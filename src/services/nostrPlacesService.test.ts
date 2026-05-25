@@ -113,6 +113,28 @@ describe('buildCacheListing', () => {
     expect(names).not.toContain('uses');
     expect(names).not.toContain('amount');
   });
+
+  it('omits the amount tag for a 0 maxWithdrawable (never advertises "0 sats", #626)', () => {
+    expect(buildCacheListing(makePiggy({ maxWithdrawableMsat: 0 })).tags).not.toContainEqual([
+      'amount',
+      '0',
+    ]);
+  });
+
+  it('omits the amount tag for a sub-1000-msat maxWithdrawable (floors to 0 sats)', () => {
+    const names = buildCacheListing(makePiggy({ maxWithdrawableMsat: 500 })).tags.map((t) => t[0]);
+    expect(names).not.toContain('amount');
+  });
+
+  it('stamps the LP label only when there is a withdraw link (no convert on non-LP edit, #681)', () => {
+    expect(buildCacheListing(makePiggy({ lnurlw: 'lightning:LNURL1abc' })).tags).toContainEqual([
+      'L',
+      LP_LABEL_NAMESPACE,
+    ]);
+    const noLink = buildCacheListing(makePiggy({ lnurlw: '' })).tags.map((t) => t[0]);
+    expect(noLink).not.toContain('L');
+    expect(noLink).not.toContain('l');
+  });
 });
 
 describe('buildFoundLog', () => {

@@ -421,13 +421,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     const ln = lnurl.trim();
     if (!ln) return;
     // Already have a confirmed non-zero amount — nothing to recover.
-    if (stage.kind === 'validated' && stage.params.maxWithdrawable > 0) return;
+    if (stage.kind === 'validated' && msatToSats(stage.params.maxWithdrawable) > 0) return;
     if (prizeReresolvedFor.current === ln) return;
     prizeReresolvedFor.current = ln;
     let cancelled = false;
     resolveLnurlWithdraw(ln)
       .then((params) => {
-        if (!cancelled && params.maxWithdrawable > 0) setStage({ kind: 'validated', params });
+        if (!cancelled && msatToSats(params.maxWithdrawable) > 0)
+          setStage({ kind: 'validated', params });
       })
       .catch(() => {
         // Link unreachable right now — leave the existing amount intact.
@@ -442,7 +443,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // the hider has typed their own value.
   useEffect(() => {
     if (amountManuallyEdited.current) return;
-    if (stage.kind === 'validated' && stage.params.maxWithdrawable > 0) {
+    if (stage.kind === 'validated' && msatToSats(stage.params.maxWithdrawable) > 0) {
       setAmountSatsText(String(msatToSats(stage.params.maxWithdrawable)));
     }
   }, [stage]);

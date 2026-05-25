@@ -69,18 +69,26 @@ export const buildCacheListing = (
   // below for the symmetric decode on the read side.
   if (piggy.hint) tags.push(['hint', rot13(piggy.hint)]);
   if (piggy.hintPhotoUrl) tags.push(['image', piggy.hintPhotoUrl]);
-  // NIP-32 label marker — flags this cache as a Lightning Piggy
-  // (claim happens on the physical NFC tag / QR, not on this event).
-  tags.push(['L', LP_LABEL_NAMESPACE]);
-  tags.push(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
+  // NIP-32 label marker — flags this cache as a Lightning Piggy. Only stamp
+  // it when there's actually a withdraw link: editing a plain NIP-GC cache
+  // (no LNURLw) must not silently convert it into an LP Piglet (#681 review).
+  // LP-ness follows the link, NOT the amount, so a Piglet whose amount we
+  // couldn't recover still stays a Piglet.
+  if (piggy.lnurlw) {
+    tags.push(['L', LP_LABEL_NAMESPACE]);
+    tags.push(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
+  }
   // LP payout-display hints (display-only; the live LNURL on the tag stays authoritative).
   if (typeof piggy.waitSecondsHint === 'number') tags.push(['wait', String(piggy.waitSecondsHint)]);
   if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
-  // Only when there's a real reward: a 0/undefined amount would advertise
-  // "0 sats" and hide the ⚡ prize badge. Omitting it (rather than writing 0)
-  // means an edit that couldn't recover the amount leaves no misleading value.
-  if (typeof piggy.maxWithdrawableMsat === 'number' && piggy.maxWithdrawableMsat > 0)
-    tags.push(['amount', String(Math.floor(piggy.maxWithdrawableMsat / 1000))]);
+  // Compute sats first and only write `amount` when it's ≥ 1 sat: a sub-1000
+  // msat maxWithdrawable floors to 0 sats, which would still advertise the
+  // misleading "0 sats" / hide the ⚡ badge this guard exists to prevent.
+  const prizeSats =
+    typeof piggy.maxWithdrawableMsat === 'number'
+      ? Math.floor(piggy.maxWithdrawableMsat / 1000)
+      : 0;
+  if (prizeSats > 0) tags.push(['amount', String(prizeSats)]);
   // NIP-40 expiration: the wizard's "Expires after" picker (#23)
   // writes the chosen unix-seconds onto the HiddenPiggy record at
   // save time. We mirror that onto the published event so finders see
