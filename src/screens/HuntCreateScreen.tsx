@@ -144,6 +144,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const [uploadingHint, setUploadingHint] = useState(false);
   const [waitMinutesText, setWaitMinutesText] = useState('');
   const [usesText, setUsesText] = useState('');
+  // Editable prize amount (sats per claim). Pre-filled from the LNURL's
+  // maxWithdrawable but overridable, so the hider can adjust the advertised
+  // prize without re-pasting the link (#626).
+  const [amountSatsText, setAmountSatsText] = useState('');
+  // Flips true once the hider types in the prize field, so the LNURL-derived
+  // auto-fill stops overwriting their value.
+  const amountManuallyEdited = useRef(false);
   const [pin, setPin] = useState<{ lat: number; lon: number; geohash: string } | null>(null);
   const [pinning, setPinning] = useState(false);
   // Bottom-sheet visibility for the NFC-write flow (step 3) and the
@@ -430,6 +437,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     };
   }, [isEditMode, lnurl, stage]);
 
+  // Keep the editable prize field in sync with the LNURL's resolved amount
+  // (on validate / re-resolve / edit-load — all of which set `stage`), unless
+  // the hider has typed their own value.
+  useEffect(() => {
+    if (amountManuallyEdited.current) return;
+    if (stage.kind === 'validated' && stage.params.maxWithdrawable > 0) {
+      setAmountSatsText(String(msatToSats(stage.params.maxWithdrawable)));
+    }
+  }, [stage]);
+
   const handlePaste = useCallback(async () => {
     try {
       const v = await Clipboard.getStringAsync();
@@ -532,8 +549,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // normal hydration path.
     const lnurlDescription =
       stage.kind === 'validated' ? (stage.params.defaultDescription ?? undefined) : undefined;
+    // Prize amount: prefer the editable "Sats per claim" field (the hider can
+    // adjust the advertised prize without re-pasting the LNURL, #626); fall
+    // back to the LNURL's resolved maxWithdrawable. A blank/0 field with no
+    // resolved amount leaves it undefined so no `amount` tag is written.
+    const editedSats = parseInt(amountSatsText.trim(), 10);
     const maxWithdrawableMsat =
-      stage.kind === 'validated' ? stage.params.maxWithdrawable : undefined;
+      Number.isFinite(editedSats) && editedSats > 0
+        ? editedSats * 1000
+        : stage.kind === 'validated'
+          ? stage.params.maxWithdrawable
+          : undefined;
     const piggy = {
       ...(existing ?? {}),
       id: ensurePiggyId(),
@@ -667,6 +693,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     hintPhotoUrl,
     waitMinutesText,
     usesText,
+    amountSatsText,
     pin,
     cacheName,
     cacheDescription,
@@ -1196,6 +1223,28 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
                 </View>
               )}
+
+              {/* Editable prize amount — pre-filled from the LNURL's
+                maxWithdrawable (LUD-03) but overridable, so the hider can
+                adjust the advertised sats without re-pasting the link (#626).
+                Display hint only; the live LNURL stays authoritative for the
+                actual payout. */}
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Sats per claim</Text>
+              <View style={styles.hintField}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 1000"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={amountSatsText}
+                  onChangeText={(t) => {
+                    amountManuallyEdited.current = true;
+                    setAmountSatsText(t);
+                  }}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-amount-input"
+                />
+              </View>
 
               {/* Cooldown + total uses live with the prize — they're
                 attributes of the LNURL-withdraw link, not the publish
