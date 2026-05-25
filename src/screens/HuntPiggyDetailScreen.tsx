@@ -534,10 +534,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         {/* Edit affordance — only visible when the signed-in user
             authored this listing. Lower-cases both sides because some
             relays normalise pubkeys differently than the local cache. */}
-        {cache &&
-        pubkey &&
-        cache.hiderPubkey.toLowerCase() === pubkey.toLowerCase() &&
-        cache.isLpPiggy ? (
+        {cache && pubkey && cache.hiderPubkey.toLowerCase() === pubkey.toLowerCase() ? (
           <TouchableOpacity
             onPress={() =>
               // Carry the published cache fields as a fallback so the
@@ -1248,49 +1245,47 @@ const CacheSpecPanel: React.FC<{
     });
   }
 
-  const meters: SpecMeter[] = [];
-  if (cache.difficulty) {
-    meters.push({
+  // Always surface Difficulty / Terrain / Size, even when the cache didn't
+  // specify them — an empty bar + "not set" reads clearer than the field
+  // silently vanishing (and matches the hider being able to fill them in).
+  const meters: SpecMeter[] = [
+    {
       key: 'difficulty',
       name: 'Difficulty',
-      value: cache.difficulty,
-      title: `Difficulty ${cache.difficulty}/5`,
+      value: cache.difficulty ?? 0,
+      title: cache.difficulty ? `Difficulty ${cache.difficulty}/5` : 'Difficulty — not set',
       body: 'How tricky this cache is to find — rated 1 (quick) to 5 (very difficult) on the NIP-GC scale.',
       options: Object.entries(DIFFICULTY_DESCRIPTIONS).map(([level, desc]) => ({
         label: `Level ${level}`,
         description: desc,
-        isCurrent: Number(level) === cache.difficulty,
+        isCurrent: cache.difficulty != null && Number(level) === cache.difficulty,
       })),
-    });
-  }
-  if (cache.terrain) {
-    meters.push({
+    },
+    {
       key: 'terrain',
       name: 'Terrain',
-      value: cache.terrain,
-      title: `Terrain ${cache.terrain}/5`,
+      value: cache.terrain ?? 0,
+      title: cache.terrain ? `Terrain ${cache.terrain}/5` : 'Terrain — not set',
       body: 'How rough the journey to the cache is — rated 1 (easy walk) to 5 (special gear needed).',
       options: Object.entries(TERRAIN_DESCRIPTIONS).map(([level, desc]) => ({
         label: `Level ${level}`,
         description: desc,
-        isCurrent: Number(level) === cache.terrain,
+        isCurrent: cache.terrain != null && Number(level) === cache.terrain,
       })),
-    });
-  }
-  if (sizeInfo) {
-    meters.push({
+    },
+    {
       key: 'size',
       name: 'Size',
-      value: Object.keys(SIZE_LABELS).indexOf(sizeKey) + 1,
-      title: `Size · ${sizeInfo.label}`,
+      value: sizeInfo ? Object.keys(SIZE_LABELS).indexOf(sizeKey) + 1 : 0,
+      title: sizeInfo ? `Size · ${sizeInfo.label}` : 'Size — not set',
       body: 'Roughly how big the cache container is — from a matchbox to a bucket.',
       options: Object.entries(SIZE_LABELS).map(([k, v]) => ({
         label: v.label,
         description: v.description,
         isCurrent: k === sizeKey,
       })),
-    });
-  }
+    },
+  ];
 
   // Expiry — surfaced as a chip so the finder knows when the listing
   // will drop off relays. NIP-40 says relays SHOULD honour the
