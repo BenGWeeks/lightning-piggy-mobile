@@ -1092,6 +1092,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // fresh LNURL is pasted on step 2.
     (crossDeviceEdit && stage.kind === 'idle');
 
+  // Whether the listing being edited/created is a Lightning Piggy, for the
+  // prize affordances. Edit mode synthesises a `validated` stage even for a
+  // plain NIP-GC cache (so Save works), so `stage.kind === 'validated'`
+  // alone would wrongly expose prize editing + a "Looks good" card on a
+  // non-LP cache. LP-ness in the wizard = a withdraw link is present
+  // (`lnurl`) OR the edited listing is flagged LP (#681 review).
+  const listingIsLpInEdit = lnurl.trim().length > 0 || isLpPiggyEdit;
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -1273,7 +1281,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   </TouchableOpacity>
                 )}
 
-              {stage.kind === 'validated' && (
+              {stage.kind === 'validated' && listingIsLpInEdit && (
                 <View style={styles.validatedCard}>
                   <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
@@ -1307,7 +1315,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     amountManuallyEdited.current = true;
                     setAmountSatsText(t);
                   }}
-                  editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
+                  editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
                   testID="hunt-piggy-amount-input"
                 />
               </View>
@@ -1331,7 +1339,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={waitMinutesText}
                     onChangeText={setWaitMinutesText}
-                    editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
+                    editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
                     testID="hunt-piggy-wait-input"
                   />
                 </View>
@@ -1344,7 +1352,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={usesText}
                     onChangeText={setUsesText}
-                    editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
+                    editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
                     testID="hunt-piggy-uses-input"
                   />
                 </View>
