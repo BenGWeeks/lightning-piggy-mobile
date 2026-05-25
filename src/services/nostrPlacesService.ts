@@ -69,12 +69,16 @@ export const buildCacheListing = (
   // below for the symmetric decode on the read side.
   if (piggy.hint) tags.push(['hint', rot13(piggy.hint)]);
   if (piggy.hintPhotoUrl) tags.push(['image', piggy.hintPhotoUrl]);
-  // NIP-32 label marker — flags this cache as a Lightning Piggy. Only stamp
-  // it when there's actually a withdraw link: editing a plain NIP-GC cache
-  // (no LNURLw) must not silently convert it into an LP Piglet (#681 review).
-  // LP-ness follows the link, NOT the amount, so a Piglet whose amount we
-  // couldn't recover still stays a Piglet.
-  if (piggy.lnurlw) {
+  // NIP-32 label marker — flags this cache as a Lightning Piggy. Stamp it
+  // when the listing IS a Piggy: either a withdraw link is present on this
+  // device, OR it's a known LP listing being edited where the bearer lives
+  // on another device (cross-device edit, #596 — `lnurlw` is blank there).
+  // Two invariants ride on this: editing a plain NIP-GC cache (no link, not
+  // LP) must NOT silently convert it into a Piglet (#681 review); and a
+  // cross-device edit of a real Piglet must NOT downgrade it to a plain
+  // cache by dropping the label. LP-ness follows the listing, NOT the amount,
+  // so a Piglet whose amount we couldn't recover still stays a Piglet.
+  if (piggy.lnurlw || piggy.isLpPiggy) {
     tags.push(['L', LP_LABEL_NAMESPACE]);
     tags.push(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
   }

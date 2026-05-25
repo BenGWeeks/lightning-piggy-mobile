@@ -126,14 +126,28 @@ describe('buildCacheListing', () => {
     expect(names).not.toContain('amount');
   });
 
-  it('stamps the LP label only when there is a withdraw link (no convert on non-LP edit, #681)', () => {
+  it('stamps the LP label when a withdraw link is present (#681)', () => {
     expect(buildCacheListing(makePiggy({ lnurlw: 'lightning:LNURL1abc' })).tags).toContainEqual([
       'L',
       LP_LABEL_NAMESPACE,
     ]);
-    const noLink = buildCacheListing(makePiggy({ lnurlw: '' })).tags.map((t) => t[0]);
-    expect(noLink).not.toContain('L');
-    expect(noLink).not.toContain('l');
+  });
+
+  it('omits the LP label for a plain NIP-GC cache — no link, not LP (no silent convert, #681)', () => {
+    const names = buildCacheListing(makePiggy({ lnurlw: '', isLpPiggy: false })).tags.map(
+      (t) => t[0],
+    );
+    expect(names).not.toContain('L');
+    expect(names).not.toContain('l');
+  });
+
+  it('stamps the LP label on a cross-device edit (isLpPiggy set, bearer absent — #596 / #681)', () => {
+    // The LNURL bearer lives on the original device, so `lnurlw` is blank
+    // here; LP-ness rides on the flag carried from the published event.
+    // Dropping the label would downgrade a real Piglet to a plain cache.
+    const tags = buildCacheListing(makePiggy({ lnurlw: '', isLpPiggy: true })).tags;
+    expect(tags).toContainEqual(['L', LP_LABEL_NAMESPACE]);
+    expect(tags).toContainEqual(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
   });
 });
 

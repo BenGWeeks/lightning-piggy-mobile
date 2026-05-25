@@ -62,6 +62,12 @@ export interface HiddenPiggy {
    * each finder claim. Optional because old / unreachable LNURLs may
    * have been resolved before but failed at re-validation. */
   maxWithdrawableMsat?: number;
+  /** True when this listing is a Lightning Piggy (carries the NIP-32
+   * `L`/`l` label on-relay), independent of whether the LNURL bearer is
+   * present on THIS device. Cross-device edits (#596) hydrate from the
+   * published event with `lnurlw: ''` but must still re-stamp the LP
+   * label — so LP-ness follows this flag, not the local bearer string. */
+  isLpPiggy?: boolean;
   /** Optional EXIF-stripped Blossom / nostr.build URL of a hint photo
    * uploaded at create time ("look near this bench"). Surfaces on the
    * finder celebration screen and on the public Piggy detail page when

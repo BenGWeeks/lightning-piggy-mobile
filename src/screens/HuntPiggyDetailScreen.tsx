@@ -562,10 +562,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   expiresAt: cache.expiresAt,
                   waitSeconds: cache.waitSeconds,
                   uses: cache.uses,
+                  isLpPiggy: cache.isLpPiggy,
+                  payoutSats: cache.payoutSats ?? null,
                 },
               })
             }
-            accessibilityLabel="Edit this Piglet"
+            accessibilityLabel={cache.isLpPiggy ? 'Edit this Piglet' : 'Edit this cache'}
             testID="hunt-piggy-detail-edit-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >

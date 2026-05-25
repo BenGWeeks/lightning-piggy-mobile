@@ -112,6 +112,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // and step 6's NFC-write step becomes optional so they can update
   // the listing without re-writing a tag they may not be near.
   const [crossDeviceEdit, setCrossDeviceEdit] = useState(false);
+  // Whether the listing being edited is a Lightning Piggy. Tracked
+  // separately from the (possibly absent) LNURL bearer so a cross-device
+  // edit re-stamps the LP label instead of downgrading the Piglet to a
+  // plain NIP-GC cache (#596 / #681 review).
+  const [isLpPiggyEdit, setIsLpPiggyEdit] = useState(false);
   // Original createdAt is preserved across edits — the unix-seconds
   // anchor for NIP-40 windows. Captured during the hydration effect
   // below; null until then (and forever when creating fresh).
@@ -250,6 +255,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           fallbackCache.hiderPubkey.toLowerCase() === pubkey.toLowerCase()
         ) {
           setCrossDeviceEdit(true);
+          setIsLpPiggyEdit(fallbackCache.isLpPiggy);
+          // Seed the editable "Sats per claim" field from the published
+          // advertised prize so a cross-device edit shows the current
+          // value (and preserves it on save) even though the LNURL bearer
+          // isn't on this device (#626 / #681 review). Skipped if the
+          // hider already typed a value.
+          if (
+            !amountManuallyEdited.current &&
+            typeof fallbackCache.payoutSats === 'number' &&
+            fallbackCache.payoutSats > 0
+          ) {
+            setAmountSatsText(String(fallbackCache.payoutSats));
+          }
           piggyIdRef.current = editingId;
           // Anchor createdAt to the on-relay event so the NIP-40 expiry
           // window we restamp at save time aligns with the original
@@ -555,12 +573,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // back to the LNURL's resolved maxWithdrawable. A blank/0 field with no
     // resolved amount leaves it undefined so no `amount` tag is written.
     const editedSats = parseInt(amountSatsText.trim(), 10);
+    // Cross-device fallback: the advertised prize carried from the
+    // published listing, so a metadata-only edit (no LNURL on this
+    // device, blank field) preserves the existing `amount` instead of
+    // wiping it — the original #626 regression (#681 review).
+    const carriedPayoutMsat =
+      typeof fallbackCache?.payoutSats === 'number' && fallbackCache.payoutSats > 0
+        ? fallbackCache.payoutSats * 1000
+        : undefined;
     const maxWithdrawableMsat =
       Number.isFinite(editedSats) && editedSats > 0
         ? editedSats * 1000
         : stage.kind === 'validated'
           ? stage.params.maxWithdrawable
-          : undefined;
+          : (existing?.maxWithdrawableMsat ?? carriedPayoutMsat);
     const piggy = {
       ...(existing ?? {}),
       id: ensurePiggyId(),
@@ -569,6 +595,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       createdAt: originalCreatedAt.current ?? Date.now(),
       isPublic,
       maxWithdrawableMsat,
+      // LP-ness follows the listing, not the (possibly absent) bearer:
+      // a fresh hide / local edit has the LNURL in hand; a cross-device
+      // edit carries the flag from the published event. Either way the
+      // publisher re-stamps the NIP-32 label so the Piglet stays a
+      // Piglet. A plain NIP-GC cache (no link, flag false) stays plain.
+      isLpPiggy: isLpPiggyEdit || Boolean(lnurl.trim()) || existing?.isLpPiggy || false,
       hintPhotoUrl: hintPhotoUrl ?? undefined,
       waitSecondsHint,
       usesHint,
@@ -704,6 +736,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheType,
     expiryDays,
     crossDeviceEdit,
+    isLpPiggyEdit,
+    fallbackCache,
     ensurePiggyId,
     editingId,
     isEditMode,
@@ -1242,7 +1276,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     amountManuallyEdited.current = true;
                     setAmountSatsText(t);
                   }}
-                  editable={stage.kind === 'validated'}
+                  editable={stage.kind === 'validated' || crossDeviceEdit}
                   testID="hunt-piggy-amount-input"
                 />
               </View>
@@ -1266,7 +1300,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={waitMinutesText}
                     onChangeText={setWaitMinutesText}
-                    editable={stage.kind === 'validated'}
+                    editable={stage.kind === 'validated' || crossDeviceEdit}
                     testID="hunt-piggy-wait-input"
                   />
                 </View>
@@ -1279,7 +1313,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={usesText}
                     onChangeText={setUsesText}
-                    editable={stage.kind === 'validated'}
+                    editable={stage.kind === 'validated' || crossDeviceEdit}
                     testID="hunt-piggy-uses-input"
                   />
                 </View>

@@ -107,6 +107,11 @@ export type ExploreStackParamList = {
           expiresAt: number | null;
           waitSeconds: number | null;
           uses: number | null;
+          // LP classification + advertised prize, carried so a cross-device
+          // edit (#596) re-stamps the LP label and preserves/seeds the
+          // "Sats per claim" field without the local bearer (#681 review).
+          isLpPiggy: boolean;
+          payoutSats: number | null;
         };
       }
     | undefined;
