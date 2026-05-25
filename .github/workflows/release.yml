@@ -299,12 +299,13 @@ jobs:
           OUT=$(mktemp)
           ERR=$(mktemp)
           CLEAN=$(mktemp)
+          JQERR=$(mktemp)
           url=""
           attempts=12
           for i in $(seq 1 "$attempts"); do
             if ! fetch "$OUT" "$ERR"; then
               echo "::warning title=eas build:list call failed (attempt $i/$attempts)::Transient EAS API hiccup; retrying in 20 s."
-              sleep 20
+              [ "$i" -lt "$attempts" ] && sleep 20
               continue
             fi
 
@@ -312,16 +313,27 @@ jobs:
             # noise written to stdout) — keep from the first `[` line onward.
             sed -n '/^\[/,$p' "$OUT" > "$CLEAN"
 
-            url=$(jq -r --arg sha "${{ github.sha }}" \
-                    '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
-                    "$CLEAN" 2>/dev/null || true)
+            # Fail fast on a genuine jq parse error (malformed JSON / an EAS
+            # CLI output-format change) instead of mistaking it for an
+            # eventual-consistency empty result — otherwise a real format
+            # break burns the whole poll window then fails with a misleading
+            # "not surfaced yet" message.
+            if ! url=$(jq -r --arg sha "${{ github.sha }}" \
+                         '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
+                         "$CLEAN" 2>"$JQERR"); then
+              echo "::error title=jq failed to parse eas build:list output::Likely an EAS CLI / JSON format change — logs below."
+              echo "::group::jq stderr"; cat "$JQERR"; echo "::endgroup::"
+              echo "::group::raw stdout"; cat "$OUT"; echo "::endgroup::"
+              echo "::group::cleaned JSON"; cat "$CLEAN"; echo "::endgroup::"
+              exit 1
+            fi
             if [ -n "$url" ] && [ "$url" != "null" ]; then
               echo "Resolved Android APK URL on attempt $i/$attempts."
               break
             fi
 
             echo "::warning title=Finished Android build not surfaced yet (attempt $i/$attempts)::eas build:list has no finished build for ${{ github.sha }} yet; retrying in 20 s."
-            sleep 20
+            [ "$i" -lt "$attempts" ] && sleep 20
           done
 
           if [ -z "$url" ] || [ "$url" = "null" ]; then
