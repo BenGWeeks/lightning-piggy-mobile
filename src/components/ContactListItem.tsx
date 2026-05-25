@@ -146,7 +146,9 @@ const ContactListItem: React.FC<Props> = ({
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !onZap }}
                 accessibilityLabel={
-                  zapDisabled ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})` : `Zap ${name}`
+                  zapDisabled
+                    ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})`
+                    : `Zap ${name}`
                 }
                 testID="contact-row-zap"
               >
