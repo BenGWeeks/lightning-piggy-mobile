@@ -129,6 +129,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     return piggyIdRef.current;
   }, [editingId]);
+  // Tracks the LNURL we've already re-resolved on edit, so the prize-
+  // recovery effect (#626) runs at most once per link.
+  const prizeReresolvedFor = useRef<string | null>(null);
 
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -398,6 +401,34 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       cancelled = true;
     };
   }, [editingId, fallbackCache, navigation, pubkey]);
+
+  // Recover the live prize amount when editing (#626). The edit-load above
+  // seeds the prize from the local record's `maxWithdrawableMsat`, which can
+  // be 0/undefined for older or cross-device records — and republishing with
+  // 0 would wipe the `amount` tag off the kind-37516 event (the ⚡ vanishes).
+  // So re-resolve the already-stored LNURLw once (no re-paste) to pull its
+  // real maxWithdrawable. Best-effort: if the link can't be reached we keep
+  // whatever amount we already had rather than clobbering it.
+  useEffect(() => {
+    if (!isEditMode) return;
+    const ln = lnurl.trim();
+    if (!ln) return;
+    // Already have a confirmed non-zero amount — nothing to recover.
+    if (stage.kind === 'validated' && stage.params.maxWithdrawable > 0) return;
+    if (prizeReresolvedFor.current === ln) return;
+    prizeReresolvedFor.current = ln;
+    let cancelled = false;
+    resolveLnurlWithdraw(ln)
+      .then((params) => {
+        if (!cancelled && params.maxWithdrawable > 0) setStage({ kind: 'validated', params });
+      })
+      .catch(() => {
+        // Link unreachable right now — leave the existing amount intact.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, lnurl, stage]);
 
   const handlePaste = useCallback(async () => {
     try {

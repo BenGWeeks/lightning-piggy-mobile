@@ -76,7 +76,10 @@ export const buildCacheListing = (
   // LP payout-display hints (display-only; the live LNURL on the tag stays authoritative).
   if (typeof piggy.waitSecondsHint === 'number') tags.push(['wait', String(piggy.waitSecondsHint)]);
   if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
-  if (typeof piggy.maxWithdrawableMsat === 'number')
+  // Only when there's a real reward: a 0/undefined amount would advertise
+  // "0 sats" and hide the ⚡ prize badge. Omitting it (rather than writing 0)
+  // means an edit that couldn't recover the amount leaves no misleading value.
+  if (typeof piggy.maxWithdrawableMsat === 'number' && piggy.maxWithdrawableMsat > 0)
     tags.push(['amount', String(Math.floor(piggy.maxWithdrawableMsat / 1000))]);
   // NIP-40 expiration: the wizard's "Expires after" picker (#23)
   // writes the chosen unix-seconds onto the HiddenPiggy record at
