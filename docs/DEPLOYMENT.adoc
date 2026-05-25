@@ -364,7 +364,7 @@ eas build:list --platform android --status finished --limit 1 \
 . Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
-. *What to Test* fills itself in — the `set-testflight-whats-new` workflow job reads `docs/RELEASE_NOTES_NEXT.md`, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_P8` secrets aren't configured.
+. *What to Test* fills itself in — the `set-testflight-whats-new` workflow job reads `docs/RELEASE_NOTES_NEXT.md`, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `EXPO_ASC_API_KEY_ID` / `EXPO_ASC_API_KEY_ISSUER_ID` / `EXPO_ASC_API_KEY_P8` secrets aren't configured.
 
 NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remote counter (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit them for releases — cloud builds auto-increment past whatever's in `app.config.ts`. The integer in the file is only the floor for `eas build --local` and `expo run:android --variant release`, both of which are dev-test paths, not release paths.
 
@@ -515,19 +515,19 @@ If the release tagger forgot to populate the file and no qualifying commits are 
 
 ===== One-time GitHub Secrets setup
 
-The job needs the App Store Connect API key (the same `.p8` EAS uses for `eas submit` — but the `.p8` itself lives only on EAS's server, so you have to register it as a GitHub secret too). Add these three secrets at *Settings → Secrets and variables → Actions* on the repo:
+The job needs the App Store Connect API key (the same `.p8` EAS uses for `eas submit` — but the `.p8` itself lives only on EAS's server, so you have to register it as a GitHub secret too). These are the **`EXPO_ASC_*`** secrets — likely already present (EAS uses the same key), so check *Settings → Secrets and variables → Actions* before re-adding:
 
 [cols="1,3", options="header"]
 |===
 | Secret | Value
 
-| `ASC_API_KEY_ID`
+| `EXPO_ASC_API_KEY_ID`
 | The 10-character key identifier from App Store Connect → *Users and Access* → *Integrations* → *Team Keys* (e.g. `ABC1234567`). Same value as `ascApiKeyId` in the `eas.json` snippet above.
 
-| `ASC_API_KEY_ISSUER_ID`
+| `EXPO_ASC_API_KEY_ISSUER_ID`
 | The team's issuer UUID, shown above the key list on the same page (e.g. `00000000-0000-0000-0000-000000000000`). Same as `ascApiKeyIssuerId`.
 
-| `ASC_API_KEY_P8`
+| `EXPO_ASC_API_KEY_P8`
 | The full PEM contents of the `AuthKey_XXXXXXXXXX.p8` file, including the `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines. Paste the file contents verbatim into the secret value box; GitHub preserves the newlines.
 |===
 
