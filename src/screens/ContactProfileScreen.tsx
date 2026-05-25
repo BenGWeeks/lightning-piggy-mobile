@@ -34,6 +34,7 @@ import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
 import FullscreenImageModal from '../components/FullscreenImageModal';
 import { useNostr } from '../contexts/NostrContext';
+import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { isNfcSupported } from '../services/nfcService';
@@ -64,6 +65,7 @@ const ContactProfileScreen: React.FC = () => {
   const navigation = useNavigation<ContactProfileNavigation>();
   const route = useRoute<ContactProfileRoute>();
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
+  const { hasWallets } = useWallet();
 
   const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);
   const [following, setFollowing] = useState(false);
@@ -129,26 +131,36 @@ const ContactProfileScreen: React.FC = () => {
   // to a non-null string). Users whose kind-0 omits `about` write `null`
   // back via `setContact`, which would re-trigger this effect (deps
   // include `contact.about`); the ref blocks the re-fetch.
-  const aboutFetchedFor = useRef<string | null>(null);
+  // Resolves the *verified* profile once per pubkey to fill in the bio AND
+  // the Lightning address. The contacts-list profile has its lud16 stripped
+  // (anti-redirect slimming), so this verified single-fetch is what re-arms
+  // the zap button and yields a safe-to-pay address.
+  const profileFetchedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!contact.pubkey) return;
-    if (contact.about !== undefined && contact.about !== null) return;
-    if (aboutFetchedFor.current === contact.pubkey) return;
-    aboutFetchedFor.current = contact.pubkey;
+    const needsAbout = contact.about === undefined || contact.about === null;
+    const needsLud16 = !contact.lightningAddress;
+    if (!needsAbout && !needsLud16) return;
+    if (profileFetchedFor.current === contact.pubkey) return;
+    profileFetchedFor.current = contact.pubkey;
     let cancelled = false;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     fetchProfile(contact.pubkey, readRelays)
       .then((profile) => {
         if (cancelled || !profile) return;
-        setContact((prev) => ({ ...prev, about: profile.about ?? null }));
+        setContact((prev) => ({
+          ...prev,
+          about: prev.about ?? profile.about ?? null,
+          lightningAddress: prev.lightningAddress ?? profile.lud16 ?? null,
+        }));
       })
       .catch(() => {
-        // best-effort — bio is non-critical
+        // best-effort — bio + address are non-critical to first paint
       });
     return () => {
       cancelled = true;
     };
-  }, [contact.pubkey, contact.about, relays]);
+  }, [contact.pubkey, contact.about, contact.lightningAddress, relays]);
 
   useEffect(() => {
     if (contact.pubkey) {
@@ -184,9 +196,19 @@ const ContactProfileScreen: React.FC = () => {
   }, [contact, navigation]);
 
   const handleZap = useCallback(() => {
-    if (!contact.lightningAddress) return;
+    if (!hasWallets) {
+      Alert.alert('No wallet attached', 'Connect a Lightning wallet first to send zaps.');
+      return;
+    }
+    if (!contact.lightningAddress) {
+      Alert.alert(
+        'No Lightning address',
+        `${contact.name} hasn’t published a Lightning address, so they can’t receive zaps yet.`,
+      );
+      return;
+    }
     setSendSheetOpen(true);
-  }, [contact.lightningAddress]);
+  }, [hasWallets, contact.lightningAddress, contact.name]);
 
   const handleSetLightningAddress = useCallback(
     async (address: string) => {
@@ -422,16 +444,20 @@ const ContactProfileScreen: React.FC = () => {
                   <QrCode size={20} color={colors.white} />
                 </TouchableOpacity>
               )}
-              {contact.lightningAddress && (
-                <TouchableOpacity
-                  style={styles.actionIconButton}
-                  onPress={handleZap}
-                  accessibilityLabel="Zap"
-                  testID="contact-profile-zap-button"
-                >
-                  <Zap size={20} color={colors.white} />
-                </TouchableOpacity>
-              )}
+              {/* Always shown (greyed when there's no Lightning address);
+                  tapping the greyed state explains why via handleZap. */}
+              <TouchableOpacity
+                style={[
+                  styles.actionIconButton,
+                  !contact.lightningAddress && styles.actionIconButtonDisabled,
+                ]}
+                onPress={handleZap}
+                accessibilityRole="button"
+                accessibilityLabel={contact.lightningAddress ? 'Zap' : 'Zap (no Lightning address)'}
+                testID="contact-profile-zap-button"
+              >
+                <Zap size={20} color={colors.white} />
+              </TouchableOpacity>
               {contact.pubkey && (
                 <TouchableOpacity
                   style={styles.actionIconButton}
@@ -769,6 +795,10 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    actionIconButtonDisabled: {
+      backgroundColor: colors.textSupplementary,
+      opacity: 0.5,
     },
     followButton: {
       paddingHorizontal: 22,

@@ -25,6 +25,10 @@ describe('slimDisplayProfile', () => {
     expect(slimDisplayProfile(fullProfile).lud16).toBeNull();
   });
 
+  it('records lud16 presence in hasLud16 (so the zap affordance can show/grey)', () => {
+    expect(slimDisplayProfile(fullProfile).hasLud16).toBe(true);
+  });
+
   it('keeps the banner (cosmetic) — the quick-profile sheet renders it (#666/#18)', () => {
     expect(slimDisplayProfile(fullProfile).banner).toBe('https://example.com/banner.png');
   });
@@ -67,6 +71,6 @@ describe('slimDisplayProfile', () => {
       lud16: null,
       nip05: null,
     };
-    expect(slimDisplayProfile(sparse)).toEqual(sparse);
+    expect(slimDisplayProfile(sparse)).toEqual({ ...sparse, hasLud16: false });
   });
 });

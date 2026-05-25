@@ -19,6 +19,7 @@ import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-n
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
+import { fetchProfile } from '../services/nostrService';
 import { useWallet } from '../contexts/WalletContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -66,6 +67,10 @@ interface ListItem {
   banner: string | null;
   nip05: string | null;
   lightningAddress: string | null;
+  // Whether the contact has a Lightning address at all (presence). Derived
+  // from the slimmed profile's `hasLud16` flag since the actual `lud16` value
+  // is stripped on the batch path; drives whether the list shows a zap button.
+  hasLightningAddress: boolean;
   pubkey: string | null;
   source: 'nostr' | 'contacts';
 }
@@ -74,7 +79,8 @@ const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
+  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact, relays } =
+    useNostr();
   // Wallet-attached flag drives the per-row zap gate alongside the
   // contact's Lightning address. Without a wallet there's nothing to
   // pay from, so the zap action is rendered disabled even when the
@@ -206,6 +212,10 @@ const FriendsScreen: React.FC = () => {
           banner: c.profile?.banner ?? null,
           nip05: c.profile?.nip05 ?? null,
           lightningAddress: c.profile?.lud16 ?? null,
+          // lud16 value is stripped on the batch path; hasLud16 records its
+          // presence so the list can show the zap affordance for zappable
+          // contacts (the verified address is re-resolved at zap time).
+          hasLightningAddress: !!(c.profile?.lud16 || c.profile?.hasLud16),
           pubkey: c.pubkey,
           source: 'nostr',
         });
@@ -221,6 +231,7 @@ const FriendsScreen: React.FC = () => {
           banner: null,
           nip05: null,
           lightningAddress: c.lightningAddress,
+          hasLightningAddress: !!c.lightningAddress,
           pubkey: null,
           source: 'contacts',
         });
@@ -322,11 +333,32 @@ const FriendsScreen: React.FC = () => {
     setRefreshing(false);
   }, [refreshContacts]);
 
-  const handleZap = useCallback((item: ListItem) => {
-    if (!item.lightningAddress) return;
-    setZapTarget(item);
-    setSendOpen(true);
-  }, []);
+  const handleZap = useCallback(
+    async (item: ListItem) => {
+      if (!hasWallets) {
+        Alert.alert('No wallet attached', 'Connect a Lightning wallet first to send zaps.');
+        return;
+      }
+      // The contacts-list profile has its lud16 stripped (anti-redirect
+      // slimming), so resolve the *verified* address on demand before paying.
+      let address = item.lightningAddress;
+      if (!address && item.pubkey) {
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const verified = await fetchProfile(item.pubkey, readRelays);
+        address = verified?.lud16 ?? null;
+      }
+      if (!address) {
+        Alert.alert(
+          'No Lightning address',
+          `${item.name} hasn’t published a Lightning address, so they can’t receive zaps yet.`,
+        );
+        return;
+      }
+      setZapTarget({ ...item, lightningAddress: address });
+      setSendOpen(true);
+    },
+    [hasWallets, relays],
+  );
 
   // Tap on a friend row → open the bottom-sheet preview. The sheet
   // gives a quick peek (QR, npub, copy, Zap / Message / Share) without
@@ -425,14 +457,14 @@ const FriendsScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) => {
-      // Both action buttons render unconditionally; the per-button gate
-      // surfaces *why* a tap won't work when the underlying data is
-      // missing. Message needs a Nostr pubkey (phone-only contacts
-      // don't have one); Zap needs both a wallet AND a Lightning
-      // address. The disabled-reason strings are shown to screen
-      // readers so users aren't left guessing.
-      const canZap = !!item.lightningAddress && hasWallets;
-      const zapDisabledReason = !hasWallets ? 'no wallet attached' : 'no Lightning address';
+      // Zap affordance only shows for contacts that actually have a
+      // Lightning address (hasLightningAddress). When shown it's enabled
+      // as long as the user has a wallet — the verified address is
+      // re-resolved on tap; greyed + tappable-for-why when there's no
+      // wallet. Message needs a Nostr pubkey (phone-only contacts don't
+      // have one). Disabled-reason strings are read to screen readers.
+      const canZap = hasWallets;
+      const zapDisabledReason = 'no wallet attached';
       return (
         <ContactListItem
           name={item.name}
@@ -440,6 +472,7 @@ const FriendsScreen: React.FC = () => {
           lightningAddress={item.lightningAddress}
           canMessage={!!item.pubkey}
           canZap={canZap}
+          showZap={item.hasLightningAddress}
           zapDisabledReason={zapDisabledReason}
           onPress={() => handleContactPress(item)}
           onZap={() => handleZap(item)}
@@ -652,14 +685,16 @@ const FriendsScreen: React.FC = () => {
         }}
         contact={selectedContact}
         onViewFullProfile={handleViewFullProfile}
-        canZap={!!selectedContact?.lightningAddress && hasWallets}
-        zapDisabledReason={!hasWallets ? 'no wallet attached' : 'no Lightning address'}
+        canZap={hasWallets}
+        zapDisabledReason="no wallet attached"
         onZap={
-          selectedContact?.lightningAddress
+          selectedContact
             ? () => {
+                const target = selectedContact;
                 setProfileSheetVisible(false);
-                setZapTarget(selectedContact);
-                setSendOpen(true);
+                // handleZap re-resolves the verified Lightning address and
+                // either zaps or explains why it can't.
+                handleZap(target);
               }
             : undefined
         }
