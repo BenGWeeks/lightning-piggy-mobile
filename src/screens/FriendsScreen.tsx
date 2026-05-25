@@ -685,8 +685,8 @@ const FriendsScreen: React.FC = () => {
         }}
         contact={selectedContact}
         onViewFullProfile={handleViewFullProfile}
-        canZap={hasWallets}
-        zapDisabledReason="no wallet attached"
+        canZap={hasWallets && !!selectedContact?.hasLightningAddress}
+        zapDisabledReason={!hasWallets ? 'no wallet attached' : 'no Lightning address'}
         onZap={
           selectedContact
             ? () => {

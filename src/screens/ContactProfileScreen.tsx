@@ -195,12 +195,24 @@ const ContactProfileScreen: React.FC = () => {
     });
   }, [contact, navigation]);
 
-  const handleZap = useCallback(() => {
+  const handleZap = useCallback(async () => {
     if (!hasWallets) {
       Alert.alert('No wallet attached', 'Connect a Lightning wallet first to send zaps.');
       return;
     }
-    if (!contact.lightningAddress) {
+    let address = contact.lightningAddress;
+    if (!address && contact.pubkey) {
+      // The on-mount verified fetch may not have finished yet (or failed) —
+      // resolve once more on demand so a present lud16 isn't false-negatived
+      // into a "no Lightning address" alert.
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const verified = await fetchProfile(contact.pubkey, readRelays);
+      if (verified?.lud16) {
+        address = verified.lud16;
+        setContact((prev) => ({ ...prev, lightningAddress: verified.lud16 }));
+      }
+    }
+    if (!address) {
       Alert.alert(
         'No Lightning address',
         `${contact.name} hasn’t published a Lightning address, so they can’t receive zaps yet.`,
@@ -208,7 +220,7 @@ const ContactProfileScreen: React.FC = () => {
       return;
     }
     setSendSheetOpen(true);
-  }, [hasWallets, contact.lightningAddress, contact.name]);
+  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays]);
 
   const handleSetLightningAddress = useCallback(
     async (address: string) => {
@@ -444,16 +456,23 @@ const ContactProfileScreen: React.FC = () => {
                   <QrCode size={20} color={colors.white} />
                 </TouchableOpacity>
               )}
-              {/* Always shown (greyed when there's no Lightning address);
-                  tapping the greyed state explains why via handleZap. */}
+              {/* Always shown; greyed when a zap can't go out (no wallet or
+                  no Lightning address). Tapping the greyed state explains
+                  which prerequisite is missing via handleZap. */}
               <TouchableOpacity
                 style={[
                   styles.actionIconButton,
-                  !contact.lightningAddress && styles.actionIconButtonDisabled,
+                  (!hasWallets || !contact.lightningAddress) && styles.actionIconButtonDisabled,
                 ]}
                 onPress={handleZap}
                 accessibilityRole="button"
-                accessibilityLabel={contact.lightningAddress ? 'Zap' : 'Zap (no Lightning address)'}
+                accessibilityLabel={
+                  !hasWallets
+                    ? 'Zap (no wallet attached)'
+                    : contact.lightningAddress
+                      ? 'Zap'
+                      : 'Zap (no Lightning address)'
+                }
                 testID="contact-profile-zap-button"
               >
                 <Zap size={20} color={colors.white} />
