@@ -78,21 +78,30 @@ export const buildCacheListing = (
   // cross-device edit of a real Piglet must NOT downgrade it to a plain
   // cache by dropping the label. LP-ness follows the listing, NOT the amount,
   // so a Piglet whose amount we couldn't recover still stays a Piglet.
-  if (piggy.lnurlw || piggy.isLpPiggy) {
+  const isLp = Boolean(piggy.lnurlw || piggy.isLpPiggy);
+  if (isLp) {
     tags.push(['L', LP_LABEL_NAMESPACE]);
     tags.push(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
   }
-  // LP payout-display hints (display-only; the live LNURL on the tag stays authoritative).
-  if (typeof piggy.waitSecondsHint === 'number') tags.push(['wait', String(piggy.waitSecondsHint)]);
-  if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
-  // Compute sats first and only write `amount` when it's ≥ 1 sat: a sub-1000
-  // msat maxWithdrawable floors to 0 sats, which would still advertise the
-  // misleading "0 sats" / hide the ⚡ badge this guard exists to prevent.
-  const prizeSats =
-    typeof piggy.maxWithdrawableMsat === 'number'
-      ? Math.floor(piggy.maxWithdrawableMsat / 1000)
-      : 0;
-  if (prizeSats > 0) tags.push(['amount', String(prizeSats)]);
+  // wait / uses / amount are LP-only display hints — gate their emission on
+  // LP-ness (the same signal as the label) so a plain NIP-GC cache never
+  // carries a "Prize" / cooldown chip with no `L`/`l` label backing it.
+  // This is the authoritative guard: even if the edit UI populated the
+  // fields on a non-LP listing, the on-wire event stays consistent (#681).
+  if (isLp) {
+    // Display-only; the live LNURL on the finder side stays authoritative.
+    if (typeof piggy.waitSecondsHint === 'number')
+      tags.push(['wait', String(piggy.waitSecondsHint)]);
+    if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
+    // Compute sats first and only write `amount` when it's ≥ 1 sat: a sub-
+    // 1000 msat maxWithdrawable floors to 0 sats, which would still advertise
+    // the misleading "0 sats" / hide the ⚡ badge this guard exists to prevent.
+    const prizeSats =
+      typeof piggy.maxWithdrawableMsat === 'number'
+        ? Math.floor(piggy.maxWithdrawableMsat / 1000)
+        : 0;
+    if (prizeSats > 0) tags.push(['amount', String(prizeSats)]);
+  }
   // NIP-40 expiration: the wizard's "Expires after" picker (#23)
   // writes the chosen unix-seconds onto the HiddenPiggy record at
   // save time. We mirror that onto the published event so finders see

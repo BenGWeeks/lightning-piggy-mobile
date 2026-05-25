@@ -543,10 +543,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     const waitMinutes = parseInt(waitMinutesText.trim(), 10);
-    const waitSecondsHint =
-      Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
     const usesParsed = parseInt(usesText.trim(), 10);
-    const usesHint = Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
     // Preserve identity across an edit so `savePiggy` overwrites the
     // existing record AND the relay-side kind 37516 listing replaces
     // itself under the same `d` tag (NIP-33 addressable). createdAt
@@ -581,8 +578,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       typeof fallbackCache?.payoutSats === 'number' && fallbackCache.payoutSats > 0
         ? fallbackCache.payoutSats * 1000
         : undefined;
-    const maxWithdrawableMsat =
-      Number.isFinite(editedSats) && editedSats > 0
+    // LP-ness follows the listing, not the (possibly absent) bearer: a
+    // fresh hide / local edit has the LNURL in hand; a cross-device edit
+    // carries the flag from the published event. amount / wait / uses are
+    // LP-only display hints, so for a plain NIP-GC cache we force them to
+    // undefined — never write a "Prize" / cooldown chip onto a non-LP
+    // listing, even if the fields somehow held a value (#681 review).
+    const listingIsLp = isLpPiggyEdit || Boolean(lnurl.trim()) || existing?.isLpPiggy || false;
+    const waitSecondsHint =
+      listingIsLp && Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
+    const usesHint =
+      listingIsLp && Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
+    const maxWithdrawableMsat = !listingIsLp
+      ? undefined
+      : Number.isFinite(editedSats) && editedSats > 0
         ? editedSats * 1000
         : stage.kind === 'validated'
           ? stage.params.maxWithdrawable
@@ -595,12 +604,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       createdAt: originalCreatedAt.current ?? Date.now(),
       isPublic,
       maxWithdrawableMsat,
-      // LP-ness follows the listing, not the (possibly absent) bearer:
-      // a fresh hide / local edit has the LNURL in hand; a cross-device
-      // edit carries the flag from the published event. Either way the
-      // publisher re-stamps the NIP-32 label so the Piglet stays a
-      // Piglet. A plain NIP-GC cache (no link, flag false) stays plain.
-      isLpPiggy: isLpPiggyEdit || Boolean(lnurl.trim()) || existing?.isLpPiggy || false,
+      isLpPiggy: listingIsLp,
       hintPhotoUrl: hintPhotoUrl ?? undefined,
       waitSecondsHint,
       usesHint,
@@ -1276,7 +1280,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     amountManuallyEdited.current = true;
                     setAmountSatsText(t);
                   }}
-                  editable={stage.kind === 'validated' || crossDeviceEdit}
+                  editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
                   testID="hunt-piggy-amount-input"
                 />
               </View>
@@ -1300,7 +1304,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={waitMinutesText}
                     onChangeText={setWaitMinutesText}
-                    editable={stage.kind === 'validated' || crossDeviceEdit}
+                    editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
                     testID="hunt-piggy-wait-input"
                   />
                 </View>
@@ -1313,7 +1317,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={usesText}
                     onChangeText={setUsesText}
-                    editable={stage.kind === 'validated' || crossDeviceEdit}
+                    editable={stage.kind === 'validated' || (crossDeviceEdit && isLpPiggyEdit)}
                     testID="hunt-piggy-uses-input"
                   />
                 </View>

@@ -250,6 +250,7 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (p.usesHint !== undefined && typeof p.usesHint !== 'number') return false;
   if (p.maxWithdrawableMsat !== undefined && typeof p.maxWithdrawableMsat !== 'number')
     return false;
+  if (p.isLpPiggy !== undefined && typeof p.isLpPiggy !== 'boolean') return false;
   if (p.lat !== undefined && typeof p.lat !== 'number') return false;
   if (p.lon !== undefined && typeof p.lon !== 'number') return false;
   if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;

@@ -126,6 +126,25 @@ describe('buildCacheListing', () => {
     expect(names).not.toContain('amount');
   });
 
+  it('omits the wait / uses / amount LP hints on a plain non-LP cache, even if set (#681)', () => {
+    // No link, not LP, but the hint fields somehow carry values — the
+    // publisher must not stamp LP-only tags onto a plain NIP-GC cache,
+    // or downstream UIs render a "Prize"/cooldown chip with no L/l label.
+    const names = buildCacheListing(
+      makePiggy({
+        lnurlw: '',
+        isLpPiggy: false,
+        maxWithdrawableMsat: 21000,
+        waitSecondsHint: 10800,
+        usesHint: 100,
+      }),
+    ).tags.map((t) => t[0]);
+    expect(names).not.toContain('amount');
+    expect(names).not.toContain('wait');
+    expect(names).not.toContain('uses');
+    expect(names).not.toContain('L');
+  });
+
   it('stamps the LP label when a withdraw link is present (#681)', () => {
     expect(buildCacheListing(makePiggy({ lnurlw: 'lightning:LNURL1abc' })).tags).toContainEqual([
       'L',
