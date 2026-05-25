@@ -195,6 +195,9 @@ const ContactProfileBody: React.FC<Props> = ({
         })()}
         {(() => {
           const zapDisabled = !canZap || !onZap;
+          // Dimmed-but-tappable when a handler is wired: tapping a greyed zap
+          // explains *why* (no wallet / no Lightning address) via the host
+          // rather than doing nothing. Only inert when no handler at all.
           return (
             <TouchableOpacity
               style={[
@@ -202,10 +205,10 @@ const ContactProfileBody: React.FC<Props> = ({
                 styles.iconCircleButtonYellow,
                 zapDisabled && styles.iconCircleButtonDisabled,
               ]}
-              onPress={zapDisabled ? undefined : onZap}
-              disabled={zapDisabled}
+              onPress={onZap}
+              disabled={!onZap}
               accessibilityRole="button"
-              accessibilityState={{ disabled: zapDisabled }}
+              accessibilityState={{ disabled: !onZap }}
               accessibilityLabel={
                 zapDisabled ? `Zap (${zapDisabledReason ?? 'unavailable'})` : 'Zap'
               }

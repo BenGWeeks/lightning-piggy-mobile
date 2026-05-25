@@ -25,6 +25,11 @@ interface Props {
    * `canZap` is false. Caller composes it (the host screen knows whether
    * it's "no wallet" or "no Lightning address"). */
   zapDisabledReason?: string;
+  /** Whether to render the zap affordance at all. On the list we hide it
+   * entirely for contacts with no Lightning address (an empty spacer keeps
+   * the message button column-aligned); the profile screen always shows it
+   * (greyed) instead. Defaults to true. */
+  showZap?: boolean;
   onPress?: () => void;
   onZap?: () => void;
   onMessage?: () => void;
@@ -38,6 +43,7 @@ const ContactListItem: React.FC<Props> = ({
   canMessage = false,
   canZap = false,
   zapDisabledReason,
+  showZap = true,
   onPress,
   onZap,
   onMessage,
@@ -125,24 +131,36 @@ const ContactListItem: React.FC<Props> = ({
                 strokeWidth={2}
               />
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.iconButton, zapDisabled && styles.iconButtonDisabled]}
-              onPress={zapDisabled ? undefined : onZap}
-              disabled={zapDisabled}
-              activeOpacity={0.6}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: zapDisabled }}
-              accessibilityLabel={
-                zapDisabled ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})` : `Zap ${name}`
-              }
-              testID="contact-row-zap"
-            >
-              <Zap
-                size={20}
-                color={zapDisabled ? colors.textSupplementary : colors.brandPink}
-                fill={zapDisabled ? 'none' : colors.brandPink}
-              />
-            </TouchableOpacity>
+            {/* Hidden entirely on the list for contacts with no Lightning
+                address (showZap=false) — an empty spacer keeps the message
+                button aligned. A shown-but-dimmed (can't-zap) button stays
+                tappable when a handler is wired: the host explains *why* it
+                can't zap (no wallet / no Lightning address) rather than
+                silently doing nothing. Only truly inert when no handler. */}
+            {showZap ? (
+              <TouchableOpacity
+                style={[styles.iconButton, zapDisabled && styles.iconButtonDisabled]}
+                onPress={onZap}
+                disabled={!onZap}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !onZap }}
+                accessibilityLabel={
+                  zapDisabled
+                    ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})`
+                    : `Zap ${name}`
+                }
+                testID="contact-row-zap"
+              >
+                <Zap
+                  size={20}
+                  color={zapDisabled ? colors.textSupplementary : colors.brandPink}
+                  fill={zapDisabled ? 'none' : colors.brandPink}
+                />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.iconButton} />
+            )}
           </View>
         );
       })()}
