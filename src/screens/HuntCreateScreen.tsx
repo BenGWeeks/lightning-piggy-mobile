@@ -50,7 +50,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import type { RouteProp } from '@react-navigation/native';
-import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
+import { ExploreNavigation, ExploreStackParamList, HuntCacheFallback } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import {
@@ -230,6 +230,62 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     let cancelled = false;
     loadPiggies().then((all) => {
       if (cancelled) return;
+      // Shared hydration for the published-event fields (the cross-device
+      // source of truth). Used by BOTH the no-local-record path and the
+      // local-record-is-stale path below, so the two can't drift. Sets only
+      // the public / finder-facing fields — the LNURL bearer, prize stage,
+      // NFC lock, and isPublic are decided per-branch (the event never
+      // carries the bearer, so that stays local-only).
+      const hydratePublicFieldsFromEvent = (fc: HuntCacheFallback) => {
+        if (typeof fc.geohash === 'string' && fc.geohash.length > 0) {
+          const { lat, lng } = decodeGeohash(fc.geohash);
+          setPin({ lat, lon: lng, geohash: fc.geohash });
+        }
+        setCacheName(fc.name ?? '');
+        setCacheDescription(fc.description ?? '');
+        if (typeof fc.difficulty === 'number')
+          setDifficulty(Math.min(5, Math.max(1, fc.difficulty)) as 1 | 2 | 3 | 4 | 5);
+        if (typeof fc.terrain === 'number')
+          setTerrain(Math.min(5, Math.max(1, fc.terrain)) as 1 | 2 | 3 | 4 | 5);
+        if (
+          fc.size === 'micro' ||
+          fc.size === 'small' ||
+          fc.size === 'regular' ||
+          fc.size === 'large' ||
+          fc.size === 'other'
+        ) {
+          setCacheSize(fc.size);
+        }
+        if (
+          fc.cacheType === 'traditional' ||
+          fc.cacheType === 'multi' ||
+          fc.cacheType === 'mystery' ||
+          fc.cacheType === 'virtual'
+        ) {
+          setCacheType(fc.cacheType);
+        }
+        if (fc.imageUrl) setHintPhotoUrl(fc.imageUrl);
+        if (typeof fc.waitSeconds === 'number')
+          setWaitMinutesText(String(Math.round(fc.waitSeconds / 60)));
+        if (typeof fc.uses === 'number') setUsesText(String(fc.uses));
+        // Reverse-map the event's NIP-40 expiry back onto a picker chip so a
+        // metadata-only save doesn't silently change the listing's expiry.
+        if (typeof fc.expiresAt !== 'number' || fc.expiresAt === null) {
+          setExpiryDays('never');
+        } else {
+          const windowSec = fc.expiresAt - fc.createdAt;
+          const day = 24 * 60 * 60;
+          const closest = [
+            { key: '30' as const, sec: 30 * day },
+            { key: '90' as const, sec: 90 * day },
+            { key: '180' as const, sec: 180 * day },
+            { key: '365' as const, sec: 365 * day },
+          ].reduce((best, opt) =>
+            Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
+          ).key;
+          setExpiryDays(closest);
+        }
+      };
       const piggy = all.find((p) => p.id === editingId);
       if (!piggy) {
         // Cross-device edit fallback (#596): local record is missing
@@ -277,63 +333,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           // LNURL deliberately stays empty. Stage stays `idle` so step
           // 2's validate-affordance is what the user sees if they want
           // to paste a fresh link.
-          if (typeof fallbackCache.geohash === 'string' && fallbackCache.geohash.length > 0) {
-            // Decode lat/lon back from the published geohash so the
-            // map pin pre-renders. The event omits raw lat/lon to
-            // preserve hider precision — geohash precision 9 is ≈ 5 m
-            // which is what the wizard stores anyway. decodeGeohash
-            // returns { lat, lng }; rename `lng` to `lon` to match the
-            // pin shape the rest of the wizard uses.
-            const { lat, lng } = decodeGeohash(fallbackCache.geohash);
-            setPin({ lat, lon: lng, geohash: fallbackCache.geohash });
-          }
-          setCacheName(fallbackCache.name ?? '');
-          setCacheDescription(fallbackCache.description ?? '');
-          if (typeof fallbackCache.difficulty === 'number')
-            setDifficulty(Math.min(5, Math.max(1, fallbackCache.difficulty)) as 1 | 2 | 3 | 4 | 5);
-          if (typeof fallbackCache.terrain === 'number')
-            setTerrain(Math.min(5, Math.max(1, fallbackCache.terrain)) as 1 | 2 | 3 | 4 | 5);
-          if (
-            fallbackCache.size === 'micro' ||
-            fallbackCache.size === 'small' ||
-            fallbackCache.size === 'regular' ||
-            fallbackCache.size === 'large' ||
-            fallbackCache.size === 'other'
-          ) {
-            setCacheSize(fallbackCache.size);
-          }
-          if (
-            fallbackCache.cacheType === 'traditional' ||
-            fallbackCache.cacheType === 'multi' ||
-            fallbackCache.cacheType === 'mystery' ||
-            fallbackCache.cacheType === 'virtual'
-          ) {
-            setCacheType(fallbackCache.cacheType);
-          }
-          if (fallbackCache.imageUrl) setHintPhotoUrl(fallbackCache.imageUrl);
-          if (typeof fallbackCache.waitSeconds === 'number')
-            setWaitMinutesText(String(Math.round(fallbackCache.waitSeconds / 60)));
-          if (typeof fallbackCache.uses === 'number') setUsesText(String(fallbackCache.uses));
-          // Reverse-map the event's NIP-40 expiry back onto one of the
-          // picker chips so a metadata-only save doesn't silently
-          // change the listing's expiry (a `Never` cache would
-          // otherwise re-stamp as 365d on save). Same window-snap
-          // logic as the local-record branch below.
-          if (typeof fallbackCache.expiresAt !== 'number' || fallbackCache.expiresAt === null) {
-            setExpiryDays('never');
-          } else {
-            const windowSec = fallbackCache.expiresAt - fallbackCache.createdAt;
-            const day = 24 * 60 * 60;
-            const closest = [
-              { key: '30' as const, sec: 30 * day },
-              { key: '90' as const, sec: 90 * day },
-              { key: '180' as const, sec: 180 * day },
-              { key: '365' as const, sec: 365 * day },
-            ].reduce((best, opt) =>
-              Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
-            ).key;
-            setExpiryDays(closest);
-          }
+          hydratePublicFieldsFromEvent(fallbackCache);
           // The cache is on-relay, so it must have been published —
           // default isPublic on. The user can flip it off on step 6
           // before save if they want to convert it to a private Piggy.
@@ -352,6 +352,34 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
+      // Re-hydrate the post-write PIN row so the hider returning via Edit
+      // can recover the PIN they wrote earlier. The NFC lock is local-only
+      // (never on the event), so it always comes from the local record —
+      // whichever side wins for the public fields below.
+      if (piggy.nfcLock) {
+        setLastWrittenLock({
+          pwdHex: piggy.nfcLock.pwdHex,
+          packHex: piggy.nfcLock.packHex,
+          pin: piggy.nfcLock.pwdHex.toUpperCase(),
+          tagUid: piggy.nfcLock.tagUid,
+        });
+      }
+      // Cross-device source of truth: when the published event is newer
+      // than this device's local record, the listing was edited on another
+      // device — trust the event for the public fields AND the advertised
+      // prize, keeping only the LNURL bearer (local-only) from this record.
+      // A missing local `updatedAt` (pre-#681 records) falls back to the
+      // original hide time, so any present event wins — the safe default
+      // when the event is canonical (#596 / #681).
+      const eventIsFresher =
+        !!fallbackCache && fallbackCache.createdAt * 1000 > (piggy.updatedAt ?? piggy.createdAt);
+      const eventPayoutMsat =
+        eventIsFresher &&
+        fallbackCache &&
+        typeof fallbackCache.payoutSats === 'number' &&
+        fallbackCache.payoutSats > 0
+          ? fallbackCache.payoutSats * 1000
+          : undefined;
       setStage({
         kind: 'validated',
         params: {
@@ -360,12 +388,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           // editor isn't re-validating the LNURL unless they paste a
           // new one (which resets stage back through `handleValidate`).
           defaultDescription: piggy.lnurlDescription ?? '',
-          maxWithdrawable: piggy.maxWithdrawableMsat ?? 0,
+          // Prize: the event's published amount when it is the fresher
+          // source, else the local record's. The sync effect mirrors this
+          // into the editable "Sats per claim" field.
+          maxWithdrawable: eventPayoutMsat ?? piggy.maxWithdrawableMsat ?? 0,
           minWithdrawable: 0,
           callback: '',
           k1: '',
         },
       });
+      if (eventIsFresher && fallbackCache) {
+        hydratePublicFieldsFromEvent(fallbackCache);
+        return;
+      }
       setHintPhotoUrl(piggy.hintPhotoUrl ?? null);
       setWaitMinutesText(
         typeof piggy.waitSecondsHint === 'number'
@@ -408,18 +443,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           Math.abs(opt.sec - window) < Math.abs(best.sec - window) ? opt : best,
         ).key;
         setExpiryDays(closest);
-      }
-      // Re-hydrate the post-write PIN row so the hider returning via
-      // Edit can recover the PIN they wrote earlier without leaving the
-      // wizard. We map back to the same `lastWrittenLock` shape the
-      // fresh-write path emits so the render branch is symmetric.
-      if (piggy.nfcLock) {
-        setLastWrittenLock({
-          pwdHex: piggy.nfcLock.pwdHex,
-          packHex: piggy.nfcLock.packHex,
-          pin: piggy.nfcLock.pwdHex.toUpperCase(),
-          tagUid: piggy.nfcLock.tagUid,
-        });
       }
     });
     return () => {
@@ -602,6 +625,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       lnurlw: lnurl.trim(),
       lnurlDescription,
       createdAt: originalCreatedAt.current ?? Date.now(),
+      // Last-write timestamp (ms), bumped on every save. Compared against
+      // the published event's `created_at` on the next edit so a stale
+      // local record can't shadow a newer cross-device edit (#596 / #681).
+      updatedAt: Date.now(),
       isPublic,
       maxWithdrawableMsat,
       isLpPiggy: listingIsLp,

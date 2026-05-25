@@ -68,6 +68,32 @@ export type RootStackParamList = {
 // TypeScript resolves fine — keep the order as-is.
 // See plan .claude/plans/look-through-the-issues-squishy-wigderson.md
 // for motivation; closes parts of #467 and #468.
+// Published kind-37516 listing fields carried into the edit wizard (the
+// cross-device source of truth). Named so the wizard's hydration helper can
+// share the shape. `createdAt` here is the event envelope `created_at` (last
+// publish), which the wizard compares against the local record's `updatedAt`
+// to decide which side is fresher (#596 / #681).
+export interface HuntCacheFallback {
+  coord: string;
+  hiderPubkey: string;
+  d: string;
+  name: string;
+  description: string;
+  geohash: string | null;
+  difficulty: number | null;
+  terrain: number | null;
+  size: string | null;
+  cacheType: string | null;
+  hint: string | null;
+  imageUrl: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  waitSeconds: number | null;
+  uses: number | null;
+  isLpPiggy: boolean;
+  payoutSats: number | null;
+}
+
 export type ExploreStackParamList = {
   ExploreHome: undefined;
   Lessons: undefined;
@@ -90,29 +116,7 @@ export type ExploreStackParamList = {
   HuntCreate:
     | {
         piggyId?: string;
-        fallbackCache?: {
-          coord: string;
-          hiderPubkey: string;
-          d: string;
-          name: string;
-          description: string;
-          geohash: string | null;
-          difficulty: number | null;
-          terrain: number | null;
-          size: string | null;
-          cacheType: string | null;
-          hint: string | null;
-          imageUrl: string | null;
-          createdAt: number;
-          expiresAt: number | null;
-          waitSeconds: number | null;
-          uses: number | null;
-          // LP classification + advertised prize, carried so a cross-device
-          // edit (#596) re-stamps the LP label and preserves/seeds the
-          // "Sats per claim" field without the local bearer (#681 review).
-          isLpPiggy: boolean;
-          payoutSats: number | null;
-        };
+        fallbackCache?: HuntCacheFallback;
       }
     | undefined;
   // `coord` (optional) is the kind 37516 cache coord the finder is

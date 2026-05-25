@@ -57,6 +57,13 @@ export interface HiddenPiggy {
    * cache. The publish itself happens in milestone 6; the flag is
    * stored here from the create flow. */
   isPublic: boolean;
+  /** Last-edit timestamp (ms epoch), bumped on every save. The edit wizard
+   * compares it against the published kind-37516 event's `created_at` to
+   * decide which side is fresher — so a stale local record can't shadow a
+   * newer cross-device edit (#596 / #681). Absent on pre-#681 records, in
+   * which case the wizard falls back to `createdAt` and lets a present
+   * event win. */
+  updatedAt?: number;
   /** Snapshot of the LNURL-w endpoint's max-withdrawable (millisats) at
    * create time — purely informational; the live value is queried on
    * each finder claim. Optional because old / unreachable LNURLs may
@@ -251,6 +258,7 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (p.maxWithdrawableMsat !== undefined && typeof p.maxWithdrawableMsat !== 'number')
     return false;
   if (p.isLpPiggy !== undefined && typeof p.isLpPiggy !== 'boolean') return false;
+  if (p.updatedAt !== undefined && typeof p.updatedAt !== 'number') return false;
   if (p.lat !== undefined && typeof p.lat !== 'number') return false;
   if (p.lon !== undefined && typeof p.lon !== 'number') return false;
   if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;
