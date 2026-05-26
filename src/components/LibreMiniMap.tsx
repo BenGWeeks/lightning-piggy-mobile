@@ -846,6 +846,16 @@ const arePropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.fill !== next.fill) return false;
   if (prev.crosshair !== next.crosshair) return false;
   if (prev.testID !== next.testID) return false;
+  // pinMarker is an object — compare its fields (and null↔object) so a
+  // changed/toggled pin (e.g. isLpPiggy flips, or the coordinate moves)
+  // actually re-renders the marker (#683 review).
+  if (
+    (prev.pinMarker == null) !== (next.pinMarker == null) ||
+    prev.pinMarker?.lat !== next.pinMarker?.lat ||
+    prev.pinMarker?.lon !== next.pinMarker?.lon ||
+    prev.pinMarker?.isLpPiggy !== next.pinMarker?.isLpPiggy
+  )
+    return false;
   // Handlers — host screens should `useCallback` these but fall back
   // gracefully on reference identity if not.
   if (prev.onTapMap !== next.onTapMap) return false;
