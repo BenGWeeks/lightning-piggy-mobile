@@ -9,18 +9,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  ChevronLeft,
-  ChevronRight,
-  MapPin,
-  PiggyBank,
-  Plus,
-  RotateCw,
-  Zap,
-} from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus, RotateCw } from 'lucide-react-native';
 import type { VerifiedEvent } from 'nostr-tools';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
+import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -540,13 +533,7 @@ const Row: React.FC<RowProps> = ({
           )}
         </View>
       )}
-      {/* Lightning-zap badge — only when this Piggy carries a payout
-          (matches the Geo-caches list on HuntScreen). */}
-      {cache?.isLpPiggy && cache?.payoutSats != null ? (
-        <View style={styles.payoutBadge}>
-          <Zap size={13} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
-        </View>
-      ) : null}
+      <LpPayoutBadge isLpPiggy={cache?.isLpPiggy ?? false} payoutSats={cache?.payoutSats} />
     </View>
     <View style={styles.rowMain}>
       <View style={styles.rowTitleRow}>
@@ -716,19 +703,8 @@ const createStyles = (colors: Palette) =>
     iconLp: { backgroundColor: colors.brandPink },
     iconStandard: { backgroundColor: colors.textSupplementary },
     thumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.divider },
-    // Relative wrapper so the payout badge anchors to the icon's corner.
+    // Relative wrapper so the LpPayoutBadge anchors to the icon's corner.
     iconContainer: { position: 'relative' },
-    payoutBadge: {
-      position: 'absolute',
-      top: -5,
-      right: -5,
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     rowMain: { flex: 1 },
     rowTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textHeader },

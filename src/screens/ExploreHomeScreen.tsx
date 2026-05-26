@@ -17,11 +17,11 @@ import {
   MapPin,
   PiggyBank,
   Sparkles,
-  Zap,
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
@@ -1158,13 +1158,11 @@ const CacheCard: React.FC<{
           )}
         </View>
       )}
-      {/* Lightning-zap badge — only when this Piggy carries a payout
-          (matches the Geo-caches list on HuntScreen). */}
-      {cache.isLpPiggy && cache.payoutSats != null ? (
-        <View style={styles.cardPayoutBadge}>
-          <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
-        </View>
-      ) : null}
+      <LpPayoutBadge
+        isLpPiggy={cache.isLpPiggy}
+        payoutSats={cache.payoutSats}
+        offset={{ top: 4, right: 4 }}
+      />
     </View>
     <Text style={styles.cardTitle} numberOfLines={2}>
       {cache.name}
@@ -1312,17 +1310,6 @@ const createLocalStyles = (colors: Palette) =>
     },
     // Relative wrapper so the payout badge anchors to the thumb's corner.
     cardThumbWrap: { position: 'relative' },
-    cardPayoutBadge: {
-      position: 'absolute',
-      top: 4,
-      right: 4,
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     cardIconLightning: { backgroundColor: colors.brandPink },
     cardIconOnchain: { backgroundColor: '#F5A623' },
     cardIconStandard: { backgroundColor: '#7A5CFF' },
