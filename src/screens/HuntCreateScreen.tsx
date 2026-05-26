@@ -29,6 +29,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  Info,
   ChevronLeft,
   Clipboard as ClipboardIcon,
   QrCode,
@@ -1072,9 +1073,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (stage.kind !== 'validated') return null;
     const min = msatToSats(stage.params.minWithdrawable);
     const max = msatToSats(stage.params.maxWithdrawable);
+    // Never advertise "0 sats per claim" — a 0/undefined maxWithdrawable
+    // means we don't actually know the prize (link not present, or an
+    // older record), not that the prize is zero (#681 review).
+    if (max <= 0) return null;
     return min === max
       ? `${max.toLocaleString()} sats per claim`
       : `${min.toLocaleString()}–${max.toLocaleString()} sats per claim`;
+  })();
+  // Prize hint for the cross-device card — taken from the editable field
+  // (pre-filled from the published `amount`). Shown only when known/>0; we
+  // never surface "0 sats" or a green "validated" tick we didn't earn.
+  const crossDevicePrizeLine = (() => {
+    const n = parseInt(amountSatsText.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? `Prize: ${n.toLocaleString()} sats per claim` : null;
   })();
 
   // True when the NFC step's primary button should be enabled. Step 5
@@ -1281,7 +1293,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   </TouchableOpacity>
                 )}
 
-              {stage.kind === 'validated' && listingIsLpInEdit && (
+              {/* A withdraw link is present + validated on THIS phone:
+                  green "Looks good". */}
+              {stage.kind === 'validated' && listingIsLpInEdit && lnurl.trim().length > 0 && (
                 <View style={styles.validatedCard}>
                   <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
@@ -1294,6 +1308,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                         &ldquo;{stage.params.defaultDescription}&rdquo;
                       </Text>
                     ) : null}
+                  </View>
+                </View>
+              )}
+              {/* The withdraw link lives on the device it was set up on
+                  (cross-device edit). No green "validated" tick we didn't
+                  earn, no "0 sats" — show the published prize if known and
+                  let the hider edit the prize / cooldown / uses below. */}
+              {crossDeviceEdit && listingIsLpInEdit && lnurl.trim().length === 0 && (
+                <View style={styles.validatedCard}>
+                  <Info size={20} color={colors.brandPink} strokeWidth={2.5} />
+                  <View style={styles.validatedTextWrapper}>
+                    <Text style={styles.validatedTitle}>Link set up on another device</Text>
+                    <Text style={styles.validatedMeta}>
+                      This Piglet&apos;s withdraw link lives on the phone you created it on. You can
+                      still edit the prize, cooldown and uses below.
+                    </Text>
+                    {crossDevicePrizeLine && (
+                      <Text style={styles.validatedMeta}>{crossDevicePrizeLine}</Text>
+                    )}
                   </View>
                 </View>
               )}
