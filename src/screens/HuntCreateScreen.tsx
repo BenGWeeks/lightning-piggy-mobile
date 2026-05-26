@@ -353,6 +353,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
+      // LP-ness from the local record so the prize/cooldown/uses
+      // affordances stay enabled even for a local LP *stub* — a record
+      // left by a prior cross-device save has `isLpPiggy: true` but a
+      // blank `lnurlw`, so the lnurl-presence check alone would wrongly
+      // hide them (#681 review).
+      setIsLpPiggyEdit(piggy.isLpPiggy ?? Boolean(piggy.lnurlw));
       // Re-hydrate the post-write PIN row so the hider returning via Edit
       // can recover the PIN they wrote earlier. The NFC lock is local-only
       // (never on the event), so it always comes from the local record —
