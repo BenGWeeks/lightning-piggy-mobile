@@ -1422,12 +1422,24 @@ export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
+  // Fires once after BOTH the kind-4 and kind-1059 subscriptions have
+  // signalled end-of-stored-events (EOSE) across the relay set. Callers use
+  // this to distinguish the historical replay (everything delivered before
+  // EOSE) from genuinely-live events that stream in afterwards — e.g. to
+  // suppress OS notifications for the backlog on cold start (#279).
+  onEose?: () => void;
   // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter resolves to `clamp(providedSince - 120s, now-7d, now)` — the 120 s safety buffer in case relay clock skew tagged a wrap slightly older than our cursor, the 7-day floor caps cold-start restream when the cursor is very stale, and the `now` cap defends against a future-dated cursor (corrupted persisted value or a wrap with a bad clock) that would otherwise silently miss new DMs until wall-clock catches up. If absent, falls back to the 7-day floor.
   sinceK4?: number;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
     input.onEvent(ev);
+  };
+  // Fire `onEose` exactly once, after both filters have reached EOSE.
+  let k4Eosed = false;
+  let wrapsEosed = false;
+  const maybeEose = (): void => {
+    if (k4Eosed && wrapsEosed) input.onEose?.();
   };
   const nowSec = Math.floor(Date.now() / 1000);
   const lookbackFloor = nowSec - DM_LIVE_SUB_MAX_LOOKBACK_SECONDS;
@@ -1442,7 +1454,15 @@ export function subscribeInboxDmsForViewer(input: {
       since: sinceK4,
       limit: DM_INBOX_LIMIT,
     } as Filter,
-    { onevent },
+    {
+      onevent,
+      oneose: () => {
+        if (!k4Eosed) {
+          k4Eosed = true;
+          maybeEose();
+        }
+      },
+    },
   );
   const subWraps = pool.subscribeMany(
     input.relays,
@@ -1452,7 +1472,15 @@ export function subscribeInboxDmsForViewer(input: {
       // No `since` — NIP-59 random timestamps would drop fresh wraps.
       limit: DM_INBOX_LIMIT,
     } as Filter,
-    { onevent },
+    {
+      onevent,
+      oneose: () => {
+        if (!wrapsEosed) {
+          wrapsEosed = true;
+          maybeEose();
+        }
+      },
+    },
   );
   return () => {
     for (const s of [subK4, subWraps]) {

@@ -95,6 +95,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
   let writeChain: Promise<void> = Promise.resolve();
+  // Flips true once the relay set signals EOSE (end of stored events). The
+  // initial replay (everything before EOSE) is the historical backlog —
+  // we surface it into the inbox but do NOT fire OS notifications for it,
+  // or a fresh login would post a notification per recent DM (Android caps
+  // at 50). Only post-EOSE, genuinely-live events notify (#279).
+  let passedEose = false;
 
   // Coalesce per-event inbox merges into one setDmInbox call per ~150 ms or per 25 events. Without this, a relay-restream burst (e.g. cold start with 200+ kind-4 events queued) causes one React re-render per event = 30+ rerenders/sec on the JS thread, which is what locks the UI for 30 seconds. Batching collapses that into ~6 rerenders/sec at most. Notifications still fire per-event so unread counts/sounds aren't dropped.
   let pendingInboxEntries: DmInboxEntry[] = [];
@@ -122,7 +128,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
 
-  const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+  const handleInboxEvent = async (
+    ev: nostrService.RawInboxDmEvent,
+    isLive: boolean,
+  ): Promise<void> => {
     // Earliest-possible short-circuit for NIP-17 wraps we already
     // decrypted on a previous launch. Cost saved per backlog wrap:
     // console.log + seen.has + seen.add + kind dispatch + cacheKey
@@ -253,10 +262,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
       queueInboxEntry(k4InboxEntry);
       notifyDmMessage(partnerPubkey);
-      // OS notification (#279) — live inbound only (this is the live sub,
-      // not batch refresh), never my own echo; suppressed by
-      // notificationService when the user is viewing this exact thread.
-      if (!fromMe) {
+      // OS notification (#279) — only genuinely-live inbound (post-EOSE, so
+      // the cold-start backlog stays silent), never my own echo; suppressed
+      // by notificationService when the user is viewing this exact thread.
+      if (isLive && !fromMe) {
         void fireMessageNotification({
           kind: 'dm',
           threadId: partnerPubkey,
@@ -357,9 +366,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
     if (routeResult.kind !== 'not-group') {
       // OS notification (#279) — fired HERE (live path) not inside
-      // tryRouteGroupRumor, which also runs on batch refresh. Skip my own
-      // messages; suppressed when the user is viewing this group.
-      if (routeResult.kind === 'routed') {
+      // tryRouteGroupRumor (which also runs on batch refresh). Only
+      // post-EOSE (so the backlog is silent), skip my own messages, and
+      // suppressed when the user is viewing this group.
+      if (isLive && routeResult.kind === 'routed') {
         const sender = routeResult.message.senderPubkey;
         if (sender.toLowerCase() !== viewerPubkey.toLowerCase()) {
           void fireMessageNotification({
@@ -453,9 +463,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
     queueInboxEntry(inboxEntry);
     notifyDmMessage(partnership.partnerPubkey);
-    // OS notification (#279) — live inbound only, never my own echo;
-    // suppressed when the user is viewing this thread.
-    if (!partnership.fromMe) {
+    // OS notification (#279) — only genuinely-live inbound (post-EOSE),
+    // never my own echo; suppressed when the user is viewing this thread.
+    if (isLive && !partnership.fromMe) {
       void fireMessageNotification({
         kind: 'dm',
         threadId: partnership.partnerPubkey,
@@ -533,9 +543,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       viewerPubkey,
       relays: readRelays,
       sinceK4,
+      onEose: () => {
+        // Backlog drained — events from here on are genuinely live and may
+        // fire OS notifications. Capture `passedEose` per-event at receipt
+        // (below) so events still mid-decrypt when EOSE lands keep their
+        // pre-EOSE (silent) classification.
+        passedEose = true;
+        if (__DEV__) console.log('[Nostr] live DM sub: EOSE — notifications now live');
+      },
       onEvent: (ev) => {
+        // Snapshot live-ness at receipt time so the async decrypt finishing
+        // after EOSE doesn't retroactively promote a backlog event.
+        const isLive = passedEose;
         // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running.
-        handleInboxEvent(ev).catch((e) => {
+        handleInboxEvent(ev, isLive).catch((e) => {
           if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
         });
       },
