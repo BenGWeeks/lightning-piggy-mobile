@@ -12,36 +12,19 @@ import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { LRUCache } from '../utils/lru';
-import {
-  evictNip17CacheBytes,
-  evictNip17CacheOverflow,
-  touchNip17CacheEntry,
-} from '../utils/nip17Cache';
-import { utf8ByteSize } from '../utils/byteSize';
+import { touchNip17CacheEntry } from '../utils/nip17Cache';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
-  classifyRumor,
   partnerFromRumor,
-  subjectFromRumor,
   unwrapWrapNsec,
   unwrapWrapViaNip44,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
-import {
-  findGroupForParticipants,
-  reconcileSyntheticGroup,
-} from '../services/groupRoutingRegistry';
-import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
-import {
-  appendGroupMessage,
-  listPersistedGroupWrapIds,
-  type GroupMessage,
-} from '../services/groupMessagesStorageService';
+import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -59,743 +42,63 @@ import {
   deleteXpub,
   deleteMnemonic,
 } from '../services/walletStorageService';
+import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
+import {
+  nip04PlaintextCache,
+  appendLocalDmChains,
+  getMemoisedSecretKey,
+  clearMemoisedSecretKey,
+} from './nostrSecretKeyCache';
+import { notifyDmMessage } from './nostrEventBus';
+import { tryRouteGroupRumor } from './nostrGroupRouting';
+import {
+  yieldToEventLoop,
+  DECRYPT_FRAME_BUDGET_MS,
+  createYieldScheduler,
+  DECRYPT_YIELD_EVERY,
+  NIP17_LOOP_YIELD_EVERY,
+} from './nostrDecryptPacing';
+import {
+  AMBER_NIP17_CACHE_KEY_BASE,
+  NSEC_NIP17_CACHE_KEY_BASE,
+  wrapCacheFileName,
+  AMBER_NIP17_ENABLED_KEY_LEGACY,
+  type Nip17CacheEntry,
+  safeParseRecord,
+  writeNip17Cache,
+  DM_INBOX_REFRESH_TTL_MS,
+  DM_CONV_CACHE_PREFIX,
+  DM_CONV_LAST_SEEN_PREFIX,
+  DM_INBOX_CAP,
+  DM_CONV_CAP,
+  inboxCacheKey,
+  inboxLastSeenKey,
+  convCacheKey,
+  convLastSeenKey,
+  safeGetDmCacheItem,
+  loadDmInboxFromCache,
+  loadLastSeen,
+  mergeInboxEntries,
+  mergeConversationMessages,
+} from './nostrDmCache';
+import {
+  CONTACTS_CACHE_KEY_BASE,
+  PROFILES_CACHE_KEY_BASE,
+  CACHE_TIMESTAMP_KEY_BASE,
+  CONTACTS_TIMESTAMP_KEY_BASE,
+  OWN_PROFILE_CACHE_KEY_BASE,
+  OWN_PROFILE_TIMESTAMP_KEY_BASE,
+  RELAY_LIST_CACHE_KEY_BASE,
+  RELAY_LIST_TIMESTAMP_KEY_BASE,
+  CACHE_MAX_AGE_MS,
+  MISSING_PROFILE_RETRY_MS,
+  readCachedWithTtl,
+} from './nostrCacheKeys';
+import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
 
-/**
- * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
- * the app-session-latest 1000 decrypted messages in RAM so re-opening
- * the same thread (or navigating away and back) doesn't re-decrypt from
- * scratch. Event id → plaintext mapping is immutable once decrypted
- * (the NIP-04 payload never changes for a given id), so no TTL needed.
- *
- * Cribbed from Arcade's arclib/src/private.ts:9 (`LRUCache<string, …>`).
- * Stays in RAM only — no AsyncStorage persistence — to keep the write
- * path free and avoid serialising full-bundle JSON on every decrypt.
- */
-const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
-
-// Per-(viewer,partner) serialization chain for the optimistic local-
-// message disk-cache writes. Without this, two rapid sends (e.g.
-// double-tap retry, or two sequential tap-share-from-attach) could
-// each read-modify-write the conversation blob concurrently — last
-// write wins, losing the prior optimistic row. Per Copilot review #509.
-const appendLocalDmChains = new Map<string, Promise<void>>();
-export function __clearNip04PlaintextCacheForTests() {
-  nip04PlaintextCache.clear();
-}
-
-// Module-scope memo for the current user's secret key. Five paths in this
-// file need access to the nsec (sign, publishProfile, publishContactList,
-// sendDirectMessage, decrypt), and each one was previously hitting
-// SecureStore + bech32-decoding afresh. Memoising keyed by pubkey means
-// we read disk + decode once per login and invalidate on logout.
-let _cachedSecretKey: { pubkey: string; secretKey: Uint8Array } | null = null;
-async function getMemoisedSecretKey(expectedPubkey: string): Promise<Uint8Array | null> {
-  if (_cachedSecretKey && _cachedSecretKey.pubkey === expectedPubkey) {
-    return _cachedSecretKey.secretKey;
-  }
-  const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-  if (!nsec) return null;
-  const { pubkey, secretKey } = nostrService.decodeNsec(nsec);
-  if (pubkey !== expectedPubkey) return null;
-  _cachedSecretKey = { pubkey, secretKey };
-  return secretKey;
-}
-function clearMemoisedSecretKey(): void {
-  _cachedSecretKey = null;
-}
-
-// AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
-// use the same cache shape (wrap-id → decrypted rumor entry); they're
-// kept under separate keys so cross-signer login on the same device
-// doesn't leak plaintext between identities. As of #288 the keys are
-// also per-account namespaced — each base is suffixed with `_${pubkey}`
-// via `perAccountKey()` at every read/write site.
-const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
-const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
-// Count cap for the wrap plaintext cache. High because the cache is now
-// file-backed (no ~2 MB SQLite row limit), so the byte cap below is the
-// real binding limit — the count cap is just a sanity ceiling (#687).
-const NIP17_CACHE_CAP = 50_000;
-// The wrap cache (wrap-id -> decrypted plaintext) is persisted to a FILE,
-// not an AsyncStorage row. AsyncStorage rows hit Android's ~2 MB SQLite
-// CursorWindow limit on READ; once the cache passed that it failed to
-// hydrate (and under the old 1.5 MB write cap a large inbox was mostly
-// evicted), so the dedup signal was lost and EVERY cold start re-decrypted
-// the whole inbox — a ~64-88 s JS-thread freeze (#687). Files have no
-// per-row read cap, so the cache holds the whole inbox and dedup hits.
-const WRAP_CACHE_MAX_BYTES = 12_000_000;
-const isWrapCacheKey = (key: string): boolean =>
-  key.startsWith(AMBER_NIP17_CACHE_KEY_BASE) || key.startsWith(NSEC_NIP17_CACHE_KEY_BASE);
-// The key is already filesystem-safe (base + '_' + hex pubkey).
-const wrapCacheFileName = (key: string): string => `${key}.json`;
-// Legacy AsyncStorage key from the now-removed "Enable NIP-17 on Amber" toggle (#404). Cleared on logout so old installs don't leave dead bytes around.
-const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
-
-/** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
- * from followed senders — see refreshDmInbox's filter gate. */
-type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
-
-/**
- * Tiny pub/sub for inbound group messages. NostrContext fires
- * `notifyGroupMessage` after persisting a decrypted group rumor so
- * GroupConversationScreen can re-load its in-memory list without
- * polling. Listeners are scoped to (groupId) so an open thread doesn't
- * re-render on unrelated traffic.
- */
-type GroupMessageListener = (groupId: string, message: GroupMessage) => void;
-const groupMessageListeners = new Set<GroupMessageListener>();
-export function notifyGroupMessage(groupId: string, message: GroupMessage): void {
-  for (const l of groupMessageListeners) {
-    try {
-      l(groupId, message);
-    } catch (e) {
-      if (__DEV__) console.warn('[Nostr] group message listener threw:', e);
-    }
-  }
-}
-export function subscribeGroupMessages(listener: GroupMessageListener): () => void {
-  groupMessageListeners.add(listener);
-  return () => {
-    groupMessageListeners.delete(listener);
-  };
-}
-
-// Sibling pub/sub for inbound 1:1 DM rumors (#349). Fires after a live
-// kind-1059 wrap is decrypted to a single-recipient kind-14 rumor and
-// committed to the inbox cache. The open ConversationScreen subscribes
-// to its peer's pubkey so it can re-fetch and append the new message
-// without waiting for the user to pull-to-refresh. `partnerPubkey` is
-// the other party (lowercase hex); listeners filter on it.
-type DmMessageListener = (partnerPubkey: string) => void;
-const dmMessageListeners = new Set<DmMessageListener>();
-export function notifyDmMessage(partnerPubkey: string): void {
-  for (const l of dmMessageListeners) {
-    try {
-      l(partnerPubkey);
-    } catch (e) {
-      if (__DEV__) console.warn('[Nostr] dm message listener threw:', e);
-    }
-  }
-}
-export function subscribeDmMessages(listener: DmMessageListener): () => void {
-  dmMessageListeners.add(listener);
-  return () => {
-    dmMessageListeners.delete(listener);
-  };
-}
-
-/**
- * Outcome of attempting to route a kind-14 rumor as a group message.
- *
- * The 1:1 fallthrough path uses `partnerFromRumor`, which for a
- * multi-recipient rumor would arbitrarily pick the FIRST p tag and
- * mis-catalogue the rumor as a 1:1 DM with that pubkey. Callers must
- * therefore distinguish "not a group" (safe to fall through to DM)
- * from "group-shaped, no local match" (must NOT fall through).
- */
-type GroupRouteResult =
-  | { kind: 'routed' } // appended to a known group
-  | { kind: 'group-no-match' } // group-shaped but no matching local group
-  | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
-
-/**
- * Try to route a decoded kind-14 rumor as a group message.
- *
- * Side-effects on `routed`:
- *  - Appends to groupMessagesStorageService keyed by group.id
- *  - Fires the in-process group-message listener so an open thread
- *    refreshes immediately
- */
-async function tryRouteGroupRumor(
-  rumor: DecodedRumor,
-  viewerPubkey: string,
-  wrapId: string,
-): Promise<GroupRouteResult> {
-  const cls = classifyRumor(rumor, viewerPubkey);
-  if (!cls || cls.type !== 'group') return { kind: 'not-group' };
-  let group = findGroupForParticipants(cls.otherParticipants);
-  // Always run the synthetic-reconcile path when the matched group is
-  // synthetic (no kind-30200 backing it) — that's the only way later
-  // `subject`-tag renames from foreign clients propagate to the local
-  // group name. Per NIP-17 latest-wins, every kind-14 with a `subject`
-  // for an existing room can update its name; without this branch the
-  // first sender's subject would stick forever.
-  const isSynthetic = group ? isSyntheticGroupId(group.id) : false;
-  if (!group || isSynthetic) {
-    // No matching kind-30200-backed local group, OR matched a synthetic
-    // group that may need a name refresh. Try the NIP-17 spec-aligned
-    // fallback: foreign clients (Amethyst / Quartz, 0xchat) don't
-    // publish kind-30200; they advertise the group name via the
-    // kind-14 `subject` tag, and the room identity is the participant
-    // set. Materialise / update a synthetic group keyed off a
-    // deterministic SHA-256 of the sorted pubkey-set so subsequent
-    // messages from the same room land in the same local thread, and
-    // so the same id is computed across all peers / sessions.
-    //
-    // We require a `subject` to take this fallback — kind-14s without
-    // one are either (a) LP-native groups whose kind-30200 hasn't
-    // landed yet (existing drop-then-refresh behaviour is correct), or
-    // (b) malformed / spam (no semantic name to attach to anyway).
-    const subject = subjectFromRumor(rumor);
-    if (subject) {
-      // NIP-17 room key = pubkey + p tags = sender + every p-tag
-      // (viewer included). `participantsFromRumor` returns exactly
-      // that set; it's what `classifyRumor` derived `otherParticipants`
-      // from minus the viewer, so re-include the viewer here.
-      const fullRoom = new Set<string>(cls.otherParticipants);
-      fullRoom.add(viewerPubkey.toLowerCase());
-      const synthId = syntheticGroupIdForParticipants(fullRoom);
-      // memberPubkeys excludes the viewer by LP convention (see Group
-      // type docstring + reconcileFromGroupStateEvent).
-      const synthetic = await reconcileSyntheticGroup({
-        groupId: synthId,
-        name: subject,
-        memberPubkeys: Array.from(cls.otherParticipants),
-        createdAtSec: rumor.created_at,
-      });
-      if (synthetic) {
-        group = synthetic;
-      }
-    }
-  }
-  if (!group) {
-    // Still no match (no subject, or GroupsContext hasn't registered
-    // its reconciler yet — typically only during cold boot / logout).
-    // Drop on the floor: these wraps are NOT written into the
-    // persistent NIP-17 wrap cache (the caller's `continue` happens
-    // before the cache write), so retry only happens via a relay
-    // re-fetch on the next force-refresh. Caveat: NIP-59 wraps use
-    // randomised `created_at` so non-force refreshes (which apply a
-    // `since:` filter) may miss them. Buffering pending-group-wraps
-    // for replay after a 30200 lands is tracked as a follow-up.
-    if (__DEV__) {
-      const all = Array.from(cls.otherParticipants);
-      const fp = all
-        .slice(0, 3)
-        .map((p) => p.slice(0, 8))
-        .join(',');
-      console.log(
-        `[Nostr] dropped group-shaped rumor (no matching group): participants=[${fp}${all.length > 3 ? ',...' : ''}] sender=${rumor.pubkey.slice(0, 8)}`,
-      );
-    }
-    return { kind: 'group-no-match' };
-  }
-  const message: GroupMessage = {
-    id: wrapId,
-    senderPubkey: rumor.pubkey.toLowerCase(),
-    text: rumor.content,
-    createdAt: rumor.created_at,
-  };
-  try {
-    await appendGroupMessage(group.id, message);
-    notifyGroupMessage(group.id, message);
-  } catch (e) {
-    if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);
-    // Storage write failed — don't fall through to the DM path either,
-    // it's still a group rumor. Same caveat as the no-match branch
-    // above: this wrap is not in the persistent NIP-17 cache, so retry
-    // requires a relay re-fetch. A force-refresh from the next focus
-    // tick is the practical recovery path; no automatic replay today.
-    return { kind: 'group-no-match' };
-  }
-  return { kind: 'routed' };
-}
-
-/** Parse an AsyncStorage JSON blob into an object-keyed record, falling
- * back to `{}` if the value is missing, not valid JSON, or not an
- * object. A corrupted cache should be treated as a cold cache rather
- * than an exception that aborts the caller. */
-function safeParseRecord<T>(raw: string | null): Record<string, T> {
-  if (!raw) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, T>;
-    }
-  } catch {
-    // fall through — treat corrupted blob as empty
-  }
-  return {};
-}
-
-/** Persist a wrap-id cache back to AsyncStorage, enforcing the size
- * cap in insertion order (oldest-inserted evicts first). Combined with
- * the `touchNip17CacheEntry` helper called on every cache hit during
- * `refreshDmInbox`, this gives true LRU semantics: a re-touched entry
- * is delete+reinserted to the tail, so it survives the next eviction
- * sweep even if 5000 newer wraps arrive after it. Without the touch
- * this is FIFO-by-first-write — see #193 for why FIFO regresses to
- * pre-#176 behaviour for users with very active inboxes.
- *
- * Object keys in JS preserve insertion order for non-integer string
- * keys, and wrap ids are hex, so iteration order is stable across
- * `JSON.parse` / `JSON.stringify` round-trips — the on-disk LRU order
- * survives app restarts without any new persistence machinery.
- *
- * Returns the number of entries evicted so callers can include it in
- * a perf log line. Write failures are surfaced as a warn — a corrupted
- * storage subsystem would otherwise silently re-decrypt on every
- * refresh with no breadcrumb. */
-async function writeNip17Cache(
-  storageKey: string,
-  cache: Record<string, Nip17CacheEntry>,
-): Promise<number> {
-  const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
-  // Byte cap — generous now the cache is file-backed (no ~2 MB SQLite
-  // CursorWindow read limit). The old 1.5 MB AsyncStorage cap evicted most
-  // of a large inbox, losing the dedup signal and re-decrypting it on every
-  // cold start (#687).
-  const evictedBytes = evictNip17CacheBytes(cache, WRAP_CACHE_MAX_BYTES);
-  try {
-    const f = new File(Paths.document, wrapCacheFileName(storageKey));
-    if (f.exists) f.delete();
-    f.create();
-    f.write(JSON.stringify(cache));
-    // Retire any legacy AsyncStorage row so the old (possibly unreadable /
-    // oversized) copy stops shadowing the file + eating the 2 MB budget.
-    AsyncStorage.removeItem(storageKey).catch(() => {});
-  } catch (err) {
-    console.warn(`[Nostr] NIP-17 cache file write failed (${storageKey}):`, err);
-  }
-  return evicted + evictedBytes;
-}
-
-/** Yield to the JS event loop so UI interactions can tick between
- * chunks of a synchronous decrypt loop (#177). `await`ing an already-
- * resolved promise only drains the microtask queue, which still
- * starves UI events — setTimeout(0) returns to the task scheduler. */
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/** Half of a 60 fps frame (~8.3 ms). The NIP-17 inbox loops aim to
- * stay under this many ms of unbroken JS work per yield. With the
- * old count-based yield (every 4 wraps) a slow path could still
- * blow past 50–200 ms in a single burst — enough to drop several
- * frames on tab-switch. See #532. */
-const DECRYPT_FRAME_BUDGET_MS = 4;
-
-/** Cooperative-yield scheduler for the NIP-17 inbox loops (#532).
- *
- * Two improvements over the old `if (i % N === 0) await yieldToEventLoop()`
- * pattern:
- *
- * 1. **Time-budget yields.** We only pay for a `setTimeout(0)` round-
- *    trip when wall-clock since the last yield exceeds
- *    `DECRYPT_FRAME_BUDGET_MS`. A run of cheap cache hits no longer
- *    forces a yield every Nth iteration even though there's been no
- *    blocking work. The count-based modulo still acts as a safety
- *    cap (set by the caller) so a pathological iteration that
- *    somehow underestimates its own runtime can't starve the thread.
- *
- * 2. **Hard-cancel on abort.** When the caller's `AbortSignal` fires
- *    mid-loop, an `abort` listener clears the currently-pending
- *    `setTimeout` and resolves the awaiter immediately. Without this,
- *    the loop would still drain one more `setTimeout(0)` round-trip
- *    (plus whatever sync work follows it) before the next abort
- *    check — visible as a slug of pinned-thread time after a
- *    tab-switch blurs MessagesScreen.
- *
- * Returned object:
- * - `maybeYield()` — call once per loop iteration. No-op unless the
- *   frame budget is exceeded OR the safety-cap counter ticks.
- * - `yieldCount` — number of actual yields performed (perfLog).
- * - `dispose()` — detach the abort listener after the loop exits.
- */
-type YieldScheduler = {
-  maybeYield: () => Promise<void>;
-  readonly yieldCount: number;
-  dispose: () => void;
-};
-
-function createYieldScheduler(opts: {
-  signal?: AbortSignal;
-  /** Safety cap — always yield when iteration % safetyEvery === 0,
-   * even if the frame budget hasn't been blown. */
-  safetyEvery: number;
-  /** ms of unbroken JS work before we force a yield. */
-  budgetMs?: number;
-}): YieldScheduler {
-  const { signal, safetyEvery, budgetMs = DECRYPT_FRAME_BUDGET_MS } = opts;
-  let iteration = 0;
-  let yields = 0;
-  let lastYieldAt = performance.now();
-  let pendingHandle: ReturnType<typeof setTimeout> | null = null;
-  let pendingReject: ((reason?: unknown) => void) | null = null;
-
-  // On abort: clear the in-flight setTimeout so the awaiter unwinds
-  // immediately instead of waiting for the next scheduler tick.
-  const onAbort = () => {
-    if (pendingHandle !== null) {
-      clearTimeout(pendingHandle);
-      pendingHandle = null;
-    }
-    if (pendingReject) {
-      const reject = pendingReject;
-      pendingReject = null;
-      reject(new Error('aborted'));
-    }
-  };
-  if (signal) {
-    if (signal.aborted) {
-      // Already aborted before the loop started — caller is expected
-      // to check signal.aborted itself, but make maybeYield a no-op
-      // resolver so we don't queue work.
-    } else {
-      signal.addEventListener('abort', onAbort);
-    }
-  }
-
-  const maybeYield = async () => {
-    iteration++;
-    if (signal?.aborted) return;
-    const now = performance.now();
-    const overBudget = now - lastYieldAt >= budgetMs;
-    const safetyHit = iteration % safetyEvery === 0;
-    if (!overBudget && !safetyHit) return;
-    yields++;
-    await new Promise<void>((resolve, reject) => {
-      pendingReject = reject;
-      pendingHandle = setTimeout(() => {
-        pendingHandle = null;
-        pendingReject = null;
-        resolve();
-      }, 0);
-    }).catch(() => {
-      // Aborted — swallow; caller checks signal.aborted after maybeYield.
-    });
-    lastYieldAt = performance.now();
-  };
-
-  const dispose = () => {
-    if (signal) signal.removeEventListener('abort', onAbort);
-    if (pendingHandle !== null) {
-      clearTimeout(pendingHandle);
-      pendingHandle = null;
-    }
-  };
-
-  return {
-    maybeYield,
-    get yieldCount() {
-      return yields;
-    },
-    dispose,
-  };
-}
-
-/** Chunk size for yielding between decrypt attempts. Sized for the
- * nsec path: `nip04.decrypt` / `unwrapWrapNsec` are ~1 ms each on
- * mid-range mobile CPUs, so 15 iterations ≈ 15 ms of blocking work
- * per batch — just under a 60 fps frame budget. The Amber path uses
- * the same constant, but its decrypt is IPC-bound and already
- * yields per call, so the extra `setTimeout(0)` there is effectively
- * free. If you retune this, profile the nsec path with `Profiler`
- * in FriendsScreen as the canary. */
-const DECRYPT_YIELD_EVERY = 15;
-
-/** Yield cadence for the kind-1059 (NIP-17 wrap) loops in
- * `refreshDmInbox`. Smaller than `DECRYPT_YIELD_EVERY` because this
- * counter ticks on EVERY wrap — cache hit, miss, follow-filter drop,
- * group-route, the lot — so even an inbox of pure cache hits still
- * yields the JS thread regularly. The cache-hit path itself is cheap
- * (~ms), but on a >1000-wrap inbox the bulk processing piles up to
- * tens of seconds of unbroken JS work without a periodic yield, which
- * starves UI events (back-tap appears frozen — #286). Lowered from 8
- * to 4 in 2026-05 — perf testing on a real Pixel showed the
- * post-cold-start "Send sheet feels frozen" window was dominated by
- * back-to-back NIP-17 inbox processing without enough JS-thread
- * breathing room for gorhom-bottom-sheet's open animation to schedule
- * frames. Halving this doubles yield frequency, drops the per-burst
- * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
- * smooth during inbox drain.
- *
- * Lowered again 2026-05-16 from 4 → 2: tonight's instrumented Pixel
- * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
- * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
- * every 2 wraps cuts each per-burst block back to ~2 ms; the
- * setImmediate cost is amortised across the still-significant
- * per-wrap decrypt work so the overhead is < 5%. */
-const NIP17_LOOP_YIELD_EVERY = 2;
-
-/**
- * Minimum gap between `refreshDmInbox` calls fired by
- * `useFocusEffect` on the Messages tab. Without a TTL, every tab return
- * triggered a fresh 3-query relay round-trip + full NIP-04 decrypt
- * sweep — locking the app up for seconds on the 2nd/3rd/Nth visit.
- * 30 s is long enough that quick tab-bouncing stays responsive, short
- * enough that a user who genuinely wants fresh state (open app after
- * a break) still pays normal refresh cost. Pull-to-refresh bypasses
- * the TTL via `{ force: true }`.
- */
-const DM_INBOX_REFRESH_TTL_MS = 30_000;
-
-/**
- * Persisted inbox + per-peer message caches (PR B).
- *
- * Key shape: `<prefix>_<userPubkeyHex>` — per-user so multiple nsec
- * identities on the same device don't share or overwrite each other.
- * On logout the three blobs are removed via `AsyncStorage.multiRemove`
- * alongside the NIP-17 wrap caches.
- *
- * Storage cap: `DM_INBOX_CAP` keeps the serialised JSON under ~400 KB
- * even with verbose messages (≈1000 entries × ~400 bytes each).
- */
-const DM_INBOX_CACHE_PREFIX = 'nostr_dm_inbox_v1_';
-const DM_INBOX_LAST_SEEN_PREFIX = 'nostr_dm_inbox_last_seen_v1_';
-const DM_CONV_CACHE_PREFIX = 'nostr_dm_conv_v1_';
-const DM_CONV_LAST_SEEN_PREFIX = 'nostr_dm_conv_last_seen_v1_';
-const DM_INBOX_CAP = 1000;
-const DM_CONV_CAP = 500;
-// Hard byte ceiling for a single DM cache row. Android's SQLite
-// CursorWindow caps a row at ~2 MB — past it the *read* throws
-// SQLiteBlobTooBigException, the cache silently fails to hydrate, and
-// every cold start falls back to a full relay restream + NIP-17
-// re-decrypt (a ~70s JS-thread stall). The count caps above aren't
-// enough when messages are long, so the merge fns trim by size too.
-const DM_CACHE_MAX_BYTES = 1_500_000;
-
-function inboxCacheKey(user: string) {
-  return DM_INBOX_CACHE_PREFIX + user;
-}
-function inboxLastSeenKey(user: string) {
-  return DM_INBOX_LAST_SEEN_PREFIX + user;
-}
-function convCacheKey(user: string, peer: string) {
-  return DM_CONV_CACHE_PREFIX + user + '_' + peer;
-}
-function convLastSeenKey(user: string, peer: string) {
-  return DM_CONV_LAST_SEEN_PREFIX + user + '_' + peer;
-}
-
-/**
- * Read a DM-cache row, treating an unreadable row as empty. Android's
- * SQLite CursorWindow caps a row at ~2 MB; a row past that throws
- * `SQLiteBlobTooBigException` on read. Without this guard the throw
- * aborts the whole refresh/fetch before the write-side byte cap can
- * rewrite a smaller row — so an already-oversized row would never
- * self-heal. Catching it (and dropping the poisoned key) lets the next
- * relay restream repopulate a byte-capped row.
- */
-async function safeGetDmCacheItem(key: string): Promise<string | null> {
-  // Wrap plaintext caches are file-backed — files have no ~2 MB SQLite
-  // CursorWindow row read cap, so a large inbox hydrates instead of
-  // failing and re-decrypting every cold start (#687).
-  if (isWrapCacheKey(key)) {
-    try {
-      const f = new File(Paths.document, wrapCacheFileName(key));
-      if (f.exists) return await f.text();
-      // One-time migration: seed the file from the legacy AsyncStorage row
-      // (if it's still readable) so existing installs keep their cache;
-      // then retire the row. An unreadable legacy row just yields null and
-      // the next refresh repopulates the file.
-      const legacy = await AsyncStorage.getItem(key).catch(() => null);
-      if (legacy) {
-        try {
-          f.create();
-          f.write(legacy);
-          // Retire the legacy row only AFTER the file write succeeds — a
-          // failed migration must not discard a usable cache (#689 review).
-          AsyncStorage.removeItem(key).catch(() => {});
-        } catch {
-          // Migration failed — leave the AsyncStorage row intact; the next
-          // write/refresh retries.
-        }
-      }
-      return legacy;
-    } catch (err) {
-      console.warn(`[Nostr] NIP-17 cache file read failed — treating as empty (${key}):`, err);
-      return null;
-    }
-  }
-  try {
-    return await AsyncStorage.getItem(key);
-  } catch (err) {
-    console.warn(`[Nostr] DM cache row unreadable — dropping ${key}:`, err);
-    AsyncStorage.removeItem(key).catch(() => {});
-    return null;
-  }
-}
-
-/** Read the persisted DM inbox for a user. Used during session restore /
- * post-login so the Messages tab paints from cache on cold start instead
- * of waiting for the relay round-trip + NIP-17 decrypt loop (3-5 s). The
- * shape mirrors what `refreshDmInbox` already writes at the end of every
- * successful refresh — so this is purely a read-side hoist of work that
- * was already happening, just earlier in the lifecycle.
- *
- * No follow-list filter is applied here. The next `refreshDmInbox` call
- * (fires via Messages-tab focus) re-applies the filter against current
- * follows, so a since-last-session unfollow never persists to the UI for
- * more than the brief render window before that re-filter happens. */
-async function loadDmInboxFromCache(pubkey: string): Promise<DmInboxEntry[]> {
-  try {
-    const raw = await safeGetDmCacheItem(inboxCacheKey(pubkey));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function loadLastSeen(key: string): Promise<number | undefined> {
-  const raw = await AsyncStorage.getItem(key);
-  if (!raw) return undefined;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/**
- * Merge cached list with freshly-decrypted entries. Cached entries we
- * already have take precedence (they might have had properties we'd
- * need to re-decrypt to recover). Dedup key is `id` (kind-4 event id
- * or kind-1059 wrap id). A fallback composite key covers persisted
- * entries written before `id` was added to the type so loading an
- * old cache doesn't silently drop everything to the same slot.
- */
-function mergeInboxEntries(
-  cached: DmInboxEntry[],
-  fresh: DmInboxEntry[],
-  cap: number,
-): DmInboxEntry[] {
-  const map = new Map<string, DmInboxEntry>();
-  const dedupKey = (e: DmInboxEntry): string =>
-    e.id ?? `${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`;
-  for (const e of cached) map.set(dedupKey(e), e);
-  for (const e of fresh) map.set(dedupKey(e), e);
-  const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
-  let result = all.slice(0, cap);
-  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted newest-first, so drop
-  // from the tail (oldest). `> 0` not `> 1` so a single over-budget
-  // entry still goes rather than persisting an unreadable row;
-  // `Math.max(1, …)` guarantees forward progress (a 0.1 factor rounds
-  // to 0 for tiny arrays, which would spin forever).
-  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
-    const drop = Math.max(1, Math.floor(result.length * 0.1));
-    result = result.slice(0, result.length - drop);
-  }
-  return result;
-}
-
-// Window in seconds to match a fresh real-id message against a pending
-// optimistic local- echo (same fromMe + same text). Mirrors
-// appendGroupMessage's LOCAL_ECHO_MATCH_WINDOW_SECS so the same UX
-// invariant — one bubble per send, not two — holds across 1:1 + group.
-const LOCAL_DM_ECHO_WINDOW_SECS = 30;
-
-function mergeConversationMessages(
-  cached: ConversationMessage[],
-  fresh: ConversationMessage[],
-  cap: number,
-): ConversationMessage[] {
-  const map = new Map<string, ConversationMessage>();
-  for (const m of cached) map.set(m.id, m);
-  for (const m of fresh) {
-    // When a real (non-local-) entry arrives, drop any pending local-
-    // echo with matching fromMe + text within the echo window. Without
-    // this the user would see two bubbles for the same GIF/text: the
-    // optimistic local- row persisted by ConversationScreen on send,
-    // plus the NIP-17 self-wrap echo from the relay.
-    if (!m.id.startsWith('local-')) {
-      let bestKey: string | null = null;
-      let bestDelta = Infinity;
-      for (const [k, prev] of map) {
-        if (!k.startsWith('local-')) continue;
-        if (prev.fromMe !== m.fromMe) continue;
-        if (prev.text !== m.text) continue;
-        const delta = Math.abs(prev.createdAt - m.createdAt);
-        if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestKey = k;
-        }
-      }
-      if (bestKey !== null) map.delete(bestKey);
-    }
-    map.set(m.id, m);
-  }
-  const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-  // Keep the newest DM_CONV_CAP messages; drop oldest.
-  let result = all.length <= cap ? all : all.slice(all.length - cap);
-  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted oldest-first, so drop
-  // from the head (oldest). `> 0` not `> 1` so a single over-budget
-  // message still goes; `Math.max(1, …)` guarantees forward progress.
-  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
-    const drop = Math.max(1, Math.floor(result.length * 0.1));
-    result = result.slice(drop);
-  }
-  return result;
-}
-
-const NSEC_KEY = 'nostr_nsec';
-const PUBKEY_KEY = 'nostr_pubkey';
-const SIGNER_TYPE_KEY = 'nostr_signer_type';
-// Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
-// at every call site (#288). The legacy un-suffixed keys are migrated on
-// first launch by `migrateToPerAccountStorage`.
-const CONTACTS_CACHE_KEY_BASE = 'nostr_contacts_cache';
-const PROFILES_CACHE_KEY_BASE = 'nostr_profiles_cache';
-const CACHE_TIMESTAMP_KEY_BASE = 'nostr_cache_timestamp';
-const CONTACTS_TIMESTAMP_KEY_BASE = 'nostr_contacts_timestamp';
-// Exported so AccountDrawerContent + AccountSwitcherSheet can seed
-// their per-identity profile caches synchronously from AsyncStorage
-// before fanning out to relays — otherwise they always wait on a
-// network round-trip per non-active identity, making the switcher
-// slow to populate names + avatars.
-export const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
-const OWN_PROFILE_TIMESTAMP_KEY_BASE = 'nostr_own_profile_timestamp';
-const RELAY_LIST_CACHE_KEY_BASE = 'nostr_relay_list_cache';
-const RELAY_LIST_TIMESTAMP_KEY_BASE = 'nostr_relay_list_timestamp';
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — for all-cached fast path
-// A contact whose kind-0 we couldn't resolve on the previous attempt is
-// retried much sooner than 24 h. The "miss" often reflects the user's
-// profile being on a relay we hadn't hit yet at that moment, not that
-// they've never published one — a shorter retry window turns a few of
-// those no-profile contacts into resolved ones within the hour.
-const MISSING_PROFILE_RETRY_MS = 60 * 60 * 1000; // 1 hour
-
-/**
- * Read a JSON-serialised cache value and its timestamp in a single
- * `multiGet` call. Returns the parsed value (or null if missing / corrupt)
- * and the cache age in ms (Infinity when no timestamp exists yet).
- */
-async function readCachedWithTtl<T>(
-  dataKey: string,
-  tsKey: string,
-): Promise<{ value: T | null; ageMs: number }> {
-  try {
-    const pairs = await AsyncStorage.multiGet([dataKey, tsKey]);
-    let dataStr: string | null = null;
-    let tsStr: string | null = null;
-    for (const [k, v] of pairs) {
-      if (k === dataKey) dataStr = v;
-      else if (k === tsKey) tsStr = v;
-    }
-    const value = dataStr ? (JSON.parse(dataStr) as T) : null;
-    const ageMs = tsStr ? Date.now() - parseInt(tsStr, 10) : Infinity;
-    return { value, ageMs };
-  } catch {
-    return { value: null, ageMs: Infinity };
-  }
-}
-
-/** Options accepted by `refreshDmInbox`. All fields optional so existing
- * callers continue to work without changes. `signal` lets a screen
- * cancel the refresh on unmount so the decrypt loop stops chewing the
- * JS thread after the user has navigated away (#286).
- *
- * `includeNonFollows` bypasses the parental-control follow gate at the
- * data layer so unfollowed senders' wraps land in `dmInbox`. Only the
- * dev-mode "Following only" toggle should pass `true` here; production
- * callers leave it undefined (default = enforce). The cache hydrate
- * step also honours this — without it, a previous follows-on refresh's
- * filtered cache would mask new unfollowed entries fetched this round. */
-export interface RefreshDmInboxOptions {
-  force?: boolean;
-  signal?: AbortSignal;
-  includeNonFollows?: boolean;
-}
+export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
+export { notifyGroupMessage, subscribeGroupMessages, subscribeDmMessages } from './nostrEventBus';
+export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -969,23 +272,6 @@ interface NostrContextType {
     tags: string[][];
     content: string;
   }) => Promise<SignedEvent | null>;
-}
-
-export interface SignedEvent {
-  id: string;
-  pubkey: string;
-  sig: string;
-  kind: number;
-  created_at: number;
-  tags: string[][];
-  content: string;
-}
-
-export interface ConversationMessage {
-  id: string;
-  fromMe: boolean;
-  text: string;
-  createdAt: number;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
