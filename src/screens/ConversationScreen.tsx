@@ -23,8 +23,9 @@ import { Zap, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { setActiveThread } from '../services/notificationService';
 import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -229,6 +230,16 @@ const ConversationScreen: React.FC = () => {
   const closeAttachPanel = useCallback(() => {
     setAttachPanelOpen(false);
   }, []);
+
+  // Mark this thread active while focused so notificationService
+  // suppresses OS notifications for incoming messages from this peer
+  // (#279). Cleared on blur so leaving / backgrounding re-enables them.
+  useFocusEffect(
+    useCallback(() => {
+      setActiveThread(pubkey);
+      return () => setActiveThread(null);
+    }, [pubkey]),
+  );
 
   // Android hardware-back: when the attach panel is open, swallow the
   // back press and close the panel instead of letting it bubble up to

@@ -120,6 +120,38 @@ export const navigateToHuntPiggyDetail = (coord: string): boolean => {
   return true;
 };
 
+/**
+ * Route from a tapped OS notification (#279). Reads the `data` payload the
+ * notificationService attached and opens the relevant surface:
+ *  - dm            → the 1:1 Conversation thread
+ *  - group         → the GroupConversation thread
+ *  - payment / zap → the Home (wallet) tab
+ *
+ * Called from the notification-response listener in App.tsx. Returns false
+ * if the nav tree isn't ready yet (caller retries on cold start).
+ */
+export const navigateFromNotification = (data: {
+  kind?: string;
+  conversationPubkey?: string;
+  groupId?: string;
+  walletId?: string;
+}): boolean => {
+  if (!navigationRef.isReady()) return false;
+  if (data.conversationPubkey) {
+    // `name` is required by the route type but the screen fills the real
+    // header from its own profile fetch, so seed it empty.
+    navigationRef.navigate('Conversation', { pubkey: data.conversationPubkey, name: '' });
+    return true;
+  }
+  if (data.groupId) {
+    navigationRef.navigate('GroupConversation', { groupId: data.groupId });
+    return true;
+  }
+  // payment / zap (or anything without a thread id) → wallet home.
+  navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Home' } });
+  return true;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();

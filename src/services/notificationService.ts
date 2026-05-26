@@ -270,6 +270,78 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   }
 }
 
+// --- Foreground-suppression state (#279) ---
+//
+// We never want to buzz the user about the very thread they're staring
+// at. The app root drives `setNotificationsForeground` from AppState, and
+// the open Conversation / GroupConversation screens drive
+// `setActiveThread` on focus / blur. A message trigger then skips the
+// notification only when the app is foreground AND the active thread is
+// the one the message belongs to. Payments are never suppressed — money
+// arriving is always worth surfacing.
+let appInForeground = true;
+let activeThreadId: string | null = null;
+
+/** Called by the app root on AppState change. */
+export function setNotificationsForeground(active: boolean): void {
+  appInForeground = active;
+}
+
+/**
+ * Called by Conversation / GroupConversation screens on focus (with the
+ * partner pubkey or group id) and on blur (with `null`).
+ */
+export function setActiveThread(threadId: string | null): void {
+  activeThreadId = threadId;
+}
+
+/** True when the app is foreground AND the user is viewing `threadId`. */
+export function isThreadActivelyViewed(threadId: string): boolean {
+  return appInForeground && activeThreadId === threadId;
+}
+
+/**
+ * Fire a message (DM or group) notification, suppressed when the user is
+ * actively viewing that exact thread. `threadId` is the partner pubkey
+ * (1:1) or the group id, and is also what the tap-router reads back to
+ * reopen the thread.
+ */
+export async function fireMessageNotification(opts: {
+  kind: 'dm' | 'group';
+  threadId: string;
+  title: string;
+  body: string;
+  data: NotificationData;
+}): Promise<string | null> {
+  if (isThreadActivelyViewed(opts.threadId)) return null;
+  return fireNotification({
+    kind: opts.kind,
+    title: opts.title,
+    body: opts.body,
+    data: opts.data,
+  });
+}
+
+/** Fire an incoming-payment / zap notification. Never suppressed. */
+export async function firePaymentNotification(opts: {
+  kind: 'payment' | 'zap';
+  amountSats: number;
+  walletId?: string;
+  /** Zap comment / invoice memo, appended to the body when present. */
+  comment?: string;
+}): Promise<string | null> {
+  const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
+  const sats = opts.amountSats.toLocaleString();
+  const trimmed = opts.comment?.trim();
+  const body = trimmed ? `+${sats} sats · ${trimmed}` : `+${sats} sats received`;
+  return fireNotification({
+    kind: opts.kind,
+    title: `${noun} received`,
+    body,
+    data: opts.walletId ? { walletId: opts.walletId } : undefined,
+  });
+}
+
 /**
  * Test hook: clears cached prefs so repeated tests don't poison each
  * other. NOT exported via barrel; intentionally only reachable via
@@ -278,4 +350,6 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
 export function __resetForTests(): void {
   initialised = false;
   cachedLockScreenContent = null;
+  appInForeground = true;
+  activeThreadId = null;
 }

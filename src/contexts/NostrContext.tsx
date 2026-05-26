@@ -36,13 +36,14 @@ import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
 } from '../services/groupRoutingRegistry';
+import type { Group } from '../types/groups';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import {
   appendGroupMessage,
   listPersistedGroupWrapIds,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
-import { fireNotification } from '../services/notificationService';
+import { fireMessageNotification } from '../services/notificationService';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -195,7 +196,9 @@ export function subscribeDmMessages(listener: DmMessageListener): () => void {
  * from "group-shaped, no local match" (must NOT fall through).
  */
 type GroupRouteResult =
-  | { kind: 'routed' } // appended to a known group
+  | { kind: 'routed'; group: Group; message: GroupMessage } // appended; carries
+  // the group + message so the LIVE caller can fire an OS notification
+  // (only live deliveries notify — see the live-wrap handler)
   | { kind: 'group-no-match' } // group-shaped but no matching local group
   | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
 
@@ -300,33 +303,12 @@ async function tryRouteGroupRumor(
     return { kind: 'group-no-match' };
   }
 
-  // OS notification trigger (#279). Fire-and-forget — the notification
-  // path must NEVER block message persistence. The notificationService:
-  //   - lazily requests permission on first call
-  //   - swallows errors internally
-  //   - applies the user's lock-screen-content privacy preference
-  //   - routes onto the "Messages" Android channel (mute-able from
-  //     system Settings independently of payment notifications)
-  //
-  // TODO(#279): This trigger fires for EVERY routed group rumor,
-  // including ones from the active foreground thread. Suppress when
-  // the user is currently viewing this group (needs an
-  // app-state / current-route signal we don't yet plumb in here).
-  // TODO(#279): Wire the equivalent trigger for 1:1 DM rumors at the
-  // refreshDmInbox call sites (~lines 2034, 2108) once the UX
-  // suppress-when-foreground question is settled.
-  // TODO(#279): Resolve a proper sender display name. We pass the
-  // group name today; per-sender attribution needs a profile lookup
-  // hook from inside this module-scope function (currently only
-  // group + sender pubkey are in scope here).
-  void fireNotification({
-    kind: 'group',
-    title: group.name || 'New group message',
-    body: rumor.content,
-    data: { groupId: group.id },
-  });
-
-  return { kind: 'routed' };
+  // NOTE: the OS notification is fired by the LIVE-wrap caller, not here.
+  // tryRouteGroupRumor also runs during batch/historical refresh, so
+  // notifying here would flood on cold start. We hand the group + message
+  // back instead; the live path decides whether to surface it (and applies
+  // the foreground-suppression gate).
+  return { kind: 'routed', group, message };
 }
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
@@ -3668,6 +3650,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
 
+  // Mirror contacts into a ref so the live-DM handler can resolve a
+  // sender's display name for the notification title without adding
+  // `contacts` to the subscription effect's deps (which would re-open the
+  // sub on every profile update). Falls back to a short pubkey for
+  // senders we have no profile for.
+  const contactsRef = useRef(contacts);
+  useEffect(() => {
+    contactsRef.current = contacts;
+  }, [contacts]);
+  const resolveSenderName = useCallback((senderPubkey: string): string => {
+    const lc = senderPubkey.toLowerCase();
+    const c = contactsRef.current.find((x) => x.pubkey.toLowerCase() === lc);
+    return (
+      c?.profile?.displayName || c?.profile?.name || c?.petname || `${senderPubkey.slice(0, 8)}…`
+    );
+  }, []);
+
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
   // calls this on focus. The first call flips `liveSubArmed`, the
   // gated useEffect below re-runs and opens the live NIP-17 sub.
@@ -3919,6 +3918,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         queueInboxEntry(k4InboxEntry);
         notifyDmMessage(partnerPubkey);
+        // OS notification (#279) — live inbound only (this is the live
+        // sub handler, not batch refresh), never for my own echo, and
+        // suppressed by notificationService when the user is viewing this
+        // exact thread.
+        if (!fromMe) {
+          void fireMessageNotification({
+            kind: 'dm',
+            threadId: partnerPubkey,
+            title: resolveSenderName(partnerPubkey),
+            body: k4InboxEntry.text,
+            data: { conversationPubkey: partnerPubkey },
+          });
+        }
         if (__DEV__)
           console.log(
             `[Nostr] live kind-4 ${ev.id.slice(0, 8)} surfaced (partner=${partnerPubkey.slice(0, 8)}, fromMe=${fromMe})`,
@@ -4010,6 +4022,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // GroupConversationScreen auto-refreshes.
       const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
       if (routeResult.kind !== 'not-group') {
+        // OS notification (#279) — fired HERE (live path) not inside
+        // tryRouteGroupRumor, which also runs on batch refresh. Skip my
+        // own messages; suppressed when the user is viewing this group.
+        if (routeResult.kind === 'routed') {
+          const sender = routeResult.message.senderPubkey;
+          if (sender.toLowerCase() !== viewerPubkey.toLowerCase()) {
+            void fireMessageNotification({
+              kind: 'group',
+              threadId: routeResult.group.id,
+              title: routeResult.group.name || 'New group message',
+              body: `${resolveSenderName(sender)}: ${routeResult.message.text}`,
+              data: { groupId: routeResult.group.id },
+            });
+          }
+        }
         if (__DEV__)
           console.log(
             `[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`,
@@ -4094,6 +4121,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       queueInboxEntry(inboxEntry);
       notifyDmMessage(partnership.partnerPubkey);
+      // OS notification (#279) — live inbound only, never for my own
+      // echo; suppressed when the user is viewing this thread.
+      if (!partnership.fromMe) {
+        void fireMessageNotification({
+          kind: 'dm',
+          threadId: partnership.partnerPubkey,
+          title: resolveSenderName(partnership.partnerPubkey),
+          body: inboxEntry.text,
+          data: { conversationPubkey: partnership.partnerPubkey },
+        });
+      }
       if (__DEV__)
         console.log(
           `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
@@ -4182,7 +4220,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
-  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed, resolveSenderName]);
 
   const signEvent = useCallback(
     async (event: {

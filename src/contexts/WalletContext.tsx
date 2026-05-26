@@ -19,6 +19,7 @@ import * as zapResolverFingerprintStorage from '../services/zapResolverFingerpri
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import { singleFlight } from '../utils/singleFlight';
 import { pickNewReceipts, settledIncomingHashes } from '../utils/incomingReceipts';
+import { firePaymentNotification } from '../services/notificationService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -1904,6 +1905,31 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Intentionally only fire on `lastIncomingPayment` changes; the
     // callback identity is stable enough across renders that adding it
     // would double-fetch on unrelated renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastIncomingPayment]);
+
+  // OS notification for incoming payments (#279). Funnels through
+  // `lastIncomingPayment`, so it covers BOTH the expectPayment fast-path
+  // and the tx-list receive detector with one hook, and inherits their
+  // announce-once-per-hash dedupe. We look up the settled tx to tell a
+  // NIP-57 zap (has a zap counterparty) from a plain receive, and to pull
+  // a zap comment / memo for the body. Never suppressed — money landing
+  // is always worth surfacing.
+  useEffect(() => {
+    if (!lastIncomingPayment) return;
+    const { walletId, amountSats, paymentHash } = lastIncomingPayment;
+    const tx = wallets
+      .find((w) => w.id === walletId)
+      ?.transactions?.find((t) => t.paymentHash === paymentHash);
+    const zap = tx?.zapCounterparty ?? null;
+    void firePaymentNotification({
+      kind: zap ? 'zap' : 'payment',
+      amountSats,
+      walletId,
+      comment: zap?.comment || tx?.description || undefined,
+    });
+    // Only fire on a new detected receive; `wallets` is read for tx
+    // lookup but must not re-trigger this on unrelated wallet updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastIncomingPayment]);
 
