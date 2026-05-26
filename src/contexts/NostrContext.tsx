@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { LRUCache } from '../utils/lru';
 import {
@@ -111,7 +112,22 @@ function clearMemoisedSecretKey(): void {
 // via `perAccountKey()` at every read/write site.
 const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
 const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
-const NIP17_CACHE_CAP = 5000;
+// Count cap for the wrap plaintext cache. High because the cache is now
+// file-backed (no ~2 MB SQLite row limit), so the byte cap below is the
+// real binding limit — the count cap is just a sanity ceiling (#687).
+const NIP17_CACHE_CAP = 50_000;
+// The wrap cache (wrap-id -> decrypted plaintext) is persisted to a FILE,
+// not an AsyncStorage row. AsyncStorage rows hit Android's ~2 MB SQLite
+// CursorWindow limit on READ; once the cache passed that it failed to
+// hydrate (and under the old 1.5 MB write cap a large inbox was mostly
+// evicted), so the dedup signal was lost and EVERY cold start re-decrypted
+// the whole inbox — a ~64-88 s JS-thread freeze (#687). Files have no
+// per-row read cap, so the cache holds the whole inbox and dedup hits.
+const WRAP_CACHE_MAX_BYTES = 12_000_000;
+const isWrapCacheKey = (key: string): boolean =>
+  key.startsWith(AMBER_NIP17_CACHE_KEY_BASE) || key.startsWith(NSEC_NIP17_CACHE_KEY_BASE);
+// The key is already filesystem-safe (base + '_' + hex pubkey).
+const wrapCacheFileName = (key: string): string => `${key}.json`;
 // Legacy AsyncStorage key from the now-removed "Enable NIP-17 on Amber" toggle (#404). Cleared on logout so old installs don't leave dead bytes around.
 const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
 
@@ -325,14 +341,21 @@ async function writeNip17Cache(
   cache: Record<string, Nip17CacheEntry>,
 ): Promise<number> {
   const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
-  // Byte cap on top of the count cap — a row past Android's ~2 MB
-  // SQLite CursorWindow throws on *read*, silently breaking this
-  // fast-path cache and forcing a full cold-start restream.
-  const evictedBytes = evictNip17CacheBytes(cache, DM_CACHE_MAX_BYTES);
+  // Byte cap — generous now the cache is file-backed (no ~2 MB SQLite
+  // CursorWindow read limit). The old 1.5 MB AsyncStorage cap evicted most
+  // of a large inbox, losing the dedup signal and re-decrypting it on every
+  // cold start (#687).
+  const evictedBytes = evictNip17CacheBytes(cache, WRAP_CACHE_MAX_BYTES);
   try {
-    await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
+    const f = new File(Paths.document, wrapCacheFileName(storageKey));
+    if (f.exists) f.delete();
+    f.create();
+    f.write(JSON.stringify(cache));
+    // Retire any legacy AsyncStorage row so the old (possibly unreadable /
+    // oversized) copy stops shadowing the file + eating the 2 MB budget.
+    AsyncStorage.removeItem(storageKey).catch(() => {});
   } catch (err) {
-    console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
+    console.warn(`[Nostr] NIP-17 cache file write failed (${storageKey}):`, err);
   }
   return evicted + evictedBytes;
 }
@@ -555,6 +578,33 @@ function convLastSeenKey(user: string, peer: string) {
  * relay restream repopulate a byte-capped row.
  */
 async function safeGetDmCacheItem(key: string): Promise<string | null> {
+  // Wrap plaintext caches are file-backed — files have no ~2 MB SQLite
+  // CursorWindow row read cap, so a large inbox hydrates instead of
+  // failing and re-decrypting every cold start (#687).
+  if (isWrapCacheKey(key)) {
+    try {
+      const f = new File(Paths.document, wrapCacheFileName(key));
+      if (f.exists) return await f.text();
+      // One-time migration: seed the file from the legacy AsyncStorage row
+      // (if it's still readable) so existing installs keep their cache;
+      // then retire the row. An unreadable legacy row just yields null and
+      // the next refresh repopulates the file.
+      const legacy = await AsyncStorage.getItem(key).catch(() => null);
+      if (legacy) {
+        try {
+          f.create();
+          f.write(legacy);
+        } catch {
+          // best-effort migration — refresh will repopulate
+        }
+        AsyncStorage.removeItem(key).catch(() => {});
+      }
+      return legacy;
+    } catch (err) {
+      console.warn(`[Nostr] NIP-17 cache file read failed — treating as empty (${key}):`, err);
+      return null;
+    }
+  }
   try {
     return await AsyncStorage.getItem(key);
   } catch (err) {
