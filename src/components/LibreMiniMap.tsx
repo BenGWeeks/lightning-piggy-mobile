@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { NavigationContext } from '@react-navigation/native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
 import {
@@ -30,6 +30,29 @@ import { decodeGeohash } from '../utils/geohash';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import type { Palette } from '../styles/palettes';
+
+// `useIsFocused()` throws "Couldn't find a navigation object" when the
+// component renders OUTSIDE a navigator — e.g. inside a Gorhom
+// bottom-sheet modal, which mounts through a portal detached from the
+// navigation tree (the location picker, #681). Read the navigation
+// context directly (it's `undefined`, not a throw, when absent) and
+// treat "no navigator" as always-focused, since a sheet map is only
+// mounted while it's on screen.
+function useIsFocusedSafe(): boolean {
+  const navigation = useContext(NavigationContext);
+  const [focused, setFocused] = useState(() => (navigation ? navigation.isFocused() : true));
+  useEffect(() => {
+    if (!navigation) return undefined;
+    setFocused(navigation.isFocused());
+    const unsubFocus = navigation.addListener('focus', () => setFocused(true));
+    const unsubBlur = navigation.addListener('blur', () => setFocused(false));
+    return () => {
+      unsubFocus();
+      unsubBlur();
+    };
+  }, [navigation]);
+  return focused;
+}
 
 // Native MapLibre map — the single shared map component used by every
 // surface in the app (Explore hub, Geo-caches, Places, MapScreen,
@@ -203,7 +226,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
   // JS thread is freed for other tabs' work + future tap-handling.
   // The halo itself remains visible (we leave `pulse` at 1.0 / its
   // last value) — it's only the animation that pauses.
-  const isFocused = useIsFocused();
+  const isFocused = useIsFocusedSafe();
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!isFocused) {

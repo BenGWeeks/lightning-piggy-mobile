@@ -415,6 +415,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         typeof piggy.geohash === 'string'
       ) {
         setPin({ lat: piggy.lat, lon: piggy.lon, geohash: piggy.geohash });
+      } else if (typeof fallbackCache?.geohash === 'string' && fallbackCache.geohash.length > 0) {
+        // Local record predates location capture (no lat/lon) but the
+        // published listing carries a geohash — seed the pin from it so
+        // the map centres on where the Piglet was actually hidden instead
+        // of falling through to "Use my location" (#681 location fix).
+        const { lat, lng } = decodeGeohash(fallbackCache.geohash);
+        setPin({ lat, lon: lng, geohash: fallbackCache.geohash });
       }
       setCacheName(piggy.name ?? '');
       setCacheDescription(piggy.description ?? '');
