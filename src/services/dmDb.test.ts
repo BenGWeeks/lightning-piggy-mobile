@@ -28,6 +28,8 @@ const row = (over: Partial<DmMessageRow> = {}): DmMessageRow => ({
   createdAt: 100,
   sender: 's1',
   content: 'hi',
+  fromMe: false,
+  wireKind: 14,
   ...over,
 });
 
@@ -75,7 +77,7 @@ describe('dmDb', () => {
       expect(mockExecute).toHaveBeenCalledTimes(2);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('INSERT OR REPLACE INTO dm_messages');
-      expect(params).toEqual(['e1', 'convA', 100, 's1', 'hi']);
+      expect(params).toEqual(['e1', 'convA', 100, 's1', 'hi', 0, 14]);
     });
   });
 
@@ -83,12 +85,28 @@ describe('dmDb', () => {
     it('reads newest-first with a default limit, mapping rows', async () => {
       mockExecute.mockResolvedValueOnce(
         rowsResult([
-          { event_id: 'e2', conversation: 'convA', created_at: 200, sender: 's', content: 'b' },
+          {
+            event_id: 'e2',
+            conversation: 'convA',
+            created_at: 200,
+            sender: 's',
+            content: 'b',
+            from_me: 1,
+            wire_kind: 14,
+          },
         ]),
       );
       const out = await getConversationMessages('convA');
       expect(out).toEqual([
-        { eventId: 'e2', conversation: 'convA', createdAt: 200, sender: 's', content: 'b' },
+        {
+          eventId: 'e2',
+          conversation: 'convA',
+          createdAt: 200,
+          sender: 's',
+          content: 'b',
+          fromMe: true,
+          wireKind: 14,
+        },
       ]);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('WHERE conversation = ?');

@@ -19,7 +19,9 @@ const SCHEMA: string[] = [
      conversation TEXT NOT NULL,
      created_at   INTEGER NOT NULL,
      sender       TEXT NOT NULL,
-     content      TEXT NOT NULL
+     content      TEXT NOT NULL,
+     from_me      INTEGER NOT NULL DEFAULT 0,
+     wire_kind    INTEGER NOT NULL DEFAULT 14
    );`,
   `CREATE INDEX IF NOT EXISTS idx_dm_conversation_created
      ON dm_messages (conversation, created_at DESC);`,
@@ -42,7 +44,23 @@ async function openLocalDb(): Promise<DB> {
     );
   }
   for (const stmt of SCHEMA) await db.execute(stmt);
+  await migrateDmMessagesColumns(db);
   return db;
+}
+
+// `CREATE TABLE IF NOT EXISTS` won't add columns to a dm_messages table created
+// by an earlier schema version (e.g. a dev build before from_me/wire_kind), so
+// add any missing ones explicitly. The table is a rebuildable relay cache, but
+// ALTER preserves rows already synced. Idempotent via the table_info check.
+async function migrateDmMessagesColumns(db: DB): Promise<void> {
+  const info = await db.execute('PRAGMA table_info(dm_messages);');
+  const have = new Set((info.rows ?? []).map((c) => String(c.name)));
+  if (!have.has('from_me')) {
+    await db.execute('ALTER TABLE dm_messages ADD COLUMN from_me INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!have.has('wire_kind')) {
+    await db.execute('ALTER TABLE dm_messages ADD COLUMN wire_kind INTEGER NOT NULL DEFAULT 14;');
+  }
 }
 
 /**
