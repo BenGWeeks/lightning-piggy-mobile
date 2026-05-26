@@ -6,8 +6,8 @@ export function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** Half of a 60 fps frame (~8.3 ms). The NIP-17 inbox loops aim to
- * stay under this many ms of unbroken JS work per yield. With the
+/** ~4 ms — under a quarter of a 60 fps frame (16.6 ms). The NIP-17 inbox
+ * loops aim to stay under this many ms of unbroken JS work per yield. With the
  * old count-based yield (every 4 wraps) a slow path could still
  * blow past 50–200 ms in a single burst — enough to drop several
  * frames on tab-switch. See #532. */
@@ -152,6 +152,6 @@ export const DECRYPT_YIELD_EVERY = 15;
  * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
  * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
  * every 2 wraps cuts each per-burst block back to ~2 ms; the
- * setImmediate cost is amortised across the still-significant
+ * setTimeout(0) cost is amortised across the still-significant
  * per-wrap decrypt work so the overhead is < 5%. */
 export const NIP17_LOOP_YIELD_EVERY = 2;

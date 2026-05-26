@@ -53,8 +53,10 @@ export function safeParseRecord<T>(raw: string | null): Record<string, T> {
   return {};
 }
 
-/** Persist a wrap-id cache back to AsyncStorage, enforcing the size
- * cap in insertion order (oldest-inserted evicts first). Combined with
+/** Persist a wrap-id cache back to its per-account file (expo-file-system,
+ * #689 — no longer AsyncStorage; the old row blew the ~2 MB CursorWindow read
+ * cap), enforcing the size cap in insertion order (oldest-inserted evicts
+ * first). Combined with
  * the `touchNip17CacheEntry` helper called on every cache hit during
  * `refreshDmInbox`, this gives true LRU semantics: a re-touched entry
  * is delete+reinserted to the tail, so it survives the next eviction
