@@ -1,0 +1,120 @@
+= Data storage architecture
+
+How Lightning Piggy persists data on the device: what lives where, what's
+sensitive, and what's encrypted. Read this before adding a new cache or
+changing how anything is stored.
+
+== Principles
+
+* *Secrets go in the OS keystore.* Anything that is itself a credential —
+  the Nostr `nsec`, an LNURL-withdraw bearer, an NFC tag lock PIN — lives
+  in `expo-secure-store` (Android Keystore / iOS Keychain, hardware-backed).
+  Never in AsyncStorage or a plain file.
+* *Bulk data goes in AsyncStorage or files,* not the keystore — the keystore
+  is for small secrets (a key, a token), not megabytes of cache.
+* *Public vs private.* Nostr public events (geo-caches, NIP-52 events, BTC
+  Map places) are public data — they need no at-rest encryption. *Decrypted
+  DM content is private* — it does, and is the subject of the encrypted-store
+  work (see <<target>>).
+* *The decrypting key is the protected thing.* As long as the `nsec` is in
+  the keystore, ciphertext sitting on disk is useless without it. That's why
+  Damus/Amethyst/0xchat all protect the key and lean on the OS for the rest.
+
+== Storage layers (current)
+
+[cols="2,3,2,2",options="header"]
+|===
+| Layer | What | Sensitivity | At-rest protection
+
+| `expo-secure-store`
+  (Android Keystore / iOS Keychain)
+| `nsec`, LNURL-withdraw bearers, NFC lock PINs
+| Secret
+| *Hardware-backed encryption.* Key wrapped by the secure element.
+
+| `AsyncStorage`
+  (Android: SQLite `RKStorage` in the app sandbox)
+| App settings, WoT tier, DM inbox summaries (`nostr_dm_inbox_v1`),
+  per-conversation caches, geo-cache blob (`@lp:nostr-caches-v1`), NIP-52
+  events blob (`@lp:nostr-events-v1`), per-wallet tx caches, last-seen cursors
+| Mixed (mostly public/cache; DM *summaries* are decrypted snippets)
+| App sandbox + OS file-based encryption (FBE). *Not* app-level encrypted.
+
+| `expo-file-system`
+  (app document dir, `Paths.document`)
+| NIP-17 wrap plaintext cache, per-account (`<key>.json`, #689); BTC Map
+  places cache (`btcmap-last-result.json`)
+| The wrap cache holds *decrypted DM plaintext* (sensitive); places are public
+| App sandbox + OS FBE. *Not* app-level encrypted.
+|===
+
+== Gotcha: the 2 MB AsyncStorage row limit
+
+AsyncStorage stores each key as one row in Android's SQLite. Android's
+*CursorWindow caps a single row at ~2 MB on READ* — a value past that throws
+`SQLiteBlobTooBigException` and the row fails to hydrate. A large cache stored
+as one JSON blob therefore *silently fails to load*, which is what caused the
+DM cold-start re-decrypt freeze (#687): the wrap cache blew the limit, hydrated
+empty, and the app re-decrypted the whole inbox on every launch (64-88 s).
+
+Interim fix (#689): the NIP-17 wrap cache moved to a *file* (`expo-file-system`),
+which has no per-row read cap. *Do not store an unbounded cache as a single
+AsyncStorage row.*
+
+[[target]]
+== Target architecture (#695): indexed, encrypted SQLite
+
+The blob/file caches don't scale (whole-blob parse, no indexes, the 2 MB trap).
+The target — matching how 0xchat / Damus persist Nostr data — is a single
+*indexed local database*:
+
+* *Engine:* `op-sqlite` (bundles SQLCipher). Chosen over `expo-sqlite` because
+  SQLCipher gives *transparent whole-file encryption* (content *and* metadata),
+  so turning encryption on is just opening with a key — no schema/query change.
+* *One row per event,* not a blob. Indexed by `event_id` (unique → O(log n)
+  dedupe), `created_at`, and `conversation`/`geohash`/`author` as needed →
+  fast paginated reads, no whole-blob parse, no 2 MB ceiling.
+* *Decrypt once at receipt → store plaintext rows.* Cold start becomes an
+  indexed read with no re-decryption (the 0xchat model).
+* *At-rest encryption from day one* (see <<keys>>) — so decrypted DM plaintext
+  is never written to disk in the clear (closes #690). This is the gap every
+  peer client leaves open; we close it (Signal's model).
+* *Sync:* persistent `kind:1059` subscription + a `since` cursor rewound ~3
+  days (to absorb NIP-17's randomised gift-wrap timestamps), advanced off the
+  *inner* rumor's real `created_at`, deduped by id — so we stop re-querying the
+  whole wrap set on every open.
+
+=== What goes in the DB
+
+[cols="2,2,2",options="header"]
+|===
+| Data | Row keyed by | Encrypted?
+| DM wraps / messages (NIP-17) | `event_id` (+ `conversation`, `created_at`) | *Yes* — private content
+| Geo-caches (NIP-GC 37516) | `coord` (+ `geohash`, `author`) | Harmless (public); encrypted anyway since one DB
+| NIP-52 events (31923) | `coord` (+ `geohash`, `starts_at`) | Harmless (public)
+| BTC Map places | place id (+ lat/lon) | Harmless (public)
+|===
+
+Geo-caches, events, and places are *public* and don't require encryption, but
+folding them into the same SQLCipher DB is simpler than maintaining a second
+plain DB, and the encryption overhead is negligible. *Sequencing:* DMs first
+(they cause the freeze and need encryption); caches/events/places migrate into
+the same DB afterwards (they're smaller, public, not on fire).
+
+[[keys]]
+== Keystore key management (for the encrypted DB)
+
+Signal's wrapped-key model:
+
+. *First run:* generate a random 256-bit DB key.
+. *Store it in `expo-secure-store`* (Keystore/Keychain, hardware-backed) — a
+  32-byte key is well within the keystore's remit (unlike the bulk cache).
+. *App start:* read the key from secure-store → open the SQLCipher DB with it
+  (`PRAGMA key`). The on-disk file is ciphertext; the key only lives in RAM at
+  runtime.
+. *Optional:* auth-gate retrieval (device unlock / biometric).
+. *Logout / account wipe:* delete the DB file *and* the key from secure-store.
+  *Rotation:* new key + `PRAGMA rekey`.
+
+The hardware keystore wraps the key, so raw extraction of the DB file *or* the
+key off the device yields nothing usable.
