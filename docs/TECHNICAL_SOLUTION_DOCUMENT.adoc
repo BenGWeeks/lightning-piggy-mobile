@@ -49,6 +49,8 @@ include::DEPLOYMENT.adoc[]
 
 include::SECURITY.adoc[]
 
+include::DATA_STORAGE.adoc[]
+
 include::TESTING.adoc[]
 
 <<<
