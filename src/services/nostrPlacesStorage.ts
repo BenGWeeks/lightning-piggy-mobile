@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ParsedCache, ParsedEvent } from './nostrPlacesService';
+import { isDevLeftover } from './devEventDenylist';
 
 /**
  * AsyncStorage-backed cache of resolved NIP-GC kind 37516 cache
@@ -47,13 +48,33 @@ const hydrate = async (): Promise<void> => {
         AsyncStorage.getItem(CACHES_STORAGE_KEY),
         AsyncStorage.getItem(EVENTS_STORAGE_KEY),
       ]);
+      // Re-apply the dev-leftover denylist on read: the ingestion-layer
+      // filter (nostrPlacesPublisher) only blocks new events, so blobs
+      // persisted before a signer was denylisted still carry it and
+      // would paint on cold start otherwise (#699). When we drop any, also
+      // rewrite the sanitized blob (fire-and-forget) so the on-disk copy is
+      // actually cleaned rather than re-filtered on every cold start.
       if (cachesRaw) {
         const parsed = JSON.parse(cachesRaw) as CachedShape<ParsedCache>;
-        if (Array.isArray(parsed.items) && isFresh(parsed)) memCaches = parsed;
+        if (Array.isArray(parsed.items) && isFresh(parsed)) {
+          const before = parsed.items.length;
+          parsed.items = parsed.items.filter((c) => !isDevLeftover(c.hiderPubkey));
+          memCaches = parsed;
+          if (parsed.items.length < before) {
+            AsyncStorage.setItem(CACHES_STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
+          }
+        }
       }
       if (eventsRaw) {
         const parsed = JSON.parse(eventsRaw) as CachedShape<ParsedEvent>;
-        if (Array.isArray(parsed.items) && isFresh(parsed)) memEvents = parsed;
+        if (Array.isArray(parsed.items) && isFresh(parsed)) {
+          const before = parsed.items.length;
+          parsed.items = parsed.items.filter((e) => !isDevLeftover(e.organiserPubkey));
+          memEvents = parsed;
+          if (parsed.items.length < before) {
+            AsyncStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
+          }
+        }
       }
     } catch {
       // Best-effort hydrate — corrupted blobs are silently ignored so
@@ -93,7 +114,10 @@ void hydrate();
 // createdAt / startsAt) and persist. Write is fire-and-forget — the
 // in-memory state stays authoritative for the current session.
 export const saveCaches = (caches: ReadonlyArray<ParsedCache>): void => {
-  const sorted = [...caches].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_ENTRIES);
+  const sorted = [...caches]
+    .filter((c) => !isDevLeftover(c.hiderPubkey))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, MAX_ENTRIES);
   const next: CachedShape<ParsedCache> = { fetchedAt: Date.now(), items: sorted };
   memCaches = next;
   AsyncStorage.setItem(CACHES_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
@@ -103,6 +127,7 @@ export const saveEvents = (events: ReadonlyArray<ParsedEvent>): void => {
   // Events sort by start time so the newest-upcoming surface first
   // when we hydrate.
   const sorted = [...events]
+    .filter((e) => !isDevLeftover(e.organiserPubkey))
     .sort((a, b) => (b.startsAt ?? 0) - (a.startsAt ?? 0))
     .slice(0, MAX_ENTRIES);
   const next: CachedShape<ParsedEvent> = { fetchedAt: Date.now(), items: sorted };
