@@ -177,7 +177,7 @@ erDiagram
         TEXT content
     }
     transactions {
-        TEXT id PK
+        TEXT id PK "payment_hash | txid"
         TEXT wallet_id
         TEXT direction
         INTEGER amount_sats
@@ -217,8 +217,8 @@ erDiagram
     }
     profiles ||--o{ dm_messages : "sender"
     profiles ||--o{ group_messages : "sender"
-    profiles ||--o{ caches : "hider"
-    profiles ||--o{ events : "organiser"
+    profiles ||--o{ caches : "hider_pubkey"
+    profiles ||--o{ events : "organiser_pubkey"
 ....
 
 `dm_messages` ships first (#695); the rest migrate in later slices (DMs cause
