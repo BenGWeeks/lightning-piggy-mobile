@@ -64,7 +64,7 @@
   - **Contexts** → extract per-responsibility hooks/services. E.g. `NostrContext` → `useDmInbox` / `useProfiles` / `useRelays` (+ the `src/services/dm*` data layer), each its own file; the context just composes them.
   - **Screens** → lift sub-views into components, and non-UI logic into hooks/utils (`useXScreenState`, `src/utils/…`).
   - **Services** → split by domain (`nostrService` → `nostrRelay` / `nostrDm` / `nostrProfile`).
-- **Known offenders to break up (as of 2026-05-26, when touched):** `NostrContext.tsx` (4,279), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `ConversationScreen.tsx` (1,455), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015), `nwcService.ts` (1,009).
+- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (4,279), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `ConversationScreen.tsx` (1,455), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015), `nwcService.ts` (1,009). The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
 
 ## Unit tests
 
