@@ -113,6 +113,61 @@ describe('buildCacheListing', () => {
     expect(names).not.toContain('uses');
     expect(names).not.toContain('amount');
   });
+
+  it('omits the amount tag for a 0 maxWithdrawable (never advertises "0 sats", #626)', () => {
+    expect(buildCacheListing(makePiggy({ maxWithdrawableMsat: 0 })).tags).not.toContainEqual([
+      'amount',
+      '0',
+    ]);
+  });
+
+  it('omits the amount tag for a sub-1000-msat maxWithdrawable (floors to 0 sats)', () => {
+    const names = buildCacheListing(makePiggy({ maxWithdrawableMsat: 500 })).tags.map((t) => t[0]);
+    expect(names).not.toContain('amount');
+  });
+
+  it('omits the wait / uses / amount LP hints on a plain non-LP cache, even if set (#681)', () => {
+    // No link, not LP, but the hint fields somehow carry values — the
+    // publisher must not stamp LP-only tags onto a plain NIP-GC cache,
+    // or downstream UIs render a "Prize"/cooldown chip with no L/l label.
+    const names = buildCacheListing(
+      makePiggy({
+        lnurlw: '',
+        isLpPiggy: false,
+        maxWithdrawableMsat: 21000,
+        waitSecondsHint: 10800,
+        usesHint: 100,
+      }),
+    ).tags.map((t) => t[0]);
+    expect(names).not.toContain('amount');
+    expect(names).not.toContain('wait');
+    expect(names).not.toContain('uses');
+    expect(names).not.toContain('L');
+  });
+
+  it('stamps the LP label when a withdraw link is present (#681)', () => {
+    expect(buildCacheListing(makePiggy({ lnurlw: 'lightning:LNURL1abc' })).tags).toContainEqual([
+      'L',
+      LP_LABEL_NAMESPACE,
+    ]);
+  });
+
+  it('omits the LP label for a plain NIP-GC cache — no link, not LP (no silent convert, #681)', () => {
+    const names = buildCacheListing(makePiggy({ lnurlw: '', isLpPiggy: false })).tags.map(
+      (t) => t[0],
+    );
+    expect(names).not.toContain('L');
+    expect(names).not.toContain('l');
+  });
+
+  it('stamps the LP label on a cross-device edit (isLpPiggy set, bearer absent — #596 / #681)', () => {
+    // The LNURL bearer lives on the original device, so `lnurlw` is blank
+    // here; LP-ness rides on the flag carried from the published event.
+    // Dropping the label would downgrade a real Piglet to a plain cache.
+    const tags = buildCacheListing(makePiggy({ lnurlw: '', isLpPiggy: true })).tags;
+    expect(tags).toContainEqual(['L', LP_LABEL_NAMESPACE]);
+    expect(tags).toContainEqual(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
+  });
 });
 
 describe('buildFoundLog', () => {

@@ -29,6 +29,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  Info,
   ChevronLeft,
   Clipboard as ClipboardIcon,
   QrCode,
@@ -50,7 +51,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import type { RouteProp } from '@react-navigation/native';
-import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
+import { ExploreNavigation, ExploreStackParamList, HuntCacheFallback } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import {
@@ -112,6 +113,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // and step 6's NFC-write step becomes optional so they can update
   // the listing without re-writing a tag they may not be near.
   const [crossDeviceEdit, setCrossDeviceEdit] = useState(false);
+  // Whether the listing being edited is a Lightning Piggy. Tracked
+  // separately from the (possibly absent) LNURL bearer so a cross-device
+  // edit re-stamps the LP label instead of downgrading the Piglet to a
+  // plain NIP-GC cache (#596 / #681 review).
+  const [isLpPiggyEdit, setIsLpPiggyEdit] = useState(false);
   // Original createdAt is preserved across edits — the unix-seconds
   // anchor for NIP-40 windows. Captured during the hydration effect
   // below; null until then (and forever when creating fresh).
@@ -129,6 +135,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     return piggyIdRef.current;
   }, [editingId]);
+  // Tracks the LNURL we've already re-resolved on edit, so the prize-
+  // recovery effect (#626) runs at most once per link.
+  const prizeReresolvedFor = useRef<string | null>(null);
 
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -141,6 +150,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const [uploadingHint, setUploadingHint] = useState(false);
   const [waitMinutesText, setWaitMinutesText] = useState('');
   const [usesText, setUsesText] = useState('');
+  // Editable prize amount (sats per claim). Pre-filled from the LNURL's
+  // maxWithdrawable but overridable, so the hider can adjust the advertised
+  // prize without re-pasting the link (#626).
+  const [amountSatsText, setAmountSatsText] = useState('');
+  // Flips true once the hider types in the prize field, so the LNURL-derived
+  // auto-fill stops overwriting their value.
+  const amountManuallyEdited = useRef(false);
   const [pin, setPin] = useState<{ lat: number; lon: number; geohash: string } | null>(null);
   const [pinning, setPinning] = useState(false);
   // Bottom-sheet visibility for the NFC-write flow (step 3) and the
@@ -215,6 +231,62 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     let cancelled = false;
     loadPiggies().then((all) => {
       if (cancelled) return;
+      // Shared hydration for the published-event fields (the cross-device
+      // source of truth). Used by BOTH the no-local-record path and the
+      // local-record-is-stale path below, so the two can't drift. Sets only
+      // the public / finder-facing fields — the LNURL bearer, prize stage,
+      // NFC lock, and isPublic are decided per-branch (the event never
+      // carries the bearer, so that stays local-only).
+      const hydratePublicFieldsFromEvent = (fc: HuntCacheFallback) => {
+        if (typeof fc.geohash === 'string' && fc.geohash.length > 0) {
+          const { lat, lng } = decodeGeohash(fc.geohash);
+          setPin({ lat, lon: lng, geohash: fc.geohash });
+        }
+        setCacheName(fc.name ?? '');
+        setCacheDescription(fc.description ?? '');
+        if (typeof fc.difficulty === 'number')
+          setDifficulty(Math.min(5, Math.max(1, fc.difficulty)) as 1 | 2 | 3 | 4 | 5);
+        if (typeof fc.terrain === 'number')
+          setTerrain(Math.min(5, Math.max(1, fc.terrain)) as 1 | 2 | 3 | 4 | 5);
+        if (
+          fc.size === 'micro' ||
+          fc.size === 'small' ||
+          fc.size === 'regular' ||
+          fc.size === 'large' ||
+          fc.size === 'other'
+        ) {
+          setCacheSize(fc.size);
+        }
+        if (
+          fc.cacheType === 'traditional' ||
+          fc.cacheType === 'multi' ||
+          fc.cacheType === 'mystery' ||
+          fc.cacheType === 'virtual'
+        ) {
+          setCacheType(fc.cacheType);
+        }
+        if (fc.imageUrl) setHintPhotoUrl(fc.imageUrl);
+        if (typeof fc.waitSeconds === 'number')
+          setWaitMinutesText(String(Math.round(fc.waitSeconds / 60)));
+        if (typeof fc.uses === 'number') setUsesText(String(fc.uses));
+        // Reverse-map the event's NIP-40 expiry back onto a picker chip so a
+        // metadata-only save doesn't silently change the listing's expiry.
+        if (typeof fc.expiresAt !== 'number' || fc.expiresAt === null) {
+          setExpiryDays('never');
+        } else {
+          const windowSec = fc.expiresAt - fc.createdAt;
+          const day = 24 * 60 * 60;
+          const closest = [
+            { key: '30' as const, sec: 30 * day },
+            { key: '90' as const, sec: 90 * day },
+            { key: '180' as const, sec: 180 * day },
+            { key: '365' as const, sec: 365 * day },
+          ].reduce((best, opt) =>
+            Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
+          ).key;
+          setExpiryDays(closest);
+        }
+      };
       const piggy = all.find((p) => p.id === editingId);
       if (!piggy) {
         // Cross-device edit fallback (#596): local record is missing
@@ -240,6 +312,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           fallbackCache.hiderPubkey.toLowerCase() === pubkey.toLowerCase()
         ) {
           setCrossDeviceEdit(true);
+          setIsLpPiggyEdit(fallbackCache.isLpPiggy);
+          // Seed the editable "Sats per claim" field from the published
+          // advertised prize so a cross-device edit shows the current
+          // value (and preserves it on save) even though the LNURL bearer
+          // isn't on this device (#626 / #681 review). Skipped if the
+          // hider already typed a value.
+          if (
+            !amountManuallyEdited.current &&
+            typeof fallbackCache.payoutSats === 'number' &&
+            fallbackCache.payoutSats > 0
+          ) {
+            setAmountSatsText(String(fallbackCache.payoutSats));
+          }
           piggyIdRef.current = editingId;
           // Anchor createdAt to the on-relay event so the NIP-40 expiry
           // window we restamp at save time aligns with the original
@@ -249,63 +334,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           // LNURL deliberately stays empty. Stage stays `idle` so step
           // 2's validate-affordance is what the user sees if they want
           // to paste a fresh link.
-          if (typeof fallbackCache.geohash === 'string' && fallbackCache.geohash.length > 0) {
-            // Decode lat/lon back from the published geohash so the
-            // map pin pre-renders. The event omits raw lat/lon to
-            // preserve hider precision — geohash precision 9 is ≈ 5 m
-            // which is what the wizard stores anyway. decodeGeohash
-            // returns { lat, lng }; rename `lng` to `lon` to match the
-            // pin shape the rest of the wizard uses.
-            const { lat, lng } = decodeGeohash(fallbackCache.geohash);
-            setPin({ lat, lon: lng, geohash: fallbackCache.geohash });
-          }
-          setCacheName(fallbackCache.name ?? '');
-          setCacheDescription(fallbackCache.description ?? '');
-          if (typeof fallbackCache.difficulty === 'number')
-            setDifficulty(Math.min(5, Math.max(1, fallbackCache.difficulty)) as 1 | 2 | 3 | 4 | 5);
-          if (typeof fallbackCache.terrain === 'number')
-            setTerrain(Math.min(5, Math.max(1, fallbackCache.terrain)) as 1 | 2 | 3 | 4 | 5);
-          if (
-            fallbackCache.size === 'micro' ||
-            fallbackCache.size === 'small' ||
-            fallbackCache.size === 'regular' ||
-            fallbackCache.size === 'large' ||
-            fallbackCache.size === 'other'
-          ) {
-            setCacheSize(fallbackCache.size);
-          }
-          if (
-            fallbackCache.cacheType === 'traditional' ||
-            fallbackCache.cacheType === 'multi' ||
-            fallbackCache.cacheType === 'mystery' ||
-            fallbackCache.cacheType === 'virtual'
-          ) {
-            setCacheType(fallbackCache.cacheType);
-          }
-          if (fallbackCache.imageUrl) setHintPhotoUrl(fallbackCache.imageUrl);
-          if (typeof fallbackCache.waitSeconds === 'number')
-            setWaitMinutesText(String(Math.round(fallbackCache.waitSeconds / 60)));
-          if (typeof fallbackCache.uses === 'number') setUsesText(String(fallbackCache.uses));
-          // Reverse-map the event's NIP-40 expiry back onto one of the
-          // picker chips so a metadata-only save doesn't silently
-          // change the listing's expiry (a `Never` cache would
-          // otherwise re-stamp as 365d on save). Same window-snap
-          // logic as the local-record branch below.
-          if (typeof fallbackCache.expiresAt !== 'number' || fallbackCache.expiresAt === null) {
-            setExpiryDays('never');
-          } else {
-            const windowSec = fallbackCache.expiresAt - fallbackCache.createdAt;
-            const day = 24 * 60 * 60;
-            const closest = [
-              { key: '30' as const, sec: 30 * day },
-              { key: '90' as const, sec: 90 * day },
-              { key: '180' as const, sec: 180 * day },
-              { key: '365' as const, sec: 365 * day },
-            ].reduce((best, opt) =>
-              Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
-            ).key;
-            setExpiryDays(closest);
-          }
+          hydratePublicFieldsFromEvent(fallbackCache);
           // The cache is on-relay, so it must have been published —
           // default isPublic on. The user can flip it off on step 6
           // before save if they want to convert it to a private Piggy.
@@ -324,6 +353,40 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
+      // LP-ness from the local record so the prize/cooldown/uses
+      // affordances stay enabled even for a local LP *stub* — a record
+      // left by a prior cross-device save has `isLpPiggy: true` but a
+      // blank `lnurlw`, so the lnurl-presence check alone would wrongly
+      // hide them (#681 review).
+      setIsLpPiggyEdit(piggy.isLpPiggy ?? Boolean(piggy.lnurlw));
+      // Re-hydrate the post-write PIN row so the hider returning via Edit
+      // can recover the PIN they wrote earlier. The NFC lock is local-only
+      // (never on the event), so it always comes from the local record —
+      // whichever side wins for the public fields below.
+      if (piggy.nfcLock) {
+        setLastWrittenLock({
+          pwdHex: piggy.nfcLock.pwdHex,
+          packHex: piggy.nfcLock.packHex,
+          pin: piggy.nfcLock.pwdHex.toUpperCase(),
+          tagUid: piggy.nfcLock.tagUid,
+        });
+      }
+      // Cross-device source of truth: when the published event is newer
+      // than this device's local record, the listing was edited on another
+      // device — trust the event for the public fields AND the advertised
+      // prize, keeping only the LNURL bearer (local-only) from this record.
+      // A missing local `updatedAt` (pre-#681 records) falls back to the
+      // original hide time, so any present event wins — the safe default
+      // when the event is canonical (#596 / #681).
+      const eventIsFresher =
+        !!fallbackCache && fallbackCache.createdAt * 1000 > (piggy.updatedAt ?? piggy.createdAt);
+      const eventPayoutMsat =
+        eventIsFresher &&
+        fallbackCache &&
+        typeof fallbackCache.payoutSats === 'number' &&
+        fallbackCache.payoutSats > 0
+          ? fallbackCache.payoutSats * 1000
+          : undefined;
       setStage({
         kind: 'validated',
         params: {
@@ -332,12 +395,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           // editor isn't re-validating the LNURL unless they paste a
           // new one (which resets stage back through `handleValidate`).
           defaultDescription: piggy.lnurlDescription ?? '',
-          maxWithdrawable: piggy.maxWithdrawableMsat ?? 0,
+          // Prize: the event's published amount when it is the fresher
+          // source, else the local record's. The sync effect mirrors this
+          // into the editable "Sats per claim" field.
+          maxWithdrawable: eventPayoutMsat ?? piggy.maxWithdrawableMsat ?? 0,
           minWithdrawable: 0,
           callback: '',
           k1: '',
         },
       });
+      if (eventIsFresher && fallbackCache) {
+        hydratePublicFieldsFromEvent(fallbackCache);
+        return;
+      }
       setHintPhotoUrl(piggy.hintPhotoUrl ?? null);
       setWaitMinutesText(
         typeof piggy.waitSecondsHint === 'number'
@@ -351,6 +421,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         typeof piggy.geohash === 'string'
       ) {
         setPin({ lat: piggy.lat, lon: piggy.lon, geohash: piggy.geohash });
+      } else if (typeof fallbackCache?.geohash === 'string' && fallbackCache.geohash.length > 0) {
+        // Local record predates location capture (no lat/lon) but the
+        // published listing carries a geohash — seed the pin from it so
+        // the map centres on where the Piglet was actually hidden instead
+        // of falling through to "Use my location" (#681 location fix).
+        const { lat, lng } = decodeGeohash(fallbackCache.geohash);
+        setPin({ lat, lon: lng, geohash: fallbackCache.geohash });
       }
       setCacheName(piggy.name ?? '');
       setCacheDescription(piggy.description ?? '');
@@ -381,23 +458,50 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         ).key;
         setExpiryDays(closest);
       }
-      // Re-hydrate the post-write PIN row so the hider returning via
-      // Edit can recover the PIN they wrote earlier without leaving the
-      // wizard. We map back to the same `lastWrittenLock` shape the
-      // fresh-write path emits so the render branch is symmetric.
-      if (piggy.nfcLock) {
-        setLastWrittenLock({
-          pwdHex: piggy.nfcLock.pwdHex,
-          packHex: piggy.nfcLock.packHex,
-          pin: piggy.nfcLock.pwdHex.toUpperCase(),
-          tagUid: piggy.nfcLock.tagUid,
-        });
-      }
     });
     return () => {
       cancelled = true;
     };
   }, [editingId, fallbackCache, navigation, pubkey]);
+
+  // Recover the live prize amount when editing (#626). The edit-load above
+  // seeds the prize from the local record's `maxWithdrawableMsat`, which can
+  // be 0/undefined for older or cross-device records — and republishing with
+  // 0 would wipe the `amount` tag off the kind-37516 event (the ⚡ vanishes).
+  // So re-resolve the already-stored LNURLw once (no re-paste) to pull its
+  // real maxWithdrawable. Best-effort: if the link can't be reached we keep
+  // whatever amount we already had rather than clobbering it.
+  useEffect(() => {
+    if (!isEditMode) return;
+    const ln = lnurl.trim();
+    if (!ln) return;
+    // Already have a confirmed non-zero amount — nothing to recover.
+    if (stage.kind === 'validated' && msatToSats(stage.params.maxWithdrawable) > 0) return;
+    if (prizeReresolvedFor.current === ln) return;
+    prizeReresolvedFor.current = ln;
+    let cancelled = false;
+    resolveLnurlWithdraw(ln)
+      .then((params) => {
+        if (!cancelled && msatToSats(params.maxWithdrawable) > 0)
+          setStage({ kind: 'validated', params });
+      })
+      .catch(() => {
+        // Link unreachable right now — leave the existing amount intact.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, lnurl, stage]);
+
+  // Keep the editable prize field in sync with the LNURL's resolved amount
+  // (on validate / re-resolve / edit-load — all of which set `stage`), unless
+  // the hider has typed their own value.
+  useEffect(() => {
+    if (amountManuallyEdited.current) return;
+    if (stage.kind === 'validated' && msatToSats(stage.params.maxWithdrawable) > 0) {
+      setAmountSatsText(String(msatToSats(stage.params.maxWithdrawable)));
+    }
+  }, [stage]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -476,10 +580,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     const waitMinutes = parseInt(waitMinutesText.trim(), 10);
-    const waitSecondsHint =
-      Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
     const usesParsed = parseInt(usesText.trim(), 10);
-    const usesHint = Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
     // Preserve identity across an edit so `savePiggy` overwrites the
     // existing record AND the relay-side kind 37516 listing replaces
     // itself under the same `d` tag (NIP-33 addressable). createdAt
@@ -501,16 +602,50 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // normal hydration path.
     const lnurlDescription =
       stage.kind === 'validated' ? (stage.params.defaultDescription ?? undefined) : undefined;
-    const maxWithdrawableMsat =
-      stage.kind === 'validated' ? stage.params.maxWithdrawable : undefined;
+    // Prize amount: prefer the editable "Sats per claim" field (the hider can
+    // adjust the advertised prize without re-pasting the LNURL, #626); fall
+    // back to the LNURL's resolved maxWithdrawable. A blank/0 field with no
+    // resolved amount leaves it undefined so no `amount` tag is written.
+    const editedSats = parseInt(amountSatsText.trim(), 10);
+    // Cross-device fallback: the advertised prize carried from the
+    // published listing, so a metadata-only edit (no LNURL on this
+    // device, blank field) preserves the existing `amount` instead of
+    // wiping it — the original #626 regression (#681 review).
+    const carriedPayoutMsat =
+      typeof fallbackCache?.payoutSats === 'number' && fallbackCache.payoutSats > 0
+        ? fallbackCache.payoutSats * 1000
+        : undefined;
+    // LP-ness follows the listing, not the (possibly absent) bearer: a
+    // fresh hide / local edit has the LNURL in hand; a cross-device edit
+    // carries the flag from the published event. amount / wait / uses are
+    // LP-only display hints, so for a plain NIP-GC cache we force them to
+    // undefined — never write a "Prize" / cooldown chip onto a non-LP
+    // listing, even if the fields somehow held a value (#681 review).
+    const listingIsLp = isLpPiggyEdit || Boolean(lnurl.trim()) || existing?.isLpPiggy || false;
+    const waitSecondsHint =
+      listingIsLp && Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
+    const usesHint =
+      listingIsLp && Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
+    const maxWithdrawableMsat = !listingIsLp
+      ? undefined
+      : Number.isFinite(editedSats) && editedSats > 0
+        ? editedSats * 1000
+        : stage.kind === 'validated'
+          ? stage.params.maxWithdrawable
+          : (existing?.maxWithdrawableMsat ?? carriedPayoutMsat);
     const piggy = {
       ...(existing ?? {}),
       id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription,
       createdAt: originalCreatedAt.current ?? Date.now(),
+      // Last-write timestamp (ms), bumped on every save. Compared against
+      // the published event's `created_at` on the next edit so a stale
+      // local record can't shadow a newer cross-device edit (#596 / #681).
+      updatedAt: Date.now(),
       isPublic,
       maxWithdrawableMsat,
+      isLpPiggy: listingIsLp,
       hintPhotoUrl: hintPhotoUrl ?? undefined,
       waitSecondsHint,
       usesHint,
@@ -636,6 +771,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     hintPhotoUrl,
     waitMinutesText,
     usesText,
+    amountSatsText,
     pin,
     cacheName,
     cacheDescription,
@@ -645,6 +781,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheType,
     expiryDays,
     crossDeviceEdit,
+    isLpPiggyEdit,
+    fallbackCache,
     ensurePiggyId,
     editingId,
     isEditMode,
@@ -948,9 +1086,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (stage.kind !== 'validated') return null;
     const min = msatToSats(stage.params.minWithdrawable);
     const max = msatToSats(stage.params.maxWithdrawable);
+    // Never advertise "0 sats per claim" — a 0/undefined maxWithdrawable
+    // means we don't actually know the prize (link not present, or an
+    // older record), not that the prize is zero (#681 review).
+    if (max <= 0) return null;
     return min === max
       ? `${max.toLocaleString()} sats per claim`
       : `${min.toLocaleString()}–${max.toLocaleString()} sats per claim`;
+  })();
+  // Prize hint for the cross-device card — taken from the editable field
+  // (pre-filled from the published `amount`). Shown only when known/>0; we
+  // never surface "0 sats" or a green "validated" tick we didn't earn.
+  const crossDevicePrizeLine = (() => {
+    const n = parseInt(amountSatsText.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? `Prize: ${n.toLocaleString()} sats per claim` : null;
   })();
 
   // True when the NFC step's primary button should be enabled. Step 5
@@ -967,6 +1116,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // on step 6, but the Write-Tag affordance stays disabled until a
     // fresh LNURL is pasted on step 2.
     (crossDeviceEdit && stage.kind === 'idle');
+
+  // Whether the listing being edited/created is a Lightning Piggy, for the
+  // prize affordances. Edit mode synthesises a `validated` stage even for a
+  // plain NIP-GC cache (so Save works), so `stage.kind === 'validated'`
+  // alone would wrongly expose prize editing + a "Looks good" card on a
+  // non-LP cache. LP-ness in the wizard = a withdraw link is present
+  // (`lnurl`) OR the edited listing is flagged LP (#681 review).
+  const listingIsLpInEdit = lnurl.trim().length > 0 || isLpPiggyEdit;
 
   return (
     <KeyboardAvoidingView
@@ -1149,7 +1306,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   </TouchableOpacity>
                 )}
 
-              {stage.kind === 'validated' && (
+              {/* A withdraw link is present + validated on THIS phone:
+                  green "Looks good". */}
+              {stage.kind === 'validated' && listingIsLpInEdit && lnurl.trim().length > 0 && (
                 <View style={styles.validatedCard}>
                   <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
@@ -1165,6 +1324,47 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
                 </View>
               )}
+              {/* The withdraw link lives on the device it was set up on
+                  (cross-device edit). No green "validated" tick we didn't
+                  earn, no "0 sats" — show the published prize if known and
+                  let the hider edit the prize / cooldown / uses below. */}
+              {crossDeviceEdit && listingIsLpInEdit && lnurl.trim().length === 0 && (
+                <View style={styles.validatedCard}>
+                  <Info size={20} color={colors.brandPink} strokeWidth={2.5} />
+                  <View style={styles.validatedTextWrapper}>
+                    <Text style={styles.validatedTitle}>Link set up on another device</Text>
+                    <Text style={styles.validatedMeta}>
+                      This Piglet&apos;s withdraw link lives on the phone you created it on. You can
+                      still edit the prize, cooldown and uses below.
+                    </Text>
+                    {crossDevicePrizeLine && (
+                      <Text style={styles.validatedMeta}>{crossDevicePrizeLine}</Text>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              {/* Editable prize amount — pre-filled from the LNURL's
+                maxWithdrawable (LUD-03) but overridable, so the hider can
+                adjust the advertised sats without re-pasting the link (#626).
+                Display hint only; the live LNURL stays authoritative for the
+                actual payout. */}
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Sats per claim</Text>
+              <View style={styles.hintField}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 1000"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={amountSatsText}
+                  onChangeText={(t) => {
+                    amountManuallyEdited.current = true;
+                    setAmountSatsText(t);
+                  }}
+                  editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
+                  testID="hunt-piggy-amount-input"
+                />
+              </View>
 
               {/* Cooldown + total uses live with the prize — they're
                 attributes of the LNURL-withdraw link, not the publish
@@ -1185,7 +1385,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={waitMinutesText}
                     onChangeText={setWaitMinutesText}
-                    editable={stage.kind === 'validated'}
+                    editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
                     testID="hunt-piggy-wait-input"
                   />
                 </View>
@@ -1198,7 +1398,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     keyboardType="number-pad"
                     value={usesText}
                     onChangeText={setUsesText}
-                    editable={stage.kind === 'validated'}
+                    editable={(stage.kind === 'validated' || crossDeviceEdit) && listingIsLpInEdit}
                     testID="hunt-piggy-uses-input"
                   />
                 </View>

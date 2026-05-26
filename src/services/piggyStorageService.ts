@@ -57,11 +57,24 @@ export interface HiddenPiggy {
    * cache. The publish itself happens in milestone 6; the flag is
    * stored here from the create flow. */
   isPublic: boolean;
+  /** Last-edit timestamp (ms epoch), bumped on every save. The edit wizard
+   * compares it against the published kind-37516 event's `created_at` to
+   * decide which side is fresher — so a stale local record can't shadow a
+   * newer cross-device edit (#596 / #681). Absent on pre-#681 records, in
+   * which case the wizard falls back to `createdAt` and lets a present
+   * event win. */
+  updatedAt?: number;
   /** Snapshot of the LNURL-w endpoint's max-withdrawable (millisats) at
    * create time — purely informational; the live value is queried on
    * each finder claim. Optional because old / unreachable LNURLs may
    * have been resolved before but failed at re-validation. */
   maxWithdrawableMsat?: number;
+  /** True when this listing is a Lightning Piggy (carries the NIP-32
+   * `L`/`l` label on-relay), independent of whether the LNURL bearer is
+   * present on THIS device. Cross-device edits (#596) hydrate from the
+   * published event with `lnurlw: ''` but must still re-stamp the LP
+   * label — so LP-ness follows this flag, not the local bearer string. */
+  isLpPiggy?: boolean;
   /** Optional EXIF-stripped Blossom / nostr.build URL of a hint photo
    * uploaded at create time ("look near this bench"). Surfaces on the
    * finder celebration screen and on the public Piggy detail page when
@@ -244,6 +257,8 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (p.usesHint !== undefined && typeof p.usesHint !== 'number') return false;
   if (p.maxWithdrawableMsat !== undefined && typeof p.maxWithdrawableMsat !== 'number')
     return false;
+  if (p.isLpPiggy !== undefined && typeof p.isLpPiggy !== 'boolean') return false;
+  if (p.updatedAt !== undefined && typeof p.updatedAt !== 'number') return false;
   if (p.lat !== undefined && typeof p.lat !== 'number') return false;
   if (p.lon !== undefined && typeof p.lon !== 'number') return false;
   if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;
