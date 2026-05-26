@@ -1,0 +1,397 @@
+= Performance measurement
+
+This guide covers how to measure Lightning Piggy's runtime perf, what the
+output means, and how to feed it to Stev.ie (the project's perf agent —
+`.claude/agents/stevie.md`).
+
+Scope: **dev-time only.** Lightning Piggy targets privacy-centric users
+(GrapheneOS / degoogled Android) so we never ship commercial telemetry —
+no Sentry, no Datadog, no Firebase Performance. Everything here runs on
+your own device and your own machine.
+
+== Quick start
+
+[source,bash]
+----
+# 1. Set the emulator GPS so location-aware screens have a fix.
+#    Longitude first (gotcha), latitude second:
+adb emu geo fix 0.0589 52.2964   # Longstanton, near a cached merchant
+
+# 2. Run the Explore cold-start measurement, 5 samples:
+bash scripts/perf-explore-cold-start.sh 5
+
+# 3. With a Perfetto trace on run 1 (if you want to see *where* the time goes):
+PERFETTO=1 bash scripts/perf-explore-cold-start.sh 5
+----
+
+== What the scripts report
+
+=== Wall-clock distribution
+
+Every `scripts/perf-*.sh` now emits a six-line block via the shared
+`scripts/lib/perf-stats.sh` helper:
+
+[source]
+----
+Cold-start wall-clock (n=5):
+  min   4830 ms
+  p50   5210 ms
+  p95   6240 ms
+  p99   6890 ms
+  max   6890 ms
+  mean  5430 ms
+----
+
+**Always read p99/max, not mean.** A mean of "24 s" can hide a 38 s
+outlier — and outliers are the user-visible regression. Means are
+provided for trend-tracking, but the actionable metric is p99.
+
+=== Frame jank (per run)
+
+Each run prints a `gfxinfo:` line right after its wall-clock:
+
+[source]
+----
+run 1: 5230 ms — gfxinfo: total=387 janky=12 (3.1%) p50=8ms p95=15ms p99=24ms
+----
+
+[cols="1,3", options="header"]
+|===
+| Field | Meaning
+
+| `total`
+| Frames rendered during the run. Higher = more on-screen activity.
+
+| `janky` (count and %)
+| Frames that took >16.67 ms (60 Hz) to commit. **>5%** is noticeable to
+the user; **>10%** is bad.
+
+| `p50`
+| Median frame time. Should be well under 16 ms on a healthy screen.
+
+| `p95` / `p99`
+| The tail. A p95 of 60 ms means 1 in 20 frames stuttered for ~4 frames
+worth — visible jank.
+|===
+
+=== Perfetto trace (optional, `PERFETTO=1`)
+
+When `PERFETTO=1` is set, the first run captures a 40 s system trace
+covering the scheduler, gfx + view + input atrace categories, and the
+target app's atrace events. Output:
+
+[source]
+----
+perfetto: pulled to /tmp/explore-cold-start-trace-194233.pftrace — open at https://ui.perfetto.dev (drag-drop the file)
+----
+
+Drop the `.pftrace` on https://ui.perfetto.dev. You can then:
+
+- See per-thread CPU usage during the freeze (look for the JS thread)
+- Spot the long `setState` commit blocks
+- Confirm whether jank lives in the JS thread, the native bridge, or GC
+
+This is the canonical way to diagnose a freeze — wall-clock alone never
+names the culprit.
+
+== Per-screen markers via `[PerfTab]`
+
+`src/utils/perfLog.ts` exposes four bracketing markers around a tab
+switch. Two of them are emitted automatically by `AppNavigator.tsx`'s
+tab listeners; two are emitted by the destination screen itself.
+
+[cols="1,2,1", options="header"]
+|===
+| Marker | When | Source
+
+| `[PerfTab] <tab> tap`
+| `tabPress` event fires on the bottom tab button — closest thing to "user touched the screen".
+| `perfTabTap(name)` in the tab `listeners`.
+
+| `[PerfTab] <outgoing> hidden tap→hidden=Xms`
+| The blur event on the previously-focused tab landed. Brackets the navigation transition itself, so a slow `tap→hidden` means the animation is janking (not the destination).
+| `perfTabHidden(name)` in the tab `listeners` `blur:` handler.
+
+| `[PerfTab] <tab> focus tap→focus=Xms`
+| React Navigation completed routing to the new screen. Equivalent to "screen mounted / re-focused". Often very fast (under 200 ms) even when content is nowhere near ready.
+| `perfTabRendered(name)` in the tab `listeners` `focus:` handler.
+
+| `[PerfTab] <tab> ready tap→ready=Xms (detail)`
+| The destination screen judges its own content as usable. Deduplicated per tap so re-renders don't pollute the log.
+| `perfPageReady(name, detail?)` called from the destination screen — typically in a `useEffect` keyed off the first non-empty primary dataset.
+|===
+
+A healthy tab-switch reads:
+
+[source]
+----
+[PerfTab] Home hidden tap→hidden=120ms       ← old screen out
+[PerfTab] Explore focus tap→focus=180ms      ← new screen mounted
+[PerfTab] Explore ready tap→ready=420ms (10 merchants)
+----
+
+A degraded tab-switch (real example from #31 pre-fix on a Pixel 8):
+
+[source]
+----
+[PerfTab] Explore focus tap→focus=193ms
+[Perf] heartbeat #199 gap=7992ms             ← JS thread blocked 8s
+[PerfBlock] fetchCachesByAuthor: 4 events in 9402ms
+[PerfBlock] ExploreHome fetchPlacesInBbox: 10692ms places=367
+[PerfBlock] ExploreHome fetchPlacesInBbox: 11762ms places=367   ← second fetch!
+                                              (GPS-jitter cascade)
+----
+
+Focus event fired in 193 ms — fast — but `ready` would have come ~22 s
+later because the rail's `setMerchants` hadn't fired yet. **That's the
+gap between "screen is on" and "user can do something". Both numbers
+matter.**
+
+== Patterns to avoid
+
+These are concrete shapes that have caused user-perceived freezes in
+this codebase. Each one has a static test (greppable) and a runtime
+test (a marker that flares).
+
+=== GPS-jitter cascade (issue #31)
+
+**Shape:** a `useEffect` with `[pos]` (or another rapidly-changing
+context value) in its dep array kicks an async fetch. Android emits
+position samples ~1 Hz, each as a fresh `{lat, lon}` object — even
+when the user is sitting still and the lat/lon are byte-identical
+to the previous sample. React compares deps by reference, so the
+effect fires on every sample. Each fire spawns a new in-flight
+fetch; the previous one's Promise doesn't yield once it starts
+processing the response. They stack.
+
+**Symptom:** "first few clicks OK then really slows down" — the JS
+thread queue grows with each tab focus until it can't paint frames.
+`gfxinfo` collapses to single-digit frame counts per switch.
+
+**Fix:** derive a *bucketed* identity for the dep — round lat/lon to
+3 decimal places (~100 m) via `useMemo`, key the effect on that.
+Two samples that round to the same bucket = no re-fire. See
+`ExploreHomeScreen.tsx`'s `posBucket` for the canonical
+implementation. PlacesScreen / MapScreen don't need this — they
+have an actively-panned map where every metre matters.
+
+**Static test:** `grep -nE "useEffect\\(.*\\[.*pos.*\\]"` across screens.
+Anything matching deserves a bucket.
+
+=== Country-sized BTC Map bbox queries (also #31)
+
+**Shape:** `fetchPlacesInBbox({ minLat: pos.lat - 2, maxLat: pos.lat + 2, … })`
+covering a ±2° rectangle returns 300-400 merchants the screen only
+ever shows ~10 of. Network payload is large, post-response
+`Array.map(reshape)` blocks the JS thread for 5-8 s synchronously,
+every MapLibre marker becomes a `<Marker>` element React has to
+reconcile.
+
+**Fix:** **tiered nearest-N** via `fetchNearestPlaces(lat, lon, 10)`
+(see `src/services/btcMapService.ts`) — walks radii 25 → 100 → 500 km
+until at least N results come back. Urban callers do one ~10 KB
+round-trip; rural callers walk further. Pair with an
+anchor + time SWR short-circuit so repeated tab focuses inside an
+hour, within 5 km, don't hit the network at all. Only use on
+surfaces where the map is decorative; PlacesScreen / MapScreen keep
+the bbox call.
+
+=== `Array.prototype.shift()` as a FIFO eviction on a large array
+
+**Shape:** a bounded cache holds N entries in an array, with a Set
+keyed by the same value for O(1) membership tests. On insert past N,
+the code calls `array.shift()` to evict the oldest entry. This was the
+original implementation of `nostrService.ts`'s `verifiedEventIds` cache
+— PR #628 review flagged it as O(N) per eviction once the cache fills,
+because every remaining element has to be re-indexed.
+
+**Symptom:** the cache itself was meant to *save* JS-thread time
+(skip schnorr re-verification). With `shift()` on a 10 000-entry array,
+the eviction cost ate into the savings — measurable on the same hot
+path the cache is supposed to speed up.
+
+**Fix:** circular buffer + head cursor:
+
+[source,ts]
+----
+const CAP = 10_000;
+const ids = new Set<string>();
+const order = new Array<string | null>(CAP).fill(null);
+let head = 0;
+const remember = (id: string): void => {
+  if (ids.has(id)) return;
+  const evicted = order[head];
+  if (evicted !== null) ids.delete(evicted);
+  order[head] = id;
+  ids.add(id);
+  head = (head + 1) % CAP;
+};
+----
+
+Both insert and evict are O(1). The initial `null` slots evict harmlessly
+during the warm-up window (Set.delete on null is a no-op). Resetting the
+cache is `ids.clear(); order.fill(null); head = 0;`.
+
+**Static test:** `grep -nE '\.shift\(\)' src/` and inspect each — most
+hits in this codebase are legitimate one-shot dequeues; the dangerous
+shape is `.shift()` inside the same function as a matching `.push()`
+when both run on a high-frequency callback.
+
+=== Per-tab Maps keyed by `tabName` for transient state
+
+**Shape:** a `Map<string, T>` keyed by tab name, populated on tap, never
+cleaned. Once the user has visited Home, Messages, Explore, Friends,
+the Map has 4 permanent entries. Any consumer that iterates the Map on
+a frequent event (e.g. an outgoing-tab blur listener that wants to
+emit "tap→hidden") then logs / processes one entry per tab visited.
+
+This was the original `__tabTapAt` in `perfLog.ts` — PR #628 review
+flagged it for accumulating stale entries.
+
+**Fix:** track the most-recent value as a single pair of variables
+rather than a Map. Only one tab transition is ever in flight at a time
+(React Navigation serialises tabPress / focus / blur per gesture), so
+the Map's invariants are stricter than its type — collapse to scalars:
+
+[source,ts]
+----
+let __lastTapAt: number | null = null;
+let __lastTapDestination: string | null = null;
+----
+
+`perfTabTap` writes both, `perfTabHidden` / `perfTabRendered` / `perfPageReady`
+read both. No leak by construction.
+
+**Static test:** `grep -nE 'new Map<string,' src/utils src/contexts` and
+ask "does this Map ever shrink?" If the answer is no AND the key space
+is finite AND only the latest matters, scalarise.
+
+=== console.log left on a per-event hot path
+
+**Shape:** a `console.log` inside a Nostr `onevent` callback or a
+streaming response handler. Each emission costs ~0.5-2 ms of
+formatting + IPC to the native bridge. 150 profile events on cold
+start = 75-300 ms of pure log overhead.
+
+**Fix:** guard with `if (__DEV__)`. The repo's `EXPO_PUBLIC_KEEP_PERF_LOGS`
+flag re-enables them when needed, but the default release path is
+stripped via `babel-plugin-transform-remove-console`.
+
+== Capturing logcat during a perf script (real device)
+
+Perfetto can't see system-level events on a "user" Android build
+(see TROUBLESHOOTING). For real-device JS-thread attribution,
+combine `adb logcat` with the perf script:
+
+[source,bash]
+----
+adb -s "$SERIAL" logcat -c
+adb -s "$SERIAL" logcat -v time '*:S' ReactNativeJS:V > /tmp/run.logcat &
+LOGCAT_PID=$!
+sleep 1
+PIGGY_DEVICE="$SERIAL" PIGGY_APP_ID=com.lightningpiggy.app.preview \
+  scripts/perf-explore-tab-switch.sh 8
+sleep 3
+kill $LOGCAT_PID
+grep -E "\\[PerfTab\\]|\\[PerfBlock\\]|\\[Perf\\] heartbeat gap=[0-9]{3,}" /tmp/run.logcat
+----
+
+The `[Perf] heartbeat gap=` filter narrows to gaps ≥100 ms — every
+synchronous JS-thread block that lasted longer than a frame budget.
+Pair with a per-iteration screenshot loop (see `TROUBLESHOOTING.adoc`'s
+"Tab-switch perf script reports 20-30 s..." entry) to confirm whether
+the freeze is real or a Maestro artefact.
+
+== Methodology
+
+Stev.ie owns the deeper methodology — see `.claude/agents/stevie.md`
+for the 12-category audit (JS-thread blocking, per-event setState,
+context re-render cascades, subscription lifecycle, etc.). The short
+version:
+
+1. **Measure** before changing anything. Wall-clock + gfxinfo + a
+   Perfetto trace = three independent angles on the same problem.
+2. **Audit** the code path implicated. Static analysis often beats
+   adding more instrumentation — every category in Stev.ie's
+   methodology has a "grep for it" form.
+3. **Fix one thing at a time.** Don't ship a 5-issue bundle. Measure
+   after each.
+4. **Verify** with a fresh measurement. If p99 didn't move, the fix
+   didn't move the needle.
+
+== Adding a new perf script
+
+Use this skeleton — it inherits the stats + gfxinfo + Perfetto helpers:
+
+[source,bash]
+----
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/perf-stats.sh
+source "$SCRIPT_DIR/lib/perf-stats.sh"
+
+RUNS=${1:-3}
+DEVICE=${PIGGY_DEVICE:-emulator-5554}
+APP_ID=${PIGGY_APP_ID:-com.lightningpiggy.app.dev}
+
+totals=()
+for i in $(seq 1 "$RUNS"); do
+  perf_gfxinfo_reset "$DEVICE" "$APP_ID"
+  [ "$i" = "1" ] && perf_perfetto_start "$DEVICE" 40000 "$APP_ID"
+
+  t1=$(date +%s%3N)
+  # … your scenario here: launchApp, tap, wait, etc …
+  t2=$(date +%s%3N)
+  totals+=("$((t2 - t1))")
+  printf '  run %d: %d ms — ' "$i" "$((t2 - t1))"
+  perf_gfxinfo_sample "$DEVICE" "$APP_ID"
+
+  [ "$i" = "1" ] && perf_perfetto_stop "$DEVICE" "/tmp/my-trace-$(date +%H%M%S).pftrace"
+done
+perf_stats_report "My measurement" "${totals[@]}"
+----
+
+== Setting up the emulator for accurate GPS
+
+`expo-location` reads through Android's AOSP `LocationManager` — no
+Google Play Services needed. Lightning Piggy intentionally avoids the
+Fused Location Provider so the app works for GrapheneOS / degoogled
+users (see PR #597, which removed the FLP dependency and the dev-pin
+workaround).
+
+If the app sits in "Locating you…" forever:
+
+[source,bash]
+----
+# 1. Confirm the location service is registered (it should be on any
+#    standard AVD image — `default` or `google_apis`; `google_apis_playstore`
+#    is NOT required).
+adb shell service list | grep location
+# Expect: location: [android.location.ILocationManager]
+
+# 2. Push a fix. NB: longitude first, then latitude.
+adb emu geo fix 0.0589 52.2964   # Longstanton
+
+# 3. Verify the app picks it up (re-launch may be needed if location
+#    permission hadn't been granted).
+adb shell pm grant com.lightningpiggy.app.dev android.permission.ACCESS_FINE_LOCATION
+adb shell pm grant com.lightningpiggy.app.dev android.permission.ACCESS_COARSE_LOCATION
+----
+
+The `EXPO_PUBLIC_DEV_LAT` / `EXPO_PUBLIC_DEV_LON` env-pin workaround
+that used to live in `src/utils/devLocation.ts` has been removed
+(merged in PR #597 / issue #604) — we now rely on a properly configured
+AVD instead. This means dev now exercises the same GPS code path as
+production, so location-related perf measurements actually represent
+real behaviour.
+
+== Future work
+
+- `dumpsys gfxinfo` reset/sample is wired into `perf-explore-cold-start.sh`
+  and the lib helper. Other perf-*.sh scripts should adopt it incrementally
+  (low priority — each script can pick it up when next touched).
+- Hermes sampling profiler exposure (#611 component 1) — when landed, will
+  let us capture JS-thread flame graphs without Perfetto.
+- CI-driven regression gating is *out of scope* for now per #611's revised
+  dev-only scope.

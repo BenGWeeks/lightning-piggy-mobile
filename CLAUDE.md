@@ -5,11 +5,32 @@
 - Use `npm start` (not `npx expo start`) — the start script includes `--dev-client` which is required for custom native modules
 - Native rebuild required after changing plugins or native modules: `npx expo run:android`
 
-## Deploying a release APK to a physical device
+## Cutting a release
 
-- The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local pipeline reads `versionCode` from `app.config.ts` directly, and that floor sits behind whatever EAS's cloud counter most recently published).
-- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetching the EAS upload keystore so the signature matches an existing EAS-installed app. **Important**: `appVersionSource: "remote"` in `eas.json` only affects EAS *cloud* builds — `eas build --local` (and `expo run:android --variant release`) both read `versionCode` from `app.config.ts` directly. **Before each local prod build, bump `versionCode` in `app.config.ts` to ≥ the versionCode currently on the target device** (otherwise install fails with `INSTALL_FAILED_VERSION_DOWNGRADE`). Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
-- Full recipe + rationale (case 1 vs case 2) lives in `docs/DEPLOYMENT.adoc` → "Local production builds". When a deploy fails for one of these reasons, update that section if anything's changed.
+- **Releases go through the GitHub Release workflow, not via `eas build --local`.** Bump with `npm version <patch|minor|major>`, push `main --follow-tags`, then publish a GitHub Release pointing at the tag. `.github/workflows/release.yml` kicks off EAS cloud builds for both platforms, auto-submits iOS to TestFlight, and attaches the Android APK to the Release page. Full recipe in `docs/DEPLOYMENT.adoc` → "Cutting a release".
+- **Why not run `eas build` manually for releases?** Manual / local builds aren't anchored to a published tag — the artifact came from whatever local checkout (or whichever commit) you triggered it from, with no record of which source revision actually shipped. The GitHub Release notes then drift away from what's in users' hands. The workflow tags first, then builds, so the artifacts are pinned to one commit.
+- **Marketing version lives in `package.json` / `app.config.ts`** (single source of truth, reviewable via PR). **`versionCode` / `buildNumber` are owned by EAS's remote counter** (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit the integer for releases — cloud builds auto-increment it past whatever's in the file.
+
+## Sideloading a release-flavor APK to a physical device (for testing, not release)
+
+- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull a cloud-built production APK instead of running `eas build --local`:
+  ```
+  # 0. The APK you install must actually contain the code under test. The
+  #    "latest" finished build may be the PREVIOUS release — if your fix
+  #    isn't merged + cloud-built yet, kick off a build of it first and
+  #    download THAT one (by id), rather than blindly taking --limit 1:
+  #      eas build --profile production --platform android
+  # 1. Otherwise, find the most-recent production build's URL / ID.
+  eas build:list --platform android --profile production --status finished --limit 1
+  # 2. Download THAT build by URL or ID — don't use `--latest`, since it
+  #    isn't constrained to a profile and may hand back a development/
+  #    preview APK (which uses the `.dev` / `.preview` applicationId
+  #    and won't upgrade a production install).
+  eas build:view <build-id> --json | jq -r '.artifacts.buildUrl' | xargs -I{} curl -L -o build.apk {}
+  adb -s <serial> install -r build.apk
+  ```
+- `adb` takes the adb serial; `expo run:android --device` takes the model name (`Pixel_8`). For dev iteration, `npx expo run:android --device Pixel_8` is still the right call — release-mode sideload is only needed when validating R8 / proguard behavior.
+- `eas build --local` survives as an offline fallback (no network, urgent). Documented in `docs/DEPLOYMENT.adoc` → "Local production builds (fallback)". It requires manually bumping `versionCode` in `app.config.ts` first, and is not the release path.
 
 ## Testing
 
@@ -22,6 +43,11 @@
 - Tab bar buttons use `tabBarButtonTestID` (e.g., `tab-friends`) and `tabBarAccessibilityLabel` (e.g., `Friends tab`)
 - Alphabet sidebar letters use `testID` pattern `alphabet-{letter}` (e.g., `alphabet-M`)
 - Maestro selectors: use `id: 'testID-value'` for testID, `text: 'label'` for text/accessibilityLabel
+
+## Naming
+
+- The brand is **Lightning Piggy** — never shorten to "LP" in user-facing strings. "LP" only belongs in internal type / variable names (`isLpPiggy`) and code comments.
+- Geo-caches published by this app are called **Piglets** in UI copy (the wallet is the "Piggy", a cache stash is its "Piglet"). Vanilla NIP-GC caches stay "NIP-GC cache".
 
 ## Code Style
 

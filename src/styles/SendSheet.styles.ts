@@ -264,6 +264,17 @@ export const createSendSheetStyles = (colors: Palette) =>
       fontWeight: '500',
       textAlign: 'center',
     },
+    feeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'center',
+      gap: 8,
+    },
+    boltzLogo: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+    },
     resetText: {
       color: colors.brandPink,
       fontSize: 13,

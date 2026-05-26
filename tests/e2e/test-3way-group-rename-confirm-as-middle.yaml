@@ -7,7 +7,7 @@ name: 3-way group chat — Middle Piggy sees rename
 - runFlow:
     file: _subflow-login-as.yaml
     env:
-      MAESTRO_NSEC: ${MAESTRO_NSEC3}
+      MAESTRO_NSEC_BIG: ${MAESTRO_NSEC_MIDDLE}
 
 - tapOn:
     id: 'tab-friends'

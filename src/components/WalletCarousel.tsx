@@ -4,6 +4,9 @@ import { WalletState } from '../types/wallet';
 import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
+import { perfLog } from '../utils/perfLog';
+
+let __walletCarouselFirstRenderLogged = false;
 
 const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN * 2;
 
@@ -15,6 +18,10 @@ interface WalletCarouselProps {
   onWalletChange: (walletId: string | null) => void;
   onAddWallet: () => void;
   onSettingsPress: (walletId: string) => void;
+  // Fires true when the trailing "Add wallet" card becomes the active page and
+  // false when a real wallet card is. Lets Home swap the transaction list for an
+  // add-wallet prompt on the add card without clearing activeWalletId (#666).
+  onAddCardActiveChange?: (active: boolean) => void;
 }
 
 type CarouselItem = { type: 'wallet'; wallet: WalletState } | { type: 'add' };
@@ -27,7 +34,12 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
   onWalletChange,
   onAddWallet,
   onSettingsPress,
+  onAddCardActiveChange,
 }) => {
+  if (!__walletCarouselFirstRenderLogged) {
+    __walletCarouselFirstRenderLogged = true;
+    perfLog(`WalletCarousel first render (${wallets.length} wallets)`);
+  }
   const flatListRef = useRef<FlatList>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -44,6 +56,9 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       const index = viewableItems[0].index ?? 0;
       setCurrentIndex(index);
       const item = viewableItems[0].item as CarouselItem;
+      // Tell Home whether the add card is showing so it can swap the tx list
+      // for an add-wallet prompt (#666) — independent of activeWalletId.
+      onAddCardActiveChange?.(item.type === 'add');
       // Only track the active wallet when a real wallet card is in view.
       // Swiping onto the trailing "Add wallet" card must not clear
       // activeWalletId — doing so would disable Home's Send/Receive
@@ -53,7 +68,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         onWalletChange(item.wallet.id);
       }
     },
-    [onWalletChange],
+    [onWalletChange, onAddCardActiveChange],
   );
 
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;

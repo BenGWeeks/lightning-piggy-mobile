@@ -46,4 +46,10 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return resolveWith(context, moduleName, platform);
 };
 
+// Treat .stl as a static asset (not source) so the Piggy Bag Charm
+// model in assets/3d/ can be require()'d and shared via expo-sharing
+// at runtime. Without this Metro tries to parse the binary as JS and
+// fails the bundle.
+config.resolver.assetExts = [...(config.resolver.assetExts || []), 'stl'];
+
 module.exports = config;

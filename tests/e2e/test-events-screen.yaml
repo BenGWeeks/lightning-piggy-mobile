@@ -1,0 +1,58 @@
+appId: com.lightningpiggy.app.dev
+name: Events sub-screen renders list or empty state
+---
+# Smoke flow for EventsScreen (M7). Subscribes to NIP-52 kind 31923
+# calendar events with `g` tag in the user's coarse 5-char geohash
+# neighbourhood. Live relay coverage of NIP-52 events is sparse, so we
+# accept either a populated list OR the friendly empty state with the
+# "No upcoming events nearby" copy.
+#
+# Run: maestro test tests/e2e/test-events-screen.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-events'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'events-screen'
+
+# Either populated or empty — both legitimate.
+- runFlow:
+    when:
+      visible:
+        id: 'events-empty-state'
+    commands:
+      - assertVisible: 'No upcoming events nearby'
+- runFlow:
+    when:
+      notVisible:
+        id: 'events-empty-state'
+    commands:
+      - assertVisible:
+          id: 'events-refresh-button'
+
+# Refresh works.
+- tapOn:
+    id: 'events-refresh-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'events-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-events'

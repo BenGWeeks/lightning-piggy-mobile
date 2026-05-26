@@ -3,6 +3,80 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 const nwcUrls = new Map<string, string>();
+// In-flight reconnect promises, keyed by walletId. Dedupes parallel
+// `ensureConnected` callers (getBalance + makeInvoice + ...) so a single
+// dropped WebSocket doesn't spawn N simultaneous `provider.enable()`
+// handshakes, each holding the JS thread on the same slow relay. Pre-fix
+// a NWC blip during HuntPiggyDetailScreen mount could pin the thread for
+// 30 s while four reconnect attempts serialised through the same relay.
+const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
+
+// In-flight getBalance promises, keyed by walletId. Parallel callers
+// (initial-connect getBalance + refreshActiveBalance + expectPayment
+// tick) coalesce on the same request rather than firing three separate
+// `provider.getBalance()` calls and tripling the chance of a NIP-47
+// 'no info event' relay error. Cleared on settle so a later refresh
+// gets a fresh response.
+const getBalancesInFlight = new Map<string, Promise<number | null>>();
+
+// Per-wallet count of consecutive NIP-47 requests that got no answer from the
+// relay (reply-timeout / connection error). A WebSocket can stay `connected`
+// while the relay hangs or the link dies (no clean close → TCP lingers in
+// ESTABLISHED for ~2h), so transport state alone reports a dead relay as
+// "Connected" (#654). isWalletConnected() treats a run of unanswered requests
+// as not-connected so the UI is honest and the reconnect path kicks in.
+const relayFailures = new Map<string, number>();
+// Per-wallet timestamp until which a dead/timing-out relay is "parked" — once it
+// looks dead we back off with an escalating cooldown instead of retrying every
+// reconnect/poll tick (the churn behind the lag when a relay goes offline, #656).
+const relayCooldownUntil = new Map<string, number>();
+const RELAY_DEAD_AFTER_FAILURES = 3;
+const RELAY_COOLDOWN_BASE_MS = 30_000;
+const RELAY_COOLDOWN_MAX_MS = 5 * 60_000;
+
+// Reset the failure count AND clear any cooldown — on a fresh connect or any
+// answered request.
+function markRelayResponsive(walletId: string): void {
+  relayFailures.set(walletId, 0);
+  relayCooldownUntil.delete(walletId);
+}
+
+// Record the outcome of a NIP-47 request against its relay-health counter.
+// Only a reply-timeout / connection error (the relay never answered) counts
+// toward "dead". ANY answer resets it — including a wallet-level error such as
+// "method not supported" (NWC wallets that don't implement `get_balance`) or
+// "insufficient funds". So this is capability-agnostic: it keys off whether the
+// relay *responded*, not which method succeeded, and never false-disconnects a
+// wallet that simply lacks a method (#654). Past the dead threshold, park the
+// relay with an escalating backoff (#656).
+function recordRelayOutcome(walletId: string, error?: unknown): void {
+  if (error !== undefined && (isReplyTimeoutError(error) || isConnectionError(error))) {
+    const failures = (relayFailures.get(walletId) ?? 0) + 1;
+    relayFailures.set(walletId, failures);
+    if (failures >= RELAY_DEAD_AFTER_FAILURES) {
+      const backoff = Math.min(
+        RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
+        RELAY_COOLDOWN_MAX_MS,
+      );
+      relayCooldownUntil.set(walletId, Date.now() + backoff);
+    }
+  } else {
+    markRelayResponsive(walletId);
+  }
+}
+
+// True while a dead/timing-out relay is parked: reconnect/poll callers should
+// skip it until the cooldown expires rather than hammering it every tick (#656).
+export function isRelayInCooldown(walletId: string): boolean {
+  const until = relayCooldownUntil.get(walletId);
+  if (until === undefined) return false;
+  if (Date.now() >= until) {
+    // Expired — drop the entry so the Map can't grow unbounded.
+    relayCooldownUntil.delete(walletId);
+    return false;
+  }
+  return true;
+}
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
 // to fast-fail pay_invoice when the relay is unreachable (see #175).
@@ -47,6 +121,28 @@ export function createReplyTimeoutError(
 
 export function isReplyTimeoutError(error: unknown): boolean {
   return (error as Error)?.name === REPLY_TIMEOUT_ERROR_NAME;
+}
+
+// True when the failure is a relay/transport connectivity problem rather
+// than a confirmed payment outcome — e.g. the relay was unreachable
+// ("Failed to connect to wss://…", NWC code OTHER) or a publish never
+// completed. Like a reply-timeout, the payment status is UNKNOWN: it may
+// well have settled. Callers must NOT present these as "Payment failed"
+// (#648) — a user who trusts that may re-send and double-pay.
+export function isConnectionError(error: unknown): boolean {
+  const msg = (
+    (error as { message?: string } | undefined)?.message ?? String(error ?? '')
+  ).toLowerCase();
+  return (
+    msg.includes('failed to connect') ||
+    msg.includes('publish timed out') ||
+    msg.includes('publish failed') ||
+    msg.includes('could not connect') ||
+    msg.includes('network request failed') ||
+    msg.includes('websocket') ||
+    msg.includes('connection closed') ||
+    msg.includes('connection lost')
+  );
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -169,6 +265,20 @@ export async function connect(
     // established even if getBalance fails (e.g. slow relay response).
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
+    // Enable relay-pool keepalive pings so a dead link is noticed promptly
+    // rather than lingering in TCP ESTABLISHED for ~2h (#654). Best-effort —
+    // `client.pool` is an internal SDK shape and may be absent.
+    // NB: we deliberately do NOT reset the responsiveness counter here —
+    // re-opening the socket doesn't prove the relay answers. Status only
+    // returns to "connected" once a real request succeeds (the initial
+    // getBalance probe below), else a dead relay flaps Disconnected↔Connected
+    // on every 30s reconnect.
+    try {
+      (provider as { client?: { pool?: { enablePing?: boolean } } }).client!.pool!.enablePing =
+        true;
+    } catch {
+      // internal SDK shape unavailable — pings stay at the SDK default
+    }
 
     // Guard the consumer callback so a UI-side throw can't unwind into our
     // catch block and falsely tear down a healthy provider.
@@ -178,7 +288,10 @@ export async function connect(
       if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
     }
 
-    // Try to get initial balance, but don't fail the connection if it times out
+    // Try to get initial balance, but don't fail the connection if it times
+    // out. Doubles as the relay-responsiveness probe (#654): an answer resets
+    // the failure counter (→ Connected); a timeout/connection error advances it
+    // (so a dead relay stays Disconnected instead of flapping).
     let balance: number | undefined;
     try {
       const b = await withRetry(() => provider.getBalance(), {
@@ -187,12 +300,17 @@ export async function connect(
         delayMs: 2000,
       });
       balance = b.balance;
-    } catch {
+      recordRelayOutcome(walletId);
+    } catch (e) {
+      recordRelayOutcome(walletId, e);
       if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
     }
 
     return { success: true, balance };
   } catch (error) {
+    // enable() couldn't reach any relay (full outage). Count it so the cooldown
+    // (#656) engages — otherwise the 30s connection-check retries forever.
+    recordRelayOutcome(walletId, error);
     providers.delete(walletId);
     nwcUrls.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
@@ -229,7 +347,12 @@ export function disconnect(walletId: string): void {
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${ms}ms`));
+      // A withTimeout fire means the relay never replied in time — a
+      // reply-timeout, not a confirmed outcome. Reject with the typed error so
+      // recordRelayOutcome() counts it toward relay-dead (#654/#656); a generic
+      // Error slips through both isReplyTimeoutError and isConnectionError and
+      // would reset the counter on the very "relay hung" case this targets.
+      reject(createReplyTimeoutError(`${label} timed out after ${ms}ms`));
     }, ms);
     promise.then(
       (v) => {
@@ -251,14 +374,15 @@ export interface GetBalanceOptions {
    * retry loop. When set, the call runs *without* retries so the ceiling
    * is a true upper bound (one attempt × replyTimeoutMs).
    *
-   * Currently only the post-payment poll in `WalletContext.expectPayment`
-   * passes this (`replyTimeoutMs: 2500`) — that path is tick-gated by
-   * a 1 s `expectPayment` interval + an `inFlight` guard, so a stalled
-   * read would block the next tick. Quick give-up + a fresh poll on the
-   * next tick beats waiting 10 s for a reply that may never arrive. The
-   * 30 s foreground refresh and per-wallet refresh deliberately stay on
-   * the default (with retries) — they're not tick-gated, so a slower-
-   * but-more-reliable read is the better tradeoff there. (#133)
+   * Passed by the two tick-gated balance pollers in `WalletContext`: the
+   * post-payment poll in `expectPayment` (`replyTimeoutMs: 2500`, gated by
+   * a 1 s interval + an `inFlight` guard) and the demand-gated 10 s
+   * foreground balance poll (`replyTimeoutMs: 8000`, gated by a 10 s
+   * interval + `singleFlight`). For both, a stalled read is dropped and
+   * retried on the next tick — far better than blocking the JS thread for
+   * 22–115 s on a slow relay (#650). The one-shot / per-wallet manual
+   * refresh paths deliberately stay on the default (with retries): they're
+   * not tick-gated, so a slower-but-more-reliable read wins there. (#133, #650)
    */
   replyTimeoutMs?: number;
 }
@@ -267,28 +391,56 @@ export async function getBalance(
   walletId: string,
   options: GetBalanceOptions = {},
 ): Promise<number | null> {
-  const provider = await ensureConnected(walletId);
-  if (!provider) return null;
-  try {
-    // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
-    const b = await withRetry(
-      () => {
-        const call = provider.getBalance();
-        return options.replyTimeoutMs !== undefined
-          ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
-          : call;
-      },
-      {
-        label: `getBalance(${walletId})`,
-        attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
-        delayMs: 1500,
-      },
-    );
-    return b.balance;
-  } catch (error) {
-    console.warn(`getBalance error for ${walletId}:`, error);
-    return null;
+  // Dedupe parallel callers. The replyTimeoutMs path bypasses the
+  // shared promise because each caller may want a different ceiling —
+  // forcing them onto a single longer-timeout request would be wrong.
+  if (options.replyTimeoutMs === undefined) {
+    const pending = getBalancesInFlight.get(walletId);
+    if (pending) return pending;
   }
+  const __t0 = performance.now();
+  const run = async (): Promise<number | null> => {
+    const provider = await ensureConnected(walletId);
+    if (!provider) return null;
+    try {
+      // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
+      const b = await withRetry(
+        () => {
+          const call = provider.getBalance();
+          return options.replyTimeoutMs !== undefined
+            ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
+            : call;
+        },
+        {
+          label: `getBalance(${walletId})`,
+          attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
+          delayMs: 1500,
+        },
+      );
+      const __dt = performance.now() - __t0;
+      if (__dt > 500) {
+        console.log(
+          `[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
+        );
+      }
+      recordRelayOutcome(walletId);
+      return b.balance;
+    } catch (error) {
+      const __dt = performance.now() - __t0;
+      console.log(
+        `[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
+      );
+      console.warn(`getBalance error for ${walletId}:`, error);
+      recordRelayOutcome(walletId, error);
+      return null;
+    }
+  };
+  if (options.replyTimeoutMs !== undefined) return run();
+  const promise = run().finally(() => {
+    getBalancesInFlight.delete(walletId);
+  });
+  getBalancesInFlight.set(walletId, promise);
+  return promise;
 }
 
 export async function makeInvoice(
@@ -300,7 +452,7 @@ export async function makeInvoice(
   if (!provider) throw new Error('Not connected');
   const invoice = await provider.makeInvoice({
     amount,
-    defaultMemo: memo || 'Lightning Piggy',
+    defaultMemo: memo || 'Sent with Lightning Piggy',
   });
   return invoice.paymentRequest;
 }
@@ -377,8 +529,18 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
 
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
-    if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
-    provider = await reconnect(walletId);
+    // Dedupe parallel reconnect attempts — every concurrent ensureConnected
+    // caller awaits the same promise. Promise is cleared once resolved or
+    // rejected so a *later* drop can trigger a fresh reconnect.
+    let pending = reconnectsInFlight.get(walletId);
+    if (!pending) {
+      if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
+      pending = reconnect(walletId).finally(() => {
+        reconnectsInFlight.delete(walletId);
+      });
+      reconnectsInFlight.set(walletId, pending);
+    }
+    provider = await pending;
   }
   return provider;
 }
@@ -397,11 +559,21 @@ type Nip47Internals = {
 async function sendPaymentWithTimeout(
   provider: NostrWebLNProvider,
   bolt11: string,
+  amountMsats?: number,
 ): Promise<{ preimage: string }> {
   // Runtime guard — `executeNip47Request` is a private @getalby/sdk surface;
   // if a future SDK update removes it, fall back to the public sendPayment.
   const client = provider.client as unknown as Nip47Internals | undefined;
   if (!client || typeof client.executeNip47Request !== 'function') {
+    // The public `provider.sendPayment(bolt11)` doesn't accept the
+    // optional msats param NIP-47 defines for zero-amount invoices,
+    // so we'd silently send a bolt11-amount-of-0 if we let this path
+    // through. Fail loudly instead — caller can surface the error.
+    if (amountMsats && amountMsats > 0) {
+      throw new Error(
+        'Amount-less bolt11 requires NIP-47 `amount` param — SDK fallback path does not support it',
+      );
+    }
     if (__DEV__)
       console.warn(
         '[NWC] executeNip47Request unavailable — falling back to public sendPayment (no per-call timeout)',
@@ -412,9 +584,15 @@ async function sendPaymentWithTimeout(
     }
     return { preimage: fallback.preimage };
   }
+  // NIP-47 `pay_invoice` accepts an optional `amount` (in msats) for
+  // zero-amount invoices — the wallet picks up the user-specified
+  // amount at send time. Omit when null/undefined so amount-bearing
+  // invoices behave exactly as before.
+  const params: { invoice: string; amount?: number } = { invoice: bolt11 };
+  if (amountMsats && amountMsats > 0) params.amount = amountMsats;
   const result = await client.executeNip47Request<{ preimage: string }>(
     'pay_invoice',
-    { invoice: bolt11 },
+    params,
     // Validator: require a non-empty string preimage so { preimage: undefined }
     // can't be silently treated as success.
     (r) => !!r && typeof r.preimage === 'string' && r.preimage.length > 0,
@@ -426,6 +604,8 @@ async function sendPaymentWithTimeout(
 export interface PayInvoiceOptions {
   signal?: AbortSignal;
   onReplyTimeout?: () => void;
+  /** Amount in millisats; only used for zero-amount invoices. */
+  amountMsats?: number;
 }
 
 export async function payInvoice(
@@ -437,12 +617,12 @@ export async function payInvoice(
     signalOrOptions && 'aborted' in signalOrOptions
       ? { signal: signalOrOptions as AbortSignal }
       : ((signalOrOptions as PayInvoiceOptions | undefined) ?? {});
-  const { signal, onReplyTimeout } = options;
+  const { signal, onReplyTimeout, amountMsats } = options;
   throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
-    const result = await sendPaymentWithTimeout(provider, bolt11);
+    const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
     throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
@@ -467,7 +647,15 @@ export async function payInvoice(
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {
         try {
-          const lookup = await provider.lookupInvoice({ paymentHash });
+          // 2500 ms ceiling — this is a pre-flight check before a
+          // retry. A slow relay shouldn't block the retry; if the
+          // wallet really has paid, the duplicate-payment guard in
+          // the wallet itself catches it on the second attempt.
+          const lookup = await withTimeout(
+            provider.lookupInvoice({ paymentHash }),
+            2500,
+            `lookupInvoice(${walletId})`,
+          );
           if (lookup?.preimage) {
             console.log('[NWC] Invoice already paid — returning existing preimage');
             return { preimage: lookup.preimage };
@@ -478,7 +666,7 @@ export async function payInvoice(
         }
       }
       throwIfAborted(signal);
-      const result = await sendPaymentWithTimeout(provider, bolt11);
+      const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
@@ -509,8 +697,18 @@ export async function payInvoice(
           // `abortable` lets Cancel win the race even while the SDK is
           // blocked inside lookupInvoice's own NIP-47 round-trip; the
           // underlying promise completes in the background and its
-          // result is discarded.
-          const lookup = await abortable(provider.lookupInvoice({ paymentHash }), signal);
+          // result is discarded. 5000 ms cap on the SDK call itself so
+          // a slow relay doesn't pin the 5 s sleep + ~10 s SDK default
+          // into a 15 s effective tick — recipients had been seeing
+          // payments land before our app marked them paid (#553).
+          const lookup = await abortable(
+            withTimeout(
+              provider.lookupInvoice({ paymentHash }),
+              5000,
+              `lookupInvoice(${walletId})`,
+            ),
+            signal,
+          );
           if (lookup?.preimage) {
             console.log('[NWC] Payment completed after timeout:', paymentHash);
             return { preimage: lookup.preimage };
@@ -522,6 +720,69 @@ export async function payInvoice(
         }
       }
       throw createReplyTimeoutError();
+    }
+    // The Alby SDK wraps a NIP-47 error response with no body as
+    // `Nip47WalletError("unknown Error", "INTERNAL")` (see
+    // node_modules/@getalby/sdk/dist/cjs/nwc.cjs:7006). LNbits has
+    // been observed to do this when the wallet *did* process the
+    // payment with its LND backend (LN balance dropped) but the
+    // response back through Nostr was malformed. Look up the invoice
+    // before treating it as a real failure — if the wallet can find
+    // the preimage, the payment succeeded and we should return it.
+    // See issue #481 — this was the underlying cause of the
+    // deterministic first-attempt claim failure on every reverse swap.
+    const errCode = (error as { code?: string })?.code;
+    if (msg === 'unknown Error' || errCode === 'INTERNAL') {
+      const paymentHash = extractPaymentHash(bolt11);
+      if (paymentHash) {
+        try {
+          // 2500 ms cap — this is a one-shot disambiguation, not a
+          // poll loop, but a stalled relay reply here delays surfacing
+          // the real error to the user. Mirror the receive-side ceiling.
+          const lookup = await withTimeout(
+            provider.lookupInvoice({ paymentHash }),
+            2500,
+            `lookupInvoice(${walletId})`,
+          );
+          if (lookup?.paid && lookup.preimage) {
+            // `warn` (not `log`) so this survives the production
+            // `transform-remove-console` strip — without it field logs
+            // can't tell a benign Alby-SDK-wrapping case (wallet did
+            // process the payment) from a real failure. `paid` is the
+            // canonical settled signal (settled_at>0) — `preimage` alone
+            // isn't, per the lookupInvoice notes below.
+            console.warn(
+              `[NWC] pay_invoice surfaced "${msg}" but lookup confirms paid + has preimage — returning it (paymentHash=${paymentHash.slice(0, 8)})`,
+            );
+            return { preimage: lookup.preimage };
+          }
+          // No usable preimage. Either the lookup says unpaid/pending,
+          // or it's paid but the backend omitted preimage (LNbits has
+          // been seen to do this). Both are real-failure surfaces for
+          // pay_invoice; the caller re-throws and the swap is treated
+          // as unpaid until the next recovery pass.
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — treating as failure (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
+        } catch (lookupErr) {
+          // lookup itself threw — most ambiguous case. We don't know if
+          // the payment succeeded or not. Log so field diagnostics can
+          // correlate, then fall through + re-throw the ORIGINAL error
+          // so the caller decides. Do NOT retry the payment here —
+          // would risk a double-pay on wallets that *did* process it.
+          const lookupMsg =
+            lookupErr instanceof Error
+              ? lookupErr.message || lookupErr.toString()
+              : String(lookupErr);
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookupInvoice ALSO failed (${lookupMsg || 'no message'}) — payment status unknown (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
+        }
+      } else {
+        console.warn(
+          `[NWC] pay_invoice "${msg}" + could not extract paymentHash from bolt11 — payment status unknown`,
+        );
+      }
     }
     throw error;
   }
@@ -669,28 +930,61 @@ function isTerminalLookupError(error: unknown): boolean {
 
 // LNbits (and some other NWC backends) omit preimage/invoice from
 // list_transactions; this fills them in. Returns null on failure.
-// `paid` relies on `settled_at` (a non-zero timestamp when the invoice
-// was paid). `preimage` alone isn't a safe signal — some backends
-// pre-populate it or return a placeholder while unsettled.
+// `paid` reflects the WebLN-shape `paid` boolean returned by
+// `NostrWebLNProvider.lookupInvoice` — see the block comment inside
+// the function for why the NIP-47 `settled_at` / `state` fields aren't
+// what we read here.
+export interface LookupInvoiceOptions {
+  /**
+   * Per-call ceiling for the underlying NIP-47 round trip. When unset,
+   * defers to the SDK's own ~10 s `replyTimeout`. When set, a timed-out
+   * call fails fast so the caller's next poll tick can race a fresh
+   * request rather than waiting on a slow reply.
+   *
+   * Passed by both settlement-detection callers: the receive-side
+   * `expectPayment` poll in `WalletContext` (1 s ticks, 2500 ms cap
+   * mirrors the sibling `getBalance` ceiling) and the send-side
+   * post-reply-timeout poll here in `nwcService.payInvoice` (5 s
+   * ticks, 5000 ms cap). Without this, a slow relay reply blocked
+   * the pile-up-guarded tick for the SDK's full default — recipients
+   * saw the payment land before our app marked it paid (#553).
+   */
+  replyTimeoutMs?: number;
+}
+
 export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
+  options: LookupInvoiceOptions = {},
 ): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
   if (!isValidPaymentHash(paymentHash)) return null;
   if (hasFailedLookup(walletId, paymentHash)) return null;
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const result = (await provider.lookupInvoice({ paymentHash })) as {
+    // We use `NostrWebLNProvider` from @getalby/sdk, whose `lookupInvoice`
+    // returns the **WebLN** `LookupInvoiceResponse` shape — *not* the raw
+    // NIP-47 `Nip47Transaction` shape. So the SDK translates LNbits'
+    // spec-compliant `{type, invoice, settled_at, ...}` into WebLN's
+    // `{preimage, paymentRequest, paid}` for us. Don't reach for `settled_at`
+    // or `state` here — they're never populated on this path. If we ever
+    // switch to the raw `NWCClient` we'd need to flip both the field names
+    // and the settlement predicate; see docs/TROUBLESHOOTING.adoc →
+    // "Receive sheet slow to mark invoice as paid" for context.
+    const call = provider.lookupInvoice({ paymentHash });
+    const result = (await (options.replyTimeoutMs !== undefined
+      ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
+      : call)) as {
       preimage?: string;
-      invoice?: string;
-      settled_at?: number;
+      paymentRequest?: string;
+      paid?: boolean;
     };
-    const paid = Boolean(result?.settled_at && result.settled_at > 0);
     return {
       preimage: result?.preimage,
-      invoice: result?.invoice,
-      paid,
+      // WebLN names the bolt11 field `paymentRequest`; our caller contract
+      // exposes it as `invoice` so consumers stay decoupled from the SDK.
+      invoice: result?.paymentRequest,
+      paid: result?.paid === true,
     };
   } catch (error) {
     if (isTerminalLookupError(error)) {
@@ -706,5 +1000,10 @@ export function isWalletConnected(walletId: string): boolean {
   if (!provider) return false;
   // Check the actual WebSocket connection state
   const client = (provider as any).client;
-  return client?.connected ?? false;
+  if (!(client?.connected ?? false)) return false;
+  // Transport "connected" can lie: a hung relay / dead link leaves the socket
+  // in ESTABLISHED while nothing gets through. Treat a run of unanswered
+  // requests as not-connected so the UI is honest and the 30s connection-check
+  // triggers a reconnect (#654).
+  return (relayFailures.get(walletId) ?? 0) < RELAY_DEAD_AFTER_FAILURES;
 }
