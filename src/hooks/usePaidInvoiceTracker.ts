@@ -104,20 +104,25 @@ export function usePaidInvoiceTracker(messages: TrackedMessage[]): {
     // resets to the base cadence as soon as it responds again (#684).
     let delay = POLL_INTERVAL_MS;
     const poll = async () => {
-      let anyResponded = false;
+      let gotResult = false;
       for (const hash of outgoingOpenHashes) {
         if (cancelled) return;
         let result: Awaited<ReturnType<typeof nwcService.lookupInvoice>> = null;
         try {
           result = await nwcService.lookupInvoice(activeWalletId, hash);
-        } catch {
-          // Timeout / temp-ban / transport error — treat as "no answer"
-          // so the backoff below engages instead of a tight retry storm.
+        } catch (e) {
+          // Timeout / temp-ban / transport error — including a throw
+          // before lookupInvoice's own logging (e.g. ensureConnected
+          // failing during a reconnect). Treat as "no answer" so the
+          // backoff engages instead of a tight retry storm; log in dev so
+          // an unexpected throw stays diagnosable (#686 review).
+          if (__DEV__)
+            console.log(`[invoice-poll] lookupInvoice threw: ${(e as Error)?.message ?? e}`);
           result = null;
         }
         if (cancelled) return;
         if (result) {
-          anyResponded = true;
+          gotResult = true;
           if (result.paid) {
             setPaidHashes((prev) => {
               if (prev.has(hash)) return prev;
@@ -131,9 +136,14 @@ export function usePaidInvoiceTracker(messages: TrackedMessage[]): {
           }
         }
       }
-      // Relay answered → back to base cadence; silent (unreachable / temp-
-      // banned) → double up to the ceiling so we stop hammering it.
-      delay = anyResponded ? POLL_INTERVAL_MS : Math.min(delay * 2, POLL_BACKOFF_MAX_MS);
+      // Got at least one non-null lookupInvoice result (paid or unpaid) →
+      // the relay is answering, so stay at the base cadence. Got nothing
+      // back from any hash (every call timed out / threw / returned null —
+      // i.e. unreachable or temp-banned) → double up to the ceiling so we
+      // stop hammering it. Note: a terminal NOT_FOUND that surfaces as null
+      // also counts as "no answer" here, which is fine — there's no point
+      // fast-polling a hash the relay can't find either.
+      delay = gotResult ? POLL_INTERVAL_MS : Math.min(delay * 2, POLL_BACKOFF_MAX_MS);
     };
     const scheduleNext = () => {
       if (cancelled || !running) return;
