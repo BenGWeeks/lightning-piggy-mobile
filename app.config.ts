@@ -137,6 +137,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // remote push — these all fire from the on-device TaskManager task.
     'expo-notifications',
     'expo-task-manager',
+    // Audio playback (the Pig Lens oink, #338 follow-up).
+    // NB: react-native-vision-camera v5 ships no Expo config plugin — it
+    // autolinks as a native module, and the CAMERA permission it needs is
+    // already added by the expo-image-picker plugin above.
+    'expo-audio',
   ],
   android: {
     adaptiveIcon: {

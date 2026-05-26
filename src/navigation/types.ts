@@ -37,6 +37,8 @@ export type AccountDrawerParamList = {
 // Root stack
 export type RootStackParamList = {
   Main: NavigatorScreenParams<AccountDrawerParamList>;
+  // Pig Lens — live AR face-filter PoC (#338 follow-up). No params.
+  PigLens: undefined;
   Conversation: {
     pubkey: string;
     name: string;

@@ -29,7 +29,7 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/ic
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
 import { perfLog } from '../utils/perfLog';
-import type { MainTabParamList } from '../navigation/types';
+import type { MainTabParamList, RootNavigation } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -56,6 +56,10 @@ const HomeScreen: React.FC = () => {
   } = useWallet();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
+  // Root-stack nav for the Pig Lens PoC entry (#338 follow-up). Typed as
+  // RootNavigation so navigate('PigLens') type-checks; it bubbles up to
+  // the root stack at runtime.
+  const rootNavigation = useNavigation<RootNavigation>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
 
@@ -372,6 +376,31 @@ const HomeScreen: React.FC = () => {
           )}
         </ScrollView>
       </View>
+
+      {/* TEMP (PoC, #338 follow-up): floating entry to the live Pig Lens AR filter. */}
+      <TouchableOpacity
+        style={{
+          position: 'absolute',
+          right: 16,
+          bottom: insets.bottom + 96,
+          backgroundColor: '#EC008C',
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          borderRadius: 24,
+          flexDirection: 'row',
+          alignItems: 'center',
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 6,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 4,
+        }}
+        onPress={() => rootNavigation.navigate('PigLens')}
+        accessibilityLabel="Open Pig Lens"
+        testID="home-pig-lens"
+      >
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>🐷 Pig Lens</Text>
+      </TouchableOpacity>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <SendSheet
