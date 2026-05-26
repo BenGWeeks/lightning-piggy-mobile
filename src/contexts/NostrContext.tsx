@@ -867,7 +867,8 @@ interface NostrContextType {
     groupId: string;
     subject: string;
     memberPubkeys: string[];
-    text: string;
+    text?: string;
+    file?: EncryptedUpload;
   }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
   /**
    * Publish a parameterised-replaceable kind-30200 group-state event for
@@ -2553,20 +2554,37 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       groupId: string;
       subject: string;
       memberPubkeys: string[];
-      text: string;
+      text?: string;
+      // When set, sends an encrypted NIP-17 kind-15 file message (e.g. a
+      // voice note) to the whole group instead of a kind-14 text message.
+      // Every member's gift-wrap carries the same decryption key, so all
+      // recipients can decrypt the single ciphertext blob on Blossom.
+      file?: EncryptedUpload;
     }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      const text = input.text.trim();
-      if (!text) return { success: false, error: 'Empty message' };
+      const text = (input.text ?? '').trim();
+      if (!input.file && !text) return { success: false, error: 'Empty message' };
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
-        const rumor = nostrService.createGroupChatRumor({
-          senderPubkey: pubkey,
-          subject: input.subject,
-          memberPubkeys: input.memberPubkeys,
-          content: text,
-        });
+        const rumor = input.file
+          ? nostrService.createGroupFileRumor({
+              senderPubkey: pubkey,
+              subject: input.subject,
+              memberPubkeys: input.memberPubkeys,
+              url: input.file.url,
+              mime: input.file.mime,
+              keyHex: input.file.keyHex,
+              nonceHex: input.file.nonceHex,
+              sha256Hex: input.file.sha256Hex,
+              size: input.file.size,
+            })
+          : nostrService.createGroupChatRumor({
+              senderPubkey: pubkey,
+              subject: input.subject,
+              memberPubkeys: input.memberPubkeys,
+              content: text,
+            });
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);

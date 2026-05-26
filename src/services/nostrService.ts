@@ -1183,6 +1183,46 @@ export function createGroupChatRumor(input: {
 }
 
 /**
+ * Group (multi-recipient) NIP-17 kind-15 file-message rumor — the group
+ * equivalent of `createFileMessageRumor`. One `subject` + a `p` tag per
+ * member, plus the encrypted-file metadata. Wrapped once per member (and
+ * the sender) by `sendNip17ToMany*`, so every recipient receives the same
+ * `decryption-key` and can decrypt the single ciphertext blob on Blossom.
+ */
+export function createGroupFileRumor(input: {
+  senderPubkey: string;
+  subject: string;
+  memberPubkeys: string[];
+  url: string;
+  mime: string;
+  keyHex: string;
+  nonceHex: string;
+  sha256Hex: string;
+  size: number;
+  algorithm?: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  const tags: string[][] = [['subject', input.subject]];
+  for (const pk of input.memberPubkeys) {
+    tags.push(['p', pk]);
+  }
+  tags.push(
+    ['file-type', input.mime],
+    ['encryption-algorithm', input.algorithm ?? 'aes-gcm'],
+    ['decryption-key', input.keyHex],
+    ['decryption-nonce', input.nonceHex],
+    ['x', input.sha256Hex],
+    ['size', String(input.size)],
+  );
+  return {
+    pubkey: input.senderPubkey,
+    kind: 15,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: input.url,
+  };
+}
+
+/**
  * NIP-17 multi-recipient send via nostr-tools `wrapManyEvents`. Builds a
  * kind-14 rumor once, then seal+wraps it for each recipient (the helper
  * spec-conformantly re-wraps for the sender as well so they see their own

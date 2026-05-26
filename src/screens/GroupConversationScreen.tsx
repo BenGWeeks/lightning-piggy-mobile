@@ -42,7 +42,11 @@ import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
-import { stripImageMetadata, uploadBlob, uploadImage } from '../services/imageUploadService';
+import {
+  stripImageMetadata,
+  uploadEncryptedBlob,
+  uploadImage,
+} from '../services/imageUploadService';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -63,6 +67,7 @@ import {
 import {
   classifyMessageContent,
   extractSharedContact,
+  encodeEncryptedFileUrl,
   type BubbleContent,
 } from '../utils/messageContent';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
@@ -393,28 +398,55 @@ const GroupConversationScreen: React.FC = () => {
     [closeAttachPanel, sendText],
   );
 
-  // Voice-note send (#235): upload the recorded .m4a to Blossom, post the
-  // returned URL via the group's sendText so it lands in the group thread.
-  // Same pipeline images use today — Blossom is content-addressed and
-  // MIME-agnostic so the rename to uploadBlob is the only churn.
+  // Voice-note send (#235): encrypt the recorded .m4a on-device (AES-256-GCM),
+  // upload the CIPHERTEXT to Blossom, and send a NIP-17 kind-15 file message
+  // to the whole group. Each member's gift-wrap carries the same decryption
+  // key, so every recipient can decrypt the single blob — and the server only
+  // ever holds ciphertext. Mirrors the 1:1 path in ConversationScreen.
   const handleSendVoiceNote = useCallback(
     async (uri: string) => {
-      if (uploadingVoice) return;
+      if (uploadingVoice || !group || !myPubkey) return;
       setUploadingVoice(true);
       try {
-        const url = await uploadBlob(uri, signEvent);
-        const ok = await sendText(url);
-        if (ok) {
-          setVoiceSheetOpen(false);
-          closeAttachPanel();
+        const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
+        const result = await sendGroupMessage({
+          groupId: group.id,
+          subject: group.name,
+          memberPubkeys: group.memberPubkeys,
+          file,
+        });
+        if (!result.success) {
+          Alert.alert('Send failed', result.error ?? 'Could not send voice note.');
+          return;
         }
+        const local: GroupMessage = {
+          id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          senderPubkey: myPubkey,
+          text: encodeEncryptedFileUrl({
+            url: file.url,
+            mime: file.mime,
+            keyHex: file.keyHex,
+            nonceHex: file.nonceHex,
+          }),
+          createdAt: Math.floor(Date.now() / 1000),
+        };
+        try {
+          const next = await appendGroupMessage(group.id, local);
+          setMessages(next);
+          notifyGroupMessage(group.id, local);
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+        } catch (err) {
+          if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+        }
+        setVoiceSheetOpen(false);
+        closeAttachPanel();
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
         setUploadingVoice(false);
       }
     },
-    [closeAttachPanel, sendText, signEvent, uploadingVoice],
+    [group, myPubkey, closeAttachPanel, sendGroupMessage, signEvent, uploadingVoice],
   );
 
   // Share another contact's Nostr profile into the group. Mirrors the 1:1
