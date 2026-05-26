@@ -51,19 +51,29 @@ const hydrate = async (): Promise<void> => {
       // Re-apply the dev-leftover denylist on read: the ingestion-layer
       // filter (nostrPlacesPublisher) only blocks new events, so blobs
       // persisted before a signer was denylisted still carry it and
-      // would paint on cold start otherwise (#699).
+      // would paint on cold start otherwise (#699). When we drop any, also
+      // rewrite the sanitized blob (fire-and-forget) so the on-disk copy is
+      // actually cleaned rather than re-filtered on every cold start.
       if (cachesRaw) {
         const parsed = JSON.parse(cachesRaw) as CachedShape<ParsedCache>;
         if (Array.isArray(parsed.items) && isFresh(parsed)) {
+          const before = parsed.items.length;
           parsed.items = parsed.items.filter((c) => !isDevLeftover(c.hiderPubkey));
           memCaches = parsed;
+          if (parsed.items.length < before) {
+            AsyncStorage.setItem(CACHES_STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
+          }
         }
       }
       if (eventsRaw) {
         const parsed = JSON.parse(eventsRaw) as CachedShape<ParsedEvent>;
         if (Array.isArray(parsed.items) && isFresh(parsed)) {
+          const before = parsed.items.length;
           parsed.items = parsed.items.filter((e) => !isDevLeftover(e.organiserPubkey));
           memEvents = parsed;
+          if (parsed.items.length < before) {
+            AsyncStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(parsed)).catch(() => {});
+          }
         }
       }
     } catch {

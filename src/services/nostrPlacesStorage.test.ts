@@ -111,4 +111,24 @@ describe('nostrPlacesStorage denylist enforcement (#699)', () => {
     await seedAndRehydrate(CACHES_STORAGE_KEY, [cache(CLEAN, 'A'), cache(CLEAN, 'B')]);
     expect((await loadCachedCaches()).length).toBe(2);
   });
+
+  it('rewrites the sanitized blob to disk when hydrate drops entries (no re-filter every start)', async () => {
+    await seedAndRehydrate(CACHES_STORAGE_KEY, [
+      cache(DENYLISTED, 'Geo-Cache 1'),
+      cache(CLEAN, 'Keeper'),
+    ]);
+    await loadCachedCaches();
+    // The on-disk blob itself should now be clean, not just the in-memory mirror.
+    const raw = await AsyncStorage.getItem(CACHES_STORAGE_KEY);
+    expect(raw).not.toContain(DENYLISTED);
+  });
+
+  it('does not rewrite the blob when nothing is dropped', async () => {
+    await seedAndRehydrate(CACHES_STORAGE_KEY, [cache(CLEAN, 'A')]);
+    const setSpy = jest.spyOn(AsyncStorage, 'setItem');
+    setSpy.mockClear(); // drop the seed write's history (shared mock fn) so we only see hydrate
+    await loadCachedCaches();
+    expect(setSpy).not.toHaveBeenCalled();
+    setSpy.mockRestore();
+  });
 });
