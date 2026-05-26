@@ -1136,27 +1136,36 @@ const CacheCard: React.FC<{
   styles: ReturnType<typeof createLocalStyles>;
 }> = ({ cache, distance, onPress, colors, styles }) => (
   <TouchableOpacity style={styles.card} onPress={onPress} testID={`cache-card-${cache.d}`}>
-    {cache.imageUrl ? (
-      <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
-    ) : (
-      // Same-shape placeholder so cards align visually whether or
-      // not the hider attached a hint photo. LP Piggies get a pink
-      // panel + piggy glyph; vanilla NIP-GC caches get a slate
-      // panel + map-pin glyph.
-      <View
-        style={[
-          styles.cardThumb,
-          styles.cardThumbPlaceholder,
-          cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
-        ]}
-      >
-        {cache.isLpPiggy ? (
-          <PiggyBank size={32} color={colors.white} strokeWidth={2} />
-        ) : (
-          <MapPin size={32} color={colors.white} strokeWidth={2} />
-        )}
-      </View>
-    )}
+    <View style={styles.cardThumbWrap}>
+      {cache.imageUrl ? (
+        <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
+      ) : (
+        // Same-shape placeholder so cards align visually whether or
+        // not the hider attached a hint photo. LP Piggies get a pink
+        // panel + piggy glyph; vanilla NIP-GC caches get a slate
+        // panel + map-pin glyph.
+        <View
+          style={[
+            styles.cardThumb,
+            styles.cardThumbPlaceholder,
+            cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
+          ]}
+        >
+          {cache.isLpPiggy ? (
+            <PiggyBank size={32} color={colors.white} strokeWidth={2} />
+          ) : (
+            <MapPin size={32} color={colors.white} strokeWidth={2} />
+          )}
+        </View>
+      )}
+      {/* Lightning-zap badge — only when this Piggy carries a payout
+          (matches the Geo-caches list on HuntScreen). */}
+      {cache.isLpPiggy && cache.payoutSats != null ? (
+        <View style={styles.cardPayoutBadge}>
+          <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
+        </View>
+      ) : null}
+    </View>
     <Text style={styles.cardTitle} numberOfLines={2}>
       {cache.name}
     </Text>
@@ -1298,6 +1307,19 @@ const createLocalStyles = (colors: Palette) =>
       backgroundColor: colors.divider,
     },
     cardThumbPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // Relative wrapper so the payout badge anchors to the thumb's corner.
+    cardThumbWrap: { position: 'relative' },
+    cardPayoutBadge: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
     },
