@@ -131,10 +131,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withForegroundService',
     'expo-secure-store',
     // expo-notifications config plugin sets the Android notification
-    // icon + colour and is a no-op on iOS beyond linking the native
-    // module. We rely on local (not remote) notifications only — no
-    // FCM token is requested. See src/services/notificationService.ts.
-    'expo-notifications',
+    // small icon + colour, and is a no-op on iOS beyond linking the native
+    // module. The small icon is a white PiggyBank silhouette (lucide
+    // PiggyBank glyph) — Android renders the small icon as a flat mask and
+    // tints it with `color`, so it shows as a pink pig in the status bar /
+    // shade. We rely on local (not remote) notifications only — no FCM
+    // token is requested. See src/services/notificationService.ts.
+    [
+      'expo-notifications',
+      {
+        icon: './assets/notification-icon.png',
+        color: '#e91e63',
+      },
+    ],
     // expo-background-task (#279): runs the detect-and-ping background sync
     // periodically via WorkManager (Android) + BGTaskScheduler (iOS). The
     // plugin wires the required Info.plist BGTask identifier + Android
@@ -171,9 +180,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isAndroidBackgroundLocationEnabled: true,
       },
     ],
-    // Local notifications for the geofence alerts (#467). No FCM / no
-    // remote push — these all fire from the on-device TaskManager task.
-    'expo-notifications',
+    // Geofence alerts (#467) + the background-sync task (#279) run on the
+    // on-device TaskManager — no FCM / no remote push. (expo-notifications
+    // is configured once, above — the duplicate plugin entry was removed.)
     'expo-task-manager',
   ],
   android: {
