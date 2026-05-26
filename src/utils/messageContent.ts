@@ -63,6 +63,20 @@ export function extractImageUrl(text: string): string | null {
   return match ? match[0] : null;
 }
 
+// Audio / voice-note URLs (#235). Same "entire body is the URL" rule as
+// images so surrounding text isn't swallowed. Our recorder emits AAC
+// (.m4a); Blossom servers commonly serve it back as `.mp4` (Primal does),
+// so accept both, plus the other common audio extensions for notes from
+// other clients.
+const AUDIO_URL_REGEX = /^(https?:\/\/\S+?\.(?:m4a|mp4|aac|mp3|ogg|opus|wav))(?:\?\S*)?$/i;
+
+export function extractAudioUrl(text: string): string | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const match = trimmed.match(AUDIO_URL_REGEX);
+  return match ? match[0] : null;
+}
+
 export function extractInvoice(text: string): DecodedInvoice | null {
   if (!text) return null;
   const match = text.match(INVOICE_REGEX);

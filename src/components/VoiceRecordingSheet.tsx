@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, BackHandler, Linking } from 'react-native';
-import { Mic, Square, Send, X } from 'lucide-react-native';
+import { Mic, Square, Send, X, Play, Pause } from 'lucide-react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,11 +17,14 @@ import {
 import {
   useAudioRecorder,
   useAudioRecorderState,
+  useAudioPlayer,
+  useAudioPlayerStatus,
   RecordingPresets,
   requestRecordingPermissionsAsync,
   getRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
+import { getInfoAsync } from 'expo-file-system/legacy';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -55,31 +58,76 @@ const MAX_RECORDING_SECONDS = 60;
 // Blossom server's advertised limit is larger.
 const MAX_VOICE_NOTE_SIZE_BYTES = 5 * 1024 * 1024;
 
+// Fixed bar count for the WhatsApp-style review waveform. We average the
+// captured metering samples into this many buckets so the wave looks
+// consistent whether the clip is 2 s or 60 s.
+const WAVEFORM_BARS = 40;
+
 /**
- * Stat a local `file://` URI by streaming it into a Blob and reading
- * `blob.size`. We do this rather than pull in `expo-file-system` (not
- * a current dep) because the same XHR-to-Blob pattern is already used
- * inside `imageUploadService.readFileAsBase64` for actually shipping
- * the bytes — it's the most reliable way to read a file:// URI on
- * Android RN today (the plain `fetch` path is flaky on some OEMs).
+ * Average a variable-length metering history (0-1 loudness samples
+ * captured at ~5 Hz while recording) into a fixed number of bars.
  */
-async function getFileSizeBytes(fileUri: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', fileUri, true);
-    xhr.responseType = 'blob';
-    xhr.onerror = () => reject(new Error(`Failed to stat ${fileUri}`));
-    xhr.onload = () => {
-      const blob = xhr.response as Blob | null;
-      if (!blob) {
-        reject(new Error('Empty blob response when sizing local file'));
-        return;
-      }
-      resolve(blob.size);
-    };
-    xhr.send();
-  });
+function bucketMetering(history: number[], bars: number): number[] {
+  if (history.length === 0) return [];
+  if (history.length <= bars) return history;
+  const out: number[] = [];
+  const size = history.length / bars;
+  for (let i = 0; i < bars; i++) {
+    const start = Math.floor(i * size);
+    const end = Math.max(start + 1, Math.floor((i + 1) * size));
+    let sum = 0;
+    let n = 0;
+    for (let j = start; j < end && j < history.length; j++) {
+      sum += history[j];
+      n += 1;
+    }
+    out.push(n ? sum / n : 0);
+  }
+  return out;
 }
+
+/**
+ * WhatsApp-style waveform. `progress` (0-1) paints the played portion in
+ * brand pink and the rest in the divider grey, so it doubles as a
+ * playback scrubber. Decorative — the time label carries the duration.
+ */
+const Waveform: React.FC<{ data: number[]; progress: number; colors: Palette }> = ({
+  data,
+  progress,
+  colors,
+}) => {
+  const bars = useMemo(() => bucketMetering(data, WAVEFORM_BARS), [data]);
+  if (bars.length === 0) return null;
+  const played = Math.round(progress * bars.length);
+  return (
+    <View style={waveStyles.row} accessibilityLabel="Voice note waveform">
+      {bars.map((v, i) => (
+        <View
+          key={i}
+          style={[
+            waveStyles.bar,
+            {
+              height: 3 + v * 28,
+              backgroundColor: i < played ? colors.brandPink : colors.divider,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+};
+
+const waveStyles = StyleSheet.create({
+  row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2, height: 34 },
+  bar: { width: 3, borderRadius: 2, minHeight: 3 },
+});
+
+const fmtTime = (totalSeconds: number) => {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return `${Math.floor(s / 60)
+    .toString()
+    .padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+};
 
 /**
  * In-app voice-note recording sheet (#235). Tap-to-toggle: the big mic
@@ -87,6 +135,10 @@ async function getFileSizeBytes(fileUri: string): Promise<number> {
  * recording, and the elapsed-time display + animated pulse confirm the
  * mic is live. A 60 second hard cap auto-stops the recording so the
  * resulting `.m4a` stays under ~1 MB.
+ *
+ * After stopping, a WhatsApp-style review row (play/pause + waveform +
+ * time) lets the user listen back before sending. The waveform is built
+ * from the loudness samples captured during recording.
  *
  * The sheet always recreates its hook recorder on mount (because the
  * parent unmounts it via `visible` flipping), so there's no leaked
@@ -101,11 +153,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // Single snap point — the sheet's content drives the height, no need
-  // to guess a percentage of the viewport. enableDynamicSizing lets
-  // BottomSheetView measure intrinsically. Following the
-  // "don't hardcode sheet heights" rule from project memory.
-  const snapPoints = useMemo(() => ['CONTENT_HEIGHT'], []);
+  // No explicit snapPoints — gorhom v5 defaults `enableDynamicSizing` to
+  // true and sizes the sheet to its content intrinsically (BottomSheetView
+  // measures the height). A literal 'CONTENT_HEIGHT' snap point is not a
+  // valid value and the library throws on open, so we omit snapPoints
+  // entirely (matches ContactProfileSheet / AccountSwitcherSheet).
 
   // The recorder hook re-uses the same native recorder across renders.
   // We poll its state at 200 ms — fast enough to drive a smooth
@@ -123,6 +175,22 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   // handler doesn't race a still-finalising recorder. Cleared on every
   // open so a previous session's URI can't leak to a new send.
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
+  // Loudness samples (0-1) captured while recording — the source for the
+  // review waveform. Reset on every open / re-record.
+  const [meteringHistory, setMeteringHistory] = useState<number[]>([]);
+
+  // Playback of the just-recorded clip so the user can listen back
+  // before sending. Passing `undefined` while there's no recording keeps
+  // the player idle; it loads the file once `recordedUri` is set.
+  const player = useAudioPlayer(recordedUri ?? undefined);
+  const playerStatus = useAudioPlayerStatus(player);
+  const isPlaying = playerStatus?.playing ?? false;
+  const playbackDuration =
+    playerStatus?.duration && isFinite(playerStatus.duration) ? playerStatus.duration : 0;
+  const playbackCurrent = playerStatus?.currentTime ?? 0;
+  const playbackProgress =
+    playbackDuration > 0 ? Math.min(1, playbackCurrent / playbackDuration) : 0;
+
   // Synchronous send guard. The parent's `sending` prop only flips
   // after onSend's first await, so a quick double-tap on Send can call
   // onSend twice before either screen re-renders. A ref flips
@@ -148,10 +216,15 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   const isRecording = recorderState.isRecording;
   const isFinalised = !isRecording && !!recordedUri;
 
+  // Time shown in the review row: live playback position while playing,
+  // otherwise the clip's total length.
+  const reviewTimeLabel = fmtTime(isPlaying ? playbackCurrent : playbackDuration || elapsedSeconds);
+
   // Animated pulse driven by the recorder's metering value. metering is
   // dB (negative; -160 is silence, 0 is clipping). Map to a 0-1 scale
   // and feed a withTiming so the indicator breathes smoothly rather
-  // than snapping on every 200 ms tick.
+  // than snapping on every 200 ms tick. We also push the same 0-1 value
+  // into `meteringHistory` so the review waveform mirrors what was said.
   const pulse = useSharedValue(0);
   useEffect(() => {
     if (!isRecording) {
@@ -168,6 +241,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       duration: 200,
       easing: Easing.out(Easing.cubic),
     });
+    setMeteringHistory((prev) => [...prev, normalized]);
   }, [recorderState.metering, isRecording, pulse]);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -181,6 +255,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   useEffect(() => {
     if (visible) {
       setRecordedUri(null);
+      setMeteringHistory([]);
       setDidStart(false);
       sendInFlightRef.current = false;
       sheetRef.current?.present();
@@ -268,6 +343,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     const ok = await ensurePermission();
     if (!ok) return;
     try {
+      // Stop any review playback before we re-arm the mic.
+      try {
+        player.pause();
+      } catch {
+        // No active playback — fine.
+      }
       // Switch the audio session into record mode. Without this iOS
       // routes through the playback category (silenced when the ringer
       // switch is off) and Android's voice routing can be wrong on
@@ -277,6 +358,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       recorder.record();
       setDidStart(true);
       setRecordedUri(null);
+      setMeteringHistory([]);
       cutoffTimerRef.current = setTimeout(() => {
         // Hard 60 s cap — fire-and-forget; the recorder.stop()
         // promise resolves async and the state listener will pick
@@ -295,7 +377,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
         err instanceof Error ? err.message : 'Could not start the microphone.',
       );
     }
-  }, [ensurePermission, isRecording, recorder, requesting, sending]);
+  }, [ensurePermission, isRecording, recorder, requesting, sending, player]);
 
   const handleStop = useCallback(async () => {
     if (cutoffTimerRef.current) {
@@ -318,10 +400,37 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     }
   }, [isRecording, handleStart, handleStop]);
 
+  // Play / pause the recorded clip for review before sending.
+  const handlePlayToggle = useCallback(async () => {
+    if (!recordedUri) return;
+    try {
+      // Route to the speaker for playback (recording mode silences
+      // output on iOS). playsInSilentMode so it's audible with the
+      // ringer switch off.
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      if (isPlaying) {
+        player.pause();
+      } else {
+        // Restart from the top if we're at (or past) the end.
+        if (playbackDuration > 0 && playbackCurrent >= playbackDuration - 0.05) {
+          player.seekTo(0);
+        }
+        player.play();
+      }
+    } catch (err) {
+      console.warn('[VoiceRecordingSheet] playback failed', err);
+    }
+  }, [recordedUri, isPlaying, player, playbackCurrent, playbackDuration]);
+
   const handleCancel = useCallback(async () => {
     if (cutoffTimerRef.current) {
       clearTimeout(cutoffTimerRef.current);
       cutoffTimerRef.current = null;
+    }
+    try {
+      player.pause();
+    } catch {
+      // No active playback — fine.
     }
     try {
       await recorder.stop();
@@ -329,9 +438,10 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       // Recorder may already be stopped — discard.
     }
     setRecordedUri(null);
+    setMeteringHistory([]);
     setDidStart(false);
     onClose();
-  }, [onClose, recorder]);
+  }, [onClose, recorder, player]);
 
   const handleSend = useCallback(async () => {
     if (!recordedUri || sending || sendInFlightRef.current) return;
@@ -339,6 +449,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     // arrives in the same JS turn (before `sending` has had a chance
     // to flip via the parent's setState) returns at the guard above.
     sendInFlightRef.current = true;
+    try {
+      player.pause();
+    } catch {
+      // No active playback — fine.
+    }
     try {
       // Belt-and-braces size cap. The 60 s recording limit *should*
       // keep an AAC clip well under 2 MB at typical speech bitrates,
@@ -377,7 +492,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     // reset the ref on the next open. Holding it true in the meantime
     // prevents a third tap from racing in if the user happens to keep
     // jabbing the button while the sheet is animating away.
-  }, [recordedUri, sending, onSend]);
+  }, [recordedUri, sending, onSend, player]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -398,14 +513,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     [onClose],
   );
 
-  const elapsedLabel = `${Math.floor(elapsedSeconds / 60)
-    .toString()
-    .padStart(2, '0')}:${(elapsedSeconds % 60).toString().padStart(2, '0')}`;
+  const elapsedLabel = fmtTime(elapsedSeconds);
 
   const hint = isRecording
     ? `Recording... tap stop when you're done (max ${MAX_RECORDING_SECONDS}s)`
     : isFinalised
-      ? 'Tap Send to share your voice note'
+      ? 'Tap play to listen back, then Send'
       : didStart
         ? 'Tap the mic to record again'
         : 'Tap the mic to start recording';
@@ -413,7 +526,6 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       enableDynamicSizing
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -431,9 +543,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
           Audio is uploaded unencrypted to your Blossom server. Only the link is end-to-end
           encrypted via NIP-17.
         </Text>
-        <Text style={styles.elapsed} testID="voice-elapsed">
-          {elapsedLabel}
-        </Text>
+
+        {!isFinalised && (
+          <Text style={styles.elapsed} testID="voice-elapsed">
+            {elapsedLabel}
+          </Text>
+        )}
 
         <View style={styles.micArea}>
           {isRecording ? (
@@ -442,10 +557,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             />
           ) : null}
           <TouchableOpacity
-            style={[
-              styles.micButton,
-              { backgroundColor: isRecording ? colors.red : colors.brandPink },
-            ]}
+            style={[styles.micButton, { backgroundColor: colors.brandPink }]}
             onPress={handleToggle}
             disabled={sending || requesting}
             accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
@@ -459,6 +571,35 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Live waveform while recording */}
+        {isRecording && meteringHistory.length > 0 && (
+          <View style={styles.liveWave}>
+            <Waveform data={meteringHistory} progress={1} colors={colors} />
+          </View>
+        )}
+
+        {/* WhatsApp-style review row: play/pause + waveform + time */}
+        {isFinalised && (
+          <View style={styles.playerCard} testID="voice-player-card">
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={handlePlayToggle}
+              accessibilityLabel={isPlaying ? 'Pause playback' : 'Play voice note'}
+              testID="voice-play-toggle"
+            >
+              {isPlaying ? (
+                <Pause size={20} color={colors.white} fill={colors.white} />
+              ) : (
+                <Play size={20} color={colors.white} fill={colors.white} />
+              )}
+            </TouchableOpacity>
+            <Waveform data={meteringHistory} progress={playbackProgress} colors={colors} />
+            <Text style={styles.playerTime} testID="voice-player-time">
+              {reviewTimeLabel}
+            </Text>
+          </View>
+        )}
 
         <Text style={styles.hint}>{hint}</Text>
 
@@ -496,6 +637,18 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     </BottomSheetModal>
   );
 };
+
+/**
+ * Stat a local `file://` URI via expo-file-system (native, reliable on
+ * Android). The previous XHR-to-Blob approach failed on the recorder's
+ * cache path ("Failed to stat file://…/cache/Audio/…m4a") — RN's XHR on
+ * file:// is flaky — so we read the size natively (matches AboutScreen).
+ */
+async function getFileSizeBytes(fileUri: string): Promise<number> {
+  const info = await getInfoAsync(fileUri);
+  if (!info.exists) throw new Error(`File not found: ${fileUri}`);
+  return info.size;
+}
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -558,6 +711,37 @@ const createStyles = (colors: Palette) =>
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
       elevation: 6,
+    },
+    liveWave: {
+      alignSelf: 'stretch',
+      height: 34,
+      justifyContent: 'center',
+      paddingHorizontal: 8,
+    },
+    playerCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'stretch',
+      gap: 12,
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+    },
+    playButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    playerTime: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      fontVariant: ['tabular-nums'],
+      minWidth: 40,
+      textAlign: 'right',
     },
     hint: {
       fontSize: 13,

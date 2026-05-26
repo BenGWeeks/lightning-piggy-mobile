@@ -1,6 +1,7 @@
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getBlossomServer } from './walletStorageService';
 import { uploadToBlossom, BlossomSigner } from './blossomService';
+import { readAsStringAsync } from 'expo-file-system/legacy';
 
 const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
 
@@ -134,42 +135,21 @@ export async function uploadToNostrBuild(fileUri: string): Promise<string> {
 }
 
 /**
- * Read a local `file://` URI as a base64 string via XMLHttpRequest +
- * FileReader. Used by `uploadBlob` callers (voice notes from #235) that
- * don't have a picker handing them a base64 payload.
+ * Read a local `file://` URI as base64 via expo-file-system, which reads
+ * the file natively. Used by `uploadBlob` callers (voice notes from #235)
+ * that don't have a picker handing them a base64 payload.
  *
- * We use XHR rather than `fetch().arrayBuffer()` because RN's fetch is
- * inconsistent across versions when reading `file://` on Android — the
- * exact same reason `uploadToBlossom` insists on a base64 payload.
+ * The previous XHR + FileReader approach failed on Android for the audio
+ * recorder's cache path (`Failed to read file://…/cache/Audio/…m4a`):
+ * RN's XHR on `file://` URIs is unreliable, which is exactly why
+ * `uploadToBlossom` insists on a base64 payload in the first place.
+ * expo-file-system's native read sidesteps it (matches the base64 read
+ * in HuntCreateScreen).
  */
 async function readFileAsBase64(fileUri: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', fileUri, true);
-    xhr.responseType = 'blob';
-    xhr.onerror = () => reject(new Error(`Failed to read ${fileUri}`));
-    xhr.onload = () => {
-      const blob = xhr.response as Blob;
-      if (!blob) {
-        reject(new Error('Empty blob response when reading local file'));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error('FileReader failed on local file'));
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        // result is a `data:<mime>;base64,<payload>` string — strip the prefix.
-        const comma = result.indexOf(',');
-        if (comma < 0) {
-          reject(new Error('Unexpected FileReader result shape'));
-          return;
-        }
-        resolve(result.slice(comma + 1));
-      };
-      reader.readAsDataURL(blob);
-    };
-    xhr.send();
-  });
+  const base64 = await readAsStringAsync(fileUri, { encoding: 'base64' });
+  if (!base64) throw new Error(`Empty file: ${fileUri}`);
+  return base64;
 }
 
 /**
