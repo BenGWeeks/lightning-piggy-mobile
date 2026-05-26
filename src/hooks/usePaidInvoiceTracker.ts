@@ -12,7 +12,16 @@ export interface TrackedMessage {
 }
 
 const POLL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const POLL_INTERVAL_MS = 15_000;
+// Base cadence for the issuer-side lookupInvoice poll. A chat invoice tile
+// doesn't need sub-30 s freshness; the old 15 s fixed retry hammered our
+// own NWC relay hard enough to get the IP temp-banned (#684).
+const POLL_INTERVAL_MS = 30_000;
+// Backoff ceiling when the relay stops answering (unreachable / temp-
+// banned / slow). The delay doubles 30 s → 60 s → … → 5 min so we stop
+// hammering a relay that isn't responding — which is what kept the ban
+// alive and janked the UI — and recover to the base cadence the moment it
+// answers again.
+const POLL_BACKOFF_MAX_MS = 5 * 60 * 1000;
 
 // Tracks bolt11 settlement state across all three sources, for both
 // the issuer (`fromMe: true`) and the payer (`fromMe: false`):
@@ -89,34 +98,75 @@ export function usePaidInvoiceTracker(messages: TrackedMessage[]): {
     if (!activeWalletId || activeWallet?.walletType === 'onchain') return;
     if (outgoingOpenHashes.length === 0) return;
     let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let running = false;
+    // Current backoff delay — grows when the relay isn't answering and
+    // resets to the base cadence as soon as it responds again (#684).
+    let delay = POLL_INTERVAL_MS;
     const poll = async () => {
+      let gotResult = false;
       for (const hash of outgoingOpenHashes) {
         if (cancelled) return;
-        const result = await nwcService.lookupInvoice(activeWalletId, hash);
+        let result: Awaited<ReturnType<typeof nwcService.lookupInvoice>> = null;
+        try {
+          result = await nwcService.lookupInvoice(activeWalletId, hash);
+        } catch (e) {
+          // Timeout / temp-ban / transport error — including a throw
+          // before lookupInvoice's own logging (e.g. ensureConnected
+          // failing during a reconnect). Treat as "no answer" so the
+          // backoff engages instead of a tight retry storm; log in dev so
+          // an unexpected throw stays diagnosable (#686 review).
+          if (__DEV__)
+            console.log(`[invoice-poll] lookupInvoice threw: ${(e as Error)?.message ?? e}`);
+          result = null;
+        }
         if (cancelled) return;
-        if (result?.paid) {
-          setPaidHashes((prev) => {
-            if (prev.has(hash)) return prev;
-            const next = new Set(prev);
-            next.add(hash);
-            return next;
-          });
-          bolt11SettlementCache.record(hash, true).catch(() => {});
-        } else if (result) {
-          bolt11SettlementCache.record(hash, false).catch(() => {});
+        if (result) {
+          gotResult = true;
+          if (result.paid) {
+            setPaidHashes((prev) => {
+              if (prev.has(hash)) return prev;
+              const next = new Set(prev);
+              next.add(hash);
+              return next;
+            });
+            bolt11SettlementCache.record(hash, true).catch(() => {});
+          } else {
+            bolt11SettlementCache.record(hash, false).catch(() => {});
+          }
         }
       }
+      // Got at least one non-null lookupInvoice result (paid or unpaid) →
+      // the relay is answering, so stay at the base cadence. Got nothing
+      // back from any hash (every call timed out / threw / returned null —
+      // i.e. unreachable or temp-banned) → double up to the ceiling so we
+      // stop hammering it. Note: a terminal NOT_FOUND that surfaces as null
+      // also counts as "no answer" here, which is fine — there's no point
+      // fast-polling a hash the relay can't find either.
+      delay = gotResult ? POLL_INTERVAL_MS : Math.min(delay * 2, POLL_BACKOFF_MAX_MS);
+    };
+    const scheduleNext = () => {
+      if (cancelled || !running) return;
+      timeoutId = setTimeout(async () => {
+        await poll();
+        scheduleNext();
+      }, delay);
     };
     const start = () => {
-      if (intervalId !== null) return;
-      poll();
-      intervalId = setInterval(poll, POLL_INTERVAL_MS);
+      if (running) return;
+      running = true;
+      delay = POLL_INTERVAL_MS;
+      // Immediate first check, then self-reschedule on the (possibly
+      // backed-off) delay. setTimeout, not setInterval, so the cadence can
+      // stretch when the relay goes quiet.
+      poll().then(scheduleNext);
     };
     const stop = () => {
-      if (intervalId === null) return;
-      clearInterval(intervalId);
-      intervalId = null;
+      running = false;
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
     };
     if (AppState.currentState === 'active') start();
     const sub = AppState.addEventListener('change', (next) => {
