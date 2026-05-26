@@ -1,6 +1,9 @@
 import { registerRootComponent } from 'expo';
 import { LogBox } from 'react-native';
 import { perfAnchor, perfLog, perfHeartbeatStart } from './src/utils/perfLog';
+// Side-effect import: defines the background-sync task in the global scope
+// so expo-background-task can invoke it after an OS-driven relaunch (#279).
+import './src/services/backgroundTask';
 
 // Anchor T0 at the FIRST line of JS execution (this module is the
 // app's entry point per registerRootComponent below). Every later

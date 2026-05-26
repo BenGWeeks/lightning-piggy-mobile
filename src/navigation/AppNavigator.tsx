@@ -147,7 +147,13 @@ export const navigateFromNotification = (data: {
     navigationRef.navigate('GroupConversation', { groupId: data.groupId });
     return true;
   }
-  // payment / zap (or anything without a thread id) → wallet home.
+  // Generic message ping with no thread id (the background detect-and-ping
+  // path, which doesn't decrypt) → open the Messages list.
+  if (data.kind === 'dm' || data.kind === 'group') {
+    navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    return true;
+  }
+  // payment / zap (or anything else) → wallet home.
   navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Home' } });
   return true;
 };

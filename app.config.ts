@@ -135,6 +135,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // module. We rely on local (not remote) notifications only — no
     // FCM token is requested. See src/services/notificationService.ts.
     'expo-notifications',
+    // expo-background-task (#279): runs the detect-and-ping background sync
+    // periodically via WorkManager (Android) + BGTaskScheduler (iOS). The
+    // plugin wires the required Info.plist BGTask identifier + Android
+    // WorkManager bits — no custom native code. See
+    // src/services/backgroundTask.ts.
+    'expo-background-task',
     [
       'expo-image-picker',
       {

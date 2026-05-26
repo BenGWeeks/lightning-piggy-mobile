@@ -24,6 +24,7 @@ import {
   ensureNotificationsInitialised,
   setNotificationsForeground,
 } from './src/services/notificationService';
+import { registerBackgroundSync } from './src/services/backgroundTask';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
@@ -91,6 +92,9 @@ export default function App() {
   // route notification taps to the right screen.
   useEffect(() => {
     void ensureNotificationsInitialised();
+    // Register the periodic background detect-and-ping (#279). Idempotent;
+    // OS schedules it (~15 min floor on Android, usage-based on iOS).
+    void registerBackgroundSync();
 
     // Foreground signal — notificationService suppresses a message
     // notification only when the app is active AND the user is on that
