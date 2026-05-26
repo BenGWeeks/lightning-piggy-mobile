@@ -57,6 +57,17 @@ describe('dmIngest.ingestWraps', () => {
     expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['ok']);
   });
 
+  it('treats a throwing decryptor as undecryptable and keeps going (no whole-sync abort)', async () => {
+    const decrypt = jest.fn(async (w: IngestableWrap) => {
+      if (w.id === 'boom') throw new Error('unwrap failed');
+      return rowFor(w.id);
+    });
+    const res = await ingestWraps([wrap('ok1'), wrap('boom'), wrap('ok2')], decrypt);
+    expect(decrypt).toHaveBeenCalledTimes(3); // didn't abort after the throw
+    expect(res).toEqual({ ingested: 2, alreadyKnown: 0, undecryptable: 1 });
+    expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['ok1', 'ok2']);
+  });
+
   it('does not call upsert when nothing is fresh (all already known)', async () => {
     mockSelectKnown.mockResolvedValue(new Set(['a', 'b']));
     const decrypt = jest.fn();

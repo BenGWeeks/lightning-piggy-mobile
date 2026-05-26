@@ -74,7 +74,14 @@ export async function ingestWraps<W extends IngestableWrap>(
       result.alreadyKnown++;
       continue;
     }
-    const row = await decrypt(wrap);
+    // A throwing decryptor is treated as a skip (per WrapDecryptor's contract)
+    // so one undecryptable wrap can't abort the whole sync mid-way.
+    let row: DmMessageRow | null = null;
+    try {
+      row = await decrypt(wrap);
+    } catch {
+      row = null;
+    }
     if (row) fresh.push(row);
     else result.undecryptable++;
     freshAttempts++;
