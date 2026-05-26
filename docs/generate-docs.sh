@@ -19,7 +19,12 @@ cd "$(dirname "$0")"
 
 # Generate Technical Solution Document
 echo "Generating Technical Solution Document..."
+# -r asciidoctor-diagram renders [mermaid] blocks (e.g. DATA_STORAGE.adoc's
+# schema/storage diagrams) via mmdc. mermaid-puppeteer-config points mmdc's
+# headless Chrome at --no-sandbox so it launches in CI/containers.
 asciidoctor-pdf \
+    -r asciidoctor-diagram \
+    -a mermaid-puppeteer-config=puppeteer-mermaid.json \
     -a pdf-theme=lightning-piggy \
     -a pdf-themesdir=themes \
     -a pdf-fontsdir=themes \
