@@ -36,6 +36,10 @@ async function resolveKey(): Promise<string> {
   // Validate before trusting it: a corrupted / wrong-length value would
   // make SQLCipher fail to open with a cryptic error. Regenerate +
   // overwrite instead (pattern mirrors identitiesStore's hex guard).
+  // SAFETY (#710 L1): regenerating on a corrupt key is only safe while the DB
+  // holds rebuildable-from-relays *cache* data. Before recovery-critical rows
+  // (transactions / swaps, #695) land, revisit — a regenerated key would
+  // orphan data that can't be re-fetched.
   if (existing && HEX_64.test(existing)) return existing;
   const key = generateKey();
   await SecureStore.setItemAsync(LOCAL_DB_KEY_STORE_KEY, key, SECURE_OPTIONS);
