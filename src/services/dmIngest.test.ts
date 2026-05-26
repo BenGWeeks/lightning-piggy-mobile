@@ -15,6 +15,8 @@ const rowFor = (id: string): DmMessageRow => ({
   createdAt: 1,
   sender: 's',
   content: 'c',
+  fromMe: false,
+  wireKind: 14,
 });
 
 beforeEach(() => {

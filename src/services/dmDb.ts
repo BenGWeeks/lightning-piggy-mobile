@@ -12,6 +12,12 @@ export interface DmMessageRow {
   createdAt: number;
   sender: string;
   content: string;
+  /** True when we authored the message (sender === our pubkey). Stored rather
+   * than derived so reads don't need our pubkey threaded through. */
+  fromMe: boolean;
+  /** The inner rumor / event kind (NIP-17 text = 14, file = 15, legacy NIP-04
+   * = 4). Load-bearing: the inbox NIP-04/NIP-17 dedup keys on it. */
+  wireKind: number;
 }
 
 // SQLite caps bound variables per statement (historically 999). Chunk IN()
@@ -24,6 +30,8 @@ const toRow = (r: Record<string, unknown>): DmMessageRow => ({
   createdAt: Number(r.created_at),
   sender: String(r.sender),
   content: String(r.content),
+  fromMe: Number(r.from_me) === 1,
+  wireKind: Number(r.wire_kind),
 });
 
 /**
@@ -57,9 +65,10 @@ export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<v
   await db.transaction(async (tx) => {
     for (const m of rows) {
       await tx.execute(
-        `INSERT OR REPLACE INTO dm_messages (event_id, conversation, created_at, sender, content)
-         VALUES (?, ?, ?, ?, ?);`,
-        [m.eventId, m.conversation, m.createdAt, m.sender, m.content],
+        `INSERT OR REPLACE INTO dm_messages
+           (event_id, conversation, created_at, sender, content, from_me, wire_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?);`,
+        [m.eventId, m.conversation, m.createdAt, m.sender, m.content, m.fromMe ? 1 : 0, m.wireKind],
       );
     }
   });

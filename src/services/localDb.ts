@@ -19,7 +19,9 @@ const SCHEMA: string[] = [
      conversation TEXT NOT NULL,
      created_at   INTEGER NOT NULL,
      sender       TEXT NOT NULL,
-     content      TEXT NOT NULL
+     content      TEXT NOT NULL,
+     from_me      INTEGER NOT NULL DEFAULT 0,
+     wire_kind    INTEGER NOT NULL DEFAULT 14
    );`,
   `CREATE INDEX IF NOT EXISTS idx_dm_conversation_created
      ON dm_messages (conversation, created_at DESC);`,
