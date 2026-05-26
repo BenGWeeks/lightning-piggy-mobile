@@ -68,14 +68,24 @@ describe('localDb', () => {
     expect(await freshVerify()).toBe('4.6.0');
   });
 
-  it('verifyEncryptedDb throws when SQLCipher is not active (empty cipher_version)', async () => {
+  it('refuses to open when SQLCipher is not active (empty cipher_version → plaintext guard)', async () => {
     mockExecute.mockImplementation((sql: string) =>
       sql.includes('cipher_version')
         ? Promise.resolve({ rows: [{ cipher_version: '' }] })
         : Promise.resolve({ rows: [] }),
     );
-    const { verifyEncryptedDb: freshVerify } = require('./localDb');
-    await expect(freshVerify()).rejects.toThrow('SQLCipher not active');
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await expect(freshGetLocalDb()).rejects.toThrow('SQLCipher not active');
+  });
+
+  it('checks cipher_version before running the schema (open-time guard)', async () => {
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await freshGetLocalDb();
+    const sqls = mockExecute.mock.calls.map((c) => c[0]);
+    const cipherIdx = sqls.findIndex((s) => s.includes('cipher_version'));
+    const schemaIdx = sqls.findIndex((s) => s.includes('CREATE TABLE'));
+    expect(cipherIdx).toBeGreaterThanOrEqual(0);
+    expect(cipherIdx).toBeLessThan(schemaIdx); // guard runs before schema
   });
 });
 

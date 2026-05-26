@@ -30,6 +30,17 @@ let dbPromise: Promise<DB> | null = null;
 async function openLocalDb(): Promise<DB> {
   const encryptionKey = await getOrCreateLocalDbKey();
   const db = open({ name: DB_NAME, encryptionKey });
+  // Fail loud if SQLCipher isn't actually compiled in: op-sqlite silently
+  // ignores `encryptionKey` on a plain-SQLite build, which would write our
+  // private DM / transaction rows to disk in cleartext. cipher_version is
+  // empty on plain SQLite and non-empty (e.g. "4.14.0 community") under
+  // SQLCipher — an empty value means the build regressed, so refuse to open.
+  const cipher = await db.execute('PRAGMA cipher_version;');
+  if (!String(cipher.rows?.[0]?.cipher_version ?? '')) {
+    throw new Error(
+      'SQLCipher not active — refusing to open a plaintext DB (cipher_version empty)',
+    );
+  }
   for (const stmt of SCHEMA) await db.execute(stmt);
   return db;
 }
@@ -50,26 +61,30 @@ export function getLocalDb(): Promise<DB> {
 }
 
 /**
- * Spike smoke-check (#695 step 0): proves op-sqlite opens an *encrypted* DB
- * cleanly in the dev-client build and round-trips a row. Returns the active
- * SQLCipher cipher version (non-empty string) on success; throws if the
- * native module or SQLCipher target isn't wired up. Call once from a dev
- * build and check the log — not part of normal app flow.
+ * Dev-only smoke-check (#695 spike): round-trips a row through the opened DB
+ * and returns the active SQLCipher cipher version for logging. The
+ * SQLCipher-active assertion lives in `openLocalDb` now (every open is
+ * guarded); this just exercises an encrypted write/read end-to-end. Guarded
+ * to `__DEV__` so it can't be called from production code, and the smoke row
+ * is always cleaned up in `finally`.
  */
 export async function verifyEncryptedDb(): Promise<string> {
-  const db = await getLocalDb();
+  if (!__DEV__) throw new Error('verifyEncryptedDb is a dev-only diagnostic');
+  const db = await getLocalDb(); // openLocalDb already asserted SQLCipher is active
   const res = await db.execute('PRAGMA cipher_version;');
   const cipher = String(res.rows?.[0]?.cipher_version ?? '');
-  if (!cipher) throw new Error('SQLCipher not active — cipher_version empty (plain SQLite build?)');
-  await db.execute(
-    `INSERT OR REPLACE INTO dm_messages (event_id, conversation, created_at, sender, content)
-     VALUES (?, ?, ?, ?, ?);`,
-    ['__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
-  );
-  const back = await db.execute('SELECT content FROM dm_messages WHERE event_id = ?;', [
-    '__smoke__',
-  ]);
-  await db.execute('DELETE FROM dm_messages WHERE event_id = ?;', ['__smoke__']);
-  if (back.rows?.[0]?.content !== 'ok') throw new Error('encrypted round-trip failed');
-  return cipher;
+  try {
+    await db.execute(
+      `INSERT OR REPLACE INTO dm_messages (event_id, conversation, created_at, sender, content)
+       VALUES (?, ?, ?, ?, ?);`,
+      ['__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
+    );
+    const back = await db.execute('SELECT content FROM dm_messages WHERE event_id = ?;', [
+      '__smoke__',
+    ]);
+    if (back.rows?.[0]?.content !== 'ok') throw new Error('encrypted round-trip failed');
+    return cipher;
+  } finally {
+    await db.execute('DELETE FROM dm_messages WHERE event_id = ?;', ['__smoke__']).catch(() => {});
+  }
 }
