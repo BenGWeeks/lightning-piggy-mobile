@@ -164,8 +164,8 @@ async function readFileAsBase64(fileUri: string): Promise<string> {
  * `base64` is optional. When the caller already has the bytes in memory
  * (e.g. expo-image-picker with `base64: true`) pass them through to skip
  * a redundant file read. When omitted, we read the file from disk via
- * XHR + FileReader. nostr.build uploads always go through the
- * FormData `{uri, name, type}` path which doesn't need base64.
+ * expo-file-system (`readFileAsBase64`). nostr.build uploads always go
+ * through the FormData `{uri, name, type}` path which doesn't need base64.
  */
 export async function uploadBlob(
   fileUri: string,

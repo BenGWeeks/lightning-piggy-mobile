@@ -45,6 +45,23 @@ const fmtDuration = (seconds: number) => {
   return `${Math.floor(t / 60)}:${(t % 60).toString().padStart(2, '0')}`;
 };
 
+// Extension for the decrypted cache file, from the file-type mime, so the
+// player gets the right container hint. Defaults to m4a (our recorder).
+function extFromMime(mime?: string): string {
+  switch (mime) {
+    case 'audio/mpeg':
+      return 'mp3';
+    case 'audio/aac':
+      return 'aac';
+    case 'audio/ogg':
+      return 'ogg';
+    case 'audio/wav':
+      return 'wav';
+    default:
+      return 'm4a';
+  }
+}
+
 interface Props {
   url: string;
   fromMe: boolean;
@@ -66,6 +83,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   encrypted = false,
   keyHex,
   nonceHex,
+  mime,
   testID,
 }) => {
   const colors = useThemeColors();
@@ -104,7 +122,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
       const cipher = new Uint8Array(await res.arrayBuffer());
       const plain = decryptFile(cipher, keyHex, nonceHex);
       const safe = (url.split('/').pop() ?? 'note').replace(/[^a-zA-Z0-9._-]/g, '');
-      const uri = `${cacheDirectory ?? ''}lp-voice-${safe}.m4a`;
+      if (!cacheDirectory) throw new Error('No cache directory available for decrypted audio');
+      const base = cacheDirectory.endsWith('/') ? cacheDirectory : `${cacheDirectory}/`;
+      const uri = `${base}lp-voice-${safe}.${extFromMime(mime)}`;
       await writeAsStringAsync(uri, Buffer.from(plain).toString('base64'), {
         encoding: 'base64',
       });

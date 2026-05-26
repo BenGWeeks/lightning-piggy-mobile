@@ -19,7 +19,13 @@ jest.mock('../services/boltzService', () => ({
   },
 }));
 
-import { extractBitcoinUri, isSecretModeTrigger } from './messageContent';
+import {
+  extractBitcoinUri,
+  isSecretModeTrigger,
+  extractAudioUrl,
+  parseVoiceNote,
+  encodeEncryptedFileUrl,
+} from './messageContent';
 
 describe('isSecretModeTrigger', () => {
   it('matches the exact trigger word', () => {
@@ -92,5 +98,65 @@ describe('extractBitcoinUri', () => {
     expect(extractBitcoinUri('hello')).toBeNull();
     expect(extractBitcoinUri('lightning:lnbc100')).toBeNull();
     expect(extractBitcoinUri('')).toBeNull();
+  });
+});
+
+describe('extractAudioUrl', () => {
+  it('matches a plain audio URL that is the whole message body', () => {
+    expect(extractAudioUrl('https://blossom.example/abc.m4a')).toBe(
+      'https://blossom.example/abc.m4a',
+    );
+    expect(extractAudioUrl('https://blossom.primal.net/deadbeef.mp4')).toBe(
+      'https://blossom.primal.net/deadbeef.mp4',
+    );
+  });
+
+  it('rejects non-audio URLs and URLs with surrounding text', () => {
+    expect(extractAudioUrl('https://x/y.png')).toBeNull();
+    expect(extractAudioUrl('listen to this https://x/y.m4a')).toBeNull();
+    expect(extractAudioUrl('')).toBeNull();
+  });
+});
+
+describe('parseVoiceNote / encodeEncryptedFileUrl (NIP-17 kind 15)', () => {
+  it('round-trips an encrypted voice note and strips the fragment from the fetch URL', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://blossom.primal.net/2d6b4c.bin',
+      mime: 'audio/mp4',
+      keyHex: 'aa'.repeat(32),
+      nonceHex: 'bb'.repeat(12),
+    });
+    const parsed = parseVoiceNote(encoded);
+    expect(parsed?.encrypted).toBe(true);
+    expect(parsed?.url).toBe('https://blossom.primal.net/2d6b4c.bin');
+    expect(parsed?.url).not.toContain('#'); // fragment never reaches the server
+    expect(parsed?.keyHex).toBe('aa'.repeat(32));
+    expect(parsed?.nonceHex).toBe('bb'.repeat(12));
+    expect(parsed?.mime).toBe('audio/mp4');
+  });
+
+  it('detects a plain (unencrypted / legacy) audio URL', () => {
+    const parsed = parseVoiceNote('https://blossom.example/abc.m4a');
+    expect(parsed?.encrypted).toBe(false);
+    expect(parsed?.url).toBe('https://blossom.example/abc.m4a');
+  });
+
+  it('ignores encrypted files that are not audio (images handled separately, #688)', () => {
+    const img = encodeEncryptedFileUrl({
+      url: 'https://s/x.bin',
+      mime: 'image/jpeg',
+      keyHex: 'a'.repeat(64),
+      nonceHex: 'b'.repeat(24),
+    });
+    expect(parseVoiceNote(img)).toBeNull();
+  });
+
+  it('rejects an lpe fragment missing key or nonce', () => {
+    expect(parseVoiceNote('https://s/x.bin#lpe=1&m=audio%2Fmp4')).toBeNull();
+  });
+
+  it('returns null for non-voice text', () => {
+    expect(parseVoiceNote('hello world')).toBeNull();
+    expect(parseVoiceNote('')).toBeNull();
   });
 });

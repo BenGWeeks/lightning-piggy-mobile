@@ -56,8 +56,9 @@ function inferContentType(imageUri: string, blobType: string | undefined): strin
     // so future audio-attach paths (e.g. picker-based uploads) flow
     // through Blossom with the right MIME.
     case 'm4a':
-    case 'aac':
       return 'audio/mp4';
+    case 'aac':
+      return 'audio/aac';
     case 'mp3':
       return 'audio/mpeg';
     case 'wav':
