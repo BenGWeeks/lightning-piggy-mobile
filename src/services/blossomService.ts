@@ -76,6 +76,11 @@ export async function uploadToBlossom(
   serverUrl: string,
   signer: BlossomSigner,
   imageBase64?: string | null,
+  // Force a specific Content-Type instead of inferring from the URI
+  // extension. Encrypted uploads pass `application/octet-stream` because
+  // the bytes are AES-GCM ciphertext, not the original media type (the
+  // real mime travels in the NIP-17 kind-15 `file-type` tag).
+  contentTypeOverride?: string,
 ): Promise<string> {
   const server = serverUrl.trim().replace(/\/+$/, '');
   if (!server) throw new Error('Blossom server URL is empty');
@@ -93,7 +98,7 @@ export async function uploadToBlossom(
   console.log('[Blossom] read', bytes.length, 'bytes from base64');
 
   const hashHex = bytesToHex(sha256(bytes));
-  const contentType = inferContentType(imageUri, undefined);
+  const contentType = contentTypeOverride ?? inferContentType(imageUri, undefined);
   console.log('[Blossom] hash', hashHex, 'type', contentType);
 
   const nowSec = Math.floor(Date.now() / 1000);

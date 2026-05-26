@@ -29,7 +29,11 @@ import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { stripImageMetadata, uploadBlob, uploadImage } from '../services/imageUploadService';
+import {
+  stripImageMetadata,
+  uploadEncryptedBlob,
+  uploadImage,
+} from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
@@ -66,6 +70,7 @@ import {
   extractInvoice,
   extractSharedContact,
   formatTime,
+  encodeEncryptedFileUrl,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
@@ -159,6 +164,7 @@ const ConversationScreen: React.FC = () => {
     fetchConversation,
     getCachedConversation,
     sendDirectMessage,
+    sendFileMessage,
     appendLocalDmMessage,
     signEvent,
     contacts,
@@ -740,8 +746,13 @@ const ConversationScreen: React.FC = () => {
       if (uploadingVoice) return;
       setUploadingVoice(true);
       try {
-        const url = await uploadBlob(uri, signEvent);
-        const sendResult = await sendDirectMessage(pubkey, url);
+        // Encrypt on-device (AES-256-GCM) and upload the CIPHERTEXT to
+        // Blossom, then send a NIP-17 kind-15 file message — so the server
+        // never sees the audio and the recipient decrypts with the key
+        // carried inside the E2E-encrypted DM (#235). The optimistic bubble
+        // stores the same encoded URL so it plays locally right away.
+        const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
+        const sendResult = await sendFileMessage(pubkey, file);
         if (!sendResult.success) {
           Alert.alert('Send failed', sendResult.error ?? 'Could not send voice note.');
           return;
@@ -751,7 +762,12 @@ const ConversationScreen: React.FC = () => {
           {
             id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             fromMe: true,
-            text: url,
+            text: encodeEncryptedFileUrl({
+              url: file.url,
+              mime: file.mime,
+              keyHex: file.keyHex,
+              nonceHex: file.nonceHex,
+            }),
             createdAt: Math.floor(Date.now() / 1000),
           },
         ]);
@@ -763,7 +779,7 @@ const ConversationScreen: React.FC = () => {
         setUploadingVoice(false);
       }
     },
-    [pubkey, sendDirectMessage, signEvent, uploadingVoice],
+    [pubkey, sendFileMessage, signEvent, uploadingVoice],
   );
 
   const openLocation = useCallback((loc: SharedLocation) => {

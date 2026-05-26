@@ -2,6 +2,8 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getBlossomServer } from './walletStorageService';
 import { uploadToBlossom, BlossomSigner } from './blossomService';
 import { readAsStringAsync } from 'expo-file-system/legacy';
+import { Buffer } from 'buffer';
+import { encryptFile } from './encryptedFile';
 
 const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
 
@@ -176,6 +178,53 @@ export async function uploadBlob(
     return uploadToBlossom(fileUri, server, signer, payload);
   }
   return uploadToNostrBuild(fileUri);
+}
+
+export interface EncryptedUpload {
+  /** Blossom URL of the uploaded ciphertext. */
+  url: string;
+  /** Hex AES-256 key — goes in the kind-15 `decryption-key` tag. */
+  keyHex: string;
+  /** Hex GCM nonce — goes in the kind-15 `decryption-nonce` tag. */
+  nonceHex: string;
+  /** SHA-256 of the ciphertext — the `x` tag. */
+  sha256Hex: string;
+  /** Ciphertext byte length — the `size` tag. */
+  size: number;
+  /** Original (decrypted) mime — the `file-type` tag. */
+  mime: string;
+}
+
+/**
+ * Encrypt a file's bytes (AES-256-GCM) and upload the **ciphertext** to the
+ * user's Blossom server, returning the URL plus the key/nonce the recipient
+ * needs to decrypt. The server only ever stores ciphertext — the basis for
+ * NIP-17 kind-15 encrypted voice notes (#235; images follow in #688).
+ *
+ * Requires a Blossom signer — the nostr.build fallback doesn't apply to
+ * encrypted blobs (we always have a signer when sending a DM).
+ */
+export async function uploadEncryptedBlob(
+  fileUri: string,
+  signer: BlossomSigner,
+  mime: string,
+  base64?: string | null,
+): Promise<EncryptedUpload> {
+  const payload = base64 ?? (await readFileAsBase64(fileUri));
+  const plaintext = new Uint8Array(Buffer.from(payload, 'base64'));
+  const { ciphertext, keyHex, nonceHex, sha256Hex } = encryptFile(plaintext);
+  const ciphertextBase64 = Buffer.from(ciphertext).toString('base64');
+  const server = await getBlossomServer();
+  // Upload as opaque bytes — the blob is ciphertext, so the original mime
+  // travels in the kind-15 `file-type` tag instead of the Content-Type.
+  const url = await uploadToBlossom(
+    fileUri,
+    server,
+    signer,
+    ciphertextBase64,
+    'application/octet-stream',
+  );
+  return { url, keyHex, nonceHex, sha256Hex, size: ciphertext.length, mime };
 }
 
 /**

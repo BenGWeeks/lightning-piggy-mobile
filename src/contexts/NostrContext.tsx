@@ -20,6 +20,7 @@ import {
 import { utf8ByteSize } from '../utils/byteSize';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
+import type { EncryptedUpload } from '../services/imageUploadService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -29,8 +30,10 @@ import {
   subjectFromRumor,
   unwrapWrapNsec,
   unwrapWrapViaNip44,
+  fileMetaFromRumor,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
+import { encodeEncryptedFileUrl } from '../utils/messageContent';
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
@@ -117,6 +120,15 @@ const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
 
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
+// Internal message-store text for a decoded rumor: kind-14 chat → content
+// unchanged; kind-15 encrypted file → the blob URL with AES-256-GCM
+// decryption params folded into the fragment (encodeEncryptedFileUrl). A
+// pure superset, so existing kind-14 handling stays byte-identical.
+function textForRumor(rumor: DecodedRumor): string {
+  const meta = fileMetaFromRumor(rumor);
+  return meta ? encodeEncryptedFileUrl(meta) : rumor.content;
+}
+
 type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
 
 /**
@@ -267,7 +279,7 @@ async function tryRouteGroupRumor(
   const message: GroupMessage = {
     id: wrapId,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: rumor.content,
+    text: textForRumor(rumor),
     createdAt: rumor.created_at,
   };
   try {
@@ -831,6 +843,10 @@ interface NostrContextType {
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  sendFileMessage: (
+    recipientPubkey: string,
+    file: EncryptedUpload,
   ) => Promise<{ success: boolean; error?: string }>;
   /**
    * Persist an optimistic local- DM message to the per-conversation
@@ -2421,6 +2437,106 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   /**
+   * Send an encrypted file as a NIP-17 kind-15 message (#235 voice notes;
+   * #688 images). Mirrors `sendDirectMessage` but wraps a kind-15 file rumor
+   * (the blob URL + AES-256-GCM decryption tags) instead of a kind-14 text
+   * rumor — same nsec / Amber plumbing, same "also wrap for the sender so
+   * other devices see it" behaviour. `file` is the result of
+   * `uploadEncryptedBlob` (ciphertext already on Blossom).
+   */
+  const sendFileMessage = useCallback(
+    async (
+      recipientPubkey: string,
+      file: EncryptedUpload,
+    ): Promise<{ success: boolean; error?: string }> => {
+      if (!pubkey || !isLoggedIn) {
+        return { success: false, error: 'Not logged in' };
+      }
+      const normalizedRecipientPubkey = recipientPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
+        return { success: false, error: 'Invalid public key format' };
+      }
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const rumor = nostrService.createFileMessageRumor({
+          senderPubkey: pubkey,
+          recipientPubkey: normalizedRecipientPubkey,
+          url: file.url,
+          mime: file.mime,
+          keyHex: file.keyHex,
+          nonceHex: file.nonceHex,
+          sha256Hex: file.sha256Hex,
+          size: file.size,
+        });
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return { success: false, error: 'Key not found' };
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          const result = await nostrService.sendNip17ToManyWithNsec({
+            senderSecretKey: secretKey,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
+          }
+          return { success: true };
+        }
+
+        if (signerType === 'amber') {
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+            signerNip44Encrypt: (plain, recipient) =>
+              amberService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await amberService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('Amber returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
+          }
+          return { success: true };
+        }
+
+        return { success: false, error: 'Unsupported signer type' };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send file';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  /**
    * NIP-17 multi-recipient send. Supports both nsec (signs locally) and
    * Amber (per-recipient signEvent + nip44Encrypt round-trips) signers.
    *
@@ -2935,7 +3051,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 partnerPubkey: partnership.partnerPubkey,
                 fromMe: partnership.fromMe,
                 createdAt: rumor.created_at,
-                text: rumor.content,
+                text: textForRumor(rumor),
                 wireKind: rumor.kind,
               };
               cache[wrap.id] = entry;
@@ -2944,7 +3060,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               decrypted.push({
                 id: wrap.id,
                 fromMe: partnership.fromMe,
-                text: rumor.content,
+                text: textForRumor(rumor),
                 createdAt: rumor.created_at,
               });
             }
@@ -2988,7 +3104,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               decrypted.push({
                 id: wrap.id,
                 fromMe: partnership.fromMe,
-                text: rumor.content,
+                text: textForRumor(rumor),
                 createdAt: rumor.created_at,
               });
             } catch (error) {
@@ -3327,7 +3443,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     partnerPubkey: partnership.partnerPubkey,
                     fromMe: partnership.fromMe,
                     createdAt: rumor.created_at,
-                    text: rumor.content,
+                    text: textForRumor(rumor),
                     wireKind: rumor.kind,
                   };
                   cache[wrap.id] = entry;
@@ -3420,7 +3536,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     partnerPubkey: partnership.partnerPubkey,
                     fromMe: partnership.fromMe,
                     createdAt: rumor.created_at,
-                    text: rumor.content,
+                    text: textForRumor(rumor),
                     wireKind: rumor.kind,
                   };
                   cache[wrap.id] = entry;
@@ -3942,7 +4058,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         partnerPubkey: partnership.partnerPubkey,
         fromMe: partnership.fromMe,
         createdAt: rumor.created_at,
-        text: rumor.content,
+        text: textForRumor(rumor),
         wireKind: rumor.kind,
       };
       const inboxEntry: DmInboxEntry = {
@@ -4145,6 +4261,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendFileMessage,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,
@@ -4183,6 +4300,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendFileMessage,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,

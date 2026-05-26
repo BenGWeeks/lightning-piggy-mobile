@@ -262,6 +262,48 @@ export function participantsFromRumor(rumor: DecodedRumor): Set<string> {
  * `fromMe` reflects whether the viewer is the sender. The set of
  * `otherParticipants` always EXCLUDES the viewer.
  */
+/**
+ * File metadata parsed from a NIP-17 kind-15 file-message rumor (#235).
+ * The blob at `url` is AES-256-GCM ciphertext; `keyHex`/`nonceHex` decrypt
+ * it, `mime` is the original (decrypted) content type.
+ */
+export interface ConversationFileMeta {
+  url: string;
+  mime: string;
+  algorithm: string;
+  keyHex: string;
+  nonceHex: string;
+  sha256?: string;
+  size?: number;
+}
+
+/**
+ * Extract file metadata from a kind-15 rumor's tags + content. Returns
+ * undefined for non-kind-15 rumors, or kind-15 rumors missing the fields
+ * we need to fetch + decrypt (url / key / nonce) — callers then fall back
+ * to rendering the rumor as plain text.
+ */
+export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | undefined {
+  if (rumor.kind !== 15) return undefined;
+  const tag = (name: string): string | undefined => rumor.tags.find((t) => t[0] === name)?.[1];
+  // NIP-17 kind 15 puts the file URL in `content`; tolerate a `url` tag too.
+  const url = rumor.content?.trim() || tag('url');
+  const keyHex = tag('decryption-key');
+  const nonceHex = tag('decryption-nonce');
+  if (!url || !keyHex || !nonceHex) return undefined;
+  const sizeRaw = tag('size');
+  const size = sizeRaw && /^\d+$/.test(sizeRaw) ? Number(sizeRaw) : undefined;
+  return {
+    url,
+    mime: tag('file-type') ?? 'application/octet-stream',
+    algorithm: tag('encryption-algorithm') ?? 'aes-gcm',
+    keyHex,
+    nonceHex,
+    sha256: tag('x'),
+    size,
+  };
+}
+
 export function classifyRumor(
   rumor: DecodedRumor,
   viewerPubkey: string,

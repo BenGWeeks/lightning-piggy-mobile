@@ -15,7 +15,7 @@ import {
   type BubbleContent,
   extractBitcoinUri,
   extractImageUrl,
-  extractAudioUrl,
+  parseVoiceNote,
   extractInvoice,
   extractLightningAddress,
   extractSharedContact,
@@ -212,11 +212,15 @@ const MessageBubble: React.FC<Props> = ({
   // Voice note (#235) — inline player card (play/pause + waveform), shown
   // for both sender and receiver. Detected before the text/link fallback
   // so the Blossom `.mp4` URL renders as a player, not a bare link.
-  const audioUrl = extractAudioUrl(text);
-  if (audioUrl) {
+  const voice = parseVoiceNote(text);
+  if (voice) {
     return (
       <VoiceNotePlayer
-        url={audioUrl}
+        url={voice.url}
+        encrypted={voice.encrypted}
+        keyHex={voice.keyHex}
+        nonceHex={voice.nonceHex}
+        mime={voice.mime}
         fromMe={fromMe}
         createdAt={createdAt}
         senderName={senderName}

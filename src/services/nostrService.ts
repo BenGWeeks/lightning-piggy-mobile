@@ -865,6 +865,44 @@ export function createDirectMessageRumor(input: {
   };
 }
 
+/**
+ * Build the inner kind-15 file-message rumor for a 1:1 NIP-17 encrypted
+ * attachment (#235 voice notes; #688 images). Same shape as
+ * `createDirectMessageRumor` (one `p` tag) plus the file-metadata tags the
+ * receiver needs to fetch + decrypt the Blossom blob. The blob is AES-256-GCM
+ * ciphertext; `content` is its URL, and `decryption-key` / `decryption-nonce`
+ * travel only inside the gift-wrapped (E2E-encrypted) message.
+ *
+ * Wrapped + sent via the same `sendNip17ToMany*` plumbing as kind-14 DMs.
+ */
+export function createFileMessageRumor(input: {
+  senderPubkey: string;
+  recipientPubkey: string;
+  url: string;
+  mime: string;
+  keyHex: string;
+  nonceHex: string;
+  sha256Hex: string;
+  size: number;
+  algorithm?: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  return {
+    pubkey: input.senderPubkey,
+    kind: 15,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['p', input.recipientPubkey],
+      ['file-type', input.mime],
+      ['encryption-algorithm', input.algorithm ?? 'aes-gcm'],
+      ['decryption-key', input.keyHex],
+      ['decryption-nonce', input.nonceHex],
+      ['x', input.sha256Hex],
+      ['size', String(input.size)],
+    ],
+    content: input.url,
+  };
+}
+
 export interface RawDmEvent {
   id: string;
   pubkey: string;

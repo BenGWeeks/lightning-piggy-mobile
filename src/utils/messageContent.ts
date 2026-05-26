@@ -77,6 +77,63 @@ export function extractAudioUrl(text: string): string | null {
   return match ? match[0] : null;
 }
 
+// --- Encrypted voice-note encoding (#235, NIP-17 kind 15) ---
+//
+// kind-15 file messages carry the blob URL + AES-256-GCM decryption params
+// in event tags. Internally we fold those into the message `text` as a URL
+// fragment (`#lpe=1&alg=…&k=…&n=…&m=…`) so the existing string-based message
+// store + DM cache carry everything the player needs without a schema
+// change. The fragment is NEVER sent to the Blossom server (HTTP strips
+// `#…` from requests), and the whole string only ever lives inside the
+// E2E-encrypted DM realm. The wire format stays standard NIP-17 kind 15.
+const LPE_MARKER = 'lpe=1';
+
+export function encodeEncryptedFileUrl(input: {
+  url: string;
+  mime: string;
+  keyHex: string;
+  nonceHex: string;
+  algorithm?: string;
+}): string {
+  const frag =
+    `${LPE_MARKER}&alg=${encodeURIComponent(input.algorithm ?? 'aes-gcm')}` +
+    `&k=${input.keyHex}&n=${input.nonceHex}&m=${encodeURIComponent(input.mime)}`;
+  return `${input.url}#${frag}`;
+}
+
+export interface ParsedVoiceNote {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect a voice note: either an `#lpe=1` encrypted-file URL whose mime is
+ * `audio/*` (new path), or a plain audio URL (legacy / unencrypted / other
+ * clients). Returns null for anything else. Backward-compatible — plaintext
+ * audio URLs already in threads keep working.
+ */
+export function parseVoiceNote(text: string): ParsedVoiceNote | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0 && trimmed.slice(hashIdx + 1).includes(LPE_MARKER)) {
+    const url = trimmed.slice(0, hashIdx);
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    const keyHex = params.get('k') ?? undefined;
+    const nonceHex = params.get('n') ?? undefined;
+    const mime = params.get('m') ?? 'application/octet-stream';
+    // Only audio here — encrypted images are handled separately (#688).
+    if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
+    return { url, mime, encrypted: true, keyHex, nonceHex };
+  }
+  const plain = extractAudioUrl(trimmed);
+  return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
+}
+
 export function extractInvoice(text: string): DecodedInvoice | null {
   if (!text) return null;
   const match = text.match(INVOICE_REGEX);
