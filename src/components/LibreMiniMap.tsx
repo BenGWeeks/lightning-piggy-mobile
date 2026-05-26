@@ -116,6 +116,11 @@ interface Props {
   // LocationPickerSheet where the user picks the geocache coordinate
   // by panning the map until the crosshair sits where they want it.
   crosshair?: boolean;
+  // Optional single marker rendered at an explicit coordinate, on top of
+  // any `caches`. Used by the Hide/Edit-a-Piglet location step to show a
+  // piggy/pin glyph at the spot the hider pinned (the map centres there
+  // but otherwise has no marker). `isLpPiggy` picks the glyph + colour.
+  pinMarker?: { lat: number; lon: number; isLpPiggy?: boolean } | null;
   // Marker-tap callbacks. Optional — when unset the pin is decorative
   // (mini-map use case). MapScreen wires these to open MerchantDetail-
   // Sheet / CacheDetailSheet.
@@ -195,6 +200,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
   fill = false,
   onBoundsChange,
   crosshair = false,
+  pinMarker,
   onSelectMerchant,
   onSelectCache,
   onSelectEvent,
@@ -525,6 +531,20 @@ const LibreMiniMapInner: React.FC<Props> = ({
             </Marker>
           );
         })}
+        {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn
+            at the hider's chosen coordinate so the centred map shows where
+            the Piglet is, not just an empty map. */}
+        {pinMarker ? (
+          <Marker id="pin-marker" lngLat={[pinMarker.lon, pinMarker.lat]}>
+            <View style={[styles.pin, pinMarker.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
+              {pinMarker.isLpPiggy ? (
+                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+              ) : (
+                <MapPin size={12} color="#fff" strokeWidth={2.5} />
+              )}
+            </View>
+          </Marker>
+        ) : null}
         {/* Events: Calendar glyph in deep-purple. */}
         {eventPoints.map((e) => {
           const original = eventByCoord.get(e.id);

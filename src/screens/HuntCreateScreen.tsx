@@ -1611,6 +1611,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                       merchants={[]}
                       caches={[]}
                       events={[]}
+                      pinMarker={{ lat: pin.lat, lon: pin.lon, isLpPiggy: listingIsLpInEdit }}
                       onTapMap={() => setLocationPickerVisible(true)}
                     />
                   </View>
