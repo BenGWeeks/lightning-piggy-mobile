@@ -1,0 +1,224 @@
+import { bech32 } from 'bech32';
+
+/**
+ * Wallet-agnostic LNURL-withdraw resolver. Lightning Piggy is NOT an
+ * issuer of LNURL-w links — the user creates one in *their* wallet
+ * (LNbits, Alby, Mutiny, …) with the daily / total-cap / wait_time
+ * settings *they* want, then pastes the resulting `lnurl1...` /
+ * `lnurlw://` / `lightning:LNURL1...` string into Lightning Piggy. We
+ * just resolve it via the standard LNURL-w protocol and store it.
+ *
+ * Used by the Hunt feature (#468). See project memory `No LNbits-
+ * specific APIs` for the rationale.
+ */
+
+const FETCH_TIMEOUT_MS = 8_000;
+
+export interface LnurlWithdrawParams {
+  /** Endpoint the finder POSTs the bolt11 invoice to. */
+  callback: string;
+  /** Random nonce the issuer expects echoed back at claim time. */
+  k1: string;
+  /** Memo / "what is this for" text from the issuer. */
+  defaultDescription: string;
+  minWithdrawable: number; // millisatoshis per LUD-03
+  maxWithdrawable: number; // millisatoshis per LUD-03
+}
+
+export class LnurlWithdrawError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LnurlWithdrawError';
+  }
+}
+
+/**
+ * Parse any of the user-pasteable forms into the underlying HTTPS URL:
+ *   - bech32: `lnurl1...` / `LNURL1...`
+ *   - URI prefix: `lightning:lnurl1...`
+ *   - non-bech32 LNURL: `lnurlw://example.com/foo`
+ *
+ * Returns the resolved `https://` URL or throws.
+ */
+export const decodeLnurlWithdraw = (input: string): string => {
+  let s = input.trim();
+  if (!s) throw new LnurlWithdrawError('Empty LNURL');
+
+  // Strip the Lightning URI prefix when present.
+  if (/^lightning:/i.test(s)) {
+    s = s.slice('lightning:'.length).trim();
+  }
+
+  // `lnurlw://host/path` is the cleartext form some wallets emit.
+  if (/^lnurlw:\/\//i.test(s)) {
+    return 'https://' + s.slice('lnurlw://'.length);
+  }
+
+  // `lnurl://host/path` (rare but spec-allowed).
+  if (/^lnurl:\/\//i.test(s)) {
+    return 'https://' + s.slice('lnurl://'.length);
+  }
+
+  // bech32 form. HRP is "lnurl"; we accept any case but bech32 itself
+  // is strict on case so normalise to lower first.
+  const lc = s.toLowerCase();
+  if (lc.startsWith('lnurl1')) {
+    try {
+      const decoded = bech32.decode(lc, 2_000); // generous limit — LNURLs > 90 chars
+      if (decoded.prefix !== 'lnurl') {
+        throw new LnurlWithdrawError(`Unexpected bech32 HRP "${decoded.prefix}"`);
+      }
+      const bytes = bech32.fromWords(decoded.words);
+      const url = new TextDecoder().decode(new Uint8Array(bytes));
+      if (!/^https?:\/\//i.test(url)) {
+        throw new LnurlWithdrawError('Decoded LNURL is not an HTTP(S) URL');
+      }
+      return url;
+    } catch (e) {
+      if (e instanceof LnurlWithdrawError) throw e;
+      throw new LnurlWithdrawError(`Could not decode LNURL: ${(e as Error).message}`);
+    }
+  }
+
+  // Last-ditch: caller pasted a raw https URL of the LNURL endpoint.
+  if (/^https?:\/\//i.test(s)) return s;
+
+  throw new LnurlWithdrawError(
+    'Not a recognised LNURL — expected lnurl1…, lnurlw://, lightning:LNURL1…, or https://',
+  );
+};
+
+/**
+ * Probe the LNURL-withdraw endpoint and return the issuer's
+ * withdrawRequest params. Used at create time so the hider can sanity-
+ * check max-withdrawable before saving, and at finder time to drive
+ * the celebration screen + claim call.
+ */
+export const resolveLnurlWithdraw = async (input: string): Promise<LnurlWithdrawParams> => {
+  const url = decodeLnurlWithdraw(input);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: controller.signal });
+  } catch (e) {
+    throw new LnurlWithdrawError(`Could not reach LNURL endpoint: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    throw new LnurlWithdrawError(`LNURL endpoint returned ${res.status} ${res.statusText}`);
+  }
+
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new LnurlWithdrawError('LNURL endpoint did not return JSON');
+  }
+
+  if (!isWithdrawRequest(json)) {
+    throw new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)');
+  }
+
+  return {
+    callback: json.callback,
+    k1: json.k1,
+    defaultDescription: json.defaultDescription ?? '',
+    minWithdrawable: json.minWithdrawable,
+    maxWithdrawable: json.maxWithdrawable,
+  };
+};
+
+interface WithdrawRequest {
+  tag: 'withdrawRequest';
+  callback: string;
+  k1: string;
+  defaultDescription?: string;
+  minWithdrawable: number;
+  maxWithdrawable: number;
+}
+
+const isWithdrawRequest = (v: unknown): v is WithdrawRequest => {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  return (
+    r.tag === 'withdrawRequest' &&
+    typeof r.callback === 'string' &&
+    typeof r.k1 === 'string' &&
+    typeof r.minWithdrawable === 'number' &&
+    typeof r.maxWithdrawable === 'number'
+  );
+};
+
+/** Convenience for UI surfaces — turn millisats into a clean sats display. */
+export const msatToSats = (msat: number): number => Math.floor(msat / 1_000);
+
+/**
+ * Claim against a resolved LNURL-w. Caller supplies a `getInvoice`
+ * callback that produces a bolt11 invoice for `sats` sats — keeps this
+ * service wallet-agnostic (we don't import nwcService here, the Hunt
+ * screen does the wiring).
+ *
+ * Returns when the issuer has accepted our invoice (LUD-03 OK status).
+ * The actual incoming bolt11 settlement is observed via
+ * `WalletContext.lastIncomingPayment` — the celebration overlay is
+ * already wired to that, so the finder sees the standard success
+ * confetti when the sats land.
+ *
+ * Throws `LnurlWithdrawError` for protocol-level failures (issuer
+ * said no), and a regular Error for transport-level failures.
+ */
+export const claimLnurlWithdraw = async (
+  params: LnurlWithdrawParams,
+  getInvoice: (sats: number, memo: string) => Promise<string>,
+): Promise<{ sats: number; bolt11: string }> => {
+  // Always claim the maximum the issuer offers. Min/max being equal is
+  // the common case (single-amount Piggy); when they differ we still
+  // pick max — finders want the biggest claim available, not the
+  // smallest. The bolt11 we generate has the exact amount baked in.
+  const sats = msatToSats(params.maxWithdrawable);
+  if (sats <= 0) {
+    throw new LnurlWithdrawError(
+      'Issuer reports zero withdrawable — Piggy is sleeping (cooldown not yet expired, or budget exhausted).',
+    );
+  }
+  const bolt11 = await getInvoice(sats, params.defaultDescription || 'Hunt Piggy claim');
+
+  const url = new URL(params.callback);
+  url.searchParams.set('k1', params.k1);
+  url.searchParams.set('pr', bolt11);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { signal: controller.signal });
+  } catch (e) {
+    throw new LnurlWithdrawError(`Could not reach LNURL callback: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    throw new LnurlWithdrawError(`LNURL callback returned ${res.status} ${res.statusText}`);
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new LnurlWithdrawError('LNURL callback did not return JSON');
+  }
+  if (!isOkStatus(json)) {
+    const reason = (json as { reason?: string })?.reason;
+    throw new LnurlWithdrawError(reason || 'Issuer rejected the invoice');
+  }
+  return { sats, bolt11 };
+};
+
+const isOkStatus = (v: unknown): boolean => {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  return r.status === 'OK';
+};

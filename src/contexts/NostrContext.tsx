@@ -12,7 +12,12 @@ import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { LRUCache } from '../utils/lru';
-import { evictNip17CacheOverflow, touchNip17CacheEntry } from '../utils/nip17Cache';
+import {
+  evictNip17CacheBytes,
+  evictNip17CacheOverflow,
+  touchNip17CacheEntry,
+} from '../utils/nip17Cache';
+import { utf8ByteSize } from '../utils/byteSize';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -31,7 +36,28 @@ import {
   reconcileSyntheticGroup,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
-import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  listPersistedGroupWrapIds,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
+import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
+import { perAccountKey } from '../services/perAccountStorage';
+import {
+  loadIdentities,
+  upsertIdentity,
+  removeIdentity as removeIdentityFromStore,
+  setActiveIdentity,
+  type StoredIdentity,
+} from '../services/identitiesStore';
+import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { perfLog } from '../utils/perfLog';
+import {
+  setActivePubkeyForWalletStorage,
+  deleteNwcUrl,
+  deleteXpub,
+  deleteMnemonic,
+} from '../services/walletStorageService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -45,6 +71,13 @@ import { appendGroupMessage, type GroupMessage } from '../services/groupMessages
  * path free and avoid serialising full-bundle JSON on every decrypt.
  */
 const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
+
+// Per-(viewer,partner) serialization chain for the optimistic local-
+// message disk-cache writes. Without this, two rapid sends (e.g.
+// double-tap retry, or two sequential tap-share-from-attach) could
+// each read-modify-write the conversation blob concurrently — last
+// write wins, losing the prior optimistic row. Per Copilot review #509.
+const appendLocalDmChains = new Map<string, Promise<void>>();
 export function __clearNip04PlaintextCacheForTests() {
   nip04PlaintextCache.clear();
 }
@@ -73,9 +106,11 @@ function clearMemoisedSecretKey(): void {
 // AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
 // use the same cache shape (wrap-id → decrypted rumor entry); they're
 // kept under separate keys so cross-signer login on the same device
-// doesn't leak plaintext between identities.
-const AMBER_NIP17_CACHE_KEY = 'amber_nip17_cache_v1';
-const NSEC_NIP17_CACHE_KEY = 'nsec_nip17_cache_v1';
+// doesn't leak plaintext between identities. As of #288 the keys are
+// also per-account namespaced — each base is suffixed with `_${pubkey}`
+// via `perAccountKey()` at every read/write site.
+const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
+const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
 const NIP17_CACHE_CAP = 5000;
 // Legacy AsyncStorage key from the now-removed "Enable NIP-17 on Amber" toggle (#404). Cleared on logout so old installs don't leave dead bytes around.
 const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
@@ -290,12 +325,16 @@ async function writeNip17Cache(
   cache: Record<string, Nip17CacheEntry>,
 ): Promise<number> {
   const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
+  // Byte cap on top of the count cap — a row past Android's ~2 MB
+  // SQLite CursorWindow throws on *read*, silently breaking this
+  // fast-path cache and forcing a full cold-start restream.
+  const evictedBytes = evictNip17CacheBytes(cache, DM_CACHE_MAX_BYTES);
   try {
     await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
   } catch (err) {
     console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
   }
-  return evicted;
+  return evicted + evictedBytes;
 }
 
 /** Yield to the JS event loop so UI interactions can tick between
@@ -304,6 +343,122 @@ async function writeNip17Cache(
  * starves UI events — setTimeout(0) returns to the task scheduler. */
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Half of a 60 fps frame (~8.3 ms). The NIP-17 inbox loops aim to
+ * stay under this many ms of unbroken JS work per yield. With the
+ * old count-based yield (every 4 wraps) a slow path could still
+ * blow past 50–200 ms in a single burst — enough to drop several
+ * frames on tab-switch. See #532. */
+const DECRYPT_FRAME_BUDGET_MS = 4;
+
+/** Cooperative-yield scheduler for the NIP-17 inbox loops (#532).
+ *
+ * Two improvements over the old `if (i % N === 0) await yieldToEventLoop()`
+ * pattern:
+ *
+ * 1. **Time-budget yields.** We only pay for a `setTimeout(0)` round-
+ *    trip when wall-clock since the last yield exceeds
+ *    `DECRYPT_FRAME_BUDGET_MS`. A run of cheap cache hits no longer
+ *    forces a yield every Nth iteration even though there's been no
+ *    blocking work. The count-based modulo still acts as a safety
+ *    cap (set by the caller) so a pathological iteration that
+ *    somehow underestimates its own runtime can't starve the thread.
+ *
+ * 2. **Hard-cancel on abort.** When the caller's `AbortSignal` fires
+ *    mid-loop, an `abort` listener clears the currently-pending
+ *    `setTimeout` and resolves the awaiter immediately. Without this,
+ *    the loop would still drain one more `setTimeout(0)` round-trip
+ *    (plus whatever sync work follows it) before the next abort
+ *    check — visible as a slug of pinned-thread time after a
+ *    tab-switch blurs MessagesScreen.
+ *
+ * Returned object:
+ * - `maybeYield()` — call once per loop iteration. No-op unless the
+ *   frame budget is exceeded OR the safety-cap counter ticks.
+ * - `yieldCount` — number of actual yields performed (perfLog).
+ * - `dispose()` — detach the abort listener after the loop exits.
+ */
+type YieldScheduler = {
+  maybeYield: () => Promise<void>;
+  readonly yieldCount: number;
+  dispose: () => void;
+};
+
+function createYieldScheduler(opts: {
+  signal?: AbortSignal;
+  /** Safety cap — always yield when iteration % safetyEvery === 0,
+   * even if the frame budget hasn't been blown. */
+  safetyEvery: number;
+  /** ms of unbroken JS work before we force a yield. */
+  budgetMs?: number;
+}): YieldScheduler {
+  const { signal, safetyEvery, budgetMs = DECRYPT_FRAME_BUDGET_MS } = opts;
+  let iteration = 0;
+  let yields = 0;
+  let lastYieldAt = performance.now();
+  let pendingHandle: ReturnType<typeof setTimeout> | null = null;
+  let pendingReject: ((reason?: unknown) => void) | null = null;
+
+  // On abort: clear the in-flight setTimeout so the awaiter unwinds
+  // immediately instead of waiting for the next scheduler tick.
+  const onAbort = () => {
+    if (pendingHandle !== null) {
+      clearTimeout(pendingHandle);
+      pendingHandle = null;
+    }
+    if (pendingReject) {
+      const reject = pendingReject;
+      pendingReject = null;
+      reject(new Error('aborted'));
+    }
+  };
+  if (signal) {
+    if (signal.aborted) {
+      // Already aborted before the loop started — caller is expected
+      // to check signal.aborted itself, but make maybeYield a no-op
+      // resolver so we don't queue work.
+    } else {
+      signal.addEventListener('abort', onAbort);
+    }
+  }
+
+  const maybeYield = async () => {
+    iteration++;
+    if (signal?.aborted) return;
+    const now = performance.now();
+    const overBudget = now - lastYieldAt >= budgetMs;
+    const safetyHit = iteration % safetyEvery === 0;
+    if (!overBudget && !safetyHit) return;
+    yields++;
+    await new Promise<void>((resolve, reject) => {
+      pendingReject = reject;
+      pendingHandle = setTimeout(() => {
+        pendingHandle = null;
+        pendingReject = null;
+        resolve();
+      }, 0);
+    }).catch(() => {
+      // Aborted — swallow; caller checks signal.aborted after maybeYield.
+    });
+    lastYieldAt = performance.now();
+  };
+
+  const dispose = () => {
+    if (signal) signal.removeEventListener('abort', onAbort);
+    if (pendingHandle !== null) {
+      clearTimeout(pendingHandle);
+      pendingHandle = null;
+    }
+  };
+
+  return {
+    maybeYield,
+    get yieldCount() {
+      return yields;
+    },
+    dispose,
+  };
 }
 
 /** Chunk size for yielding between decrypt attempts. Sized for the
@@ -323,9 +478,22 @@ const DECRYPT_YIELD_EVERY = 15;
  * yields the JS thread regularly. The cache-hit path itself is cheap
  * (~ms), but on a >1000-wrap inbox the bulk processing piles up to
  * tens of seconds of unbroken JS work without a periodic yield, which
- * starves UI events (back-tap appears frozen — #286). 8 keeps each
- * yield-bounded burst well under a 60 fps frame budget. */
-const NIP17_LOOP_YIELD_EVERY = 8;
+ * starves UI events (back-tap appears frozen — #286). Lowered from 8
+ * to 4 in 2026-05 — perf testing on a real Pixel showed the
+ * post-cold-start "Send sheet feels frozen" window was dominated by
+ * back-to-back NIP-17 inbox processing without enough JS-thread
+ * breathing room for gorhom-bottom-sheet's open animation to schedule
+ * frames. Halving this doubles yield frequency, drops the per-burst
+ * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
+ * smooth during inbox drain.
+ *
+ * Lowered again 2026-05-16 from 4 → 2: tonight's instrumented Pixel
+ * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
+ * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
+ * every 2 wraps cuts each per-burst block back to ~2 ms; the
+ * setImmediate cost is amortised across the still-significant
+ * per-wrap decrypt work so the overhead is < 5%. */
+const NIP17_LOOP_YIELD_EVERY = 2;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
@@ -356,6 +524,13 @@ const DM_CONV_CACHE_PREFIX = 'nostr_dm_conv_v1_';
 const DM_CONV_LAST_SEEN_PREFIX = 'nostr_dm_conv_last_seen_v1_';
 const DM_INBOX_CAP = 1000;
 const DM_CONV_CAP = 500;
+// Hard byte ceiling for a single DM cache row. Android's SQLite
+// CursorWindow caps a row at ~2 MB — past it the *read* throws
+// SQLiteBlobTooBigException, the cache silently fails to hydrate, and
+// every cold start falls back to a full relay restream + NIP-17
+// re-decrypt (a ~70s JS-thread stall). The count caps above aren't
+// enough when messages are long, so the merge fns trim by size too.
+const DM_CACHE_MAX_BYTES = 1_500_000;
 
 function inboxCacheKey(user: string) {
   return DM_INBOX_CACHE_PREFIX + user;
@@ -368,6 +543,25 @@ function convCacheKey(user: string, peer: string) {
 }
 function convLastSeenKey(user: string, peer: string) {
   return DM_CONV_LAST_SEEN_PREFIX + user + '_' + peer;
+}
+
+/**
+ * Read a DM-cache row, treating an unreadable row as empty. Android's
+ * SQLite CursorWindow caps a row at ~2 MB; a row past that throws
+ * `SQLiteBlobTooBigException` on read. Without this guard the throw
+ * aborts the whole refresh/fetch before the write-side byte cap can
+ * rewrite a smaller row — so an already-oversized row would never
+ * self-heal. Catching it (and dropping the poisoned key) lets the next
+ * relay restream repopulate a byte-capped row.
+ */
+async function safeGetDmCacheItem(key: string): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(key);
+  } catch (err) {
+    console.warn(`[Nostr] DM cache row unreadable — dropping ${key}:`, err);
+    AsyncStorage.removeItem(key).catch(() => {});
+    return null;
+  }
 }
 
 /** Read the persisted DM inbox for a user. Used during session restore /
@@ -383,7 +577,7 @@ function convLastSeenKey(user: string, peer: string) {
  * more than the brief render window before that re-filter happens. */
 async function loadDmInboxFromCache(pubkey: string): Promise<DmInboxEntry[]> {
   try {
-    const raw = await AsyncStorage.getItem(inboxCacheKey(pubkey));
+    const raw = await safeGetDmCacheItem(inboxCacheKey(pubkey));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -418,8 +612,24 @@ function mergeInboxEntries(
   for (const e of cached) map.set(dedupKey(e), e);
   for (const e of fresh) map.set(dedupKey(e), e);
   const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
-  return all.slice(0, cap);
+  let result = all.slice(0, cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted newest-first, so drop
+  // from the tail (oldest). `> 0` not `> 1` so a single over-budget
+  // entry still goes rather than persisting an unreadable row;
+  // `Math.max(1, …)` guarantees forward progress (a 0.1 factor rounds
+  // to 0 for tiny arrays, which would spin forever).
+  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
+    const drop = Math.max(1, Math.floor(result.length * 0.1));
+    result = result.slice(0, result.length - drop);
+  }
+  return result;
 }
+
+// Window in seconds to match a fresh real-id message against a pending
+// optimistic local- echo (same fromMe + same text). Mirrors
+// appendGroupMessage's LOCAL_ECHO_MATCH_WINDOW_SECS so the same UX
+// invariant — one bubble per send, not two — holds across 1:1 + group.
+const LOCAL_DM_ECHO_WINDOW_SECS = 30;
 
 function mergeConversationMessages(
   cached: ConversationMessage[],
@@ -428,24 +638,62 @@ function mergeConversationMessages(
 ): ConversationMessage[] {
   const map = new Map<string, ConversationMessage>();
   for (const m of cached) map.set(m.id, m);
-  for (const m of fresh) map.set(m.id, m);
+  for (const m of fresh) {
+    // When a real (non-local-) entry arrives, drop any pending local-
+    // echo with matching fromMe + text within the echo window. Without
+    // this the user would see two bubbles for the same GIF/text: the
+    // optimistic local- row persisted by ConversationScreen on send,
+    // plus the NIP-17 self-wrap echo from the relay.
+    if (!m.id.startsWith('local-')) {
+      let bestKey: string | null = null;
+      let bestDelta = Infinity;
+      for (const [k, prev] of map) {
+        if (!k.startsWith('local-')) continue;
+        if (prev.fromMe !== m.fromMe) continue;
+        if (prev.text !== m.text) continue;
+        const delta = Math.abs(prev.createdAt - m.createdAt);
+        if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestKey = k;
+        }
+      }
+      if (bestKey !== null) map.delete(bestKey);
+    }
+    map.set(m.id, m);
+  }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-  if (all.length <= cap) return all;
   // Keep the newest DM_CONV_CAP messages; drop oldest.
-  return all.slice(all.length - cap);
+  let result = all.length <= cap ? all : all.slice(all.length - cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted oldest-first, so drop
+  // from the head (oldest). `> 0` not `> 1` so a single over-budget
+  // message still goes; `Math.max(1, …)` guarantees forward progress.
+  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
+    const drop = Math.max(1, Math.floor(result.length * 0.1));
+    result = result.slice(drop);
+  }
+  return result;
 }
 
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
-const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
-const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
-const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
-const CONTACTS_TIMESTAMP_KEY = 'nostr_contacts_timestamp';
-const OWN_PROFILE_CACHE_KEY = 'nostr_own_profile_cache';
-const OWN_PROFILE_TIMESTAMP_KEY = 'nostr_own_profile_timestamp';
-const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
-const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
+// Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
+// at every call site (#288). The legacy un-suffixed keys are migrated on
+// first launch by `migrateToPerAccountStorage`.
+const CONTACTS_CACHE_KEY_BASE = 'nostr_contacts_cache';
+const PROFILES_CACHE_KEY_BASE = 'nostr_profiles_cache';
+const CACHE_TIMESTAMP_KEY_BASE = 'nostr_cache_timestamp';
+const CONTACTS_TIMESTAMP_KEY_BASE = 'nostr_contacts_timestamp';
+// Exported so AccountDrawerContent + AccountSwitcherSheet can seed
+// their per-identity profile caches synchronously from AsyncStorage
+// before fanning out to relays — otherwise they always wait on a
+// network round-trip per non-active identity, making the switcher
+// slow to populate names + avatars.
+export const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
+const OWN_PROFILE_TIMESTAMP_KEY_BASE = 'nostr_own_profile_timestamp';
+const RELAY_LIST_CACHE_KEY_BASE = 'nostr_relay_list_cache';
+const RELAY_LIST_TIMESTAMP_KEY_BASE = 'nostr_relay_list_timestamp';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — for all-cached fast path
 // A contact whose kind-0 we couldn't resolve on the previous attempt is
 // retried much sooner than 24 h. The "miss" often reflects the user's
@@ -504,7 +752,37 @@ interface NostrContextType {
   profile: NostrProfile | null;
   contacts: NostrContact[];
   relays: RelayConfig[];
+  /**
+   * Relays the user has explicitly added in-app via the Nostr settings
+   * screen (#202). Subset of `relays` — exposed separately so the
+   * editor UI can distinguish user-managed rows (removable) from
+   * NIP-65 / default rows (read-only here; users edit those via
+   * another Nostr client for now).
+   */
+  userRelays: RelayConfig[];
+  /**
+   * Add or update a user-managed relay. Replaces any existing entry
+   * with the same URL (so toggling read/write on an existing user
+   * relay works through the same call). Persists to AsyncStorage.
+   */
+  addUserRelay: (config: RelayConfig) => Promise<void>;
+  /** Remove a user-managed relay by URL. Persists to AsyncStorage. */
+  removeUserRelay: (url: string) => Promise<void>;
   signerType: SignerType | null;
+  // Multi-account registry — every signed-in identity on this device.
+  // Drives the drawer header switcher and the AccountSwitcherSheet
+  // (#288). The active identity is the one whose `pubkey` matches the
+  // `pubkey` field above; everything else is "warm in the drawer".
+  identities: StoredIdentity[];
+  // Flip the active identity to a registered one. No-op if pubkey is
+  // already active or unknown to the registry. Tears down in-memory
+  // state for the previous identity but keeps its disk caches around
+  // so a switch back is instant.
+  switchIdentity: (pubkey: string) => Promise<void>;
+  // Remove a single identity from the registry. If it's the active
+  // one, behaves like `logout` (with a successor switch if available);
+  // otherwise wipes that identity's caches + entry, leaves active alone.
+  signOutIdentity: (pubkey: string) => Promise<void>;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -521,10 +799,17 @@ interface NostrContextType {
    */
   refreshProfile: (opts?: { force?: boolean }) => Promise<void>;
   refreshContacts: () => Promise<void>;
+  // Fetch kind-0 profiles for arbitrary pubkeys (non-followed DM senders) (#664).
+  fetchProfilesForPubkeys: (pubkeys: string[]) => Promise<Map<string, NostrProfile>>;
   signZapRequest: (
     recipientPubkey: string,
     amountSats: number,
     comment: string,
+    // Optional kind-1/7516/etc event id to scope the zap to a single
+    // note. When set, the resulting 9735 receipt carries the same `e`
+    // tag — enables per-note aggregation (e.g. zaps-received pill on
+    // find-log rows). Omit for plain zap-the-author flows.
+    zapEventId?: string,
   ) => Promise<string | null>;
   publishProfile: (profileData: {
     name?: string;
@@ -537,11 +822,25 @@ interface NostrContextType {
   }) => Promise<boolean>;
   followContact: (pubkey: string) => Promise<boolean>;
   unfollowContact: (pubkey: string) => Promise<boolean>;
-  addContact: (npubOrHex: string) => Promise<{ success: boolean; error?: string }>;
+  addContact: (
+    npubOrHex: string,
+  ) => Promise<
+    | { success: true; pubkey: string; alreadyFollowing?: boolean }
+    | { success: false; error: string }
+  >;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Persist an optimistic local- DM message to the per-conversation
+   * cache so it survives navigating away + back before the NIP-17
+   * self-wrap echo arrives. The matching merge dedup against the real
+   * relay echo lives in `mergeConversationMessages`. Without this,
+   * leaving the thread after sending a GIF (or any message) would
+   * drop the optimistic bubble until the relay round-trip completes.
+   */
+  appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
@@ -596,6 +895,13 @@ interface NostrContextType {
    */
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   /**
+   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
+   * DM-receiving screen (Messages tab, ConversationScreen) via
+   * useFocusEffect — first call opens the sub, subsequent are no-ops.
+   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
+   */
+  armLiveDmSub: () => void;
+  /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
    *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
@@ -631,19 +937,57 @@ export interface ConversationMessage {
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
 
+// Module-evaluation perf marker. Fires the first time this file is parsed,
+// before any provider mounts. Catches "RN bundle finished loading,
+// JS engine started executing our code" — the upstream of every other
+// [Perf] line in this file.
+perfLog('NostrContext module-eval');
+
+let __nostrProviderFirstRenderLogged = false;
+let __nostrProviderLoggedInLogged = false;
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__nostrProviderFirstRenderLogged) {
+    __nostrProviderFirstRenderLogged = true;
+    perfLog('NostrProvider first render');
+  }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
   const [contacts, setContacts] = useState<NostrContact[]>([]);
-  const [relays, setRelays] = useState<RelayConfig[]>([]);
+  // `nip65Relays` mirrors the user's published kind-10002 list (or the
+  // last cached snapshot of it). `userRelays` are explicit in-app
+  // overrides persisted to AsyncStorage by the Nostr settings screen
+  // (#202). The exposed `relays` memo is the merge — defaults +
+  // NIP-65 + user overrides — so every existing read/write filter
+  // call site picks up user-added relays without further plumbing.
+  const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
+  const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
+  const relays = useMemo(
+    () => mergeRelays({ nip65: nip65Relays, user: userRelays }),
+    [nip65Relays, userRelays],
+  );
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
+  // Gates the live NIP-17 DM sub useEffect below. False on cold boot
+  // so we don't burn JS-thread cycles unwrapping wraps the user can't
+  // see yet (they're on Home, the Messages tab isn't mounted). Flipped
+  // to true the first time Messages / Conversation / any DM-receiving
+  // surface focuses via `armLiveDmSub()`. Once armed it stays armed for
+  // the rest of the session. Cold-start Home stays responsive because
+  // the per-wrap unwrap/route work moves to after the user has
+  // explicitly chosen to look at messages.
+  const [liveSubArmed, setLiveSubArmed] = useState(false);
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
+  // Multi-account registry (#288). Mirrors the SecureStore `identities_v1`
+  // blob so the drawer header and AccountSwitcherSheet can render without
+  // each rendering its own SecureStore round-trip. The `pubkey` state above
+  // is the single source of truth for "who is the active identity"; this
+  // array is the side-table of all signed-in identities for the switcher.
+  const [identities, setIdentities] = useState<StoredIdentity[]>([]);
 
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
@@ -670,10 +1014,57 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Publish the logged-in pubkey through the nostrService module so
   // non-React consumers (e.g. WalletContext's zap sender resolver) can
-  // read it without introducing a circular provider dependency.
+  // read it without introducing a circular provider dependency. Same
+  // mirror is needed for `walletStorageService` — its module-level
+  // `walletListKey()` reads from this published value to pick the
+  // correct per-account `wallet_list_${pk}` AsyncStorage key (#288).
   useEffect(() => {
     nostrService.setCurrentUserPubkey(pubkey);
+    setActivePubkeyForWalletStorage(pubkey);
   }, [pubkey]);
+
+  // Hydrate the user-added relay overrides once at mount. Persisted
+  // separately from the NIP-65 cache so they survive logout/login and
+  // are available before any relay round-trip completes.
+  useEffect(() => {
+    getUserRelays()
+      .then((list) => {
+        if (list.length > 0) setUserRelaysState(list);
+      })
+      .catch((e) => console.warn('[Nostr] failed to load user relays:', e));
+  }, []);
+
+  const addUserRelay = useCallback(
+    async (config: RelayConfig): Promise<void> => {
+      const next: RelayConfig[] = (() => {
+        const existing = userRelays.findIndex((r) => r.url === config.url);
+        if (existing >= 0) {
+          const copy = [...userRelays];
+          copy[existing] = config;
+          return copy;
+        }
+        return [...userRelays, config];
+      })();
+      // Persist before updating React state so a failed write doesn't
+      // leave the UI showing a row that will disappear on next reload.
+      // The caller surfaces the thrown error to the user.
+      await setUserRelays(next);
+      setUserRelaysState(next);
+    },
+    [userRelays],
+  );
+
+  const removeUserRelay = useCallback(
+    async (url: string): Promise<void> => {
+      const next = userRelays.filter((r) => r.url !== url);
+      // Persist before updating React state so a failed write doesn't
+      // leave the UI looking like the row was removed when it'll be
+      // back after a restart.
+      await setUserRelays(next);
+      setUserRelaysState(next);
+    },
+    [userRelays],
+  );
 
   useEffect(() => {
     // Publish read relays so zap-receipt queries from WalletContext hit
@@ -693,8 +1084,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
       // `force` bypasses it for user-initiated refreshes.
       const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
-        OWN_PROFILE_CACHE_KEY,
-        OWN_PROFILE_TIMESTAMP_KEY,
+        perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
+        perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
       );
       if (!opts?.force && cached && ageMs < CACHE_MAX_AGE_MS) {
         setProfile(cached);
@@ -706,60 +1097,131 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (fetchedProfile) {
         setProfile(fetchedProfile);
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(
-            () => {},
-          );
-          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
+            JSON.stringify(fetchedProfile),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
+            Date.now().toString(),
+          ).catch(() => {});
         });
       }
     },
     [],
   );
 
-  const loadContactsFromCache = useCallback(async () => {
+  // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
+  // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
+  // user's relays; nostrService.fetchProfiles unions PROFILE_RELAYS for
+  // coverage. Returns a pubkey→profile map; the caller owns caching (#664).
+  const fetchProfilesForPubkeys = useCallback(
+    async (pubkeys: string[]): Promise<Map<string, NostrProfile>> => {
+      if (pubkeys.length === 0) return new Map();
+      return nostrService.fetchProfiles(pubkeys, getReadRelays());
+    },
+    [getReadRelays],
+  );
+
+  /** Eagerly hydrate own `profile` state from the per-account cache so
+   * the drawer header + tab profile avatar paint on cold start without
+   * waiting for the deferred `loadProfile` relay round-trip. Matches the
+   * pattern of `loadContactsFromCache`. The cache-fresh setProfile-from-
+   * cache was previously only happening inside the deferred `loadProfile`
+   * fast path, which meant a fresh cold-start with grace-window deferral
+   * left `profile` null for ~1.5 s. */
+  const loadProfileFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as NostrProfile;
+      setProfile(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load profile cache:', error);
+      return false;
+    }
+  }, []);
+
+  /** Eagerly hydrate `relays` state from the per-account cache so
+   * relay-dependent fan-out (kind-0 publish, NIP-17 send) uses the
+   * user's actual relays from the very first action instead of
+   * defaulting to `DEFAULT_RELAYS`. Same pattern as
+   * `loadProfileFromCache`. */
+  const loadRelaysFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as RelayConfig[];
+      if (!Array.isArray(cached)) return false;
+      // Cached relay-list is the NIP-65 slice; the user overrides are
+      // hydrated separately by the `getUserRelays()` effect.
+      setNip65Relays(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load relays cache:', error);
+      return false;
+    }
+  }, []);
+
+  const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
-      // One multiGet round-trip for all three caches. Contacts freshness
-      // is gated by CONTACTS_TIMESTAMP_KEY (the contact-list's own write
-      // time), not the profiles timestamp — they get separate keys so a
-      // successful contact refresh isn't blocked by an unrelated profiles
-      // cache entry.
-      const pairs = await AsyncStorage.multiGet([
-        CONTACTS_CACHE_KEY,
-        PROFILES_CACHE_KEY,
-        CONTACTS_TIMESTAMP_KEY,
-      ]);
+      perfLog('loadContactsFromCache: start');
+      const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
+      const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
+      const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
+      const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
+      perfLog('loadContactsFromCache: multiGet returned');
       let contactsJson: string | null = null;
       let profilesJson: string | null = null;
       let contactsTsStr: string | null = null;
       for (const [k, v] of pairs) {
-        if (k === CONTACTS_CACHE_KEY) contactsJson = v;
-        else if (k === PROFILES_CACHE_KEY) profilesJson = v;
-        else if (k === CONTACTS_TIMESTAMP_KEY) contactsTsStr = v;
+        if (k === contactsKey) contactsJson = v;
+        else if (k === profilesKey) profilesJson = v;
+        else if (k === contactsTsKey) contactsTsStr = v;
       }
+      perfLog(
+        `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
+      );
+      // Previously: any contacts cache older than 24h short-circuited the
+      // whole bootstrap, discarding the still-useful profile map and
+      // painting an empty Friends tab while `loadContacts` ran the relay
+      // fetch (#642). Even a stale follow list is a better first paint
+      // than nothing — the relay refresh will overwrite it in seconds via
+      // the stale-while-revalidate path in `loadContacts`. Profiles in
+      // particular are identity data that change rarely; preserving them
+      // means the per-row zap gate hydrates from cache instead of reading
+      // `lightningAddress: null` for every contact during the kind-0
+      // batch refetch.
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
-        return false;
+        perfLog(
+          'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
+        );
       }
       if (contactsJson) {
+        const tParse = Date.now();
         const cached: NostrContact[] = JSON.parse(contactsJson);
+        perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
         if (profilesJson) {
+          const tProfilesParse = Date.now();
           const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+          perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
+          const tMerge = Date.now();
           const withProfiles = cached.map((c) => ({
             ...c,
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
+          perfLog(
+            `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
+          );
           startTransition(() => setContacts(withProfiles));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
         } else {
           startTransition(() => setContacts(cached));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(
+            `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+          );
         }
         return true;
       }
@@ -790,8 +1252,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         { value: cachedContacts, ageMs: contactsAgeMs },
         { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
       ] = await Promise.all([
-        readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
-        readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
+        readCachedWithTtl<NostrContact[]>(
+          perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
+          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
+        ),
+        readCachedWithTtl<Record<string, NostrProfile>>(
+          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
+          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
+        ),
       ]);
       const cachedProfileMap = cachedProfileMapOrNull ?? {};
       const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
@@ -802,8 +1270,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // call it.
       const persistContacts = (contacts: NostrContact[]): void => {
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(contacts)).catch(() => {});
-          AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
+            JSON.stringify(contacts),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
+            Date.now().toString(),
+          ).catch(() => {});
         });
       };
 
@@ -963,8 +1437,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         profileMap.forEach((v, k) => {
           merged[k] = v;
         });
-        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
+          JSON.stringify(merged),
+        ).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
+          Date.now().toString(),
+        ).catch(() => {});
       });
     },
     [],
@@ -975,11 +1455,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
     // from cache when under the TTL and skip the ~3s relay round trip.
     const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
-      RELAY_LIST_CACHE_KEY,
-      RELAY_LIST_TIMESTAMP_KEY,
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
+      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
     );
     if (cached && ageMs < CACHE_MAX_AGE_MS) {
-      setRelays(cached);
+      setNip65Relays(cached);
       if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
       const readRelays = cached.filter((r) => r.read).map((r) => r.url);
       return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -993,90 +1473,205 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     if (__DEV__)
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
-    setRelays(relayList);
+    setNip65Relays(relayList);
     InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(RELAY_LIST_CACHE_KEY, JSON.stringify(relayList)).catch(() => {});
-      AsyncStorage.setItem(RELAY_LIST_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      AsyncStorage.setItem(
+        perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
+        JSON.stringify(relayList),
+      ).catch(() => {});
+      AsyncStorage.setItem(
+        perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
+        Date.now().toString(),
+      ).catch(() => {});
     });
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
 
+  // Single-fire perf log when isLoggedIn becomes true — the
+  // "login restored from cache" moment. Anchor for the boot path.
+  useEffect(() => {
+    if (isLoggedIn && !__nostrProviderLoggedInLogged) {
+      __nostrProviderLoggedInLogged = true;
+      perfLog('NostrProvider isLoggedIn=true');
+    }
+  }, [isLoggedIn]);
+
   // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
+    perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
+        // Hydrate the multi-account registry first so the switcher has
+        // something to render even before the active identity finishes
+        // loading. Empty array on a fresh install — the auto-login below
+        // populates it when the legacy single-account keys are migrated.
+        const blob = await loadIdentities();
+        setIdentities(blob.identities);
+
         const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
         let pk: string | null = null;
 
+        let pendingNsec: string | null = null;
         if (storedSignerType === 'nsec') {
           const storedNsec = await SecureStore.getItemAsync(NSEC_KEY);
           if (storedNsec) {
             pk = nostrService.decodeNsec(storedNsec).pubkey;
-            setPubkey(pk);
-            setSignerType('nsec');
-            setIsLoggedIn(true);
+            pendingNsec = storedNsec;
           }
         } else if (storedSignerType === 'amber') {
           const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
           if (storedPubkey) {
             pk = storedPubkey;
-            setPubkey(pk);
-            setSignerType('amber');
-            setIsLoggedIn(true);
           }
         }
 
         if (!pk) return;
 
-        // Load cached contacts immediately (no network, <100ms)
-        await loadContactsFromCache();
+        // One-time per-account storage migration (#288). MUST run before
+        // `setPubkey(pk)` below because `setPubkey` triggers the effect
+        // that calls `setActivePubkeyForWalletStorage(pubkey)` — which
+        // unblocks `awaitActivePubkeyHydrated()` in WalletContext. If
+        // the migration runs AFTER setPubkey, WalletContext can race
+        // ahead and read `wallet_list_${pk}` before the migration has
+        // copied legacy `wallet_list` → `wallet_list_${pk}` (#442
+        // Copilot review). Self-contained in
+        // `migrateToPerAccountStorage`: runs once, copies legacy global
+        // values to `${base}_${pk}`, sets a flag, short-circuits
+        // afterwards. Adds <50 ms to cold start.
+        try {
+          const result = await migrateToPerAccountStorage(pk);
+          if (__DEV__ && !result.alreadyDone) {
+            console.log(
+              `[Nostr] per-account storage migration: copied ${result.ranSteps} keys`,
+              result.copiedKeys,
+            );
+          }
+        } catch (e) {
+          console.warn('[Nostr] per-account storage migration failed:', e);
+        }
 
-        // Eagerly hydrate dmInbox from disk cache so the Messages tab
-        // paints conversations on cold start. The relay refresh below
-        // doesn't touch dmInbox; the eventual refreshDmInbox call
-        // (driven by Messages-tab focus) does its own cache read for
-        // the delta-fetch path and replaces this hydrated state with
-        // the merged disk+relay result.
-        await hydrateDmInboxFromCache(pk);
+        // Now safe to publish the pubkey + signer type — WalletContext's
+        // gate will unblock and the per-account `wallet_list_${pk}` is
+        // already populated (whether by migration just above or by an
+        // earlier run that short-circuited).
+        setPubkey(pk);
+        if (storedSignerType === 'nsec') {
+          setSignerType('nsec');
+          setIsLoggedIn(true);
+          if (!blob.identities.some((i) => i.pubkey === pk) && pendingNsec) {
+            const next = await upsertIdentity({
+              pubkey: pk,
+              signerType: 'nsec',
+              nsec: pendingNsec,
+              lastUsedAt: Date.now(),
+            });
+            setIdentities(next.identities);
+          }
+        } else if (storedSignerType === 'amber') {
+          setSignerType('amber');
+          setIsLoggedIn(true);
+          if (!blob.identities.some((i) => i.pubkey === pk)) {
+            const next = await upsertIdentity({
+              pubkey: pk,
+              signerType: 'amber',
+              lastUsedAt: Date.now(),
+            });
+            setIdentities(next.identities);
+          }
+        }
 
-        // Defer relay fetches until after animations/rendering complete.
+        // Eagerly hydrate cached state from disk in parallel — these
+        // are all small per-account AsyncStorage reads (<100 ms each)
+        // and they wire UI surfaces that would otherwise stay empty
+        // until the deferred parallel refresh fires:
+        //   - `profile` → drawer header + tab profile avatar
+        //   - `relays`  → relay-dependent fan-out (kind-0 publish,
+        //                 NIP-17 send, group membership republish)
+        //   - `contacts` → friends list + DM partner resolution
+        //   - `dmInbox`  → Messages tab paints on first frame
+        // Previously only contacts + dmInbox were sync-hydrated; the
+        // grace window before the deferred refresh left profile +
+        // relays null for ~1.5 s after Home rendered, which made
+        // drawer-header avatars and relay-aware code paths see empty
+        // state on cold start. (Followup of perf review on PR #495.)
+        await Promise.all([
+          loadProfileFromCache(pk),
+          loadRelaysFromCache(pk),
+          loadContactsFromCache(pk),
+          hydrateDmInboxFromCache(pk),
+        ]);
+
+        // Defer relay fetches until after animations/rendering complete,
+        // PLUS a 1500 ms grace window so the user can tap Send / Receive
+        // / Transfer in the first ~1.5 s of cold-start without the JS
+        // thread being yanked away by parallel kind-3 + kind-0 +
+        // kind-10002 fetches. `runAfterInteractions` alone fires on the
+        // next tick when nothing is registered, so it doesn't actually
+        // give us breathing room here. The setTimeout pulls the bulk
+        // refresh out of the cold-start critical path entirely — the
+        // "Send sheet feels frozen for the first few seconds" symptom
+        // tracked in perf logcats lined up exactly with this batch
+        // running back-to-back with the inbox drain on the JS thread.
+        //
         // Seed the working relay set from the cached NIP-65 relay list so
         // `loadProfile` / `loadContacts` hit the relays the user actually
         // publishes to — not `DEFAULT_RELAYS`, which might miss their
         // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
         // the very first login (before any relay cache exists).
-        InteractionManager.runAfterInteractions(async () => {
-          let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
-          // Ignore the timestamp here — even a stale cached relay list is
-          // better than DEFAULT_RELAYS for reaching user-only relays.
-          const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
-            RELAY_LIST_CACHE_KEY,
-            RELAY_LIST_TIMESTAMP_KEY,
-          );
-          if (cachedRelays) {
-            const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
-            if (readRelays.length > 0) workingRelays = readRelays;
-          }
+        const COLD_START_GRACE_MS = 1500;
+        setTimeout(() => {
+          InteractionManager.runAfterInteractions(async () => {
+            let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+            // Ignore the timestamp here — even a stale cached relay list is
+            // better than DEFAULT_RELAYS for reaching user-only relays.
+            const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
+              perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
+              perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
+            );
+            if (cachedRelays) {
+              const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
+              if (readRelays.length > 0) workingRelays = readRelays;
+            }
 
-          const t0 = Date.now();
-          Promise.all([
-            loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-            loadProfile(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] profile refresh failed:', e),
-            ),
-            loadContacts(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] contact refresh failed:', e),
-            ),
-          ]).then(() => {
-            if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+            const t0 = Date.now();
+            // [PerfBlock] per-loader timing — `parallel refresh` shows
+            // total wall-clock but masks which of the three loaders is
+            // the bottleneck. These per-loader markers let us see
+            // (a) which finishes last (slowest relay path) and (b)
+            // which one's resolution kicks off the heavy setState
+            // chain that follows. #554.
+            const __tR = Date.now();
+            const __tP = Date.now();
+            const __tC = Date.now();
+            Promise.all([
+              loadRelays(pk!)
+                .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
+                .finally(() => console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`)),
+              loadProfile(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] profile refresh failed:', e))
+                .finally(() => console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`)),
+              loadContacts(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] contact refresh failed:', e))
+                .finally(() => console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`)),
+            ]).then(() => {
+              if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+            });
           });
-        });
+        }, COLD_START_GRACE_MS);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
+  }, [
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadProfileFromCache,
+    loadRelaysFromCache,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  ]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
@@ -1090,16 +1685,35 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
         setPubkey(pk);
 
-        // Store credentials
+        // Store credentials in the legacy single-active-identity slots
+        // (still the canonical location every other consumer reads from)
+        // AND register the identity in the multi-account store so the
+        // switcher knows it exists (#288).
         await SecureStore.setItemAsync(NSEC_KEY, trimmed);
         await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nsec');
+        const next = await upsertIdentity({
+          pubkey: pk,
+          signerType: 'nsec',
+          nsec: trimmed,
+          lastUsedAt: Date.now(),
+        });
+        setIdentities(next.identities);
 
         setSignerType('nsec');
         setIsLoggedIn(true);
         setIsLoggingIn(false);
 
+        // First-launch migration for this identity — idempotent flag
+        // means this is a no-op once the user has migrated on any
+        // previous login.
+        try {
+          await migrateToPerAccountStorage(pk);
+        } catch (e) {
+          if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
+        }
+
         // Load cached contacts immediately, fetch fresh data in background
-        await loadContactsFromCache();
+        await loadContactsFromCache(pk);
         // Eagerly hydrate dmInbox from disk cache so Messages tab paints
         // on first focus instead of staying blank for the relay round-trip.
         await hydrateDmInboxFromCache(pk);
@@ -1140,13 +1754,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPubkey(pk);
       await SecureStore.setItemAsync(PUBKEY_KEY, pk);
       await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'amber');
+      const next = await upsertIdentity({
+        pubkey: pk,
+        signerType: 'amber',
+        lastUsedAt: Date.now(),
+      });
+      setIdentities(next.identities);
 
       setSignerType('amber');
       setIsLoggedIn(true);
       setIsLoggingIn(false);
 
+      try {
+        await migrateToPerAccountStorage(pk);
+      } catch (e) {
+        if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
+      }
+
       // Load cached contacts immediately, fetch fresh data in background
-      await loadContactsFromCache();
+      await loadContactsFromCache(pk);
       // Eagerly hydrate dmInbox from disk cache so Messages tab paints
       // on first focus instead of staying blank for the relay round-trip.
       await hydrateDmInboxFromCache(pk);
@@ -1171,68 +1797,239 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
+  // Wipe every per-account AsyncStorage entry for `loggedOutPubkey`.
+  // Extracted so the multi-account sign-out path can call it without
+  // coupling to the active-identity teardown logic (#288).
+  const wipeAccountCaches = useCallback(async (loggedOutPubkey: string | null) => {
+    if (!loggedOutPubkey) return;
+    // Read the per-account wallet list FIRST so we can delete the
+    // per-wallet secrets that live in SecureStore (NWC URLs, xpubs,
+    // mnemonics) and the per-wallet AsyncStorage tx caches. Without
+    // this, signing out of an identity leaves orphaned credentials
+    // and tx caches under their walletIds — a real privacy concern
+    // on shared devices and what Copilot flagged on #442.
+    const walletListKey = `wallet_list_${loggedOutPubkey}`;
+    let walletIds: string[] = [];
+    try {
+      const json = await AsyncStorage.getItem(walletListKey);
+      if (json) {
+        const list = JSON.parse(json) as Array<{ id: string }>;
+        if (Array.isArray(list)) walletIds = list.map((w) => w.id).filter(Boolean);
+      }
+    } catch {
+      // Corrupted wallet list — nothing we can clean per-wallet,
+      // but the AsyncStorage.multiRemove below still kills the list
+      // entry itself so a future load won't surface it.
+    }
+    // Per-wallet secret cleanup. Each delete is best-effort; an
+    // already-absent key is a no-op in expo-secure-store, so we
+    // can fan out concurrently without sequencing.
+    await Promise.allSettled(
+      walletIds.flatMap((id) => [deleteNwcUrl(id), deleteXpub(id), deleteMnemonic(id)]),
+    );
+
+    const toRemove: string[] = [
+      // Per-account namespaced caches (#288 storage refactor)
+      perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(PROFILES_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(CACHE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      // Pre-existing per-pubkey caches (already namespaced before #288)
+      inboxCacheKey(loggedOutPubkey),
+      inboxLastSeenKey(loggedOutPubkey),
+      `nostr_group_activity_${loggedOutPubkey}`,
+      `nostr_groups_${loggedOutPubkey}`,
+      `groups_following_only_${loggedOutPubkey}`,
+      walletListKey,
+      // Per-wallet tx caches (AsyncStorage). One key per wallet that
+      // was bound to this identity.
+      ...walletIds.map((id) => `txs_${id}`),
+    ];
+    const allKeys = await AsyncStorage.getAllKeys();
+    const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
+    const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
+    for (const k of allKeys) {
+      if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+    }
+    // group_messages_${groupId} is keyed by the random group id (not
+    // pubkey), so we can't selectively remove "this identity's groups"
+    // — they're shared across whichever identities are members. Leave
+    // them in place; they're orphaned safely once no remaining identity
+    // is a member, and re-attached if the same identity signs back in.
+    await AsyncStorage.multiRemove(toRemove);
+  }, []);
+
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
     nip04PlaintextCache.clear();
+    // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
+    // sign-out then sign-back-in to the SAME pubkey would keep wrap
+    // ids from the prior session alive in memory, and any wrap whose
+    // on-disk cache entry got wiped by `wipeAccountCaches` below
+    // would be permanently skipped by the live-sub early-return
+    // (since the in-memory Set would still claim "seen"). Per Copilot
+    // review on #508.
+    knownWrapIdsRef.current = { pubkey: null, set: new Set() };
     const loggedOutPubkey = pubkey;
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    const toRemove: string[] = [
-      CONTACTS_CACHE_KEY,
-      CONTACTS_TIMESTAMP_KEY,
-      PROFILES_CACHE_KEY,
-      CACHE_TIMESTAMP_KEY,
-      OWN_PROFILE_CACHE_KEY,
-      OWN_PROFILE_TIMESTAMP_KEY,
-      RELAY_LIST_CACHE_KEY,
-      RELAY_LIST_TIMESTAMP_KEY,
-      // DM-inbox state is identity-scoped — decrypted rumors and the
-      // Amber NIP-17 permission intent belong to the logged-in user,
-      // not globally.
-      AMBER_NIP17_CACHE_KEY,
-      AMBER_NIP17_ENABLED_KEY_LEGACY,
-      NSEC_NIP17_CACHE_KEY,
-    ];
-    // PR B caches are per-user-keyed — only clear the ones for the
-    // user we're logging out of. Per-peer conversation caches share
-    // the same prefix; we grep AsyncStorage keys for them.
+    // Clear the dead-key-as-of-#404 amber NIP-17 toggle alongside
+    // the per-account caches.
+    await AsyncStorage.removeItem(AMBER_NIP17_ENABLED_KEY_LEGACY).catch(() => {});
+
+    await wipeAccountCaches(loggedOutPubkey);
+
+    // Remove this identity from the multi-account registry. If other
+    // identities exist the switcher will pick a successor; otherwise
+    // we drop into the logged-out state below.
+    let nextIdentities: StoredIdentity[] = [];
+    let nextActive: string | null = null;
     if (loggedOutPubkey) {
-      toRemove.push(inboxCacheKey(loggedOutPubkey));
-      toRemove.push(inboxLastSeenKey(loggedOutPubkey));
-      const allKeys = await AsyncStorage.getAllKeys();
-      const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
-      const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
-      for (const k of allKeys) {
-        if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
-      }
-      // Group state + per-group message logs are NOT yet account-scoped
-      // (single-account today; per-account namespacing is a follow-up).
-      // Clear them on logout so the next signed-in identity can't see
-      // the previous identity's groups or thread history.
-      const allKeysForGroups = allKeys; // already fetched above
-      toRemove.push('nostr_groups');
-      for (const k of allKeysForGroups) {
-        if (k.startsWith('group_messages_')) toRemove.push(k);
-      }
-      // Per-pubkey group activity cache (added in #257). Contains
-      // decrypted last-message previews (`GroupActivity.lastText`),
-      // so we MUST clear it on logout — leaving it on disk would
-      // expose private content to whoever logs in next.
-      toRemove.push(`nostr_group_activity_${loggedOutPubkey}`);
+      const blob = await removeIdentityFromStore(loggedOutPubkey);
+      nextIdentities = blob.identities;
+      nextActive = blob.activePubkey;
     }
-    await AsyncStorage.multiRemove(toRemove);
+    setIdentities(nextIdentities);
+
+    if (nextActive && nextIdentities.length > 0) {
+      // Switch to the successor without dropping into the logged-out
+      // screen — feels seamless to the user (they sign out of Big Piggy
+      // and immediately see Middle Piggy's caches).
+      const successor = nextIdentities.find((i) => i.pubkey === nextActive);
+      if (successor) {
+        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, successor.signerType);
+        if (successor.signerType === 'nsec' && successor.nsec) {
+          await SecureStore.setItemAsync(NSEC_KEY, successor.nsec);
+        } else if (successor.signerType === 'amber') {
+          await SecureStore.setItemAsync(PUBKEY_KEY, successor.pubkey);
+        }
+        setPubkey(successor.pubkey);
+        setSignerType(successor.signerType);
+        setIsLoggedIn(true);
+        // Eagerly hydrate the new identity's caches; the next focus tick
+        // will refresh from relays.
+        await loadContactsFromCache(successor.pubkey);
+        await hydrateDmInboxFromCache(successor.pubkey);
+        return;
+      }
+    }
 
     setPubkey(null);
     setProfile(null);
     setContacts([]);
-    setRelays([]);
+    setNip65Relays([]);
+    // NOTE: deliberately NOT clearing user-added relays on logout —
+    // they're an in-app preference, not per-account secret material.
+    // The next account login will see the same overrides. To wipe
+    // them, users can remove each row from the Nostr settings screen.
     setSignerType(null);
     setIsLoggedIn(false);
 
     nostrService.cleanup();
-  }, []);
+  }, [pubkey, wipeAccountCaches, loadContactsFromCache, hydrateDmInboxFromCache]);
+
+  // Flip the active identity to `nextPubkey`. Must already be a
+  // registered identity (call `loginWithNsec` / `loginWithAmber`
+  // first to add a brand-new one). The flip:
+  //   1. Persists the new active in `identities_v1` + the legacy
+  //      single-identity SecureStore keys (NSEC/PUBKEY/SIGNER_TYPE),
+  //      so a hard restart resumes on the new identity.
+  //   2. Tears down the old identity's in-memory state (nip04 cache,
+  //      memoised secret, profile, contacts, relays). Persistent
+  //      caches are NOT touched — they're keyed per-pubkey, so the
+  //      old identity's data stays on disk for the next switch back.
+  //   3. Eagerly hydrates the new identity from disk caches so
+  //      Friends / Messages tabs paint instantly without waiting for
+  //      the relay round-trip.
+  //
+  // No-op if `nextPubkey === pubkey` (already active) or if the
+  // pubkey isn't in the registry.
+  const switchIdentity = useCallback(
+    async (nextPubkey: string): Promise<void> => {
+      if (nextPubkey === pubkey) return;
+      const blob = await loadIdentities();
+      const target = blob.identities.find((i) => i.pubkey === nextPubkey);
+      if (!target) {
+        if (__DEV__) console.warn(`[Nostr] switchIdentity: ${nextPubkey} not in registry`);
+        return;
+      }
+      // Tear down the previous identity's in-memory state. Persistent
+      // caches (per-account namespaced) are kept on disk so a switch
+      // back is instant.
+      clearMemoisedSecretKey();
+      nip04PlaintextCache.clear();
+      setAmberNip44Permission('unknown');
+      setProfile(null);
+      setContacts([]);
+      // Reset the NIP-65 slice only — user-added overrides are an
+      // in-app preference and shared across identities (matches the
+      // logout behaviour).
+      setNip65Relays([]);
+      setDmInbox([]);
+
+      // Promote the target identity to "active" everywhere.
+      await SecureStore.setItemAsync(SIGNER_TYPE_KEY, target.signerType);
+      if (target.signerType === 'nsec' && target.nsec) {
+        await SecureStore.setItemAsync(NSEC_KEY, target.nsec);
+        // Clear the legacy amber pubkey slot — we're an nsec identity now.
+        await SecureStore.deleteItemAsync(PUBKEY_KEY);
+      } else if (target.signerType === 'amber') {
+        await SecureStore.setItemAsync(PUBKEY_KEY, target.pubkey);
+        await SecureStore.deleteItemAsync(NSEC_KEY);
+      }
+      const updated = await setActiveIdentity(target.pubkey);
+      setIdentities(updated.identities);
+      setPubkey(target.pubkey);
+      setSignerType(target.signerType);
+      setIsLoggedIn(true);
+
+      // Eagerly hydrate from persisted per-account caches. The next
+      // tab focus / pull-to-refresh will fan out to relays.
+      await loadContactsFromCache(target.pubkey);
+      await hydrateDmInboxFromCache(target.pubkey);
+      // Defer the relay refresh — keeps the switch animation smooth.
+      InteractionManager.runAfterInteractions(async () => {
+        try {
+          const readRelays = await loadRelays(target.pubkey);
+          await loadProfile(target.pubkey, readRelays);
+          loadContacts(target.pubkey, readRelays).catch((e) =>
+            console.warn('[Nostr] post-switch contact refresh failed:', e),
+          );
+        } catch (e) {
+          console.warn('[Nostr] post-switch refresh failed:', e);
+        }
+      });
+    },
+    [pubkey, loadContactsFromCache, hydrateDmInboxFromCache, loadRelays, loadProfile, loadContacts],
+  );
+
+  // Remove a single identity from the multi-account registry. If
+  // `targetPubkey` is the active identity, behaves like `logout` (with
+  // the post-removal switch to a successor if one exists). Otherwise
+  // just wipes that identity's caches + registry entry; the active
+  // identity stays put.
+  const signOutIdentity = useCallback(
+    async (targetPubkey: string): Promise<void> => {
+      // Active-identity sign-out reuses the existing logout path so
+      // the in-memory teardown stays in one place.
+      if (targetPubkey === pubkey) {
+        await logout();
+        return;
+      }
+      await wipeAccountCaches(targetPubkey);
+      const blob = await removeIdentityFromStore(targetPubkey);
+      setIdentities(blob.identities);
+    },
+    [pubkey, logout, wipeAccountCaches],
+  );
 
   const refreshProfile = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -1260,6 +2057,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       recipientPubkey: string,
       amountSats: number,
       comment: string,
+      zapEventId?: string,
     ): Promise<string | null> => {
       if (!pubkey || !isLoggedIn) return null;
 
@@ -1270,6 +2068,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         amountSats * 1000,
         readRelays,
         comment,
+        zapEventId,
       );
 
       if (signerType === 'nsec') {
@@ -1389,10 +2188,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
         setProfile(updatedProfile);
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(updatedProfile)).catch(
-            () => {},
-          );
-          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pubkey),
+            JSON.stringify(updatedProfile),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pubkey),
+            Date.now().toString(),
+          ).catch(() => {});
         });
 
         return true;
@@ -1417,9 +2220,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const success = await publishContactList(updatedContacts);
       if (success) {
         startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the follow immediately
-        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        // Update cache so restarts reflect the follow immediately.
+        // Per-account namespaced (#288). Bumps the *contacts* timestamp
+        // (the right freshness clock for kind-3 list reads) — pre-#442
+        // code mistakenly wrote to CACHE_TIMESTAMP_KEY_BASE which is
+        // the *profiles* cache freshness, leaving the contacts list's
+        // own freshness clock stale after every follow.
+        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
+        const tKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey);
+        AsyncStorage.setItem(cKey, JSON.stringify(updatedContacts)).catch(() => {});
+        AsyncStorage.setItem(tKey, Date.now().toString()).catch(() => {});
         // Fetch profile for the new contact
         const readRelays = getReadRelays();
         const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
@@ -1430,7 +2240,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
               );
               // Update cache with profile data
-              AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+              AsyncStorage.setItem(cKey, JSON.stringify(updated)).catch(() => {});
               return updated;
             }),
           );
@@ -1438,7 +2248,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       return success;
     },
-    [contacts, publishContactList, getReadRelays],
+    [contacts, publishContactList, getReadRelays, pubkey],
   );
 
   const unfollowContact = useCallback(
@@ -1447,17 +2257,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const success = await publishContactList(updatedContacts);
       if (success) {
         startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the unfollow immediately
-        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        // Update cache so restarts reflect the unfollow immediately.
+        // Per-account namespaced (#288).
+        AsyncStorage.setItem(
+          perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
+          JSON.stringify(updatedContacts),
+        ).catch(() => {});
+        // Same fix as followContact above — bump the *contacts*
+        // timestamp, not the *profiles* one.
+        AsyncStorage.setItem(
+          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
+          Date.now().toString(),
+        ).catch(() => {});
       }
       return success;
     },
-    [contacts, publishContactList],
+    [contacts, publishContactList, pubkey],
   );
 
   const addContact = useCallback(
-    async (npubOrHex: string): Promise<{ success: boolean; error?: string }> => {
+    async (
+      npubOrHex: string,
+    ): Promise<
+      | { success: true; pubkey: string; alreadyFollowing?: boolean }
+      | { success: false; error: string }
+    > => {
       try {
         let hex = npubOrHex.trim();
         // Strip nostr: URI prefix (NIP-21)
@@ -1473,11 +2297,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return { success: false, error: 'Invalid public key format' };
         }
         if (contacts.some((c) => c.pubkey === hex)) {
-          return { success: false, error: 'Already following this contact' };
+          // Already a follow — not a failure. Surface it as a neutral
+          // "already connected" so the UI doesn't show a red error (#660).
+          return { success: true, alreadyFollowing: true, pubkey: hex };
         }
         const success = await followContact(hex);
         return success
-          ? { success: true }
+          ? { success: true, pubkey: hex }
           : { success: false, error: 'Failed to publish contact list' };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Invalid key' };
@@ -1808,13 +2634,65 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
       try {
-        const raw = await AsyncStorage.getItem(convCacheKey(pubkey, normalized));
+        const raw = await safeGetDmCacheItem(convCacheKey(pubkey, normalized));
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
       } catch {
         return [];
       }
+    },
+    [pubkey],
+  );
+
+  const appendLocalDmMessage = useCallback(
+    async (otherPubkey: string, msg: ConversationMessage): Promise<void> => {
+      if (!pubkey) return;
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      // Serialize concurrent appends to the same conversation. Without
+      // this, two rapid sends could both read the same `existing` array,
+      // each merge their msg, both write back — last write wins, the
+      // earlier optimistic row is silently lost. Per Copilot review #509.
+      const chainKey = `${pubkey}:${normalized}`;
+      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          const key = convCacheKey(pubkey, normalized);
+          const raw = await AsyncStorage.getItem(key);
+          const existing: ConversationMessage[] = raw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          // Dedup on id (same key would arise from a double-tap retry).
+          const map = new Map<string, ConversationMessage>();
+          for (const m of existing) map.set(m.id, m);
+          map.set(msg.id, msg);
+          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+          const capped =
+            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
+          await AsyncStorage.setItem(key, JSON.stringify(capped));
+        } catch {
+          // Swallow — the in-memory setMessages above already painted
+          // the bubble. The remount-after-back regression is precisely
+          // what this method exists to fix, so a write failure is
+          // unfortunate but not destructive (next relay echo will
+          // repopulate the cache).
+        }
+      });
+      // `.catch` on the chain entry so a single failure doesn't poison
+      // every subsequent append on this conversation.
+      appendLocalDmChains.set(
+        chainKey,
+        next.catch(() => {}),
+      );
+      await next;
     },
     [pubkey],
   );
@@ -1843,7 +2721,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // open so we only ever re-decrypt the (typically 0-few) events
       // that arrived since last open.
       const [convRaw, convLastSeen] = await Promise.all([
-        AsyncStorage.getItem(convCacheKey(pubkey, normalized)),
+        safeGetDmCacheItem(convCacheKey(pubkey, normalized)),
         loadLastSeen(convLastSeenKey(pubkey, normalized)),
       ]);
       const cachedConv: ConversationMessage[] = convRaw
@@ -1959,13 +2837,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // next tab focus. For a chat UX that's a non-issue.
       const signerWrapCacheKey =
         signerType === 'nsec'
-          ? NSEC_NIP17_CACHE_KEY
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey)
           : signerType === 'amber'
-            ? AMBER_NIP17_CACHE_KEY
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey)
             : null;
-      const wrapCacheRaw = signerWrapCacheKey
-        ? await AsyncStorage.getItem(signerWrapCacheKey)
-        : null;
+      const wrapCacheRaw = signerWrapCacheKey ? await safeGetDmCacheItem(signerWrapCacheKey) : null;
       const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapCacheRaw);
       const cachedWrapEntries = Object.values(wrapCache);
       let skippedInboxFetch = false;
@@ -2014,7 +2890,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // this thread open), we decrypt AND write them back so the
             // next thread open across ANY conversation can short-circuit
             // without waiting for the next inbox refresh.
-            const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+            const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey);
+            const raw = await safeGetDmCacheItem(nsecCacheKey);
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let nip17Decrypted = 0;
@@ -2072,11 +2949,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               });
             }
             if (newlyCached.length > 0 || threadTouched > 0) {
-              await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
+              await writeNip17Cache(nsecCacheKey, cache);
             }
           }
         } else if (signerType === 'amber') {
-          const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
+          const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey);
+          const raw = await safeGetDmCacheItem(amberCacheKey);
           const cache = safeParseRecord<Nip17CacheEntry>(raw);
           let threadTouched = 0;
           for (const wrap of kind1059) {
@@ -2118,7 +2996,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
           }
           if (threadTouched > 0) {
-            await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
+            await writeNip17Cache(amberCacheKey, cache);
           }
         }
       }
@@ -2172,6 +3050,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDmInbox([]);
         return;
       }
+      // [PerfBlock] timing bracket — surfaces the wall-clock cost of
+      // a full inbox refresh including NIP-17 decrypt loops. Look for
+      // matched `refreshDmInbox: …ms` pairs in logcat to isolate
+      // multi-second freezes that coincide with this call. #554.
+      const __perfBlockStart = performance.now();
       const signal = opts?.signal;
       // Dev-only "Following only=off" bypass — read once at the top so
       // the closure captures a stable value across the async work below.
@@ -2229,12 +3112,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           let nip17Misses = 0;
           let nip17Evictions = 0;
           let nip17CacheSize = 0;
+          // Number of actual `setTimeout(0)` yields the NIP-17 loop
+          // performed this refresh — emitted in the [Perf] nip17-cache
+          // line so we can track how often the new frame-budget
+          // scheduler trips (#532). Higher = more breathing room
+          // given back to the UI thread.
+          let nip17YieldCount = 0;
 
           // PR B: load persisted inbox + last-seen so we can (a) paint
           // cached entries before the relay round-trip finishes and
           // (b) only fetch events newer than the last one we saw.
           const [cachedInboxRaw, lastSeen] = await Promise.all([
-            AsyncStorage.getItem(inboxCacheKey(refreshForPubkey)),
+            safeGetDmCacheItem(inboxCacheKey(refreshForPubkey)),
             loadLastSeen(inboxLastSeenKey(refreshForPubkey)),
           ]);
           const cachedInbox: DmInboxEntry[] = cachedInboxRaw
@@ -2356,44 +3245,145 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (secretKey) {
               // Persistent wrap-id cache mirroring the Amber branch. Only
               // ever contains rumors from followed senders — see the
-              // filter gate below. This is the fix for #176.
-              const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+              // filter gate below. This is the fix for #176. Per-account
+              // namespaced (#288).
+              const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, refreshForPubkey);
+              const raw = await safeGetDmCacheItem(nsecCacheKey);
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
-              let nip17Decrypted = 0;
-              let nip17Iterated = 0;
               let touched = 0;
-              for (const wrap of kind1059) {
-                // Periodic yield + abort check covers the cache-hit path
-                // too (#286). Without this, a long run of cache hits
-                // (or skipped/unfollowed entries) walks the whole
-                // kind1059 list synchronously between the per-decrypt
-                // yields below — bad on a >1000-wrap inbox where any
-                // back-tap during refresh appears frozen.
-                if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
+              // Frame-budget scheduler (#532): yield whenever we've held
+              // the JS thread for >= DECRYPT_FRAME_BUDGET_MS, with the
+              // count-based modulo kept as a safety cap. On abort, the
+              // scheduler hard-cancels any pending setTimeout so the
+              // loop unwinds in the next microtask instead of waiting
+              // out one more scheduler round-trip.
+              const nsecYield = createYieldScheduler({
+                signal,
+                safetyEvery: NIP17_LOOP_YIELD_EVERY,
+              });
+              try {
+                for (const wrap of kind1059) {
+                  // Time-budget yield + abort check (#286, #532). Covers
+                  // the cache-hit path too — without it, a long run of
+                  // cache hits walks the whole kind1059 list synchronously
+                  // and any back-tap during refresh appears frozen.
+                  await nsecYield.maybeYield();
                   if (signal?.aborted) return;
-                  await yieldToEventLoop();
+                  const cached = cache[wrap.id];
+                  if (cached) {
+                    nip17Hits++;
+                    // Cache entry exists → it was from a followed sender
+                    // when first stored. Re-check against the *current*
+                    // follow set so unfollowed partners don't keep
+                    // surfacing from cache. Purge the stale entry so we
+                    // don't keep dragging it through every refresh until
+                    // the 5000-cap LRU finally evicts it.
+                    if (!passesFollowGate(cached.partnerPubkey)) {
+                      delete cache[wrap.id];
+                      unfollowedPurged++;
+                      continue;
+                    }
+                    // LRU touch (#193): re-insert at the tail so this hot
+                    // entry survives the next overflow eviction. Without
+                    // this the cache is FIFO-by-first-write — a thread
+                    // the user re-opens regularly can be evicted just
+                    // because 5000 newer wraps happened to arrive first.
+                    touchNip17CacheEntry(cache, wrap.id);
+                    touched++;
+                    entries.push({
+                      id: cached.wrapId,
+                      partnerPubkey: cached.partnerPubkey,
+                      fromMe: cached.fromMe,
+                      createdAt: cached.createdAt,
+                      text: cached.text,
+                      wireKind: cached.wireKind,
+                    });
+                    continue;
+                  }
+                  nip17Misses++;
+                  const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
+                  // No per-decrypt yield here: the frame-budget scheduler
+                  // at the top of the loop already yields whenever the
+                  // accumulated work exceeds DECRYPT_FRAME_BUDGET_MS,
+                  // which captures the cost of unwrapWrapNsec naturally.
+                  if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path. The 1:1 inbox
+                  // never sees group messages — they belong to a different
+                  // surface (GroupConversationScreen).
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
+                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
+                  if (!partnership) continue;
+                  // B1 — drop non-follows at the data layer. No caching, no
+                  // state. The filter is load-bearing ("parental control"),
+                  // so it runs here not in the view.
+                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  const entry: Nip17CacheEntry = {
+                    id: wrap.id,
+                    wrapId: wrap.id,
+                    partnerPubkey: partnership.partnerPubkey,
+                    fromMe: partnership.fromMe,
+                    createdAt: rumor.created_at,
+                    text: rumor.content,
+                    wireKind: rumor.kind,
+                  };
+                  cache[wrap.id] = entry;
+                  newlyCached.push(entry);
+                  entries.push({
+                    id: entry.id,
+                    partnerPubkey: entry.partnerPubkey,
+                    fromMe: entry.fromMe,
+                    createdAt: entry.createdAt,
+                    text: entry.text,
+                    wireKind: entry.wireKind,
+                  });
                 }
+              } finally {
+                nsecYield.dispose();
+              }
+              nip17YieldCount += nsecYield.yieldCount;
+
+              // Persist if we mutated the cache for any reason: new
+              // entries, follow-set purges, or LRU touches (#193) — the
+              // touch reorders insertion order, and we need that order
+              // on disk for it to survive app restart.
+              if (newlyCached.length > 0 || unfollowedPurged > 0 || touched > 0) {
+                nip17Evictions += await writeNip17Cache(nsecCacheKey, cache);
+              }
+              nip17CacheSize = Object.keys(cache).length;
+            }
+          } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
+            // Always run the unwrap loop — Amber's silent content-resolver path returns PERMISSION_NOT_GRANTED on the first wrap if the user hasn't granted nip44_decrypt yet, which we surface via setAmberNip44Permission('denied') so NostrScreen can show the one-shot "Grant permission in Amber" button. Closes #404.
+            // Persistent cache keyed by wrap id. Only ever contains rumors from *followed* senders — see the filter gate below. Per-account namespaced (#288).
+            const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, refreshForPubkey);
+            const raw = await safeGetDmCacheItem(amberCacheKey);
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            const newlyCached: Nip17CacheEntry[] = [];
+            let permissionDenied = false;
+            let touched = 0;
+            let unfollowedPurged = 0;
+            // Frame-budget scheduler (#532) — see nsec branch above.
+            const amberYield = createYieldScheduler({
+              signal,
+              safetyEvery: NIP17_LOOP_YIELD_EVERY,
+            });
+            try {
+              for (const wrap of kind1059) {
+                // Time-budget yield + abort check (#286, #532) — see nsec branch above for rationale.
+                await amberYield.maybeYield();
+                if (signal?.aborted) return;
                 const cached = cache[wrap.id];
                 if (cached) {
                   nip17Hits++;
-                  // Cache entry exists → it was from a followed sender
-                  // when first stored. Re-check against the *current*
-                  // follow set so unfollowed partners don't keep
-                  // surfacing from cache. Purge the stale entry so we
-                  // don't keep dragging it through every refresh until
-                  // the 5000-cap LRU finally evicts it.
+                  // Re-check against current follow set; purge if no longer followed so we don't drag stale entries through every refresh.
                   if (!passesFollowGate(cached.partnerPubkey)) {
                     delete cache[wrap.id];
                     unfollowedPurged++;
                     continue;
                   }
-                  // LRU touch (#193): re-insert at the tail so this hot
-                  // entry survives the next overflow eviction. Without
-                  // this the cache is FIFO-by-first-write — a thread
-                  // the user re-opens regularly can be evicted just
-                  // because 5000 newer wraps happened to arrive first.
                   touchNip17CacheEntry(cache, wrap.id);
                   touched++;
                   entries.push({
@@ -2407,147 +3397,67 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   continue;
                 }
                 nip17Misses++;
-                const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
-                if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
-                if (!rumor) continue;
-                // Multi-recipient (group) rumors: route to group storage
-                // and short-circuit the DM-inbox path. The 1:1 inbox
-                // never sees group messages — they belong to a different
-                // surface (GroupConversationScreen).
-                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                if (routeResult.kind !== 'not-group') continue;
-                const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                if (!partnership) continue;
-                // B1 — drop non-follows at the data layer. No caching, no
-                // state. The filter is load-bearing ("parental control"),
-                // so it runs here not in the view.
-                if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                const entry: Nip17CacheEntry = {
-                  id: wrap.id,
-                  wrapId: wrap.id,
-                  partnerPubkey: partnership.partnerPubkey,
-                  fromMe: partnership.fromMe,
-                  createdAt: rumor.created_at,
-                  text: rumor.content,
-                  wireKind: rumor.kind,
-                };
-                cache[wrap.id] = entry;
-                newlyCached.push(entry);
-                entries.push({
-                  id: entry.id,
-                  partnerPubkey: entry.partnerPubkey,
-                  fromMe: entry.fromMe,
-                  createdAt: entry.createdAt,
-                  text: entry.text,
-                  wireKind: entry.wireKind,
-                });
-              }
-
-              // Persist if we mutated the cache for any reason: new
-              // entries, follow-set purges, or LRU touches (#193) — the
-              // touch reorders insertion order, and we need that order
-              // on disk for it to survive app restart.
-              if (newlyCached.length > 0 || unfollowedPurged > 0 || touched > 0) {
-                nip17Evictions += await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
-              }
-              nip17CacheSize = Object.keys(cache).length;
-            }
-          } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
-            // Always run the unwrap loop — Amber's silent content-resolver path returns PERMISSION_NOT_GRANTED on the first wrap if the user hasn't granted nip44_decrypt yet, which we surface via setAmberNip44Permission('denied') so NostrScreen can show the one-shot "Grant permission in Amber" button. Closes #404.
-            // Persistent cache keyed by wrap id. Only ever contains rumors from *followed* senders — see the filter gate below.
-            const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
-            const cache = safeParseRecord<Nip17CacheEntry>(raw);
-            const newlyCached: Nip17CacheEntry[] = [];
-            let permissionDenied = false;
-            let nip17Iterated = 0;
-            let touched = 0;
-            let unfollowedPurged = 0;
-
-            for (const wrap of kind1059) {
-              // Periodic yield + abort check (#286) — see the nsec branch above for rationale.
-              if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
-                if (signal?.aborted) return;
-                await yieldToEventLoop();
-              }
-              const cached = cache[wrap.id];
-              if (cached) {
-                nip17Hits++;
-                // Re-check against current follow set; purge if no longer followed so we don't drag stale entries through every refresh.
-                if (!passesFollowGate(cached.partnerPubkey)) {
-                  delete cache[wrap.id];
-                  unfollowedPurged++;
-                  continue;
-                }
-                touchNip17CacheEntry(cache, wrap.id);
-                touched++;
-                entries.push({
-                  id: cached.wrapId,
-                  partnerPubkey: cached.partnerPubkey,
-                  fromMe: cached.fromMe,
-                  createdAt: cached.createdAt,
-                  text: cached.text,
-                  wireKind: cached.wireKind,
-                });
-                continue;
-              }
-              nip17Misses++;
-              // Uncached — unwrap via Amber's silent content-resolver path.
-              // If Amber hasn't granted blanket nip44_decrypt permission,
-              // this throws PERMISSION_NOT_GRANTED and we stop iterating.
-              try {
-                const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
-                if (!rumor) continue;
-                // Multi-recipient (group) rumors: route to group storage
-                // and short-circuit the DM-inbox path.
-                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                if (routeResult.kind !== 'not-group') continue;
-                const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                if (!partnership) continue;
-                // B1 — never cache rumors from non-followed senders. The
-                // cost is re-decrypting them on the next refresh, but the
-                // silent path is ~1 ms per call and keeps plaintext off
-                // AsyncStorage.
-                if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                const entry: Nip17CacheEntry = {
-                  id: wrap.id,
-                  wrapId: wrap.id,
-                  partnerPubkey: partnership.partnerPubkey,
-                  fromMe: partnership.fromMe,
-                  createdAt: rumor.created_at,
-                  text: rumor.content,
-                  wireKind: rumor.kind,
-                };
-                cache[wrap.id] = entry;
-                newlyCached.push(entry);
-                entries.push({
-                  id: entry.id,
-                  partnerPubkey: entry.partnerPubkey,
-                  fromMe: entry.fromMe,
-                  createdAt: entry.createdAt,
-                  text: entry.text,
-                  wireKind: entry.wireKind,
-                });
-              } catch (error) {
-                const code = (error as { code?: string })?.code;
-                const message = (error as Error)?.message ?? '';
-                if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
-                  permissionDenied = true;
-                  if (__DEV__) {
-                    console.log(
-                      `[Nostr] Amber NIP-44 permission not granted — stopping NIP-17 unwrap for this refresh`,
-                    );
+                // Uncached — unwrap via Amber's silent content-resolver path.
+                // If Amber hasn't granted blanket nip44_decrypt permission,
+                // this throws PERMISSION_NOT_GRANTED and we stop iterating.
+                try {
+                  const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
+                  if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path.
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
+                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
+                  if (!partnership) continue;
+                  // B1 — never cache rumors from non-followed senders. The
+                  // cost is re-decrypting them on the next refresh, but the
+                  // silent path is ~1 ms per call and keeps plaintext off
+                  // AsyncStorage.
+                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  const entry: Nip17CacheEntry = {
+                    id: wrap.id,
+                    wrapId: wrap.id,
+                    partnerPubkey: partnership.partnerPubkey,
+                    fromMe: partnership.fromMe,
+                    createdAt: rumor.created_at,
+                    text: rumor.content,
+                    wireKind: rumor.kind,
+                  };
+                  cache[wrap.id] = entry;
+                  newlyCached.push(entry);
+                  entries.push({
+                    id: entry.id,
+                    partnerPubkey: entry.partnerPubkey,
+                    fromMe: entry.fromMe,
+                    createdAt: entry.createdAt,
+                    text: entry.text,
+                    wireKind: entry.wireKind,
+                  });
+                } catch (error) {
+                  const code = (error as { code?: string })?.code;
+                  const message = (error as Error)?.message ?? '';
+                  if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
+                    permissionDenied = true;
+                    if (__DEV__) {
+                      console.log(
+                        `[Nostr] Amber NIP-44 permission not granted — stopping NIP-17 unwrap for this refresh`,
+                      );
+                    }
+                    break;
                   }
-                  break;
+                  if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
                 }
-                if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
               }
+            } finally {
+              amberYield.dispose();
             }
+            nip17YieldCount += amberYield.yieldCount;
 
             setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
             // Persist on new entries, LRU touches (#193 — touches reorder insertion order which we need on disk), or unfollowed-partner purges (so the purge survives the next launch).
             if (newlyCached.length > 0 || touched > 0 || unfollowedPurged > 0) {
-              nip17Evictions += await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
+              nip17Evictions += await writeNip17Cache(amberCacheKey, cache);
             }
             nip17CacheSize = Object.keys(cache).length;
           }
@@ -2586,7 +3496,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               `hits=${nip17Hits}, ` +
               `misses=${nip17Misses}, ` +
               `evictions=${nip17Evictions}, ` +
-              `size=${nip17CacheSize}`,
+              `size=${nip17CacheSize}, ` +
+              `yields=${nip17YieldCount} (budget=${DECRYPT_FRAME_BUDGET_MS}ms, cap=${NIP17_LOOP_YIELD_EVERY})`,
           );
 
           setDmInbox(filteredFinal);
@@ -2625,6 +3536,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         dmInboxLastRefreshAt.current = performance.now();
       } finally {
         dmInboxInFlight.current = null;
+        const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
+        // Only surface costly refreshes — sub-200 ms ones aren't
+        // contributors to the multi-second freezes we're hunting.
+        if (__perfBlockMs > 200) {
+          console.log(`[PerfBlock] refreshDmInbox: ${__perfBlockMs}ms`);
+        }
       }
     },
     [
@@ -2652,6 +3569,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
+
+  // Idempotent — any DM-surface (Messages tab, ConversationScreen)
+  // calls this on focus. The first call flips `liveSubArmed`, the
+  // gated useEffect below re-runs and opens the live NIP-17 sub.
+  // Subsequent calls are no-ops (React bails on identical setState).
+  const armLiveDmSub = useCallback(() => {
+    setLiveSubArmed(true);
+  }, []);
+
+  // In-memory dedup Set that survives live-DM-sub re-opens. The sub
+  // useEffect below re-runs when getReadRelays changes — e.g. when the
+  // relay-list refresh adds a new relay 9 s into cold start. Without
+  // this ref, the new effect instance creates a fresh Set and re-seeds
+  // it from AsyncStorage's wrap cache. That snapshot is stale by the
+  // deferred-write window, so all wraps the prior sub already
+  // decrypted re-stream from the relays (same `since` cursor) and get
+  // re-routed/re-decrypted. Carrying the Set forward keeps the
+  // early-return in handleInboxEvent honest across the re-open.
+  // Reset only when the viewer changes (sign out / account switch).
+  const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
+    pubkey: null,
+    set: new Set(),
+  });
 
   // Long-lived kind-1059 (NIP-17 gift wrap) subscription for the
   // current viewer (#349). Without this, new incoming wraps only
@@ -2693,14 +3633,33 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
+    // Wait until a DM-surface (Messages tab, ConversationScreen) has
+    // focused at least once before opening the live sub. On cold boot
+    // the user is on Home, so we skip ~5 s of per-wrap unwrap/route/
+    // dedup JS-thread work. First Messages focus flips `liveSubArmed`,
+    // this effect re-runs, sub opens, drain happens then — when the
+    // user is explicitly looking at messages and a brief loading
+    // state is expected.
+    if (!liveSubArmed) return;
     const viewerPubkey = pubkey;
     const activeSigner = signerType;
     const readRelays = getReadRelays();
     const seen = new Set<string>();
     const SEEN_CAP = 4096;
-    // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
-    // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
-    let knownWrapIds: Set<string> | null = null;
+    // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
+    // by `knownWrapIdsRef` so the Set survives this effect's re-runs
+    // (relay-list change → fresh effect instance). Seeded by union
+    // below from AsyncStorage's wrap cache, but does NOT replace any
+    // entries the prior sub instance added in-memory but the deferred
+    // writeChain hasn't persisted yet. Per issue #505 — the relay
+    // re-streams the backlog since the last `since` cursor, and on a
+    // busy account that's 100+ wraps in ~12 s, almost all of which are
+    // already known; pre-#505 the dedup-cache hit check was
+    // lazy-populated and downstream of several per-event operations.
+    if (knownWrapIdsRef.current.pubkey !== viewerPubkey) {
+      knownWrapIdsRef.current = { pubkey: viewerPubkey, set: new Set() };
+    }
+    const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -2731,6 +3690,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+      // Earliest-possible short-circuit for NIP-17 wraps we already
+      // decrypted on a previous launch. Cost saved per backlog wrap:
+      // console.log + seen.has + seen.add + kind dispatch + cacheKey
+      // build + the async AsyncStorage.getItem race. On a busy
+      // fixture with 100+ wraps in the backlog this compressed the
+      // cold-start JS-thread occupation window from ~12 s to <1 s.
+      // Per issue #505.
+      if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
+      // Eagerly claim this wrap.id in the in-memory dedup Set before
+      // doing any async work. The deferred writeChain at the bottom of
+      // this handler also does this, but only after AsyncStorage I/O
+      // completes — leaving a window where a re-opened sub (relay-list
+      // change mid cold start) re-streams the same wrap and gets past
+      // the early-return because the Set hasn't been updated yet.
+      // Set.add is idempotent so the trailing writeChain add becomes
+      // a no-op. kind 4 has its own `seen` Set below.
+      if (ev.kind === 1059) knownWrapIds.add(ev.id);
       if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
       if (seen.has(ev.id)) {
@@ -2810,7 +3786,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         writeChain = writeChain
           .then(async () => {
             if (cancelled) return;
-            const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+            const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
             const cachedInbox: DmInboxEntry[] = inboxRaw
               ? (() => {
                   try {
@@ -2861,25 +3837,41 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // via two paths (live + a near-simultaneous force-refresh).
       const cacheKey =
         activeSigner === 'nsec'
-          ? NSEC_NIP17_CACHE_KEY
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
           : activeSigner === 'amber'
-            ? AMBER_NIP17_CACHE_KEY
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
             : null;
       if (!cacheKey) return;
-      if (knownWrapIds === null) {
-        // First wrap — pay the JSON.parse once to seed the in-memory mirror.
-        const seedRaw = await AsyncStorage.getItem(cacheKey);
-        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
-        knownWrapIds = new Set(Object.keys(seedCache));
-      }
-      if (knownWrapIds.has(wrap.id)) {
-        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} dedup-cache`);
-        return;
-      }
+      // knownWrapIds is seeded eagerly up-front below (before the
+      // subscription opens) — the in-flow lazy-load was removed in
+      // #505 because it (a) raced when many wraps arrived together
+      // and each tried to seed the Set concurrently, and (b) made
+      // dedup hits pay through a long per-event prologue before the
+      // check fired. The check for cached IDs now lives at the very
+      // top of this function for kind-1059 events. This line is only
+      // reached for genuinely new (not-yet-cached) wraps, OR — in
+      // the rare case the seed failed (see the catch in the sub-open
+      // block) — for wraps that should have been pre-known. In that
+      // case the wrap re-decrypts; the persistent `wrapCache` write
+      // below still guards against the on-disk cache filling
+      // unboundedly, but the `dmMessageListeners` may fire a second
+      // time for messages already shown in a previous session.
+      // Acceptable trade-off because the seed only fails on
+      // AsyncStorage I/O error which is extremely rare on Android.
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
       };
+
+      // Yield to the event loop before each per-wrap decryption. The
+      // live sub fans out wraps from the relay one at a time, but
+      // when the sub catches up a backlog after cold start, multiple
+      // wraps land in the same JS task — each sync `unwrapWrapNsec`
+      // is ~1-3 ms and they pile up to tens-of-ms of unbroken
+      // blocking, dropping bottom-sheet animation frames. A single
+      // setTimeout(0) per wrap costs ~0 ms but lets RN re-flush
+      // pending UI events between decryptions. See issue #496.
+      await yieldToEventLoop();
 
       let rumor: DecodedRumor | null = null;
       if (activeSigner === 'nsec') {
@@ -2979,7 +3971,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await writeNip17Cache(cacheKey, wrapCache);
           knownWrapIds?.add(wrap.id);
 
-          const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
           const cachedInbox: DmInboxEntry[] = inboxRaw
             ? (() => {
                 try {
@@ -3016,6 +4008,59 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
       const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
       if (cancelled) return;
+      // Pre-seed `knownWrapIds` from the persisted NIP-17 wrap-id
+      // cache. One JSON.parse here saves N inline AsyncStorage reads
+      // + parses inside `handleInboxEvent` when the relay re-streams
+      // the backlog. The early-return in `handleInboxEvent` (top)
+      // checks this Set as the very first thing and skips all
+      // downstream per-event work for cache hits. Per issue #505.
+      const wrapCacheKey =
+        activeSigner === 'nsec'
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
+          : activeSigner === 'amber'
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
+            : null;
+      if (wrapCacheKey) {
+        try {
+          const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
+          const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
+          for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
+          // Also seed from persisted group messages — group-routed wraps
+          // never land in the 1:1 wrapCache (the tryRouteGroupRumor
+          // branch returns before the cache write). Without this union
+          // every cold start re-decrypts + re-routes the same group
+          // wraps the relay re-streams since the last `since` cursor.
+          const dmCount = knownWrapIds.size;
+          const groupWrapIds = await listPersistedGroupWrapIds();
+          for (const id of groupWrapIds) knownWrapIds.add(id);
+          if (__DEV__) {
+            console.log(
+              `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
+            );
+          }
+        } catch (e) {
+          // Seed-from-disk failed — leave knownWrapIds as the empty
+          // Set we initialised at outer-scope. Cached wraps re-stream
+          // through the full handler (decrypt, route, write-cache,
+          // queueInboxEntry, notifyDmMessage). Two observable side
+          // effects vs the pre-#505 in-flow dedup check:
+          //   1. `dmMessageListeners` registered for an open
+          //      conversation will re-fire for messages already
+          //      surfaced in a prior session.
+          //   2. The `unwrapWrapNsec` / `unwrapWrapViaNip44` call
+          //      runs unnecessarily for each cached wrap (1–3 ms each).
+          // The persistent on-disk wrapCache write is idempotent —
+          // it doesn't grow unboundedly. We accept this regression on
+          // the failure path because (a) AsyncStorage.getItem I/O
+          // errors are extremely rare on Android, and (b) the
+          // alternative (resurrecting the lazy-load inside the
+          // handler) would re-introduce the race + per-event prologue
+          // cost that motivated #505 in the first place.
+          if (__DEV__)
+            console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
+        }
+      }
+      if (cancelled) return;
       unsubscribe = nostrService.subscribeInboxDmsForViewer({
         viewerPubkey,
         relays: readRelays,
@@ -3039,7 +4084,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
-  }, [isLoggedIn, pubkey, signerType, getReadRelays]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
   const signEvent = useCallback(
     async (event: {
@@ -3081,12 +4126,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       contacts,
       relays,
+      userRelays,
+      addUserRelay,
+      removeUserRelay,
       signerType,
+      identities,
+      switchIdentity,
+      signOutIdentity,
       loginWithNsec,
       loginWithAmber,
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,
@@ -3097,9 +4149,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     }),
@@ -3110,12 +4164,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       contacts,
       relays,
+      userRelays,
+      addUserRelay,
+      removeUserRelay,
       signerType,
+      identities,
+      switchIdentity,
+      signOutIdentity,
       loginWithNsec,
       loginWithAmber,
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,
@@ -3126,9 +4187,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     ],

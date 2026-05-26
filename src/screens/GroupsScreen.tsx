@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,12 @@ const GroupsScreen: React.FC = () => {
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
+  // TODO(wot): swap to wotTier + WebOfTrustChip + WebOfTrustBottomSheet when
+  // the GroupsScreen filter row gets its own three-tier picker (#547 only
+  // migrated the Messages chip; GroupsScreen still uses the legacy boolean
+  // shim — `followingOnly` is now derived from `effectiveWotTier !== 'all'`
+  // and `setFollowingOnly` writes back via `setWotTier`).
+  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
   const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
 
   // Built once per render and shared by every row's GroupAvatar so we
@@ -63,21 +68,43 @@ const GroupsScreen: React.FC = () => {
     return map;
   }, [visibleGroups, myPubkey]);
 
-  const enforceFollowingOnly = followingOnly || !devMode;
+  const enforceFollowingOnly = followingOnly || !secretMode;
   const [createVisible, setCreateVisible] = useState(false);
 
   // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
   // and the NIP-17 decrypt loop can route group rumors into the local
   // group store. Mirrors MessagesScreen's pattern (deferred via
   // InteractionManager so the tab transition stays smooth).
+  //
+  // AbortSignal so an in-flight NIP-17 unwrap loop releases the JS
+  // thread when the user navigates AWAY from Groups — pre-fix the
+  // decrypt loop kept grinding through hundreds of cached wraps after
+  // blur, contributing to the 8-second refreshDmInbox latency Ben
+  // logged in #560. Same shape MessagesScreen uses for the Messages
+  // tab (#412).
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const newRefreshSignal = useCallback((): AbortSignal => {
+    refreshAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    refreshAbortRef.current = ctrl;
+    return ctrl.signal;
+  }, []);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() =>
-        refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly }),
+        refreshDmInbox({
+          force: true,
+          includeNonFollows: !enforceFollowingOnly,
+          signal: newRefreshSignal(),
+        }),
       );
-      return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox, enforceFollowingOnly]),
+      return () => {
+        handle.cancel();
+        refreshAbortRef.current?.abort();
+        refreshAbortRef.current = null;
+      };
+    }, [isLoggedIn, refreshDmInbox, enforceFollowingOnly, newRefreshSignal]),
   );
 
   const openGroup = useCallback(
@@ -180,7 +207,7 @@ const GroupsScreen: React.FC = () => {
 
       <View style={styles.content}>
         <View style={styles.filterChipRow}>
-          {devMode ? (
+          {secretMode ? (
             <TouchableOpacity
               style={followingOnly ? styles.filterChip : styles.filterChipOff}
               onPress={() => setFollowingOnly(!followingOnly)}
