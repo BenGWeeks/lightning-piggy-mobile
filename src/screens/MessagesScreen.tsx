@@ -13,7 +13,7 @@ import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
-import { Users, Clock, Search, X, Zap } from 'lucide-react-native';
+import { Clock, Search, X, Zap } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -22,11 +22,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
+import WebOfTrustChip from '../components/WebOfTrustChip';
+import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
 import type { ContactInfo } from '../components/GroupAvatar';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
@@ -41,22 +45,12 @@ import {
 } from '../utils/conversationSummaries';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
+import type { NostrProfile } from '../types/nostr';
 
 type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
-
-interface AnonContact {
-  id: string;
-  name: string;
-  picture: string | null;
-  banner: string | null;
-  nip05: string | null;
-  lightningAddress: string | null;
-  pubkey: string | null;
-  source: 'nostr' | 'contacts';
-}
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -78,11 +72,28 @@ const MessagesScreen: React.FC = () => {
     refreshProfile,
     dmInbox,
     refreshDmInbox,
+    armLiveDmSub,
+    fetchProfilesForPubkeys,
+    pubkey,
   } = useNostr();
   const { wallets } = useWallet();
-  const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
-  // Production hard-lock: filter is always enforced unless devMode AND followingOnly=off.
-  const enforceFollowingOnly = followingOnly || !devMode;
+  const { groupSummaries, effectiveWotTier } = useGroups();
+  // `trustSetForTier` rather than the raw `trustSet` so the screen's
+  // defensive trust filter is computed against `effectiveWotTier`. The
+  // persisted `wotTier` can be 'all' while the hard-lock clamps the
+  // effective tier back to 'friends' (secretMode off) — if we evaluated
+  // against the persisted set, the L2 entries would still be included
+  // and the filter would no-op past the parental-control gate (#547
+  // follow-up).
+  const { trustSetForTier } = useTrustGraph();
+  // WoT bottom-sheet visibility — opened from the chip in the filter row.
+  // Mirrors MapScreen's setWotSheetVisible pattern (#547).
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
+  // Production hard-lock (#547): the data + UI layers still apply the
+  // trust filter unless the effective tier is 'all'. effectiveWotTier
+  // already collapses 'all' → 'friends' for non-secret-mode users, so a
+  // stale persisted 'all' can't leak past the parental-control gate.
+  const enforceFollowingOnly = effectiveWotTier !== 'all';
   // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
   const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
@@ -91,7 +102,8 @@ const MessagesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
-  const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [windowDays, setWindowDays] = useState<30 | 90>(30);
   // Default OFF so the inbox starts as DMs-only (#147). When ON, the
   // memo below re-merges zap-counterparty rows into the conversation
@@ -198,6 +210,11 @@ const MessagesScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
+      // Tell NostrContext to open the live NIP-17 sub — idempotent;
+      // cold-boot left it disarmed so Home stays responsive. First
+      // Messages-tab focus pays the wrap-drain cost here, where a
+      // brief loading state is the expected UX.
+      armLiveDmSub();
       const handle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
         // Bump the TTL marker only after the refresh resolves successfully — if it's aborted (tab blur) or throws, leave the marker untouched so the next focus retries instead of suppressing for 30 s. (#413 review)
@@ -219,7 +236,7 @@ const MessagesScreen: React.FC = () => {
         refreshAbortRef.current?.abort();
         refreshAbortRef.current = null;
       };
-    }, [isLoggedIn, refreshDmInbox, newRefreshSignal]),
+    }, [isLoggedIn, refreshDmInbox, newRefreshSignal, armLiveDmSub]),
   );
 
   // Avatar prefetch is split into its own focus effect so it can depend on `contacts` (the content it iterates) without invalidating the DM-refresh callback above. (#413 review)
@@ -261,11 +278,13 @@ const MessagesScreen: React.FC = () => {
     }, [isLoggedIn, contacts]),
   );
 
-  const followPubkeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of contacts) set.add(c.pubkey.toLowerCase());
-    return set;
-  }, [contacts]);
+  // Trust gate (#547). For 'friends' tier this is L1 follows + viewer + seeds;
+  // for 'fof' it adds L2 follows-of-follows; for 'all' it's still computed
+  // but the enforceFollowingOnly switch above disables the gate entirely.
+  // Kept named `followPubkeys` so the downstream call-sites stay diff-clean
+  // — the *semantics* widened from "raw follow list" to "tier-aware trust
+  // set" but every existing predicate (Set.has) still applies unchanged.
+  const followPubkeys = trustSetForTier(effectiveWotTier);
 
   // Single pubkey → ContactInfo lookup for the screen, shared by every
   // row + handler. Three previously-separate `contacts.find()` paths
@@ -273,6 +292,37 @@ const MessagesScreen: React.FC = () => {
   // handleConversationPress's picture/lightning-address fallback) now
   // all consult this map, so a 50-contact x N-row screen does O(contacts)
   // once per render instead of O(rows × contacts) per render. See #245.
+  // Non-followed DM senders aren't in `contacts`, so the contacts pipeline
+  // never fetches their kind-0 — they'd show a raw npub + blank avatar. We
+  // fetch their profiles on demand (see the effect below), cache to disk, and
+  // layer them into the resolution here + buildDmSummaries (#664).
+  const [nonFollowProfiles, setNonFollowProfiles] = useState<Map<string, NostrProfile>>(new Map());
+  const nonFollowAttempted = useRef<Set<string>>(new Set());
+
+  // Hydrate the per-account non-follow profile cache on mount / identity change.
+  useEffect(() => {
+    // Reset per-account state first so a previous account's profiles + the
+    // attempted set don't leak across a multi-account switch (#668 review).
+    nonFollowAttempted.current = new Set();
+    setNonFollowProfiles(new Map());
+    if (!pubkey) return;
+    let cancelled = false;
+    AsyncStorage.getItem(`nonfollow_profiles_${pubkey}`)
+      .then((raw) => {
+        if (cancelled || !raw) return;
+        try {
+          const obj = JSON.parse(raw) as Record<string, NostrProfile>;
+          setNonFollowProfiles(new Map(Object.entries(obj)));
+        } catch {
+          // Corrupt cache — ignore; the fetch effect repopulates.
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey]);
+
   const contactInfoMap = useMemo(() => {
     const map = new Map<string, ContactInfo>();
     for (const c of contacts) {
@@ -282,26 +332,81 @@ const MessagesScreen: React.FC = () => {
         lightningAddress: c.profile?.lud16 ?? null,
       });
     }
+    // Layer in non-followed senders' fetched profiles (never override a contact).
+    for (const [pk, prof] of nonFollowProfiles) {
+      if (map.has(pk)) continue;
+      map.set(pk, {
+        picture: prof.picture ?? null,
+        name: (prof.displayName || prof.name || '').trim() || null,
+        lightningAddress: prof.lud16 ?? null,
+      });
+    }
     return map;
-  }, [contacts]);
+  }, [contacts, nonFollowProfiles]);
+
+  // Fetch kind-0 for DM partners not in contacts and not yet cached, so their
+  // name + avatar resolve in the list (esp. with WoT: All). Each pubkey is
+  // attempted once per session so a profile-less sender isn't re-queried (#664).
+  useEffect(() => {
+    if (!pubkey) return;
+    // De-dupe — dmInbox can hold multiple entries for the same partner.
+    const missingSet = new Set<string>();
+    for (const entry of dmInbox) {
+      const pk = entry.partnerPubkey?.toLowerCase();
+      if (!pk || contactInfoMap.has(pk) || nonFollowAttempted.current.has(pk)) continue;
+      missingSet.add(pk);
+    }
+    if (missingSet.size === 0) return;
+    const missing = [...missingSet];
+    missing.forEach((pk) => nonFollowAttempted.current.add(pk));
+    let cancelled = false;
+    fetchProfilesForPubkeys(missing)
+      .then((fetched) => {
+        if (cancelled || fetched.size === 0) return;
+        // No side effects in the updater (Strict Mode may run it twice);
+        // persistence is handled by the dedicated effect below.
+        setNonFollowProfiles((prev) => {
+          const next = new Map(prev);
+          for (const [pk, prof] of fetched) next.set(pk.toLowerCase(), prof);
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [dmInbox, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
+
+  // Persist the non-follow profile cache when it changes — kept out of the
+  // state updater so Strict Mode's double-invocation can't duplicate the write.
+  useEffect(() => {
+    if (!pubkey || nonFollowProfiles.size === 0) return;
+    AsyncStorage.setItem(
+      `nonfollow_profiles_${pubkey}`,
+      JSON.stringify(Object.fromEntries(nonFollowProfiles)),
+    ).catch(() => {});
+  }, [nonFollowProfiles, pubkey]);
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
   const deferredDmInbox = useDeferredValue(dmInbox);
   const deferredContacts = useDeferredValue(contacts);
   // Build the DM summaries first — this is always part of the inbox
-  // regardless of the zap-counterparties toggle. Pass followPubkeys as a
-  // defence-in-depth filter. NostrContext's refreshDmInbox already drops
-  // non-follows at the data layer, but applying it again here guards
-  // against stale dmInbox state from before a follow was revoked. The
-  // "Following only" rule is load-bearing — keep it enforced everywhere
-  // a summary is built. Skip the gate only when devMode AND followingOnly=off (production hard-lock).
+  // regardless of the zap-counterparties toggle. Pass the tier-aware
+  // trust set (#547) as a defence-in-depth filter. NostrContext's
+  // refreshDmInbox already drops non-trusted senders at the data layer,
+  // but applying it again here guards against stale dmInbox state from
+  // before a follow was revoked or a tier was widened. The trust rule
+  // is load-bearing — keep it enforced everywhere a summary is built.
+  // Skip the gate only when effectiveWotTier === 'all' (which itself is
+  // already secret-mode-gated by GroupsContext's hard-lock).
   const dmSummaries = useMemo(() => {
     return buildDmSummaries(
       deferredDmInbox,
       deferredContacts,
       enforceFollowingOnly ? followPubkeys : undefined,
+      nonFollowProfiles,
     );
-  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys]);
+  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys, nonFollowProfiles]);
   // Build the zap-counterparties memo separately so that toggling
   // `showZapCounterparties` off doesn't make every wallet update churn
   // the merged summary list — when the toggle is off this memo is built
@@ -317,11 +422,11 @@ const MessagesScreen: React.FC = () => {
     return mergeSummaries(zapSummaries, dmSummaries);
   }, [dmSummaries, zapSummaries]);
 
-  // Following-only is always on by design (parental-control requirement);
+  // The trust gate is on by default (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
   // applies the user-selectable time window + search, plus a defensive
-  // follow check for pubkey'd zap rows so non-followed zap counterparties
-  // don't slip in. Groups go through their own follow gate inside
+  // trust check for pubkey'd zap rows so untrusted zap counterparties
+  // don't slip in. Groups go through their own trust gate inside
   // GroupsContext.visibleGroups, so we just merge the result here.
   type InboxRow =
     | { kind: 'dm'; summary: ConversationSummary; sortKey: number }
@@ -334,7 +439,10 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !devMode.
+        // Defence-in-depth trust gate (#547): apply the tier-aware trust set
+        // unless the effective tier is 'all'. effectiveWotTier already
+        // collapses 'all' → 'friends' for non-secret-mode users, so the
+        // parental-control hard-lock holds even with a stale persisted 'all'.
         if (enforceFollowingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase()))
           return false;
         if (!lower) return true;
@@ -413,17 +521,20 @@ const MessagesScreen: React.FC = () => {
         return;
       }
       // Anonymous zap: no pubkey to thread against. Surface what we have via
-      // the profile sheet so the user can at least see the zap metadata.
-      setAnonSheetContact({
-        id: `conv-${summary.id}`,
+      // the bottom-sheet peek instead of straight to the full profile — the
+      // sheet's "View full profile" link drills in if the user wants the
+      // wider view; staying as a peek matches every other contact-tap entry
+      // point in the app.
+      setSheetContact({
+        pubkey: null,
         name: summary.name,
         picture,
         banner: null,
         nip05: summary.nip05,
         lightningAddress,
-        pubkey: null,
         source: 'nostr',
       });
+      setProfileSheetVisible(true);
     },
     [contactInfoMap, navigation],
   );
@@ -555,36 +666,14 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            {devMode ? (
-              <TouchableOpacity
-                style={followingOnly ? styles.filterChip : styles.filterChipOff}
-                onPress={() => setFollowingOnly(!followingOnly)}
-                accessibilityLabel={
-                  followingOnly
-                    ? 'Following-only filter on. Tap to show all conversations (dev mode).'
-                    : 'Following-only filter off. Tap to filter to followed senders only.'
-                }
-                accessibilityRole="button"
-                testID="messages-follows-toggle"
-              >
-                <Users
-                  size={14}
-                  color={followingOnly ? colors.brandPink : colors.textSupplementary}
-                />
-                <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
-                  {followingOnly ? 'Following only' : 'All (dev)'}
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <View
-                style={styles.filterChip}
-                accessibilityLabel="Showing conversations from people you follow only"
-                testID="messages-follows-indicator"
-              >
-                <Users size={14} color={colors.brandPink} />
-                <Text style={styles.filterChipText}>Following only</Text>
-              </View>
-            )}
+            <WebOfTrustChip
+              currentTier={effectiveWotTier}
+              onPress={() => setWotSheetVisible(true)}
+              testID="messages-wot-chip"
+            />
+            {/* Hidden marker for Maestro so flows can assert the active tier without parsing the chip label. Mirrors messages-zaps-toggle-on/off below. */}
+            <View testID={`messages-wot-tier-${effectiveWotTier}`} accessibilityElementsHidden />
+
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
@@ -695,10 +784,17 @@ const MessagesScreen: React.FC = () => {
       />
 
       <ContactProfileSheet
-        visible={anonSheetContact !== null}
-        onClose={() => setAnonSheetContact(null)}
-        contact={anonSheetContact}
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={() => {
+          if (!sheetContact) return;
+          setProfileSheetVisible(false);
+          navigation.navigate('ContactProfile', { contact: sheetContact });
+        }}
       />
+
+      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
     </View>
   );
 };

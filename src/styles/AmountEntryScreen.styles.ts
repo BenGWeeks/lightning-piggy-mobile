@@ -112,16 +112,21 @@ export const createAmountEntryStyles = (colors: Palette) =>
     amountValueSecondary: {
       color: colors.textSupplementary,
     },
+    // Round, bright-pink swap affordance with a white icon for contrast.
+    // The accessibilityLabel conveys the target unit to screen readers,
+    // so no inline text label is needed.
     swapButton: {
       position: 'absolute',
       top: '50%',
       right: 16,
-      width: SWAP_DIAMETER,
       height: SWAP_DIAMETER,
+      minWidth: SWAP_DIAMETER,
+      paddingHorizontal: 12,
       borderRadius: SWAP_DIAMETER / 2,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.brandPink,
       alignItems: 'center',
       justifyContent: 'center',
+      gap: 6,
       transform: [{ translateY: -SWAP_DIAMETER / 2 }],
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
@@ -140,6 +145,23 @@ export const createAmountEntryStyles = (colors: Palette) =>
       color: colors.red,
       textAlign: 'center',
       marginTop: 6,
+    },
+    memoInput: {
+      // Single-line "what's it for" field beneath the amount card,
+      // shown only when the parent passes `enableMemo` (currently
+      // the in-conversation Invoice flow — #211). Visually distinct
+      // from the amount card (no fiat/sats pill, no keypad) so users
+      // don't mistake it for another numeric input. Sits inside
+      // `topArea` so it inherits the 16px horizontal padding.
+      marginTop: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.background,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: colors.textHeader,
     },
     confirmButton: {
       marginTop: 16,

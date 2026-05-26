@@ -1,0 +1,324 @@
+import React, { useMemo, useRef } from 'react';
+import {
+  Animated,
+  Modal,
+  PanResponder,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Bitcoin, MapPin, PiggyBank, Zap } from 'lucide-react-native';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
+import { btcMapIconComponent } from '../utils/btcMapIcon';
+
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+  /**
+   * When true, the sheet also lists the BTC Map category icons present
+   * in the current view (the user's filter chips can turn merchants off
+   * entirely, in which case showing the category iconography is just
+   * noise). Caller decides based on its current `filters.lightning ||
+   * filters.onchain`.
+   */
+  placesVisible: boolean;
+  /**
+   * BTC Map category keys present in the current viewport — same
+   * `availableCategories` array the MapScreen filter sheet uses. We
+   * render the icon for each so the user can correlate the glyph on
+   * the map pin with the category name.
+   */
+  availableCategories: string[];
+}
+
+/**
+ * Bottom-sheet legend opened from a button next to Recenter on the
+ * inline + full maps. Lists the pin colour idioms and, when places
+ * are visible, the BTC Map category iconography. Replaces the inline
+ * `MapLegend` strip we previously rendered under the maps — the legend
+ * is rarely-needed but high-value when you do need it, so tucking it
+ * behind a glyph button reclaims vertical space on the host screens.
+ *
+ * Swipe-down to dismiss; tap-backdrop also dismisses. Same gesture
+ * rules as `useDismissibleSheet` in MapScreen for behavioural parity
+ * — the hook was inlined there before this component existed; this
+ * sheet copies the rules rather than depending on a co-located hook
+ * to keep the component self-contained.
+ */
+export const LegendSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  placesVisible,
+  availableCategories,
+}) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const translateY = useRef(new Animated.Value(0)).current;
+  const responder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4,
+      onPanResponderMove: (_e, g) => translateY.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_e, g) => {
+        const dismiss = g.dy > 100 || g.vy > 0.5;
+        if (dismiss) {
+          Animated.timing(translateY, {
+            toValue: 600,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            translateY.setValue(0);
+            onClose();
+          });
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 8,
+            tension: 80,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+
+  // Sort + dedupe so unstable BTC Map ordering doesn't make the legend
+  // shuffle on every viewport change. The same key (e.g. 'cafe' and
+  // 'coffee') maps to the same Lucide glyph; we dedupe by glyph name
+  // so the user doesn't see duplicate entries.
+  const categoryRows = useMemo(() => {
+    if (!placesVisible) return [];
+    const seenComponents = new Set<unknown>();
+    const rows: { key: string; label: string }[] = [];
+    for (const key of [...availableCategories].sort()) {
+      const Comp = btcMapIconComponent(key);
+      if (seenComponents.has(Comp)) continue;
+      seenComponents.add(Comp);
+      // Title-case the category key for display ("fast_food" → "Fast food").
+      const label = key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+      rows.push({ key, label });
+    }
+    return rows;
+  }, [availableCategories, placesVisible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.backdrop} testID="legend-sheet">
+        <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
+        <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+          {/* The whole header strip — grabber pill, the "Pin types"
+              section title, AND a tall transparent area around them —
+              is one big drag target so the user doesn't have to aim
+              for the 4-px pill to dismiss. Everything below the title
+              lives in the ScrollView and scrolls independently. */}
+          <View {...responder.panHandlers} style={styles.grabberZone} testID="legend-sheet-grabber">
+            <View style={styles.handle} />
+            <Text style={styles.sectionTitle}>Pin types</Text>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPad}>
+            {/* All pin-type rows render the same 22-px circle-with-glyph
+                chassis used on the actual map markers, so what the user
+                sees in the legend is exactly what they'll see in the
+                viewport. Colour signals payment / cache class; glyph
+                signals what. */}
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
+                <Zap size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>Lightning merchant</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: '#F7931A' }]}>
+                <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>On-chain merchant</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
+                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>NIP-GC Piglet (Lightning Piggy)</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: colors.cachePurple }]}>
+                <MapPin size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>NIP-GC cache (vanilla)</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={styles.userDotChip}>
+                <View style={styles.userDotInner} />
+              </View>
+              <Text style={styles.rowLabel}>You</Text>
+            </View>
+
+            {categoryRows.length > 0 ? (
+              <>
+                <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Categories</Text>
+                <Text style={styles.sectionSub}>
+                  Icons used on Places pins in the current viewport.
+                </Text>
+                {categoryRows.map((row) => {
+                  const Icon = btcMapIconComponent(row.key);
+                  return (
+                    <View key={row.key} style={styles.row}>
+                      {/* Category rows reuse the same pinChip chassis as
+                          pin types — coloured pink (the default Lightning
+                          merchant tint, since the map carries the same
+                          category icon for both Lightning + on-chain
+                          merchants and the colour signals payment type
+                          separately). Same 28-px / 14-px proportions so
+                          every row in the sheet visually aligns. */}
+                      <View style={[styles.pinChip, { backgroundColor: colors.brandPink }]}>
+                        <Icon size={12} color="#fff" strokeWidth={2.5} />
+                      </View>
+                      <Text style={styles.rowLabel}>{row.label}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            ) : null}
+          </ScrollView>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
+const Item: React.FC<{
+  label: string;
+  color: string;
+  dot?: boolean;
+  diamond?: boolean;
+}> = ({ label, color, dot, diamond }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.row}>
+      <View style={[dot ? styles.swatchDot : styles.swatchDiamond, { backgroundColor: color }]} />
+      <Text style={styles.rowLabel}>{label}</Text>
+    </View>
+  );
+};
+
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    backdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'flex-end',
+    },
+    tapAway: { ...StyleSheet.absoluteFillObject },
+    sheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      maxHeight: '75%',
+      paddingHorizontal: 20,
+      paddingBottom: 32,
+    },
+    grabber: { width: '100%', paddingVertical: 12, alignItems: 'center' },
+    // Expanded drag zone — grabber pill at the top + the "Pin types"
+    // section title below it. The whole 60-px tall strip catches the
+    // PanResponder so the user can dismiss from anywhere near the top.
+    grabberZone: {
+      width: '100%',
+      paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'stretch',
+    },
+    handle: {
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.divider,
+      alignSelf: 'center',
+    },
+    scrollPad: { paddingBottom: 8 },
+    sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.textHeader },
+    sectionSub: { fontSize: 13, color: colors.textSupplementary, marginTop: 2, marginBottom: 8 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 8,
+    },
+    swatchDot: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      borderWidth: 1.5,
+      borderColor: '#fff',
+    },
+    // Shared chassis for every pin-type / category row chip. 22 px
+    // diameter byte-for-byte matches the map markers so the legend
+    // swatches are the same size as what the user sees on the map.
+    // 12-px glyph inside, 1.5-px white border around.
+    pinChip: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // The "You" row inner dot matches the map's user dot exactly.
+    userDotChip: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    userDotInner: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: '#2D88FF',
+      borderWidth: 2,
+      borderColor: '#fff',
+    },
+    cacheCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      borderWidth: 2,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cacheZapBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: '#FFB200',
+      borderWidth: 1.5,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    swatchDiamond: {
+      width: 12,
+      height: 12,
+      transform: [{ rotate: '45deg' }],
+      borderWidth: 1.5,
+      borderColor: '#fff',
+    },
+    iconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rowLabel: { fontSize: 14, color: colors.textBody, flex: 1 },
+  });
+
+export default LegendSheet;

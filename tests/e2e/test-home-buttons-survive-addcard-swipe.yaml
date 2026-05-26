@@ -30,7 +30,11 @@ name: Home Send/Receive buttons stay enabled after swiping to Add card
     speed: 40
 - waitForAnimationToEnd: { timeout: 1500 }
 
-# Receive should still open — activeWalletId must not have been nulled.
+# #666: on the Add card the transactions area shows the add-wallet prompt
+# instead of the previous wallet's transactions.
+- assertVisible: { id: 'home-add-wallet-empty' }
+
+# Receive should still open — activeWalletId must not have been nulled (#166).
 - tapOn: { id: 'btn-receive' }
 - waitForAnimationToEnd: { timeout: 3000 }
 - assertVisible: { text: 'Receive' }

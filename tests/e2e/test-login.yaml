@@ -2,7 +2,7 @@ appId: ${APP_ID:-com.lightningpiggy.app}
 name: Nostr Login Test
 ---
 # Tests logging in with an nsec key
-# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-login.yaml
+# Run: source .env && maestro test -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" tests/e2e/test-login.yaml
 
 # Wait for app to be ready
 - waitForAnimationToEnd:
@@ -47,7 +47,7 @@ name: Nostr Login Test
 # Enter nsec and dismiss keyboard
 - tapOn:
     id: 'nsec-input'
-- inputText: ${MAESTRO_NSEC}
+- inputText: ${MAESTRO_NSEC_BIG}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 2000

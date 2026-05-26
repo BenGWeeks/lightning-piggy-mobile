@@ -10,7 +10,7 @@ name: Rename a group via the GroupConversationScreen header
 #
 # Run:
 #   source .env && maestro test \
-#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
 #     -e RENAME_TARGET='TestGroup-15:08:38' \
 #     -e RENAME_NEW_NAME='Renamed-by-test' \
 #     tests/e2e/test-rename-group.yaml
