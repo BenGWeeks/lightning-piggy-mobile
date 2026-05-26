@@ -594,10 +594,13 @@ async function safeGetDmCacheItem(key: string): Promise<string | null> {
         try {
           f.create();
           f.write(legacy);
+          // Retire the legacy row only AFTER the file write succeeds — a
+          // failed migration must not discard a usable cache (#689 review).
+          AsyncStorage.removeItem(key).catch(() => {});
         } catch {
-          // best-effort migration — refresh will repopulate
+          // Migration failed — leave the AsyncStorage row intact; the next
+          // write/refresh retries.
         }
-        AsyncStorage.removeItem(key).catch(() => {});
       }
       return legacy;
     } catch (err) {
@@ -1913,6 +1916,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // them in place; they're orphaned safely once no remaining identity
     // is a member, and re-attached if the same identity signs back in.
     await AsyncStorage.multiRemove(toRemove);
+    // The NIP-17 wrap caches are file-backed now (#689), so the
+    // multiRemove above doesn't touch them — delete the files explicitly.
+    // Decrypted DM plaintext must not survive logout / account wipe
+    // (#689 review / #690).
+    if (loggedOutPubkey) {
+      for (const base of [AMBER_NIP17_CACHE_KEY_BASE, NSEC_NIP17_CACHE_KEY_BASE]) {
+        try {
+          const f = new File(
+            Paths.document,
+            wrapCacheFileName(perAccountKey(base, loggedOutPubkey)),
+          );
+          if (f.exists) f.delete();
+        } catch {
+          // best-effort — non-fatal
+        }
+      }
+    }
   }, []);
 
   const logout = useCallback(async () => {
