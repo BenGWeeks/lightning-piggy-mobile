@@ -16,9 +16,12 @@ changing how anything is stored.
   Map places) are public data — they need no at-rest encryption. *Decrypted
   DM content is private* — it does, and is the subject of the encrypted-store
   work (see <<target>>).
-* *The decrypting key is the protected thing.* As long as the `nsec` is in
-  the keystore, ciphertext sitting on disk is useless without it. That's why
-  Damus/Amethyst/0xchat all protect the key and lean on the OS for the rest.
+* *The decrypting key is the protected thing.* As long as the key is in the
+  keystore, ciphertext on disk is useless without it. Peer clients stop here
+  and leave the at-rest data unprotected: Damus keeps the `nsec` in the Keychain
+  but stores event data unencrypted; Amethyst holds decrypted data in memory
+  only; 0xchat's Isar DB is plaintext on disk. We go one step further and
+  encrypt the at-rest DB too (Signal's model) — see <<target>>.
 
 == Storage layers (current)
 
@@ -112,8 +115,9 @@ the same DB afterwards (they're smaller, public, not on fire).
 [[keys]]
 == Keystore key management (for the encrypted DB)
 
-Signal's wrapped-key model, implemented in `src/services/localDbKey.ts`
-(`getOrCreateLocalDbKey` / `clearLocalDbKey`, #697). One key opens one DB
+Signal's wrapped-key model. The key module (`src/services/localDbKey.ts` —
+`getOrCreateLocalDbKey` / `clearLocalDbKey`) is the first slice of the #695/#690
+work, added in #697. One key opens one DB
 holding *both* the private DM rows and the public cache rows — the name is
 deliberately not DM-specific:
 

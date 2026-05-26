@@ -32,7 +32,7 @@ function generateKey(): string {
 }
 
 async function resolveKey(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(LOCAL_DB_KEY_STORE_KEY, SECURE_OPTIONS);
+  const existing = await SecureStore.getItemAsync(LOCAL_DB_KEY_STORE_KEY);
   // Validate before trusting it: a corrupted / wrong-length value would
   // make SQLCipher fail to open with a cryptic error. Regenerate +
   // overwrite instead (pattern mirrors identitiesStore's hex guard).
@@ -71,5 +71,5 @@ export function getOrCreateLocalDbKey(): Promise<string> {
  */
 export async function clearLocalDbKey(): Promise<void> {
   keyPromise = null;
-  await SecureStore.deleteItemAsync(LOCAL_DB_KEY_STORE_KEY, SECURE_OPTIONS);
+  await SecureStore.deleteItemAsync(LOCAL_DB_KEY_STORE_KEY);
 }
