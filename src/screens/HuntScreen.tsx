@@ -18,7 +18,6 @@ import {
   PiggyBank,
   Search,
   SlidersHorizontal,
-  Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -26,6 +25,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
@@ -543,13 +543,7 @@ const CacheRow: React.FC<{
           )}
         </View>
       )}
-      {/* Lightning-zap badge — only when this Piggy actually carries a payout
-          (the LNURL-withdraw is optional metadata). */}
-      {cache.isLpPiggy && cache.payoutSats != null ? (
-        <View style={styles.payoutBadge}>
-          <Zap size={13} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
-        </View>
-      ) : null}
+      <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
     </View>
     <View style={styles.rowMain}>
       <Text style={styles.rowTitle} numberOfLines={1}>
@@ -698,17 +692,6 @@ const createStyles = (colors: Palette) =>
     // as "muted/disabled" and clashed with the now-coloured map pin.
     iconStandard: { backgroundColor: '#7A5CFF' },
     iconContainer: { position: 'relative' },
-    payoutBadge: {
-      position: 'absolute',
-      top: -5,
-      right: -5,
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     thumb: {
       width: 44,
       height: 44,
