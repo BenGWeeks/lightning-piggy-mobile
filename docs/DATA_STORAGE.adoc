@@ -101,16 +101,24 @@ The target — matching how 0xchat / Damus persist Nostr data — is a single
 |===
 | Data | Row keyed by | Encrypted?
 | DM wraps / messages (NIP-17) | `event_id` (+ `conversation`, `created_at`) | *Yes* — private content
+| Transactions (Lightning / on-chain) | `payment_hash` / txid (+ `wallet_id`, `created_at`) | *Yes* — private financial
+| Boltz swaps | swap id (+ `status`, `timeout_block`) | *Yes* — private + recovery-critical
 | Geo-caches (NIP-GC 37516) | `coord` (+ `geohash`, `author`) | Harmless (public); encrypted anyway since one DB
 | NIP-52 events (31923) | `coord` (+ `geohash`, `starts_at`) | Harmless (public)
-| BTC Map places | place id (+ lat/lon) | Harmless (public)
 |===
 
-Geo-caches, events, and places are *public* and don't require encryption, but
-folding them into the same SQLCipher DB is simpler than maintaining a second
-plain DB, and the encryption overhead is negligible. *Sequencing:* DMs first
-(they cause the freeze and need encryption); caches/events/places migrate into
-the same DB afterwards (they're smaller, public, not on fire).
+DMs, transactions, and swaps are *private* and the reason the DB is encrypted.
+Geo-caches and events are *public* but folding them into the same SQLCipher DB
+is simpler than a second plain DB, and the overhead is negligible.
+
+*BTC Map places are the deliberate exception* — public *external bulk* data,
+identical for every user and refreshed wholesale, so they stay in their own
+*plain* cache (`btcmap-last-result.json`), **not** the encrypted DB. That keeps
+the encrypted DB strictly *your* data, so logout = a clean, complete wipe (see
+the storage map under <<Diagrams>>).
+
+*Sequencing:* DMs first (they cause the freeze and need encryption);
+transactions/swaps next (financial); the public Nostr tables after.
 
 [[keys]]
 == Keystore key management (for the encrypted DB)
@@ -138,9 +146,10 @@ key off the device yields nothing usable.
 
 == Diagrams
 
-NOTE: These are https://mermaid.js.org[Mermaid] blocks. They render in the
-asciidoctor-diagram / PDF pipeline and on Mermaid-aware viewers; GitHub's raw
-`.adoc` preview shows them as source.
+NOTE: These are https://mermaid.js.org[Mermaid] blocks. They render to images
+in the PDF build (`generate-docs.sh` wires `asciidoctor-diagram` +
+`puppeteer-mermaid.json`) and on Mermaid-aware viewers; GitHub's raw `.adoc`
+preview shows them as source.
 
 === Encrypted DB schema (target)
 
@@ -246,7 +255,7 @@ that isn't yours to wipe.
 
 The encrypted DB is populated from the *canonical sources*, not by importing the
 old caches. Relays are already the source of truth for messages — the old wrap
-cache only memoised decryption — so we re-fetch wraps and decrypt-once into the
+cache only memoized decryption — so we re-fetch wraps and decrypt-once into the
 DB, then *delete* the old plaintext caches (closing the at-rest gap, #690). The
 old blob/file caches are never read as a migration source.
 
@@ -256,5 +265,5 @@ flowchart LR
     R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once"| DB[("Encrypted DB")]
     W["Wallet backend<br/>(NWC / on-chain)"] -->|"sync"| DB
     BM["BTC Map API"] -->|"refresh"| PC["Plain places cache"]
-    OLD["Old plaintext caches<br/>(wrap cache, AsyncStorage blobs)"] -.->|"deleted, not imported"| X["🗑"]
+    OLD["Old plaintext caches<br/>(wrap cache, AsyncStorage blobs)"] -.->|"deleted, not imported"| X["discarded"]
 ....
