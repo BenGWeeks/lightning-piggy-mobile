@@ -56,6 +56,16 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## File size and modularity
+
+- **Hard cap: no source file over 1,000 lines.** A file approaching or past 1,000 lines MUST be broken up into smaller, **logically-cohesive** modules — split by *concern*, not by arbitrary line count. A 4,000-line context/screen is unreviewable, conflict-prone, and hides coupling.
+- **New files** must not be created over the cap. **When you touch an existing over-cap file, leave it smaller, never larger** — extract the part you're working on into its own module rather than adding to the blob.
+- **How to split (by concern, not by slicing):**
+  - **Contexts** → extract per-responsibility hooks/services. E.g. `NostrContext` → `useDmInbox` / `useProfiles` / `useRelays` (+ the `src/services/dm*` data layer), each its own file; the context just composes them.
+  - **Screens** → lift sub-views into components, and non-UI logic into hooks/utils (`useXScreenState`, `src/utils/…`).
+  - **Services** → split by domain (`nostrService` → `nostrRelay` / `nostrDm` / `nostrProfile`).
+- **Known offenders to break up (as of 2026-05-26, when touched):** `NostrContext.tsx` (4,279), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `ConversationScreen.tsx` (1,455), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015), `nwcService.ts` (1,009).
+
 ## Unit tests
 
 - Coverage scope: **`src/services`, `src/utils`, `src/contexts` only.** Components are excluded — they're best covered by Maestro pixel/flow tests (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort, low-payoff).
