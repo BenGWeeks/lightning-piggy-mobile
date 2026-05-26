@@ -140,14 +140,17 @@ const fmtTime = (totalSeconds: number) => {
  * time) lets the user listen back before sending. The waveform is built
  * from the loudness samples captured during recording.
  *
- * The sheet always recreates its hook recorder on mount (because the
- * parent unmounts it via `visible` flipping), so there's no leaked
- * recorder session across opens. Closing the sheet mid-recording calls
- * `recorder.stop()` to release the mic.
+ * The screens render this sheet permanently and drive it with the
+ * `visible` prop: `present()` on open, `dismiss()` on close — the
+ * component is NOT unmounted between opens. Session state (recorded URI,
+ * metering, send guard) is therefore reset on each open, and every close
+ * path (Cancel, hardware-back, pan-down dismiss) routes through the same
+ * teardown so `recorder.stop()` always releases the mic — a back-out
+ * mid-recording can't leave it live off-screen.
  *
- * Inline playback in the receiver's bubble is OUT OF SCOPE here — the
- * sender posts the Blossom URL as plain text, the receiver renders it
- * as a tappable link until a follow-up issue lands a player.
+ * The recorded clip is AES-256-GCM-encrypted on send (NIP-17 kind 15);
+ * both sender and recipient play it inline via VoiceNotePlayer /
+ * MessageBubble.
  */
 const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sending = false }) => {
   const colors = useThemeColors();
@@ -263,17 +266,6 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       sheetRef.current?.dismiss();
     }
   }, [visible]);
-
-  // Hardware back button → close. Mirrors the GifPickerSheet pattern so
-  // the sheet behaves consistently with its siblings on Android.
-  useEffect(() => {
-    if (!visible) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
-      return true;
-    });
-    return () => sub.remove();
-  }, [visible, onClose]);
 
   // Cancel + cleanup on unmount or visibility flip while recording.
   // Without this the native mic stays held open until the OS reclaims
@@ -422,7 +414,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     }
   }, [recordedUri, isPlaying, player, playbackCurrent, playbackDuration]);
 
-  const handleCancel = useCallback(async () => {
+  // Release the mic + halt review playback + clear the cutoff timer.
+  // Shared by every close path (Cancel button, hardware back, pan-down
+  // dismiss) — the sheet is never unmounted on close, so without this a
+  // back-out / swipe-away mid-recording would leave the recorder running
+  // off-screen until the 60 s cap fires.
+  const teardownRecording = useCallback(async () => {
     if (cutoffTimerRef.current) {
       clearTimeout(cutoffTimerRef.current);
       cutoffTimerRef.current = null;
@@ -437,11 +434,15 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     } catch {
       // Recorder may already be stopped — discard.
     }
+  }, [recorder, player]);
+
+  const handleCancel = useCallback(async () => {
+    await teardownRecording();
     setRecordedUri(null);
     setMeteringHistory([]);
     setDidStart(false);
     onClose();
-  }, [onClose, recorder, player]);
+  }, [onClose, teardownRecording]);
 
   const handleSend = useCallback(async () => {
     if (!recordedUri || sending || sendInFlightRef.current) return;
@@ -508,10 +509,28 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      if (index === -1) {
+        // Pan-down dismiss bypasses the Cancel button, so tear the
+        // recorder down here too — otherwise a swipe-away mid-recording
+        // leaves the mic live off-screen.
+        teardownRecording();
+        onClose();
+      }
     },
-    [onClose],
+    [onClose, teardownRecording],
   );
+
+  // Hardware back button → run the same teardown as Cancel so the mic is
+  // released, then close. Mirrors the GifPickerSheet pattern. Declared
+  // after handleCancel so the dependency is initialised before this runs.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleCancel();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, handleCancel]);
 
   const elapsedLabel = fmtTime(elapsedSeconds);
 

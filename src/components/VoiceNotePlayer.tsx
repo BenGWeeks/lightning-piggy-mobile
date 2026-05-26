@@ -137,7 +137,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
     } finally {
       setBusy(false);
     }
-  }, [encrypted, url, localUri, keyHex, nonceHex]);
+  }, [encrypted, url, localUri, keyHex, nonceHex, mime]);
 
   // Once the decrypted file lands and the user had asked to play, start it
   // (the player's source only switches to `localUri` on the next render).

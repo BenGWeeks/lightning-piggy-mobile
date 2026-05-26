@@ -736,11 +736,11 @@ const ConversationScreen: React.FC = () => {
     [pubkey, sendDirectMessage, appendOptimisticLocal],
   );
 
-  // Voice-note send (#235): upload the recorded .m4a to Blossom, post the
-  // returned URL as the message body. Other Nostr clients render the URL
-  // as an inline audio player from the file extension; ones that don't
-  // fall back to a tappable link. Inline playback in our own renderer is
-  // a follow-up — not in scope here.
+  // Voice-note send (#235): encrypt the recorded .m4a (AES-256-GCM),
+  // upload the CIPHERTEXT to Blossom, and send a NIP-17 kind-15 file
+  // message. Both sender and recipient render it inline via MessageBubble
+  // → VoiceNotePlayer (decrypt-then-play). Encryption-aware clients (e.g.
+  // 0xchat) can also render the standard kind-15 event.
   const handleSendVoiceNote = useCallback(
     async (uri: string) => {
       if (uploadingVoice) return;

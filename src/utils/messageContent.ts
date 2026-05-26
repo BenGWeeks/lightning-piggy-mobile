@@ -120,15 +120,19 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
   if (!text) return null;
   const trimmed = text.trim();
   const hashIdx = trimmed.indexOf('#');
-  if (hashIdx >= 0 && trimmed.slice(hashIdx + 1).includes(LPE_MARKER)) {
-    const url = trimmed.slice(0, hashIdx);
+  if (hashIdx >= 0) {
     const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
-    const keyHex = params.get('k') ?? undefined;
-    const nonceHex = params.get('n') ?? undefined;
-    const mime = params.get('m') ?? 'application/octet-stream';
-    // Only audio here — encrypted images are handled separately (#688).
-    if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
-    return { url, mime, encrypted: true, keyHex, nonceHex };
+    // Require `lpe` to equal exactly '1'. A substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // Only audio here — encrypted images are handled separately (#688).
+      if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
   }
   const plain = extractAudioUrl(trimmed);
   return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;

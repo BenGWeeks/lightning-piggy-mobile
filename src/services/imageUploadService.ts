@@ -96,7 +96,11 @@ function mimeFromExt(ext: string | undefined): string {
     case 'wav':
       return 'audio/wav';
     default:
-      return `application/${ext}`;
+      // Unknown extension — `application/octet-stream` is the correct
+      // "arbitrary bytes" type. Building `application/${ext}` would emit
+      // non-standard types (e.g. `application/bin`) and mislabel the
+      // nostr.build fallback's Content-Type.
+      return 'application/octet-stream';
   }
 }
 

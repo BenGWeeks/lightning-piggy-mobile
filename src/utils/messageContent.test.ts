@@ -155,6 +155,16 @@ describe('parseVoiceNote / encodeEncryptedFileUrl (NIP-17 kind 15)', () => {
     expect(parseVoiceNote('https://s/x.bin#lpe=1&m=audio%2Fmp4')).toBeNull();
   });
 
+  it('does not treat a near-miss marker like lpe=10 as an encrypted note', () => {
+    // A substring test for "lpe=1" would wrongly fire on "lpe=10"; the
+    // parser requires the param to equal exactly "1".
+    expect(
+      parseVoiceNote(
+        `https://s/x.bin#lpe=10&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=audio%2Fmp4`,
+      ),
+    ).toBeNull();
+  });
+
   it('returns null for non-voice text', () => {
     expect(parseVoiceNote('hello world')).toBeNull();
     expect(parseVoiceNote('')).toBeNull();
