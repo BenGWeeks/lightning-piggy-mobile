@@ -359,7 +359,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       // local *stub* (blank `lnurlw`, and `isLpPiggy` unset on an old
       // record or saved `false` by a prior reward-dropping edit) would
       // otherwise read as non-LP and wrongly lock the fields even though
-      // the listing carries the LP label on relays (Hawthorn case, #681).
+      // the listing carries the LP label on relays (Hawthorn case, #692;
+      // follows the #681 edit-Piglet work).
       setIsLpPiggyEdit(
         (piggy.isLpPiggy ?? Boolean(piggy.lnurlw)) || (fallbackCache?.isLpPiggy ?? false),
       );
