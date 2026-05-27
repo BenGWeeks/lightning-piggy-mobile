@@ -21,7 +21,6 @@ declare -A BASELINE=(
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1710
   ["src/screens/MapScreen.tsx"]=1562
   ["src/services/nostrService.ts"]=1529
-  ["src/screens/ConversationScreen.tsx"]=1455
   ["src/components/TransferSheet.tsx"]=1418
   ["src/screens/ExploreHomeScreen.tsx"]=1377
   ["src/services/nfcService.ts"]=1242
