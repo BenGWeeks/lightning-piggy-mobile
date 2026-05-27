@@ -1,5 +1,5 @@
 import { open, type DB } from '@op-engineering/op-sqlite';
-import { getOrCreateLocalDbKey } from './localDbKey';
+import { getOrCreateLocalDbKey, clearLocalDbKey } from './localDbKey';
 
 // The single encrypted local database (#695). SQLCipher is enabled as the
 // op-sqlite compile target (package.json "op-sqlite": { "sqlcipher": true }),
@@ -76,6 +76,49 @@ export function getLocalDb(): Promise<DB> {
     });
   }
   return dbPromise;
+}
+
+/**
+ * Close + delete the encrypted DB file and reset the open handle. If the DB
+ * wasn't opened this session, a bare handle is opened solely to delete the
+ * on-disk file.
+ *
+ * Module-private on purpose: deleting the file WITHOUT also clearing the key is
+ * not a complete wipe (a delete failure would leave a still-readable encrypted
+ * DB on disk). The only safe public entry point is `wipeLocalDmStore`, which
+ * pairs this with `clearLocalDbKey`. A delete failure is logged in dev as a
+ * breadcrumb rather than thrown, so it can't wedge the logout flow.
+ */
+async function clearLocalDb(): Promise<void> {
+  let db: DB | null = null;
+  if (dbPromise) {
+    db = await dbPromise.catch(() => null);
+    dbPromise = null;
+  }
+  if (!db) {
+    try {
+      db = open({ name: DB_NAME });
+    } catch {
+      db = null;
+    }
+  }
+  try {
+    db?.delete();
+  } catch (e) {
+    if (__DEV__) console.warn(`[localDb] DB file delete failed: ${(e as Error)?.message ?? e}`);
+  }
+}
+
+/**
+ * Full wipe of the local DM store on logout / account-wipe: delete the
+ * encrypted DB file AND its keystore key. A lone key or a lone ciphertext file
+ * is useless, but leave neither behind (#690 / #710 H1). Wire this into the
+ * logout path alongside the DM-store rewire (#709) that first writes real rows;
+ * safe to call earlier — both halves are no-ops when nothing has been created.
+ */
+export async function wipeLocalDmStore(): Promise<void> {
+  await clearLocalDb();
+  await clearLocalDbKey();
 }
 
 /**

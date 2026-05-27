@@ -2,11 +2,14 @@
 // schema orchestration and the verify smoke-check. The real encrypted open is
 // validated by an on-device dev build (#695 spike), not here.
 const mockExecute = jest.fn();
-const mockDb = { execute: mockExecute };
+const mockDelete = jest.fn();
+const mockDb = { execute: mockExecute, delete: mockDelete };
 const mockOpen = jest.fn(() => mockDb);
+const mockClearKey = jest.fn(() => Promise.resolve());
 jest.mock('@op-engineering/op-sqlite', () => ({ open: mockOpen }));
 jest.mock('./localDbKey', () => ({
   getOrCreateLocalDbKey: jest.fn(() => Promise.resolve('a'.repeat(64))),
+  clearLocalDbKey: mockClearKey,
 }));
 
 import { getLocalDb, verifyEncryptedDb } from './localDb';
@@ -86,6 +89,25 @@ describe('localDb', () => {
     const schemaIdx = sqls.findIndex((s) => s.includes('CREATE TABLE'));
     expect(cipherIdx).toBeGreaterThanOrEqual(0);
     expect(cipherIdx).toBeLessThan(schemaIdx); // guard runs before schema
+  });
+
+  // clearLocalDb is module-private (the only safe public wipe is
+  // wipeLocalDmStore, which also clears the key) — so its delete paths are
+  // exercised through wipeLocalDmStore.
+  it('wipeLocalDmStore deletes the DB AND clears the keystore key (open-handle case, #710 H1)', async () => {
+    const { getLocalDb: g, wipeLocalDmStore } = require('./localDb');
+    await g(); // opened this session
+    await wipeLocalDmStore();
+    expect(mockDelete).toHaveBeenCalled();
+    expect(mockClearKey).toHaveBeenCalled();
+  });
+
+  it('wipeLocalDmStore opens a bare handle to delete when DB not opened this session', async () => {
+    const { wipeLocalDmStore } = require('./localDb');
+    await wipeLocalDmStore(); // never opened this session
+    expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({ name: 'lightningpiggy.db' }));
+    expect(mockDelete).toHaveBeenCalled();
+    expect(mockClearKey).toHaveBeenCalled();
   });
 });
 
