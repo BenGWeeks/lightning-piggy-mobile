@@ -5,7 +5,12 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
+import {
+  partnerFromRumor,
+  unwrapWrapNsec,
+  unwrapWrapViaNip44,
+  textForRumor,
+} from '../utils/nip17Unwrap';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   nip04PlaintextCache,
@@ -532,7 +537,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     partnerPubkey: partnership.partnerPubkey,
                     fromMe: partnership.fromMe,
                     createdAt: rumor.created_at,
-                    text: rumor.content,
+                    text: textForRumor(rumor),
                     wireKind: rumor.kind,
                   };
                   cache[wrap.id] = entry;
@@ -625,7 +630,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     partnerPubkey: partnership.partnerPubkey,
                     fromMe: partnership.fromMe,
                     createdAt: rumor.created_at,
-                    text: rumor.content,
+                    text: textForRumor(rumor),
                     wireKind: rumor.kind,
                   };
                   cache[wrap.id] = entry;

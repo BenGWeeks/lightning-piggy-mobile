@@ -19,120 +19,52 @@ import {
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, ArrowDown } from 'lucide-react-native';
+import { ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
-import MessageBubble from '../components/MessageBubble';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
+import ConversationMessageRow from '../components/ConversationMessageRow';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
 import TransactionDetailSheet, {
   TransactionDetailData,
 } from '../components/TransactionDetailSheet';
-import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
-import {
-  getCurrentLocation,
-  formatGeoMessage,
-  buildOsmViewUrl,
-  formatCoordsForDisplay,
-  SharedLocation,
-} from '../services/locationService';
-import {
-  fetchProfile,
-  nprofileEncode,
-  buildProfileRelayHints,
-  DEFAULT_RELAYS,
-} from '../services/nostrService';
-import { isConfigured as isGifConfigured, Gif } from '../services/giphyService';
+import { buildOsmViewUrl, SharedLocation } from '../services/locationService';
+import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
-import {
-  classifyMessageContent,
-  extractInvoice,
-  extractSharedContact,
-  formatTime,
-} from '../utils/messageContent';
+import { extractSharedContact } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
+import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
+import {
+  type Item,
+  type TimedItem,
+  buildZapItems,
+  buildConversationItems,
+} from '../utils/conversationItems';
+import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 
-type Item =
-  | {
-      kind: 'message';
-      id: string;
-      fromMe: boolean;
-      text: string;
-      createdAt: number;
-    }
-  | {
-      kind: 'zap';
-      id: string;
-      fromMe: boolean;
-      amountSats: number;
-      comment: string;
-      createdAt: number;
-      tx: TransactionDetailData;
-    }
-  | {
-      kind: 'location';
-      id: string;
-      fromMe: boolean;
-      location: SharedLocation;
-      createdAt: number;
-    }
-  | {
-      kind: 'gif';
-      id: string;
-      fromMe: boolean;
-      url: string;
-      createdAt: number;
-    }
-  | {
-      kind: 'dayHeader';
-      id: string;
-      label: string;
-    };
-
-// Every Item variant except the dayHeader synthetic row — these are the
-// ones that have a real `createdAt` and participate in chronological sort.
-type TimedItem = Exclude<Item, { kind: 'dayHeader' }>;
-
-// Local-only formatter — only used for the dayHeader rule between
-// chronological message groups, so it stays here rather than in the
-// shared `messageContent` util (which sticks to bubble-level concerns).
-function formatDayHeader(epochSeconds: number): string {
-  const d = new Date(epochSeconds * 1000);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-  if (sameDay(d, today)) return 'Today';
-  if (sameDay(d, yesterday)) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
@@ -153,23 +85,14 @@ const ConversationScreen: React.FC = () => {
   }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const {
-    isLoggedIn,
-    fetchConversation,
-    getCachedConversation,
-    sendDirectMessage,
-    appendLocalDmMessage,
-    signEvent,
-    contacts,
-    relays,
-    armLiveDmSub,
-  } = useNostr();
+  const { isLoggedIn, fetchConversation, getCachedConversation, contacts, armLiveDmSub } =
+    useNostr();
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
   useEffect(() => {
     armLiveDmSub();
   }, [armLiveDmSub]);
-  const { wallets, activeWalletId, activeWallet } = useWallet();
+  const { wallets } = useWallet();
 
   const [messages, setMessages] = useState<
     { id: string; fromMe: boolean; text: string; createdAt: number }[]
@@ -177,8 +100,6 @@ const ConversationScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
@@ -245,101 +166,15 @@ const ConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
-  const [sharingLocation, setSharingLocation] = useState(false);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
-  const zapItems = useMemo<TimedItem[]>(() => {
-    const out: TimedItem[] = [];
-    for (const w of wallets) {
-      for (const tx of w.transactions) {
-        const cp = tx.zapCounterparty;
-        if (!cp || !cp.pubkey || cp.pubkey !== pubkey) continue;
-        const when = tx.settled_at ?? tx.created_at;
-        if (!when) continue;
-        out.push({
-          kind: 'zap',
-          id: `zap-${tx.paymentHash ?? tx.bolt11 ?? when}-${tx.type}`,
-          fromMe: tx.type === 'outgoing',
-          amountSats: Math.abs(tx.amount),
-          comment: cp.comment ?? '',
-          createdAt: when,
-          tx,
-        });
-      }
-    }
-    return out;
-  }, [wallets, pubkey]);
+  const zapItems = useMemo<TimedItem[]>(() => buildZapItems(wallets, pubkey), [wallets, pubkey]);
 
-  const items = useMemo<Item[]>(() => {
-    const msgItems: TimedItem[] = messages.map((m) => {
-      // Classify each raw DM into the variant the renderer expects. Same
-      // shape used by the group screen (via `classifyMessageContent`)
-      // — keeps gif / geo detection in one place.
-      const classified = classifyMessageContent(m.text);
-      if (classified.kind === 'gif') {
-        return {
-          kind: 'gif',
-          id: `dm-${m.id}`,
-          fromMe: m.fromMe,
-          url: classified.url,
-          createdAt: m.createdAt,
-        };
-      }
-      if (classified.kind === 'location') {
-        return {
-          kind: 'location',
-          id: `dm-${m.id}`,
-          fromMe: m.fromMe,
-          location: classified.location,
-          createdAt: m.createdAt,
-        };
-      }
-      return {
-        kind: 'message',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        text: m.text,
-        createdAt: m.createdAt,
-      };
-    });
-    // Descending order — index 0 is newest. The FlatList is `inverted`, so
-    // index 0 renders at the visual bottom (chat default) and the
-    // RefreshControl attaches to the visual bottom too, which is what
-    // drives the pull-up-to-refresh gesture.
-    const sorted = [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
-
-    // Interleave "Today / Yesterday / <date>" dividers between day groups.
-    // With an inverted FlatList the array runs newest → oldest, so each
-    // divider must sit AFTER its group's oldest entry in array order
-    // (= visually above the group's newest entry). This gives the same
-    // chat-standard look as Transactions' date headers.
-    if (sorted.length === 0) return sorted;
-    const withHeaders: Item[] = [];
-    const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
-    let prevKey: string | null = null;
-    let prevTs: number | null = null;
-    for (const it of sorted) {
-      const key = dayKey(it.createdAt);
-      if (prevKey !== null && prevKey !== key && prevTs !== null) {
-        withHeaders.push({
-          kind: 'dayHeader',
-          id: `day-${prevKey}`,
-          label: formatDayHeader(prevTs),
-        });
-      }
-      withHeaders.push(it);
-      prevKey = key;
-      prevTs = it.createdAt;
-    }
-    if (prevKey !== null && prevTs !== null) {
-      withHeaders.push({
-        kind: 'dayHeader',
-        id: `day-${prevKey}`,
-        label: formatDayHeader(prevTs),
-      });
-    }
-    return withHeaders;
-  }, [messages, zapItems]);
+  const items = useMemo<Item[]>(
+    () => buildConversationItems(messages, zapItems),
+    [messages, zapItems],
+  );
 
   // Mount/unmount tracker so the async `load()` below can bail when
   // the user navigates back mid-fetch. Without this, every back-press
@@ -533,199 +368,30 @@ const ConversationScreen: React.FC = () => {
   // reopen before the NIP-17 self-wrap echo arrives). The merge-side
   // dedup in mergeConversationMessages drops this local- row when the
   // real wrap echoes back from the relay.
-  const appendOptimisticLocal = useCallback(
-    (text: string) => {
-      const optimistic = {
-        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        fromMe: true,
-        text,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      setMessages((prev) => [...prev, optimistic]);
-      void appendLocalDmMessage(pubkey, optimistic);
-    },
-    [appendLocalDmMessage, pubkey],
-  );
-
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setSending(true);
-    try {
-      const result = await sendDirectMessage(pubkey, text);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send message.');
-        return;
-      }
-      setDraft('');
-      appendOptimisticLocal(text);
-    } finally {
-      setSending(false);
-    }
-  }, [draft, sending, sendDirectMessage, pubkey, appendOptimisticLocal]);
-
-  const handleShareLocation = useCallback(async () => {
-    if (sharingLocation) return;
-    setAttachPanelOpen(false);
-    setSharingLocation(true);
-    try {
-      const result = await getCurrentLocation();
-      if (!result.ok) {
-        Alert.alert('Could not share location', result.message);
-        return;
-      }
-      const loc = result.location;
-      await new Promise<void>((resolve) => {
-        // `pressed` guards against `onDismiss` firing while a button's
-        // onPress is still awaiting `sendDirectMessage`. Without it, the
-        // outer Promise can resolve early, clear `sharingLocation`, and
-        // re-enable the Attach button mid-publish — a classic double-submit
-        // window we don't want.
-        let pressed = false;
-        Alert.alert(
-          `Share location with ${name}?`,
-          `${formatCoordsForDisplay(loc)}\n\nYour message will be end-to-end encrypted. ${name} will see a map preview from OpenStreetMap.`,
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => {
-                pressed = true;
-                resolve();
-              },
-            },
-            {
-              text: 'Share',
-              style: 'default',
-              onPress: async () => {
-                pressed = true;
-                const text = formatGeoMessage(loc);
-                const sendResult = await sendDirectMessage(pubkey, text);
-                if (!sendResult.success) {
-                  Alert.alert('Send failed', sendResult.error ?? 'Could not send location.');
-                } else {
-                  appendOptimisticLocal(text);
-                }
-                resolve();
-              },
-            },
-          ],
-          {
-            cancelable: true,
-            onDismiss: () => {
-              if (!pressed) resolve();
-            },
-          },
-        );
-      });
-    } finally {
-      setSharingLocation(false);
-    }
-  }, [sharingLocation, name, pubkey, sendDirectMessage, appendOptimisticLocal]);
-
-  // Shared send-image path for both gallery and camera entry points.
-  // Strips EXIF from the picked image, uploads to the user's configured
-  // Blossom server (or nostr.build fallback), then DMs the returned URL
-  // to the conversation partner.
-  const uploadAndSendImage = useCallback(
-    async (localUri: string, pickerBase64?: string | null) => {
-      setUploadingImage(true);
-      try {
-        const scrubbed = await stripImageMetadata(localUri, pickerBase64);
-        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        const sendResult = await sendDirectMessage(pubkey, url);
-        if (!sendResult.success) {
-          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
-          return;
-        }
-        appendOptimisticLocal(url);
-      } catch (error) {
-        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
-      } finally {
-        setUploadingImage(false);
-      }
-    },
-    [signEvent, sendDirectMessage, pubkey, appendOptimisticLocal],
-  );
-
-  const handlePickAndSendImage = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachPanelOpen(false);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to send images.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      // Needed so stripImageMetadata can pass animated GIFs through
-      // without re-encoding (expo-image-manipulator has no animated
-      // output format). No-op for JPEG/PNG — those get re-encoded.
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
-
-  const handleTakeAndSendPhoto = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachPanelOpen(false);
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      // Camera never captures GIF, but keep the shape consistent with the
-      // gallery path — harmless for JPEG output.
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
-
-  // Share another contact's Nostr profile into this conversation. Payload
-  // mirrors the ContactProfileSheet → "Share with friend" format: a
-  // human-readable first line plus a NIP-21 `nostr:nprofile…` URI that
-  // other Nostr clients (Damus, Amethyst, Primal, …) render as a
-  // clickable profile mention.
-  const handleShareContactPicked = useCallback(
-    async (friend: PickedFriend) => {
-      // Dismiss both sheets in reverse stack order (top first).
-      setContactPickerOpen(false);
-      setAttachPanelOpen(false);
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
-      const nprofile = nprofileEncode(friend.pubkey, relayHints);
-      const label = friend.name || 'a contact';
-      const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Share failed', result.error ?? 'Could not share contact.');
-        return;
-      }
-      appendOptimisticLocal(payload);
-    },
-    [pubkey, sendDirectMessage, contacts, relays, appendOptimisticLocal],
-  );
-
-  const handleSendGif = useCallback(
-    async (gif: Gif) => {
-      setGifPickerOpen(false);
-      setAttachPanelOpen(false);
-      const payload = gif.url;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
-        return;
-      }
-      appendOptimisticLocal(payload);
-    },
-    [pubkey, sendDirectMessage, appendOptimisticLocal],
-  );
+  const {
+    sending,
+    uploadingImage,
+    sharingLocation,
+    uploadingVoice,
+    appendOptimisticLocal,
+    handleSend,
+    handleShareLocation,
+    handlePickAndSendImage,
+    handleTakeAndSendPhoto,
+    handleShareContactPicked,
+    handleSendGif,
+    handleSendVoiceNote,
+  } = useConversationComposerActions({
+    pubkey,
+    name,
+    draft,
+    setDraft,
+    setMessages,
+    setAttachPanelOpen,
+    setContactPickerOpen,
+    setGifPickerOpen,
+    setVoiceSheetOpen,
+  });
 
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
@@ -740,97 +406,28 @@ const ConversationScreen: React.FC = () => {
   }, []);
 
   const renderItem = useCallback(
-    ({ item }: { item: Item }) => {
-      if (item.kind === 'dayHeader') {
-        return (
-          <View style={styles.dayHeaderRow}>
-            <View style={styles.dayHeaderRule} />
-            <Text style={styles.dayHeaderText}>{item.label}</Text>
-            <View style={styles.dayHeaderRule} />
-          </View>
-        );
-      }
-      // Wallet-derived zap variant — Lightning tx pulled from the wallet's
-      // ledger, NOT a Nostr message. Stays inline because it's the only
-      // 1:1-specific Item kind: groups don't pair zap receipts to a single
-      // peer, so MessageBubble doesn't carry this case.
-      if (item.kind === 'zap') {
-        return (
-          <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setDetailTx(item.tx)}
-              style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
-              accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
-              testID={`conversation-zap-${item.id}`}
-            >
-              <View
-                style={[
-                  styles.zapCardIconBadge,
-                  item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
-                ]}
-              >
-                <Zap
-                  size={18}
-                  color={item.fromMe ? colors.brandPink : colors.white}
-                  fill={item.fromMe ? colors.brandPink : colors.white}
-                />
-              </View>
-              <View style={styles.zapCardBody}>
-                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                  {item.fromMe ? 'Zap sent' : 'Zap received'}
-                </Text>
-                <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
-                  {item.amountSats.toLocaleString()} sats
-                </Text>
-                {item.comment ? (
-                  <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
-                    {item.comment}
-                  </Text>
-                ) : null}
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        );
-      }
-      // Map the local Item shape to MessageBubble's `BubbleContent`. The
-      // Items array was already classified upstream (see the items useMemo
-      // that calls extractGifUrl + parseGeoMessage when assembling) so this
-      // is a flat re-tag — MessageBubble handles the remaining text-format
-      // detection (image / invoice / lnaddr / contact) on render.
-      const content =
-        item.kind === 'gif'
-          ? ({ kind: 'gif', url: item.url } as const)
-          : item.kind === 'location'
-            ? ({ kind: 'location', location: item.location } as const)
-            : ({ kind: 'text', text: item.text } as const);
-      return (
-        <MessageBubble
-          id={item.id}
-          fromMe={item.fromMe}
-          createdAt={item.createdAt}
-          content={content}
-          sharedProfiles={sharedProfiles}
-          isInvoicePaid={isInvoicePaid}
-          onPayInvoice={handlePayInvoice}
-          onPayLightningAddress={handlePayInvoice}
-          onOpenContact={openSharedContact}
-          onOpenLocation={openLocation}
-          onOpenGifFullscreen={setFullscreenGifUrl}
-          onToggleSecretMode={handleToggleSecretMode}
-          testIdPrefix="conversation"
-        />
-      );
-    },
+    ({ item }: { item: Item }) => (
+      <ConversationMessageRow
+        item={item}
+        styles={styles}
+        colors={colors}
+        sharedProfiles={sharedProfiles}
+        isInvoicePaid={isInvoicePaid}
+        onPayInvoice={handlePayInvoice}
+        onOpenContact={openSharedContact}
+        onOpenLocation={openLocation}
+        onOpenGifFullscreen={setFullscreenGifUrl}
+        onToggleSecretMode={handleToggleSecretMode}
+        onShowTxDetail={setDetailTx}
+      />
+    ),
     [
       openLocation,
       isInvoicePaid,
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      handleToggleSecretMode,
       styles,
       colors,
     ],
@@ -1020,6 +617,7 @@ const ConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           disabled={!isLoggedIn}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
@@ -1067,10 +665,21 @@ const ConversationScreen: React.FC = () => {
                     }
                   : undefined
               }
+              onSendVoiceNote={() => {
+                // VoiceRecordingSheet opens over the panel; leave the panel
+                // mounted so dismissing the sheet returns the user to it.
+                setVoiceSheetOpen(true);
+              }}
             />
           }
         />
       </View>
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {
@@ -1192,264 +801,5 @@ const ConversationScreen: React.FC = () => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    flex: { flex: 1 },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      backgroundColor: colors.surface,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-      gap: 10,
-    },
-    backButton: {
-      padding: 4,
-    },
-    headerPeer: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    headerAvatar: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.background,
-    },
-    headerAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerName: {
-      flex: 1,
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    listContent: {
-      paddingHorizontal: 12,
-      // Inverted list: paddingTop becomes the *visual-bottom* padding.
-      // The composer (rendered inside KeyboardStickyView below) is a
-      // flex sibling, so the FlatList's bottom edge already ends where
-      // the composer's top begins — we don't need to clear the
-      // composer's height here, just a small breathing gap so the
-      // newest bubble doesn't visually hug the composer's top border.
-      // ConversationScreen overrides this inline (16 dp) when the
-      // attach panel is open. paddingBottom (= visual-top) keeps a
-      // small breathing gap above the day-header row.
-      paddingTop: 8,
-      paddingBottom: 12,
-      gap: 6,
-      flexGrow: 1,
-    },
-    bubbleRow: {
-      flexDirection: 'row',
-      marginVertical: 2,
-    },
-    bubbleRowLeft: { justifyContent: 'flex-start' },
-    bubbleRowRight: { justifyContent: 'flex-end' },
-    dayHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingTop: 16,
-      paddingBottom: 6,
-      paddingHorizontal: 16,
-      gap: 12,
-    },
-    // Wrapper is a centered lane hovering above the composer; the FAB
-    // sits inside it so we can horizontally centre it without needing
-    // to know the FAB's width. `pointerEvents="box-none"` lets taps
-    // outside the button pass through to the message list below.
-    scrollToBottomWrap: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      // Lifts the FAB clear of the ~60 px composer by a comfortable gap
-      // so it doesn't visually crowd the message input.
-      bottom: 92,
-      alignItems: 'center',
-    },
-    scrollToBottomFab: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandPink,
-      // White ring keeps the FAB visible when it overlaps a pink bubble
-      // — otherwise the pink-on-pink blends into an invisible blob.
-      borderWidth: 2,
-      borderColor: colors.white,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.2,
-      shadowRadius: 4,
-      elevation: 4,
-    },
-    dayHeaderRule: {
-      flex: 1,
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.divider,
-    },
-    dayHeaderText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    // Bubble + per-message-type styles moved to MessageBubble.
-    // bubbleTime / bubbleTimeMe stay here because the inline zap
-    // renderer (1:1-only Item kind) still uses them for its time slug.
-    bubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      alignSelf: 'flex-end',
-    },
-    bubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    zapRow: {
-      flexDirection: 'row',
-      marginVertical: 4,
-    },
-    zapRowLeft: { justifyContent: 'flex-start' },
-    zapRowRight: { justifyContent: 'flex-end' },
-    zapCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 12,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    zapCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    zapCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    zapCardIconBadge: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    zapCardIconBadgeMe: {
-      backgroundColor: colors.white,
-    },
-    zapCardIconBadgeThem: {
-      backgroundColor: colors.zapYellow,
-    },
-    zapCardBody: {
-      flex: 1,
-    },
-    zapCardHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    zapCardLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    zapCardLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    zapCardTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-    },
-    zapCardTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    zapCardAmount: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    zapCardAmountMe: {
-      color: colors.white,
-    },
-    zapCardComment: {
-      fontSize: 14,
-      color: colors.textBody,
-      marginTop: 4,
-    },
-    zapCardCommentMe: {
-      color: colors.white,
-    },
-    // composer + composerInput + composerSendButton + composerAttachButton
-    // moved to ConversationComposer (#251) — kept in sync with the group
-    // screen via that shared component.
-    // gifCard / gifImage / gifTime / locationCard / locationMap /
-    // locationBody / locationLabel / locationCoords / locationAccuracy /
-    // imageBubble + bg / time variants moved to MessageBubble. The
-    // fullscreen-modal styles below are still used by the Modal that
-    // expands a tapped GIF, which lives at the screen level.
-    fullscreenBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.92)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    fullscreenImage: {
-      width: '100%',
-      height: '100%',
-    },
-    loading: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-    },
-    loadingText: {
-      color: colors.textSupplementary,
-      fontSize: 14,
-    },
-    empty: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 40,
-    },
-    emptyTitle: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 6,
-    },
-    emptySubtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-    },
-  });
 
 export default ConversationScreen;

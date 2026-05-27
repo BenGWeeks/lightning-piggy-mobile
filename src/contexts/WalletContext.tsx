@@ -18,7 +18,12 @@ import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import { singleFlight } from '../utils/singleFlight';
-import { pickNewReceipts, settledIncomingHashes } from '../utils/incomingReceipts';
+import {
+  pickNewReceipts,
+  settledIncomingHashes,
+  shouldSeedBaseline,
+} from '../utils/incomingReceipts';
+import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -252,6 +257,43 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so a flapping/stale balance can't re-announce the same payment (#653).
   // Seeded silently from existing history on first sight (no launch re-announce).
   const seenReceiptsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Wallet ids whose initial transaction fetch has already been kicked off, so
+  // the initial-fetch effect runs once per wallet rather than on every render
+  // that touches `wallets` (#725).
+  const initiallyFetchedRef = useRef<Set<string>>(new Set());
+
+  // Record a wallet's announced-receipt baseline in memory and (optionally) on
+  // disk — the "set the ref + persistSeenReceipts" pattern shared by the launch-
+  // hydration, identity-switch, and first-fetch baseline sites. `persist` is
+  // false only when the set was just read back from disk (no need to re-write).
+  const seedSeenReceipts = useCallback(
+    (walletId: string, seeded: Set<string>, persist = true): void => {
+      seenReceiptsRef.current.set(walletId, seeded);
+      if (persist) persistSeenReceipts(walletId, seeded);
+    },
+    [],
+  );
+
+  // Seed a wallet's announced-receipts set BEFORE the detector runs, on launch
+  // hydration / identity switch: prefer the persisted set, else baseline from
+  // cached history (a corrupt persisted value falls back to a fresh baseline).
+  // The in-memory set alone reset on every JS re-eval and re-announced a payment
+  // whose hash wasn't in the (possibly stale) tx cache (#653 follow-up).
+  const hydrateSeenReceipts = useCallback(
+    async (walletId: string, cachedTxs: readonly WalletTransaction[]): Promise<void> => {
+      try {
+        const seenRaw = await AsyncStorage.getItem(`seenReceipts_${walletId}`);
+        if (seenRaw) {
+          seedSeenReceipts(walletId, new Set<string>(JSON.parse(seenRaw) as string[]), false);
+        } else {
+          seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
+        }
+      } catch {
+        seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
+      }
+    },
+    [seedSeenReceipts],
+  );
 
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
@@ -435,25 +477,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } catch {
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
-            // Seed the announced-receipts set BEFORE the detector runs: prefer
-            // the persisted set, else baseline from cached history. In-memory
-            // alone reset on every JS re-eval and re-announced a payment whose
-            // hash wasn't in the (possibly stale) tx cache (#653 follow-up).
-            try {
-              const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
-              const seeded = seenRaw
-                ? new Set<string>(JSON.parse(seenRaw) as string[])
-                : settledIncomingHashes(cachedTxs);
-              seenReceiptsRef.current.set(w.id, seeded);
-              if (!seenRaw) persistSeenReceipts(w.id, seeded);
-            } catch {
-              // Corrupt persisted value — overwrite with a fresh baseline so the
-              // next cold start doesn't keep hitting this catch (and possibly
-              // re-announcing off a stale tx cache).
-              const seeded = settledIncomingHashes(cachedTxs);
-              seenReceiptsRef.current.set(w.id, seeded);
-              persistSeenReceipts(w.id, seeded);
-            }
+            // Seed the announced-receipts set BEFORE the detector runs.
+            await hydrateSeenReceipts(w.id, cachedTxs);
             return {
               ...w,
               isConnected: false,
@@ -568,6 +593,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsLoading(false);
       }
     })();
+    // Mount-once startup. `hydrateSeenReceipts` is a stable useCallback; adding
+    // it would (wrongly) re-run the whole startup hydration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchPrice]);
 
   // Re-hydrate wallets when the active Nostr identity changes (#288).
@@ -622,20 +650,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
               // Seed the announced-receipts set before the detector runs (see
               // the startup-hydration path for the rationale).
-              try {
-                const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
-                const seeded = seenRaw
-                  ? new Set<string>(JSON.parse(seenRaw) as string[])
-                  : settledIncomingHashes(cachedTxs);
-                seenReceiptsRef.current.set(w.id, seeded);
-                if (!seenRaw) persistSeenReceipts(w.id, seeded);
-              } catch {
-                // Corrupt persisted value — overwrite with a fresh baseline (see
-                // the startup-hydration path for the rationale).
-                const seeded = settledIncomingHashes(cachedTxs);
-                seenReceiptsRef.current.set(w.id, seeded);
-                persistSeenReceipts(w.id, seeded);
-              }
+              await hydrateSeenReceipts(w.id, cachedTxs);
               return {
                 ...w,
                 isConnected: false,
@@ -695,6 +710,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       cancelled = true;
       unsubscribe();
     };
+    // Subscribe-once effect; `hydrateSeenReceipts` is a stable useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Refresh BTC price every 5 minutes
@@ -1086,68 +1103,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
-          // Preserve any previously resolved zap sender info so a refresh
-          // doesn't re-trigger relay lookups for transactions we've already
-          // attributed. Also preserves optimistic counterparty entries
-          // written at pay-time (see SendSheet) so the zap card doesn't
-          // flicker out when the LNbits refresh lands.
+          // Carries forward resolved zap-counterparties + optimistic rows the
+          // server doesn't round-trip (see mapNwcTransactions).
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
-          const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
-          for (const prev of existing) {
-            if (prev.paymentHash && prev.zapCounterparty !== undefined) {
-              counterpartyByHash.set(prev.paymentHash, prev.zapCounterparty);
-            }
-          }
-          type NwcTx = {
-            type: 'incoming' | 'outgoing';
-            amount: number;
-            description?: string | null;
-            settled_at?: number | null;
-            created_at?: number | null;
-            invoice?: string;
-            payment_hash?: string;
-            preimage?: string;
-            fees_paid?: number;
-          };
-          txs = (raw as NwcTx[]).map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.description ?? undefined,
-            settled_at: tx.settled_at ?? undefined,
-            created_at: tx.created_at ?? undefined,
-            bolt11: tx.invoice,
-            invoice: tx.invoice,
-            paymentHash: tx.payment_hash,
-            preimage: tx.preimage,
-            // NWC reports fees in msats; surface as sats for display.
-            feesSats:
-              typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
-            zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
-          }));
-          // Preserve optimistic rows that SendSheet inserted at pay-time but
-          // LNbits hasn't flushed into its own ledger yet. Without this the
-          // freshly-sent zap would disappear from the conversation thread on
-          // the very next refresh, then reappear a second or two later when
-          // LNbits catches up. Only rows marked `optimistic` are preserved —
-          // the matching uses `paymentHash + type` because a self-pay produces
-          // both an incoming and an outgoing leg with the same hash; keying on
-          // hash alone would drop our optimistic outgoing leg as soon as the
-          // incoming leg came back from the server. The `optimistic` flag also
-          // scopes preservation to newly-inserted rows, so older historical
-          // txs that fall off the listTransactions window aren't regrown.
-          const returnedKeys = new Set(
-            txs.filter((t) => !!t.paymentHash).map((t) => `${t.type}:${t.paymentHash}`),
-          );
-          const stillPending = existing.filter(
-            (t) => t.optimistic && t.paymentHash && !returnedKeys.has(`${t.type}:${t.paymentHash}`),
-          );
-          if (stillPending.length > 0) {
-            txs = [...stillPending, ...txs].sort(
-              (a, b) => (b.settled_at ?? b.created_at ?? 0) - (a.settled_at ?? a.created_at ?? 0),
-            );
-          }
+          txs = mapNwcTransactions(raw as NwcRawTransaction[], existing);
         }
         updateWalletInState(walletId, { transactions: txs });
+
+        // First fetch for this wallet (e.g. a freshly-added NWC wallet, whose
+        // history isn't loaded on connect): seed the announced-receipts baseline
+        // from the *fetched* history so the detector can't announce it as new
+        // (the empty-baseline race, #725 — see shouldSeedBaseline).
+        if (shouldSeedBaseline(seenReceiptsRef.current.get(walletId))) {
+          seedSeenReceipts(walletId, settledIncomingHashes(txs));
+        }
 
         // Persist to AsyncStorage for fast loading on next startup
         await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
@@ -1166,7 +1135,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
     // the list short means callers that capture this function (e.g. SendSheet's
     // post-pay refresh IIFE) hold onto a stable reference across renders.
-    [updateWalletInState],
+    [updateWalletInState, seedSeenReceipts],
   );
 
   /**
@@ -1936,11 +1905,29 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets]);
 
+  // Build the transaction list once per wallet when it first appears in state —
+  // an effect (not a synchronous call in the add paths) so it runs AFTER the
+  // wallet is committed and walletsRef.current includes it; otherwise
+  // fetchTransactionsForWallet early-returns on the stale ref (#725). Only fetch
+  // wallets whose list wasn't hydrated from cache (freshly added → empty), so a
+  // launch with cached history doesn't trigger a redundant refresh storm.
+  useEffect(() => {
+    for (const w of wallets) {
+      if (initiallyFetchedRef.current.has(w.id)) continue;
+      initiallyFetchedRef.current.add(w.id);
+      if ((w.transactions?.length ?? 0) === 0) {
+        void fetchTransactionsForWallet(w.id, { force: true }).catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets]);
+
   // Receive detector. Announces each settled incoming payment exactly once,
   // keyed by payment_hash — so a flapping / stale balance can't re-announce the
-  // same payment (#653). First sight of a wallet seeds the seen-set from its
-  // (cache-hydrated) history: a silent baseline, so launch doesn't re-announce
-  // past receives. Lives in the context so the overlay pops on any screen.
+  // same payment (#653). A wallet with no baseline yet is skipped: baselining is
+  // owned by the seeding sites (launch hydration, identity switch, first fetch),
+  // never off the in-state txns here — see #725 + shouldSeedBaseline. Lives in
+  // the context so the overlay pops on any screen.
   useEffect(() => {
     // Mark every new receipt seen (so none re-announces on a later refresh), but
     // announce only ONE per render: the overlay shows a single payment and
@@ -1957,14 +1944,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     for (const wallet of wallets) {
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
-      if (seen === undefined) {
-        // Newly-added wallet (hydration already seeded existing ones): baseline
-        // its history silently and persist so it survives the next re-eval.
-        const seeded = settledIncomingHashes(txns);
-        seenReceiptsRef.current.set(wallet.id, seeded);
-        persistSeenReceipts(wallet.id, seeded);
-        continue;
-      }
+      // No baseline yet — skip. Baselining is owned by the seeding sites (launch
+      // hydration, identity switch, first fetch); doing it here off the current
+      // in-state txns re-introduces the empty-baseline race (#725, see
+      // shouldSeedBaseline).
+      if (shouldSeedBaseline(seen)) continue;
       let changed = false;
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);

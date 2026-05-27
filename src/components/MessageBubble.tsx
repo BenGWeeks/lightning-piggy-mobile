@@ -15,6 +15,7 @@ import {
   type BubbleContent,
   extractBitcoinUri,
   extractImageUrl,
+  parseVoiceNote,
   extractInvoice,
   extractLightningAddress,
   extractSharedContact,
@@ -27,6 +28,7 @@ import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
+import VoiceNotePlayer from './VoiceNotePlayer';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -204,6 +206,26 @@ const MessageBubble: React.FC<Props> = ({
           </Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  // Voice note (#235) — inline player card (play/pause + waveform), shown
+  // for both sender and receiver. Detected before the text/link fallback
+  // so the Blossom `.mp4` URL renders as a player, not a bare link.
+  const voice = parseVoiceNote(text);
+  if (voice) {
+    return (
+      <VoiceNotePlayer
+        url={voice.url}
+        encrypted={voice.encrypted}
+        keyHex={voice.keyHex}
+        nonceHex={voice.nonceHex}
+        mime={voice.mime}
+        fromMe={fromMe}
+        createdAt={createdAt}
+        senderName={senderName}
+        testID={`${testIdPrefix}-voice-${id}`}
+      />
     );
   }
 
