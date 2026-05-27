@@ -2,7 +2,7 @@ import { friendlyClaimError } from './claimErrorMessage';
 
 describe('friendlyClaimError', () => {
   const FRIENDLY =
-    "Couldn't reach your wallet to receive the prize. Check your active wallet's connection, then try again.";
+    "Couldn't reach your wallet to receive the prize. Check your wallet's connection, then try again.";
 
   it.each([
     'no info event (kind 13194) returned from relay',
