@@ -152,10 +152,19 @@ describe('buildZapItems', () => {
 });
 
 describe('formatDayHeader', () => {
+  // Build an epoch (seconds) at NOON on the calendar day `offsetDays` from
+  // today. Calendar arithmetic via setDate + noon means a DST ±1h shift can't
+  // push the timestamp across a day boundary (which `now - 24*3600` could).
+  const noonEpochOffset = (offsetDays: number): number => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    d.setHours(12, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
+  };
+
   it('labels today and yesterday relatively', () => {
-    const now = Math.floor(Date.now() / 1000);
-    expect(formatDayHeader(now)).toBe('Today');
-    expect(formatDayHeader(now - 24 * 3600)).toBe('Yesterday');
+    expect(formatDayHeader(noonEpochOffset(0))).toBe('Today');
+    expect(formatDayHeader(noonEpochOffset(-1))).toBe('Yesterday');
   });
 
   it('falls back to a numeric date for older days', () => {
