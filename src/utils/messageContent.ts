@@ -110,6 +110,12 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
       const keyHex = params.get('k') ?? undefined;
       const nonceHex = params.get('n') ?? undefined;
       const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). If a kind-15 file
+      // arrives with a different `alg`, bail to plain-text rendering rather
+      // than show a voice-note card that would fail when the user hits play.
+      // `alg` is always emitted by our encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
       // Only audio here — encrypted images are handled separately (#688).
       if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
       return { url, mime, encrypted: true, keyHex, nonceHex };

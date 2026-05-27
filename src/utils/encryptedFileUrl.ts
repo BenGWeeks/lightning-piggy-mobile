@@ -24,5 +24,10 @@ export function encodeEncryptedFileUrl(input: {
   const frag =
     `${LPE_MARKER}&alg=${encodeURIComponent(input.algorithm ?? 'aes-gcm')}` +
     `&k=${input.keyHex}&n=${input.nonceHex}&m=${encodeURIComponent(input.mime)}`;
-  return `${input.url}#${frag}`;
+  // Strip any pre-existing fragment on the source URL before appending ours.
+  // A double-`#` string would break parseVoiceNote, which splits on the FIRST
+  // `#` and would then fail to read our params. Blossom URLs don't normally
+  // carry a fragment, but a foreign/unexpected URL might.
+  const base = input.url.split('#')[0];
+  return `${base}#${frag}`;
 }

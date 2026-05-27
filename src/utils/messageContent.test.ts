@@ -165,6 +165,37 @@ describe('parseVoiceNote / encodeEncryptedFileUrl (NIP-17 kind 15)', () => {
     ).toBeNull();
   });
 
+  it('rejects an lpe fragment whose alg is not aes-gcm (we only implement GCM)', () => {
+    // A non-aes-gcm kind-15 file would render a player that then fails on
+    // play — fall back to plain text instead.
+    expect(
+      parseVoiceNote(
+        `https://s/x.bin#lpe=1&alg=chacha20&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=audio%2Fmp4`,
+      ),
+    ).toBeNull();
+  });
+
+  it('tolerates a missing alg param (defaults to aes-gcm)', () => {
+    const parsed = parseVoiceNote(
+      `https://s/x.bin#lpe=1&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=audio%2Fmp4`,
+    );
+    expect(parsed?.encrypted).toBe(true);
+  });
+
+  it('strips a pre-existing fragment on the source URL instead of double-#', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://blossom.example/abc.bin#already-here',
+      mime: 'audio/mp4',
+      keyHex: 'aa'.repeat(32),
+      nonceHex: 'bb'.repeat(12),
+    });
+    // Exactly one '#', and the parser recovers the clean URL + params.
+    expect(encoded.match(/#/g)?.length).toBe(1);
+    const parsed = parseVoiceNote(encoded);
+    expect(parsed?.encrypted).toBe(true);
+    expect(parsed?.url).toBe('https://blossom.example/abc.bin');
+  });
+
   it('returns null for non-voice text', () => {
     expect(parseVoiceNote('hello world')).toBeNull();
     expect(parseVoiceNote('')).toBeNull();

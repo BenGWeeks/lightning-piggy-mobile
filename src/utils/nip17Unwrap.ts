@@ -253,17 +253,6 @@ export function participantsFromRumor(rumor: DecodedRumor): Set<string> {
 }
 
 /**
- * Classify a kind-14 rumor as either a 1:1 DM or a group message.
- * Returns null if the rumor is malformed (e.g. no resolvable partner).
- *
- *  - DM: exactly one OTHER participant (the viewer plus one peer).
- *  - Group: two or more OTHER participants. Caller is responsible for
- *    looking up which group the participant set matches.
- *
- * `fromMe` reflects whether the viewer is the sender. The set of
- * `otherParticipants` always EXCLUDES the viewer.
- */
-/**
  * File metadata parsed from a NIP-17 kind-15 file-message rumor (#235).
  * The blob at `url` is AES-256-GCM ciphertext; `keyHex`/`nonceHex` decrypt
  * it, `mime` is the original (decrypted) content type.
@@ -318,6 +307,17 @@ export function textForRumor(rumor: DecodedRumor): string {
   return meta ? encodeEncryptedFileUrl(meta) : rumor.content;
 }
 
+/**
+ * Classify a kind-14 rumor as either a 1:1 DM or a group message.
+ * Returns null if the rumor is malformed (e.g. no resolvable partner).
+ *
+ *  - DM: exactly one OTHER participant (the viewer plus one peer).
+ *  - Group: two or more OTHER participants. Caller is responsible for
+ *    looking up which group the participant set matches.
+ *
+ * `fromMe` reflects whether the viewer is the sender. The set of
+ * `otherParticipants` always EXCLUDES the viewer.
+ */
 export function classifyRumor(
   rumor: DecodedRumor,
   viewerPubkey: string,
