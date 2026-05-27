@@ -56,14 +56,14 @@ import {
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
-import { createStyles } from './ConversationScreen.styles';
+import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
 
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();

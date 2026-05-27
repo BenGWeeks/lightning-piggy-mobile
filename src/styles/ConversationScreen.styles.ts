@@ -3,9 +3,9 @@ import type { Palette } from '../styles/palettes';
 
 // Styles for ConversationScreen — extracted to its own module to keep the
 // screen file under the #703 size cap. Themed via the active Palette.
-export type ConversationStyles = ReturnType<typeof createStyles>;
+export type ConversationStyles = ReturnType<typeof createConversationScreenStyles>;
 
-export const createStyles = (colors: Palette) =>
+export const createConversationScreenStyles = (colors: Palette) =>
   StyleSheet.create({
     container: {
       flex: 1,

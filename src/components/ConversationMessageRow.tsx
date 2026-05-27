@@ -4,7 +4,7 @@ import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
-import type { ConversationStyles } from '../screens/ConversationScreen.styles';
+import type { ConversationStyles } from '../styles/ConversationScreen.styles';
 import type { Item } from '../utils/conversationItems';
 import { formatTime } from '../utils/messageContent';
 
