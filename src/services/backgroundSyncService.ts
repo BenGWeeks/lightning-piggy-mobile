@@ -56,7 +56,11 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
   if (readRelays.length === 0) return { pinged: false, freshCount: 0 };
 
   const cursorRaw = await AsyncStorage.getItem(BG_CURSOR_KEY);
-  const cursor = cursorRaw ? Number(cursorRaw) : 0;
+  // Guard against a corrupted / non-numeric stored cursor: a NaN cursor
+  // would make `e.created_at > cursor` always false (never ping) and feed
+  // NaN into the `since` filter. Fall back to a cold start.
+  const parsedCursor = cursorRaw ? Number(cursorRaw) : 0;
+  const cursor = Number.isFinite(parsedCursor) ? parsedCursor : 0;
   const now = Math.floor(Date.now() / 1000);
   const since = cursor > 0 ? Math.max(0, cursor - OVERLAP_SEC) : now - COLD_WINDOW_SEC;
 
@@ -91,12 +95,15 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
         data: {},
       });
     }
-  } catch {
-    // Best-effort: a failed relay round-trip just means we retry next wake.
-  } finally {
-    // Advance the cursor even on failure so we don't widen the window
-    // unboundedly; a missed event still surfaces on the next app open.
+    // Advance the cursor ONLY after a successful query — if the relay
+    // round-trip threw, the events in this window were never fetched, so
+    // advancing would skip them permanently (they'd only resurface on the
+    // next app open). Leaving the cursor put means the next wake re-queries
+    // the same `since` and catches up.
     await AsyncStorage.setItem(BG_CURSOR_KEY, String(now));
+  } catch {
+    // Best-effort: a failed relay round-trip just means we retry next wake
+    // from the same cursor.
   }
 
   return { pinged: freshCount > 0, freshCount };

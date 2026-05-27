@@ -51,6 +51,11 @@ export async function registerBackgroundSync(): Promise<void> {
         console.log('[backgroundTask] background execution restricted — not registering');
       return;
     }
+    // Idempotency: re-registering an already-registered task re-schedules
+    // it and resets the OS's interval timer, so skip if it's already live.
+    if (await TaskManager.isTaskRegisteredAsync(BACKGROUND_SYNC_TASK)) {
+      return;
+    }
     await BackgroundTask.registerTaskAsync(BACKGROUND_SYNC_TASK, {
       minimumInterval: MINIMUM_INTERVAL_MINUTES,
     });

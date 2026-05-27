@@ -22,6 +22,7 @@ import AppNavigator, {
 } from './src/navigation/AppNavigator';
 import {
   ensureNotificationsInitialised,
+  requestNotificationPermission,
   setNotificationsForeground,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
@@ -93,6 +94,10 @@ export default function App() {
   // route notification taps to the right screen.
   useEffect(() => {
     void ensureNotificationsInitialised();
+    // Ask for permission HERE, from the foreground, not lazily from a fire
+    // path — the background sync task can't present the OS dialog. Safe to
+    // call every launch; it short-circuits once the user has answered.
+    void requestNotificationPermission();
     // Register the periodic background detect-and-ping (#279). Idempotent;
     // OS schedules it (~15 min floor on Android, usage-based on iOS).
     void registerBackgroundSync();
@@ -120,7 +125,12 @@ export default function App() {
       tryNav(0);
     };
     // Cold start: the app may have been launched by a notification tap.
-    Notifications.getLastNotificationResponseAsync().then(routeFromResponse);
+    // Clear the stored launch response once routed, so a later effect
+    // re-run / remount doesn't re-handle the same cold-start tap.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      routeFromResponse(response);
+      void Notifications.clearLastNotificationResponseAsync?.();
+    });
     // Warm taps while the app is already running.
     const responseSub = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
 

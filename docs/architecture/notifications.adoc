@@ -41,51 +41,57 @@ notifications fired by the JS runtime when it next runs (see
 | `src/services/notificationService.ts`
 | Single integration point. Exposes typed `fireNotification(payload)`
 to every trigger site (DM rumor decrypt, payment settle, zap receipt).
-Owns Android channels, lazy permission flow, and the lock-screen
-content privacy preference. Backed by `expo-notifications` LOCAL
-notifications (no FCM token requested).
+Owns Android channels, the foreground permission flow, and the
+lock-screen content privacy preference. Backed by `expo-notifications`
+LOCAL notifications (no FCM token requested).
 
-| Android persistent foreground service
-| Keeps a single relay WebSocket + LNbits / NWC subscription alive
-while the app is backgrounded. Holds a `dataSync` foreground service
-type so Doze and App Standby don't suspend the socket. Required
-manifest permissions land via `plugins/withForegroundService.js`;
-the Kotlin `Service` class itself is a follow-up.
+| `expo-background-task` + `src/services/backgroundSyncService.ts`
+| The cross-platform background worker — WorkManager on Android,
+BGTaskScheduler on iOS — registered in `src/services/backgroundTask.ts`.
+When the UI isn't mounted the OS periodically runs `runBackgroundSync`,
+which does DETECT-AND-PING: it notices new encrypted inbound traffic
+and fires a generic "new message" notification *without decrypting*.
+No custom native code; the config plugin wires the platform bits.
 
-| iOS BGTaskScheduler task
-| Periodic background refresh registered via the
-`BGTaskSchedulerPermittedIdentifiers` Info.plist key in
-`app.config.ts`. The OS picks the cadence (typically ~30 min). Native
-handler implementation is a follow-up.
+| Android foreground service (future upgrade)
+| A persistent relay WebSocket for *realtime* (vs ~15-min) delivery.
+Manifest permissions are scaffolded in
+`plugins/withForegroundService.js`, but the Kotlin `Service` class is
+not implemented — the `expo-background-task` path above is what ships.
 |===
 
 == Android background story
 
 ----
-[ Foreground service ] ── relay WebSocket ──> [ relays ]
-       │                  LNbits / NWC sub
-       │
-       ├── decrypts incoming gift wrap, classifies, persists
-       │
-       └─> notificationService.fireNotification({...})
-              │
-              └─> expo-notifications local schedule
-                     │
-                     └─> OS notification shade
+[ WorkManager ] ──(~15 min)──> runBackgroundSync()
+                                   │
+                                   ├── queries relays for new kind-1059
+                                   │   gift wraps + kind-4 DMs addressed
+                                   │   to us (DOES NOT decrypt)
+                                   │
+                                   └─> notificationService.fireMessageNotification({...})
+                                          │  (generic "New message" copy)
+                                          └─> expo-notifications local schedule
+                                                 │
+                                                 └─> OS notification shade
 ----
 
-* `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` permissions
-  declared in `withForegroundService.js`.
-* User sees a persistent low-priority notification ("Listening for
-  messages") while the service runs — this is non-negotiable per
-  Android's foreground-service contract from API 26 onward. We will
-  surface it on a dedicated channel with importance set to
-  `MIN` so it collapses below the notification fold.
-* `RECEIVE_BOOT_COMPLETED` permission lets us re-arm the service after
-  device reboot (BootReceiver implementation also a follow-up).
-* `POST_NOTIFICATIONS` runtime permission is requested *lazily* the
-  first time we actually want to fire a notification, not at app
-  boot. See `notificationService.ensureNotificationPermission()`.
+* The background worker is scheduled by `expo-background-task`
+  (WorkManager under the hood). ~15-minute floor — Android won't run a
+  periodic task more often. That cadence suits detect-and-ping: we only
+  need to notice new traffic arrived, not stream it.
+* DETECT-AND-PING, never decrypt in the background. This works for BOTH
+  nsec and Amber users (Amber can't decrypt headlessly), and keeps
+  plaintext off-screen. See `backgroundSyncService.ts`.
+* `POST_NOTIFICATIONS` runtime permission is requested from the
+  FOREGROUND at app launch — not lazily from a fire path, since a
+  headless task can't present the OS dialog. See
+  `notificationService.requestNotificationPermission()`; fire paths
+  only ever call `hasNotificationPermission()`.
+* A persistent foreground service (realtime relay socket) is a possible
+  future upgrade — `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC`
+  / `RECEIVE_BOOT_COMPLETED` permissions are scaffolded in
+  `withForegroundService.js`, but the Kotlin `Service` is not built.
 
 This path works on stock Android, GrapheneOS, microG, and any other
 AOSP derivative. It does not work in scenarios where the user has
@@ -115,29 +121,30 @@ This will be explained in iOS onboarding when the iOS build ships.
 
 == Privacy: lock-screen content
 
-Decrypted DM plaintext is *never* written to the lock-screen
-notification body by default. The user must explicitly opt in via
-a future Settings toggle (preference key
-`notif_pref_lockscreen_content_v1`).
+Decrypted DM plaintext is *never* written to the notification body by
+default. The user must explicitly opt in via the Settings toggle on
+SecurityScreen (preference key `notif_pref_lockscreen_content_v1`).
 
 How it's enforced:
 
-* **Android channel level** — both `messages` and `payments`
-  channels are created with
-  `lockscreenVisibility: AndroidNotificationVisibility.SECRET`.
-  The OS replaces the body with a generic placeholder when the
-  device is locked.
-* **Per-notification level** — when the preference is OFF (default),
-  `notificationService.fireNotification` substitutes the
+* **Per-notification level (the real guard)** — when the preference is
+  OFF (default), `notificationService.fireNotification` substitutes the
   caller-provided title/body with a generic
   `"New message" / "Open Lightning Piggy to read"` pair before
-  scheduling. This means the actual content never enters the OS
-  notification store at all, even briefly — defence in depth on
-  top of the channel-level setting.
+  scheduling. The actual content never enters the OS notification store
+  at all, even briefly. This is what makes the opt-in toggle meaningful.
+* **Android channel level** — both `messages` and `payments` channels
+  use `lockscreenVisibility: AndroidNotificationVisibility.PRIVATE`
+  (not `SECRET`). PRIVATE lets the notification appear on the lock
+  screen while honouring the user's system-level "hide sensitive
+  content" setting. We deliberately avoid `SECRET`: it would hide the
+  entry entirely even after the user opts into lock-screen content,
+  making the toggle a no-op on Android.
 
-The full payload still rides in the notification's `data` field so
-the in-app screen we navigate to on tap can render the real content
-once the user has unlocked.
+Only routing metadata rides in the notification's `data` field — the
+`kind` plus conversation/group/wallet ids — *not* the plaintext title
+or body. The in-app screen we navigate to on tap reloads the real
+content from the local store once the user has unlocked.
 
 == Per-channel mute
 
@@ -172,26 +179,27 @@ This seam exists so we can:
 Landed:
 
 * `expo-notifications` dependency wired (SDK 55-compatible version)
-* `notificationService` with Android channels, lazy permission flow,
-  privacy-preserving lock-screen behaviour, typed payload API
-* One trigger wired end-to-end: `tryRouteGroupRumor` fires a
-  notification on every successfully routed group rumor
-* Android manifest permissions for the foreground service via
-  `plugins/withForegroundService.js`
-* iOS Info.plist `UIBackgroundModes` + BGTaskScheduler identifier
+* `notificationService` with Android channels, foreground permission
+  flow, privacy-preserving lock-screen behaviour, typed payload API
+* All triggers wired end-to-end: 1:1 DMs, group messages
+  (`tryRouteGroupRumor` + the live DM subscription), incoming
+  payments and zaps (`PaymentNotifier`)
+* Cross-platform background detect-and-ping via `expo-background-task`
+  + `backgroundSyncService` (WorkManager / BGTaskScheduler), registered
+  in `backgroundTask.ts`
+* Suppress-when-foreground: no notification for the thread the user is
+  currently viewing (`setActiveThread` / `isThreadActivelyViewed`)
+* Lock-screen-content opt-in toggle in Settings (SecurityScreen)
+* Notification-tap routing in `App.tsx` (`navigateFromNotification`)
+* Android manifest permissions scaffolded for a future foreground
+  service via `plugins/withForegroundService.js`
+* iOS Info.plist `UIBackgroundModes`
 * This document
 
-Deferred to follow-up PRs (TODO comments are planted at the call
-sites with the issue reference):
+Deferred to follow-up PRs:
 
-* Kotlin `NostrRelayService` class + manifest `<service>` entry
-* Android `BootReceiver` to re-arm after reboot
-* iOS Swift BGTaskScheduler handler
-* DM-inbox trigger wiring (1:1 messages — issue #279 covers this)
-* Payment-settled trigger wiring
-* Zap-received trigger wiring
-* In-app per-channel mute UI
+* Kotlin `NostrRelayService` foreground service + manifest `<service>`
+  entry + `BootReceiver` — only needed for *realtime* (vs ~15-min)
+  Android delivery; the background-task path ships without it
+* In-app per-channel mute UI (system Settings is the mute path for now)
 * Notification grouping (multiple from same sender → one stack)
-* Settings UI for the lock-screen-content opt-in toggle
-* Suppress-when-foreground heuristic (don't notify for the
-  conversation the user is currently looking at)

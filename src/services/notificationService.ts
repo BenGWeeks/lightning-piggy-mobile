@@ -8,16 +8,18 @@
  * 1. NO Firebase / FCM / Google Play Services dependency. The app must
  *    work on GrapheneOS, microG, and other un-googled devices. We use
  *    `expo-notifications` LOCAL notifications only — the OS renders the
- *    notification, no remote push server is involved. The actual
- *    "wake the JS runtime so we can decide to fire a notification"
- *    work is done by an Android foreground service (see
- *    plugins/withForegroundService.js) on Android and BGTaskScheduler
- *    on iOS, both of which are FCM-free.
+ *    notification, no remote push server is involved. Background wake-up
+ *    (so we can decide to fire a notification while the UI isn't mounted)
+ *    is done by `expo-background-task` — WorkManager on Android,
+ *    BGTaskScheduler on iOS (see src/services/backgroundTask.ts) — both
+ *    FCM-free. A realtime Android foreground-service socket (manifest
+ *    perms scaffolded in plugins/withForegroundService.js) is an optional
+ *    future upgrade.
  *
- * 2. Permission flow is LAZY — we don't ask on app boot. Permission is
- *    requested the first time a feature wants to fire a notification
- *    (e.g. first inbound DM rumor decrypted in the background). Less
- *    blunt + a higher conversion rate per the issue #279 discussion.
+ * 2. Permission is requested once, from the foreground, at app launch via
+ *    `requestNotificationPermission()`. Fire paths only ever *check*
+ *    permission (`hasNotificationPermission()`) and never prompt — a
+ *    headless/background task must not present a permission dialog.
  *
  * 3. Per-channel mute. Android 8+ channels split notifications into
  *    "Messages" and "Payments" so the user can mute one without the
@@ -87,7 +89,7 @@ export interface NotificationPayload {
   data?: NotificationData;
 }
 
-let initialised = false;
+let initialisingPromise: Promise<void> | null = null;
 let cachedLockScreenContent: boolean | null = null;
 
 /**
@@ -103,9 +105,23 @@ let cachedLockScreenContent: boolean | null = null;
  * presentation layer.
  */
 export async function ensureNotificationsInitialised(): Promise<void> {
-  if (initialised) return;
-  initialised = true;
+  // Memoise the in-flight init so concurrent callers await the SAME promise
+  // and never return before the Android channels exist (Android drops a
+  // notification scheduled before its channel is created). Resets to null on
+  // failure so a transient error can be retried.
+  if (initialisingPromise) return initialisingPromise;
+  initialisingPromise = (async () => {
+    try {
+      await initialiseInternal();
+    } catch (e) {
+      initialisingPromise = null;
+      throw e;
+    }
+  })();
+  return initialisingPromise;
+}
 
+async function initialiseInternal(): Promise<void> {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
@@ -127,29 +143,45 @@ export async function ensureNotificationsInitialised(): Promise<void> {
       // Show the channel description in system Settings so the user
       // knows what each channel covers when they go to mute one.
       description: 'New direct messages and group messages',
-      // Lock-screen visibility: SECRET = body fully hidden until
-      // unlock. We override per-notification when the user has opted
-      // into lock-screen content. Channel default = privacy-preserving.
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.SECRET,
+      // PRIVATE = the notification appears on the lock screen but the OS
+      // honours the user's system-level "hide sensitive content" setting.
+      // We deliberately do NOT use SECRET here: SECRET hides the entry
+      // entirely even after the user opts into lock-screen content via
+      // `setLockScreenContentEnabled`, which would make that toggle a
+      // no-op on Android. Body redaction is enforced in `fireNotification`
+      // (generic copy substitution) regardless of channel visibility.
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     });
     await Notifications.setNotificationChannelAsync(CHANNEL_PAYMENTS, {
       name: 'Payments',
       importance: Notifications.AndroidImportance.HIGH,
       description: 'Incoming Lightning, on-chain payments, and zaps',
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.SECRET,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     });
   }
 }
 
 /**
- * Lazy permission request. First call asks the OS; subsequent calls
- * short-circuit on the cached "already asked" flag so we never re-prompt
- * on every event. Returns whether permission is currently granted.
- *
- * Per issue #279, callers should invoke this on the first relevant
- * event — NOT on app boot.
+ * Check-only: is notification permission currently granted? Never
+ * prompts. This is the ONLY permission call safe to make from a
+ * background / headless context (a fire path), where presenting the
+ * OS permission dialog is impossible and would throw or no-op.
  */
-export async function ensureNotificationPermission(): Promise<boolean> {
+export async function hasNotificationPermission(): Promise<boolean> {
+  await ensureNotificationsInitialised();
+  const existing = await Notifications.getPermissionsAsync();
+  return existing.granted;
+}
+
+/**
+ * Foreground-only permission request. MUST be called from a mounted UI
+ * context (e.g. app launch in App.tsx) — never from the background sync
+ * task, which cannot present a dialog. First call asks the OS; once the
+ * user has been asked and denied (and can't be re-asked), subsequent
+ * calls short-circuit so we never spin the dialog. Returns whether
+ * permission is granted afterwards.
+ */
+export async function requestNotificationPermission(): Promise<boolean> {
   await ensureNotificationsInitialised();
 
   const existing = await Notifications.getPermissionsAsync();
@@ -160,8 +192,7 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   if (existing.status === 'denied' && !existing.canAskAgain) return false;
 
   // We've asked before in a previous session AND been denied — don't
-  // re-ask on every event in this session, only once per install.
-  // Re-prompting is a per-OS dialog so we shouldn't drive it ourselves.
+  // re-ask on every launch, only once per install.
   const alreadyAsked = await AsyncStorage.getItem(PERMISSION_REQUESTED_KEY);
   if (alreadyAsked === 'true' && existing.status === 'denied') return false;
 
@@ -231,18 +262,19 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
  * the trigger path that called us.
  *
  * Concurrency: safe to call from anywhere (no shared mutable state
- * after init). The `ensureNotificationsInitialised` call inside
- * `ensureNotificationPermission` short-circuits after first invocation.
+ * after init), INCLUDING the background sync task — it only ever
+ * *checks* permission (`hasNotificationPermission`), never prompts.
  */
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
   try {
-    const granted = await ensureNotificationPermission();
+    const granted = await hasNotificationPermission();
     if (!granted) return null;
 
     const lockScreenContent = await getLockScreenContentEnabled();
-    // When privacy mode is on, present generic copy. The full payload
-    // still rides in `data` so the in-app screen we route to on tap
-    // can render the real content once the user has unlocked.
+    // When privacy mode is on, present generic copy. Note the real body
+    // is NOT carried in `data` — only routing metadata (kind + ids) is,
+    // so the tap-router can reopen the right thread, which then loads the
+    // actual message from the local store once the user has unlocked.
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
 
     const id = await Notifications.scheduleNotificationAsync({
@@ -348,7 +380,7 @@ export async function firePaymentNotification(opts: {
  * deep import to keep production callers from grabbing it.
  */
 export function __resetForTests(): void {
-  initialised = false;
+  initialisingPromise = null;
   cachedLockScreenContent = null;
   appInForeground = true;
   activeThreadId = null;

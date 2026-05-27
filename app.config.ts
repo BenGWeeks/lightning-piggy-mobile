@@ -73,12 +73,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // to file separate export-compliance documentation. See
       // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
       ITSAppUsesNonExemptEncryption: false,
-      // Background-modes scaffolding for OS notifications (#279). We
-      // register a BGTaskScheduler refresh task identifier here so the
-      // app can run a periodic relay-poll + decrypt sweep in the
-      // background and surface OS notifications without relying on
-      // APNs (we have no remote push server — see
-      // docs/architecture/notifications.adoc for rationale).
+      // Background modes for the OS-notification detect-and-ping (#279).
+      // The `expo-background-task` config plugin registers ITS OWN
+      // BGTaskScheduler identifier in Info.plist and runs our JS task
+      // (lp-relay-bg-sync) under it — there is no separate Swift handler
+      // and no background decryption (detect-and-ping only; see
+      // src/services/backgroundSyncService.ts). We surface notifications
+      // without APNs / a remote push server — see
+      // docs/architecture/notifications.adoc for rationale.
       //
       // Trade-off: BGTaskScheduler cadence is OS-controlled; expect
       // ~30 min between executions in practice. iOS realtime DM
@@ -86,13 +88,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // server, and the project explicitly rejects that path. The
       // ~30 min latency is the iOS reality we accept; surface it in
       // onboarding when the iOS build ships.
-      //
-      // The actual TaskScheduler handler implementation is a
-      // follow-up — registering the identifier here is the
-      // architectural commitment. The handler will live in a native
-      // Swift module added by a future config plugin.
       UIBackgroundModes: ['fetch', 'processing'],
-      BGTaskSchedulerPermittedIdentifiers: ['com.lightningpiggy.app.relay-refresh'],
     },
   },
   plugins: [
@@ -171,9 +167,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isAndroidBackgroundLocationEnabled: true,
       },
     ],
-    // Local notifications for the geofence alerts (#467). No FCM / no
-    // remote push — these all fire from the on-device TaskManager task.
-    'expo-notifications',
+    // NB: geofence alerts (#467) also use local notifications, but
+    // `expo-notifications` is already registered above (for #279) — listing
+    // it twice makes the second config win silently, so keep the single
+    // entry above. No FCM / no remote push — all fired on-device.
     'expo-task-manager',
   ],
   android: {
