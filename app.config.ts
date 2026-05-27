@@ -147,16 +147,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   android: {
     adaptiveIcon: {
-      // Dev variant uses a flat blue backgroundColor and preview a flat
-      // purple — both drop the backgroundImage so the flat colour dominates
-      // and the variant is recognisable in the launcher next to a production
-      // install. backgroundImage takes precedence in Expo's adaptive-icon
-      // template, so we deliberately omit it for the two non-prod variants.
-      // Production uses the pink radial-gradient background image (matching the
-      // iOS icon); the colour here is just its load fallback (gradient midtone).
-      backgroundColor: IS_DEV ? '#4A90D9' : IS_PREVIEW ? '#8B5CF6' : '#D6007E',
+      // Each variant gets its own radial-gradient background image (matching
+      // the iOS icon): production pink, dev blue, preview purple — so the three
+      // installs stay distinguishable on the launcher. The white PiggyBank +
+      // bolt is the shared foreground layer. `backgroundColor` is only the
+      // load fallback (each gradient's approximate midtone). Regenerate all of
+      // these with `bash scripts/generate-app-icons.sh`.
+      backgroundColor: IS_DEV ? '#3F86C9' : IS_PREVIEW ? '#8B5CF6' : '#D6007E',
       foregroundImage: './assets/android-icon-foreground.png',
-      ...(IS_DEV || IS_PREVIEW ? {} : { backgroundImage: './assets/android-icon-background.png' }),
+      backgroundImage: IS_DEV
+        ? './assets/android-icon-background-dev.png'
+        : IS_PREVIEW
+          ? './assets/android-icon-background-preview.png'
+          : './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
