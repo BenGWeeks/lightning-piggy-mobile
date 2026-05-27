@@ -39,6 +39,11 @@ export interface ComposerSendStrategy {
    *  dialog (and resolves true/false); the group composer omits it and sends
    *  immediately. */
   confirmLocation?: (loc: SharedLocation) => Promise<boolean>;
+  /** Optional preflight: return false when there's no valid send target (e.g.
+   *  group/identity not loaded). Lets the shared hook skip an expensive
+   *  encrypt + Blossom upload (voice / image) that would only fail downstream.
+   *  Omit (1:1) to always allow. */
+  canSend?: () => boolean;
 }
 
 export interface UseComposerActionsParams {
@@ -108,7 +113,7 @@ export function useComposerActions({
   );
 
   const handlePickAndSendImage = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
+    if (!isLoggedIn || uploadingImage || sending || strategy.canSend?.() === false) return;
     closeAttachPanel();
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -125,10 +130,10 @@ export function useComposerActions({
     });
     if (result.canceled || !result.assets?.[0]) return;
     await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, closeAttachPanel, uploadAndSendImage]);
+  }, [isLoggedIn, uploadingImage, sending, strategy, closeAttachPanel, uploadAndSendImage]);
 
   const handleTakeAndSendPhoto = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
+    if (!isLoggedIn || uploadingImage || sending || strategy.canSend?.() === false) return;
     closeAttachPanel();
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
@@ -142,7 +147,7 @@ export function useComposerActions({
     });
     if (result.canceled || !result.assets?.[0]) return;
     await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, closeAttachPanel, uploadAndSendImage]);
+  }, [isLoggedIn, uploadingImage, sending, strategy, closeAttachPanel, uploadAndSendImage]);
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
@@ -192,7 +197,9 @@ export function useComposerActions({
   // upload the CIPHERTEXT to Blossom, then send a NIP-17 kind-15 file message.
   const handleSendVoiceNote = useCallback(
     async (uri: string) => {
-      if (uploadingVoice) return;
+      // Preflight BEFORE the expensive encrypt + Blossom upload: bail if a send
+      // is already in flight or there's no valid target (group not loaded).
+      if (uploadingVoice || strategy.canSend?.() === false) return;
       setUploadingVoice(true);
       try {
         const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');

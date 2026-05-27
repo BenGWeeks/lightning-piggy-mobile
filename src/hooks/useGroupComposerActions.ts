@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -40,10 +40,12 @@ export function useGroupComposerActions(params: {
   const { sendGroupMessage, pubkey: myPubkey } = useNostr();
 
   // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
-  // is a known follow-up, PR #227) and scroll to it.
+  // is a known follow-up, PR #227) and scroll to it. Returns false if the local
+  // persist failed — the relay send already succeeded, but the caller surfaces
+  // that so the draft isn't cleared and the user can retry/refresh.
   const appendOptimisticGroupRow = useCallback(
-    async (text: string) => {
-      if (!group || !myPubkey) return;
+    async (text: string): Promise<boolean> => {
+      if (!group || !myPubkey) return false;
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         senderPubkey: myPubkey,
@@ -55,8 +57,14 @@ export function useGroupComposerActions(params: {
         setMessages(next);
         notifyGroupMessage(group.id, local);
         setTimeout(scrollToEnd, 0);
+        return true;
       } catch (err) {
         if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+        Alert.alert(
+          'Saved on relay, not on device',
+          'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
+        );
+        return false;
       }
     },
     [group, myPubkey, setMessages, scrollToEnd],
@@ -75,8 +83,9 @@ export function useGroupComposerActions(params: {
         Alert.alert('Send failed', result.error ?? 'Unknown error');
         return false;
       }
-      await appendOptimisticGroupRow(text);
-      return true;
+      // Relay send succeeded; return the local-persist result so a failed
+      // local save keeps the draft (and shows the "saved on relay" alert).
+      return appendOptimisticGroupRow(text);
     },
     [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
@@ -94,7 +103,7 @@ export function useGroupComposerActions(params: {
         Alert.alert('Send failed', result.error ?? 'Could not send voice note.');
         return false;
       }
-      await appendOptimisticGroupRow(
+      return appendOptimisticGroupRow(
         encodeEncryptedFileUrl({
           url: file.url,
           mime: file.mime,
@@ -102,13 +111,23 @@ export function useGroupComposerActions(params: {
           nonceHex: file.nonceHex,
         }),
       );
-      return true;
     },
     [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
+  // Preflight so the shared hook can skip an expensive encrypt+upload (voice /
+  // image) when there's no valid group target to send to.
+  const canSend = useCallback(() => !!group && !!myPubkey, [group, myPubkey]);
+
+  // Memoise the strategy so the shared hook's callbacks (which depend on it)
+  // keep stable identities across renders.
+  const strategy = useMemo(
+    () => ({ sendText, sendVoice, canSend }),
+    [sendText, sendVoice, canSend],
+  );
+
   const actions = useComposerActions({
-    strategy: { sendText, sendVoice },
+    strategy,
     draft,
     setDraft,
     setAttachPanelOpen,

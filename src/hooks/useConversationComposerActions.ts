@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
 import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
@@ -133,8 +133,16 @@ export function useConversationComposerActions(params: {
     [name],
   );
 
+  // Memoise the strategy so the shared hook's callbacks (which depend on it)
+  // keep stable identities across renders. (1:1 needs no canSend preflight —
+  // the peer pubkey is always present from the route params.)
+  const strategy = useMemo(
+    () => ({ sendText, sendVoice, confirmLocation }),
+    [sendText, sendVoice, confirmLocation],
+  );
+
   const actions = useComposerActions({
-    strategy: { sendText, sendVoice, confirmLocation },
+    strategy,
     draft,
     setDraft,
     setAttachPanelOpen,
