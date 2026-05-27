@@ -1,4 +1,9 @@
-import { pickNewReceipts, settledIncomingHashes, isValidPaymentHash } from './incomingReceipts';
+import {
+  pickNewReceipts,
+  settledIncomingHashes,
+  isValidPaymentHash,
+  shouldSeedBaseline,
+} from './incomingReceipts';
 import type { WalletTransaction } from '../types/wallet';
 
 // Valid payment hashes are 64 hex chars.
@@ -68,6 +73,21 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
     expect(pickNewReceipts(txns, new Set([H1]))).toEqual([
       { paymentHash: H2, amountSats: 222, settledAt: 200 },
     ]);
+  });
+});
+
+describe('shouldSeedBaseline (#725 — own baselining, never off in-state txns)', () => {
+  it('is true only when the wallet has never been baselined', () => {
+    expect(shouldSeedBaseline(undefined)).toBe(true);
+  });
+
+  it('is false once a baseline exists (even an EMPTY one)', () => {
+    // The empty-set case is the crux of #725 case (c): a wallet added with no
+    // history seeds an empty baseline on first fetch, and that empty set must
+    // still count as "baselined" so a later REAL receive is announced (not re-
+    // baselined away) by the detector.
+    expect(shouldSeedBaseline(new Set<string>())).toBe(false);
+    expect(shouldSeedBaseline(new Set(['a'.repeat(64)]))).toBe(false);
   });
 });
 
