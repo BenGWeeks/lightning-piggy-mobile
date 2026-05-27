@@ -89,4 +89,7 @@ convert -size "${MONO}x${MONO}" xc:none \
   \( "$TMP/mark.png" -resize 260x260 \) -gravity center -composite \
   assets/android-icon-monochrome.png
 
-echo "✓ app icons regenerated in assets/ (Lucide PiggyBank outline + white bolt; prod=pink, dev=blue, preview=purple)"
+# Web favicon — derived from the production icon (browsers downscale it).
+convert assets/icon.png -resize 256x256 assets/favicon.png
+
+echo "✓ app icons regenerated in assets/ (Lucide PiggyBank outline + white bolt; prod=pink, dev=blue, preview=purple; + favicon)"
