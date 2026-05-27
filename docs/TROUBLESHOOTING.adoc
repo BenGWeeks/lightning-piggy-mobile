@@ -30,6 +30,21 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 *Verify:* `adb shell dumpsys input_method | grep mInputShown` should report `mInputShown=true` once an input is focused. The audit script `scripts/keyboard-screenshot-audit.sh` polls this gate before every screenshot. +
 *Lower-friction alternative:* run daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM (avoiding the "System UI isn't responding" stalls under memory pressure). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
 
+| Emulator throws repeated "System UI isn't responding" / "Process system isn't responding" / "<Google app> isn't responding" ANR dialogs on the `google_apis` AVD (contact avatars never load in Messages, relays stall, Maestro flows die with `Terminated`)
+| The android-34 **google_apis** system image bundles Google apps (Digital Wellbeing, Quicksearch / the Google app, Maps) and a full GMS that churn in the background under the software GPU (`-gpu swiftshader_indirect`), throwing ANR dialogs that steal window focus, starve the Nostr relay websockets + avatar image downloads (so Messages-list profile pictures stay on the default pig placeholder), and abort Maestro runs mid-flow. An in-guest System UI restart (`adb shell am force-stop com.android.systemui`) does **not** hold — it re-ANRs within seconds. A fresh cold boot (`adb emu kill`, then relaunch with `-no-snapshot-load`) clears it but the churn returns under load. +
+*The biggest offender is core GMS, not the bundled apps.* The **"Process system isn't responding"** dialog specifically is `system_server` being pegged (~175% CPU) by `com.google.android.gms.persistent`, which loops ANR-ing and crashing on `.chimera.PersistentIntentOperationService` (`adb logcat \| grep "ANR in"` shows it). Disabling Wellbeing/Quicksearch/Maps quiets the focus-stealing app dialogs but NOT this one — you have to disable GMS itself to stop it. Confirmed harmless here: after disabling GMS, CPU dropped to ~370/400 idle, the ANRs stopped, and the app (which uses no GMS) ran fine. +
+*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-only (`expo-notifications`, "No FCM" per `app.config.ts`), and `expo-location` runs on the platform provider (emulator location is mocked via `EXPO_PUBLIC_DEV_LAT/LON`). There are no `com.google.android.gms` references in the native Android config. +
+*Quick fix (reversible, keeps app data — re-apply after each cold boot, like the keyboard gates above):* +
+[source,bash]
+----
+adb shell pm disable-user --user 0 com.google.android.gms                    # the big one — stops "Process system isn't responding"
+adb shell pm disable-user --user 0 com.google.android.apps.wellbeing
+adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox
+adb shell pm disable-user --user 0 com.google.android.apps.maps
+# undo with: adb shell pm enable <package>
+----
+*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `tests/e2e/_subflow-login-as-piggy.yaml` / `_subflow-seed-test-wallet.yaml`.
+
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
 
