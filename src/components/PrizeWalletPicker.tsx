@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { ChevronUp, ChevronDown } from 'lucide-react-native';
+import { ChevronUp, ChevronDown, ArrowBigRight, Bitcoin } from 'lucide-react-native';
 import { walletLabel } from '../types/wallet';
 import type { WalletState } from '../types/wallet';
 import type { Palette } from '../styles/palettes';
@@ -48,20 +48,12 @@ const PrizeWalletPicker: React.FC<Props> = ({
     );
   }
 
-  if (lightningWallets.length === 1) {
-    return (
-      <View style={styles.row} testID="prize-wallet-picker" accessibilityLabel="Prize wallet">
-        <Text style={styles.rowLabel}>Prize →</Text>
-        <Text style={styles.rowValue} numberOfLines={1}>
-          {selectedName}
-        </Text>
-      </View>
-    );
-  }
-
+  // Always a dropdown, even with one wallet (single selected option), so the
+  // affordance is consistent and "Prize → <wallet>" always names the destination.
   return (
     <View style={styles.row}>
-      <Text style={styles.rowLabel}>Prize →</Text>
+      <Bitcoin size={20} color={colors.bitcoinOrange} strokeWidth={2} fill="none" />
+      <ArrowBigRight size={20} color={colors.brandPink} strokeWidth={2} fill="none" />
       <View style={styles.wrapper}>
         <TouchableOpacity
           style={styles.dropdown}
@@ -115,17 +107,6 @@ const createStyles = (colors: Palette) =>
       gap: 8,
       marginBottom: 16,
       maxWidth: '100%',
-    },
-    rowLabel: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    rowValue: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textBody,
-      flexShrink: 1,
     },
     wrapper: {
       position: 'relative',
