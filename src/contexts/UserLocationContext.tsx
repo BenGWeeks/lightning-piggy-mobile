@@ -1,5 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useLiveUserLocation,
   type LiveUserLocation,
@@ -87,18 +86,25 @@ export const useUserLocation = (): UserLocationValue => {
     throw new Error('useUserLocation must be used inside <UserLocationProvider>');
   }
   const { value, retain, release } = ctx;
-  // useFocusEffect, NOT useEffect — the bottom-tab navigator uses
-  // `freezeOnBlur: true` + `lazy: true`, which keeps screens mounted
-  // when their tab is hidden. A plain mount/unmount retain/release
-  // would never tear the GPS watch down once a map screen had been
-  // visited, even when the user is back on Home / Messages /
-  // Friends. Focus-effect runs the cleanup on blur, so the watch
-  // sleeps as soon as no map tab is visible.
-  useFocusEffect(
-    useCallback(() => {
-      retain();
-      return () => release();
-    }, [retain, release]),
-  );
+  // useEffect (mount/unmount), NOT useFocusEffect (#731 Fix 3).
+  //
+  // The bottom-tab navigator uses `freezeOnBlur: true`, which keeps map
+  // screens (Explore, Friends) mounted even when their tab is hidden.
+  // The previous `useFocusEffect` retain/release tore the GPS watch down
+  // on every tab blur and restarted it on every tab focus — firing
+  // `requestForegroundPermissionsAsync` 4× in a 7-tab-switch test and
+  // adding ~100–200 ms of GPS re-init overhead to each Explore/Friends
+  // focus (regression from #595/#597, confirmed in #731 audit).
+  //
+  // Mount-scoped retain keeps the watch alive across tab switches while
+  // the consumer screen stays mounted (the common case under freezeOnBlur).
+  // The watch tears down naturally on unmount (e.g. when the user hard-
+  // navigates away from a map screen stack). The ref-count semantics in
+  // UserLocationProvider are unchanged: refCount drops to 0 when the last
+  // mounted consumer unmounts, and the watch tears down then.
+  useEffect(() => {
+    retain();
+    return () => release();
+  }, [retain, release]);
   return value;
 };

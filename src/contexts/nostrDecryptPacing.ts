@@ -1,9 +1,27 @@
-/** Yield to the JS event loop so UI interactions can tick between
- * chunks of a synchronous decrypt loop (#177). `await`ing an already-
- * resolved promise only drains the microtask queue, which still
- * starves UI events — setTimeout(0) returns to the task scheduler. */
+/** Yield to the native event loop so UI interactions and paint can tick
+ * between chunks of a synchronous decrypt loop (#177, #731).
+ *
+ * Why requestAnimationFrame instead of setTimeout(0):
+ *   - `setTimeout(resolve, 0)` posts to the native timer queue; under load
+ *     (83 active timers re-enqueued back-to-back by the decrypt loop) the
+ *     Android Looper batches them into the same frame and fires them all
+ *     inside a single `callTimers` JS→native→JS bridge call. The JS thread
+ *     never actually returns to native between yields, inflating each
+ *     "yield" to ~90 ms wall-clock (issue #731 audit Finding 2).
+ *   - `requestAnimationFrame` is wired through the Choreographer vsync
+ *     signal. Each RAF fires once per Choreographer tick; re-enqueueing
+ *     from inside the callback schedules the NEXT tick, so the JS thread
+ *     genuinely returns to native between iterations.
+ *   - Do NOT use RN's `setImmediate`: RN shims it on top of
+ *     `queueMicrotask`, which runs before the next task (no yield to
+ *     native). Do NOT use `queueMicrotask` directly for the same reason.
+ *   - `MessageChannel` is not reliably polyfilled in Hermes/RN.
+ *
+ * For the abort-aware scheduler in `createYieldScheduler` the RAF handle
+ * is cancelable via `cancelAnimationFrame`, matching the
+ * `clearTimeout` pattern used there. */
 export function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 /** ~4 ms — under a quarter of a 60 fps frame (16.6 ms). The NIP-17 inbox
@@ -18,8 +36,8 @@ export const DECRYPT_FRAME_BUDGET_MS = 4;
  * Two improvements over the old `if (i % N === 0) await yieldToEventLoop()`
  * pattern:
  *
- * 1. **Time-budget yields.** We only pay for a `setTimeout(0)` round-
- *    trip when wall-clock since the last yield exceeds
+ * 1. **Time-budget yields.** We only pay for a `requestAnimationFrame`
+ *    round-trip when wall-clock since the last yield exceeds
  *    `DECRYPT_FRAME_BUDGET_MS`. A run of cheap cache hits no longer
  *    forces a yield every Nth iteration even though there's been no
  *    blocking work. The count-based modulo still acts as a safety
@@ -27,10 +45,10 @@ export const DECRYPT_FRAME_BUDGET_MS = 4;
  *    somehow underestimates its own runtime can't starve the thread.
  *
  * 2. **Hard-cancel on abort.** When the caller's `AbortSignal` fires
- *    mid-loop, an `abort` listener clears the currently-pending
- *    `setTimeout` and resolves the awaiter immediately. Without this,
- *    the loop would still drain one more `setTimeout(0)` round-trip
- *    (plus whatever sync work follows it) before the next abort
+ *    mid-loop, an `abort` listener cancels the currently-pending RAF
+ *    via `cancelAnimationFrame` and resolves the awaiter immediately.
+ *    Without this, the loop would still drain one more vsync round-
+ *    trip (plus whatever sync work follows it) before the next abort
  *    check — visible as a slug of pinned-thread time after a
  *    tab-switch blurs MessagesScreen.
  *
@@ -58,14 +76,14 @@ export function createYieldScheduler(opts: {
   let iteration = 0;
   let yields = 0;
   let lastYieldAt = performance.now();
-  let pendingHandle: ReturnType<typeof setTimeout> | null = null;
+  let pendingHandle: ReturnType<typeof requestAnimationFrame> | null = null;
   let pendingReject: ((reason?: unknown) => void) | null = null;
 
-  // On abort: clear the in-flight setTimeout so the awaiter unwinds
-  // immediately instead of waiting for the next scheduler tick.
+  // On abort: cancel the in-flight RAF so the awaiter unwinds
+  // immediately instead of waiting for the next vsync tick.
   const onAbort = () => {
     if (pendingHandle !== null) {
-      clearTimeout(pendingHandle);
+      cancelAnimationFrame(pendingHandle);
       pendingHandle = null;
     }
     if (pendingReject) {
@@ -94,11 +112,11 @@ export function createYieldScheduler(opts: {
     yields++;
     await new Promise<void>((resolve, reject) => {
       pendingReject = reject;
-      pendingHandle = setTimeout(() => {
+      pendingHandle = requestAnimationFrame(() => {
         pendingHandle = null;
         pendingReject = null;
         resolve();
-      }, 0);
+      });
     }).catch(() => {
       // Aborted — swallow; caller checks signal.aborted after maybeYield.
     });
@@ -108,7 +126,7 @@ export function createYieldScheduler(opts: {
   const dispose = () => {
     if (signal) signal.removeEventListener('abort', onAbort);
     if (pendingHandle !== null) {
-      clearTimeout(pendingHandle);
+      cancelAnimationFrame(pendingHandle);
       pendingHandle = null;
     }
   };
@@ -151,7 +169,7 @@ export const DECRYPT_YIELD_EVERY = 15;
  * Lowered again 2026-05-16 from 4 → 2: tonight's instrumented Pixel
  * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
  * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
- * every 2 wraps cuts each per-burst block back to ~2 ms; the
- * setTimeout(0) cost is amortised across the still-significant
- * per-wrap decrypt work so the overhead is < 5%. */
+ * every 2 wraps cuts each per-burst block back to ~2 ms; the RAF
+ * overhead is amortised across the still-significant per-wrap decrypt
+ * work so the overhead is < 5%. */
 export const NIP17_LOOP_YIELD_EVERY = 2;
