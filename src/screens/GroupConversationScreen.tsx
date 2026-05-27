@@ -3,9 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   FlatList,
-  Image,
   ActivityIndicator,
   Linking,
   Modal,
@@ -18,16 +16,16 @@ import {
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, subscribeGroupMessages, notifyGroupMessage } from '../contexts/NostrContext';
+import { useNostr, subscribeGroupMessages } from '../contexts/NostrContext';
+import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import AttachPanel from '../components/AttachPanel';
@@ -35,30 +33,15 @@ import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
-import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
 import SecretModeCelebration from '../components/SecretModeCelebration';
-import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import {
-  getCurrentLocation,
-  formatGeoMessage,
-  buildOsmViewUrl,
-  type SharedLocation,
-} from '../services/locationService';
-import {
-  fetchProfile,
-  nprofileEncode,
-  buildProfileRelayHints,
-  DEFAULT_RELAYS,
-} from '../services/nostrService';
-import {
-  appendGroupMessage,
-  loadGroupMessages,
-  type GroupMessage,
-} from '../services/groupMessagesStorageService';
+import { isConfigured as isGifConfigured } from '../services/giphyService';
+import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
+import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
   extractSharedContact,
@@ -98,28 +81,18 @@ const GroupConversationScreen: React.FC = () => {
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
-  const {
-    contacts,
-    sendGroupMessage,
-    pubkey: myPubkey,
-    profile: myProfile,
-    signEvent,
-    relays,
-  } = useNostr();
+  const { contacts, pubkey: myPubkey, profile: myProfile } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [sharingLocation, setSharingLocation] = useState(false);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
   // same in groups.
@@ -249,62 +222,32 @@ const GroupConversationScreen: React.FC = () => {
     return map;
   }, [members, myPubkey]);
 
-  // Single send-text path used by both the composer Send button and the
-  // attach-panel actions (image-URL, location, GIF, etc.). Returns true
-  // on success so callers can sequence post-send UI changes.
-  const sendText = useCallback(
-    async (text: string): Promise<boolean> => {
-      if (!group || !myPubkey) return false;
-      const trimmed = text.trim();
-      if (!trimmed) return false;
-      setSending(true);
-      const result = await sendGroupMessage({
-        groupId: group.id,
-        subject: group.name,
-        memberPubkeys: group.memberPubkeys,
-        text: trimmed,
-      });
-      setSending(false);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Unknown error');
-        return false;
-      }
-      // Optimistically append locally with a `local_…` id. Duplicate
-      // window vs the inbound self-wrap is documented as a known
-      // follow-up (see PR #227 round-2 review thread).
-      const local: GroupMessage = {
-        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        senderPubkey: myPubkey,
-        text: trimmed,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      try {
-        const next = await appendGroupMessage(group.id, local);
-        setMessages(next);
-        notifyGroupMessage(group.id, local);
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
-        return true;
-      } catch (err) {
-        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
-        Alert.alert(
-          'Saved on relay, not on device',
-          'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
-        );
-        return false;
-      }
-    },
-    [group, myPubkey, sendGroupMessage],
-  );
+  // Send / upload / share orchestration + in-flight flags live in the
+  // useGroupComposerActions hook (parallel to the 1:1 screen's
+  // useConversationComposerActions). Everything funnels through the hook's
+  // sendText (optimistic append + scroll).
+  const {
+    sending,
+    uploadingImage,
+    sharingLocation,
+    handleSend,
+    handlePickAndSendImage,
+    handleTakeAndSendPhoto,
+    handleShareLocation,
+    handleSendGif,
+    handleShareContactPicked,
+    handleSendInvoiceToGroup,
+  } = useGroupComposerActions({
+    group,
+    draft,
+    setDraft,
+    setMessages,
+    scrollToEnd: () => listRef.current?.scrollToEnd({ animated: true }),
+    setAttachPanelOpen,
+    setGifPickerOpen,
+    setContactPickerOpen,
+  });
 
-  const handleSend = useCallback(async () => {
-    const ok = await sendText(draft);
-    if (ok) setDraft('');
-  }, [draft, sendText]);
-
-  // Attach-panel actions. Each ends by closing the panel and (on
-  // success) appending an optimistic local message via sendText. Image
-  // and Photo go through the existing imageUploadService (Blossom →
-  // URL) and send the URL as the message body — same as the 1:1 path.
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
   // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
   // so the panel + composer + keyboard never have to stack. Without this,
@@ -314,133 +257,6 @@ const GroupConversationScreen: React.FC = () => {
     setAttachPanelOpen(true);
     KeyboardController.dismiss();
   }, []);
-
-  const uploadAndSend = useCallback(
-    async (localUri: string, base64?: string | null) => {
-      setUploadingImage(true);
-      try {
-        const scrubbed = await stripImageMetadata(localUri, base64);
-        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        await sendText(url);
-      } catch (err) {
-        Alert.alert('Upload failed', err instanceof Error ? err.message : 'Please try again.');
-      } finally {
-        setUploadingImage(false);
-      }
-    },
-    [sendText, signEvent],
-  );
-
-  const handlePickAndSendImage = useCallback(async () => {
-    if (uploadingImage || sending) return;
-    closeAttachPanel();
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to send images.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
-
-  const handleTakeAndSendPhoto = useCallback(async () => {
-    if (uploadingImage || sending) return;
-    closeAttachPanel();
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
-
-  const handleShareLocation = useCallback(async () => {
-    if (sharingLocation) return;
-    closeAttachPanel();
-    setSharingLocation(true);
-    try {
-      const result = await getCurrentLocation();
-      if (!result.ok) {
-        Alert.alert('Could not share location', result.message);
-        return;
-      }
-      await sendText(formatGeoMessage(result.location));
-    } finally {
-      setSharingLocation(false);
-    }
-  }, [sharingLocation, closeAttachPanel, sendText]);
-
-  const handleSendGif = useCallback(
-    async (gif: Gif) => {
-      setGifPickerOpen(false);
-      closeAttachPanel();
-      await sendText(gif.url);
-    },
-    [closeAttachPanel, sendText],
-  );
-
-  // Share another contact's Nostr profile into the group. Mirrors the 1:1
-  // path (ConversationScreen.handleShareContactPicked): "Shared contact:
-  // <name>\nnostr:nprofile…" lets other Nostr clients render a tappable
-  // profile mention. We send via the group's own sendText so the message
-  // shows up in the group thread (not as a DM to the picked contact).
-  const handleShareContactPicked = useCallback(
-    async (friend: PickedFriend) => {
-      setContactPickerOpen(false);
-      closeAttachPanel();
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
-      const nprofile = nprofileEncode(friend.pubkey, relayHints);
-      const label = friend.name || 'a contact';
-      await sendText(`Shared contact: ${label}\nnostr:${nprofile}`);
-    },
-    [closeAttachPanel, contacts, relays, sendText],
-  );
-
-  // ReceiveSheet hands us the bolt11 via `onSendToGroup`. We post it
-  // directly via sendGroupMessage (NOT sendText) because sendText raises
-  // its own Alert on failure — ReceiveSheet shows a Toast on failure as
-  // well, and stacking both reads as a bug. Optimistic local append
-  // mirrors what sendText does so the invoice shows up in the thread.
-  const handleSendInvoiceToGroup = useCallback(
-    async (payload: string): Promise<{ success: boolean; error?: string }> => {
-      if (!group || !myPubkey) return { success: false, error: 'Group unavailable.' };
-      const result = await sendGroupMessage({
-        groupId: group.id,
-        subject: group.name,
-        memberPubkeys: group.memberPubkeys,
-        text: payload,
-      });
-      if (!result.success) return { success: false, error: result.error ?? 'Send failed' };
-      const local: GroupMessage = {
-        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        senderPubkey: myPubkey,
-        text: payload,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      try {
-        const next = await appendGroupMessage(group.id, local);
-        setMessages(next);
-        notifyGroupMessage(group.id, local);
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
-      } catch (err) {
-        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
-      }
-      return { success: true };
-    },
-    [group, myPubkey, sendGroupMessage],
-  );
 
   // MessageBubble handler — Pay button on an invoice / lightning address
   // bubble routes through SendSheet, same UX as 1:1 conversations.
@@ -912,104 +728,4 @@ const GroupConversationScreen: React.FC = () => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.brandPink,
-    },
-    header: {
-      paddingHorizontal: 20,
-      paddingBottom: 40,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    titleTouch: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      flexShrink: 1,
-    },
-    title: {
-      color: colors.white,
-      fontSize: 22,
-      fontWeight: '700',
-      flexShrink: 1,
-    },
-    memberCount: {
-      color: 'rgba(255,255,255,0.8)',
-      fontSize: 13,
-      fontWeight: '500',
-      marginTop: 8,
-      marginLeft: 48,
-    },
-    actionButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    deleteIconButton: {
-      backgroundColor: 'rgba(0,0,0,0.15)',
-    },
-    content: {
-      flex: 1,
-      backgroundColor: colors.background,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      marginTop: -24,
-      overflow: 'hidden',
-    },
-    messagesList: {
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      gap: 6,
-      flexGrow: 1,
-    },
-    // Bubble + per-message-type styles moved to src/components/MessageBubble
-    // — both 1:1 and group screens render the same bubble component now.
-    fullscreenBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.92)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    fullscreenImage: {
-      width: '100%',
-      height: '100%',
-    },
-    // composer + input + attachButton + sendButton + sendButtonDisabled
-    // moved to ConversationComposer (#251) — kept in sync with the 1:1
-    // screen via that shared component.
-    emptyState: {
-      padding: 40,
-      alignItems: 'center',
-      gap: 8,
-    },
-    emptyTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    emptySubtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
-  });
-
 export default GroupConversationScreen;
