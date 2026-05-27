@@ -70,6 +70,47 @@ name: Group attach panel — Zap (disabled), Invoice, Contact tiles render
           id: 'attach-send-image'
       - assertVisible:
           id: 'attach-share-location'
+      # Voice tile (#235) — must render in the group attach panel too,
+      # not just 1:1 chats. Without this assertion a regression that
+      # disables the group voice path would ship unnoticed.
+      - assertVisible:
+          id: 'attach-tile-voice'
+
+      # Tap Voice → VoiceRecordingSheet opens. Don't tap the mic
+      # (would trigger the OS permission prompt). Just confirm the
+      # sheet plus its three primary controls render, then dismiss
+      # via Cancel — same shape as test-attach-tile-voice.yaml for
+      # the 1:1 path.
+      - tapOn:
+          id: 'attach-tile-voice'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'voice-recording-sheet'
+      - assertVisible:
+          id: 'voice-record-toggle'
+      - assertVisible:
+          id: 'voice-cancel-button'
+      - assertVisible:
+          id: 'voice-send-button'
+      - tapOn:
+          id: 'voice-cancel-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertNotVisible:
+          id: 'voice-recording-sheet'
+
+      # Re-open the panel since Cancel may have closed it as part of
+      # the cascade (matches the 1:1 sheet's behaviour).
+      - runFlow:
+          when:
+            notVisible:
+              id: 'conversation-attach-panel'
+          commands:
+            - tapOn:
+                id: 'group-attach-button'
+            - waitForAnimationToEnd:
+                timeout: 2000
 
       # Tap Contact → FriendPickerSheet opens. Don't actually share —
       # back out without picking.

@@ -32,6 +32,7 @@ import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
@@ -165,6 +166,7 @@ const ConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<TimedItem[]>(() => buildZapItems(wallets, pubkey), [wallets, pubkey]);
@@ -370,6 +372,7 @@ const ConversationScreen: React.FC = () => {
     sending,
     uploadingImage,
     sharingLocation,
+    uploadingVoice,
     appendOptimisticLocal,
     handleSend,
     handleShareLocation,
@@ -377,6 +380,7 @@ const ConversationScreen: React.FC = () => {
     handleTakeAndSendPhoto,
     handleShareContactPicked,
     handleSendGif,
+    handleSendVoiceNote,
   } = useConversationComposerActions({
     pubkey,
     name,
@@ -386,6 +390,7 @@ const ConversationScreen: React.FC = () => {
     setAttachPanelOpen,
     setContactPickerOpen,
     setGifPickerOpen,
+    setVoiceSheetOpen,
   });
 
   const openLocation = useCallback((loc: SharedLocation) => {
@@ -612,6 +617,7 @@ const ConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           disabled={!isLoggedIn}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
@@ -659,10 +665,21 @@ const ConversationScreen: React.FC = () => {
                     }
                   : undefined
               }
+              onSendVoiceNote={() => {
+                // VoiceRecordingSheet opens over the panel; leave the panel
+                // mounted so dismissing the sheet returns the user to it.
+                setVoiceSheetOpen(true);
+              }}
             />
           }
         />
       </View>
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {

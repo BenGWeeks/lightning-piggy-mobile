@@ -1,6 +1,7 @@
 import * as nip59 from 'nostr-tools/nip59';
 import { verifyEvent, type NostrEvent } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
+import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -249,6 +250,70 @@ export function participantsFromRumor(rumor: DecodedRumor): Set<string> {
     if (v && HEX64.test(v)) set.add(v);
   }
   return set;
+}
+
+/**
+ * File metadata parsed from a NIP-17 kind-15 file-message rumor (#235).
+ * The blob at `url` is AES-256-GCM ciphertext; `keyHex`/`nonceHex` decrypt
+ * it, `mime` is the original (decrypted) content type.
+ */
+export interface ConversationFileMeta {
+  url: string;
+  mime: string;
+  algorithm: string;
+  keyHex: string;
+  nonceHex: string;
+  sha256?: string;
+  size?: number;
+}
+
+/**
+ * Extract file metadata from a kind-15 rumor's tags + content. Returns
+ * undefined for non-kind-15 rumors, or kind-15 rumors missing the fields
+ * we need to fetch + decrypt (url / key / nonce) — callers then fall back
+ * to rendering the rumor as plain text.
+ */
+export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | undefined {
+  if (rumor.kind !== 15) return undefined;
+  const tag = (name: string): string | undefined => rumor.tags.find((t) => t[0] === name)?.[1];
+  // NIP-17 kind 15 puts the file URL in `content`; tolerate a `url` tag too.
+  const url = rumor.content?.trim() || tag('url');
+  const keyHex = tag('decryption-key');
+  const nonceHex = tag('decryption-nonce');
+  if (!url || !keyHex || !nonceHex) return undefined;
+  const sizeRaw = tag('size');
+  const size = sizeRaw && /^\d+$/.test(sizeRaw) ? Number(sizeRaw) : undefined;
+  return {
+    url,
+    mime: tag('file-type') ?? 'application/octet-stream',
+    algorithm: tag('encryption-algorithm') ?? 'aes-gcm',
+    keyHex,
+    nonceHex,
+    sha256: tag('x'),
+    size,
+  };
+}
+
+/**
+ * Inbox/display text for a decoded rumor (#235). A kind-15 encrypted file
+ * message (voice note) is stored as its `#lpe=…` encoded URL so
+ * MessageBubble → VoiceNotePlayer can render + decrypt it; every other
+ * rumor keeps its plaintext content. Shared by all the DM receive paths
+ * (live sub, fetch-conversation, inbox refresh) so they classify kind-15
+ * identically.
+ */
+export function textForRumor(rumor: DecodedRumor): string {
+  const meta = fileMetaFromRumor(rumor);
+  // Only fold a kind-15 file into the `#lpe=…` URL — which embeds the
+  // decryption key + nonce in the message text — when it's a payload we can
+  // actually render inline: an AES-GCM audio voice note. For anything else
+  // (a different algorithm, or future encrypted images), keep `rumor.content`
+  // (the bare blob URL per NIP-17) so we never surface decryption secrets in a
+  // plain-text fallback bubble. Matches what `parseVoiceNote` accepts. (#235)
+  if (meta && meta.algorithm === 'aes-gcm' && meta.mime.startsWith('audio/')) {
+    return encodeEncryptedFileUrl(meta);
+  }
+  return rumor.content;
 }
 
 /**

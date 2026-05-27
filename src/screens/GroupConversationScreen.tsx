@@ -32,6 +32,7 @@ import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
@@ -93,6 +94,7 @@ const GroupConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
   // same in groups.
@@ -230,6 +232,7 @@ const GroupConversationScreen: React.FC = () => {
     sending,
     uploadingImage,
     sharingLocation,
+    uploadingVoice,
     handleSend,
     handlePickAndSendImage,
     handleTakeAndSendPhoto,
@@ -237,6 +240,7 @@ const GroupConversationScreen: React.FC = () => {
     handleSendGif,
     handleShareContactPicked,
     handleSendInvoiceToGroup,
+    handleSendVoiceNote,
   } = useGroupComposerActions({
     group,
     draft,
@@ -246,6 +250,7 @@ const GroupConversationScreen: React.FC = () => {
     setAttachPanelOpen,
     setGifPickerOpen,
     setContactPickerOpen,
+    setVoiceSheetOpen,
   });
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
@@ -564,6 +569,7 @@ const GroupConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
           attachOpen={attachPanelOpen}
@@ -603,10 +609,18 @@ const GroupConversationScreen: React.FC = () => {
                 // Picker opens over the panel; close on cancel/select.
                 setContactPickerOpen(true);
               }}
+              onSendVoiceNote={() => setVoiceSheetOpen(true)}
             />
           }
         />
       </View>
+
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
 
       <RenameGroupSheet
         visible={renameVisible}

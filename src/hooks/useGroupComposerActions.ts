@@ -1,27 +1,18 @@
-import React, { useCallback, useState } from 'react';
-import * as ImagePicker from 'expo-image-picker';
+import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { getCurrentLocation, formatGeoMessage } from '../services/locationService';
-import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
-import type { PickedFriend } from '../components/FriendPickerSheet';
-import type { Gif } from '../services/giphyService';
+import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
+import type { EncryptedUpload } from '../services/imageUploadService';
 import type { Group } from '../types/groups';
+import { useComposerActions } from './useComposerActions';
 
 /**
- * Send / upload / share actions for GroupConversationScreen (#235 onward),
- * plus their in-flight flags. The group sibling of `useConversationComposerActions`:
- * extracted from the screen so it stays focused on layout + wiring (and under the
- * #703 size cap), and so this orchestration — optimistic append, EXIF stripping,
- * Blossom upload, picker dismissal, permission prompts — lives in one place.
- *
- * Everything funnels through `sendText` (the group analog of the 1:1's optimistic
- * send): publish via the context's `sendGroupMessage`, then append a `local_…`
- * row and scroll to it. The hook consumes `useNostr()` directly; the caller passes
- * the screen-owned bits (the group, the composer draft, the message-list setter,
- * a scroll-to-end callback, and the panel/picker setters).
+ * Group GroupConversationScreen composer actions. A thin wrapper over the
+ * shared `useComposerActions` (#235): it provides the group send strategy
+ * (`sendGroupMessage` text / kind-15 file + an optimistic `local_…`-row append
+ * with scroll) and re-exposes the shared handlers, plus the group-only
+ * `handleSendInvoiceToGroup`. The 1:1 sibling is `useConversationComposerActions`.
  */
 export function useGroupComposerActions(params: {
   group: Group | undefined;
@@ -32,6 +23,7 @@ export function useGroupComposerActions(params: {
   setAttachPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const {
     group,
@@ -42,40 +34,22 @@ export function useGroupComposerActions(params: {
     setAttachPanelOpen,
     setGifPickerOpen,
     setContactPickerOpen,
+    setVoiceSheetOpen,
   } = params;
 
-  const { sendGroupMessage, pubkey: myPubkey, signEvent, contacts, relays } = useNostr();
+  const { sendGroupMessage, pubkey: myPubkey } = useNostr();
 
-  const [sending, setSending] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [sharingLocation, setSharingLocation] = useState(false);
-
-  const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), [setAttachPanelOpen]);
-
-  const sendText = useCallback(
+  // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
+  // is a known follow-up, PR #227) and scroll to it. Returns false if the local
+  // persist failed — the relay send already succeeded, but the caller surfaces
+  // that so the draft isn't cleared and the user can retry/refresh.
+  const appendOptimisticGroupRow = useCallback(
     async (text: string): Promise<boolean> => {
       if (!group || !myPubkey) return false;
-      const trimmed = text.trim();
-      if (!trimmed) return false;
-      setSending(true);
-      const result = await sendGroupMessage({
-        groupId: group.id,
-        subject: group.name,
-        memberPubkeys: group.memberPubkeys,
-        text: trimmed,
-      });
-      setSending(false);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Unknown error');
-        return false;
-      }
-      // Optimistically append locally with a `local_…` id. Duplicate
-      // window vs the inbound self-wrap is documented as a known
-      // follow-up (see PR #227 round-2 review thread).
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         senderPubkey: myPubkey,
-        text: trimmed,
+        text,
         createdAt: Math.floor(Date.now() / 1000),
       };
       try {
@@ -93,113 +67,78 @@ export function useGroupComposerActions(params: {
         return false;
       }
     },
-    [group, myPubkey, sendGroupMessage, setMessages, scrollToEnd],
+    [group, myPubkey, setMessages, scrollToEnd],
   );
 
-  const handleSend = useCallback(async () => {
-    const ok = await sendText(draft);
-    if (ok) setDraft('');
-  }, [draft, sendText, setDraft]);
-
-  // Attach-panel actions. Each ends by closing the panel and (on success)
-  // appending an optimistic local message via sendText. Image and Photo go
-  // through imageUploadService (Blossom → URL) and send the URL as the body.
-  const uploadAndSend = useCallback(
-    async (localUri: string, base64?: string | null) => {
-      setUploadingImage(true);
-      try {
-        const scrubbed = await stripImageMetadata(localUri, base64);
-        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        await sendText(url);
-      } catch (err) {
-        Alert.alert('Upload failed', err instanceof Error ? err.message : 'Please try again.');
-      } finally {
-        setUploadingImage(false);
+  const sendText = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!group || !myPubkey) return false;
+      const result = await sendGroupMessage({
+        groupId: group.id,
+        subject: group.name,
+        memberPubkeys: group.memberPubkeys,
+        text,
+      });
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Unknown error');
+        return false;
       }
+      // Relay send succeeded; return the local-persist result so a failed
+      // local save keeps the draft (and shows the "saved on relay" alert).
+      return appendOptimisticGroupRow(text);
     },
-    [sendText, signEvent],
+    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  const handlePickAndSendImage = useCallback(async () => {
-    if (uploadingImage || sending) return;
-    closeAttachPanel();
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to send images.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
-
-  const handleTakeAndSendPhoto = useCallback(async () => {
-    if (uploadingImage || sending) return;
-    closeAttachPanel();
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
-
-  const handleShareLocation = useCallback(async () => {
-    if (sharingLocation) return;
-    closeAttachPanel();
-    setSharingLocation(true);
-    try {
-      const result = await getCurrentLocation();
-      if (!result.ok) {
-        Alert.alert('Could not share location', result.message);
-        return;
+  const sendVoice = useCallback(
+    async (file: EncryptedUpload): Promise<boolean> => {
+      if (!group || !myPubkey) return false;
+      const result = await sendGroupMessage({
+        groupId: group.id,
+        subject: group.name,
+        memberPubkeys: group.memberPubkeys,
+        file,
+      });
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send voice note.');
+        return false;
       }
-      await sendText(formatGeoMessage(result.location));
-    } finally {
-      setSharingLocation(false);
-    }
-  }, [sharingLocation, closeAttachPanel, sendText]);
-
-  const handleSendGif = useCallback(
-    async (gif: Gif) => {
-      setGifPickerOpen(false);
-      closeAttachPanel();
-      await sendText(gif.url);
+      return appendOptimisticGroupRow(
+        encodeEncryptedFileUrl({
+          url: file.url,
+          mime: file.mime,
+          keyHex: file.keyHex,
+          nonceHex: file.nonceHex,
+        }),
+      );
     },
-    [closeAttachPanel, sendText, setGifPickerOpen],
+    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  // Share another contact's Nostr profile into the group. Mirrors the 1:1
-  // path: "Shared contact: <name>\nnostr:nprofile…" lets other Nostr clients
-  // render a tappable profile mention. Sent via the group's own sendText so it
-  // shows up in the group thread (not as a DM to the picked contact).
-  const handleShareContactPicked = useCallback(
-    async (friend: PickedFriend) => {
-      setContactPickerOpen(false);
-      closeAttachPanel();
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
-      const nprofile = nprofileEncode(friend.pubkey, relayHints);
-      const label = friend.name || 'a contact';
-      await sendText(`Shared contact: ${label}\nnostr:${nprofile}`);
-    },
-    [closeAttachPanel, contacts, relays, sendText, setContactPickerOpen],
+  // Preflight so the shared hook can skip an expensive encrypt+upload (voice /
+  // image) when there's no valid group target to send to.
+  const canSend = useCallback(() => !!group && !!myPubkey, [group, myPubkey]);
+
+  // Memoise the strategy so the shared hook's callbacks (which depend on it)
+  // keep stable identities across renders.
+  const strategy = useMemo(
+    () => ({ sendText, sendVoice, canSend }),
+    [sendText, sendVoice, canSend],
   );
 
-  // ReceiveSheet hands us the bolt11 via `onSendToGroup`. We post it directly
-  // via sendGroupMessage (NOT sendText) because sendText raises its own Alert
-  // on failure — ReceiveSheet shows a Toast on failure too, and stacking both
-  // reads as a bug. Optimistic local append mirrors sendText.
+  const actions = useComposerActions({
+    strategy,
+    draft,
+    setDraft,
+    setAttachPanelOpen,
+    setGifPickerOpen,
+    setContactPickerOpen,
+    setVoiceSheetOpen,
+  });
+
+  // Group-only: ReceiveSheet hands us a bolt11 via `onSendToGroup`. Post it
+  // directly (NOT via the strategy's sendText, which raises its own Alert on
+  // failure — ReceiveSheet shows a Toast too, and stacking both reads as a bug).
   const handleSendInvoiceToGroup = useCallback(
     async (payload: string): Promise<{ success: boolean; error?: string }> => {
       if (!group || !myPubkey) return { success: false, error: 'Group unavailable.' };
@@ -210,36 +149,11 @@ export function useGroupComposerActions(params: {
         text: payload,
       });
       if (!result.success) return { success: false, error: result.error ?? 'Send failed' };
-      const local: GroupMessage = {
-        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        senderPubkey: myPubkey,
-        text: payload,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      try {
-        const next = await appendGroupMessage(group.id, local);
-        setMessages(next);
-        notifyGroupMessage(group.id, local);
-        setTimeout(scrollToEnd, 0);
-      } catch (err) {
-        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
-      }
+      await appendOptimisticGroupRow(payload);
       return { success: true };
     },
-    [group, myPubkey, sendGroupMessage, setMessages, scrollToEnd],
+    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  return {
-    sending,
-    uploadingImage,
-    sharingLocation,
-    sendText,
-    handleSend,
-    handlePickAndSendImage,
-    handleTakeAndSendPhoto,
-    handleShareLocation,
-    handleSendGif,
-    handleShareContactPicked,
-    handleSendInvoiceToGroup,
-  };
+  return { ...actions, handleSendInvoiceToGroup };
 }

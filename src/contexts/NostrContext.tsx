@@ -34,6 +34,8 @@ import {
   deleteMnemonic,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
+import { useMessageSend } from './useMessageSend';
+import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -155,6 +157,15 @@ interface NostrContextType {
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
   /**
+   * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
+   * 1:1 recipient. The blob is already AES-encrypted + uploaded; this
+   * gift-wraps the URL + decryption key. See #235.
+   */
+  sendFileMessage: (
+    recipientPubkey: string,
+    file: EncryptedUpload,
+  ) => Promise<{ success: boolean; error?: string }>;
+  /**
    * Persist an optimistic local- DM message to the per-conversation
    * cache so it survives navigating away + back before the NIP-17
    * self-wrap echo arrives. The matching merge dedup against the real
@@ -173,7 +184,9 @@ interface NostrContextType {
     groupId: string;
     subject: string;
     memberPubkeys: string[];
-    text: string;
+    text?: string;
+    /** Encrypted NIP-17 kind-15 file message (voice note) sent to the group. */
+    file?: EncryptedUpload;
   }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
   /**
    * Publish a parameterised-replaceable kind-30200 group-state event for
@@ -1662,99 +1675,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
    * inbox on other devices — the same multi-device behaviour group
    * messages have today.
    */
-  const sendDirectMessage = useCallback(
-    async (
-      recipientPubkey: string,
-      plaintext: string,
-    ): Promise<{ success: boolean; error?: string }> => {
-      if (!pubkey || !isLoggedIn) {
-        return { success: false, error: 'Not logged in' };
-      }
-      const normalizedRecipientPubkey = recipientPubkey.trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
-        return { success: false, error: 'Invalid public key format' };
-      }
-      // Union the user's published write relays with DEFAULT_RELAYS. Publish
-      // uses Promise.any, so one responsive relay is enough — but a user
-      // whose NIP-65 list has a single entry (and no in-app UI to edit it)
-      // hits a single-point failure the moment that relay is slow.
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
-      try {
-        const rumor = nostrService.createDirectMessageRumor({
-          senderPubkey: pubkey,
-          recipientPubkey: normalizedRecipientPubkey,
-          content: plaintext,
-        });
-
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          const result = await nostrService.sendNip17ToManyWithNsec({
-            senderSecretKey: secretKey,
-            rumor,
-            recipientPubkeys: [normalizedRecipientPubkey],
-            relays: targetRelays,
-          });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          // Partial send — at least one wrap (recipient delivery and/or sender's own inbox copy) failed to publish. Surface as non-fatal failure so the composer keeps its draft and the user can retry, mirroring sendGroupMessage's pattern.
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
-            };
-          }
-          return { success: true };
-        }
-
-        if (signerType === 'amber') {
-          const currentUser = pubkey;
-          const result = await nostrService.sendNip17ToManyWithSigner({
-            senderPubkey: currentUser,
-            rumor,
-            recipientPubkeys: [normalizedRecipientPubkey],
-            relays: targetRelays,
-            signerNip44Encrypt: (plain, recipient) =>
-              amberService.requestNip44Encrypt(plain, recipient, currentUser),
-            signerSignSeal: async (unsignedSeal) => {
-              // Keep pubkey on the seal — Amber misroutes kind=13 sign_event Intents without it (#356) and lands on its main Apps screen instead of the Sign Event sheet. Same rule as the group-send Amber path further down.
-              const { event: signedEventJson } = await amberService.requestEventSignature(
-                JSON.stringify(unsignedSeal),
-                '',
-                currentUser,
-              );
-              if (!signedEventJson) {
-                throw new Error('Amber returned empty signed seal');
-              }
-              return JSON.parse(signedEventJson);
-            },
-          });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          // Same partial-send handling as the nsec path. Amber's per-recipient sequential signing means a cancelled prompt or a failed seal mid-loop leaves earlier wraps published but later ones unsent — surface that to the user instead of silent success.
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
-            };
-          }
-          return { success: true };
-        }
-
-        return { success: false, error: 'Unsupported signer type' };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to send message';
-        return { success: false, error: message };
-      }
-    },
-    [pubkey, isLoggedIn, signerType, relays],
-  );
+  // 1:1 sends — text + encrypted file (voice note, #235) — live in
+  // useMessageSend (#703). Group send + group-state live in useGroupMessaging
+  // (wired above). We take ONLY the 1:1 sends here so sendGroupMessage /
+  // publishGroupState aren't declared twice.
+  const { sendDirectMessage, sendFileMessage } = useMessageSend({
+    pubkey,
+    isLoggedIn,
+    signerType,
+    relays,
+  });
 
   const signEvent = useCallback(
     async (event: {
@@ -1815,6 +1745,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendFileMessage,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,
@@ -1853,6 +1784,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendFileMessage,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,

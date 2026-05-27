@@ -133,6 +133,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isAndroidBackgroundLocationEnabled: true,
       },
     ],
+    // expo-audio — short voice-note recording in the message composer
+    // (#235). We only ever record while the recording sheet is open, so
+    // background-recording / background-playback / notifications stay
+    // off (the plugin defaults would otherwise add FOREGROUND_SERVICE +
+    // POST_NOTIFICATIONS which we don't need).
+    [
+      'expo-audio',
+      {
+        microphonePermission:
+          'Allow Lightning Piggy to use your microphone to record short voice notes for your conversations.',
+        enableBackgroundRecording: false,
+        enableBackgroundPlayback: false,
+      },
+    ],
     // Local notifications for the geofence alerts (#467). No FCM / no
     // remote push — these all fire from the on-device TaskManager task.
     'expo-notifications',

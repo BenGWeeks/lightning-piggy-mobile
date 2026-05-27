@@ -3,7 +3,12 @@ import { touchNip17CacheEntry } from '../utils/nip17Cache';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { SignerType } from '../types/nostr';
-import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
+import {
+  partnerFromRumor,
+  unwrapWrapNsec,
+  unwrapWrapViaNip44,
+  textForRumor,
+} from '../utils/nip17Unwrap';
 import { perAccountKey } from '../services/perAccountStorage';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -279,7 +284,7 @@ export async function fetchConversationFor(
             partnerPubkey: partnership.partnerPubkey,
             fromMe: partnership.fromMe,
             createdAt: rumor.created_at,
-            text: rumor.content,
+            text: textForRumor(rumor),
             wireKind: rumor.kind,
           };
           cache[wrap.id] = entry;
@@ -288,7 +293,7 @@ export async function fetchConversationFor(
           decrypted.push({
             id: wrap.id,
             fromMe: partnership.fromMe,
-            text: rumor.content,
+            text: textForRumor(rumor),
             createdAt: rumor.created_at,
           });
         }
@@ -332,7 +337,7 @@ export async function fetchConversationFor(
           decrypted.push({
             id: wrap.id,
             fromMe: partnership.fromMe,
-            text: rumor.content,
+            text: textForRumor(rumor),
             createdAt: rumor.created_at,
           });
         } catch (error) {

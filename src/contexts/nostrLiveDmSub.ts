@@ -8,6 +8,7 @@ import {
   partnerFromRumor,
   unwrapWrapNsec,
   unwrapWrapViaNip44,
+  textForRumor,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
@@ -371,7 +372,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       partnerPubkey: partnership.partnerPubkey,
       fromMe: partnership.fromMe,
       createdAt: rumor.created_at,
-      text: rumor.content,
+      text: textForRumor(rumor),
       wireKind: rumor.kind,
     };
     const inboxEntry: DmInboxEntry = {
