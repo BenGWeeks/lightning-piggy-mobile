@@ -58,8 +58,15 @@ describe('textForRumor (kind-15 → bubble text)', () => {
     expect(out).toContain('k=' + 'a'.repeat(64));
   });
 
-  it('does NOT leak the key for a non-audio kind-15 (keeps bare content)', () => {
+  it('encodes an AES-GCM image into the #lpe URL (#688)', () => {
     const out = textForRumor(fileRumor('image/jpeg', 'aes-gcm'));
+    expect(out).toContain('#lpe=1');
+    expect(out).toContain('k=' + 'a'.repeat(64));
+    expect(out).toContain('m=image%2Fjpeg');
+  });
+
+  it('does NOT leak the key for an unrenderable mime kind-15 (keeps bare content)', () => {
+    const out = textForRumor(fileRumor('application/pdf', 'aes-gcm'));
     expect(out).toBe('https://blossom.example/abc.bin');
     expect(out).not.toContain('lpe=1');
     expect(out).not.toContain('a'.repeat(64)); // the decryption key
@@ -67,6 +74,12 @@ describe('textForRumor (kind-15 → bubble text)', () => {
 
   it('does NOT leak the key for a non-aes-gcm audio kind-15', () => {
     const out = textForRumor(fileRumor('audio/mp4', 'chacha20'));
+    expect(out).toBe('https://blossom.example/abc.bin');
+    expect(out).not.toContain('a'.repeat(64));
+  });
+
+  it('does NOT leak the key for a non-aes-gcm image kind-15', () => {
+    const out = textForRumor(fileRumor('image/png', 'chacha20'));
     expect(out).toBe('https://blossom.example/abc.bin');
     expect(out).not.toContain('a'.repeat(64));
   });

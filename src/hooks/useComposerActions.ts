@@ -4,7 +4,6 @@ import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
 import {
   stripImageMetadata,
-  uploadImage,
   uploadEncryptedBlob,
   type EncryptedUpload,
 } from '../services/imageUploadService';
@@ -23,18 +22,19 @@ import type { Gif } from '../services/giphyService';
  * contact / voice / location orchestration + permission prompts + in-flight
  * flags) is identical and lives in `useComposerActions` below.
  *
- * `sendText` / `sendVoice` each own their optimistic local append (+ scroll):
+ * `sendText` / `sendFile` each own their optimistic local append (+ scroll):
  * the 1:1 wrapper appends a DM row via `appendLocalDmMessage`; the group
  * wrapper appends a `local_…` row via `appendGroupMessage`. Returning a boolean
  * lets the shared hook clear the draft / close the sheet only on success.
  */
 export interface ComposerSendStrategy {
-  /** Send a plaintext payload (message / image URL / GIF URL / geo / contact
-   *  share). Owns the optimistic append. Returns true on success. */
+  /** Send a plaintext payload (message / GIF URL / geo / contact share). Owns
+   *  the optimistic append. Returns true on success. */
   sendText: (text: string) => Promise<boolean>;
-  /** Send an encrypted file (voice note, NIP-17 kind-15). Owns the optimistic
-   *  append. Returns true on success. */
-  sendVoice: (file: EncryptedUpload) => Promise<boolean>;
+  /** Send an encrypted file (voice note or image, NIP-17 kind-15). Owns the
+   *  optimistic append. Returns true on success. The `kind` lets the wrapper
+   *  pick the right failure copy ("voice note" vs "image"). */
+  sendFile: (file: EncryptedUpload, kind: 'voice' | 'image') => Promise<boolean>;
   /** Optional gate before a location send. The 1:1 composer shows a confirm
    *  dialog (and resolves true/false); the group composer omits it and sends
    *  immediately. */
@@ -94,15 +94,27 @@ export function useComposerActions({
     }
   }, [draft, sending, strategy, setDraft]);
 
-  // Shared gallery/camera path: strip EXIF, upload to Blossom (or nostr.build
-  // fallback), then send the returned URL via the strategy.
+  // Shared gallery/camera path (#688): strip EXIF, then encrypt the scrubbed
+  // image on-device (AES-256-GCM) and upload the CIPHERTEXT to Blossom — so the
+  // server never holds the image in the clear — and send it as a NIP-17 kind-15
+  // file message, exactly like voice notes. The recipient's MessageBubble
+  // fetches + decrypts. (Legacy plaintext image URLs from other clients still
+  // render via parseImageMessage's plain branch — only the SEND side changed.)
   const uploadAndSendImage = useCallback(
     async (localUri: string, pickerBase64?: string | null) => {
       setUploadingImage(true);
       try {
         const scrubbed = await stripImageMetadata(localUri, pickerBase64);
-        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        await strategy.sendText(url);
+        // stripImageMetadata flattens to JPEG, preserving PNG → PNG and passing
+        // GIFs through untouched (so animation survives); the scrubbed uri keeps
+        // the resulting extension, so derive the mime from it.
+        const mime = /\.png$/i.test(scrubbed.uri)
+          ? 'image/png'
+          : /\.gif$/i.test(scrubbed.uri)
+            ? 'image/gif'
+            : 'image/jpeg';
+        const file = await uploadEncryptedBlob(scrubbed.uri, signEvent, mime, scrubbed.base64);
+        await strategy.sendFile(file, 'image');
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
@@ -203,7 +215,7 @@ export function useComposerActions({
       setUploadingVoice(true);
       try {
         const file = await uploadEncryptedBlob(uri, signEvent, 'audio/mp4');
-        const ok = await strategy.sendVoice(file);
+        const ok = await strategy.sendFile(file, 'voice');
         if (!ok) return;
         setVoiceSheetOpen(false);
         closeAttachPanel();

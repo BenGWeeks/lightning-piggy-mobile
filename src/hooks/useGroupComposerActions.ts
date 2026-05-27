@@ -90,8 +90,8 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  const sendVoice = useCallback(
-    async (file: EncryptedUpload): Promise<boolean> => {
+  const sendFile = useCallback(
+    async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
       if (!group || !myPubkey) return false;
       const result = await sendGroupMessage({
         groupId: group.id,
@@ -100,7 +100,8 @@ export function useGroupComposerActions(params: {
         file,
       });
       if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send voice note.');
+        const what = kind === 'image' ? 'image' : 'voice note';
+        Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
         return false;
       }
       return appendOptimisticGroupRow(
@@ -121,10 +122,7 @@ export function useGroupComposerActions(params: {
 
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders.
-  const strategy = useMemo(
-    () => ({ sendText, sendVoice, canSend }),
-    [sendText, sendVoice, canSend],
-  );
+  const strategy = useMemo(() => ({ sendText, sendFile, canSend }), [sendText, sendFile, canSend]);
 
   const actions = useComposerActions({
     strategy,

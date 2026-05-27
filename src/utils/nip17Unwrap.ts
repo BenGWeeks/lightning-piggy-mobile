@@ -306,11 +306,16 @@ export function textForRumor(rumor: DecodedRumor): string {
   const meta = fileMetaFromRumor(rumor);
   // Only fold a kind-15 file into the `#lpe=…` URL — which embeds the
   // decryption key + nonce in the message text — when it's a payload we can
-  // actually render inline: an AES-GCM audio voice note. For anything else
-  // (a different algorithm, or future encrypted images), keep `rumor.content`
-  // (the bare blob URL per NIP-17) so we never surface decryption secrets in a
-  // plain-text fallback bubble. Matches what `parseVoiceNote` accepts. (#235)
-  if (meta && meta.algorithm === 'aes-gcm' && meta.mime.startsWith('audio/')) {
+  // actually render inline: an AES-GCM audio voice note (#235) or image
+  // (#688). For anything else (a different algorithm, or a mime we don't
+  // render) keep `rumor.content` (the bare blob URL per NIP-17) so we never
+  // surface decryption secrets in a plain-text fallback bubble. Matches what
+  // `parseVoiceNote` / `parseImageMessage` accept.
+  if (
+    meta &&
+    meta.algorithm === 'aes-gcm' &&
+    (meta.mime.startsWith('audio/') || meta.mime.startsWith('image/'))
+  ) {
     return encodeEncryptedFileUrl(meta);
   }
   return rumor.content;

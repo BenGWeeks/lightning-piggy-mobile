@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, Linking } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -13,8 +13,9 @@ import {
 } from '../services/locationService';
 import {
   type BubbleContent,
+  type ParsedImageMessage,
   extractBitcoinUri,
-  extractImageUrl,
+  parseImageMessage,
   parseVoiceNote,
   extractInvoice,
   extractLightningAddress,
@@ -29,6 +30,7 @@ import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
+import DecryptedImage from './DecryptedImage';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -74,6 +76,59 @@ interface Props {
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
 }
+
+type Styles = ReturnType<typeof createStyles>;
+
+/**
+ * Image bubble (#688). Lives in its own component because the encrypted
+ * branch needs render state (the resolved displayable URI for the fullscreen
+ * tap) — a hook can't be called from inside MessageBubble's body, which has
+ * earlier conditional returns. Renders DecryptedImage, which handles both the
+ * plain-URL and fetch-ciphertext→decrypt paths.
+ */
+const ImageBubble: React.FC<{
+  styles: Styles;
+  image: ParsedImageMessage;
+  fromMe: boolean;
+  createdAt: number;
+  senderLabel: React.ReactNode;
+  onOpenImageFullscreen?: (url: string) => void;
+  testID: string;
+}> = ({ styles, image, fromMe, createdAt, senderLabel, onOpenImageFullscreen, testID }) => {
+  // For plain images the fetchable URL is the display source; for encrypted
+  // ones DecryptedImage resolves a data: URI, which it reports back here so
+  // the fullscreen tap shows the decrypted image, not the ciphertext blob.
+  const [displayUri, setDisplayUri] = useState<string | null>(image.encrypted ? null : image.url);
+  const canOpen = !!onOpenImageFullscreen && !!displayUri;
+  return (
+    <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
+        style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
+        accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
+        accessibilityRole={canOpen ? 'imagebutton' : 'image'}
+        disabled={!canOpen}
+        testID={testID}
+      >
+        {senderLabel}
+        <DecryptedImage
+          url={image.url}
+          encrypted={image.encrypted}
+          keyHex={image.keyHex}
+          nonceHex={image.nonceHex}
+          mime={image.mime}
+          style={styles.imageBubbleImage}
+          accessibilityLabel="Shared image"
+          onResolved={image.encrypted ? setDisplayUri : undefined}
+        />
+        <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
+          {formatTime(createdAt)}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 const MessageBubble: React.FC<Props> = ({
   id,
@@ -181,31 +236,21 @@ const MessageBubble: React.FC<Props> = ({
   // content.kind === 'text' — fall through to per-text-format detection.
   const text = content.text;
 
-  const imageUrl = extractImageUrl(text);
-  if (imageUrl) {
+  // Image (#688) — encrypted NIP-17 kind-15 (fetch ciphertext → decrypt →
+  // display) OR a plain image URL (legacy / other clients → display directly).
+  // Both render through the same bubble; DecryptedImage owns the decrypt path.
+  const image = parseImageMessage(text);
+  if (image) {
     return (
-      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => onOpenImageFullscreen?.(imageUrl)}
-          style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
-          accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
-          accessibilityRole={onOpenImageFullscreen ? 'imagebutton' : 'image'}
-          disabled={!onOpenImageFullscreen}
-          testID={`${testIdPrefix}-image-${id}`}
-        >
-          {SenderLabel}
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.imageBubbleImage}
-            resizeMode="cover"
-            accessibilityLabel="Shared image"
-          />
-          <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <ImageBubble
+        styles={styles}
+        image={image}
+        fromMe={fromMe}
+        createdAt={createdAt}
+        senderLabel={SenderLabel}
+        onOpenImageFullscreen={onOpenImageFullscreen}
+        testID={`${testIdPrefix}-image-${id}`}
+      />
     );
   }
 
