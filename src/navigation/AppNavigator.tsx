@@ -23,6 +23,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { setActiveThread } from '../services/notificationService';
 import {
   RootStackParamList,
   ExploreStackParamList,
@@ -157,6 +158,24 @@ export const navigateFromNotification = (data: {
   navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Home' } });
   return true;
 };
+
+/**
+ * Keep notificationService's "active thread" in sync with the focused route
+ * (#279), so DM / group notifications are suppressed for the thread the user
+ * is currently viewing. Done centrally here (off the back of the existing
+ * onStateChange) rather than per-screen, to avoid growing the over-cap
+ * Conversation / GroupConversation screen files (#703).
+ */
+function syncActiveThreadFromNav(): void {
+  const route = navigationRef.getCurrentRoute();
+  if (route?.name === 'Conversation') {
+    setActiveThread((route.params as { pubkey?: string } | undefined)?.pubkey ?? null);
+  } else if (route?.name === 'GroupConversation') {
+    setActiveThread((route.params as { groupId?: string } | undefined)?.groupId ?? null);
+  } else {
+    setActiveThread(null);
+  }
+}
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -438,6 +457,8 @@ export default function AppNavigator() {
         // Fire-and-forget — failures are swallowed inside the util so
         // a flaky AsyncStorage write can't crash navigation.
         void persistNavigationState(state);
+        // Suppress notifications for the thread the user is now viewing.
+        syncActiveThreadFromNav();
       }}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>

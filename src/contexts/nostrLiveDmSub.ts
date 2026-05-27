@@ -16,6 +16,7 @@ import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
+import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -539,7 +540,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       }
     }
     if (cancelled) return;
-    unsubscribe = nostrService.subscribeInboxDmsForViewer({
+    unsubscribe = subscribeInboxDmsForViewer({
       viewerPubkey,
       relays: readRelays,
       sinceK4,

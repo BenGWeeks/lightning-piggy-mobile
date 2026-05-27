@@ -22,8 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { setActiveThread } from '../services/notificationService';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -156,16 +155,6 @@ const GroupConversationScreen: React.FC = () => {
   const listRef = useRef<FlatList<ClassifiedMessage>>(null);
 
   const group = getGroup(route.params.groupId);
-
-  // Mark this group active while focused so notificationService
-  // suppresses OS notifications for messages in this group while open
-  // (#279). Cleared on blur.
-  useFocusEffect(
-    useCallback(() => {
-      setActiveThread(route.params.groupId);
-      return () => setActiveThread(null);
-    }, [route.params.groupId]),
-  );
 
   // Load persisted local messages on mount / when navigating back.
   useEffect(() => {

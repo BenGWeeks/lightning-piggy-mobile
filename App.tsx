@@ -25,6 +25,7 @@ import {
   setNotificationsForeground,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
+import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
@@ -339,6 +340,10 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                     <BrandedToast />
                     <GlobalIncomingPaymentOverlay />
+                    {/* Fires OS notifications for incoming payments / zaps
+                        (#279). Lives here (not in WalletContext) to keep that
+                        over-cap file from growing — see #703. */}
+                    <PaymentNotifier />
                     {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert
