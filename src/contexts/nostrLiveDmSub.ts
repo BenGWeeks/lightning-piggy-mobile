@@ -16,6 +16,8 @@ import { perAccountKey } from '../services/perAccountStorage';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
+import { fireMessageNotification } from '../services/notificationService';
+import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -95,6 +97,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
   let writeChain: Promise<void> = Promise.resolve();
+  // Wall-clock second the sub opened. We fire OS notifications ONLY for
+  // messages whose own timestamp is at/after this (minus a clock-skew
+  // buffer) — i.e. genuinely-new arrivals, never the historical backlog
+  // the relay replays on open (a fresh login otherwise floods to Android's
+  // 50-cap, #279). We can't use EOSE for this: nostr-tools fires `oneose`
+  // on an ~2 s eoseTimeout, which lands mid-backlog for a large history and
+  // wrongly marks the rest "live". The message timestamp is reliable —
+  // NIP-17 randomises only the gift-WRAP time; the inner kind-14 rumor's
+  // `created_at` (and kind-4's) is the real send time.
+  const subOpenedAtSec = Math.floor(Date.now() / 1000);
+  const NOTIFY_SKEW_SEC = 120; // tolerate sender/receiver clock drift
+  const isFreshArrival = (createdAtSec: number): boolean =>
+    createdAtSec >= subOpenedAtSec - NOTIFY_SKEW_SEC;
 
   // Coalesce per-event inbox merges into one setDmInbox call per ~150 ms or per 25 events. Without this, a relay-restream burst (e.g. cold start with 200+ kind-4 events queued) causes one React re-render per event = 30+ rerenders/sec on the JS thread, which is what locks the UI for 30 seconds. Batching collapses that into ~6 rerenders/sec at most. Notifications still fire per-event so unread counts/sounds aren't dropped.
   let pendingInboxEntries: DmInboxEntry[] = [];
@@ -253,6 +268,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
       queueInboxEntry(k4InboxEntry);
       notifyDmMessage(partnerPubkey);
+      // OS notification (#279) — only genuinely-fresh inbound (the
+      // historical backlog the relay replays on open has old timestamps
+      // and stays silent), never my own echo; suppressed by
+      // notificationService when the user is viewing this exact thread.
+      if (!fromMe && isFreshArrival(ev.created_at)) {
+        void fireMessageNotification({
+          kind: 'dm',
+          threadId: partnerPubkey,
+          title: 'New message',
+          body: plaintext,
+          data: { conversationPubkey: partnerPubkey },
+        });
+      }
       if (__DEV__)
         console.log(
           `[Nostr] live kind-4 ${ev.id.slice(0, 8)} surfaced (partner=${partnerPubkey.slice(0, 8)}, fromMe=${fromMe})`,
@@ -344,6 +372,22 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // GroupConversationScreen auto-refreshes.
     const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
     if (routeResult.kind !== 'not-group') {
+      // OS notification (#279) — fired HERE (live path) not inside
+      // tryRouteGroupRumor (which also runs on batch refresh). Only for
+      // genuinely-fresh messages (backlog has old timestamps → silent),
+      // skip my own, and suppressed when the user is viewing this group.
+      if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
+        const sender = routeResult.message.senderPubkey;
+        if (sender.toLowerCase() !== viewerPubkey.toLowerCase()) {
+          void fireMessageNotification({
+            kind: 'group',
+            threadId: routeResult.group.id,
+            title: routeResult.group.name || 'New group message',
+            body: routeResult.message.text,
+            data: { groupId: routeResult.group.id },
+          });
+        }
+      }
       if (__DEV__)
         console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`);
       return;
@@ -426,6 +470,18 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
     queueInboxEntry(inboxEntry);
     notifyDmMessage(partnership.partnerPubkey);
+    // OS notification (#279) — only genuinely-fresh inbound (backlog has
+    // old rumor timestamps and stays silent), never my own echo;
+    // suppressed when the user is viewing this thread.
+    if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
+      void fireMessageNotification({
+        kind: 'dm',
+        threadId: partnership.partnerPubkey,
+        title: 'New message',
+        body: rumor.content,
+        data: { conversationPubkey: partnership.partnerPubkey },
+      });
+    }
     if (__DEV__)
       console.log(
         `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
@@ -491,12 +547,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       }
     }
     if (cancelled) return;
-    unsubscribe = nostrService.subscribeInboxDmsForViewer({
+    unsubscribe = subscribeInboxDmsForViewer({
       viewerPubkey,
       relays: readRelays,
       sinceK4,
       onEvent: (ev) => {
-        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running.
+        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
         handleInboxEvent(ev).catch((e) => {
           if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
         });

@@ -23,6 +23,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { setActiveThread } from '../services/notificationService';
 import {
   RootStackParamList,
   ExploreStackParamList,
@@ -119,6 +120,62 @@ export const navigateToHuntPiggyDetail = (coord: string): boolean => {
   });
   return true;
 };
+
+/**
+ * Route from a tapped OS notification (#279). Reads the `data` payload the
+ * notificationService attached and opens the relevant surface:
+ *  - dm            → the 1:1 Conversation thread
+ *  - group         → the GroupConversation thread
+ *  - payment / zap → the Home (wallet) tab
+ *
+ * Called from the notification-response listener in App.tsx. Returns false
+ * if the nav tree isn't ready yet (caller retries on cold start).
+ */
+export const navigateFromNotification = (data: {
+  kind?: string;
+  conversationPubkey?: string;
+  groupId?: string;
+  walletId?: string;
+}): boolean => {
+  if (!navigationRef.isReady()) return false;
+  if (data.conversationPubkey) {
+    // `name` is required by the route type but the screen fills the real
+    // header from its own profile fetch, so seed it empty.
+    navigationRef.navigate('Conversation', { pubkey: data.conversationPubkey, name: '' });
+    return true;
+  }
+  if (data.groupId) {
+    navigationRef.navigate('GroupConversation', { groupId: data.groupId });
+    return true;
+  }
+  // Generic message ping with no thread id (the background detect-and-ping
+  // path, which doesn't decrypt) → open the Messages list.
+  if (data.kind === 'dm' || data.kind === 'group') {
+    navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    return true;
+  }
+  // payment / zap (or anything else) → wallet home.
+  navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Home' } });
+  return true;
+};
+
+/**
+ * Keep notificationService's "active thread" in sync with the focused route
+ * (#279), so DM / group notifications are suppressed for the thread the user
+ * is currently viewing. Done centrally here (off the back of the existing
+ * onStateChange) rather than per-screen, to avoid growing the over-cap
+ * Conversation / GroupConversation screen files (#703).
+ */
+function syncActiveThreadFromNav(): void {
+  const route = navigationRef.getCurrentRoute();
+  if (route?.name === 'Conversation') {
+    setActiveThread((route.params as { pubkey?: string } | undefined)?.pubkey ?? null);
+  } else if (route?.name === 'GroupConversation') {
+    setActiveThread((route.params as { groupId?: string } | undefined)?.groupId ?? null);
+  } else {
+    setActiveThread(null);
+  }
+}
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -400,6 +457,8 @@ export default function AppNavigator() {
         // Fire-and-forget — failures are swallowed inside the util so
         // a flaky AsyncStorage write can't crash navigation.
         void persistNavigationState(state);
+        // Suppress notifications for the thread the user is now viewing.
+        syncActiveThreadFromNav();
       }}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>

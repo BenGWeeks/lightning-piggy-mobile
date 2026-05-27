@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
-import { Check, ShieldCheck, Link2 } from 'lucide-react-native';
+import { Check, ShieldCheck, Link2, BellRing } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -11,6 +11,10 @@ import {
   setSendThreshold,
 } from '../../services/sendThresholdService';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
+import {
+  getLockScreenContentEnabled,
+  setLockScreenContentEnabled,
+} from '../../services/notificationService';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 const PRESETS: { value: number | null; label: string; sublabel: string }[] = [
@@ -33,6 +37,7 @@ const SecurityScreen: React.FC = () => {
   );
   const [customDraft, setCustomDraft] = useState<string>('');
   const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
+  const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
 
   useEffect(() => {
     getSendThreshold().then((t) => {
@@ -42,11 +47,17 @@ const SecurityScreen: React.FC = () => {
       if (!isPreset && t !== null) setCustomDraft(String(t));
     });
     getLinkPreviewEnabled().then(setLinkPreviewOn);
+    getLockScreenContentEnabled().then(setLockScreenContentOn);
   }, []);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
     await setLinkPreviewEnabled(next);
+  };
+
+  const handleToggleLockScreenContent = async (next: boolean) => {
+    setLockScreenContentOn(next);
+    await setLockScreenContentEnabled(next);
   };
 
   const handlePickPreset = async (value: number | null) => {
@@ -140,6 +151,29 @@ const SecurityScreen: React.FC = () => {
           onValueChange={handleToggleLinkPreview}
           accessibilityLabel="Show link previews in messages"
           testID="security-link-preview-toggle"
+          trackColor={{ false: colors.divider, true: colors.brandPink }}
+        />
+      </View>
+
+      <View style={[styles.headerRow, styles.sectionGap]}>
+        <BellRing size={22} color={colors.brandPink} />
+        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
+          Notification content
+        </Text>
+      </View>
+      <Text style={sharedAccountStyles.fieldHint}>
+        When OFF, notifications tell you a message or payment arrived but never include the details
+        — you'll see "New message" rather than the text, and "Payment received" rather than the
+        amount, both on the lock screen and in the notification shade. Turn ON to include the full
+        content. Default: OFF.
+      </Text>
+      <View style={styles.toggleRow}>
+        <Text style={styles.optionLabel}>Show message & payment details</Text>
+        <Switch
+          value={lockScreenContentOn}
+          onValueChange={handleToggleLockScreenContent}
+          accessibilityLabel="Show message and payment details in notifications"
+          testID="security-lockscreen-content-toggle"
           trackColor={{ false: colors.divider, true: colors.brandPink }}
         />
       </View>

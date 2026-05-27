@@ -73,6 +73,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // to file separate export-compliance documentation. See
       // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
       ITSAppUsesNonExemptEncryption: false,
+      // Background modes for the OS-notification detect-and-ping (#279).
+      // The `expo-background-task` config plugin registers ITS OWN
+      // BGTaskScheduler identifier in Info.plist and runs our JS task
+      // (lp-relay-bg-sync) under it — there is no separate Swift handler
+      // and no background decryption (detect-and-ping only; see
+      // src/services/backgroundSyncService.ts). We surface notifications
+      // without APNs / a remote push server — see
+      // docs/architecture/notifications.adoc for rationale.
+      //
+      // Trade-off: BGTaskScheduler cadence is OS-controlled; expect
+      // ~30 min between executions in practice. iOS realtime DM
+      // notifications are NOT achievable without APNs + a remote
+      // server, and the project explicitly rejects that path. The
+      // ~30 min latency is the iOS reality we accept; surface it in
+      // onboarding when the iOS build ships.
+      UIBackgroundModes: ['fetch', 'processing'],
     },
   },
   plugins: [
@@ -102,7 +118,34 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // #552 for migration rationale + memory `reference_map_stack_future_maplibre`.
     '@maplibre/maplibre-react-native',
     './plugins/withNfc',
+    // OS notifications foundation (#279). Adds Android manifest
+    // permissions for the planned persistent foreground service that
+    // keeps a relay WebSocket alive without FCM. The Java/Kotlin
+    // Service class itself ships in a follow-up — see
+    // plugins/withForegroundService.js for the deferred-vs-landed
+    // breakdown.
+    './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-notifications config plugin sets the Android notification
+    // small icon + colour, and is a no-op on iOS beyond linking the native
+    // module. The small icon is a white PiggyBank silhouette (lucide
+    // PiggyBank glyph) — Android renders the small icon as a flat mask and
+    // tints it with `color`, so it shows as a pink pig in the status bar /
+    // shade. We rely on local (not remote) notifications only — no FCM
+    // token is requested. See src/services/notificationService.ts.
+    [
+      'expo-notifications',
+      {
+        icon: './assets/notification-icon.png',
+        color: '#e91e63',
+      },
+    ],
+    // expo-background-task (#279): runs the detect-and-ping background sync
+    // periodically via WorkManager (Android) + BGTaskScheduler (iOS). The
+    // plugin wires the required Info.plist BGTask identifier + Android
+    // WorkManager bits — no custom native code. See
+    // src/services/backgroundTask.ts.
+    'expo-background-task',
     [
       'expo-image-picker',
       {
@@ -147,9 +190,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         enableBackgroundPlayback: false,
       },
     ],
-    // Local notifications for the geofence alerts (#467). No FCM / no
-    // remote push — these all fire from the on-device TaskManager task.
-    'expo-notifications',
+    // NB: geofence alerts (#467) also use local notifications, but
+    // `expo-notifications` is already registered above (for #279) — listing
+    // it twice makes the second config win silently, so keep the single
+    // entry above. No FCM / no remote push — all fired on-device.
     'expo-task-manager',
   ],
   android: {

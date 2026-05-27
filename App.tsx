@@ -2,7 +2,8 @@
 import './src/polyfills';
 
 import React, { useEffect, useState } from 'react';
-import { Linking, StyleSheet } from 'react-native';
+import { AppState, Linking, StyleSheet } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -17,7 +18,15 @@ import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
   navigateToHuntFound,
   navigateToHuntPiggyDetail,
+  navigateFromNotification,
 } from './src/navigation/AppNavigator';
+import {
+  ensureNotificationsInitialised,
+  requestNotificationPermission,
+  setNotificationsForeground,
+} from './src/services/notificationService';
+import { registerBackgroundSync } from './src/services/backgroundTask';
+import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
@@ -78,6 +87,57 @@ export default function App() {
   // re-tries via `ensureNfcStarted` on its own).
   useEffect(() => {
     void initNfc();
+  }, []);
+
+  // OS notifications (#279): create the Android channels up-front, track
+  // foreground state for the suppress-when-viewing-this-thread gate, and
+  // route notification taps to the right screen.
+  useEffect(() => {
+    void ensureNotificationsInitialised();
+    // Ask for permission HERE, from the foreground, not lazily from a fire
+    // path — the background sync task can't present the OS dialog. Safe to
+    // call every launch; it short-circuits once the user has answered.
+    void requestNotificationPermission();
+    // Register the periodic background detect-and-ping (#279). Idempotent;
+    // OS schedules it (~15 min floor on Android, usage-based on iOS).
+    void registerBackgroundSync();
+
+    // Foreground signal — notificationService suppresses a message
+    // notification only when the app is active AND the user is on that
+    // exact thread.
+    setNotificationsForeground(AppState.currentState === 'active');
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      setNotificationsForeground(state === 'active');
+    });
+
+    // Tap routing. Retry briefly so a cold-start tap that races the nav
+    // tree's mount still lands (mirrors the deep-link tryNav pattern).
+    const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
+      const data = response?.notification?.request?.content?.data as
+        | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
+        | undefined;
+      if (!data) return;
+      const tryNav = (attempt: number) => {
+        if (navigateFromNotification(data)) return;
+        if (attempt >= 20) return;
+        setTimeout(() => tryNav(attempt + 1), 100);
+      };
+      tryNav(0);
+    };
+    // Cold start: the app may have been launched by a notification tap.
+    // Clear the stored launch response once routed, so a later effect
+    // re-run / remount doesn't re-handle the same cold-start tap.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      routeFromResponse(response);
+      void Notifications.clearLastNotificationResponseAsync?.();
+    });
+    // Warm taps while the app is already running.
+    const responseSub = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
+
+    return () => {
+      appStateSub.remove();
+      responseSub.remove();
+    };
   }, []);
 
   // `lightning:` deep-link listener (Hunt finder flow, #468). LP registers
@@ -290,6 +350,10 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                     <BrandedToast />
                     <GlobalIncomingPaymentOverlay />
+                    {/* Fires OS notifications for incoming payments / zaps
+                        (#279). Lives here (not in WalletContext) to keep that
+                        over-cap file from growing — see #703. */}
+                    <PaymentNotifier />
                     {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert
