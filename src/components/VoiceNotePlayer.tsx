@@ -121,7 +121,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
       if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
       const cipher = new Uint8Array(await res.arrayBuffer());
       const plain = decryptFile(cipher, keyHex, nonceHex);
-      const safe = (url.split('/').pop() ?? 'note').replace(/[^a-zA-Z0-9._-]/g, '');
+      // `||` not `??`: a trailing-slash URL makes `.pop()` return '' (not
+      // null), which would yield `lp-voice-.m4a` and collide across notes.
+      const safe = (url.split('/').pop() || 'note').replace(/[^a-zA-Z0-9._-]/g, '');
       if (!cacheDirectory) throw new Error('No cache directory available for decrypted audio');
       const base = cacheDirectory.endsWith('/') ? cacheDirectory : `${cacheDirectory}/`;
       const uri = `${base}lp-voice-${safe}.${extFromMime(mime)}`;

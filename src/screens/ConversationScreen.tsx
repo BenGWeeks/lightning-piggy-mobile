@@ -617,6 +617,7 @@ const ConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           disabled={!isLoggedIn}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}

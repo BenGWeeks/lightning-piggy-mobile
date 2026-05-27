@@ -69,7 +69,11 @@ const WAVEFORM_BARS = 40;
  */
 function bucketMetering(history: number[], bars: number): number[] {
   if (history.length === 0) return [];
-  if (history.length <= bars) return history;
+  // Always emit exactly `bars` values so the waveform (and the playback
+  // `progress` mapping over it) stays consistent regardless of clip length.
+  // The loop below stretches a short history (size < 1 repeats samples) just
+  // as it averages a long one, so we must NOT early-return the raw history
+  // for short clips — that would render fewer than `bars` bars.
   const out: number[] = [];
   const size = history.length / bars;
   for (let i = 0; i < bars; i++) {

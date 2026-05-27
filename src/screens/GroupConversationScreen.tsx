@@ -569,6 +569,7 @@ const GroupConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
           attachOpen={attachPanelOpen}
