@@ -47,6 +47,13 @@ const NIP59_MAX_BACKDATE_SEC = 2 * 24 * 60 * 60;
 const OVERLAP_SEC = 120;
 const LOOKBACK_SEC = NIP59_MAX_BACKDATE_SEC + OVERLAP_SEC;
 
+// Cap the relay round-trip so a slow/unresponsive relay cannot keep this
+// headless task alive (battery drain + risk of the OS killing/penalising
+// it). nostr-tools closes the sub after maxWait and returns whatever
+// arrived — partial results are fine for detect-and-ping. Matches the 5 s
+// cap nostrPlacesPublisher uses for the same Hermes timer-starvation reason.
+const QUERY_MAXWAIT_MS = 5000;
+
 export interface BackgroundSyncResult {
   /** Whether a notification was fired this run. */
   pinged: boolean;
@@ -98,11 +105,15 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
   try {
     // kind-1059 = NIP-17 gift wraps, kind-4 = legacy NIP-04 DMs, both
     // addressed to us via a `#p` tag.
-    const events = await pool.querySync(readRelays, {
-      kinds: [1059, 4],
-      '#p': [activePubkey],
-      since,
-    });
+    const events = await pool.querySync(
+      readRelays,
+      {
+        kinds: [1059, 4],
+        '#p': [activePubkey],
+        since,
+      },
+      { maxWait: QUERY_MAXWAIT_MS },
+    );
 
     // Genuinely-new = an id we haven't accounted for, excluding our own
     // kind-4 echoes (real author === us). kind-1059 wrap authors are

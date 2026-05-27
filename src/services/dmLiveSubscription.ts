@@ -21,11 +21,16 @@ export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
-  // Fires once after BOTH the kind-4 and kind-1059 subscriptions have
-  // signalled end-of-stored-events (EOSE) across the relay set. Callers use
-  // this to distinguish the historical replay (everything delivered before
-  // EOSE) from genuinely-live events that stream in afterwards — e.g. to
-  // suppress OS notifications for the backlog on cold start (#279).
+  // Fires once after BOTH the kind-4 and kind-1059 subscriptions have each
+  // reached end-of-stored-events (EOSE). NB: nostr-tools' `subscribeMany`
+  // delivers `oneose` PER RELAY, so this resolves on the FIRST (fastest)
+  // relay's EOSE for each filter — not after every relay has finished
+  // replaying its backlog. That imprecision is deliberately tolerated:
+  // cold-start OS-notification suppression does NOT depend on EOSE timing —
+  // it is gated per-event by the `isFreshArrival` timestamp check in the
+  // live DM sub (#282), so a slow relay replaying backlog late cannot
+  // reintroduce a notification flood. Callers use this only as a coarse
+  // "initial replay has begun to settle" signal.
   onEose?: () => void;
   // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter resolves to `clamp(providedSince - 120s, now-7d, now)` — the 120 s safety buffer in case relay clock skew tagged a wrap slightly older than our cursor, the 7-day floor caps cold-start restream when the cursor is very stale, and the `now` cap defends against a future-dated cursor (corrupted persisted value or a wrap with a bad clock) that would otherwise silently miss new DMs until wall-clock catches up. If absent, falls back to the 7-day floor.
   sinceK4?: number;
