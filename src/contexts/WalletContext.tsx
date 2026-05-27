@@ -257,6 +257,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so a flapping/stale balance can't re-announce the same payment (#653).
   // Seeded silently from existing history on first sight (no launch re-announce).
   const seenReceiptsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Wallet ids whose initial transaction fetch has already been kicked off, so
+  // the initial-fetch effect runs once per wallet rather than on every render
+  // that touches `wallets` (#725).
+  const initiallyFetchedRef = useRef<Set<string>>(new Set());
 
   // Record a wallet's announced-receipt baseline in memory and (optionally) on
   // disk — the "set the ref + persistSeenReceipts" pattern shared by the launch-
@@ -338,14 +342,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
   // pulling the resolver's dependencies into its useCallback deps list.
   const resolveZapSendersRef = useRef<
-    ((walletId: string, opts?: { force?: boolean }) => Promise<void>) | null
-  >(null);
-
-  // Forward-ref to `fetchTransactionsForWallet` (defined far below): the wallet
-  // add callbacks are declared *before* it, so they call through this ref to
-  // load history on connect (#725) — without it a freshly-added wallet showed
-  // "No transactions" until a manual pull-to-refresh.
-  const fetchTransactionsRef = useRef<
     ((walletId: string, opts?: { force?: boolean }) => Promise<void>) | null
   >(null);
 
@@ -844,10 +840,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveWalletId(id);
       }
 
-      // Build the tx list on connect (NWC's handshake doesn't fetch it) and seed
-      // the receive baseline from that fetched history (#725, see add paths).
-      void fetchTransactionsRef.current?.(id, { force: true });
-
       // Return the new wallet's id so callers (e.g. CreateCoinosWalletSheet)
       // can stash sidecar data — recovery info, NFC tag metadata — against
       // the right id without racing the React state update. Without this
@@ -912,9 +904,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveWalletId(id);
       }
 
-      // Build the tx list on add + seed the receive baseline (#725).
-      void fetchTransactionsRef.current?.(id, { force: true });
-
       return { success: true };
     },
     // Same reasoning as addWallet — depend on the count, not the array.
@@ -972,9 +961,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       setWallets((prev) => [...prev, state]);
       if (!activeWalletId) setActiveWalletId(id);
-
-      // Build the tx list on add + seed the receive baseline (#725).
-      void fetchTransactionsRef.current?.(id, { force: true });
 
       return { success: true };
     },
@@ -1651,8 +1637,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   useEffect(() => {
     resolveZapSendersRef.current = resolveZapSendersForWallet;
-    fetchTransactionsRef.current = fetchTransactionsForWallet;
-  }, [resolveZapSendersForWallet, fetchTransactionsForWallet]);
+  }, [resolveZapSendersForWallet]);
 
   // When the user's Nostr pubkey becomes available (via NostrContext
   // auto-login), run zap attribution against every wallet's cached txs.
@@ -1917,6 +1902,23 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
     // fetchTransactionsForWallet is a stable useCallback; omitting it from deps
     // avoids re-running on unrelated renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets]);
+
+  // Build the transaction list once per wallet when it first appears in state —
+  // an effect (not a synchronous call in the add paths) so it runs AFTER the
+  // wallet is committed and walletsRef.current includes it; otherwise
+  // fetchTransactionsForWallet early-returns on the stale ref (#725). Only fetch
+  // wallets whose list wasn't hydrated from cache (freshly added → empty), so a
+  // launch with cached history doesn't trigger a redundant refresh storm.
+  useEffect(() => {
+    for (const w of wallets) {
+      if (initiallyFetchedRef.current.has(w.id)) continue;
+      initiallyFetchedRef.current.add(w.id);
+      if ((w.transactions?.length ?? 0) === 0) {
+        void fetchTransactionsForWallet(w.id, { force: true }).catch(() => {});
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets]);
 
