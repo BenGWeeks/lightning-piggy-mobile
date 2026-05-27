@@ -28,6 +28,8 @@ import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
+import PrizeWalletPicker from './PrizeWalletPicker';
+import AddWalletWizard from './AddWalletWizard';
 
 interface Props {
   visible: boolean;
@@ -79,10 +81,21 @@ const formatCountdown = (seconds: number): string => {
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice, lastIncomingPayment, expectPayment } = useWallet();
+  const { wallets, makeInvoiceForWallet, lastIncomingPayment, expectPayment } = useWallet();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
+  // Only Lightning (NWC) wallets can mint a bolt11 invoice for the prize.
+  const lightningWallets = useMemo(() => wallets.filter((w) => w.walletType === 'nwc'), [wallets]);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // Default to the first Lightning wallet (Home-screen order); keep a manual pick while it's valid.
+  useEffect(() => {
+    const stillValid =
+      selectedWalletId !== null && lightningWallets.some((w) => w.id === selectedWalletId);
+    if (stillValid) return;
+    setSelectedWalletId(lightningWallets[0]?.id ?? null);
+  }, [lightningWallets, selectedWalletId]);
   // Remaining-seconds counter that ticks down each second in the
   // sleeping state — null when the LNURLw's response doesn't carry a
   // time hint (budget exhausted, generic 'already used', etc.).
@@ -140,7 +153,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     // via balance-diff (paymentHash === null), we fall back to
     // walletId + the post-claim timestamp window — the best we can
     // do without an invoice hash.
-    if (lastIncomingPayment.walletId !== activeWalletId) return;
+    if (lastIncomingPayment.walletId !== selectedWalletId) return;
     if (
       expectedPaymentHashRef.current &&
       lastIncomingPayment.paymentHash &&
@@ -152,7 +165,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       if (mountedRef.current) onClose();
     }, 250);
     return () => clearTimeout(t);
-  }, [lastIncomingPayment, stage, onClose, activeWalletId]);
+  }, [lastIncomingPayment, stage, onClose, selectedWalletId]);
 
   const startRead = useCallback(async () => {
     setErrorMessage('');
@@ -184,7 +197,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           'No prize link on this tag. The hider may have written a tag without an LNURL.',
         );
       }
-      if (!activeWalletId) {
+      if (!selectedWalletId) {
         throw new Error(
           'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
         );
@@ -204,7 +217,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           return;
         }
         const claim = await claimLnurlWithdraw(params, async (sats, memo) =>
-          makeInvoice(sats, memo),
+          makeInvoiceForWallet(selectedWalletId, sats, memo),
         );
         if (!mountedRef.current) return;
         await recordClaim({
@@ -226,14 +239,14 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         // the sheet sits on "X sats inbound!" for up to half a
         // minute and the user manually taps Done before the auto-
         // dismiss + confetti can fire (#579 follow-up).
-        if (activeWalletId) {
+        if (selectedWalletId) {
           const paymentHash = paymentHashFromBolt11(claim.bolt11);
           if (paymentHash) {
             // Stash so the auto-dismiss effect can match against
             // `lastIncomingPayment.paymentHash` — defends against
             // unrelated incoming payments triggering close.
             expectedPaymentHashRef.current = paymentHash;
-            expectPayment(activeWalletId, paymentHash, claim.sats);
+            expectPayment(selectedWalletId, paymentHash, claim.sats);
           }
         }
       } catch (e) {
@@ -271,7 +284,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         );
       }
     }
-  }, [expectedCoord, activeWalletId, makeInvoice, expectPayment]);
+  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment]);
 
   useEffect(() => {
     if (visible) {
@@ -282,7 +295,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       claimedAtRef.current = null;
       expectedPaymentHashRef.current = null;
       sheetRef.current?.present();
-      startRead();
+      // Don't arm the reader with nowhere to send the prize; the empty state shows Add wallet instead.
+      if (hasLightningWalletRef.current) startRead();
     } else {
       sheetRef.current?.dismiss();
       cancelNfcOperation();
@@ -320,10 +334,13 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   // 'Maximum update depth exceeded' guard on the Pixel.
   const stageRef = useRef(stage);
   const startReadRef = useRef(startRead);
+  // Lets the present-on-visible effect decide whether to arm the reader without re-subscribing on wallet churn.
+  const hasLightningWalletRef = useRef(lightningWallets.length > 0);
   useEffect(() => {
     stageRef.current = stage;
     startReadRef.current = startRead;
-  }, [stage, startRead]);
+    hasLightningWalletRef.current = lightningWallets.length > 0;
+  }, [stage, startRead, lightningWallets.length]);
   useEffect(() => {
     if (!visible) return;
     let lastState: AppStateStatus = AppState.currentState;
@@ -337,6 +354,20 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     });
     return () => sub.remove();
   }, [visible]);
+
+  // Arm the reader once a Lightning wallet lands while sitting open in 'ready' (e.g. just finished Add wallet).
+  const hadLightningWalletRef = useRef(lightningWallets.length > 0);
+  useEffect(() => {
+    if (!visible) {
+      hadLightningWalletRef.current = lightningWallets.length > 0;
+      return;
+    }
+    const hasNow = lightningWallets.length > 0;
+    if (hasNow && !hadLightningWalletRef.current && stageRef.current === 'ready') {
+      startReadRef.current();
+    }
+    hadLightningWalletRef.current = hasNow;
+  }, [visible, lightningWallets.length]);
 
   // Tick the countdown each second while sleeping. Stops at 0 — the
   // Try Again button then re-runs the claim and either succeeds (if
@@ -368,151 +399,165 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   };
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={snapPoints}
-      onDismiss={handleClose}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handleIndicator}
-    >
-      <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Try the prize</Text>
+    <>
+      <BottomSheetModal
+        ref={sheetRef}
+        snapPoints={snapPoints}
+        onDismiss={handleClose}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}
+      >
+        <BottomSheetView style={styles.content}>
+          <Text style={styles.title}>Try the prize</Text>
 
-        {stage === 'ready' && (
-          <View style={styles.stateContainer}>
-            <View style={styles.iconContainer}>
-              <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
-            </View>
-            <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
-            <Text style={styles.description}>
-              We'll read the tag and try to claim the sats prize automatically.
-            </Text>
-            <ActivityIndicator
-              size="small"
-              color={colors.brandPink}
-              style={styles.waitingIndicator}
-            />
-            <Text style={styles.waitingText}>Waiting for NFC tag…</Text>
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={handleClose}
-              accessibilityLabel="Cancel NFC scan"
-              testID="nfc-read-cancel"
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {(stage === 'reading' || stage === 'claiming') && (
-          <View style={styles.stateContainer}>
-            <ActivityIndicator size="large" color={colors.brandPink} />
-            <Text style={styles.instruction}>
-              {stage === 'reading' ? 'Reading…' : 'Claiming sats…'}
-            </Text>
-          </View>
-        )}
-
-        {stage === 'claimed' && (
-          <View style={styles.stateContainer}>
-            <View style={[styles.iconContainer, styles.successIcon]}>
-              <PartyPopper size={64} color={colors.green} strokeWidth={2} />
-            </View>
-            <Text style={styles.instruction}>
-              {claimedSats?.toLocaleString() ?? ''} sats inbound!
-            </Text>
-            <Text style={styles.description}>
-              Sent to your active wallet — the receive toast fires the moment they land.
-            </Text>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleClose}
-              accessibilityLabel="Dismiss prize sheet"
-              testID="nfc-read-done"
-            >
-              <Text style={styles.primaryButtonText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {stage === 'sleeping' && (
-          <View style={styles.stateContainer}>
-            <View style={[styles.iconContainer, styles.sleepingIcon]}>
-              <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
-              <Text style={styles.zzzBadge}>Zzz</Text>
-            </View>
-            <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
-            {cooldownRemaining !== null && cooldownRemaining > 0 ? (
-              <>
-                <Text style={styles.countdown} testID="nfc-read-sleep-countdown">
-                  {formatCountdown(cooldownRemaining)}
-                </Text>
-                <Text style={styles.description}>
-                  Another finder beat you to the trough. The Piggy wakes back up when the timer hits
-                  zero.
-                </Text>
-              </>
-            ) : cooldownRemaining === 0 ? (
-              <Text style={styles.description}>Piggy is up — tap Try Again!</Text>
-            ) : (
+          {stage === 'ready' && (
+            <View style={styles.stateContainer}>
+              <View style={styles.iconContainer}>
+                <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
+              </View>
+              <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
               <Text style={styles.description}>
-                The trough's empty, or the cooldown is still running. Try again later.
+                We'll read the tag and try to claim the sats prize automatically.
               </Text>
-            )}
-            <View style={styles.errorButtons}>
-              <TouchableOpacity
-                style={styles.retryButton}
-                onPress={handleRetry}
-                accessibilityLabel="Try again"
-                testID="nfc-read-sleep-retry"
-              >
-                <Text style={styles.retryButtonText}>Try Again</Text>
-              </TouchableOpacity>
+              <PrizeWalletPicker
+                lightningWallets={lightningWallets}
+                selectedWalletId={selectedWalletId}
+                onSelect={setSelectedWalletId}
+                onAddWallet={() => setWizardOpen(true)}
+                colors={colors}
+              />
+              {lightningWallets.length > 0 && (
+                <>
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.brandPink}
+                    style={styles.waitingIndicator}
+                  />
+                  <Text style={styles.waitingText}>Waiting for NFC tag…</Text>
+                </>
+              )}
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={handleClose}
-                accessibilityLabel="Dismiss"
-                testID="nfc-read-sleep-cancel"
+                accessibilityLabel="Cancel NFC scan"
+                testID="nfc-read-cancel"
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        )}
+          )}
 
-        {stage === 'error' && (
-          <View style={styles.stateContainer}>
-            <View style={[styles.iconContainer, styles.errorIcon]}>
-              <Nfc size={64} color={colors.red} strokeWidth={2} />
-              <View style={styles.errorBadge}>
-                <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
+          {(stage === 'reading' || stage === 'claiming') && (
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="large" color={colors.brandPink} />
+              <Text style={styles.instruction}>
+                {stage === 'reading' ? 'Reading…' : 'Claiming sats…'}
+              </Text>
+            </View>
+          )}
+
+          {stage === 'claimed' && (
+            <View style={styles.stateContainer}>
+              <View style={[styles.iconContainer, styles.successIcon]}>
+                <PartyPopper size={64} color={colors.green} strokeWidth={2} />
+              </View>
+              <Text style={styles.instruction}>
+                {claimedSats?.toLocaleString() ?? ''} sats inbound!
+              </Text>
+              <Text style={styles.description}>
+                Sent to your active wallet — the receive toast fires the moment they land.
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleClose}
+                accessibilityLabel="Dismiss prize sheet"
+                testID="nfc-read-done"
+              >
+                <Text style={styles.primaryButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {stage === 'sleeping' && (
+            <View style={styles.stateContainer}>
+              <View style={[styles.iconContainer, styles.sleepingIcon]}>
+                <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
+                <Text style={styles.zzzBadge}>Zzz</Text>
+              </View>
+              <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
+              {cooldownRemaining !== null && cooldownRemaining > 0 ? (
+                <>
+                  <Text style={styles.countdown} testID="nfc-read-sleep-countdown">
+                    {formatCountdown(cooldownRemaining)}
+                  </Text>
+                  <Text style={styles.description}>
+                    Another finder beat you to the trough. The Piggy wakes back up when the timer
+                    hits zero.
+                  </Text>
+                </>
+              ) : cooldownRemaining === 0 ? (
+                <Text style={styles.description}>Piggy is up — tap Try Again!</Text>
+              ) : (
+                <Text style={styles.description}>
+                  The trough's empty, or the cooldown is still running. Try again later.
+                </Text>
+              )}
+              <View style={styles.errorButtons}>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={handleRetry}
+                  accessibilityLabel="Try again"
+                  testID="nfc-read-sleep-retry"
+                >
+                  <Text style={styles.retryButtonText}>Try Again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleClose}
+                  accessibilityLabel="Dismiss"
+                  testID="nfc-read-sleep-cancel"
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
               </View>
             </View>
-            <Text style={styles.instruction}>Couldn't claim</Text>
-            <Text style={styles.description}>{errorMessage}</Text>
-            <View style={styles.errorButtons}>
-              <TouchableOpacity
-                style={styles.retryButton}
-                onPress={handleRetry}
-                accessibilityLabel="Retry"
-                testID="nfc-read-retry"
-              >
-                <Text style={styles.retryButtonText}>Try Again</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleClose}
-                accessibilityLabel="Cancel"
-                testID="nfc-read-error-cancel"
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+          )}
+
+          {stage === 'error' && (
+            <View style={styles.stateContainer}>
+              <View style={[styles.iconContainer, styles.errorIcon]}>
+                <Nfc size={64} color={colors.red} strokeWidth={2} />
+                <View style={styles.errorBadge}>
+                  <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
+                </View>
+              </View>
+              <Text style={styles.instruction}>Couldn't claim</Text>
+              <Text style={styles.description}>{errorMessage}</Text>
+              <View style={styles.errorButtons}>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={handleRetry}
+                  accessibilityLabel="Retry"
+                  testID="nfc-read-retry"
+                >
+                  <Text style={styles.retryButtonText}>Try Again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleClose}
+                  accessibilityLabel="Cancel"
+                  testID="nfc-read-error-cancel"
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        )}
-      </BottomSheetView>
-    </BottomSheetModal>
+          )}
+        </BottomSheetView>
+      </BottomSheetModal>
+      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+    </>
   );
 };
 
