@@ -237,19 +237,29 @@ const MessagesScreen: React.FC = () => {
         refreshDelayRef.current = setTimeout(() => {
           refreshDelayRef.current = null;
           const startedAt = Date.now();
+          // Capture the signal: refreshDmInbox RESOLVES (never rejects) on
+          // abort — it early-returns internally on `signal.aborted` — so
+          // `.then` runs in BOTH the completed and aborted cases and `.catch`
+          // is effectively dead for aborts. We therefore branch on the signal
+          // (not the catch) to choose the TTL marker.
+          const signal = newRefreshSignal();
           refreshDmInbox({
             includeNonFollows: !enforceFollowingOnlyRef.current,
-            signal: newRefreshSignal(),
+            signal,
           })
             .then(() => {
-              // Full 30 s TTL on successful resolve.
-              dmInboxLastRefreshAt.current = startedAt;
+              // Aborted mid-refresh (e.g. a fast tab-hop): write a shorter
+              // 10 s marker (#731 Fix 1 — "chaining trap") so the next focus
+              // doesn't immediately re-chain a full refresh, while still
+              // refreshing sooner than a clean 30 s TTL would. A clean
+              // completion gets the full 30 s TTL.
+              dmInboxLastRefreshAt.current = signal.aborted
+                ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
+                : startedAt;
             })
             .catch(() => {
-              // Abort or relay error (#731 Fix 1 — "chaining trap"):
-              // write a shorter 10 s marker so a fast tab-hop that aborts
-              // mid-refresh doesn't leave the TTL unset and immediately
-              // re-chain a full refresh on the very next focus.
+              // refreshDmInbox rarely rejects, but if it does, treat it like an
+              // abort: short marker so we retry soon rather than waiting 30 s.
               dmInboxLastRefreshAt.current =
                 Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS);
             });
