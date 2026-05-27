@@ -2,12 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
-import { writeAsStringAsync, cacheDirectory } from 'expo-file-system/legacy';
+import { writeAsStringAsync, getInfoAsync, cacheDirectory } from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { formatTime } from '../utils/messageContent';
 import { decryptFile } from '../services/encryptedFile';
+
+// url → decrypted-clip file:// uri. Module-scoped so a voice note decrypted
+// once is reused across re-renders, remounts and the session — no re-fetch /
+// re-decrypt on every play after a scroll-away (#730). Mirrors DecryptedImage.
+const decryptedVoiceCache = new Map<string, string>();
 
 const BARS = 40;
 
@@ -92,7 +97,9 @@ const VoiceNotePlayer: React.FC<Props> = ({
 
   // Decrypted clip is written to a cache file on first play; for plain notes
   // we stream the URL directly.
-  const [localUri, setLocalUri] = useState<string | null>(null);
+  const [localUri, setLocalUri] = useState<string | null>(
+    encrypted ? (decryptedVoiceCache.get(url) ?? null) : null,
+  );
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const wantPlayRef = useRef(false);
@@ -111,25 +118,37 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const ensureLocal = useCallback(async (): Promise<string | null> => {
     if (!encrypted) return url;
     if (localUri) return localUri;
+    // Decrypted earlier this session → reuse the cache file, no work (#730).
+    const memo = decryptedVoiceCache.get(url);
+    if (memo) {
+      setLocalUri(memo);
+      return memo;
+    }
     if (!keyHex || !nonceHex) {
       setFailed(true);
       return null;
     }
     setBusy(true);
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-      const cipher = new Uint8Array(await res.arrayBuffer());
-      const plain = decryptFile(cipher, keyHex, nonceHex);
       // `||` not `??`: a trailing-slash URL makes `.pop()` return '' (not
       // null), which would yield `lp-voice-.m4a` and collide across notes.
       const safe = (url.split('/').pop() || 'note').replace(/[^a-zA-Z0-9._-]/g, '');
       if (!cacheDirectory) throw new Error('No cache directory available for decrypted audio');
       const base = cacheDirectory.endsWith('/') ? cacheDirectory : `${cacheDirectory}/`;
       const uri = `${base}lp-voice-${safe}.${extFromMime(mime)}`;
-      await writeAsStringAsync(uri, Buffer.from(plain).toString('base64'), {
-        encoding: 'base64',
-      });
+      // Reuse a clip decrypted on a previous mount if it's still on disk —
+      // decrypt once, even across remounts (#730).
+      const info = await getInfoAsync(uri);
+      if (!info.exists) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+        const cipher = new Uint8Array(await res.arrayBuffer());
+        const plain = decryptFile(cipher, keyHex, nonceHex);
+        await writeAsStringAsync(uri, Buffer.from(plain).toString('base64'), {
+          encoding: 'base64',
+        });
+      }
+      decryptedVoiceCache.set(url, uri);
       setLocalUri(uri);
       return uri;
     } catch (e) {
