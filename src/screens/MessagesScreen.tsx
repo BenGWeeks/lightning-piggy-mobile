@@ -148,15 +148,6 @@ const MessagesScreen: React.FC = () => {
     ).catch(() => {});
   }, [showZapCounterparties]);
 
-  // Defer the refresh until the Messages tab's transition animation
-  // and first-paint have finished. The refresh itself (relay fetches
-  // + decrypt loop) holds the JS thread for 3-5 s; running it inside
-  // the focus-effect callback synchronously meant navigating away
-  // from Messages felt laggy because the NEXT tab's render queued
-  // behind it. InteractionManager yields to the scheduler and runs
-  // the work once the UI is idle. `.cancel()` in cleanup avoids
-  // firing the refresh on a focus that was already abandoned.
-  //
   // Also pre-warms the friend-picker avatar bitmaps. Histograms from
   // perf-suite showed the FAB → FriendPicker open path spends most
   // of its modern-jank budget on cold avatar decode. Prefetching the
@@ -181,8 +172,20 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  // Short TTL written on abort (#731 Fix 1 — "chaining trap").
+  // The full 30 s TTL is only written when the refresh RESOLVES. If the
+  // user blurs before it finishes the TTL was previously left unset,
+  // so the very next focus would immediately start another full refresh
+  // (tab-hop faster than the refresh → full refresh every time,
+  // indefinitely). Writing a shorter marker on abort tells the next
+  // focus "a refresh already started and was interrupted; wait a bit
+  // before trying again" — 10 s is long enough to suppress spurious
+  // re-chains without delaying a genuine user intent to view new DMs.
+  const DM_INBOX_ABORT_TTL_MS = 10_000;
   // Aborts the in-flight refreshDmInbox when the user leaves Messages, so the NIP-17 unwrap loop releases the JS thread quickly instead of grinding through hundreds of cached wraps after blur. See #412 for the perceived "tabs feel locked during refresh" symptom.
   const refreshAbortRef = useRef<AbortController | null>(null);
+  // Tracks the post-interaction delay timer so it can be cancelled on blur before it fires (#731 Fix 1).
+  const refreshDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newRefreshSignal = useCallback((): AbortSignal => {
     refreshAbortRef.current?.abort();
     const ctrl = new AbortController();
@@ -215,24 +218,62 @@ const MessagesScreen: React.FC = () => {
       // Messages-tab focus pays the wrap-drain cost here, where a
       // brief loading state is the expected UX.
       armLiveDmSub();
-      const handle = InteractionManager.runAfterInteractions(() => {
+      // Two-stage defer (#731 Fix 1 — keep decrypt off the tab-animation hot path):
+      //
+      // 1. InteractionManager.runAfterInteractions waits for the tab-bar
+      //    slide animation to complete its "interaction" frame budget.
+      // 2. Inside that callback a 120 ms safety margin lets the first JS
+      //    paint of MessagesScreen (FlashList measure + item layout +
+      //    avatar decode) finish before the decrypt loop begins. Without
+      //    this delay those two phases competed for the JS thread on every
+      //    cold Messages focus — visible as list-renders jank right after
+      //    the tab-bar animation completes.
+      //
+      // Both the interactionHandle and refreshDelayRef are cancelled in
+      // cleanup so a blur before the delay fires is a complete no-op —
+      // no decrypt work starts at all (optimal outcome for a fast tab-hop).
+      const interactionHandle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
-        // Bump the TTL marker only after the refresh resolves successfully — if it's aborted (tab blur) or throws, leave the marker untouched so the next focus retries instead of suppressing for 30 s. (#413 review)
-        const startedAt = Date.now();
-        refreshDmInbox({
-          includeNonFollows: !enforceFollowingOnlyRef.current,
-          signal: newRefreshSignal(),
-        })
-          .then(() => {
-            dmInboxLastRefreshAt.current = startedAt;
+        refreshDelayRef.current = setTimeout(() => {
+          refreshDelayRef.current = null;
+          const startedAt = Date.now();
+          // Capture the signal: refreshDmInbox RESOLVES (never rejects) on
+          // abort — it early-returns internally on `signal.aborted` — so
+          // `.then` runs in BOTH the completed and aborted cases and `.catch`
+          // is effectively dead for aborts. We therefore branch on the signal
+          // (not the catch) to choose the TTL marker.
+          const signal = newRefreshSignal();
+          refreshDmInbox({
+            includeNonFollows: !enforceFollowingOnlyRef.current,
+            signal,
           })
-          .catch(() => {
-            // Abort or relay error — TTL untouched, next focus retries.
-          });
+            .then(() => {
+              // Aborted mid-refresh (e.g. a fast tab-hop): write a shorter
+              // 10 s marker (#731 Fix 1 — "chaining trap") so the next focus
+              // doesn't immediately re-chain a full refresh, while still
+              // refreshing sooner than a clean 30 s TTL would. A clean
+              // completion gets the full 30 s TTL.
+              dmInboxLastRefreshAt.current = signal.aborted
+                ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
+                : startedAt;
+            })
+            .catch(() => {
+              // refreshDmInbox rarely rejects, but if it does, treat it like an
+              // abort: short marker so we retry soon rather than waiting 30 s.
+              dmInboxLastRefreshAt.current =
+                Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS);
+            });
+        }, 120);
       });
       return () => {
-        handle.cancel();
-        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the 30 s TTL gate.
+        interactionHandle.cancel();
+        // Cancel any pending delay that was scheduled inside the interaction
+        // callback but hadn't fired yet (e.g. blur during the 120 ms window).
+        if (refreshDelayRef.current !== null) {
+          clearTimeout(refreshDelayRef.current);
+          refreshDelayRef.current = null;
+        }
+        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the TTL gate (30 s resolved, 10 s aborted).
         refreshAbortRef.current?.abort();
         refreshAbortRef.current = null;
       };
