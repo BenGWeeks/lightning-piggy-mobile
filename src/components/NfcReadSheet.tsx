@@ -24,6 +24,7 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
+import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
@@ -245,7 +246,12 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           setCooldownRemaining(parseCooldownSeconds(reason));
         } else {
           setStage('error');
-          setErrorMessage(reason);
+          // LNURL-withdraw issuer errors (cache empty, cooldown, already
+          // claimed) are meaningful — show as-is. Wallet-side NWC/relay
+          // failures surface a cryptic SDK string, so map those to friendly
+          // copy (#734).
+          const friendly = e instanceof LnurlWithdrawError ? null : friendlyClaimError(reason);
+          setErrorMessage(friendly ?? reason);
         }
       }
     } catch (err) {
