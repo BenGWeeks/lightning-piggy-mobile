@@ -77,29 +77,10 @@ export function extractAudioUrl(text: string): string | null {
   return match ? match[0] : null;
 }
 
-// --- Encrypted voice-note encoding (#235, NIP-17 kind 15) ---
-//
-// kind-15 file messages carry the blob URL + AES-256-GCM decryption params
-// in event tags. Internally we fold those into the message `text` as a URL
-// fragment (`#lpe=1&alg=…&k=…&n=…&m=…`) so the existing string-based message
-// store + DM cache carry everything the player needs without a schema
-// change. The fragment is NEVER sent to the Blossom server (HTTP strips
-// `#…` from requests), and the whole string only ever lives inside the
-// E2E-encrypted DM realm. The wire format stays standard NIP-17 kind 15.
-const LPE_MARKER = 'lpe=1';
-
-export function encodeEncryptedFileUrl(input: {
-  url: string;
-  mime: string;
-  keyHex: string;
-  nonceHex: string;
-  algorithm?: string;
-}): string {
-  const frag =
-    `${LPE_MARKER}&alg=${encodeURIComponent(input.algorithm ?? 'aes-gcm')}` +
-    `&k=${input.keyHex}&n=${input.nonceHex}&m=${encodeURIComponent(input.mime)}`;
-  return `${input.url}#${frag}`;
-}
+// Encrypted voice-note URL encoder (#235). Lives in ./encryptedFileUrl (a
+// dependency-free module) so nip17Unwrap can use it without pulling in this
+// file's heavier graph; re-exported here for existing importers.
+export { encodeEncryptedFileUrl } from './encryptedFileUrl';
 
 export interface ParsedVoiceNote {
   /** Fetch URL with the fragment stripped. */

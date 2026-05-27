@@ -1,6 +1,7 @@
 import * as nip59 from 'nostr-tools/nip59';
 import { verifyEvent, type NostrEvent } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
+import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -302,6 +303,19 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
     sha256: tag('x'),
     size,
   };
+}
+
+/**
+ * Inbox/display text for a decoded rumor (#235). A kind-15 encrypted file
+ * message (voice note) is stored as its `#lpe=…` encoded URL so
+ * MessageBubble → VoiceNotePlayer can render + decrypt it; every other
+ * rumor keeps its plaintext content. Shared by all the DM receive paths
+ * (live sub, fetch-conversation, inbox refresh) so they classify kind-15
+ * identically.
+ */
+export function textForRumor(rumor: DecodedRumor): string {
+  const meta = fileMetaFromRumor(rumor);
+  return meta ? encodeEncryptedFileUrl(meta) : rumor.content;
 }
 
 export function classifyRumor(

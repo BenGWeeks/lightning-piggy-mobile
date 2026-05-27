@@ -353,12 +353,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
-      // LP-ness from the local record so the prize/cooldown/uses
-      // affordances stay enabled even for a local LP *stub* — a record
-      // left by a prior cross-device save has `isLpPiggy: true` but a
-      // blank `lnurlw`, so the lnurl-presence check alone would wrongly
-      // hide them (#681 review).
-      setIsLpPiggyEdit(piggy.isLpPiggy ?? Boolean(piggy.lnurlw));
+      // LP-ness for the prize/cooldown/uses affordances. Take it from the
+      // local record OR the published event (fallbackCache) — whichever
+      // says LP, since the published event is the source of truth. A stale
+      // local *stub* (blank `lnurlw`, and `isLpPiggy` unset on an old
+      // record or saved `false` by a prior reward-dropping edit) would
+      // otherwise read as non-LP and wrongly lock the fields even though
+      // the listing carries the LP label on relays (Hawthorn case, #692;
+      // follows the #681 edit-Piglet work).
+      setIsLpPiggyEdit(
+        (piggy.isLpPiggy ?? Boolean(piggy.lnurlw)) || (fallbackCache?.isLpPiggy ?? false),
+      );
       // Re-hydrate the post-write PIN row so the hider returning via Edit
       // can recover the PIN they wrote earlier. The NFC lock is local-only
       // (never on the event), so it always comes from the local record —
@@ -1611,6 +1616,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                       merchants={[]}
                       caches={[]}
                       events={[]}
+                      pinMarker={{ lat: pin.lat, lon: pin.lon, isLpPiggy: listingIsLpInEdit }}
                       onTapMap={() => setLocationPickerVisible(true)}
                     />
                   </View>
