@@ -29,6 +29,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
 import PrizeWalletPicker from './PrizeWalletPicker';
+import ScanRingSpinner from './ScanRingSpinner';
 import AddWalletWizard from './AddWalletWizard';
 
 interface Props {
@@ -304,6 +305,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setErrorMessage('');
       setClaimedSats(null);
       setCooldownRemaining(null);
+      setWizardOpen(false);
       claimedAtRef.current = null;
       expectedPaymentHashRef.current = null;
     }
@@ -403,6 +405,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       <BottomSheetModal
         ref={sheetRef}
         snapPoints={snapPoints}
+        enablePanDownToClose
         onDismiss={handleClose}
         backdropComponent={renderBackdrop}
         backgroundStyle={styles.sheetBackground}
@@ -415,6 +418,12 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
             <View style={styles.stateContainer}>
               <View style={styles.iconContainer}>
                 <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
+                {lightningWallets.length > 0 && (
+                  // Armed and waiting for a tag — a thin ring at the faded-circle diameter spins around the NFC icon to read as "scanning".
+                  <View style={styles.scanRing} pointerEvents="none">
+                    <ScanRingSpinner size={100} color={colors.brandPink} strokeWidth={3} />
+                  </View>
+                )}
               </View>
               <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
               <Text style={styles.description}>
@@ -427,24 +436,6 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 onAddWallet={() => setWizardOpen(true)}
                 colors={colors}
               />
-              {lightningWallets.length > 0 && (
-                <>
-                  <ActivityIndicator
-                    size="small"
-                    color={colors.brandPink}
-                    style={styles.waitingIndicator}
-                  />
-                  <Text style={styles.waitingText}>Waiting for NFC tag…</Text>
-                </>
-              )}
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleClose}
-                accessibilityLabel="Cancel NFC scan"
-                testID="nfc-read-cancel"
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
             </View>
           )}
 
@@ -466,7 +457,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 {claimedSats?.toLocaleString() ?? ''} sats inbound!
               </Text>
               <Text style={styles.description}>
-                Sent to your active wallet — the receive toast fires the moment they land.
+                Sent to your chosen wallet — the receive toast fires the moment they land.
               </Text>
               <TouchableOpacity
                 style={styles.primaryButton}
@@ -600,6 +591,11 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       marginBottom: 20,
     },
+    scanRing: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     successIcon: { backgroundColor: colors.greenLight },
     sleepingIcon: { backgroundColor: colors.brandPinkLight },
     // 'Zzz' label floats outside the top-right of the icon container,
@@ -648,12 +644,6 @@ const createStyles = (colors: Palette) =>
       color: colors.brandPink,
       fontVariant: ['tabular-nums'],
       marginBottom: 12,
-    },
-    waitingIndicator: { marginBottom: 8 },
-    waitingText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginBottom: 24,
     },
     primaryButton: {
       paddingHorizontal: 48,

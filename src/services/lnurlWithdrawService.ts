@@ -12,7 +12,8 @@ import { bech32 } from 'bech32';
  * specific APIs` for the rationale.
  */
 
-const FETCH_TIMEOUT_MS = 8_000;
+// 20s — prize claims round-trip a relay + the issuer's wallet; 8s was too tight on slow links (#734).
+const FETCH_TIMEOUT_MS = 20_000;
 
 export interface LnurlWithdrawParams {
   /** Endpoint the finder POSTs the bolt11 invoice to. */
