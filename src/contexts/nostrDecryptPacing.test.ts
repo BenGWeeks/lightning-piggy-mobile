@@ -23,6 +23,13 @@ import {
 let rafCallbacks: Array<(ts: number) => void> = [];
 let rafHandle = 0;
 
+// Capture the real RAF globals (if any) up front so `afterEach` can restore
+// them. Jest shares one global per worker across test files, so leaving our
+// mock installed would leak into unrelated suites and cause order-dependent
+// failures.
+const originalRequestAnimationFrame = global.requestAnimationFrame;
+const originalCancelAnimationFrame = global.cancelAnimationFrame;
+
 function installRafMock() {
   rafCallbacks = [];
   rafHandle = 0;
@@ -52,6 +59,9 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers();
+  // Restore the real RAF globals so the mock doesn't leak into other suites.
+  global.requestAnimationFrame = originalRequestAnimationFrame;
+  global.cancelAnimationFrame = originalCancelAnimationFrame;
 });
 
 // ─── yieldToEventLoop ─────────────────────────────────────────────────────────
