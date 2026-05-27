@@ -12,7 +12,18 @@ import { decryptFile } from '../services/encryptedFile';
 // url → decrypted-clip file:// uri. Module-scoped so a voice note decrypted
 // once is reused across re-renders, remounts and the session — no re-fetch /
 // re-decrypt on every play after a scroll-away (#730). Mirrors DecryptedImage.
+// Capped (insertion-order eviction) so a long session with many notes can't
+// grow it unbounded, matching the bounded module caches elsewhere (#732 review).
+const VOICE_CACHE_CAP = 64;
 const decryptedVoiceCache = new Map<string, string>();
+function rememberVoiceUri(url: string, uri: string): void {
+  decryptedVoiceCache.set(url, uri);
+  while (decryptedVoiceCache.size > VOICE_CACHE_CAP) {
+    const oldest = decryptedVoiceCache.keys().next().value;
+    if (oldest === undefined) break;
+    decryptedVoiceCache.delete(oldest);
+  }
+}
 
 const BARS = 40;
 
@@ -96,10 +107,11 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const bars = useMemo(() => pseudoWave(url, BARS), [url]);
 
   // Decrypted clip is written to a cache file on first play; for plain notes
-  // we stream the URL directly.
-  const [localUri, setLocalUri] = useState<string | null>(
-    encrypted ? (decryptedVoiceCache.get(url) ?? null) : null,
-  );
+  // we stream the URL directly. NOT seeded from the cache Map directly: the OS
+  // can evict cacheDirectory, so a Map hit isn't proof the file still exists —
+  // ensureLocal verifies existence (and re-decrypts on a miss) before it sets
+  // localUri (#732 review).
+  const [localUri, setLocalUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const wantPlayRef = useRef(false);
@@ -118,11 +130,16 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const ensureLocal = useCallback(async (): Promise<string | null> => {
     if (!encrypted) return url;
     if (localUri) return localUri;
-    // Decrypted earlier this session → reuse the cache file, no work (#730).
+    // Decrypted earlier this session → reuse it, but verify the file still
+    // exists first: the OS can evict cacheDirectory, and a stale entry would
+    // otherwise pin localUri to a dead path with no retry (#732 review).
     const memo = decryptedVoiceCache.get(url);
     if (memo) {
-      setLocalUri(memo);
-      return memo;
+      if ((await getInfoAsync(memo)).exists) {
+        setLocalUri(memo);
+        return memo;
+      }
+      decryptedVoiceCache.delete(url); // evicted from disk → fall through to re-decrypt
     }
     if (!keyHex || !nonceHex) {
       setFailed(true);
@@ -148,7 +165,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
           encoding: 'base64',
         });
       }
-      decryptedVoiceCache.set(url, uri);
+      rememberVoiceUri(url, uri);
       setLocalUri(uri);
       return uri;
     } catch (e) {
