@@ -11,7 +11,11 @@
  * Jest coverage-collection scope defined in jest.config.js.
  */
 
-import { createYieldScheduler, yieldToEventLoop, DECRYPT_FRAME_BUDGET_MS } from './nostrDecryptPacing';
+import {
+  createYieldScheduler,
+  yieldToEventLoop,
+  DECRYPT_FRAME_BUDGET_MS,
+} from './nostrDecryptPacing';
 
 // RAF is not available in the Jest / jsdom environment. Provide a
 // minimal implementation that records pending callbacks and lets tests
