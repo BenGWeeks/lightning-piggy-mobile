@@ -48,6 +48,7 @@ import {
   inboxLastSeenKey,
 } from './nostrDmCache';
 import { useDmInbox } from './useDmInbox';
+import { useGroupMessaging } from './useGroupMessaging';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
@@ -391,6 +392,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAmberNip44Permission,
     knownWrapIdsRef,
   } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays });
+
+  // Group-messaging cluster (#707). The NIP-17 group send + kind-30200
+  // group-state publish callbacks live in `useGroupMessaging`. The provider
+  // threads in the identity + relay dependencies these close over and
+  // re-exposes the returned callbacks through the context value below.
+  const { sendGroupMessage, publishGroupState } = useGroupMessaging({
+    pubkey,
+    isLoggedIn,
+    signerType,
+    relays,
+  });
 
   const loadProfile = useCallback(
     async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
@@ -1663,68 +1675,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
    * inbox on other devices — the same multi-device behaviour group
    * messages have today.
    */
-  // 1:1 text, 1:1 encrypted file (voice note, #235), and group sends live
-  // in useMessageSend (#703 — keeps this file under the size cap). They
-  // close over only these four values.
-  const { sendDirectMessage, sendFileMessage, sendGroupMessage } = useMessageSend({
+  // 1:1 sends — text + encrypted file (voice note, #235) — live in
+  // useMessageSend (#703). Group send + group-state live in useGroupMessaging
+  // (wired above). We take ONLY the 1:1 sends here so sendGroupMessage /
+  // publishGroupState aren't declared twice.
+  const { sendDirectMessage, sendFileMessage } = useMessageSend({
     pubkey,
     isLoggedIn,
     signerType,
     relays,
   });
-
-  /**
-   * Publish a kind-30200 group-state event. Single signEvent call —
-   * trivially safe for Amber (no per-recipient fan-out, no concurrency).
-   */
-  const publishGroupState = useCallback(
-    async (input: {
-      groupId: string;
-      name: string;
-      memberPubkeys: string[];
-    }): Promise<{ success: boolean; error?: string }> => {
-      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
-      try {
-        const event = nostrService.createGroupStateEvent({
-          groupId: input.groupId,
-          name: input.name,
-          memberPubkeys: input.memberPubkeys,
-        });
-
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-          return { success: true };
-        }
-
-        if (signerType === 'amber') {
-          // Mirror the kind-4 DM Amber path — pass the unsigned event
-          // without `pubkey`; Amber sets it from `current_user`.
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) {
-            return { success: false, error: 'Amber returned empty event' };
-          }
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
-          return { success: true };
-        }
-
-        return { success: false, error: 'Unsupported signer type' };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to publish group state';
-        return { success: false, error: message };
-      }
-    },
-    [pubkey, isLoggedIn, signerType, relays],
-  );
 
   const signEvent = useCallback(
     async (event: {

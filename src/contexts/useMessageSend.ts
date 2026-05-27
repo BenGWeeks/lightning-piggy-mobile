@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import { NSEC_KEY } from './nostrAuthKeys';
-import { createFileMessageRumor, createGroupFileRumor } from '../services/nostrFileMessage';
+import { createFileMessageRumor } from '../services/nostrFileMessage';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { SignerType, RelayConfig } from '../types/nostr';
 
@@ -213,121 +213,5 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
     [pubkey, isLoggedIn, signerType, relays],
   );
 
-  /**
-   * NIP-17 multi-recipient group send. Builds one kind-14 (text) or kind-15
-   * (encrypted file) rumor with `subject` + `p` tags for every member, then
-   * NIP-59 seal+wraps it once per recipient (including the sender for
-   * cross-device visibility). For a file send, every member's wrap carries
-   * the same decryption key so all recipients can decrypt the one Blossom
-   * blob. Both nsec and Amber signers; Amber is sequential (the native
-   * module rejects concurrent intents with BUSY — see #247).
-   */
-  const sendGroupMessage = useCallback(
-    async (input: {
-      groupId: string;
-      subject: string;
-      memberPubkeys: string[];
-      text?: string;
-      // When set, sends an encrypted NIP-17 kind-15 file message (e.g. a
-      // voice note) to the whole group instead of a kind-14 text message.
-      file?: EncryptedUpload;
-    }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
-      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      const text = (input.text ?? '').trim();
-      if (!input.file && !text) return { success: false, error: 'Empty message' };
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
-      try {
-        const rumor = input.file
-          ? createGroupFileRumor({
-              senderPubkey: pubkey,
-              subject: input.subject,
-              memberPubkeys: input.memberPubkeys,
-              url: input.file.url,
-              mime: input.file.mime,
-              keyHex: input.file.keyHex,
-              nonceHex: input.file.nonceHex,
-              sha256Hex: input.file.sha256Hex,
-              size: input.file.size,
-            })
-          : nostrService.createGroupChatRumor({
-              senderPubkey: pubkey,
-              subject: input.subject,
-              memberPubkeys: input.memberPubkeys,
-              content: text,
-            });
-
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          const result = await nostrService.sendNip17ToManyWithNsec({
-            senderSecretKey: secretKey,
-            rumor,
-            recipientPubkeys: input.memberPubkeys,
-            relays: targetRelays,
-          });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          // Partial send — some recipients got the message, others didn't.
-          // Surface as non-fatal so the composer keeps the draft and the
-          // user sees how many members actually received it.
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              wrapsPublished: result.wrapsPublished,
-              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
-            };
-          }
-          return { success: true, wrapsPublished: result.wrapsPublished };
-        }
-
-        if (signerType === 'amber') {
-          const currentUser = pubkey;
-          const result = await nostrService.sendNip17ToManyWithSigner({
-            senderPubkey: currentUser,
-            rumor,
-            recipientPubkeys: input.memberPubkeys,
-            relays: targetRelays,
-            signerNip44Encrypt: (plaintext, recipientPubkey) =>
-              amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
-            signerSignSeal: async (unsignedSeal) => {
-              // Keep pubkey on the seal — Amber misroutes kind=13 sign_event Intents without it (#356).
-              const { event: signedEventJson } = await amberService.requestEventSignature(
-                JSON.stringify(unsignedSeal),
-                '',
-                currentUser,
-              );
-              if (!signedEventJson) {
-                throw new Error('Amber returned empty signed seal');
-              }
-              return JSON.parse(signedEventJson);
-            },
-          });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              wrapsPublished: result.wrapsPublished,
-              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
-            };
-          }
-          return { success: true, wrapsPublished: result.wrapsPublished };
-        }
-
-        return { success: false, error: 'Unsupported signer type' };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to send group message';
-        return { success: false, error: message };
-      }
-    },
-    [pubkey, isLoggedIn, signerType, relays],
-  );
-
-  return { sendDirectMessage, sendFileMessage, sendGroupMessage };
+  return { sendDirectMessage, sendFileMessage };
 }
