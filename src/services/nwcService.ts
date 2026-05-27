@@ -1,5 +1,24 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
 import type { Nip47GetInfoResponse } from '@getalby/sdk';
+import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
+import {
+  createReplyTimeoutError,
+  isConnectionError,
+  isReplyTimeoutError,
+  throwIfAborted,
+  abortableSleep,
+  abortable,
+} from './nwcErrors';
+
+// Preserve the prior public API — these were defined + exported here before
+// moving to ./nwcErrors; consumers (e.g. SendSheet) still import them from here.
+export {
+  createAbortError,
+  createReplyTimeoutError,
+  isConnectionError,
+  isReplyTimeoutError,
+  REPLY_TIMEOUT_ERROR_NAME,
+} from './nwcErrors';
 
 const providers = new Map<string, NostrWebLNProvider>();
 const nwcUrls = new Map<string, string>();
@@ -100,99 +119,6 @@ function hasRecentPublishFailure(walletId: string): boolean {
   return true;
 }
 
-/** Standard DOMException-shape abort error: `name === 'AbortError'`.
- * Callers can detect via `error.name === 'AbortError'` or by checking
- * `signal.aborted` after await. */
-export function createAbortError(message = 'Payment cancelled'): Error {
-  const err = new Error(message);
-  err.name = 'AbortError';
-  return err;
-}
-
-export const REPLY_TIMEOUT_ERROR_NAME = 'ReplyTimeoutError';
-
-export function createReplyTimeoutError(
-  message = 'Wallet did not reply in time; payment may still be in flight',
-): Error {
-  const err = new Error(message);
-  err.name = REPLY_TIMEOUT_ERROR_NAME;
-  return err;
-}
-
-export function isReplyTimeoutError(error: unknown): boolean {
-  return (error as Error)?.name === REPLY_TIMEOUT_ERROR_NAME;
-}
-
-// True when the failure is a relay/transport connectivity problem rather
-// than a confirmed payment outcome — e.g. the relay was unreachable
-// ("Failed to connect to wss://…", NWC code OTHER) or a publish never
-// completed. Like a reply-timeout, the payment status is UNKNOWN: it may
-// well have settled. Callers must NOT present these as "Payment failed"
-// (#648) — a user who trusts that may re-send and double-pay.
-export function isConnectionError(error: unknown): boolean {
-  const msg = (
-    (error as { message?: string } | undefined)?.message ?? String(error ?? '')
-  ).toLowerCase();
-  return (
-    msg.includes('failed to connect') ||
-    msg.includes('publish timed out') ||
-    msg.includes('publish failed') ||
-    msg.includes('could not connect') ||
-    msg.includes('network request failed') ||
-    msg.includes('websocket') ||
-    msg.includes('connection closed') ||
-    msg.includes('connection lost')
-  );
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw createAbortError();
-}
-
-/** Sleep that rejects with AbortError if the signal fires, instead of
- * resolving on schedule. Without this the 5-minute poll loop below
- * ignores cancellation between polls. */
-function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(createAbortError());
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(createAbortError());
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-/** Race a non-cancellable promise against an AbortSignal so the caller
- * can stop waiting even while the underlying SDK call keeps running.
- * The background promise is allowed to complete; its result is just
- * discarded if abort wins the race. */
-function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(createAbortError());
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(createAbortError());
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (err) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(err);
-      },
-    );
-  });
-}
-
 async function withRetry<T>(
   fn: () => Promise<T>,
   { attempts = 3, delayMs = 1000, label = 'operation' } = {},
@@ -260,6 +186,7 @@ export async function connect(
     patchRelayPublish(provider, walletId);
 
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
+    await pinNip04IfNoInfoEvent(provider, walletId);
 
     // Store provider immediately after enable() — the relay connection is
     // established even if getBalance fails (e.g. slow relay response).
@@ -330,6 +257,8 @@ export function disconnect(walletId: string): void {
   // wallet lifecycle (a removed wallet shouldn't keep its terminal-miss
   // entries pinned for the JS-runtime lifetime).
   clearFailedLookupCache(walletId);
+  // Forget the cached encryption decision so a re-add re-probes fresh (#737).
+  clearEncryptionDecision(walletId);
 }
 
 /**
@@ -485,6 +414,10 @@ function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void
             origPublish(event).catch((err: unknown) => {
               console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
               markPublishFailure(walletId);
+              // A relay rejection (temp-ban / rate-limit / connectivity) should
+              // count toward the cooldown so we park the relay and stop
+              // publishing into a ban instead of looping on it (#737).
+              if (isConnectionError(err)) recordRelayOutcome(walletId, err);
             });
             return Promise.resolve(); // resolve immediately
           };
@@ -515,6 +448,7 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
   patchRelayPublish(provider, walletId);
   await provider.enable();
+  await pinNip04IfNoInfoEvent(provider, walletId);
   providers.set(walletId, provider);
   return provider;
 }
