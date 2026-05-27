@@ -125,6 +125,51 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
   return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
 }
 
+export interface ParsedImageMessage {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect an image message (#688): either an `#lpe=1` encrypted-file URL whose
+ * mime is `image/*` (NIP-17 kind-15, fetch ciphertext + AES-256-GCM decrypt),
+ * or a plain image URL (legacy / unencrypted / other clients — rendered
+ * directly). Returns null for anything else. Mirrors `parseVoiceNote`; the
+ * plain branch preserves today's `extractImageUrl` behaviour so DMs already in
+ * threads keep rendering.
+ */
+export function parseImageMessage(text: string): ParsedImageMessage | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0) {
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    // Require `lpe` to equal exactly '1' — a substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). A kind-15 file with
+      // a different `alg` falls back to plain rendering rather than show an
+      // image card that fails to decrypt. `alg` is always emitted by our
+      // encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
+      // Only images here — encrypted audio is handled by parseVoiceNote.
+      if (!keyHex || !nonceHex || !mime.startsWith('image/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
+  }
+  const plain = extractImageUrl(trimmed);
+  return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
+}
+
 export function extractInvoice(text: string): DecodedInvoice | null {
   if (!text) return null;
   const match = text.match(INVOICE_REGEX);
