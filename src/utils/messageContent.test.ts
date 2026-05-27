@@ -24,6 +24,7 @@ import {
   isSecretModeTrigger,
   extractAudioUrl,
   parseVoiceNote,
+  parseImageMessage,
   encodeEncryptedFileUrl,
 } from './messageContent';
 
@@ -199,5 +200,86 @@ describe('parseVoiceNote / encodeEncryptedFileUrl (NIP-17 kind 15)', () => {
   it('returns null for non-voice text', () => {
     expect(parseVoiceNote('hello world')).toBeNull();
     expect(parseVoiceNote('')).toBeNull();
+  });
+});
+
+describe('parseImageMessage (NIP-17 kind 15, #688)', () => {
+  it('round-trips an encrypted image and strips the fragment from the fetch URL', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://blossom.primal.net/abc123.bin',
+      mime: 'image/jpeg',
+      keyHex: 'aa'.repeat(32),
+      nonceHex: 'bb'.repeat(12),
+    });
+    const parsed = parseImageMessage(encoded);
+    expect(parsed?.encrypted).toBe(true);
+    expect(parsed?.url).toBe('https://blossom.primal.net/abc123.bin');
+    expect(parsed?.url).not.toContain('#'); // fragment never reaches the server
+    expect(parsed?.keyHex).toBe('aa'.repeat(32));
+    expect(parsed?.nonceHex).toBe('bb'.repeat(12));
+    expect(parsed?.mime).toBe('image/jpeg');
+  });
+
+  it('round-trips an encrypted PNG (mime preserved for the data: URI)', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://s/x.bin',
+      mime: 'image/png',
+      keyHex: 'a'.repeat(64),
+      nonceHex: 'b'.repeat(24),
+    });
+    const parsed = parseImageMessage(encoded);
+    expect(parsed?.encrypted).toBe(true);
+    expect(parsed?.mime).toBe('image/png');
+  });
+
+  it('detects a plain (unencrypted / legacy / other-client) image URL', () => {
+    const parsed = parseImageMessage('https://example.com/cat.jpg');
+    expect(parsed?.encrypted).toBe(false);
+    expect(parsed?.url).toBe('https://example.com/cat.jpg');
+  });
+
+  it('detects a plain image URL with a query string', () => {
+    const parsed = parseImageMessage('https://cdn.example/p.png?w=640');
+    expect(parsed?.encrypted).toBe(false);
+    expect(parsed?.url).toBe('https://cdn.example/p.png?w=640');
+  });
+
+  it('ignores encrypted files that are not images (audio handled by parseVoiceNote)', () => {
+    const audio = encodeEncryptedFileUrl({
+      url: 'https://s/x.bin',
+      mime: 'audio/mp4',
+      keyHex: 'a'.repeat(64),
+      nonceHex: 'b'.repeat(24),
+    });
+    expect(parseImageMessage(audio)).toBeNull();
+  });
+
+  it('rejects an encrypted-image lpe fragment missing key or nonce', () => {
+    expect(parseImageMessage('https://s/x.bin#lpe=1&m=image%2Fjpeg')).toBeNull();
+    expect(
+      parseImageMessage(`https://s/x.bin#lpe=1&k=${'a'.repeat(64)}&m=image%2Fjpeg`),
+    ).toBeNull();
+  });
+
+  it('rejects an lpe fragment whose alg is not aes-gcm (we only implement GCM)', () => {
+    expect(
+      parseImageMessage(
+        `https://s/x.bin#lpe=1&alg=chacha20&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=image%2Fjpeg`,
+      ),
+    ).toBeNull();
+  });
+
+  it('does not treat a near-miss marker like lpe=10 as an encrypted image', () => {
+    expect(
+      parseImageMessage(
+        `https://s/x.png#lpe=10&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=image%2Fpng`,
+      ),
+    ).toBeNull();
+  });
+
+  it('returns null for non-image text', () => {
+    expect(parseImageMessage('hello world')).toBeNull();
+    expect(parseImageMessage('https://example.com/clip.m4a')).toBeNull();
+    expect(parseImageMessage('')).toBeNull();
   });
 });

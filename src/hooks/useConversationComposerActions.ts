@@ -68,14 +68,15 @@ export function useConversationComposerActions(params: {
     [pubkey, sendDirectMessage, appendOptimisticLocal],
   );
 
-  const sendVoice = useCallback(
-    async (file: EncryptedUpload): Promise<boolean> => {
+  const sendFile = useCallback(
+    async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
       const result = await sendFileMessage(pubkey, file);
       if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send voice note.');
+        const what = kind === 'image' ? 'image' : 'voice note';
+        Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
         return false;
       }
-      // Optimistic bubble stores the same encoded URL so it plays right away.
+      // Optimistic bubble stores the same encoded URL so it renders right away.
       setMessages((prev) => [
         ...prev,
         {
@@ -137,8 +138,8 @@ export function useConversationComposerActions(params: {
   // keep stable identities across renders. (1:1 needs no canSend preflight —
   // the peer pubkey is always present from the route params.)
   const strategy = useMemo(
-    () => ({ sendText, sendVoice, confirmLocation }),
-    [sendText, sendVoice, confirmLocation],
+    () => ({ sendText, sendFile, confirmLocation }),
+    [sendText, sendFile, confirmLocation],
   );
 
   const actions = useComposerActions({
