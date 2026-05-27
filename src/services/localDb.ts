@@ -79,13 +79,17 @@ export function getLocalDb(): Promise<DB> {
 }
 
 /**
- * Close + delete the encrypted DB file and reset the open handle. Used on
- * logout / account-wipe so no encrypted DM data lingers on disk. Best-effort:
- * a delete failure is swallowed (the file is unreadable without the key, which
- * clearLocalDbKey removes anyway). If the DB wasn't opened this session, a bare
- * handle is opened solely to delete the on-disk file.
+ * Close + delete the encrypted DB file and reset the open handle. If the DB
+ * wasn't opened this session, a bare handle is opened solely to delete the
+ * on-disk file.
+ *
+ * Module-private on purpose: deleting the file WITHOUT also clearing the key is
+ * not a complete wipe (a delete failure would leave a still-readable encrypted
+ * DB on disk). The only safe public entry point is `wipeLocalDmStore`, which
+ * pairs this with `clearLocalDbKey`. A delete failure is logged in dev as a
+ * breadcrumb rather than thrown, so it can't wedge the logout flow.
  */
-export async function clearLocalDb(): Promise<void> {
+async function clearLocalDb(): Promise<void> {
   let db: DB | null = null;
   if (dbPromise) {
     db = await dbPromise.catch(() => null);
@@ -100,8 +104,8 @@ export async function clearLocalDb(): Promise<void> {
   }
   try {
     db?.delete();
-  } catch {
-    // best-effort — see doc comment
+  } catch (e) {
+    if (__DEV__) console.warn(`[localDb] DB file delete failed: ${(e as Error)?.message ?? e}`);
   }
 }
 

@@ -91,23 +91,21 @@ describe('localDb', () => {
     expect(cipherIdx).toBeLessThan(schemaIdx); // guard runs before schema
   });
 
-  it('clearLocalDb deletes the encrypted DB file (open handle case)', async () => {
-    const { getLocalDb: g, clearLocalDb } = require('./localDb');
-    await g(); // open it this session
-    await clearLocalDb();
-    expect(mockDelete).toHaveBeenCalled();
-  });
-
-  it('clearLocalDb opens a bare handle to delete when not opened this session', async () => {
-    const { clearLocalDb } = require('./localDb');
-    await clearLocalDb(); // never opened
-    expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({ name: 'lightningpiggy.db' }));
-    expect(mockDelete).toHaveBeenCalled();
-  });
-
-  it('wipeLocalDmStore deletes the DB AND clears the keystore key (#710 H1)', async () => {
-    const { wipeLocalDmStore } = require('./localDb');
+  // clearLocalDb is module-private (the only safe public wipe is
+  // wipeLocalDmStore, which also clears the key) — so its delete paths are
+  // exercised through wipeLocalDmStore.
+  it('wipeLocalDmStore deletes the DB AND clears the keystore key (open-handle case, #710 H1)', async () => {
+    const { getLocalDb: g, wipeLocalDmStore } = require('./localDb');
+    await g(); // opened this session
     await wipeLocalDmStore();
+    expect(mockDelete).toHaveBeenCalled();
+    expect(mockClearKey).toHaveBeenCalled();
+  });
+
+  it('wipeLocalDmStore opens a bare handle to delete when DB not opened this session', async () => {
+    const { wipeLocalDmStore } = require('./localDb');
+    await wipeLocalDmStore(); // never opened this session
+    expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({ name: 'lightningpiggy.db' }));
     expect(mockDelete).toHaveBeenCalled();
     expect(mockClearKey).toHaveBeenCalled();
   });
