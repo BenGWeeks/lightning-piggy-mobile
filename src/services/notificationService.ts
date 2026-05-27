@@ -202,15 +202,17 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
- * Privacy preference: should the decrypted body text be shown on the
- * lock screen? Default OFF. When OFF, the OS still shows that A
- * notification arrived (with the channel name + a generic title), but
- * the body collapses to a placeholder — chosen by the OS on Android
- * (channel `lockscreenVisibility: SECRET`) and by the placeholder
- * substitution we do here on iOS.
+ * Privacy preference: should the real (decrypted) title/body be included in
+ * notifications at all? Default OFF. When OFF, `fireNotification` substitutes
+ * generic copy ("New message" / "Payment received") at SCHEDULE time, so the
+ * plaintext never enters the OS notification store — it's hidden everywhere
+ * (lock screen, shade, history), not just on the lock screen. This is the
+ * cross-platform enforcement; the Android channels are `PRIVATE` (not
+ * `SECRET`) so that, once the user opts in, the entry still shows and honours
+ * their system "hide sensitive content" setting.
  *
- * Toggle is exposed as a future Settings UI element (TODO — follow-up
- * issue).
+ * Surfaced as the "notification content" toggle in
+ * `src/screens/account/SecurityScreen.tsx`.
  */
 export async function getLockScreenContentEnabled(): Promise<boolean> {
   if (cachedLockScreenContent !== null) return cachedLockScreenContent;
@@ -286,6 +288,13 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         data: { kind: payload.kind, ...(payload.data ?? {}) },
         sound: 'default',
       },
+      // Android: a TIME_INTERVAL trigger is the supported way to pin a
+      // notification to a specific channel (`channelId` lives on the trigger,
+      // not the content). `trigger: null` fires immediately but drops the
+      // notification onto the default channel, collapsing the Messages /
+      // Payments split. The 1-second delay is imperceptible and the price of
+      // keeping per-channel mute working. iOS has no channels → fire
+      // immediately with `trigger: null`.
       trigger:
         Platform.OS === 'android'
           ? {

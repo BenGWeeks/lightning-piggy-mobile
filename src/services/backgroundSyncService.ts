@@ -1,7 +1,7 @@
 /**
  * backgroundSyncService — the context-free worker the native background
- * host (Android foreground service / iOS BGTask) runs to surface OS
- * notifications while the app's UI isn't mounted (#279).
+ * host (Android WorkManager / iOS BGTaskScheduler, via expo-background-task)
+ * runs to surface OS notifications while the app's UI isn't mounted (#279).
  *
  * DETECT-AND-PING design: this NEVER decrypts. It only detects that new
  * encrypted traffic arrived and fires a GENERIC "you have new messages"
@@ -14,10 +14,18 @@
  *     lock-screen default.
  *   - Far less code runs headless (no signer, no gift-wrap unwrap).
  *
- * Runs in a SEPARATE JS context from the React tree, so it reads
- * everything it needs from storage and talks to relays directly via the
- * shared nostr-tools pool. It must be cheap and self-terminating: open a
- * query, decide whether to ping, persist a cursor, return.
+ * Freshness is tracked by EVENT ID, not by a `created_at` cursor. NIP-59
+ * randomises a gift wrap's `created_at` up to two days into the PAST to
+ * thwart timing analysis, so a genuinely-new kind-1059 wrap can arrive
+ * carrying an already-old timestamp. A `since`/`created_at` gate would let
+ * the relay filter such a wrap out and silently miss real NIP-17 traffic
+ * (Copilot review #282). So we query a window wide enough to span the
+ * maximum backdate and dedupe against a persisted set of seen ids.
+ *
+ * Runs in a SEPARATE JS context from the React tree, so it reads everything
+ * it needs from storage and talks to relays directly via the shared
+ * nostr-tools pool. It must be cheap and self-terminating: open a query,
+ * decide whether to ping, persist the seen-set, return.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pool } from './nostrService';
@@ -25,23 +33,52 @@ import { loadIdentities } from './identitiesStore';
 import { getUserRelays } from './nostrRelayStorage';
 import { fireMessageNotification } from './notificationService';
 
-// Last wall-clock second we checked. New events are those with
-// `created_at` strictly after this. Persisted so repeated wakes don't
-// re-ping the same arrivals.
-const BG_CURSOR_KEY = 'bg_sync_last_check_v1';
+// Persisted ids we've already accounted for, so repeated wakes never
+// re-ping the same arrival. Bounded (insertion-ordered; oldest dropped
+// past the cap). Its PRESENCE also marks that the baseline has been
+// primed — see the first-run handling in runBackgroundSync.
+const BG_SEEN_IDS_KEY = 'bg_sync_seen_ids_v1';
+const SEEN_CAP = 1000;
 
-// Re-query a little before the cursor to absorb relay clock skew /
-// late-delivered events without missing any.
+// NIP-59 tweaks a wrap's `created_at` up to 2 days into the past. Query a
+// window that spans that, plus a little overlap for relay clock skew, so no
+// genuinely-new wrap is filtered out by the relay before we can see its id.
+const NIP59_MAX_BACKDATE_SEC = 2 * 24 * 60 * 60;
 const OVERLAP_SEC = 120;
-// First-ever run (no cursor): only look back an hour so a cold start
-// doesn't ping for ancient history.
-const COLD_WINDOW_SEC = 60 * 60;
+const LOOKBACK_SEC = NIP59_MAX_BACKDATE_SEC + OVERLAP_SEC;
 
 export interface BackgroundSyncResult {
   /** Whether a notification was fired this run. */
   pinged: boolean;
   /** Count of fresh inbound events detected (0 when nothing new). */
   freshCount: number;
+}
+
+/**
+ * Load the persisted seen-set. `primed` is false only on the very first run
+ * (key absent) so the caller can establish a silent baseline rather than
+ * pinging for pre-existing history. A present-but-corrupt value is treated
+ * as primed (empty set) so a bad write can't trigger a cold-start flood.
+ */
+async function loadSeenIds(): Promise<{ seen: Set<string>; primed: boolean }> {
+  const raw = await AsyncStorage.getItem(BG_SEEN_IDS_KEY).catch(() => null);
+  if (raw == null) return { seen: new Set(), primed: false };
+  try {
+    const arr: unknown = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      return { seen: new Set(arr.filter((x): x is string => typeof x === 'string')), primed: true };
+    }
+  } catch {
+    // fall through to the primed-but-empty fallback
+  }
+  return { seen: new Set(), primed: true };
+}
+
+/** Persist the seen-set, keeping only the most-recent SEEN_CAP ids. */
+async function persistSeenIds(seen: Set<string>): Promise<void> {
+  const arr = Array.from(seen); // insertion order → tail is newest
+  const bounded = arr.length > SEEN_CAP ? arr.slice(arr.length - SEEN_CAP) : arr;
+  await AsyncStorage.setItem(BG_SEEN_IDS_KEY, JSON.stringify(bounded)).catch(() => {});
 }
 
 /**
@@ -55,16 +92,9 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
   const readRelays = (await getUserRelays()).filter((r) => r.read).map((r) => r.url);
   if (readRelays.length === 0) return { pinged: false, freshCount: 0 };
 
-  const cursorRaw = await AsyncStorage.getItem(BG_CURSOR_KEY);
-  // Guard against a corrupted / non-numeric stored cursor: a NaN cursor
-  // would make `e.created_at > cursor` always false (never ping) and feed
-  // NaN into the `since` filter. Fall back to a cold start.
-  const parsedCursor = cursorRaw ? Number(cursorRaw) : 0;
-  const cursor = Number.isFinite(parsedCursor) ? parsedCursor : 0;
-  const now = Math.floor(Date.now() / 1000);
-  const since = cursor > 0 ? Math.max(0, cursor - OVERLAP_SEC) : now - COLD_WINDOW_SEC;
+  const { seen, primed } = await loadSeenIds();
+  const since = Math.floor(Date.now() / 1000) - LOOKBACK_SEC;
 
-  let freshCount = 0;
   try {
     // kind-1059 = NIP-17 gift wraps, kind-4 = legacy NIP-04 DMs, both
     // addressed to us via a `#p` tag.
@@ -73,15 +103,27 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
       '#p': [activePubkey],
       since,
     });
-    // Count genuinely-new inbound events. For kind-4 we can drop our own
-    // echoes (real author === us). For kind-1059 the wrap author is an
-    // ephemeral throwaway key, so we can't distinguish a received wrap
-    // from our own sent-copy without decrypting — we accept the rare
-    // false ping (the app reconciles exactly on open).
-    freshCount = events.filter(
-      (e) => e.created_at > cursor && !(e.kind === 4 && e.pubkey === activePubkey),
-    ).length;
 
+    // Genuinely-new = an id we haven't accounted for, excluding our own
+    // kind-4 echoes (real author === us). kind-1059 wrap authors are
+    // ephemeral throwaway keys, so we can't distinguish a received wrap from
+    // our own sent-copy without decrypting — we accept the rare false ping
+    // (the app reconciles exactly on open).
+    const fresh = events.filter(
+      (e) => !seen.has(e.id) && !(e.kind === 4 && e.pubkey === activePubkey),
+    );
+
+    // Record everything we saw so the next wake won't reconsider it.
+    for (const e of events) seen.add(e.id);
+    await persistSeenIds(seen);
+
+    // First-ever run: we've just established the baseline above. Everything
+    // currently on the relays is history the user may already have read
+    // in-app, so pinging for it would be a cold-start flood. Stay silent;
+    // only arrivals AFTER this baseline ping on later wakes.
+    if (!primed) return { pinged: false, freshCount: 0 };
+
+    const freshCount = fresh.length;
     if (freshCount > 0) {
       await fireMessageNotification({
         kind: 'dm',
@@ -95,16 +137,9 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
         data: {},
       });
     }
-    // Advance the cursor ONLY after a successful query — if the relay
-    // round-trip threw, the events in this window were never fetched, so
-    // advancing would skip them permanently (they'd only resurface on the
-    // next app open). Leaving the cursor put means the next wake re-queries
-    // the same `since` and catches up.
-    await AsyncStorage.setItem(BG_CURSOR_KEY, String(now));
+    return { pinged: freshCount > 0, freshCount };
   } catch {
-    // Best-effort: a failed relay round-trip just means we retry next wake
-    // from the same cursor.
+    // Best-effort: a failed relay round-trip just means we retry next wake.
+    return { pinged: false, freshCount: 0 };
   }
-
-  return { pinged: freshCount > 0, freshCount };
 }

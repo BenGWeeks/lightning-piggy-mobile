@@ -132,7 +132,9 @@ describe('firePaymentNotification', () => {
     await firePaymentNotification({ kind: 'payment', amountSats: 1000, walletId: 'w1' });
     const content = lastScheduledContent();
     expect(content?.title).toBe('Payment received');
-    expect(content?.body).toBe('+1,000 sats received');
+    // Build the expected string with the same locale-aware formatter the
+    // code uses, so the assertion doesn't break under a non-en CI locale.
+    expect(content?.body).toBe(`+${(1000).toLocaleString()} sats received`);
     expect(content?.data).toMatchObject({ kind: 'payment', walletId: 'w1' });
   });
 

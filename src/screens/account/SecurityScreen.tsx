@@ -158,21 +158,21 @@ const SecurityScreen: React.FC = () => {
       <View style={[styles.headerRow, styles.sectionGap]}>
         <BellRing size={22} color={colors.brandPink} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          Notification content on lock screen
+          Notification content
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>
-        When OFF, notifications still tell you a message or payment arrived but hide the details on
-        the lock screen — you'll see "New message" rather than the text, and "Payment received"
-        rather than the amount. Turn ON to show the full content even before you unlock. Default:
-        OFF.
+        When OFF, notifications tell you a message or payment arrived but never include the details
+        — you'll see "New message" rather than the text, and "Payment received" rather than the
+        amount, both on the lock screen and in the notification shade. Turn ON to include the full
+        content. Default: OFF.
       </Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.optionLabel}>Show details on lock screen</Text>
+        <Text style={styles.optionLabel}>Show message & payment details</Text>
         <Switch
           value={lockScreenContentOn}
           onValueChange={handleToggleLockScreenContent}
-          accessibilityLabel="Show notification details on lock screen"
+          accessibilityLabel="Show message and payment details in notifications"
           testID="security-lockscreen-content-toggle"
           trackColor={{ false: colors.divider, true: colors.brandPink }}
         />

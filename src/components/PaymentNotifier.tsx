@@ -34,10 +34,12 @@ export default function PaymentNotifier(): null {
 
   useEffect(() => {
     if (!lastIncomingPayment) return;
-    const { walletId, amountSats, paymentHash } = lastIncomingPayment;
-    // On-chain receives can lack a payment hash; fall back to a wallet+amount
-    // key for dedupe so a null hash never collapses distinct receives.
-    const dedupeKey = paymentHash ?? `${walletId}:${amountSats}`;
+    const { walletId, amountSats, paymentHash, at } = lastIncomingPayment;
+    // On-chain receives can lack a payment hash; fall back to a
+    // wallet+amount+timestamp key so two distinct same-amount receives to the
+    // same wallet (which `walletId:amountSats` alone would collapse) each still
+    // notify. `at` is stable per detection, so re-renders dedupe correctly.
+    const dedupeKey = paymentHash ?? `${walletId}:${amountSats}:${at}`;
     if (announced.current.has(dedupeKey)) return;
 
     const tx = wallets

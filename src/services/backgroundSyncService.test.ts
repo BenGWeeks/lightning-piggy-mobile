@@ -1,6 +1,6 @@
 // Tests for the detect-and-ping background sync (#279). The relay pool,
 // identity/relay storage, and notificationService are mocked so we assert
-// the detection + cursor logic without network or native modules.
+// the detection + dedupe logic without network or native modules.
 
 const mockQuerySync = jest.fn();
 const mockLoadIdentities = jest.fn();
@@ -21,6 +21,14 @@ import { runBackgroundSync } from './backgroundSyncService';
 
 const ME = 'a'.repeat(64);
 const READ_RELAYS = [{ url: 'wss://r.example', read: true, write: true }];
+const SEEN_KEY = 'bg_sync_seen_ids_v1';
+
+/** Put the service into the "primed" state (baseline established) with an
+ * optional set of already-seen ids. Without this a run is the first-ever
+ * run and stays silent. */
+async function prime(ids: string[] = []): Promise<void> {
+  await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(ids));
+}
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -44,9 +52,21 @@ it('does nothing when there are no read relays', async () => {
   expect(mockQuerySync).not.toHaveBeenCalled();
 });
 
-it('pings when a fresh inbound gift-wrap is present', async () => {
+it('first-ever run primes the baseline silently (no ping) and seeds the seen-set', async () => {
   const now = Math.floor(Date.now() / 1000);
-  mockQuerySync.mockResolvedValue([{ id: 'w1', kind: 1059, pubkey: 'ephemeral', created_at: now }]);
+  mockQuerySync.mockResolvedValue([{ id: 'w1', kind: 1059, pubkey: 'eph', created_at: now }]);
+  const r = await runBackgroundSync();
+  expect(r).toEqual({ pinged: false, freshCount: 0 });
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
+  // The wrap we saw is now recorded so it won't ping on a later run.
+  const seen = JSON.parse((await AsyncStorage.getItem(SEEN_KEY)) ?? '[]');
+  expect(seen).toContain('w1');
+});
+
+it('pings when a new gift-wrap arrives after the baseline is primed', async () => {
+  await prime(['old']);
+  const now = Math.floor(Date.now() / 1000);
+  mockQuerySync.mockResolvedValue([{ id: 'w1', kind: 1059, pubkey: 'eph', created_at: now }]);
   const r = await runBackgroundSync();
   expect(r).toEqual({ pinged: true, freshCount: 1 });
   expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
@@ -54,11 +74,31 @@ it('pings when a fresh inbound gift-wrap is present', async () => {
     kind: 'dm',
     threadId: '__background__',
   });
-  // Cursor advanced so the next run won't re-ping these.
-  expect(await AsyncStorage.getItem('bg_sync_last_check_v1')).not.toBeNull();
+});
+
+it('detects a backdated new wrap a since/created_at gate would miss (NIP-59)', async () => {
+  await prime(['old']);
+  const now = Math.floor(Date.now() / 1000);
+  // NIP-59 randomises created_at up to 2 days back: a genuinely-new wrap can
+  // carry a day-old timestamp. ID-dedup still catches it; a created_at gate
+  // would not.
+  mockQuerySync.mockResolvedValue([
+    { id: 'wBack', kind: 1059, pubkey: 'eph', created_at: now - 24 * 60 * 60 },
+  ]);
+  const r = await runBackgroundSync();
+  expect(r).toEqual({ pinged: true, freshCount: 1 });
+});
+
+it('queries a window wide enough to span the NIP-59 backdate (>= 2 days)', async () => {
+  await prime([]);
+  const now = Math.floor(Date.now() / 1000);
+  await runBackgroundSync();
+  const sinceArg = (mockQuerySync.mock.calls[0][1] as { since: number }).since;
+  expect(now - sinceArg).toBeGreaterThanOrEqual(2 * 24 * 60 * 60);
 });
 
 it('ignores my own kind-4 echoes (no ping)', async () => {
+  await prime(['old']);
   const now = Math.floor(Date.now() / 1000);
   mockQuerySync.mockResolvedValue([{ id: 'e1', kind: 4, pubkey: ME, created_at: now }]);
   const r = await runBackgroundSync();
@@ -66,18 +106,19 @@ it('ignores my own kind-4 echoes (no ping)', async () => {
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
 
-it('does not ping when nothing new arrived', async () => {
-  mockQuerySync.mockResolvedValue([]);
+it('does not re-ping a wrap whose id is already seen', async () => {
+  await prime(['w1']);
+  const now = Math.floor(Date.now() / 1000);
+  mockQuerySync.mockResolvedValue([{ id: 'w1', kind: 1059, pubkey: 'eph', created_at: now }]);
   const r = await runBackgroundSync();
   expect(r.pinged).toBe(false);
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
 
-it('does not re-ping events at/under the stored cursor', async () => {
-  const cursor = Math.floor(Date.now() / 1000) - 10;
-  await AsyncStorage.setItem('bg_sync_last_check_v1', String(cursor));
-  // Event exactly at the cursor — already counted on a previous run.
-  mockQuerySync.mockResolvedValue([{ id: 'w1', kind: 1059, pubkey: 'eph', created_at: cursor }]);
+it('does not ping when nothing new arrived', async () => {
+  await prime(['old']);
+  mockQuerySync.mockResolvedValue([]);
   const r = await runBackgroundSync();
   expect(r.pinged).toBe(false);
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
