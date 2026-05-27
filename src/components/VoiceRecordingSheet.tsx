@@ -95,12 +95,17 @@ function bucketMetering(history: number[], bars: number): number[] {
  * brand pink and the rest in the divider grey, so it doubles as a
  * playback scrubber. Decorative — the time label carries the duration.
  */
-const Waveform: React.FC<{ data: number[]; progress: number; colors: Palette }> = ({
-  data,
-  progress,
-  colors,
-}) => {
-  const bars = useMemo(() => bucketMetering(data, WAVEFORM_BARS), [data]);
+const Waveform: React.FC<{
+  data: number[];
+  progress: number;
+  colors: Palette;
+  /** How many bars to render. Defaults to the full `WAVEFORM_BARS` (the static
+   *  review waveform). While recording, the caller passes a smaller, time-
+   *  proportional count so the left-aligned waveform visibly grows toward the
+   *  right, reaching full width at the 60 s cap. */
+  barCount?: number;
+}> = ({ data, progress, colors, barCount = WAVEFORM_BARS }) => {
+  const bars = useMemo(() => bucketMetering(data, barCount), [data, barCount]);
   if (bars.length === 0) return null;
   const played = Math.round(progress * bars.length);
   return (
@@ -595,10 +600,18 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
           </TouchableOpacity>
         </View>
 
-        {/* Live waveform while recording */}
+        {/* Live waveform while recording — grows left→right, full at 60s. */}
         {isRecording && meteringHistory.length > 0 && (
           <View style={styles.liveWave}>
-            <Waveform data={meteringHistory} progress={1} colors={colors} />
+            <Waveform
+              data={meteringHistory}
+              progress={1}
+              barCount={Math.max(
+                1,
+                Math.round((elapsedSeconds / MAX_RECORDING_SECONDS) * WAVEFORM_BARS),
+              )}
+              colors={colors}
+            />
           </View>
         )}
 
