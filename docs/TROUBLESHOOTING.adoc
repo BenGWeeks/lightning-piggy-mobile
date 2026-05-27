@@ -30,6 +30,25 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 *Verify:* `adb shell dumpsys input_method | grep mInputShown` should report `mInputShown=true` once an input is focused. The audit script `scripts/keyboard-screenshot-audit.sh` polls this gate before every screenshot. +
 *Lower-friction alternative:* run daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM (avoiding the "System UI isn't responding" stalls under memory pressure). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
 
+| Android emulator pathologically slow + unstable (ANRs, "isn't responding" dialogs, Maestro driver-startup and `inputText` timeouts) while the HOST has free RAM and idle CPU
+| Don't chase host RAM/CPU — the bottleneck is **disk I/O saturation from the emulator's own RAM-snapshot writeback**. Signature: host load average is high (~8) yet `top` shows the CPU mostly idle and memory free, because the load is processes blocked in **I/O wait**, not computing. +
+*Diagnose (on the host):* +
+[source,bash]
+----
+vmstat 1 3                 # bo (blocks-out) huge, wa (io-wait) 50-67%, b (blocked procs) high
+cat /proc/pressure/io      # full avgN ~67%  -> tasks fully stalled on I/O
+cat /proc/pressure/memory  # ~0.00           -> RAM is NOT the problem
+pidstat -d 1 3 | grep qemu # qemu writing ~750 MB/s, sustained, even with an idle guest
+----
+*Root cause:* launching with `-no-snapshot-load` still keeps quickboot's **file-backed guest RAM**. `~/.android/avd/<AVD>.avd/snapshots/default_boot/ram.img` is sized to the guest RAM (4 GB for `-memory 4096`) and memory-mapped, so the kernel continuously flushes dirty RAM pages back to it (~750 MB/s observed) *even when the guest is idle*. That pins the disk at ~67% I/O-wait, and qemu then blocks on its own writes -> the guest freezes -> every downstream symptom (ANRs, Maestro `port 7001` driver-startup timeout, `inputText` gRPC `DEADLINE_EXCEEDED`). Confirm it's the writer: `ls -la <AVD>.avd/snapshots/default_boot/ram.img` shows its mtime advancing every second. +
+*Fix:* relaunch with **`-no-snapshot`** (NOT `-no-snapshot-load`) so guest RAM is anonymous memory with no writeback: +
+[source,bash]
+----
+adb emu kill
+"$ANDROID_HOME/emulator/emulator" -avd <AVD> -no-snapshot -no-boot-anim -no-audio -memory 4096 -cores 4 -gpu swiftshader_indirect &
+----
+Measured impact: qemu writes dropped **~755 MB/s -> ~10 MB/s**, I/O pressure **67% -> 26%**, and the ANR / Maestro flakiness cleared. Trade-off: `-no-snapshot` disables quickboot, so every launch is a full cold boot (slower start, stable session). **This is the deeper cause behind the GMS-churn entry below — rule it out first.**
+
 | Emulator throws repeated "System UI isn't responding" / "Process system isn't responding" / per-Google-app "isn't responding" ANR dialogs on the `google_apis` AVD (contact avatars never load in Messages, relays stall, Maestro flows die with `Terminated`)
 | The android-34 **google_apis** system image bundles Google apps (Digital Wellbeing, Quicksearch / the Google app, Maps) and a full GMS that churn in the background under the software GPU (`-gpu swiftshader_indirect`), throwing ANR dialogs that steal window focus, starve the Nostr relay websockets + avatar image downloads (so Messages-list profile pictures stay on the default pig placeholder), and abort Maestro runs mid-flow. An in-guest System UI restart (`adb shell am force-stop com.android.systemui`) does **not** hold — it re-ANRs within seconds. A fresh cold boot (`adb emu kill`, then relaunch with `-no-snapshot-load`) clears it but the churn returns under load. +
 *The biggest offender is core GMS, not the bundled apps.* The **"Process system isn't responding"** dialog specifically is `system_server` being pegged (~175% CPU) by `com.google.android.gms.persistent`, which loops ANR-ing and crashing on `.chimera.PersistentIntentOperationService` (`adb logcat \| grep "ANR in"` shows it). Disabling Wellbeing/Quicksearch/Maps quiets the focus-stealing app dialogs but NOT this one — you have to disable GMS itself to stop it. Confirmed harmless here: after disabling GMS, CPU dropped to ~370/400 idle, the ANRs stopped, and the app (which uses no GMS) ran fine. +
