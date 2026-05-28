@@ -20,9 +20,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   setNotificationsForeground,
   setActiveThread,
+  setActiveCache,
   isThreadActivelyViewed,
+  isCacheActivelyViewed,
   fireMessageNotification,
   firePaymentNotification,
+  fireCacheNotification,
   setLockScreenContentEnabled,
   __resetForTests,
 } from './notificationService';
@@ -149,6 +152,109 @@ describe('firePaymentNotification', () => {
     setNotificationsForeground(true);
     setActiveThread('anything');
     const id = await firePaymentNotification({ kind: 'payment', amountSats: 42 });
+    expect(id).toBe('notif-id');
+    expect(mockScheduleNotificationAsync).toHaveBeenCalled();
+  });
+});
+
+// --- Find-log notifications (#740) -----------------------------------
+
+describe('active-cache suppression (#740)', () => {
+  it('is active only when foreground AND the coord matches', () => {
+    setNotificationsForeground(true);
+    setActiveCache('37516:abc:my-cache');
+    expect(isCacheActivelyViewed('37516:abc:my-cache')).toBe(true);
+    expect(isCacheActivelyViewed('37516:abc:other-cache')).toBe(false);
+  });
+
+  it('is never active while backgrounded, even on the open cache', () => {
+    setActiveCache('37516:abc:my-cache');
+    setNotificationsForeground(false);
+    expect(isCacheActivelyViewed('37516:abc:my-cache')).toBe(false);
+  });
+
+  it('clears when the active cache is unset (screen blur)', () => {
+    setNotificationsForeground(true);
+    setActiveCache('37516:abc:my-cache');
+    setActiveCache(null);
+    expect(isCacheActivelyViewed('37516:abc:my-cache')).toBe(false);
+  });
+
+  it('independent of the active-thread state (a coord matching a thread id does not suppress)', () => {
+    setNotificationsForeground(true);
+    setActiveThread('shared-id');
+    expect(isCacheActivelyViewed('shared-id')).toBe(false);
+    setActiveCache('shared-id');
+    expect(isCacheActivelyViewed('shared-id')).toBe(true);
+    expect(isThreadActivelyViewed('shared-id')).toBe(true);
+  });
+});
+
+describe('fireCacheNotification', () => {
+  it('suppresses (no schedule) when the user is viewing that exact cache', async () => {
+    setNotificationsForeground(true);
+    setActiveCache('37516:abc:my-cache');
+    const id = await fireCacheNotification({
+      cacheCoord: '37516:abc:my-cache',
+      title: 'Find on My Cache',
+      body: 'finderName found it',
+    });
+    expect(id).toBeNull();
+    expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('fires for a different cache than the one being viewed', async () => {
+    setNotificationsForeground(true);
+    setActiveCache('37516:abc:my-cache');
+    await fireCacheNotification({
+      cacheCoord: '37516:abc:other-cache',
+      title: 'Find on Other Cache',
+      body: 'someone found it',
+    });
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    // kind always rides in data for the tap-router; coord is the payload.
+    expect(lastScheduledContent()?.data).toMatchObject({
+      kind: 'cache',
+      cacheCoord: '37516:abc:other-cache',
+    });
+  });
+
+  it('uses generic copy when the lock-screen-content toggle is off (default)', async () => {
+    await fireCacheNotification({
+      cacheCoord: '37516:abc:my-cache',
+      title: 'Find on My Cache',
+      body: 'finderName · "got it!"',
+    });
+    const content = lastScheduledContent();
+    expect(content?.title).toBe('New find on your cache');
+    expect(content?.body).toBe('Open Lightning Piggy to view');
+    // The coord still rides in data for the tap router to pick up on
+    // unlock — only the human-readable title/body is redacted.
+    expect(content?.data).toMatchObject({ kind: 'cache', cacheCoord: '37516:abc:my-cache' });
+  });
+
+  it('uses the real title/body once the user opts in', async () => {
+    await setLockScreenContentEnabled(true);
+    await fireCacheNotification({
+      cacheCoord: '37516:abc:my-cache',
+      title: 'Find on Treasure Pig',
+      body: 'alice · "thanks!"',
+    });
+    const content = lastScheduledContent();
+    expect(content?.title).toBe('Find on Treasure Pig');
+    expect(content?.body).toBe('alice · "thanks!"');
+  });
+
+  it('background sentinel coord (__background__) never matches a real active cache', async () => {
+    // Whatever the user is currently viewing, a background ping with the
+    // sentinel must always get through (it never matches a real coord).
+    setNotificationsForeground(true);
+    setActiveCache('37516:abc:any-real-cache');
+    const id = await fireCacheNotification({
+      cacheCoord: '__background__',
+      title: 'New find on your cache',
+      body: 'Open Lightning Piggy to view',
+    });
     expect(id).toBe('notif-id');
     expect(mockScheduleNotificationAsync).toHaveBeenCalled();
   });

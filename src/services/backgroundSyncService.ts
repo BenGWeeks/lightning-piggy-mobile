@@ -31,13 +31,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pool } from './nostrService';
 import { loadIdentities } from './identitiesStore';
 import { getUserRelays } from './nostrRelayStorage';
-import { fireMessageNotification } from './notificationService';
+import { fireMessageNotification, fireCacheNotification } from './notificationService';
+import { fetchCachesByAuthor } from './nostrPlacesPublisher';
+import { GC_COMMENT_KIND } from './nostrPlacesService';
 
 // Persisted ids we've already accounted for, so repeated wakes never
 // re-ping the same arrival. Bounded (insertion-ordered; oldest dropped
 // past the cap). Its PRESENCE also marks that the baseline has been
 // primed — see the first-run handling in runBackgroundSync.
 const BG_SEEN_IDS_KEY = 'bg_sync_seen_ids_v1';
+// Independent seen-set for kind-1111 find-logs (#740). Kept separate from the
+// DM/wrap seen-set so the two streams can't collide on event ids and so a
+// future cap change to one doesn't silently re-flood the other on next wake.
+const BG_SEEN_CACHE_COMMENT_IDS_KEY = 'bg_sync_seen_cache_comment_ids_v1';
 const SEEN_CAP = 1000;
 
 // NIP-59 tweaks a wrap's `created_at` up to 2 days into the past. Query a
@@ -47,6 +53,14 @@ const NIP59_MAX_BACKDATE_SEC = 2 * 24 * 60 * 60;
 const OVERLAP_SEC = 120;
 const LOOKBACK_SEC = NIP59_MAX_BACKDATE_SEC + OVERLAP_SEC;
 
+// Find-logs (kind-1111) are public, never gift-wrapped — their `created_at`
+// is the genuine publish time. We don't need the NIP-59 backdate cushion,
+// but background wakes are best-effort and infrequent (~15 min floor on
+// Android), so a relay that dropped one earlier still wants picking up on
+// the next pass. A 1-day window dedupes by id against the seen-set and
+// keeps the round-trip cheap.
+const CACHE_COMMENT_LOOKBACK_SEC = 24 * 60 * 60;
+
 // Cap the relay round-trip so a slow/unresponsive relay cannot keep this
 // headless task alive (battery drain + risk of the OS killing/penalising
 // it). nostr-tools closes the sub after maxWait and returns whatever
@@ -55,10 +69,12 @@ const LOOKBACK_SEC = NIP59_MAX_BACKDATE_SEC + OVERLAP_SEC;
 const QUERY_MAXWAIT_MS = 5000;
 
 export interface BackgroundSyncResult {
-  /** Whether a notification was fired this run. */
+  /** Whether a notification was fired this run (any kind). */
   pinged: boolean;
-  /** Count of fresh inbound events detected (0 when nothing new). */
+  /** Count of fresh inbound DM events detected (0 when nothing new). */
   freshCount: number;
+  /** Count of fresh kind-1111 find-logs against my caches (#740). */
+  freshCacheCommentCount: number;
 }
 
 /**
@@ -67,8 +83,10 @@ export interface BackgroundSyncResult {
  * pinging for pre-existing history. A present-but-corrupt value is treated
  * as primed (empty set) so a bad write can't trigger a cold-start flood.
  */
-async function loadSeenIds(): Promise<{ seen: Set<string>; primed: boolean }> {
-  const raw = await AsyncStorage.getItem(BG_SEEN_IDS_KEY).catch(() => null);
+async function loadSeenIds(
+  key: string = BG_SEEN_IDS_KEY,
+): Promise<{ seen: Set<string>; primed: boolean }> {
+  const raw = await AsyncStorage.getItem(key).catch(() => null);
   if (raw == null) return { seen: new Set(), primed: false };
   try {
     const arr: unknown = JSON.parse(raw);
@@ -82,10 +100,10 @@ async function loadSeenIds(): Promise<{ seen: Set<string>; primed: boolean }> {
 }
 
 /** Persist the seen-set, keeping only the most-recent SEEN_CAP ids. */
-async function persistSeenIds(seen: Set<string>): Promise<void> {
+async function persistSeenIds(seen: Set<string>, key: string = BG_SEEN_IDS_KEY): Promise<void> {
   const arr = Array.from(seen); // insertion order → tail is newest
   const bounded = arr.length > SEEN_CAP ? arr.slice(arr.length - SEEN_CAP) : arr;
-  await AsyncStorage.setItem(BG_SEEN_IDS_KEY, JSON.stringify(bounded)).catch(() => {});
+  await AsyncStorage.setItem(key, JSON.stringify(bounded)).catch(() => {});
 }
 
 /**
@@ -94,11 +112,30 @@ async function persistSeenIds(seen: Set<string>): Promise<void> {
  */
 export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
   const { activePubkey } = await loadIdentities();
-  if (!activePubkey) return { pinged: false, freshCount: 0 };
+  if (!activePubkey) return { pinged: false, freshCount: 0, freshCacheCommentCount: 0 };
 
   const readRelays = (await getUserRelays()).filter((r) => r.read).map((r) => r.url);
-  if (readRelays.length === 0) return { pinged: false, freshCount: 0 };
+  if (readRelays.length === 0) return { pinged: false, freshCount: 0, freshCacheCommentCount: 0 };
 
+  // Run the two detect-and-ping passes sequentially — they touch
+  // disjoint persisted seen-sets and disjoint kinds on the relay, so a
+  // failure in one must not poison the other (the catch on each pass is
+  // independent and falls through with a 0 count).
+  const dmResult = await runDmDetectAndPing(activePubkey, readRelays);
+  const cacheResult = await runCacheCommentDetectAndPing(activePubkey, readRelays);
+
+  return {
+    pinged: dmResult.pinged || cacheResult.pinged,
+    freshCount: dmResult.freshCount,
+    freshCacheCommentCount: cacheResult.freshCount,
+  };
+}
+
+/** DM detect-and-ping pass — kind-1059 + kind-4 addressed to the viewer. */
+async function runDmDetectAndPing(
+  activePubkey: string,
+  readRelays: string[],
+): Promise<{ pinged: boolean; freshCount: number }> {
   const { seen, primed } = await loadSeenIds();
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_SEC;
 
@@ -151,6 +188,78 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
     return { pinged: freshCount > 0, freshCount };
   } catch {
     // Best-effort: a failed relay round-trip just means we retry next wake.
+    return { pinged: false, freshCount: 0 };
+  }
+}
+
+/**
+ * Find-log detect-and-ping pass (#740) — kind-1111 NIP-22 comments whose
+ * `#A` root pointer matches one of the active user's published caches.
+ * Pattern mirrors the DM pass: query a window, dedupe against a persisted
+ * seen-set, fire a single generic notification on fresh arrivals.
+ *
+ * "My caches" comes from a one-shot author-listing query rather than a
+ * persisted snapshot, for two reasons: (a) the background JS context is
+ * disjoint from the foreground React tree, so we can't read NostrContext's
+ * in-memory cache list; (b) author-listings are tiny (kind-37516 by one
+ * pubkey is replaceable and bounded) so the extra round-trip is cheap.
+ * No caches → no filter armed → silent return.
+ */
+async function runCacheCommentDetectAndPing(
+  activePubkey: string,
+  readRelays: string[],
+): Promise<{ pinged: boolean; freshCount: number }> {
+  let myCoords: string[] = [];
+  try {
+    const mine = await fetchCachesByAuthor(activePubkey, readRelays);
+    myCoords = mine.map((c) => c.coord);
+  } catch {
+    // Author-listing failed — skip this pass without poisoning the next.
+    return { pinged: false, freshCount: 0 };
+  }
+  if (myCoords.length === 0) return { pinged: false, freshCount: 0 };
+
+  const { seen, primed } = await loadSeenIds(BG_SEEN_CACHE_COMMENT_IDS_KEY);
+  const since = Math.floor(Date.now() / 1000) - CACHE_COMMENT_LOOKBACK_SEC;
+
+  try {
+    const events = await pool.querySync(
+      readRelays,
+      {
+        kinds: [GC_COMMENT_KIND],
+        '#A': myCoords,
+        since,
+      },
+      { maxWait: QUERY_MAXWAIT_MS },
+    );
+
+    // Genuinely-new = not in the seen-set AND not our own echo (a hider
+    // commenting on their own cache is a maintenance note, not a find we
+    // want to self-ping for).
+    const fresh = events.filter((e) => !seen.has(e.id) && e.pubkey !== activePubkey);
+
+    for (const e of events) seen.add(e.id);
+    await persistSeenIds(seen, BG_SEEN_CACHE_COMMENT_IDS_KEY);
+
+    // First-ever run primes a silent baseline so any historical find-logs
+    // already on the relays don't fire a cold-start flood. Same shape as
+    // the DM pass.
+    if (!primed) return { pinged: false, freshCount: 0 };
+
+    const freshCount = fresh.length;
+    if (freshCount > 0) {
+      await fireCacheNotification({
+        // Sentinel coord — never matches an actively-viewed cache, so the
+        // suppression gate always lets a background ping through. The tap
+        // router falls back to the Geo-caches list when the coord can't
+        // be resolved to a specific detail screen.
+        cacheCoord: '__background__',
+        title: freshCount > 1 ? 'New finds on your caches' : 'New find on your cache',
+        body: 'Open Lightning Piggy to view',
+      });
+    }
+    return { pinged: freshCount > 0, freshCount };
+  } catch {
     return { pinged: false, freshCount: 0 };
   }
 }

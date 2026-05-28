@@ -49,6 +49,7 @@ import {
 } from './nostrDmCache';
 import { useDmInbox } from './useDmInbox';
 import { useGroupMessaging } from './useGroupMessaging';
+import { useCacheNotifications } from './useCacheNotifications';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
@@ -403,6 +404,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     signerType,
     relays,
   });
+
+  // Find-log notifications (#740) — live kind-1111 sub against the
+  // viewer's cache coordinates. Sibling to `useDmInbox`'s live sub;
+  // fires `fireCacheNotification` per fresh arrival.
+  useCacheNotifications({ pubkey, getReadRelays });
 
   const loadProfile = useCallback(
     async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
