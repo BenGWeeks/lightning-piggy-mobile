@@ -22,7 +22,7 @@ name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
 # in PR #334's NIP-17 migration vs group send in #267).
 #
 # Prerequisites (same as test-conversation-keyboard.yaml):
-#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC,
+#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC_BIG,
 #     "Approve basic actions" was selected).
 #   - Little Piggy fixture is reachable from the Messages list (default
 #     Maestro seed). The conversation row is matched by `text: 'Little Piggy.*'` regex — same shape used elsewhere in the suite (e.g. test-conversation-keyboard.yaml). MessagesScreen rows don't have per-row testIDs today, so there's no testID-prefix alternative.
@@ -31,7 +31,7 @@ name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
 #
 # Run:
 #   source .env && \
-#     maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     maestro test -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" \
 #     tests/e2e/test-dm-send-amber-373.yaml
 
 - runFlow: test-login-amber.yaml

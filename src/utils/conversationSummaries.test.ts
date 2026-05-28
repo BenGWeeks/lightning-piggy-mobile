@@ -1,5 +1,5 @@
 import { buildDmSummaries, type DmInboxEntry } from './conversationSummaries';
-import type { NostrContact } from '../types/nostr';
+import type { NostrContact, NostrProfile } from '../types/nostr';
 
 const FOLLOWED = 'a'.repeat(64);
 const UNFOLLOWED = 'b'.repeat(64);
@@ -42,7 +42,7 @@ describe('buildDmSummaries follow gate', () => {
     expect(result[0].pubkey).toBe(FOLLOWED);
   });
 
-  it('keeps unfollowed senders when followPubkeys is undefined (devMode + Following-only=off)', () => {
+  it('keeps unfollowed senders when followPubkeys is undefined (secretMode + Following-only=off)', () => {
     const result = buildDmSummaries(
       [entry(FOLLOWED), entry(UNFOLLOWED)],
       [followedContact],
@@ -62,5 +62,48 @@ describe('buildDmSummaries follow gate', () => {
       new Set<string>(),
     );
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('buildDmSummaries non-followed profile resolution (#664)', () => {
+  const evilProfile: NostrProfile = {
+    pubkey: UNFOLLOWED,
+    npub: '',
+    name: 'Evil Piggy',
+    displayName: null,
+    picture: 'https://example.com/evil.png',
+    banner: null,
+    about: null,
+    lud16: null,
+    nip05: null,
+  };
+
+  it('resolves a non-contact sender name + avatar from extraProfiles', () => {
+    const result = buildDmSummaries(
+      [entry(UNFOLLOWED)],
+      [], // not in the contact list
+      undefined,
+      new Map([[UNFOLLOWED.toLowerCase(), evilProfile]]),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('Evil Piggy');
+    expect(result[0].picture).toBe('https://example.com/evil.png');
+  });
+
+  it('falls back to an npub-style name (not a profile) when none is known', () => {
+    const result = buildDmSummaries([entry(UNFOLLOWED)], [], undefined);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).not.toBe('Evil Piggy');
+    expect(result[0].picture).toBeNull();
+  });
+
+  it('prefers a real contact profile over extraProfiles', () => {
+    const result = buildDmSummaries(
+      [entry(FOLLOWED)],
+      [followedContact],
+      undefined,
+      new Map([[FOLLOWED.toLowerCase(), evilProfile]]),
+    );
+    expect(result[0].name).toBe('Alice');
   });
 });

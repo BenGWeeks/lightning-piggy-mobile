@@ -4,6 +4,9 @@ import {
   getPublicKey,
   finalizeEvent,
   getEventHash,
+  verifyEvent,
+  validateEvent,
+  type Event as NostrEvent,
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
@@ -12,8 +15,114 @@ import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
+import { slimDisplayProfile } from '../utils/profileSanitize';
 
-const pool = new SimplePool();
+// Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
+// the Hunt feature's NIP-GC subs) can share the single connection pool
+// rather than spinning up parallel SimplePool instances per feature —
+// each pool maintains its own WebSockets per relay, so duplication adds
+// real connection cost.
+export const pool = new SimplePool();
+
+// Fast-path verification for kind-0 (profile / metadata) events.
+// `SimplePool` runs `verifyEvent` synchronously for every event before
+// dispatching `onevent` — a full secp256k1 schnorr check (~25 ms each in
+// Hermes), so a cold-start burst of 150+ profile events from a
+// `fetchProfiles` query froze the JS thread for ~6 s (issue #526). For
+// kind 0 we keep only the cheap structural check (`validateEvent`) and
+// skip schnorr. Trade-off: a kind-0 from this path is NOT signature-
+// verified — a malicious relay could forge any field, including the
+// `lud16` lightning address, which would silently redirect a zap. That
+// is safe ONLY because both consumers compensate: `fetchProfiles` (batch)
+// runs every result through `slimDisplayProfile` to strip `lud16`, and
+// `fetchProfile` (single) re-runs full `verifyEvent` itself before its
+// `lud16` can feed a payment. Every other kind keeps full `verifyEvent`.
+//
+// Verified-event-id cache (#605 follow-up). The 2026-05-17 CDP profile
+// of the Explore tab freeze showed 25-30 % of the 16 s tab-switch is
+// Schnorr verification on the Hermes JS thread (`mul` / `sqrtMod` /
+// `pow2` / `Maj`). The relay's filter-EOSE replay on every re-subscribe
+// re-emits the same events we already verified on the previous focus,
+// and each one pays the full ~25 ms cost again. Caching the id of
+// every successfully-verified event lets re-subscribes skip the
+// secp256k1 work — same security posture (we only cache an id once
+// the full schnorr check passed), much faster.
+//
+// Bounded at 10 000 entries with O(1) circular-buffer eviction so a
+// long-running session doesn't drift to unlimited memory. 10 000
+// event-ids at 64 bytes each ≈ 640 KB — negligible. The cache is
+// module-scoped so it survives across screen focus / blur / tab
+// switches.
+//
+// Eviction was previously `Array.prototype.shift()` on a 10k-element
+// array — O(n) memmove per call once the cache filled, measurable on
+// the same hot path this cache is meant to speed up (PR #628 Copilot
+// review). Switching to a fixed-size circular buffer keeps both
+// insert + evict at O(1).
+const VERIFIED_CACHE_CAP = 10_000;
+const verifiedEventIds = new Set<string>();
+const verifiedEventOrder = new Array<string | null>(VERIFIED_CACHE_CAP).fill(null);
+let verifiedHead = 0;
+const rememberVerified = (id: string): void => {
+  if (verifiedEventIds.has(id)) return;
+  // Evict the slot we're about to overwrite (null on first cap-1 calls,
+  // then the oldest live id once the buffer wraps). Set.delete on null
+  // is a no-op so we don't need a separate branch for the cold path.
+  const evicted = verifiedEventOrder[verifiedHead];
+  if (evicted !== null) verifiedEventIds.delete(evicted);
+  verifiedEventOrder[verifiedHead] = id;
+  verifiedEventIds.add(id);
+  verifiedHead = (verifiedHead + 1) % VERIFIED_CACHE_CAP;
+};
+// Exposed for tests and for the rare case a downstream code path
+// explicitly wants to invalidate (e.g. trust-graph change that
+// requires re-checking authorship).
+export const __resetVerifiedEventCache = (): void => {
+  verifiedEventIds.clear();
+  verifiedEventOrder.fill(null);
+  verifiedHead = 0;
+};
+export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
+
+// Non-financial event kinds where a malicious relay can at worst show
+// stale / fake content — there's no LNURL or wallet-relevant data inside
+// the event, so a forged one doesn't move funds. For these we skip
+// schnorr and run only the cheap structural validate.
+//
+// - 37516 NIP-GC cache listing: the LNURL bearer lives on the NFC tag,
+//   never on the Nostr event (see `feedback_lnurl_never_on_relays` in
+//   the buildCacheListing comment). Worst case: a fake cache appears
+//   on the map. Finder still has to scan a real tag to claim.
+// - 31923 NIP-52 time-based event: meetup metadata. A fake "Bitcoin
+//   meetup tonight" wastes the user's time, costs no money.
+// - 1059 NIP-59 gift-wrap: the outer wrap uses an ephemeral one-time
+//   key whose pubkey is never published anywhere — schnorr verification
+//   would pass for ANY key, so the check provides no integrity signal.
+//   The real integrity comes from the seal/rumor layer inside (unwrapped
+//   with our secret key in `unwrapGiftWrap`). Saving ~1–5 ms × N per
+//   cold-start inbox burst. `validateEvent()` (JSON structure) still runs.
+//
+// Other kinds keep the full schnorr — DMs (4 / 14), reactions, zap
+// requests/receipts, comment kinds (1111), found logs (7516), etc.
+const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923, 1059]);
+
+pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
+  // Skip the schnorr check if we've seen this exact event id pass it
+  // before (this run of the app). Per-event ids are 32-byte SHA-256
+  // hashes of the canonical event encoding — they include every signed
+  // field, so two events with the same id are byte-identical.
+  if (typeof event.id === 'string' && verifiedEventIds.has(event.id)) {
+    return true;
+  }
+  let ok: boolean;
+  if (event.kind === 0 || SKIP_VERIFY_KINDS.has(event.kind)) {
+    ok = validateEvent(event);
+  } else {
+    ok = verifyEvent(event);
+  }
+  if (ok && typeof event.id === 'string') rememberVerified(event.id);
+  return ok;
+}) as typeof pool.verifyEvent;
 
 // Shared pubkey + read relays of the currently logged-in Nostr user.
 // Kept as module state because `WalletProvider` wraps `NostrProvider` in
@@ -178,6 +287,12 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
       authors: [pubkey],
     });
     if (!event) return null;
+    // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
+    // fetch feeds payment destinations (`lud16`), so verify it for real here.
+    if (!verifyEvent(event)) {
+      console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
+      return null;
+    }
 
     const parsed = parseProfileContent(event.content);
     return {
@@ -348,13 +463,6 @@ export async function fetchRelayList(
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return Promise.race([
-    promise,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
-  ]);
-}
-
 // Stream a single batch of profile events. Replaces the previous
 // `pool.querySync()`-based pattern which waited for EVERY relay in the
 // set to send EOSE before returning anything. With long lists like
@@ -439,11 +547,17 @@ export async function fetchProfiles(
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
     const parsed = parseProfileContent(event.content);
-    profiles.set(event.pubkey, {
-      pubkey: event.pubkey,
-      npub: npubEncode(event.pubkey),
-      ...parsed,
-    });
+    // Batch-fetched kind-0 events skip schnorr verification (see the
+    // pool.verifyEvent fast-path) — strip payment-relevant fields so a
+    // forged relay reply can't redirect a zap. Display-only path.
+    profiles.set(
+      event.pubkey,
+      slimDisplayProfile({
+        pubkey: event.pubkey,
+        npub: npubEncode(event.pubkey),
+        ...parsed,
+      }),
+    );
     scheduleEmit();
   };
 
@@ -639,8 +753,9 @@ async function fetchZapReceiptsByTag(
   // filter type which expects `#<letter>` index signatures.
   const filter = { ...baseFilter, [tag]: deduped } as Parameters<typeof pool.querySync>[1];
   try {
-    const events = await withTimeout(pool.querySync(allRelays, filter), 15000);
-    if (!events) return [];
+    // maxWait: per-relay EOSE timeout — closes the sub at 15 s if EOSE never
+    // arrives (unlike withTimeout, which only raced the Promise and left the sub open).
+    const events = await pool.querySync(allRelays, filter, { maxWait: 15000 });
     const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
     for (const e of events) byId.set(e.id, e);
     return Array.from(byId.values());
@@ -656,16 +771,23 @@ export function createZapRequestEvent(
   amountMsats: number,
   relays: string[],
   content: string,
+  // Optional event id to zap. NIP-57 says the `e` tag MAY appear on a
+  // 9734 to scope the zap to one note; LNURL servers copy it through
+  // to the 9735 receipt's `e` tag so clients can aggregate zaps on
+  // that note (see `findLogZapsService` for the consumer side).
+  zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  const tags: string[][] = [
+    ['p', recipientPubkey],
+    ['amount', amountMsats.toString()],
+    ['relays', ...relays],
+  ];
+  if (zapEventId) tags.push(['e', zapEventId]);
   return {
     kind: 9734,
     created_at: Math.floor(Date.now() / 1000),
     pubkey: senderPubkey,
-    tags: [
-      ['p', recipientPubkey],
-      ['amount', amountMsats.toString()],
-      ['relays', ...relays],
-    ],
+    tags,
     content,
   };
 }
@@ -792,13 +914,14 @@ export async function fetchDirectMessageEvents(
     toMeFilter.since = since;
   }
   try {
+    // maxWait closes the sub at 15 s if EOSE never arrives (proper teardown vs withTimeout race).
     const [fromMe, toMe] = await Promise.all([
-      withTimeout(pool.querySync(allRelays, fromMeFilter), 15000),
-      withTimeout(pool.querySync(allRelays, toMeFilter), 15000),
+      pool.querySync(allRelays, fromMeFilter, { maxWait: 15000 }),
+      pool.querySync(allRelays, toMeFilter, { maxWait: 15000 }),
     ]);
     const byId = new Map<string, RawDmEvent>();
-    for (const ev of fromMe ?? []) byId.set(ev.id, ev as RawDmEvent);
-    for (const ev of toMe ?? []) byId.set(ev.id, ev as RawDmEvent);
+    for (const ev of fromMe) byId.set(ev.id, ev as RawDmEvent);
+    for (const ev of toMe) byId.set(ev.id, ev as RawDmEvent);
     return Array.from(byId.values());
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
@@ -870,16 +993,19 @@ export async function fetchInboxDmEvents(
     recvK4Filter.since = since;
   }
   try {
+    // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
+    // inbox fetch genuinely terminates — unlike withTimeout which only raced the
+    // Promise and left the underlying subscribeEose sub running for up to ~60 s.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      withTimeout(pool.querySync(allRelays, sentK4Filter), 15000),
-      withTimeout(pool.querySync(allRelays, recvK4Filter), 15000),
-      withTimeout(pool.querySync(allRelays, wrapsFilter), 15000),
+      pool.querySync(allRelays, sentK4Filter, { maxWait: 15000 }),
+      pool.querySync(allRelays, recvK4Filter, { maxWait: 15000 }),
+      pool.querySync(allRelays, wrapsFilter, { maxWait: 15000 }),
     ]);
     const k4 = new Map<string, RawDmEvent>();
-    for (const ev of sentK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
-    for (const ev of receivedK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
+    for (const ev of sentK4) k4.set(ev.id, ev as RawDmEvent);
+    for (const ev of receivedK4) k4.set(ev.id, ev as RawDmEvent);
     const k1059 = new Map<string, RawGiftWrapEvent>();
-    for (const ev of wraps ?? []) k1059.set(ev.id, ev as RawGiftWrapEvent);
+    for (const ev of wraps) k1059.set(ev.id, ev as RawGiftWrapEvent);
     return { kind4: Array.from(k4.values()), kind1059: Array.from(k1059.values()) };
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchInboxDmEvents failed:', error);
@@ -933,7 +1059,8 @@ export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec
 const connectedRelays = new Set<string>();
 
 // Track all relays we connect to for proper cleanup
-function trackRelays(relays: string[]) {
+// (exported for ./dmLiveSubscription, extracted per #703).
+export function trackRelays(relays: string[]) {
   relays.forEach((r) => connectedRelays.add(r));
 }
 
@@ -1293,52 +1420,69 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 // fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
 // future tweak. (#383, Copilot review on PR #384)
 export const DM_INBOX_LIMIT = 1000;
-// Live sub never looks further back than this — caps cold-start restream cost when inboxLastSeen is very stale (e.g. user hasn't opened the app in weeks). The bulk fetch (fetchInboxDmEvents) handles deeper backfill on tab open.
-const DM_LIVE_SUB_MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
-export function subscribeInboxDmsForViewer(input: {
-  viewerPubkey: string;
+// The live inbox subscription (subscribeInboxDmsForViewer) was extracted to
+// ./dmLiveSubscription to keep this file under the size cap (#703).
+
+// Raw kind-1 note for the friend-feed embed on ContactProfileScreen.
+// Lean shape: just the fields the preview cards actually render.
+export interface RawAuthorNote {
+  id: string;
+  pubkey: string;
+  created_at: number;
+  content: string;
+}
+
+// Subscribe to an author's recent kind-1 notes. Mirrors the
+// subscribeInboxDmsForViewer pattern: returns a cleanup function the
+// caller invokes on unmount. Events stream in via `onEvent` ordered by
+// relay arrival (NOT created_at) — caller is responsible for sorting.
+export function subscribeAuthorNotes(input: {
+  authorPubkey: string;
   relays: string[];
-  onEvent: (ev: RawInboxDmEvent) => void;
-  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter resolves to `clamp(providedSince - 120s, now-7d, now)` — the 120 s safety buffer in case relay clock skew tagged a wrap slightly older than our cursor, the 7-day floor caps cold-start restream when the cursor is very stale, and the `now` cap defends against a future-dated cursor (corrupted persisted value or a wrap with a bad clock) that would otherwise silently miss new DMs until wall-clock catches up. If absent, falls back to the 7-day floor.
-  sinceK4?: number;
+  limit?: number;
+  onEvent: (note: RawAuthorNote) => void;
+  // Fires once after every read relay has signalled end-of-stored-events
+  // (EOSE). Callers use this to drop the "loading" spinner so quiet
+  // authors don't keep spinning forever — the grace timer downstream
+  // is just a backstop. Wired-up callers don't need to do anything
+  // beyond `setLoading(false)` here; the subscription remains active
+  // for live events.
+  onEose?: () => void;
 }): () => void {
   trackRelays(input.relays);
-  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
-    input.onEvent(ev);
-  };
-  const nowSec = Math.floor(Date.now() / 1000);
-  const lookbackFloor = nowSec - DM_LIVE_SUB_MAX_LOOKBACK_SECONDS;
-  const requested = input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
-  // Upper-bound at `nowSec` so a future-dated persisted cursor (or one bumped by a wrap with a bad created_at) doesn't drop us into a `since` in the future where the relay returns nothing.
-  const sinceK4 = Math.min(nowSec, Math.max(lookbackFloor, requested));
-  const subK4 = pool.subscribeMany(
+  const limit = input.limit ?? 30;
+  let eoseFired = false;
+  const sub = pool.subscribeMany(
     input.relays,
     {
-      kinds: [4],
-      '#p': [input.viewerPubkey],
-      since: sinceK4,
-      limit: DM_INBOX_LIMIT,
+      kinds: [1],
+      authors: [input.authorPubkey],
+      limit,
     } as Filter,
-    { onevent },
-  );
-  const subWraps = pool.subscribeMany(
-    input.relays,
     {
-      kinds: [1059],
-      '#p': [input.viewerPubkey],
-      // No `since` — NIP-59 random timestamps would drop fresh wraps.
-      limit: DM_INBOX_LIMIT,
-    } as Filter,
-    { onevent },
+      onevent: (ev: { id: string; pubkey: string; created_at: number; content: string }) => {
+        input.onEvent({
+          id: ev.id,
+          pubkey: ev.pubkey,
+          created_at: ev.created_at,
+          content: ev.content,
+        });
+      },
+      oneose: () => {
+        // pool.subscribeMany fires oneose per relay; collapse to one
+        // callback so consumers don't need their own dedupe.
+        if (eoseFired) return;
+        eoseFired = true;
+        input.onEose?.();
+      },
+    },
   );
   return () => {
-    for (const s of [subK4, subWraps]) {
-      try {
-        s.close();
-      } catch {
-        // best-effort
-      }
+    try {
+      sub.close();
+    } catch {
+      // best-effort — sub may already be closed
     }
   };
 }

@@ -1,0 +1,35 @@
+# Smoke test for the ConversationScreen refactor (styles / conversationItems /
+# ConversationMessageRow / useConversationComposerActions extraction). Opens a
+# 1:1 conversation via the friend picker and verifies the refactored screen +
+# composer + attach panel render and respond. Not a regression suite — a quick
+# "did the extraction break rendering" check.
+appId: com.lightningpiggy.app.dev
+---
+- launchApp
+- tapOn:
+    id: 'tab-friends'
+    optional: true
+# Go to Messages and start a new 1:1 conversation.
+- tapOn:
+    id: 'tab-messages'
+    optional: true
+- assertVisible: 'Messages'
+- tapOn:
+    id: 'start-conversation-button'
+- assertVisible:
+    id: 'friend-picker-search'
+# Pick the first friend offered (regex matches any "Send to <name>" row).
+- tapOn:
+    text: 'Send to .*'
+    index: 0
+# ConversationScreen (refactored) should now be mounted.
+- assertVisible:
+    id: 'conversation-input'
+- assertVisible:
+    id: 'conversation-attach'
+# Open the inline attach panel — exercises the composer-actions wiring.
+- tapOn:
+    id: 'conversation-attach'
+- assertVisible:
+    id: 'conversation-attach-panel'
+- takeScreenshot: /tmp/maestro-conversation-refactor

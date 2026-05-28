@@ -6,7 +6,7 @@ name: Nostr Login Test (dev variant)
 # variant; test-login.yaml's ${APP_ID:-com.lightningpiggy.app} default
 # syntax trips Maestro's GraalJs evaluator.
 #
-# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-login-dev.yaml
+# Run: source .env && maestro test -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" tests/e2e/test-login-dev.yaml
 
 - waitForAnimationToEnd:
     timeout: 10000
@@ -53,7 +53,7 @@ name: Nostr Login Test (dev variant)
 
 - tapOn:
     id: 'nsec-input'
-- inputText: ${MAESTRO_NSEC}
+- inputText: ${MAESTRO_NSEC_BIG}
 - hideKeyboard
 - waitForAnimationToEnd:
     timeout: 2000
