@@ -217,7 +217,17 @@ async function runCacheCommentDetectAndPing(
     // Author-listing failed — skip this pass without poisoning the next.
     return { pinged: false, freshCount: 0 };
   }
-  if (myCoords.length === 0) return { pinged: false, freshCount: 0 };
+  if (myCoords.length === 0) {
+    // Persist an empty seen-set on the no-cache path so the baseline is
+    // marked as primed — otherwise the very first background pass after
+    // the user publishes their first cache would treat pre-existing
+    // find-logs (within the 1-day window) as baseline (!primed) and
+    // silently swallow them. Idempotent: skip the write if already primed
+    // (a previous run with caches that since vanished). Copilot review #742.
+    const { primed: alreadyPrimed } = await loadSeenIds(BG_SEEN_CACHE_COMMENT_IDS_KEY);
+    if (!alreadyPrimed) await persistSeenIds(new Set(), BG_SEEN_CACHE_COMMENT_IDS_KEY);
+    return { pinged: false, freshCount: 0 };
+  }
 
   const { seen, primed } = await loadSeenIds(BG_SEEN_CACHE_COMMENT_IDS_KEY);
   const since = Math.floor(Date.now() / 1000) - CACHE_COMMENT_LOOKBACK_SEC;

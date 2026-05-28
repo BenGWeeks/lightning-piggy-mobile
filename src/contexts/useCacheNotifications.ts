@@ -9,15 +9,17 @@
  * decryption, no follow gate, and no inbox state to mutate — the hook
  * exists purely to listen and ping.
  *
- * "My cache coordinates" is sourced from a one-shot author-listing query
- * via `fetchCachesByAuthor`, with a session-scoped re-fetch when the
- * viewer's pubkey changes or the read relays change. We deliberately do
- * NOT thread this list through NostrContext state — the screens that
- * already display the user's caches each have their own hydration
- * paths, and bolting another reactive source onto the context would
- * grow that over-cap file without a clear win. The cost is one
- * `fetchCachesByAuthor` per identity-switch; cheap (kind-37516 by one
- * pubkey is replaceable and bounded).
+ * "My cache coordinates" is sourced from `fetchCachesByAuthor` and
+ * re-fetched on a session timer (every minute) and on every AppState →
+ * active transition, so a cache the user publishes mid-session (which a
+ * one-shot snapshot would miss until full remount, Copilot review #742)
+ * is picked up by the live sub within a minute — and immediately on a
+ * background→foreground hop. We deliberately do NOT thread this list
+ * through NostrContext state — the screens that already display the
+ * user's caches each have their own hydration paths, and bolting another
+ * reactive source onto the context would grow that over-cap file without
+ * a clear win. The cost is one `fetchCachesByAuthor` per minute; cheap
+ * (kind-37516 by one pubkey is replaceable and bounded, capped at 5 s).
  *
  * Freshness gate matches the DM live sub: only events whose own
  * `created_at` ≥ `subOpenedAtSec − NOTIFY_SKEW_SEC` fire a notification,
@@ -26,6 +28,7 @@
  * relays only fires once.
  */
 import { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import type { VerifiedEvent } from 'nostr-tools';
 import { subscribeCacheCommentsForCoords } from '../services/cacheNotifySubscription';
 import { fireCacheNotification } from '../services/notificationService';
@@ -39,6 +42,12 @@ const NOTIFY_SKEW_SEC = 120;
 // in heavy bursts (e.g. a treasure hunt going viral) and we don't want
 // the Set to grow unboundedly across the life of the sub.
 const SEEN_CAP = 1000;
+
+// Re-poll the viewer's cache coords once a minute so a cache published
+// mid-session is picked up by the live sub without a full app restart
+// (Copilot review #742). Bounded (5 s maxWait inside fetchCachesByAuthor)
+// and inexpensive (kind-37516 by one pubkey is replaceable + small).
+const REFETCH_COORDS_INTERVAL_MS = 60_000;
 
 export interface UseCacheNotificationsParams {
   /** Active viewer's hex pubkey. Null when logged out — sub stays closed. */
@@ -74,6 +83,9 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
 
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
+    // Coord set the sub is currently armed with. Compared against each
+    // refetch to skip tear-down + re-arm when nothing changed.
+    let currentCoords: string[] = [];
     const seen = new Set<string>();
     const subOpenedAtSec = Math.floor(Date.now() / 1000);
 
@@ -117,14 +129,29 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       });
     };
 
-    // Resolve "my caches" with a one-shot author query, then open the
-    // sub. fetchCachesByAuthor caps internally at 5 s so a slow relay
-    // can't pin the hook on mount.
-    (async () => {
+    /**
+     * Re-fetch "my cache coords" and (re-)arm the live sub if the coord
+     * set changed. Called on mount, on a 60 s interval, and on every
+     * AppState → active transition so a cache published mid-session is
+     * picked up without a full app restart. `fetchCachesByAuthor` caps
+     * itself at 5 s so this can't pin the hook against a slow relay.
+     */
+    const refetchAndRearm = async (): Promise<void> => {
+      if (cancelled) return;
       try {
         const myCaches = await fetchCachesByAuthor(pubkey, readRelays);
         if (cancelled) return;
         const coords = myCaches.map((c) => c.coord);
+        // Set-equality (order-independent — fetchCachesByAuthor ordering is
+        // not guaranteed). Skip the tear-down + re-arm when unchanged.
+        const sameSet =
+          coords.length === currentCoords.length && coords.every((c) => currentCoords.includes(c));
+        if (sameSet) return;
+        currentCoords = coords;
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
         if (coords.length === 0) return;
         unsubscribe = subscribeCacheCommentsForCoords({
           viewerPubkey: pubkey,
@@ -133,13 +160,24 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
           onEvent: handle,
         });
       } catch {
-        // Non-fatal — the background detect-and-ping pass still catches
-        // anything we miss here on the next wake.
+        // Non-fatal — leave the previous sub (if any) in place; the next
+        // refetch retries. The background detect-and-ping pass also
+        // catches anything we miss here.
       }
-    })();
+    };
+
+    void refetchAndRearm();
+    const interval = setInterval(() => {
+      void refetchAndRearm();
+    }, REFETCH_COORDS_INTERVAL_MS);
+    const appStateSub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') void refetchAndRearm();
+    });
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
+      appStateSub.remove();
       if (unsubscribe) unsubscribe();
     };
   }, [pubkey, getReadRelays]);
