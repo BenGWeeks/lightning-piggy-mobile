@@ -28,9 +28,13 @@ import {
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
+  AMBER_NIP17_SKIP_KEY_BASE,
+  NSEC_NIP17_SKIP_KEY_BASE,
   type Nip17CacheEntry,
   safeParseRecord,
   writeNip17Cache,
+  loadNip17SkipSet,
+  writeNip17SkipSet,
   DM_INBOX_REFRESH_TTL_MS,
   DM_INBOX_CAP,
   DM_CONV_CAP,
@@ -266,6 +270,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // multi-second freezes that coincide with this call. #554.
       const __perfBlockStart = performance.now();
       const signal = opts?.signal;
+      // When true, the negative-result skip-set is bypassed so wraps that
+      // were previously skipped (non-follows, group routes) get re-evaluated
+      // against the current follow set. Necessary because a user who follows
+      // a new contact should see their older wraps surface on the next
+      // pull-to-refresh, not remain silently skipped. (#743)
+      const forceRefresh = opts?.force === true;
       // Dev-only "Following only=off" bypass — read once at the top so
       // the closure captures a stable value across the async work below.
       // When true, all six follow-gate `continue`s in the decrypt loops
@@ -322,6 +332,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           let nip17Misses = 0;
           let nip17Evictions = 0;
           let nip17CacheSize = 0;
+          // Wraps short-circuited by the negative-result skip-set (#743).
+          // Counted separately from positive-cache hits so we can see
+          // how much decrypt work the skip-set is saving per refresh.
+          let nip17SkipHits = 0;
           // Number of actual `setTimeout(0)` yields the NIP-17 loop
           // performed this refresh — emitted in the [Perf] nip17-cache
           // line so we can track how often the new frame-budget
@@ -458,11 +472,24 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               // filter gate below. This is the fix for #176. Per-account
               // namespaced (#288).
               const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-              const raw = await safeGetDmCacheItem(nsecCacheKey);
+              // Negative-result skip-set: wrap ids that were successfully
+              // decrypted in a prior refresh but produced no inbox entry
+              // (group rumor or non-followed sender). The relay re-delivers
+              // the same wraps on every warm refresh and each miss pays the
+              // full NIP-44 schnorr + decrypt cost again. Persisting the
+              // set lets the loop short-circuit to a Set.has(id) check.
+              // Only the wrap id (a public nonce on the outer envelope) is
+              // stored — no plaintext, no sender pubkey. (#743)
+              const nsecSkipKey = perAccountKey(NSEC_NIP17_SKIP_KEY_BASE, refreshForPubkey);
+              const [raw, skipSet] = await Promise.all([
+                safeGetDmCacheItem(nsecCacheKey),
+                loadNip17SkipSet(nsecSkipKey),
+              ]);
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
               let touched = 0;
+              let skipSetDirty = false;
               // Frame-budget scheduler (#532): yield whenever we've held
               // the JS thread for >= DECRYPT_FRAME_BUDGET_MS, with the
               // count-based modulo kept as a safety cap. On abort, the
@@ -512,6 +539,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     });
                     continue;
                   }
+                  // Skip-set hit: this wrap was previously decrypted and
+                  // found to carry a group rumor or a non-followed sender —
+                  // short-circuit without re-paying the NIP-44 decrypt cost.
+                  // Bypassed on force-refresh so a newly-followed contact's
+                  // older wraps get re-evaluated. (#743)
+                  if (!forceRefresh && skipSet.has(wrap.id)) {
+                    nip17SkipHits++;
+                    continue;
+                  }
                   nip17Misses++;
                   const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
                   // No per-decrypt yield here: the frame-budget scheduler
@@ -524,13 +560,29 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   // never sees group messages — they belong to a different
                   // surface (GroupConversationScreen).
                   const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                  if (routeResult.kind !== 'not-group') continue;
+                  if (routeResult.kind !== 'not-group') {
+                    // Successful decrypt, no inbox entry — add to skip-set
+                    // so subsequent refreshes don't re-decrypt. (#743)
+                    skipSet.add(wrap.id);
+                    skipSetDirty = true;
+                    continue;
+                  }
                   const partnership = partnerFromRumor(rumor, refreshForPubkey);
                   if (!partnership) continue;
                   // B1 — drop non-follows at the data layer. No caching, no
                   // state. The filter is load-bearing ("parental control"),
                   // so it runs here not in the view.
-                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  if (!passesFollowGate(partnership.partnerPubkey)) {
+                    // Successful decrypt, non-followed sender — add to
+                    // skip-set. If the user later follows this sender the
+                    // skip-set is not invalidated: the live NIP-17 sub
+                    // delivers new wraps in real time, and pull-to-refresh
+                    // (force: true) bypasses the skip-set by resetting it.
+                    // (#743)
+                    skipSet.add(wrap.id);
+                    skipSetDirty = true;
+                    continue;
+                  }
                   const entry: Nip17CacheEntry = {
                     id: wrap.id,
                     wrapId: wrap.id,
@@ -563,18 +615,28 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               if (newlyCached.length > 0 || unfollowedPurged > 0 || touched > 0) {
                 nip17Evictions += await writeNip17Cache(nsecCacheKey, cache);
               }
+              if (skipSetDirty) {
+                await writeNip17SkipSet(nsecSkipKey, skipSet);
+              }
               nip17CacheSize = Object.keys(cache).length;
             }
           } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
             // Always run the unwrap loop — Amber's silent content-resolver path returns PERMISSION_NOT_GRANTED on the first wrap if the user hasn't granted nip44_decrypt yet, which we surface via setAmberNip44Permission('denied') so NostrScreen can show the one-shot "Grant permission in Amber" button. Closes #404.
             // Persistent cache keyed by wrap id. Only ever contains rumors from *followed* senders — see the filter gate below. Per-account namespaced (#288).
             const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-            const raw = await safeGetDmCacheItem(amberCacheKey);
-            const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            // Negative-result skip-set — same semantics as the nsec branch.
+            // (#743)
+            const amberSkipKey = perAccountKey(AMBER_NIP17_SKIP_KEY_BASE, refreshForPubkey);
+            const [rawAmber, amberSkipSet] = await Promise.all([
+              safeGetDmCacheItem(amberCacheKey),
+              loadNip17SkipSet(amberSkipKey),
+            ]);
+            const cache = safeParseRecord<Nip17CacheEntry>(rawAmber);
             const newlyCached: Nip17CacheEntry[] = [];
             let permissionDenied = false;
             let touched = 0;
             let unfollowedPurged = 0;
+            let amberSkipSetDirty = false;
             // Frame-budget scheduler (#532) — see nsec branch above.
             const amberYield = createYieldScheduler({
               signal,
@@ -606,6 +668,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   });
                   continue;
                 }
+                // Skip-set hit — short-circuit without an Amber IPC call.
+                // Bypassed on force-refresh. (#743)
+                if (!forceRefresh && amberSkipSet.has(wrap.id)) {
+                  nip17SkipHits++;
+                  continue;
+                }
                 nip17Misses++;
                 // Uncached — unwrap via Amber's silent content-resolver path.
                 // If Amber hasn't granted blanket nip44_decrypt permission,
@@ -616,14 +684,19 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   // Multi-recipient (group) rumors: route to group storage
                   // and short-circuit the DM-inbox path.
                   const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                  if (routeResult.kind !== 'not-group') continue;
+                  if (routeResult.kind !== 'not-group') {
+                    amberSkipSet.add(wrap.id);
+                    amberSkipSetDirty = true;
+                    continue;
+                  }
                   const partnership = partnerFromRumor(rumor, refreshForPubkey);
                   if (!partnership) continue;
-                  // B1 — never cache rumors from non-followed senders. The
-                  // cost is re-decrypting them on the next refresh, but the
-                  // silent path is ~1 ms per call and keeps plaintext off
-                  // AsyncStorage.
-                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  // B1 — never cache rumors from non-followed senders. (#743)
+                  if (!passesFollowGate(partnership.partnerPubkey)) {
+                    amberSkipSet.add(wrap.id);
+                    amberSkipSetDirty = true;
+                    continue;
+                  }
                   const entry: Nip17CacheEntry = {
                     id: wrap.id,
                     wrapId: wrap.id,
@@ -669,6 +742,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             if (newlyCached.length > 0 || touched > 0 || unfollowedPurged > 0) {
               nip17Evictions += await writeNip17Cache(amberCacheKey, cache);
             }
+            if (amberSkipSetDirty) {
+              await writeNip17SkipSet(amberSkipKey, amberSkipSet);
+            }
             nip17CacheSize = Object.keys(cache).length;
           }
 
@@ -704,6 +780,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           console.log(
             `[Perf] nip17-cache: ` +
               `hits=${nip17Hits}, ` +
+              `skipHits=${nip17SkipHits}, ` +
               `misses=${nip17Misses}, ` +
               `evictions=${nip17Evictions}, ` +
               `size=${nip17CacheSize}, ` +
