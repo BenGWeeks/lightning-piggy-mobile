@@ -567,10 +567,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
-  // Gate re-subscription on a ≥500 m position delta so GPS jitter (~1 Hz on
-  // Android) doesn't churn relay subs on every tick. refreshKey bypasses the
-  // gate so pull-to-refresh always re-opens. (#739 Fix 3)
-  const subsLastPosRef = useRef<{ lat: number; lon: number; refreshKey: number } | null>(null);
+  // Gate re-subscription on coarse position movement so GPS jitter (~1 Hz on
+  // Android) doesn't churn relay subs on every tick. We do this via a
+  // quantised "position bucket" key in the effect's deps below, NOT a
+  // gate-and-return-early inside the effect body: React runs the previous
+  // effect's cleanup BEFORE the new body, so a body-level skip would still
+  // close the existing subs and then bail — leaving the screen with zero
+  // active subs across the cold-start lat/lon jitter sequence
+  // (peekCachedAnchor → getLastKnown → getCurrent typically settle within a
+  // few hundred metres). Quantising the bucket key keeps the deps stable
+  // through that jitter so the effect (and its cleanup) only re-fires when
+  // the user crosses a bucket boundary. (Copilot review #741 → #739 Fix 3.)
+  //
+  // 0.005° latitude ≈ 555 m. 0.005° longitude ≈ 555 m at the equator and
+  // shrinks with latitude (≈ 320 m at 60° N) — close enough for a "did the
+  // user move enough to re-query a different geohash neighbourhood" gate.
   // NIP-GC + NIP-52 subscriptions live on the *mount* lifecycle, not
   // the focus lifecycle. Open once when ExploreHomeScreen first
   // mounts (which is lazy on the tab navigator via `lazy: true`, so
@@ -603,21 +614,28 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // Stev.ie's #612 review surfaced this.
   const posLat = pos?.lat;
   const posLon = pos?.lon;
+  const POS_BUCKET_DEG = 0.005;
+  const posBucketKey =
+    typeof posLat !== 'number' || typeof posLon !== 'number'
+      ? null
+      : `${Math.round(posLat / POS_BUCKET_DEG)}:${Math.round(posLon / POS_BUCKET_DEG)}`;
   useEffect(() => {
-    // `refreshKey` is intentionally listed in the deps below so that
-    // pull-to-refresh (which bumps it) tears down + re-runs the
-    // subscriptions, even though the value isn't referenced inside
-    // the body.
-    if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
-    // Skip re-open when position hasn't changed ≥500 m and refreshKey is unchanged.
-    const last = subsLastPosRef.current;
+    // `refreshKey` is intentionally listed in the deps so pull-to-refresh
+    // (which bumps it) tears down + re-runs the subscriptions even though
+    // the value isn't referenced inside the body.
+    //
+    // posBucketKey gates re-runs to ~500 m moves (see the comment block
+    // above the declaration); the raw posLat / posLon are read here to
+    // build the geohash filters but are deliberately NOT in the deps —
+    // they jitter on every GPS tick and would otherwise re-run this
+    // effect on every micro-update, defeating the whole gate. eslint
+    // exhaustive-deps would flag them; the suppression is intentional.
     if (
-      last !== null &&
-      last.refreshKey === refreshKey &&
-      haversineMetres({ lat: last.lat, lon: last.lon }, { lat: posLat, lon: posLon }) < 500
+      posBucketKey === null ||
+      typeof posLat !== 'number' ||
+      typeof posLon !== 'number'
     )
       return;
-    subsLastPosRef.current = { lat: posLat, lon: posLon, refreshKey };
     // `cancelled` covers the window between effect cleanup firing
     // (subsCloserRef.current.forEach(c => c())) and the underlying
     // relay socket actually closing — a stray event in that gap
@@ -697,7 +715,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       flushPendingCaches();
       flushPendingEvents();
     };
-  }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]);
+    // posLat / posLon are intentionally NOT in this deps array — see the
+    // comment at the top of the effect. The bucket key gates re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posBucketKey, refreshKey, flushPendingCaches, flushPendingEvents]);
 
   // ----- lessons progress (local) -----------------------------------------
 
