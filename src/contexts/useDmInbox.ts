@@ -282,6 +282,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // become no-ops AND the cache hydrate skips its filter so the
       // already-cached unfollowed entries don't get masked.
       const includeNonFollows = opts?.includeNonFollows === true;
+      // Gate for negative-result skip-set lookups (#743). Bypass when:
+      //   force=true (pull-to-refresh) — newly-followed contacts' older
+      //     wraps must surface on the next explicit refresh.
+      //   includeNonFollows=true ("All (dev)" toggle) — the follow gate is
+      //     disabled, so wraps from non-followed senders that were already
+      //     added to the skip-set must now be re-evaluated and surfaced.
+      //     Without this, "Following only=off" would silently skip them.
+      //     (Copilot review finding on #744)
+      const bypassSkipSet = forceRefresh || includeNonFollows;
       // Freshness TTL: skip the refresh entirely if the previous one
       // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
       // explicitly opts into a forced refresh (pull-to-refresh). The
@@ -544,7 +553,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   // short-circuit without re-paying the NIP-44 decrypt cost.
                   // Bypassed on force-refresh so a newly-followed contact's
                   // older wraps get re-evaluated. (#743)
-                  if (!forceRefresh && skipSet.has(wrap.id)) {
+                  if (!bypassSkipSet && skipSet.has(wrap.id)) {
                     nip17SkipHits++;
                     continue;
                   }
@@ -672,7 +681,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 }
                 // Skip-set hit — short-circuit without an Amber IPC call.
                 // Bypassed on force-refresh. (#743)
-                if (!forceRefresh && amberSkipSet.has(wrap.id)) {
+                if (!bypassSkipSet && amberSkipSet.has(wrap.id)) {
                   nip17SkipHits++;
                   continue;
                 }
