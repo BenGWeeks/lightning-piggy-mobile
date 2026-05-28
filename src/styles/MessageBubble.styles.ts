@@ -360,7 +360,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     pollCard: {
       maxWidth: '85%',
-      minWidth: 260,
+      minWidth: 240,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
@@ -414,6 +414,11 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       marginTop: 4,
       minHeight: 40,
       justifyContent: 'center',
+    },
+    // Outgoing (pink) card: transparent rows so brand-pink shows through and white option text stays legible (the light row background made white-on-white unreadable).
+    pollOptionRowMe: {
+      backgroundColor: 'transparent',
+      borderColor: 'rgba(255,255,255,0.45)',
     },
     pollOptionRowMineThem: {
       borderColor: colors.brandPink,

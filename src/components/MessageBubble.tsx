@@ -291,6 +291,7 @@ const MessageBubble: React.FC<Props> = ({
                 activeOpacity={0.85}
                 style={[
                   styles.pollOptionRow,
+                  fromMe && styles.pollOptionRowMe,
                   isMine && (fromMe ? styles.pollOptionRowMineMe : styles.pollOptionRowMineThem),
                 ]}
                 onPress={() => onVotePoll?.(id, opt.id)}
