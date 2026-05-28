@@ -12,12 +12,12 @@ name: BrandedAlert renders for invalid Send-sheet input
 # emulator can't easily fake.
 #
 # Pre-reqs:
-#  - .env contains MAESTRO_NSEC
+#  - .env contains MAESTRO_NSEC_BIG
 #  - Signed-in account has at least one connected NWC wallet
 #
 # Run:
 #   source .env && maestro --device emulator-5554 test \
-#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
 #     tests/e2e/test-branded-alert.yaml
 
 - runFlow: _subflow-login-as.yaml

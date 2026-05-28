@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -8,15 +8,19 @@ import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import ContactProfileSheet from './ContactProfileSheet';
+import type { ContactProfileBodyData } from './ContactProfileBody';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
 } from './TransactionDetailSheet';
-import ContactProfileSheet from './ContactProfileSheet';
 import SendSheet from './SendSheet';
-import TransactionTypeIcon from './TransactionTypeIcon';
+import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
+import * as swapRecoveryService from '../services/swapRecoveryService';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
+import { perfLog } from '../utils/perfLog';
 import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
@@ -89,6 +93,15 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 }
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
+  // Per-mount first-render marker. The previous module-scope `let`
+  // never reset, so navigating away + back (or switching wallets,
+  // which forces a remount via the activeWalletId effect) silently
+  // dropped the perf log on every subsequent mount.
+  const firstRenderLogged = useRef(false);
+  if (!firstRenderLogged.current) {
+    firstRenderLogged.current = true;
+    perfLog(`TransactionList first render (${transactions.length} txs)`);
+  }
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { btcPrice, currency, activeWalletId } = useWallet();
@@ -139,8 +152,69 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [detailIconState, setDetailIconState] = useState<TransactionIconState | undefined>(
+    undefined,
+  );
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
+
+  // Subscribe to swapRecoveryService's attention set + claimed-hash cache
+  // so rows re-render when a recovery pass / synchronous claim updates
+  // either. Both are keyed by LN paymentHash (= sha256(preimage)), which
+  // is what WalletTransaction rows carry, so matching is a direct .has()
+  // per row. We bump a single counter on either change to force a render
+  // — the actual lookups go through swapRecoveryService each time.
+  const [, setSwapStateTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setSwapStateTick((n) => n + 1);
+    const unsubAttention = swapRecoveryService.subscribeAttention(bump);
+    const unsubClaimed = swapRecoveryService.subscribeClaimed(bump);
+    // Defensive bump: `loadClaimedHashes()` is kicked off eagerly at module
+    // import, and recovery's `notifyAttention()` can fire before this
+    // effect subscribes. Without an initial sync bump after subscribing,
+    // either of those notifies would be missed and the list would render
+    // with empty state until the *next* change. Bumping once forces a
+    // fresh read through `getAttentionPaymentHashes()` /
+    // `hasClaimedPaymentHash()` on the current values.
+    bump();
+    return () => {
+      unsubAttention();
+      unsubClaimed();
+    };
+  }, []);
+
+  /** Resolves the icon-corner badge for a row:
+   *   - 'attention' for any Boltz row whose paymentHash is currently in
+   *     swapRecoveryService's attention set;
+   *   - 'pending' for in-flight Boltz rows (so the lifecycle reads
+   *     clock → tick / warning instead of bare → tick);
+   *   - 'done' for settled INCOMING Boltz rows that aren't in the
+   *     attention set — on incoming swaps LN-settled implies the swap
+   *     is complete (Boltz received on-chain before paying our invoice);
+   *   - 'done' for settled OUTGOING Boltz rows whose claim has been
+   *     recorded in swapRecoveryService's claimed-hash cache (i.e. we've
+   *     observed the on-chain claim broadcast / Boltz reported terminal
+   *     success). Settled outgoing rows without a recorded claim stay
+   *     unbadged — the LN leg can settle before the claim broadcasts,
+   *     and a green tick on a stuck swap would be misleading;
+   *   - undefined (no badge) for vanilla Lightning rows and the
+   *     settled-but-claim-not-recorded outgoing case above. */
+  const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined => {
+    if (!swapRecoveryService.isBoltzTransaction(tx)) return undefined;
+    if (tx.paymentHash && swapRecoveryService.getAttentionPaymentHashes().has(tx.paymentHash))
+      return 'attention';
+    const settled = Boolean(tx.settled_at || tx.blockHeight);
+    if (!settled) return 'pending';
+    if (tx.type === 'incoming') return 'done';
+    return tx.paymentHash && swapRecoveryService.hasClaimedPaymentHash(tx.paymentHash)
+      ? 'done'
+      : undefined;
+  };
+
+  // Counterparty preview — opened from TransactionDetailSheet → "view
+  // profile". A quick-peek bottom sheet first; "View full profile"
+  // inside drills into the ContactProfile route.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
 
   // Collapse the list back to the initial N rows when the active wallet
   // changes, but NOT on every transactions-array update. WalletContext
@@ -256,23 +330,34 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
+        const rowIconState = iconStateFor(item);
+
         return (
           <TouchableOpacity
             key={row.key}
             style={[styles.item, isPending && styles.itemPending]}
-            onPress={() => setDetail(item as TransactionDetailData)}
+            onPress={() => {
+              setDetail(item as TransactionDetailData);
+              setDetailIconState(rowIconState);
+            }}
             accessibilityLabel={`Open details for ${primary}`}
           >
             <View style={styles.avatarWrap}>
-              {counterpartyAvatar ? (
+              {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
                 <Image
                   source={{ uri: counterpartyAvatar }}
                   style={styles.avatar}
-                  cachePolicy="disk"
+                  cachePolicy="memory-disk"
+                  recyclingKey={counterpartyAvatar}
+                  autoplay={false}
                   contentFit="cover"
                 />
               ) : (
-                <TransactionTypeIcon category={getTxCategory(item)} size={AVATAR_SIZE} />
+                <TransactionTypeIcon
+                  category={getTxCategory(item)}
+                  size={AVATAR_SIZE}
+                  state={rowIconState}
+                />
               )}
             </View>
 
@@ -324,10 +409,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
+        iconState={detailIconState}
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);
-          setProfileContact(contact);
+          setSheetContact(contact);
+          setProfileSheetVisible(true);
         }}
         onZapCounterparty={(contact) => {
           setDetail(null);
@@ -343,15 +430,29 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           });
         }}
       />
+      <SendSheet
+        visible={zapContact !== null}
+        onClose={() => setZapContact(null)}
+        initialAddress={zapContact?.lightningAddress ?? undefined}
+        initialPicture={zapContact?.picture ?? undefined}
+        recipientPubkey={zapContact?.pubkey ?? undefined}
+        recipientName={zapContact?.name ?? undefined}
+      />
       <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={() => {
+          if (!sheetContact) return;
+          setProfileSheetVisible(false);
+          navigation.navigate('ContactProfile', { contact: sheetContact });
+        }}
         onMessage={
-          profileContact
+          sheetContact?.pubkey
             ? () => {
-                const c = profileContact;
-                setProfileContact(null);
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
                 navigation.navigate('Conversation', {
                   pubkey: c.pubkey,
                   name: c.name,
@@ -362,22 +463,28 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             : undefined
         }
         onZap={
-          profileContact?.lightningAddress
+          // Require both a pubkey AND a lightning address — SendSheet's
+          // zap path needs a real pubkey to attach the zap receipt to
+          // (NIP-57 verification fails on an empty-string sender).
+          // Anonymous-zap counterparties (no pubkey) hide the icon
+          // rather than silently mis-target.
+          sheetContact?.pubkey && sheetContact.lightningAddress
             ? () => {
-                const c = profileContact;
-                setProfileContact(null);
-                setZapContact(c);
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                setZapContact({
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                  banner: c.banner ?? null,
+                  nip05: c.nip05 ?? null,
+                  source: 'nostr',
+                });
               }
             : undefined
         }
-      />
-      <SendSheet
-        visible={zapContact !== null}
-        onClose={() => setZapContact(null)}
-        initialAddress={zapContact?.lightningAddress ?? undefined}
-        initialPicture={zapContact?.picture ?? undefined}
-        recipientPubkey={zapContact?.pubkey ?? undefined}
-        recipientName={zapContact?.name ?? undefined}
       />
     </View>
   );

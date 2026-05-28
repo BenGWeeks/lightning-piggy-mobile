@@ -17,6 +17,16 @@
 #   - tab-home           Home tab tap after launch
 #   - tab-messages       Messages tab tap after launch
 #   - tab-friends        Friends tab tap after launch
+#   - tab-explore        Explore tab tap after launch (Explore hub mount)
+#   - explore-places     Cold load of "Places near you" rail (waits for
+#                        a place-card-* row to paint — the metric is
+#                        end-to-end time from cold start to first
+#                        merchant visible, the thing #15 attacks)
+#   - explore-caches     Cold load of "Geo-caches near you" rail
+#                        (waits for cache-card-* — covers the NIP-GC
+#                        sub + parse pipeline)
+#   - hunt-list-cold     Cold open of the full Geo-caches list screen
+#                        (Explore → See all → wait for first row)
 #   - scroll-friends     12 swipes on Friends list (steady-state)
 #   - scroll-messages    12 swipes on Messages list (steady-state)
 #   - fab-open           FAB → FriendPickerSheet open
@@ -40,6 +50,12 @@ DEVICE="${DEVICE:-emulator-5554}"
 PKG="${PKG:-com.lightningpiggy.app.dev}"
 SAMPLES="${SAMPLES:-3}"
 METRO_RELOAD_URL="${METRO_RELOAD_URL:-http://localhost:8081/reload}"
+# EXTENDED=1 enables additional, slower scenarios (#536):
+#   - dm-refresh-explore: pull-to-refresh Messages then immediately
+#     switch to Explore. Stresses the JS-thread unblock from PR #533
+#     (NIP-17 decrypt yield-budget).
+# Off by default so the fast-run summary stays quick.
+EXTENDED="${EXTENDED:-0}"
 
 OUT="/tmp/perf-suite-$(date +%s)"
 mkdir -p "$OUT"
@@ -79,6 +95,72 @@ write_flow /tmp/perf-flow-tab-friends.yaml "name: tap friends
     timeout: 30000
 - tapOn:
     id: 'tab-friends'"
+
+# Explore tab cold tap — symmetric with the other tabBar surfaces.
+# Doesn't wait for content because Explore is the hub itself; the
+# place / cache rail timings get their own surfaces below.
+write_flow /tmp/perf-flow-tab-explore.yaml "name: tap explore
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-explore'"
+
+# Explore → first \`place-card-*\` rendered. The assertVisible regex
+# blocks the flow until any row in the \"Places near you\" rail
+# paints, so the measured window covers app launch + tab tap +
+# location resolution + cached merchant hydration. This is the
+# surface that #15 + PR #550 attack (synchronous peek of cached
+# places + anchor on mount).
+write_flow /tmp/perf-flow-explore-places.yaml "name: explore places rail
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-explore'
+- extendedWaitUntil:
+    visible:
+      id: 'place-card-.*'
+    timeout: 20000"
+
+# Explore → first \`cache-card-*\` rendered. Covers the NIP-GC sub
+# round-trip (relay → parseCache → first paint).
+write_flow /tmp/perf-flow-explore-caches.yaml "name: explore caches rail
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-explore'
+- extendedWaitUntil:
+    visible:
+      id: 'cache-card-.*'
+    timeout: 20000"
+
+# Cold-open of the full Hunt / Geo-caches list. Launch → Explore →
+# tap the \"See all\" entry on the Geo-caches rail
+# (\`explore-card-hunt\`) → wait for the first list row.
+# Catches regressions in HuntScreen's mount path, which is separate
+# from the inline-rail render path above.
+write_flow /tmp/perf-flow-hunt-list-cold.yaml "name: hunt list cold
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-explore'
+- tapOn:
+    id: 'explore-card-hunt'
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-discover-row-.*'
+    timeout: 20000"
 
 write_flow /tmp/perf-flow-warmup-friends.yaml "name: warmup friends
 ---
@@ -305,10 +387,38 @@ EOF
 run_surface "tab-home"        "Home tab cold tap"       "cold-tap" /tmp/perf-flow-tab-home.yaml
 run_surface "tab-messages"    "Messages tab cold tap"   "cold-tap" /tmp/perf-flow-tab-messages.yaml
 run_surface "tab-friends"     "Friends tab cold tap"    "cold-tap" /tmp/perf-flow-tab-friends.yaml
+run_surface "tab-explore"     "Explore tab cold tap"    "cold-tap" /tmp/perf-flow-tab-explore.yaml
+run_surface "explore-places"  "Explore: Places rail load"  "cold-tap" /tmp/perf-flow-explore-places.yaml
+run_surface "explore-caches"  "Explore: Geo-caches rail load" "cold-tap" /tmp/perf-flow-explore-caches.yaml
+run_surface "hunt-list-cold"  "Geo-caches list cold open"  "cold-tap" /tmp/perf-flow-hunt-list-cold.yaml
 run_surface "scroll-friends"  "Friends list scroll"     "steady"   /tmp/perf-flow-warmup-friends.yaml /tmp/perf-flow-swipes.yaml
 run_surface "scroll-messages" "Messages list scroll"    "steady"   /tmp/perf-flow-warmup-messages.yaml /tmp/perf-flow-swipes.yaml
 run_surface "fab-open"        "FAB → FriendPicker open" "steady"   /tmp/perf-flow-warmup-messages.yaml /tmp/perf-flow-fab.yaml
 run_surface "back-from-group" "Group → Back transition" "steady"   /tmp/perf-flow-warmup-group-open.yaml /tmp/perf-flow-back-from-group.yaml
+
+# ---- Extended surfaces (EXTENDED=1) ----------------------------------------
+#
+# Off by default — these are slower and target specific regression
+# guards rather than steady-state perf. Enable with:
+#   EXTENDED=1 ./scripts/perf-suite.sh
+if [ "$EXTENDED" = "1" ]; then
+  # PR #533 guard: pull-to-refresh Messages contended with immediate
+  # Explore-tab switch. Warmup = launch + Messages-tab tap (so the
+  # measured window starts from a Messages list that's already
+  # mounted). Action = pull-to-refresh swipe + Explore-tab tap.
+  write_flow /tmp/perf-flow-dm-refresh-explore.yaml "name: dm refresh then explore
+---
+- swipe:
+    start: 50%, 25%
+    end: 50%, 85%
+    duration: 600
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 4000"
+  run_surface "dm-refresh-explore" "DM refresh → Explore mount" "steady" \
+    /tmp/perf-flow-warmup-messages.yaml /tmp/perf-flow-dm-refresh-explore.yaml
+fi
 
 cat "$OUT/summary.md.tmp" >> "$OUT/summary.md"
 rm -f "$OUT/summary.md.tmp"

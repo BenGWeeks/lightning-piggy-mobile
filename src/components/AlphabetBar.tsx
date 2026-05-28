@@ -205,8 +205,10 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       paddingTop: 8,
       paddingBottom: 8,
-      width: 22,
-      marginLeft: 2,
+      // Wider + nudged in from the screen edge so the letters are easier to
+      // tap (were tight against the left bezel at width 22 / marginLeft 2).
+      width: 26,
+      marginLeft: 6,
     },
     alphabetLetterTouch: {
       // `flex: 1` distributes the 27 letter buckets proportionally
@@ -218,7 +220,7 @@ const createStyles = (colors: Palette) =>
       flex: 1,
       paddingHorizontal: 2,
       borderRadius: 8,
-      width: 18,
+      width: 24,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -231,8 +233,8 @@ const createStyles = (colors: Palette) =>
       // remain visible in constrained layouts such as
       // FriendPickerSheet, reducing the chance that trailing letters
       // get clipped on smaller screens.
-      fontSize: 9,
-      lineHeight: 11,
+      fontSize: 11,
+      lineHeight: 13,
       fontWeight: '700',
       color: colors.textSupplementary,
       textAlign: 'center',

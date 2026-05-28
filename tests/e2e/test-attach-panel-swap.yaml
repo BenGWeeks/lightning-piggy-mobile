@@ -27,16 +27,15 @@ name: WhatsApp-style Attach Panel Swap Test
 #     starts from a known account.
 #   - Big Piggy must have a previous DM thread with Little Piggy (so
 #     ${LITTLE_PIGGY_NAME} appears in the Messages list).
-#   - On teardown, sign out + sign back in with ${MAESTRO_NSEC} so the
+#   - On teardown, sign out + sign back in with ${MAESTRO_NSEC_BIG} so the
 #     device is left in the same state it started in for subsequent
 #     tests.
 #
 # Run:
 #   source .env
 #   maestro --device emulator-5554 test \
-#     -e BIG_PIGGY_NSEC="$MAESTRO_NSEC2" \
+#     -e BIG_PIGGY_NSEC="$MAESTRO_NSEC_BIG" \
 #     -e LITTLE_PIGGY_NAME='Little Piggy' \
-#     -e MAESTRO_NSEC="$MAESTRO_NSEC" \
 #     tests/e2e/test-attach-panel-swap.yaml
 
 - launchApp:
@@ -210,7 +209,7 @@ name: WhatsApp-style Attach Panel Swap Test
     timeout: 3000
 - tapOn:
     id: 'nsec-input'
-- inputText: ${MAESTRO_NSEC}
+- inputText: ${MAESTRO_NSEC_BIG}
 - hideKeyboard
 - waitForAnimationToEnd:
     timeout: 2000

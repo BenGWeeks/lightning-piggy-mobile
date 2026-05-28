@@ -3,6 +3,8 @@ import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
 import { parseLiveLocationMarker, type LiveLocationMarker } from '../services/liveLocationService';
+import { isBitcoinAddress } from '../services/boltzService';
+import { parseBip21, ParsedBip21 } from './bip21';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -38,6 +40,21 @@ export interface SharedContactRef {
   relays: string[];
 }
 
+export type BitcoinUri = ParsedBip21;
+
+// Magic string that triggers the "Toggle Secret Mode" inline card in
+// chat. Only Lightning Piggy installs render the card — other Nostr
+// clients show it as a plain text line, which is fine because to
+// non-LP clients it's a meaningless word. Case-insensitive match,
+// must be the entire trimmed body so users can still discuss the
+// trigger word without firing it.
+const SECRET_MODE_TRIGGER = 'secretthreewords';
+
+export function isSecretModeTrigger(text: string): boolean {
+  if (!text) return false;
+  return text.trim().toLowerCase() === SECRET_MODE_TRIGGER;
+}
+
 export function extractImageUrl(text: string): string | null {
   if (!text) return null;
   // Only treat a message as an image when the entire body is the URL. This
@@ -45,6 +62,113 @@ export function extractImageUrl(text: string): string | null {
   const trimmed = text.trim();
   const match = trimmed.match(IMAGE_URL_REGEX);
   return match ? match[0] : null;
+}
+
+// Audio / voice-note URLs (#235). Same "entire body is the URL" rule as
+// images so surrounding text isn't swallowed. Our recorder emits AAC
+// (.m4a); Blossom servers commonly serve it back as `.mp4` (Primal does),
+// so accept both, plus the other common audio extensions for notes from
+// other clients.
+const AUDIO_URL_REGEX = /^(https?:\/\/\S+?\.(?:m4a|mp4|aac|mp3|ogg|opus|wav))(?:\?\S*)?$/i;
+
+export function extractAudioUrl(text: string): string | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const match = trimmed.match(AUDIO_URL_REGEX);
+  return match ? match[0] : null;
+}
+
+// Encrypted voice-note URL encoder (#235). Lives in ./encryptedFileUrl (a
+// dependency-free module) so nip17Unwrap can use it without pulling in this
+// file's heavier graph; re-exported here for existing importers.
+export { encodeEncryptedFileUrl } from './encryptedFileUrl';
+
+export interface ParsedVoiceNote {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect a voice note: either an `#lpe=1` encrypted-file URL whose mime is
+ * `audio/*` (new path), or a plain audio URL (legacy / unencrypted / other
+ * clients). Returns null for anything else. Backward-compatible — plaintext
+ * audio URLs already in threads keep working.
+ */
+export function parseVoiceNote(text: string): ParsedVoiceNote | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0) {
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    // Require `lpe` to equal exactly '1'. A substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). If a kind-15 file
+      // arrives with a different `alg`, bail to plain-text rendering rather
+      // than show a voice-note card that would fail when the user hits play.
+      // `alg` is always emitted by our encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
+      // Only audio here — encrypted images are handled separately (#688).
+      if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
+  }
+  const plain = extractAudioUrl(trimmed);
+  return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
+}
+
+export interface ParsedImageMessage {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect an image message (#688): either an `#lpe=1` encrypted-file URL whose
+ * mime is `image/*` (NIP-17 kind-15, fetch ciphertext + AES-256-GCM decrypt),
+ * or a plain image URL (legacy / unencrypted / other clients — rendered
+ * directly). Returns null for anything else. Mirrors `parseVoiceNote`; the
+ * plain branch preserves today's `extractImageUrl` behaviour so DMs already in
+ * threads keep rendering.
+ */
+export function parseImageMessage(text: string): ParsedImageMessage | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0) {
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    // Require `lpe` to equal exactly '1' — a substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). A kind-15 file with
+      // a different `alg` falls back to plain rendering rather than show an
+      // image card that fails to decrypt. `alg` is always emitted by our
+      // encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
+      // Only images here — encrypted audio is handled by parseVoiceNote.
+      if (!keyHex || !nonceHex || !mime.startsWith('image/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
+  }
+  const plain = extractImageUrl(trimmed);
+  return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
 }
 
 export function extractInvoice(text: string): DecodedInvoice | null {
@@ -84,6 +208,18 @@ export function extractLightningAddress(text: string): string | null {
   if (!text) return null;
   const match = text.match(LN_ADDRESS_REGEX);
   return match ? match[1] : null;
+}
+
+export function extractBitcoinUri(text: string): BitcoinUri | null {
+  const parsed = parseBip21(text);
+  if (!parsed) return null;
+  // parseBip21 only matches the URI shape (`bitcoin:[8+ alnum chars]`).
+  // Without an address-checksum check, garbage like `bitcoin:hello12345`
+  // would render a Pay button + open SendSheet on an invalid
+  // destination. Validate via bitcoinjs-lib's address parse so only
+  // well-formed mainnet addresses produce the Pay affordance.
+  if (!isBitcoinAddress(parsed.address)) return null;
+  return parsed;
 }
 
 export function extractSharedContact(text: string): SharedContactRef | null {

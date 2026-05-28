@@ -25,11 +25,20 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { Check, X } from 'lucide-react-native';
+import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { lightPalette, type Palette } from '../styles/palettes';
 
-export type PaymentProgressState = 'sending' | 'success' | 'error' | 'hidden';
+export type PaymentProgressState =
+  | 'sending'
+  | 'in-flight-extended'
+  | 'success'
+  // Relay/transport connectivity failure — outcome UNKNOWN, not a
+  // confirmed failure (#648). Distinct from 'error' so we never imply the
+  // payment failed when it may have settled.
+  | 'connection-lost'
+  | 'error'
+  | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
 
 interface Props {
@@ -154,9 +163,15 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
   const progress = useSharedValue(0);
   // Reanimated worklets capture primitives by value, so freeze the
   // endpoint colours at render time so the interpolation below sees
-  // stable string literals.
-  const bubbleStart = colors.brandPink;
-  const bubbleEnd = colors.green;
+  // stable string literals. Symmetric 3-stop range so success and
+  // failure animate AWAY from 0/pink in opposite directions, never
+  // crossing the other outcome's stop (#426):
+  //   colorProgress -1 = red (failure)
+  //   colorProgress  0 = pink (in-flight, default)
+  //   colorProgress  1 = green (success)
+  const bubblePink = colors.brandPink;
+  const bubbleGreen = colors.green;
+  const bubbleRed = colors.red;
 
   useEffect(() => {
     progress.value = withDelay(
@@ -174,7 +189,11 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
       [0, 0.12, 0.85, 1],
       [0, spec.opacityPeak, spec.opacityPeak, 0],
     );
-    const bg = interpolateColor(colorProgress.value, [0, 1], [bubbleStart, bubbleEnd]);
+    const bg = interpolateColor(
+      colorProgress.value,
+      [-1, 0, 1],
+      [bubbleRed, bubblePink, bubbleGreen],
+    );
     return {
       transform: [{ translateX: xOffset }, { translateY: y }],
       opacity,
@@ -297,8 +316,12 @@ export default function PaymentProgressOverlay({
   const bubbleSpecs = useMemo(() => makeSpecs(BUBBLE_COUNT, height), [height]);
   const confettiSpecs = useMemo(() => makeConfettiSpecs(CONFETTI_COUNT), []);
 
-  // 0 = pink (sending / error), 1 = green (success). The error case
-  // keeps pink so the green-flood doesn't imply success on a failure.
+  // Symmetric 3-stop range so success and failure paths animate from
+  // 0/pink in opposite directions and never cross each other's stop:
+  //   -1 = red (failure)
+  //    0 = pink (in-flight, default)
+  //    1 = green (success)
+  // See the `Bubble` component's interpolateColor for the colour map.
   const colorProgress = useSharedValue(0);
   // 0 while holding fire, 1 once success fires — gates the confetti launch.
   const confettiArmed = useSharedValue(0);
@@ -339,11 +362,26 @@ export default function PaymentProgressOverlay({
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
     } else if (state === 'error') {
+      // Bubbles morph from pink to red on a definitive failure (#426 —
+      // mirrors the pink → green success path, just in the opposite
+      // direction so the animation never transits through green). Same
+      // 650 ms duration so the animation feels symmetric across outcomes.
+      if (direction === 'send') {
+        colorProgress.value = withTiming(-1, { duration: 650 });
+      }
       iconScale.value = withSequence(
         withTiming(0, { duration: 0 }),
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
-    } else if (state === 'sending') {
+    } else if (state === 'connection-lost') {
+      // Not a failure — keep the neutral palette (no red morph) but pop
+      // the icon in so the "couldn't confirm" card reads as resolved.
+      colorProgress.value = 0;
+      iconScale.value = withSequence(
+        withTiming(0, { duration: 0 }),
+        withSpring(1, { damping: 10, stiffness: 220 }),
+      );
+    } else if (state === 'sending' || state === 'in-flight-extended') {
       colorProgress.value = 0;
       iconScale.value = 0;
       confettiArmed.value = 0;
@@ -385,9 +423,17 @@ export default function PaymentProgressOverlay({
           ? `from ${recipientName}`
           : `to ${recipientName}`
         : undefined;
+  } else if (state === 'connection-lost') {
+    title = 'Connection lost';
+    subtitle =
+      "We couldn't reach your wallet to confirm. Your payment may still have gone through — check your balance before trying again.";
   } else if (state === 'error') {
     title = 'Payment failed';
     subtitle = humanizedError.message;
+  } else if (state === 'in-flight-extended') {
+    title = 'Still in flight';
+    subtitle =
+      'Lightning payments via bridge nodes can take 1–2 min. The result will appear in your transactions once the network settles.';
   }
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
@@ -399,6 +445,8 @@ export default function PaymentProgressOverlay({
     if (state === 'sending') return;
     onDismiss();
   };
+
+  const showSpinner = state === 'sending' || state === 'in-flight-extended';
 
   return (
     <Modal
@@ -437,7 +485,7 @@ export default function PaymentProgressOverlay({
         </View>
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
-          {state === 'sending' && (
+          {showSpinner && (
             <ActivityIndicator size="large" color={colors.brandPink} style={styles.iconSlot} />
           )}
           {state === 'success' && (
@@ -448,6 +496,11 @@ export default function PaymentProgressOverlay({
           {state === 'error' && (
             <Animated.View style={[styles.iconSlot, styles.errorCircle, iconAnimatedStyle]}>
               <X size={44} color={colors.white} strokeWidth={3.5} />
+            </Animated.View>
+          )}
+          {state === 'connection-lost' && (
+            <Animated.View style={[styles.iconSlot, styles.connectionCircle, iconAnimatedStyle]}>
+              <WifiOff size={40} color={colors.zapYellowInk} strokeWidth={3} />
             </Animated.View>
           )}
 
@@ -491,10 +544,21 @@ export default function PaymentProgressOverlay({
             <TouchableOpacity
               style={styles.okButton}
               onPress={onDismiss}
-              accessibilityLabel="Dismiss payment confirmation"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel={
+                state === 'in-flight-extended'
+                  ? 'Continue in background'
+                  : 'Dismiss payment confirmation'
+              }
               testID="payment-overlay-ok"
             >
-              <Text style={styles.okButtonText}>{state === 'error' ? 'Dismiss' : 'OK'}</Text>
+              <Text style={styles.okButtonText}>
+                {state === 'in-flight-extended'
+                  ? 'Continue in background'
+                  : state === 'error'
+                    ? 'Dismiss'
+                    : 'OK'}
+              </Text>
             </TouchableOpacity>
           ) : onCancel ? (
             <TouchableOpacity
@@ -563,6 +627,12 @@ const createStyles = (colors: Palette) =>
     errorCircle: {
       borderRadius: 36,
       backgroundColor: colors.red,
+    },
+    // Amber, not red: a connection loss is "couldn't confirm", not a
+    // confirmed failure (#648).
+    connectionCircle: {
+      borderRadius: 36,
+      backgroundColor: colors.zapYellow,
     },
     title: {
       fontSize: 20,

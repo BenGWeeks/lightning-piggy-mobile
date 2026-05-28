@@ -14,27 +14,95 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import NfcIcon from './icons/NfcIcon';
-import { writeNpubToTag, cancelNfcOperation, isNfcEnabled } from '../services/nfcService';
+import { Nfc, AlertCircle, Copy, Eye, EyeOff, Lock } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Toast } from './BrandedToast';
+import {
+  writeNpubToTag,
+  writeLnurlToTag,
+  writeHuntTagToTag,
+  cancelNfcOperation,
+  isNfcEnabled,
+  type HuntTagPayload,
+} from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  npub: string;
-  displayName: string;
+  /**
+   * Write mode. `npub` (default) writes a Nostr identity to a contact's
+   * tag; `piglet` writes an LNURL-withdraw prize link to a Hide-a-Piglet
+   * tag and locks it so a passer-by can't repoint it.
+   */
+  mode?: 'npub' | 'piglet';
+  /** npub mode — the Nostr identity to write + the name shown in copy. */
+  npub?: string;
+  displayName?: string;
+  /** piglet mode — the LNURL-withdraw link to write to the tag.
+   * Legacy single-record path used when `huntPayload` is absent. */
+  lnurl?: string;
+  /** piglet mode (preferred) — multi-record NDEF payload: lightningpiggy://
+   * deep link + nostr:naddr1 listing reference + optional LNURL. When
+   * supplied, takes precedence over `lnurl`. See #73. */
+  huntPayload?: HuntTagPayload;
+  /** piglet mode — when true (default) the Android write path also sets
+   * a random PWD/PACK on the tag and returns the resulting PIN via
+   * `onWritten`. Set false to publish an unlocked tag. iOS always writes
+   * unlocked regardless. Issue #567. */
+  lockTag?: boolean;
+  /** piglet edit mode — when the Piglet was previously locked, pass the
+   * stored secrets so the write path PWD_AUTHs the chip before writing
+   * the new NDEF payload. The PIN stays the same after the rewrite —
+   * the hider doesn't have to track a fresh one. Issue #567. */
+  existingLock?: { pwdHex: string; packHex: string };
+  /** Fires once the tag write succeeds (before the user dismisses).
+   * Receives the lock secrets when the locked-write path ran — caller
+   * persists them on the matching `HiddenPiggy` so the PIN can be
+   * surfaced in My Piglets and the unlock flow can authenticate later. */
+  onWritten?: (result?: {
+    locked: boolean;
+    lock?: { pwdHex: string; packHex: string; pin: string; tagUid: string };
+  }) => void;
 }
 
 type WriteState = 'ready' | 'writing' | 'success' | 'error';
 
-const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName }) => {
+const NfcWriteSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  mode = 'npub',
+  npub = '',
+  displayName = '',
+  lnurl = '',
+  huntPayload,
+  lockTag = true,
+  existingLock,
+  onWritten,
+}) => {
+  const isPiglet = mode === 'piglet';
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<WriteState>('ready');
   const [errorMessage, setErrorMessage] = useState('');
+  // Lock outcome from the most recent write. Drives the inline PIN
+  // reveal on the success state so the hider sees the PIN the instant
+  // the chip confirms — no need to dismiss the sheet first. Issue #567.
+  const [lastLock, setLastLock] = useState<{
+    pwdHex: string;
+    packHex: string;
+    pin: string;
+    tagUid: string;
+  } | null>(null);
+  const [pinRevealed, setPinRevealed] = useState(false);
+  // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
+  // (the default) sizes the sheet to its content, so the error state
+  // with a long diagnostic message gets a tall sheet, the simple
+  // success state gets a short one, and the user never has to swipe
+  // the sheet up to see hidden content. Project rule: no hardcoded
+  // sheet heights unless we genuinely need a fixed snap point.
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -48,11 +116,26 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
     if (visible) {
       setState('ready');
       setErrorMessage('');
+      // Also clear the previous PIN — reopening the sheet either re-
+      // writes (fresh secrets) or unlock-then-rewrite (same PIN, but
+      // we'll re-receive it via writeResult). Either way, leaking the
+      // old PIN into the new ready/error state is wrong.
+      setLastLock(null);
+      setPinRevealed(false);
       sheetRef.current?.present();
       startWrite();
     } else {
       sheetRef.current?.dismiss();
       cancelNfcOperation();
+      // Reset on close too — the BottomSheet keeps the component mounted,
+      // so a previous error / success state would persist into the next
+      // open without this. Pre-fix the user reopened the sheet after a
+      // capacity-error and still saw the old "Tag payload is N bytes"
+      // copy (#73 follow-up).
+      setState('ready');
+      setErrorMessage('');
+      setLastLock(null);
+      setPinRevealed(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -90,12 +173,57 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
 
     setState('ready');
     try {
-      await writeNpubToTag(npub, () => {
+      const onTagDetected = () => {
         // Tag detected — show writing state
         if (mountedRef.current) setState('writing');
-      });
+      };
+      let writeResult: Awaited<ReturnType<typeof writeHuntTagToTag>> | null = null;
+      if (isPiglet) {
+        // Multi-record write when the caller supplies the richer Hunt
+        // payload (#73); single-record LNURL write covers private
+        // hides without a published kind 37516. BOTH paths thread the
+        // lock toggle through to the same MifareUltralight helper
+        // (#567 r3) — pre-fix the single-record fallback silently
+        // skipped locking and the toggle was a lie for private
+        // Piglets.
+        if (huntPayload) {
+          writeResult = await writeHuntTagToTag({
+            ...huntPayload,
+            onTagDetected,
+            lockTag,
+            existingLock,
+          });
+        } else {
+          // Private Piglet — no nostr:naddr to emit, just the LNURL
+          // bearer record. The locked-write path still applies on
+          // Android so a passer-by can't repoint the chip (Copilot
+          // #572 review: this branch used to silently fall back to
+          // the irreversible `makeReadOnly` lock even when the
+          // wizard toggle was on). The single-record writer routes
+          // through the same MifareUltralight helper as the
+          // multi-record path when lockTag is true.
+          const result = await writeLnurlToTag({
+            lnurl,
+            onTagDetected,
+            lockTag,
+            existingLock,
+          });
+          writeResult = result;
+        }
+      } else {
+        await writeNpubToTag(npub, onTagDetected);
+      }
       if (mountedRef.current) {
+        if (writeResult?.lock) {
+          setLastLock(writeResult.lock);
+        } else {
+          setLastLock(null);
+        }
+        setPinRevealed(false);
         setState('success');
+        onWritten?.(
+          writeResult ? { locked: writeResult.locked, lock: writeResult.lock } : undefined,
+        );
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -119,28 +247,46 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={handleClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Write to NFC</Text>
+        <Text style={styles.title}>{isPiglet ? 'Write the Piglet tag' : 'Write to NFC'}</Text>
 
         {state === 'ready' && (
           <View style={styles.stateContainer}>
             <View style={styles.iconContainer}>
-              <NfcIcon size={64} color={colors.brandPink} />
+              <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
             </View>
-            <Text style={styles.instruction}>Hold your phone against an NFC tag</Text>
+            <Text style={styles.instruction}>
+              {isPiglet
+                ? 'Hold the Piglet to the back of your phone'
+                : 'Hold your phone against an NFC tag'}
+            </Text>
             <Text style={styles.description}>
-              This will write {displayName}&apos;s Nostr identity (npub) to the tag. Anyone with a
-              Nostr-compatible app can tap the tag to view the profile.
+              {isPiglet
+                ? // Honest copy keyed to the actual write mode. Both
+                  // the multi-record (public) AND single-record
+                  // (private) write paths route the lock toggle
+                  // through the same MifareUltralight helper, so the
+                  // branch is lockTag + platform only — `huntPayload`
+                  // is irrelevant to whether the chip ends up locked.
+                  // Copilot #572 r3 caught the stale `huntPayload`
+                  // gate that lied to private hiders.
+                  Platform.OS !== 'android'
+                  ? "This writes the prize link onto the tag. iOS doesn't support our reversible lock yet, so the chip stays open — anyone with an NFC writer could repoint it."
+                  : lockTag
+                    ? 'This writes the prize link onto the tag and password-locks the chip so no-one can overwrite it. Keep the Piglet still against the phone until it confirms.'
+                    : 'This writes the prize link onto the tag and leaves the chip open. Anyone with an NFC writer can later overwrite it — turn on Lock the tag on the previous screen to password-protect.'
+                : `This will write ${displayName}'s Nostr identity (npub) to the tag. Anyone with a Nostr-compatible app can tap the tag to view the profile.`}
             </Text>
-            <Text style={styles.npubPreview} numberOfLines={1}>
-              {npub.slice(0, 20)}...{npub.slice(-8)}
-            </Text>
+            {!isPiglet && (
+              <Text style={styles.npubPreview} numberOfLines={1}>
+                {npub.slice(0, 20)}...{npub.slice(-8)}
+              </Text>
+            )}
             <ActivityIndicator
               size="small"
               color={colors.brandPink}
@@ -170,11 +316,51 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
             <View style={[styles.iconContainer, styles.successIcon]}>
               <Text style={styles.checkmark}>&#10003;</Text>
             </View>
-            <Text style={styles.instruction}>Successfully written!</Text>
-            <Text style={styles.description}>
-              {displayName}&apos;s npub has been written to the NFC tag. Anyone can now tap this tag
-              to view the profile.
+            <Text style={styles.instruction}>
+              {isPiglet && lastLock ? 'Successfully written and locked' : 'Successfully written!'}
             </Text>
+            <Text style={styles.description}>
+              {isPiglet
+                ? lastLock
+                  ? 'The prize link is on the tag and the chip is password-protected so no-one can overwrite it. Save the PIN below — you’ll need it to repoint the tag later.'
+                  : Platform.OS !== 'android'
+                    ? "The prize link is on the tag. iOS doesn't support our reversible lock yet, so the chip is left open — anyone with an NFC writer could later repoint it."
+                    : 'The prize link is on the tag. Anyone with an NFC writer can still overwrite it — flip the Lock toggle on the previous screen to password-protect this chip on a re-write.'
+                : `${displayName}'s npub has been written to the NFC tag. Anyone can now tap this tag to view the profile.`}
+            </Text>
+            {isPiglet && lastLock ? (
+              <View style={styles.pinCard} testID="nfc-write-pin-card">
+                <View style={styles.pinHeaderRow}>
+                  <Lock size={13} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.pinHeaderText}>Your PIN</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.pinValueRow}
+                  onPress={() => setPinRevealed((v) => !v)}
+                  accessibilityLabel={pinRevealed ? 'Hide PIN' : 'Reveal PIN'}
+                  testID="nfc-write-pin-reveal"
+                >
+                  <Text style={styles.pinValueText}>{pinRevealed ? lastLock.pin : '••••••••'}</Text>
+                  {pinRevealed ? (
+                    <EyeOff size={16} color={colors.textSupplementary} strokeWidth={2} />
+                  ) : (
+                    <Eye size={16} color={colors.textSupplementary} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.pinCopyButton}
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(lastLock.pin);
+                    Toast.show({ type: 'success', text1: 'PIN copied' });
+                  }}
+                  accessibilityLabel="Copy PIN"
+                  testID="nfc-write-pin-copy"
+                >
+                  <Copy size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.pinCopyButtonText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={styles.doneButton}
               onPress={handleClose}
@@ -189,7 +375,10 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
         {state === 'error' && (
           <View style={styles.stateContainer}>
             <View style={[styles.iconContainer, styles.errorIcon]}>
-              <Text style={styles.errorMark}>!</Text>
+              <Nfc size={64} color={colors.red} strokeWidth={2} />
+              <View style={styles.errorBadge}>
+                <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
+              </View>
             </View>
             <Text style={styles.instruction}>Write failed</Text>
             <Text style={styles.description}>{errorMessage}</Text>
@@ -230,7 +419,9 @@ const createStyles = (colors: Palette) =>
       width: 40,
     },
     content: {
-      flex: 1,
+      // No `flex: 1` — that overrides gorhom v5's content-driven
+      // sizing and forces the sheet to fill the screen instead of
+      // hugging its content. Project rule: no hardcoded sheet heights.
       alignItems: 'center',
       paddingHorizontal: 24,
       paddingTop: 8,
@@ -243,7 +434,10 @@ const createStyles = (colors: Palette) =>
       marginBottom: 24,
     },
     stateContainer: {
-      flex: 1,
+      // Hugs its children so dynamic sheet sizing measures the true
+      // content height. The flex:1 we had here pushed the sheet to
+      // full-screen and forced the user to swipe up to see the
+      // diagnostic message on error.
       alignItems: 'center',
       justifyContent: 'center',
       width: '100%',
@@ -271,10 +465,13 @@ const createStyles = (colors: Palette) =>
       color: colors.green,
       fontWeight: '700',
     },
-    errorMark: {
-      fontSize: 48,
-      color: colors.red,
-      fontWeight: '700',
+    errorBadge: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 1,
     },
     instruction: {
       fontSize: 18,
@@ -348,6 +545,55 @@ const createStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
+    // ---- Post-write PIN card (success state, #567) -----------------------
+    pinCard: {
+      width: '100%',
+      padding: 12,
+      marginBottom: 16,
+      borderRadius: 12,
+      backgroundColor: colors.brandPinkLight,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      gap: 8,
+    },
+    pinHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    pinHeaderText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.brandPink,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+    },
+    pinValueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    pinValueText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      letterSpacing: 2,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    pinCopyButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.surface,
+    },
+    pinCopyButtonText: { fontSize: 12, fontWeight: '700', color: colors.brandPink },
   });
 
 export default NfcWriteSheet;

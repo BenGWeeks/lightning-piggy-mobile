@@ -8,7 +8,7 @@
 //   node scripts/update-nostr-profile.mjs <ENV_VAR_OF_NSEC> <name> [picture-url] [banner-url] [about]
 //
 // Example:
-//   node scripts/update-nostr-profile.mjs MAESTRO_NSEC \
+//   node scripts/update-nostr-profile.mjs MAESTRO_NSEC_BIG \
 //     "Big Piggy" \
 //     "https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/lightning-piggy-intro.png" \
 //     "https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/lightning-piggy-intro.png" \
@@ -75,7 +75,9 @@ const pool = new SimplePool();
 const results = await Promise.allSettled(pool.publish(RELAYS, event));
 for (let i = 0; i < RELAYS.length; i++) {
   const r = results[i];
-  console.log(`[${envVar}] ${RELAYS[i]} — ${r.status}${r.status === 'rejected' ? ': ' + r.reason : ''}`);
+  console.log(
+    `[${envVar}] ${RELAYS[i]} — ${r.status}${r.status === 'rejected' ? ': ' + r.reason : ''}`,
+  );
 }
 await new Promise((r) => setTimeout(r, 1500));
 pool.close(RELAYS);

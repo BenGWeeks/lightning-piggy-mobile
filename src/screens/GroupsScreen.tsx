@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr } from '../contexts/NostrContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
+import GroupAvatar, { type ContactInfo } from '../components/GroupAvatar';
 import type { RootStackParamList } from '../navigation/types';
 import type { Group } from '../types/groups';
 
@@ -29,20 +30,81 @@ const GroupsScreen: React.FC = () => {
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
-  const { isLoggedIn, refreshDmInbox } = useNostr();
+  // TODO(wot): swap to wotTier + WebOfTrustChip + WebOfTrustBottomSheet when
+  // the GroupsScreen filter row gets its own three-tier picker (#547 only
+  // migrated the Messages chip; GroupsScreen still uses the legacy boolean
+  // shim — `followingOnly` is now derived from `effectiveWotTier !== 'all'`
+  // and `setFollowingOnly` writes back via `setWotTier`).
+  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
+  const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
+
+  // Built once per render and shared by every row's GroupAvatar so we
+  // do O(contacts) per render instead of O(rows × avatars × contacts).
+  // Same idiom MessagesScreen uses (#245).
+  const contactInfoMap = useMemo(() => {
+    const map = new Map<string, ContactInfo>();
+    for (const c of contacts) {
+      map.set(c.pubkey.toLowerCase(), {
+        picture: c.profile?.picture ?? null,
+        name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim() || null,
+        lightningAddress: c.profile?.lud16 ?? null,
+      });
+    }
+    return map;
+  }, [contacts]);
+
+  // Per-group avatar inputs precomputed once per (visibleGroups, myPubkey)
+  // change. Both the displayed member count and the GroupAvatar pubkeys
+  // are derived from the same `pubkeys` array — so they can never drift
+  // (Copilot blocking on PR 365: when myPubkey is null during session
+  // restore, count and cluster size must still agree). Memoizing also
+  // keeps the array reference stable, so React.memo(GroupAvatar) can
+  // skip re-renders during unrelated state churn.
+  const groupAvatarInputs = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const g of visibleGroups) {
+      map.set(g.id, myPubkey ? [myPubkey, ...g.memberPubkeys] : g.memberPubkeys);
+    }
+    return map;
+  }, [visibleGroups, myPubkey]);
+
+  const enforceFollowingOnly = followingOnly || !secretMode;
   const [createVisible, setCreateVisible] = useState(false);
 
   // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
   // and the NIP-17 decrypt loop can route group rumors into the local
   // group store. Mirrors MessagesScreen's pattern (deferred via
   // InteractionManager so the tab transition stays smooth).
+  //
+  // AbortSignal so an in-flight NIP-17 unwrap loop releases the JS
+  // thread when the user navigates AWAY from Groups — pre-fix the
+  // decrypt loop kept grinding through hundreds of cached wraps after
+  // blur, contributing to the 8-second refreshDmInbox latency Ben
+  // logged in #560. Same shape MessagesScreen uses for the Messages
+  // tab (#412).
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const newRefreshSignal = useCallback((): AbortSignal => {
+    refreshAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    refreshAbortRef.current = ctrl;
+    return ctrl.signal;
+  }, []);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox({ force: true }));
-      return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox]),
+      const handle = InteractionManager.runAfterInteractions(() =>
+        refreshDmInbox({
+          force: true,
+          includeNonFollows: !enforceFollowingOnly,
+          signal: newRefreshSignal(),
+        }),
+      );
+      return () => {
+        handle.cancel();
+        refreshAbortRef.current?.abort();
+        refreshAbortRef.current = null;
+      };
+    }, [isLoggedIn, refreshDmInbox, enforceFollowingOnly, newRefreshSignal]),
   );
 
   const openGroup = useCallback(
@@ -67,29 +129,35 @@ const GroupsScreen: React.FC = () => {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: Group }) => (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => openGroup(item)}
-        onLongPress={() => handleLongPress(item)}
-        activeOpacity={0.6}
-        accessibilityLabel={`Open group ${item.name}`}
-        testID={`group-row-${item.id}`}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarLetter}>{(item.name[0] || '?').toUpperCase()}</Text>
-        </View>
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {item.memberPubkeys.length} member{item.memberPubkeys.length === 1 ? '' : 's'}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    ),
-    [openGroup, handleLongPress, styles],
+    ({ item }: { item: Group }) => {
+      const pubkeys = groupAvatarInputs.get(item.id) ?? item.memberPubkeys;
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => openGroup(item)}
+          onLongPress={() => handleLongPress(item)}
+          activeOpacity={0.6}
+          accessibilityLabel={`Open group ${item.name}`}
+          testID={`group-row-${item.id}`}
+        >
+          <GroupAvatar
+            pubkeys={pubkeys}
+            groupName={item.name}
+            size={44}
+            contactInfoMap={contactInfoMap}
+          />
+          <View style={styles.info}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {pubkeys.length} member{pubkeys.length === 1 ? '' : 's'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [openGroup, handleLongPress, styles, contactInfoMap, groupAvatarInputs],
   );
 
   return (
@@ -139,7 +207,7 @@ const GroupsScreen: React.FC = () => {
 
       <View style={styles.content}>
         <View style={styles.filterChipRow}>
-          {devMode ? (
+          {secretMode ? (
             <TouchableOpacity
               style={followingOnly ? styles.filterChip : styles.filterChipOff}
               onPress={() => setFollowingOnly(!followingOnly)}
@@ -303,19 +371,6 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 20,
       paddingVertical: 14,
       gap: 12,
-    },
-    avatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPinkLight,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    avatarLetter: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.brandPink,
     },
     info: {
       flex: 1,

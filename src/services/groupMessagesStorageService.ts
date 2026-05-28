@@ -36,14 +36,49 @@ export async function loadGroupMessages(groupId: string): Promise<GroupMessage[]
   }
 }
 
+// Window in seconds for matching an inbound real-event message against a
+// pending optimistic local_* row (same sender + same text). Closes #402:
+// without this, the sender's own NIP-17 self-wrap echo arrives with the
+// gift-wrap hex id, which never collides with the local_<ts>_<rnd> id we
+// optimistically appended on send — so both rows persisted and the user
+// saw the same message (e.g. a GIF) twice.
+const LOCAL_ECHO_MATCH_WINDOW_SECS = 30;
+
 export async function appendGroupMessage(
   groupId: string,
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
   const existing = await loadGroupMessages(groupId);
-  // Dedup on id; keep the newer copy when ids collide (createdAt wins).
   const map = new Map<string, GroupMessage>();
   for (const m of existing) map.set(m.id, m);
+
+  // When a real (non-local_) event arrives, look for a pending optimistic
+  // local_* row from the same sender with identical text and a close-enough
+  // createdAt — and replace it with the real one rather than appending
+  // alongside. Pick the closest createdAt match so back-to-back identical
+  // sends are matched in order even when relay echoes arrive out-of-order.
+  // senderPubkey is lowercased on both sides because inbound rumors are
+  // lowercased upstream while optimistic locals may use the viewer pubkey
+  // as-is.
+  if (!message.id.startsWith('local_')) {
+    const targetSender = message.senderPubkey.toLowerCase();
+    let bestKey: string | null = null;
+    let bestDelta = Infinity;
+    for (const [k, m] of map) {
+      if (!k.startsWith('local_')) continue;
+      if (m.senderPubkey.toLowerCase() !== targetSender) continue;
+      if (m.text !== message.text) continue;
+      const delta = Math.abs(m.createdAt - message.createdAt);
+      if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestKey = k;
+      }
+    }
+    if (bestKey !== null) map.delete(bestKey);
+  }
+
+  // Dedup on id; keep the newer copy when ids collide (createdAt wins).
   const prior = map.get(message.id);
   if (!prior || prior.createdAt < message.createdAt) {
     map.set(message.id, message);
@@ -56,4 +91,36 @@ export async function appendGroupMessage(
 
 export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
+}
+
+// Scan AsyncStorage for every `group_messages_*` blob and return the
+// set of message ids that look like NIP-17 wrap ids (64-char hex —
+// `local_*` optimistic rows are excluded). Used by NostrContext to
+// pre-seed `knownWrapIds` on cold start so the live DM sub doesn't
+// redundantly decrypt + re-route group wraps it already processed in
+// a previous session. Single AsyncStorage round-trip per stored group.
+const WRAP_ID_PATTERN = /^[0-9a-f]{64}$/;
+export async function listPersistedGroupWrapIds(): Promise<string[]> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const groupKeys = keys.filter((k) => k.startsWith('group_messages_'));
+    if (groupKeys.length === 0) return [];
+    const pairs = await AsyncStorage.multiGet(groupKeys);
+    const ids: string[] = [];
+    for (const [, raw] of pairs) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as GroupMessage[];
+        if (!Array.isArray(parsed)) continue;
+        for (const m of parsed) {
+          if (typeof m.id === 'string' && WRAP_ID_PATTERN.test(m.id)) ids.push(m.id);
+        }
+      } catch {
+        // Skip malformed blob — better than aborting the whole scan.
+      }
+    }
+    return ids;
+  } catch {
+    return [];
+  }
 }

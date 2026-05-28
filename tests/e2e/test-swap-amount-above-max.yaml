@@ -1,0 +1,84 @@
+appId: com.lightningpiggy.app.dev
+name: Boltz reverse swap — amount above maximum surfaces "Maximum is" warning
+---
+# Scaffold for issue #453. Symmetric to test-swap-amount-below-min:
+# pure-UI bounds check, no funds, no network side effect. Asserts
+# AmountEntryScreen.tsx:303-305 renders "Maximum is N sats." when the
+# user types a value above Boltz's server-quoted max for a reverse
+# swap, and that the Done button stays disabled.
+#
+# Preconditions same as the below-min test (clipboard seeded with
+# `bitcoin:${MAESTRO_ADDR_BIG}` — no amount).
+
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'btn-send'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'send-tab-input'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'send-paste-clipboard'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'send-paste-go'
+- waitForAnimationToEnd:
+    timeout: 6000
+
+- tapOn:
+    id: 'send-amount-picker'
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+
+# Wait for the Boltz min/max range copy to render before typing —
+# AmountEntryScreen only emits the "Maximum is …" warning once
+# `maxSats` is populated from the Boltz fees fetch. Without this gate,
+# a slow network leaves max undefined → warning never fires → false-
+# pass. Range text renders as "<min> – <max> sats", em-dash is U+2013.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
+
+# 999,999,999 sats = ~10 BTC — comfortably above Boltz's per-swap
+# ceiling (currently in the low millions of sats / fractions of a
+# BTC range, varies by liquidity).
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- tapOn: { id: 'amount-entry-key-9' }
+- assertVisible: '999,999,999'
+
+- assertVisible:
+    text: '.*Maximum is.*sats.*'
+
+- tapOn:
+    id: 'amount-entry-confirm'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'amount-entry-screen'

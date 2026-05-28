@@ -12,7 +12,7 @@ name: Amber Import Key Test
 #   adb uninstall com.greenart7c3.nostrsigner
 #   adb install /tmp/amber-free-x86_64-release-v6.0.3.apk
 #
-# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-amber-import-key.yaml
+# Run: source .env && maestro test -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" tests/e2e/test-amber-import-key.yaml
 
 - waitForAnimationToEnd:
     timeout: 5000
@@ -24,7 +24,7 @@ name: Amber Import Key Test
 
 # Paste the nsec, dismiss keyboard, tap Next
 - tapOn: 'Nsec / private key'
-- inputText: ${MAESTRO_NSEC}
+- inputText: ${MAESTRO_NSEC_BIG}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -40,7 +40,7 @@ name: Amber Import Key Test
 # Dismiss Android's notifications permission dialog (Unicode apostrophe)
 # Using regex-safe dot so the match works regardless of the exact quote char
 - tapOn:
-    text: "Don.t allow"
+    text: 'Don.t allow'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000

@@ -33,6 +33,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
+import { createLiveLocationPingEvent } from '../services/nostrLiveLocation';
 import * as amberService from '../services/amberService';
 import { useNostr } from './NostrContext';
 import {
@@ -128,7 +129,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
           if (!nsec) return false;
           const { secretKey } = nostrService.decodeNsec(nsec);
-          const event = await nostrService.createLiveLocationPingEvent(
+          const event = await createLiveLocationPingEvent(
             secretKey,
             session.recipientPubkey,
             session.sessionId,
