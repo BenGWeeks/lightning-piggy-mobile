@@ -40,6 +40,8 @@ import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCac
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
+  AMBER_NIP17_SKIP_KEY_BASE,
+  NSEC_NIP17_SKIP_KEY_BASE,
   wrapCacheFileName,
   AMBER_NIP17_ENABLED_KEY_LEGACY,
   DM_CONV_CACHE_PREFIX,
@@ -1190,7 +1192,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Decrypted DM plaintext must not survive logout / account wipe
     // (#689 review / #690).
     if (loggedOutPubkey) {
-      for (const base of [AMBER_NIP17_CACHE_KEY_BASE, NSEC_NIP17_CACHE_KEY_BASE]) {
+      // Includes the per-account skip-set files (#746 — they sit alongside the
+      // positive-cache files; if we wiped only the cache on logout, the
+      // skip-set would leak across account switches and silently suppress
+      // wraps for the next signed-in user).
+      for (const base of [
+        AMBER_NIP17_CACHE_KEY_BASE,
+        NSEC_NIP17_CACHE_KEY_BASE,
+        AMBER_NIP17_SKIP_KEY_BASE,
+        NSEC_NIP17_SKIP_KEY_BASE,
+      ]) {
         try {
           const f = new File(
             Paths.document,

@@ -577,8 +577,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     // skip-set. If the user later follows this sender the
                     // skip-set is not invalidated: the live NIP-17 sub
                     // delivers new wraps in real time, and pull-to-refresh
-                    // (force: true) bypasses the skip-set by resetting it.
-                    // (#743)
+                    // (force: true) bypasses the skip-set CHECK (the wrap
+                    // is re-decrypted and the follow gate re-evaluated; if
+                    // the sender is still non-followed the wrap id is just
+                    // re-added to the same skip-set). (#745)
                     skipSet.add(wrap.id);
                     skipSetDirty = true;
                     continue;
