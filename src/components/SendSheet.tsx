@@ -5,9 +5,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   BackHandler,
-  Keyboard,
   Linking,
-  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
@@ -28,6 +26,7 @@ import { walletLabel } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
@@ -167,7 +166,7 @@ const SendSheet: React.FC<Props> = ({
   // fixed-footer structure in the render output below) so they stay
   // reachable even when the form content is tall enough to require
   // internal scrolling.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardHeight = useKeyboardHeight();
 
   // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
   // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
@@ -230,28 +229,6 @@ const SendSheet: React.FC<Props> = ({
     });
     return () => handler.remove();
   }, [visible, onClose]);
-
-  // Track keyboard height so the BottomSheetScrollView has enough bottom
-  // padding to reach past the keyboard to the last field. Mirrors the
-  // pattern in NostrLoginSheet / EditProfileSheet / TransferSheet —
-  // rule 5 of the "Bottom sheet doesn't slide up when keyboard opens"
-  // checklist in docs/TROUBLESHOOTING.adoc.
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-      // Don't scrollToEnd here — that fires for every focus, including the
-      // paste field near the top of the sheet, and would shove the paste
-      // input out of view. The memo input has its own onFocus scroller for
-      // the only case where end-scroll is actually wanted.
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   // Resolve lightning address when scanned
   useEffect(() => {
