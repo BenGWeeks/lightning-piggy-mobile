@@ -60,7 +60,7 @@ const PERMISSION_REQUESTED_KEY = 'notif_pref_permission_asked_v1';
  * Add a new kind here BEFORE adding a new caller — keeps the routing
  * logic exhaustive.
  */
-export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap';
+export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache';
 
 /** Tap-routing data shipped with every notification. The deep-link
  * router (TODO — follow-up) reads these on tap to navigate to the
@@ -70,11 +70,15 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap';
  *  - group     → groupId (open the group thread)
  *  - payment   → walletId (open that wallet's history)
  *  - zap       → conversationPubkey OR groupId (zap context)
+ *  - cache     → cacheCoord (open the cache detail; #740)
  */
 export interface NotificationData {
   conversationPubkey?: string;
   groupId?: string;
   walletId?: string;
+  /** `<kind>:<pubkey>:<d>` coordinate of the geo-cache the find-log
+   * targets. Read on tap to open HuntPiggyDetail (#740). */
+  cacheCoord?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -226,11 +230,22 @@ export async function setLockScreenContentEnabled(enabled: boolean): Promise<voi
   await AsyncStorage.setItem(LOCK_SCREEN_CONTENT_KEY, enabled ? 'true' : 'false').catch(() => {});
 }
 
-/** Map a `NotificationKind` to the Android channel id it should fire on. */
+/** Map a `NotificationKind` to the Android channel id it should fire on.
+ *
+ * `cache` (find-logs on the user's geo-caches, #740) deliberately rides on
+ * the existing Messages channel rather than introducing a third channel.
+ * A new channel would orphan every user's existing per-channel mute
+ * settings, and a find-log is conversationally similar to a DM (someone
+ * pinging you about something you published) — the user who muted
+ * Messages almost certainly wants find-logs muted too. If demand for an
+ * independent "Hunt" channel surfaces, add it later with a careful
+ * migration; until then sharing the channel is the lower-friction default.
+ */
 function channelForKind(kind: NotificationKind): string {
   switch (kind) {
     case 'dm':
     case 'group':
+    case 'cache':
       return CHANNEL_MESSAGES;
     case 'payment':
     case 'zap':
@@ -252,6 +267,8 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
       return { title: 'Payment received', body: 'Open Lightning Piggy for details' };
     case 'zap':
       return { title: 'Zap received', body: 'Open Lightning Piggy for details' };
+    case 'cache':
+      return { title: 'New find on your cache', body: 'Open Lightning Piggy to view' };
   }
 }
 
@@ -322,6 +339,11 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
 // arriving is always worth surfacing.
 let appInForeground = true;
 let activeThreadId: string | null = null;
+// #740: same idea as `activeThreadId` but keyed on the cache coordinate
+// (`<kind>:<pubkey>:<d>`) so a find-log fired while the user is on that
+// exact HuntPiggyDetail screen stays quiet. Kept independent of the
+// thread id so a cache and a DM thread never collide on the same value.
+let activeCacheCoord: string | null = null;
 
 /** Called by the app root on AppState change. */
 export function setNotificationsForeground(active: boolean): void {
@@ -339,6 +361,19 @@ export function setActiveThread(threadId: string | null): void {
 /** True when the app is foreground AND the user is viewing `threadId`. */
 export function isThreadActivelyViewed(threadId: string): boolean {
   return appInForeground && activeThreadId === threadId;
+}
+
+/**
+ * Called by HuntPiggyDetail / the navigation focus sync on focus (with the
+ * cache coord) and on blur (with `null`). Mirrors `setActiveThread` (#740).
+ */
+export function setActiveCache(cacheCoord: string | null): void {
+  activeCacheCoord = cacheCoord;
+}
+
+/** True when the app is foreground AND the user is viewing `cacheCoord`. */
+export function isCacheActivelyViewed(cacheCoord: string): boolean {
+  return appInForeground && activeCacheCoord === cacheCoord;
 }
 
 /**
@@ -360,6 +395,33 @@ export async function fireMessageNotification(opts: {
     title: opts.title,
     body: opts.body,
     data: opts.data,
+  });
+}
+
+/**
+ * Fire a find-log notification (#740) — someone published a kind-1111
+ * comment against one of the user's geo-caches (Piglet or vanilla
+ * NIP-GC). Suppressed when the user is actively viewing the cache's
+ * detail screen. `cacheCoord` is the addressable `<kind>:<pubkey>:<d>`
+ * triple of the cache and is what the tap-router reads back to open
+ * HuntPiggyDetail.
+ *
+ * The detect-and-ping background path (`runBackgroundSync`) calls this
+ * with the sentinel `cacheCoord: '__background__'` — that value never
+ * matches a real route, so the suppression gate always lets the ping
+ * through and the router falls back to the Geo-caches list.
+ */
+export async function fireCacheNotification(opts: {
+  cacheCoord: string;
+  title: string;
+  body: string;
+}): Promise<string | null> {
+  if (isCacheActivelyViewed(opts.cacheCoord)) return null;
+  return fireNotification({
+    kind: 'cache',
+    title: opts.title,
+    body: opts.body,
+    data: { cacheCoord: opts.cacheCoord },
   });
 }
 
@@ -393,4 +455,5 @@ export function __resetForTests(): void {
   cachedLockScreenContent = null;
   appInForeground = true;
   activeThreadId = null;
+  activeCacheCoord = null;
 }

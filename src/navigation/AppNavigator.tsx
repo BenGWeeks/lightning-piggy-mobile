@@ -23,7 +23,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { setActiveThread } from '../services/notificationService';
+import { setActiveThread, setActiveCache } from '../services/notificationService';
 import {
   RootStackParamList,
   ExploreStackParamList,
@@ -136,6 +136,7 @@ export const navigateFromNotification = (data: {
   conversationPubkey?: string;
   groupId?: string;
   walletId?: string;
+  cacheCoord?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
   if (data.conversationPubkey) {
@@ -146,6 +147,20 @@ export const navigateFromNotification = (data: {
   }
   if (data.groupId) {
     navigationRef.navigate('GroupConversation', { groupId: data.groupId });
+    return true;
+  }
+  // Find-log on one of my caches (#740) → open that cache detail. The
+  // background detect-and-ping path passes the sentinel `__background__`
+  // coord (it didn't resolve to a specific cache) — fall through to the
+  // Geo-caches list in that case instead of pushing a doomed detail.
+  if (data.kind === 'cache') {
+    if (data.cacheCoord && data.cacheCoord !== '__background__') {
+      return navigateToHuntPiggyDetail(data.cacheCoord);
+    }
+    navigationRef.navigate('Main', {
+      screen: 'MainTabs',
+      params: { screen: 'Explore', params: { screen: 'Hunt' } },
+    });
     return true;
   }
   // Generic message ping with no thread id (the background detect-and-ping
@@ -174,6 +189,15 @@ function syncActiveThreadFromNav(): void {
     setActiveThread((route.params as { groupId?: string } | undefined)?.groupId ?? null);
   } else {
     setActiveThread(null);
+  }
+  // Active-cache suppression (#740) — if the focused screen is the
+  // detail view for a specific cache, find-logs against that coord stay
+  // silent. Independent of the thread gate so a DM and a cache can't
+  // collide on the same identifier.
+  if (route?.name === 'HuntPiggyDetail') {
+    setActiveCache((route.params as { coord?: string } | undefined)?.coord ?? null);
+  } else {
+    setActiveCache(null);
   }
 }
 
