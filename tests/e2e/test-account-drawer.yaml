@@ -6,7 +6,7 @@ name: Account Drawer Test
 #   2. The drawer shows the version footer.
 #   3. Each section row navigates to its screen and the back button
 #      returns to the tabs.
-#   4. Triple-tapping the About version toggles developer mode.
+#   4. Triple-tapping the About version toggles secret mode.
 # Run: maestro test tests/e2e/test-account-drawer.yaml
 
 - waitForAnimationToEnd:
@@ -77,7 +77,7 @@ name: Account Drawer Test
     id: 'version-text'
 - extendedWaitUntil:
     visible:
-      text: 'Developer Mode.*'
+      text: 'Secret Mode.*'
     timeout: 3000
 - tapOn:
     text: 'OK'
@@ -94,7 +94,7 @@ name: Account Drawer Test
     id: 'version-text'
 - extendedWaitUntil:
     visible:
-      text: 'Developer Mode.*'
+      text: 'Secret Mode.*'
     timeout: 3000
 - tapOn:
     text: 'OK'

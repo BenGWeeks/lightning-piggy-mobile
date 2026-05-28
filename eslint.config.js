@@ -66,11 +66,17 @@ module.exports = [
     },
   },
   {
-    // Jest test setup + co-located `*.test.ts(x)` run under jest-expo,
-    // so allow the jest globals (`jest`, `expect`, `describe`, etc.).
-    files: ['jest.setup.js', '**/*.test.ts', '**/*.test.tsx', 'tests/unit/**/*.ts'],
+    // Jest setup/config files + co-located `*.test.ts(x)` run under
+    // jest-expo, so allow the jest globals (`jest`, `expect`, etc.).
+    files: [
+      'jest.setup.js',
+      'jest.config.js',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      'tests/unit/**/*.ts',
+    ],
     languageOptions: {
-      globals: { ...globals.jest, ...globals.node },
+      globals: { ...globals.node, ...globals.jest },
     },
   },
   {

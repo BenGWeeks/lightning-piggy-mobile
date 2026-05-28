@@ -17,11 +17,7 @@ import { argv, exit } from 'node:process';
 import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip17 from 'nostr-tools/nip17';
-import {
-  generateSecretKey,
-  getPublicKey,
-  finalizeEvent,
-} from 'nostr-tools/pure';
+import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure';
 
 // Must also be reachable from the emulator when it fetches. Matches the
 // DEFAULT_RELAYS list in src/services/nostrService.ts.
@@ -60,7 +56,10 @@ function writeEnv(map) {
   for (const [k, v] of map) {
     if (!existingKeys.has(k)) lines.push(`${k}=${v}`);
   }
-  writeFileSync(ENV_PATH, lines.filter((l, i, arr) => !(l === '' && i === arr.length - 1)).join('\n') + '\n');
+  writeFileSync(
+    ENV_PATH,
+    lines.filter((l, i, arr) => !(l === '' && i === arr.length - 1)).join('\n') + '\n',
+  );
 }
 
 function loadOrGenerateSenderKey() {
@@ -155,7 +154,9 @@ async function main() {
   await new Promise((r) => setTimeout(r, 1500));
   pool.close(RELAYS);
 
-  console.log('\n[B] Done. The recipient should see this message in their inbox once they refresh.');
+  console.log(
+    '\n[B] Done. The recipient should see this message in their inbox once they refresh.',
+  );
   console.log(`[B] Friend this account from the LP UI: ${nip19.npubEncode(senderPubkey)}`);
 }
 

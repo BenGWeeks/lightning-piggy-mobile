@@ -5,8 +5,8 @@
 
 set -e
 
-echo "=== Setup: Enable Developer Mode ==="
-maestro test tests/e2e/test-dev-mode.yaml
+echo "=== Setup: Enable Secret Mode ==="
+maestro test tests/e2e/test-secret-mode.yaml
 
 echo ""
 echo "=== Setup: Add NWC Wallet 1 ==="

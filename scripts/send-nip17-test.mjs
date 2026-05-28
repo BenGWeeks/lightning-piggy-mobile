@@ -11,12 +11,12 @@
 // Usage:
 //   node scripts/send-nip17-test.mjs [text]
 //
-// Defaults: from MAESTRO_NSEC3 (Middle Piggy) to MAESTRO_NSEC pubkey (Big Piggy).
+// Defaults: from MAESTRO_NSEC_MIDDLE (Middle Piggy) to MAESTRO_NSEC_BIG pubkey (Big Piggy).
 // Override via env:
-//   FROM_NSEC=$MAESTRO_NSEC4 TO_PUBKEY_HEX=<hex> node scripts/send-nip17-test.mjs "hello"
+//   FROM_NSEC=$MAESTRO_NSEC_EVIL TO_PUBKEY_HEX=<hex> node scripts/send-nip17-test.mjs "hello"
 //
 // Notes:
-// - Caller must `source .env` (or otherwise export MAESTRO_NSEC*) before running.
+// - Caller must `source .env` (or otherwise export MAESTRO_NSEC_BIG*) before running.
 // - Does NOT log secrets. Logs sender/recipient pubkey prefixes only.
 
 import { SimplePool, getPublicKey } from 'nostr-tools';
@@ -37,16 +37,16 @@ function decodeNsec(nsec) {
 }
 
 async function main() {
-  const fromNsec = process.env.FROM_NSEC || process.env.MAESTRO_NSEC3;
-  if (!fromNsec) throw new Error('FROM_NSEC or MAESTRO_NSEC3 required');
+  const fromNsec = process.env.FROM_NSEC || process.env.MAESTRO_NSEC_MIDDLE;
+  if (!fromNsec) throw new Error('FROM_NSEC or MAESTRO_NSEC_MIDDLE required');
   const fromSk = decodeNsec(fromNsec);
   const fromPk = getPublicKey(fromSk);
 
-  // Recipient pubkey: explicit override OR derive from MAESTRO_NSEC (Big Piggy).
+  // Recipient pubkey: explicit override OR derive from MAESTRO_NSEC_BIG (Big Piggy).
   let toPk = process.env.TO_PUBKEY_HEX;
   if (!toPk) {
-    const toNsec = process.env.MAESTRO_NSEC;
-    if (!toNsec) throw new Error('TO_PUBKEY_HEX or MAESTRO_NSEC required');
+    const toNsec = process.env.MAESTRO_NSEC_BIG;
+    if (!toNsec) throw new Error('TO_PUBKEY_HEX or MAESTRO_NSEC_BIG required');
     toPk = getPublicKey(decodeNsec(toNsec));
   }
 

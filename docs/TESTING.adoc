@@ -184,7 +184,7 @@ Available subflows:
 | Subflow | Purpose
 
 | `_subflow-login-as.yaml`
-| Force-stop the app, sign out any prior session, then sign in via the nsec passed in `MAESTRO_NSEC`. Used by every multi-actor flow.
+| Force-stop the app, sign out any prior session, then sign in via the nsec passed in `MAESTRO_NSEC_BIG`. Used by every multi-actor flow.
 
 | `_subflow-seed-test-wallet.yaml`
 | Walk the AddWalletWizard to seed a test wallet so wallet-conditional tests (Send, Receive, Transfer, cached-tx, etc.) don't have to re-implement the wizard inline. Picks the wallet type based on which env var is non-empty:

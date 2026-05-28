@@ -179,6 +179,15 @@ export function BrandedAlertHost(): React.ReactElement | null {
                   onPress={() => handleButton(btn)}
                   style={({ pressed }) => [
                     styles.button,
+                    // In row mode flex:1 distributes width evenly across 2
+                    // buttons. In column mode it instead distributes
+                    // *height* — and with the parent `alignSelf: stretch`
+                    // inside a flex:1 backdrop, each button balloons to a
+                    // third of the screen, pushing later buttons below
+                    // the fold (#75 STL "Save to Files" was invisible
+                    // because the alert had 3 actions). Drop flex when
+                    // stacking so buttons hug their content height.
+                    stackButtons ? styles.buttonStacked : styles.buttonInRow,
                     isCancel
                       ? styles.cancelButton
                       : isDestructive
@@ -268,7 +277,6 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'column-reverse',
     },
     button: {
-      flex: 1,
       paddingVertical: 12,
       // 24px horizontal padding clipped 6+ char labels ("Cancel" / "Sign Out")
       // when two buttons sat side-by-side inside the card's 28px padding.
@@ -278,6 +286,11 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
+    // Row mode (≤2 buttons) — flex:1 distributes width evenly. Column
+    // mode (3+) instead hugs content height so stacked buttons don't
+    // each grab a third of the screen. See the inline note above.
+    buttonInRow: { flex: 1 },
+    buttonStacked: { alignSelf: 'stretch' },
     primaryButton: {
       backgroundColor: colors.brandPink,
     },

@@ -36,6 +36,13 @@ jest.mock('react-native-nfc-manager', () => ({
     ndefHandler: { writeNdefMessage: jest.fn().mockResolvedValue(undefined) },
   },
   NfcTech: { Ndef: 'Ndef' },
+  NfcAdapter: {
+    FLAG_READER_NFC_A: 1,
+    FLAG_READER_NFC_B: 2,
+    FLAG_READER_NFC_F: 4,
+    FLAG_READER_NFC_V: 8,
+    FLAG_READER_NO_PLATFORM_SOUNDS: 256,
+  },
   NfcEvents: {
     DiscoverTag: 'NfcManagerDiscoverTag',
     SessionClosed: 'NfcManagerSessionClosed',
@@ -48,3 +55,12 @@ jest.mock('react-native-nfc-manager', () => ({
     uriRecord: jest.fn(),
   },
 }));
+
+// AsyncStorage's native module isn't linked in the Jest environment.
+// The package ships an in-memory mock for exactly this case — wire it
+// up here so any test that touches storage (e.g. sendThresholdService
+// in #82) gets a working get/set/clear without each test file having
+// to add its own jest.mock(...) boilerplate.
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);

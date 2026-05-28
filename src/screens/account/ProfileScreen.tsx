@@ -1,36 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Alert } from '../../components/BrandedAlert';
-import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
-import * as Clipboard from 'expo-clipboard';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
-import { Copy, UserRound, Zap } from 'lucide-react-native';
+import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import EditProfileSheet from '../../components/EditProfileSheet';
-import QrSheet from '../../components/QrSheet';
-import NfcIcon from '../../components/icons/NfcIcon';
+import QrWithIdentityToggle from '../../components/QrWithIdentityToggle';
 import NfcWriteSheet from '../../components/NfcWriteSheet';
 import { isNfcSupported } from '../../services/nfcService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
-
-const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Rect x="3" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
-    <Rect x="14" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
-    <Rect x="3" y="14" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
-    <SvgPath
-      d="M14 14h3v3h-3zM20 14v3h-3M14 20h3M20 20h0"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </Svg>
-);
 
 const ProfileScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -39,8 +21,6 @@ const ProfileScreen: React.FC = () => {
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const [qrSheetOpen, setQrSheetOpen] = useState(false);
-  const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   // Probe device NFC capability once on mount. Hide the NFC button on
@@ -62,17 +42,6 @@ const ProfileScreen: React.FC = () => {
     }, [isLoggedIn, refreshProfile]),
   );
 
-  const copyNpub = async () => {
-    if (profile?.npub) {
-      await Clipboard.setStringAsync(profile.npub);
-      Alert.alert('Copied', 'Your npub has been copied to clipboard.');
-    }
-  };
-
-  const truncatedNpub = profile?.npub
-    ? `${profile.npub.slice(0, 16)}...${profile.npub.slice(-8)}`
-    : '';
-
   return (
     <AccountScreenLayout title="Profile">
       {isLoggedIn && profile ? (
@@ -82,7 +51,13 @@ const ProfileScreen: React.FC = () => {
           )}
           <View style={styles.profileRow}>
             {profile.picture ? (
-              <Image source={{ uri: profile.picture }} style={styles.profilePicture} />
+              <ExpoImage
+                source={{ uri: profile.picture }}
+                style={styles.profilePicture}
+                cachePolicy="memory-disk"
+                recyclingKey={profile.picture}
+                autoplay={false}
+              />
             ) : (
               <View style={styles.profilePicturePlaceholder}>
                 <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
@@ -96,38 +71,23 @@ const ProfileScreen: React.FC = () => {
             </View>
           </View>
 
-          <View style={styles.npubRow}>
-            <TouchableOpacity style={styles.npubCopy} onPress={copyNpub}>
-              <Text style={styles.npubText}>{truncatedNpub}</Text>
-              <Copy size={20} color={colors.textSupplementary} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                setQrDefaultMode('npub');
-                setQrSheetOpen(true);
-              }}
-              accessibilityLabel="Show npub QR"
-              testID="profile-npub-qr"
-            >
-              <QrIcon size={22} color={colors.textSupplementary} />
-            </TouchableOpacity>
-            {nfcSupported && (
-              <TouchableOpacity
-                onPress={() => setNfcWriteVisible(true)}
-                accessibilityLabel="Write npub to NFC tag"
-                testID="profile-npub-nfc"
-              >
-                <NfcIcon size={22} color={colors.textSupplementary} />
-              </TouchableOpacity>
-            )}
-          </View>
+          {profile.about ? <Text style={styles.profileAbout}>{profile.about}</Text> : null}
 
-          {profile.lud16 && (
-            <View style={styles.profileLnRow}>
-              <Zap size={14} color={colors.white} />
-              <Text style={styles.profileLn}>{profile.lud16}</Text>
-            </View>
-          )}
+          {/* Inline QR + npub/Lightning toggle (issue #463). Replaces both
+              the QR-icon-opens-bottom-sheet path AND the inline npub /
+              lud16 rows that used to live here — the QR's own value-row
+              renders the active value with a copy affordance, so the
+              upper rows would just duplicate it. NFC + Share + Copy
+              actions are wired to the active toggle value, so swapping
+              npub <-> Lightning swaps which value the action buttons
+              operate on. */}
+          <QrWithIdentityToggle
+            npub={profile.npub}
+            lightningAddress={profile.lud16 ?? null}
+            defaultMode="npub"
+            nfcSupported={nfcSupported}
+            onNfcWrite={() => setNfcWriteVisible(true)}
+          />
 
           <TouchableOpacity
             style={styles.editProfileButton}
@@ -156,15 +116,6 @@ const ProfileScreen: React.FC = () => {
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
       <EditProfileSheet visible={editProfileOpen} onClose={() => setEditProfileOpen(false)} />
-      {profile?.npub && (
-        <QrSheet
-          visible={qrSheetOpen}
-          onClose={() => setQrSheetOpen(false)}
-          npub={profile.npub}
-          lightningAddress={profile.lud16 ?? null}
-          defaultMode={qrDefaultMode}
-        />
-      )}
       {profile?.npub && (
         <NfcWriteSheet
           visible={nfcWriteVisible}
@@ -222,34 +173,12 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       marginTop: 2,
     },
-    npubRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 16,
-      paddingBottom: 8,
-    },
-    npubCopy: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      flex: 1,
-    },
-    npubText: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    profileLnRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingBottom: 12,
-      gap: 4,
-    },
-    profileLn: {
+    profileAbout: {
       color: colors.textBody,
       fontSize: 14,
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      lineHeight: 20,
     },
     editProfileButton: {
       margin: 16,
