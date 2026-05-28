@@ -992,6 +992,7 @@ export async function fetchInboxDmEvents(
     sentK4Filter.since = since;
     recvK4Filter.since = since;
   }
+  const __t0 = performance.now();
   try {
     // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
     // inbox fetch genuinely terminates — unlike withTimeout which only raced the
@@ -1001,6 +1002,18 @@ export async function fetchInboxDmEvents(
       pool.querySync(allRelays, recvK4Filter, { maxWait: 15000 }),
       pool.querySync(allRelays, wrapsFilter, { maxWait: 15000 }),
     ]);
+    // [Perf] Cold-start freeze attribution (#751). querySync ingests every
+    // returned event synchronously (JSON.parse + validateEvent + matchFilters)
+    // before resolving — logs the wrap count + wall-clock so we can tell
+    // whether the dominant cost is fetch volume (reduce limit/fan-out) or
+    // per-event ingest (yield). Prints here, inside the fetch, so it survives
+    // the caller's post-fetch abort short-circuit (useDmInbox.ts:395) which
+    // otherwise suppresses the [Perf] refreshDmInbox count line.
+    console.log(
+      `[Perf] fetchInboxDmEvents: ${(performance.now() - __t0).toFixed(0)}ms ` +
+        `wraps=${wraps.length} sentK4=${sentK4.length} recvK4=${receivedK4.length} ` +
+        `relays=${allRelays.length} limit=${limit}`,
+    );
     const k4 = new Map<string, RawDmEvent>();
     for (const ev of sentK4) k4.set(ev.id, ev as RawDmEvent);
     for (const ev of receivedK4) k4.set(ev.id, ev as RawDmEvent);
