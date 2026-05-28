@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   InteractionManager,
+  AppState,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -318,6 +319,21 @@ const MessagesScreen: React.FC = () => {
       return () => handle.cancel();
     }, [isLoggedIn, contacts]),
   );
+
+  // Abort any in-flight decrypt loop when the app goes to background
+  // (#739 Fix 2). RAF callbacks suspend when Android pauses Choreographer
+  // (user hits Home or switches apps), so an in-flight loop hangs until
+  // the app resumes and appears frozen on return. Mirror the pattern from
+  // WalletContext.tsx:735. The listener must outlive focus/blur so we use
+  // a plain useEffect scoped to the screen mount, not useFocusEffect.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        refreshAbortRef.current?.abort();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Trust gate (#547). For 'friends' tier this is L1 follows + viewer + seeds;
   // for 'fof' it adds L2 follows-of-follows; for 'all' it's still computed

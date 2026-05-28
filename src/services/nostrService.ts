@@ -95,10 +95,16 @@ export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
 //   on the map. Finder still has to scan a real tag to claim.
 // - 31923 NIP-52 time-based event: meetup metadata. A fake "Bitcoin
 //   meetup tonight" wastes the user's time, costs no money.
+// - 1059 NIP-59 gift-wrap: the outer wrap uses an ephemeral one-time
+//   key whose pubkey is never published anywhere — schnorr verification
+//   would pass for ANY key, so the check provides no integrity signal.
+//   The real integrity comes from the seal/rumor layer inside (unwrapped
+//   with our secret key in `unwrapGiftWrap`). Saving ~1–5 ms × N per
+//   cold-start inbox burst. `validateEvent()` (JSON structure) still runs.
 //
 // Other kinds keep the full schnorr — DMs (4 / 14), reactions, zap
 // requests/receipts, comment kinds (1111), found logs (7516), etc.
-const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923]);
+const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923, 1059]);
 
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
   // Skip the schnorr check if we've seen this exact event id pass it
@@ -457,13 +463,6 @@ export async function fetchRelayList(
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return Promise.race([
-    promise,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
-  ]);
-}
-
 // Stream a single batch of profile events. Replaces the previous
 // `pool.querySync()`-based pattern which waited for EVERY relay in the
 // set to send EOSE before returning anything. With long lists like
@@ -754,8 +753,9 @@ async function fetchZapReceiptsByTag(
   // filter type which expects `#<letter>` index signatures.
   const filter = { ...baseFilter, [tag]: deduped } as Parameters<typeof pool.querySync>[1];
   try {
-    const events = await withTimeout(pool.querySync(allRelays, filter), 15000);
-    if (!events) return [];
+    // maxWait: per-relay EOSE timeout — closes the sub at 15 s if EOSE never
+    // arrives (unlike withTimeout, which only raced the Promise and left the sub open).
+    const events = await pool.querySync(allRelays, filter, { maxWait: 15000 });
     const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
     for (const e of events) byId.set(e.id, e);
     return Array.from(byId.values());
@@ -914,13 +914,14 @@ export async function fetchDirectMessageEvents(
     toMeFilter.since = since;
   }
   try {
+    // maxWait closes the sub at 15 s if EOSE never arrives (proper teardown vs withTimeout race).
     const [fromMe, toMe] = await Promise.all([
-      withTimeout(pool.querySync(allRelays, fromMeFilter), 15000),
-      withTimeout(pool.querySync(allRelays, toMeFilter), 15000),
+      pool.querySync(allRelays, fromMeFilter, { maxWait: 15000 }),
+      pool.querySync(allRelays, toMeFilter, { maxWait: 15000 }),
     ]);
     const byId = new Map<string, RawDmEvent>();
-    for (const ev of fromMe ?? []) byId.set(ev.id, ev as RawDmEvent);
-    for (const ev of toMe ?? []) byId.set(ev.id, ev as RawDmEvent);
+    for (const ev of fromMe) byId.set(ev.id, ev as RawDmEvent);
+    for (const ev of toMe) byId.set(ev.id, ev as RawDmEvent);
     return Array.from(byId.values());
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
@@ -992,16 +993,19 @@ export async function fetchInboxDmEvents(
     recvK4Filter.since = since;
   }
   try {
+    // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
+    // inbox fetch genuinely terminates — unlike withTimeout which only raced the
+    // Promise and left the underlying subscribeEose sub running for up to ~60 s.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      withTimeout(pool.querySync(allRelays, sentK4Filter), 15000),
-      withTimeout(pool.querySync(allRelays, recvK4Filter), 15000),
-      withTimeout(pool.querySync(allRelays, wrapsFilter), 15000),
+      pool.querySync(allRelays, sentK4Filter, { maxWait: 15000 }),
+      pool.querySync(allRelays, recvK4Filter, { maxWait: 15000 }),
+      pool.querySync(allRelays, wrapsFilter, { maxWait: 15000 }),
     ]);
     const k4 = new Map<string, RawDmEvent>();
-    for (const ev of sentK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
-    for (const ev of receivedK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
+    for (const ev of sentK4) k4.set(ev.id, ev as RawDmEvent);
+    for (const ev of receivedK4) k4.set(ev.id, ev as RawDmEvent);
     const k1059 = new Map<string, RawGiftWrapEvent>();
-    for (const ev of wraps ?? []) k1059.set(ev.id, ev as RawGiftWrapEvent);
+    for (const ev of wraps) k1059.set(ev.id, ev as RawGiftWrapEvent);
     return { kind4: Array.from(k4.values()), kind1059: Array.from(k1059.values()) };
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchInboxDmEvents failed:', error);

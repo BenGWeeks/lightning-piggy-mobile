@@ -228,14 +228,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     bearing,
     distanceMetres,
   } = useCompassNavigation(compassTarget);
-  // Pull the cached position from the app-wide UserLocationContext too.
-  // useCompassNavigation starts a fresh watch on mount and the first
-  // fix can take a couple of seconds — without this fallback, the dot
-  // briefly renders at the cache's coordinates (camera centre) until
-  // compass nav settles. The cached value is reference-stable across
-  // screen transitions, so the dot renders at the LAST KNOWN position
-  // from the first frame, then upgrades to compass nav's value when
-  // it lands.
+  // Fallback to cached UserLocation so the user dot shows from the first
+  // frame; useCompassNavigation's fresh GPS watch can take ~2 s to settle.
   const { pos: cachedUser } = useUserLocation();
   const userPos = compassUser ?? (cachedUser ? { lat: cachedUser.lat, lon: cachedUser.lon } : null);
   const userAccuracy = compassAccuracy ?? cachedUser?.accuracy ?? null;
@@ -257,10 +251,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     (async () => {
-      // Cold-tap deep-link path: peek mirror was empty so check
-      // AsyncStorage explicitly before falling through to the relay
-      // fetch. The disk read is ~10ms while a busy-thread relay round-
-      // trip can be 15s+; painting cached data first hides the freeze.
+      // Paint from disk first (cold deep-link path) to hide relay latency.
       if (!cache) {
         try {
           const onDisk = await loadCachedCaches();
@@ -278,9 +269,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         const c = await fetchCache(parts.pubkey, parts.d);
         if (cancelled) return;
         if (!c) {
-          // Only surface the "not found" error when we have no cached
-          // data to fall back on; if the screen is already showing the
-          // local snapshot, a transient relay miss shouldn't blank it.
+          // Only error when there's no cached snapshot to fall back on.
           if (!cache) setError('Cache not found on relays — it may have expired.');
         } else {
           setCache(c);
@@ -306,12 +295,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     };
   }, [coord]);
 
-  // Refetch the cache when the user comes back from HuntCreate (Edit
-  // mode) so a rename / spec change shows up immediately, plus the
-  // RefreshControl on the ScrollView below for manual refetch. The
-  // mount-time effect above only fires once per `coord`; without
-  // this, an Edit-then-back-button would leave the detail showing
-  // the stale title.
+  // Refetch on return from HuntCreate (edit) or on pull-to-refresh so
+  // renames/spec changes show immediately (mount effect fires once only).
   const refetchCache = useCallback(async () => {
     const parts = parseCacheCoord(coord);
     if (!parts) return;
@@ -323,13 +308,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [coord]);
 
-  // Track first-focus skip via a ref, NOT useState/closure. Pre-fix
-  // the skip flag lived inside the useCallback closure and depended on
-  // `cache`, so every successful refetch (which setCaches the new
-  // value) recreated the callback, which made useFocusEffect re-run
-  // while the screen was still focused — an infinite refetch loop
-  // every time the screen had focus and the relay was reachable.
-  // Copilot #572 r4 catch.
+  // Skip first focus — ref avoids dep on `cache` which would re-run
+  // the callback after every relay round-trip (infinite loop; #572).
   const isFirstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
@@ -351,30 +331,49 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [refetchCache]);
 
-  // Re-subscribe to zap receipts referencing the current find-log set
-  // every time a new log lands. The filter uses the kind-7516 ids on
-  // the `#e` tag — any kind-9735 receipt zapping a log surfaces here
-  // and gets aggregated by receipt id (so the same zap arriving from
-  // multiple relays only counts once). Memoised on the join of log ids
-  // so an unchanged set doesn't restart the sub.
+  // Re-subscribe to kind-9735 zap receipts on the `#e` tag of find-logs.
+  // Keyed on sorted log ids so a new log re-opens the sub while an
+  // unchanged set doesn't. Receipts deduped by receiptId across relays.
   const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
+  // Coalesce per-zap Map clones into one setState per ≤150 ms flush.
+  // Without batching a relay burst fires N × O(prev) Map clones. (#739 Fix 4)
+  const pendingZapsRef = useRef<{ receiptId: string; logId: string; sats: number }[]>([]);
+  const zapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const logIds = logIdsKey ? logIdsKey.split(',') : [];
     if (logIds.length === 0) return undefined;
-    const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+    const flush = (): void => {
+      if (zapFlushTimerRef.current) {
+        clearTimeout(zapFlushTimerRef.current);
+        zapFlushTimerRef.current = null;
+      }
+      if (pendingZapsRef.current.length === 0) return;
+      const batch = pendingZapsRef.current;
+      pendingZapsRef.current = [];
       setZapsByLog((prev) => {
-        const inner = prev.get(logId);
-        // Skip when this receipt is already counted — guards against
-        // the same event echoing in from a second relay.
-        if (inner && inner.has(receiptId)) return prev;
         const next = new Map(prev);
-        const nextInner = new Map(inner ?? []);
-        nextInner.set(receiptId, sats);
-        next.set(logId, nextInner);
+        for (const { receiptId, logId, sats } of batch) {
+          const inner = next.get(logId);
+          if (inner && inner.has(receiptId)) continue; // already counted
+          const nextInner = new Map(inner ?? []);
+          nextInner.set(receiptId, sats);
+          next.set(logId, nextInner);
+        }
         return next;
       });
+    };
+    const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+      pendingZapsRef.current.push({ receiptId, logId, sats });
+      if (pendingZapsRef.current.length >= 25) {
+        flush();
+        return;
+      }
+      if (zapFlushTimerRef.current === null) zapFlushTimerRef.current = setTimeout(flush, 150);
     });
-    return () => closer();
+    return () => {
+      closer();
+      flush();
+    };
   }, [logIdsKey]);
 
   // ----- composer image picker -------------------------------------------
