@@ -32,6 +32,59 @@ export const wrapCacheFileName = (key: string): string => `${key}.json`;
 // Legacy AsyncStorage key from the now-removed "Enable NIP-17 on Amber" toggle (#404). Cleared on logout so old installs don't leave dead bytes around.
 export const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
 
+// Negative-result skip-set: wrap ids that were decrypted in a prior
+// refresh but produced no inbox entry — because the rumor was a group
+// message (routed to group storage) or from a non-followed sender. On
+// subsequent warm refreshes the relay re-delivers the same wraps and
+// the decrypt loop re-pays the schnorr + NIP-44 cost for each one.
+// Persisting the skip-set lets the loop short-circuit without
+// re-decrypting. Only the wrap *id* (a public nonce on the sealed
+// outer envelope) is stored — no plaintext, no sender pubkey.
+// Invariant: a wrap id is added to the skip-set ONLY after a successful
+// decrypt proves it carries a non-inbox rumor; failed decrypts (wrong
+// key, corrupt wrap) are left out so the next refresh retries them.
+// Cap matches the positive cache to prevent unbounded growth.
+export const NSEC_NIP17_SKIP_KEY_BASE = 'nsec_nip17_skip_v1';
+export const AMBER_NIP17_SKIP_KEY_BASE = 'amber_nip17_skip_v1';
+export const NIP17_SKIP_CAP = 50_000;
+
+/** Load and parse the skip-set from its file, returning an empty Set on
+ * any failure (missing file, corrupt JSON). The outer Set is O(1) lookup
+ * vs the per-entry object used by the positive cache — a tiny extra
+ * allocation but nicer ergonomics for `has(id)` + `add(id)`. */
+export async function loadNip17SkipSet(storageKey: string): Promise<Set<string>> {
+  try {
+    const f = new File(Paths.document, wrapCacheFileName(storageKey));
+    if (!f.exists) return new Set<string>();
+    const raw = await f.text();
+    const arr: unknown = JSON.parse(raw);
+    if (Array.isArray(arr)) return new Set<string>(arr as string[]);
+  } catch {
+    // Treat corrupt file as empty — the next refresh repopulates it.
+  }
+  return new Set<string>();
+}
+
+/** Persist the skip-set to its per-account file. Enforces NIP17_SKIP_CAP
+ * by dropping the first (oldest-inserted) entries when over the limit —
+ * insertion order of a Set is stable in JS so oldest goes first. Write
+ * failures are surfaced as a warn so a broken storage subsystem isn't
+ * silent. */
+export async function writeNip17SkipSet(storageKey: string, set: Set<string>): Promise<void> {
+  // Trim to cap before persisting — keep the newest (end of insertion
+  // order) because recently-skipped wraps are more likely to re-appear.
+  let arr = Array.from(set);
+  if (arr.length > NIP17_SKIP_CAP) arr = arr.slice(arr.length - NIP17_SKIP_CAP);
+  try {
+    const f = new File(Paths.document, wrapCacheFileName(storageKey));
+    if (f.exists) f.delete();
+    f.create();
+    f.write(JSON.stringify(arr));
+  } catch (err) {
+    console.warn(`[Nostr] NIP-17 skip-set file write failed (${storageKey}):`, err);
+  }
+}
+
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
 export type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
