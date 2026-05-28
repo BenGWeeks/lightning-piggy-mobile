@@ -134,18 +134,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- location ---------------------------------------------------------
 
-  // Seed `pos` from the anchor saved alongside the merchant cache on
-  // the previous successful fetch. Two wins on cold start:
-  //   (1) `sortedMerchants` can run before GPS resolves (the haversine
-  //       sort + maxDistance filter both need a `pos`), so the Places
-  //       rail paints on first render instead of after a multi-hundred
-  //       -ms GPS round-trip.
-  //   (2) The Geo-caches + Events rails get the same head-start since
-  //       they're also gated on `pos`.
-  // The real GPS fix below overwrites this once `getLastKnownPositionAsync`
-  // / `getCurrentPositionAsync` lands; accuracy is null because the
-  // anchor is a historical centroid, not a measurement (suppresses the
-  // user-position halo until a real fix arrives).
+  // Seed pos from the cached anchor so rails render before GPS resolves.
+  // Accuracy is null (suppresses user dot halo) until a real fix lands.
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     () => {
       const anchor = peekCachedAnchorSync();
@@ -153,9 +143,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     },
   );
   const [locationDenied, setLocationDenied] = useState(false);
-  // Live position for the user dot — refreshes as the user walks
-  // around without re-running the BTC-merchant / cache / event fetches
-  // below (those fire once on the initial pos resolve).
+  // Live position for the user dot — doesn't re-trigger data fetches.
   const { pos: livePos } = useUserLocation();
   useEffect(() => {
     let cancelled = false;
@@ -166,11 +154,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         setLocationDenied(true);
         return;
       }
-      // Fast path: surface last-known position immediately so the
-      // rails + mini-map render content while we ask for a fresh fix
-      // in parallel. On Android emulators `getCurrentPositionAsync` can
-      // hang waiting on the simulated GPS HAL even with `geo fix`
-      // ticking; on real devices it usually returns in under a second.
+      // Fast path: last-known position unblocks rails while we wait
+      // for the current fix (emulator GPS HAL can take several seconds).
       try {
         const last = await Location.getLastKnownPositionAsync({
           maxAge: 10 * 60 * 1000, // ≤ 10 min old is fine for our 5 km tiles
@@ -582,6 +567,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
+  // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
+  // via the posBucketKey in the effect's deps below — NOT a body-level skip:
+  // React runs cleanup BEFORE the new body, so a body-level skip closes the
+  // existing subs first then bails, leaving zero subs across cold-start GPS
+  // jitter (peekCachedAnchor → getLastKnown → getCurrent settle within a few
+  // hundred metres). #741 Copilot review on #739 Fix 3.
   // NIP-GC + NIP-52 subscriptions live on the *mount* lifecycle, not
   // the focus lifecycle. Open once when ExploreHomeScreen first
   // mounts (which is lazy on the tab navigator via `lazy: true`, so
@@ -614,12 +605,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // Stev.ie's #612 review surfaced this.
   const posLat = pos?.lat;
   const posLon = pos?.lon;
+  const POS_BUCKET_DEG = 0.005;
+  const posBucketKey =
+    typeof posLat !== 'number' || typeof posLon !== 'number'
+      ? null
+      : `${Math.round(posLat / POS_BUCKET_DEG)}:${Math.round(posLon / POS_BUCKET_DEG)}`;
   useEffect(() => {
-    // `refreshKey` is intentionally listed in the deps below so that
-    // pull-to-refresh (which bumps it) tears down + re-runs the
-    // subscriptions, even though the value isn't referenced inside
-    // the body.
-    if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
+    // refreshKey in deps: pull-to-refresh bumps it → tear down + re-run.
+    // posLat / posLon are used here for the geohash filters but deliberately
+    // NOT in deps (they'd thrash the gate on every GPS tick) — see the
+    // bucket-key comment above the declaration. eslint suppression below.
+    if (posBucketKey === null || typeof posLat !== 'number' || typeof posLon !== 'number') return;
     // `cancelled` covers the window between effect cleanup firing
     // (subsCloserRef.current.forEach(c => c())) and the underlying
     // relay socket actually closing — a stray event in that gap
@@ -699,7 +695,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       flushPendingCaches();
       flushPendingEvents();
     };
-  }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]);
+    // posLat / posLon are intentionally NOT in this deps array — see the
+    // comment at the top of the effect. The bucket key gates re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posBucketKey, refreshKey, flushPendingCaches, flushPendingEvents]);
 
   // ----- lessons progress (local) -----------------------------------------
 
