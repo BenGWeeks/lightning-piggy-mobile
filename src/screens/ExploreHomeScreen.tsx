@@ -630,12 +630,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // they jitter on every GPS tick and would otherwise re-run this
     // effect on every micro-update, defeating the whole gate. eslint
     // exhaustive-deps would flag them; the suppression is intentional.
-    if (
-      posBucketKey === null ||
-      typeof posLat !== 'number' ||
-      typeof posLon !== 'number'
-    )
-      return;
+    if (posBucketKey === null || typeof posLat !== 'number' || typeof posLon !== 'number') return;
     // `cancelled` covers the window between effect cleanup firing
     // (subsCloserRef.current.forEach(c => c())) and the underlying
     // relay socket actually closing — a stray event in that gap
