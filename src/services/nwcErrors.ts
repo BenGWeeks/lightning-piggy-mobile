@@ -46,8 +46,11 @@ export function isConnectionError(error: unknown): boolean {
     msg.includes('connection lost') ||
     // Relay rate-limit / abuse rejection (e.g. CoinOS "temp-banned <ip>"). Treat
     // as a connectivity failure so the cooldown (#656) parks the relay and we
-    // stop publishing into a ban instead of hammering it (#737).
-    msg.includes('banned') ||
+    // stop publishing into a ban instead of hammering it (#737). Match the
+    // narrow "temp-banned" anchor, not bare "banned", so a wallet-side error
+    // that happens to contain "banned" (e.g. "user account banned") still
+    // surfaces as a confirmed failure to the user (Copilot review #738).
+    msg.includes('temp-banned') ||
     msg.includes('rate-limit') ||
     msg.includes('rate limit')
   );
