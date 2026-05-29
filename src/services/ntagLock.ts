@@ -22,7 +22,7 @@ import {
   type NtagFamily,
   type NtagPages,
 } from '../utils/nfc/ntag21xLock';
-import { READER_MODE_OPTS, inferTagFamily, type WriteLnurlResult } from './nfcService';
+import { READER_MODE_OPTS, inferTagFamily, type WriteLnurlResult } from './nfcReaderMode';
 
 interface LockedWriteOptions {
   onTagDetected?: () => void;

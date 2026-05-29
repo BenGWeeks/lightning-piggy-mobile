@@ -35,7 +35,7 @@ jest.mock('react-native-nfc-manager', () => ({
     setEventListener: jest.fn(),
     ndefHandler: { writeNdefMessage: jest.fn().mockResolvedValue(undefined) },
   },
-  NfcTech: { Ndef: 'Ndef' },
+  NfcTech: { Ndef: 'Ndef', NfcA: 'NfcA', MifareUltralight: 'MifareUltralight' },
   NfcAdapter: {
     FLAG_READER_NFC_A: 1,
     FLAG_READER_NFC_B: 2,

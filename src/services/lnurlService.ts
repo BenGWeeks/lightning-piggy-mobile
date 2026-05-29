@@ -375,49 +375,6 @@ export async function fetchInvoice(
   return data.pr;
 }
 
-/**
- * Hand a bolt11 invoice back to an LNURL-withdraw service so it can pay
- * (and thereby "claim") the funds into the wallet that issued the
- * invoice. Per LUD-03 the wallet GETs `<callback>?k1=<k1>&pr=<bolt11>`.
- *
- * The server replies with `{status:"OK"}` on success or
- * `{status:"ERROR", reason:"..."}` if the request was rejected (already
- * claimed, expired k1, invoice amount outside min/max, etc.). We surface
- * the reason verbatim so the UI can show "already claimed" cleanly per
- * the issue's risk note.
- *
- * Issue #103.
- */
-export async function claimLnurlWithdraw(
-  callback: string,
-  k1: string,
-  bolt11: string,
-): Promise<void> {
-  let callbackUrl: URL;
-  try {
-    callbackUrl = new URL(callback);
-  } catch {
-    throw new Error('Invalid LNURL-withdraw callback URL');
-  }
-  // Same scheme gate as `resolveLnurlUrl` — never POST an invoice over
-  // unauthenticated HTTP unless we're addressing a Tor hidden service.
-  const isHttps = callbackUrl.protocol === 'https:';
-  const isHttpOnion = callbackUrl.protocol === 'http:' && callbackUrl.hostname.endsWith('.onion');
-  if (!isHttps && !isHttpOnion) {
-    throw new Error('LNURL-withdraw callback must be HTTPS, or HTTP on a .onion host');
-  }
-
-  callbackUrl.searchParams.set('k1', k1);
-  callbackUrl.searchParams.set('pr', bolt11);
-
-  const response = await fetch(callbackUrl.toString());
-  if (!response.ok) {
-    throw new Error(`LNURL-withdraw callback failed (${response.status})`);
-  }
-  const data: { status?: string; reason?: string } = await response.json();
-  if (data.status !== 'OK') {
-    // Surface the server's `reason` so the user sees "already used",
-    // "amount too high", etc., rather than a generic failure.
-    throw new Error(data.reason || 'LNURL-withdraw was rejected by the service');
-  }
-}
+// The LNURL-withdraw claim (callback?k1=&pr= → OK/reason) lives in
+// `lnurlWithdrawService.claimLnurlWithdraw` — single source of truth for
+// every caller (Hunt claim, NFC read sheet, NFC withdraw listener).

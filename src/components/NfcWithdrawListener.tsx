@@ -21,12 +21,15 @@
  * here — those have their own UI entry points (NfcWriteSheet writes,
  * QR scan reads invoices, etc.).
  */
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { useWallet } from '../contexts/WalletContext';
 import { registerForegroundTagListener, type NfcTagContent } from '../services/nfcService';
-import { resolveLnurl, resolveLnurlUrl, claimLnurlWithdraw } from '../services/lnurlService';
+import { resolveLnurl, resolveLnurlUrl } from '../services/lnurlService';
+// Single source of truth for the LNURL-withdraw claim (callback + k1 +
+// bolt11 → fetch → OK/reason). Same service the Hunt claim flow uses.
+import { claimLnurlWithdraw } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 
@@ -84,12 +87,19 @@ const NfcWithdrawListener: React.FC = () => {
                 onPress: () => {
                   void (async () => {
                     try {
-                      const bolt11 = await makeInvoiceForWallet(
-                        activeWalletId,
-                        amountSats,
-                        description || 'NFC LNURL-withdraw claim',
+                      // Delegate the actual claim to the shared withdraw
+                      // service; it builds the invoice via our callback,
+                      // POSTs callback?k1=&pr= and maps the OK/reason.
+                      await claimLnurlWithdraw(
+                        {
+                          callback,
+                          k1,
+                          defaultDescription: description || 'NFC LNURL-withdraw claim',
+                          minWithdrawable: amountSats * 1000,
+                          maxWithdrawable: amountSats * 1000,
+                        },
+                        (sats, memo) => makeInvoiceForWallet(activeWalletId, sats, memo),
                       );
-                      await claimLnurlWithdraw(callback, k1, bolt11);
                       // Record in the shared claim history (same store as the geo-cache prize flow); no piggyId since generic withdraw tags aren't geo-caches.
                       await recordClaim({ lnurl: content.data, sats: amountSats });
                       // Settle confetti is handled by the global
@@ -121,6 +131,11 @@ const NfcWithdrawListener: React.FC = () => {
   }, [activeWalletId, makeInvoiceForWallet]);
 
   useEffect(() => {
+    // Gate the radio on having an active wallet — registering with no
+    // wallet contradicts the "ONLY while the active wallet is connected"
+    // contract and just drains battery polling for taps we'd ignore.
+    if (!activeWalletId) return;
+
     // Cleanup function returned by the most recent register call. We
     // hold it across AppState transitions so we can tear down cleanly
     // when the app backgrounds (don't drain battery polling NFC while
@@ -168,7 +183,7 @@ const NfcWithdrawListener: React.FC = () => {
       sub.remove();
       stop();
     };
-  }, []);
+  }, [activeWalletId]);
 
   return null;
 };
