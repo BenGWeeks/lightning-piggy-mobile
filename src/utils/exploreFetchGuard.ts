@@ -22,3 +22,13 @@ export function claimExploreByAuthorFetch(key: string): boolean {
   claimedKeys.add(key);
   return true;
 }
+
+/**
+ * Release a previously-claimed key so a later mount can retry. Call this when
+ * the fetch failed or was cancelled before its result was merged — otherwise a
+ * claim that never produced data would permanently suppress the fetch for that
+ * key (Copilot review on #752).
+ */
+export function releaseExploreByAuthorFetch(key: string): void {
+  claimedKeys.delete(key);
+}

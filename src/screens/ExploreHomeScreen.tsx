@@ -28,7 +28,7 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
-import { claimExploreByAuthorFetch } from '../utils/exploreFetchGuard';
+import { claimExploreByAuthorFetch, releaseExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -539,6 +539,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         });
       })
       .catch((e) => {
+        releaseExploreByAuthorFetch(fetchKey);
         console.warn(`[PerfBlock] ExploreHome by-author fetch threw: ${(e as Error).message}`);
       });
     return () => {
