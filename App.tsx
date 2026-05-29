@@ -16,13 +16,13 @@ import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
-  navigateToHuntFound,
   navigateToHuntPiggyDetail,
   navigateToContactProfile,
   navigateToUnsupportedEntity,
   navigateToSend,
   navigateFromNotification,
 } from './src/navigation/AppNavigator';
+import { openLnurlWithdrawSheet, LnurlWithdrawHost } from './src/components/LnurlWithdrawSheet';
 import { fetchProfile, decodeProfileReference } from './src/services/nostrService';
 import {
   isProfileReferenceUri,
@@ -328,6 +328,23 @@ export default function App() {
         }
       }
 
+      // Standalone LNURL-withdraw tag / deep link — a bare `lnurlw://…` (or
+      // `lnurl://…`) URI, i.e. record 1 of a standalone withdraw / gift-card
+      // tag, NOT wrapped in `lightning:`. Open the generic withdraw bottom
+      // sheet (NOT the Hunt/Piglet full screen — a plain voucher needn't be a
+      // geo-cache). #341. Piglet tags are unaffected — their first record is
+      // `lightningpiggy://hunt/…`, handled above. Retry while the sheet host
+      // mounts on a cold launch.
+      if (/^lnurlw:\/\//i.test(trimmed) || /^lnurl:\/\//i.test(trimmed)) {
+        const tryOpen = (attempt: number) => {
+          if (openLnurlWithdrawSheet(trimmed)) return;
+          if (attempt >= 20 || cancelled) return;
+          setTimeout(() => tryOpen(attempt + 1), 100);
+        };
+        tryOpen(0);
+        return;
+      }
+
       if (!/^lightning:/i.test(trimmed)) {
         console.log(`[Link] ignored: no handler for scheme`);
         return;
@@ -383,20 +400,26 @@ export default function App() {
         });
         return;
       }
-
+      // LNURL form: resolve ONCE, then route on the resolved direction.
+      // Combines #756's pay/withdraw disambiguation with #341's withdraw UX:
+      //   withdrawRequest → the generic LnurlWithdrawSheet bottom sheet (#341),
+      //                     NOT the full HuntFoundScreen (a standalone voucher
+      //                     needn't be a geo-cache Piglet — those arrive as
+      //                     `lightningpiggy://`, handled above).
+      //   payRequest      → SendSheet (#756).
       void (async () => {
         try {
           const resolved = await resolveLnurlDirection(lnurl);
           if (cancelled) return;
           if (resolved.kind === 'withdraw') {
-            console.log(`[Link] → HuntFound (LNURL withdrawRequest)`);
-            tryNav(() => navigateToHuntFound(lnurl));
+            console.log(`[Link] → LnurlWithdrawSheet (LNURL withdrawRequest)`);
+            tryNav(() => openLnurlWithdrawSheet(lnurl));
           } else {
-            // payRequest → SendSheet. Hand it the resolved endpoint URL
-            // so SendSheet doesn't have to re-decode the bech32 (and so
-            // `lnurlp://` / raw-https forms work even though
-            // `processInput` only understands bolt11 + Lightning
-            // Address today — see the SendSheet TODO in the PR).
+            // payRequest → SendSheet. Hand it the resolved endpoint URL so
+            // SendSheet doesn't have to re-decode the bech32 (and so
+            // `lnurlp://` / raw-https forms work even though `processInput`
+            // only understands bolt11 + Lightning Address today — see the
+            // SendSheet TODO in #757).
             console.log(`[Link] → SendSheet (LNURL payRequest)`);
             tryNav(() => navigateToSend(resolved.url));
           }
@@ -460,6 +483,18 @@ export default function App() {
                             penalty when online (returns null). See #634. */}
                         <OfflineBanner />
                         <AppNavigator />
+                        {/* Global claim sheet for standalone LNURL-withdraw
+                            vouchers (gift cards, bounty stickers). Opened by the
+                            `lightning:`/`lnurlw:` deep-link/intent-filter path
+                            above via `openLnurlWithdrawSheet`. Generic (no Piggy
+                            branding) and a bottom sheet, not a full screen —
+                            Piglet/geo-cache taps keep HuntFoundScreen via their
+                            `lightningpiggy://` record. MUST live inside
+                            BottomSheetModalProvider (its BottomSheetModal needs
+                            that context) and inside WalletProvider (needs
+                            makeInvoice). Replaced the broken passive foreground
+                            NFC listener (#341). */}
+                        <LnurlWithdrawHost />
                       </BottomSheetModalProvider>
                     </UserLocationProvider>
                     {/* BrandedToast: brand-themed wrapper around

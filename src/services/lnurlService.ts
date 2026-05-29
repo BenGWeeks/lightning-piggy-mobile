@@ -289,11 +289,40 @@ async function resolveLnurlFromUrl(
   }
 
   const data = await response.json();
+  return parseLnurlResponse(data);
+}
 
+// Loose shape — the LNURL spec leaves a lot optional and the field set
+// differs between pay/withdraw branches; keeping this as a Partial gives
+// us a single helper that handles both without weakening the public
+// callers' return types.
+type LnurlServerResponse = Partial<{
+  tag: string;
+  callback: string;
+  minSendable: number;
+  maxSendable: number;
+  metadata: string;
+  commentAllowed: number;
+  allowsNostr: boolean;
+  nostrPubkey: string;
+  k1: string;
+  minWithdrawable: number;
+  maxWithdrawable: number;
+  defaultDescription: string;
+}>;
+
+function parseLnurlResponse(
+  data: LnurlServerResponse,
+):
+  | { tag: 'payRequest'; params: LnurlPayParams }
+  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams } {
   if (data.tag === 'payRequest') {
+    if (!data.callback || data.minSendable == null || data.maxSendable == null) {
+      throw new Error('Invalid LNURL-pay response: missing required fields');
+    }
     let description = '';
     try {
-      const metadata = JSON.parse(data.metadata);
+      const metadata = JSON.parse(data.metadata ?? '[]');
       const textEntry = metadata.find((m: [string, string]) => m[0] === 'text/plain');
       if (textEntry) description = textEntry[1];
     } catch {}
@@ -313,6 +342,14 @@ async function resolveLnurlFromUrl(
   }
 
   if (data.tag === 'withdrawRequest') {
+    if (
+      !data.callback ||
+      !data.k1 ||
+      data.minWithdrawable == null ||
+      data.maxWithdrawable == null
+    ) {
+      throw new Error('Invalid LNURL-withdraw response: missing required fields');
+    }
     return {
       tag: 'withdrawRequest',
       params: {
@@ -325,7 +362,7 @@ async function resolveLnurlFromUrl(
     };
   }
 
-  throw new Error(`Unsupported LNURL tag: ${data.tag}`);
+  throw new Error(`Unsupported LNURL tag: ${data.tag ?? 'unknown'}`);
 }
 
 /**
@@ -419,3 +456,7 @@ export async function fetchInvoice(
 
   return data.pr;
 }
+
+// The LNURL-withdraw claim (callback?k1=&pr= → OK/reason) lives in
+// `lnurlWithdrawService.claimLnurlWithdraw` — single source of truth for
+// every caller (Hunt claim, NFC read sheet, NFC withdraw listener).

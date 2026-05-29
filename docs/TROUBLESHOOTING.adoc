@@ -239,12 +239,13 @@ The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead o
 *Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
 
 | NWC "reply timeout" after publish succeeds
-| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
-*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. A flaky / rate-limited relay (e.g. ln.coinos.io under a burst of requests) shows it intermittently — `get_balance` succeeds one moment and times out the next. +
+*Symptom seen on a claim:* an LNURL-withdraw / prize claim sticks on "Claiming sats…" then fails, because the claim calls `makeInvoice` to mint the receiving invoice. Originally `makeInvoice` was the **one** NWC method with no retry (unlike `getBalance` / `payInvoice` / `listTransactions`), so the claim path died on the first timeout while everything else recovered. +
+*Fix / workaround:* `makeInvoice` now wraps its call in `withRetry` + `recordRelayOutcome` like the other methods. If still persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin), and give a rate-limited relay a minute to settle (our own `relayCooldownUntil` parks a relay for 30s–5min after 3 timeouts, #656).
 
 | NWC relay intermittently drops WebSocket connections
 | The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
-*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, `listTransactions()`, and `makeInvoice()`.
 
 | App shows "Unable to load script" on physical device
 | The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.

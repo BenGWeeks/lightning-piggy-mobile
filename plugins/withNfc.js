@@ -55,60 +55,48 @@ function withNfcAndroid(config) {
           }
           const filters = mainActivity['intent-filter'];
 
-          // NDEF_DISCOVERED for the lightningpiggy://hunt/<coord> scheme.
-          // Without this, tapping a written Piglet tag while the app is
-          // foreground/background does nothing — Android's NFC dispatch
-          // has no activity to route the URI to. The earlier nostr: /
-          // lightning: registrations were intentionally disabled because
-          // the JS side had no Linking handler; we now route both
-          // `lightningpiggy://hunt/<coord>` and `nostr:naddr1…` in
-          // App.tsx, so re-enabling for our own scheme is safe.
-          //
-          // Scoped to `lightningpiggy` only (NOT `nostr:` or `lightning:`)
-          // so we don't intercept the user's preferred Nostr / Lightning
-          // wallet for those broader schemes.
-          const hasNdefLpFilter = filters.some(
-            (f) =>
-              Array.isArray(f.action) &&
-              f.action.some(
-                (a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED',
-              ) &&
-              Array.isArray(f.data) &&
-              f.data.some((d) => d.$?.['android:scheme'] === 'lightningpiggy'),
-          );
-          if (!hasNdefLpFilter) {
-            filters.push({
-              action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
-              category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-              data: [{ $: { 'android:scheme': 'lightningpiggy' } }],
-            });
-          }
-
-          // NDEF_DISCOVERED for the `nostr:` scheme — conference contact
-          // badges whose first record is `nostr:nprofile1…` / `nostr:npub1…`
-          // (#754). Without this, tapping such a tag while the app is
-          // foreground/background routes to whatever generic Nostr app the
-          // OS picks (or nothing). The VIEW intent filter in app.config.ts
-          // covers the deep-link / cold-launch case; this NDEF filter covers
-          // a foreground tag tap. Scoped to `nostr` only — the JS router in
-          // App.tsx decodes npub / nprofile → ContactProfile and falls back
-          // to UnsupportedEntity for note / nevent.
-          const hasNdefNostrFilter = filters.some(
-            (f) =>
-              Array.isArray(f.action) &&
-              f.action.some(
-                (a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED',
-              ) &&
-              Array.isArray(f.data) &&
-              f.data.some((d) => d.$?.['android:scheme'] === 'nostr'),
-          );
-          if (!hasNdefNostrFilter) {
-            filters.push({
-              action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
-              category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-              data: [{ $: { 'android:scheme': 'nostr' } }],
-            });
-          }
+          // NDEF_DISCOVERED filters for the schemes LP handles on an NFC tap.
+          // Without these, tapping a tag does nothing in foreground/background
+          // (or lands in another wallet) — Android's NFC dispatch has no LP
+          // activity to route the URI to. All five are routed by the Linking
+          // handler in App.tsx:
+          //   - `lightningpiggy` — record 1 of a Hunt/Piglet tag
+          //     (`lightningpiggy://hunt/<coord>`) → opens the cache page.
+          //   - `lightning` / `lnurlw` / `lnurl` — standalone LNURL-withdraw
+          //     tags / gift cards whose FIRST record is the withdraw URI
+          //     (`lnurl://` is the rare spec-allowed cleartext form) → in-app claim
+          //     (#341 rework: replaced a passive foreground listener that lost
+          //     to the system dispatch). Android dispatches on the FIRST NDEF
+          //     record only, so Piglets (record 1 = `lightningpiggy`) are
+          //     unaffected — their `lightning:` bearer is record 3. Android
+          //     shows its app chooser if another LN wallet also handles
+          //     `lightning`/`lnurlw`, so we don't hijack the user's preferred
+          //     wallet.
+          //   - `nostr` — conference contact badges whose first record is
+          //     `nostr:nprofile1…` / `nostr:npub1…` (#754) → ContactProfile
+          //     (UnsupportedEntity for note / nevent).
+          const addNdefScheme = (scheme) => {
+            const exists = filters.some(
+              (f) =>
+                Array.isArray(f.action) &&
+                f.action.some(
+                  (a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED',
+                ) &&
+                Array.isArray(f.data) &&
+                f.data.some((d) => d.$?.['android:scheme'] === scheme),
+            );
+            if (!exists) {
+              filters.push({
+                action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
+                category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+                data: [{ $: { 'android:scheme': scheme } }],
+              });
+            }
+          };
+          // `lnurl` is the rare spec-allowed cleartext form App.tsx also routes;
+          // `nostr` covers contact badges (#754). Register all so their tags
+          // aren't a silent no-op on Android.
+          ['lightningpiggy', 'lightning', 'lnurlw', 'lnurl', 'nostr'].forEach(addNdefScheme);
         }
       }
     }

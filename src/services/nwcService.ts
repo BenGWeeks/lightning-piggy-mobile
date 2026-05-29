@@ -379,11 +379,28 @@ export async function makeInvoice(
 ): Promise<string> {
   const provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
-  const invoice = await provider.makeInvoice({
-    amount,
-    defaultMemo: memo || 'Sent with Lightning Piggy',
-  });
-  return invoice.paymentRequest;
+  try {
+    // Retry on a slow/flaky relay so a single ~10s reply-timeout doesn't sink a
+    // prize/voucher claim. makeInvoice was the one NWC method left bare —
+    // getBalance/payInvoice/listTransactions already retry + record relay health
+    // — so the claim path failed on the first timeout while everything else
+    // recovered (see TROUBLESHOOTING → "NWC reply timeout"). The SDK's own ~10s
+    // replyTimeout bounds each attempt; a retry may orphan an unpaid invoice on
+    // the wallet, which simply expires — harmless.
+    const invoice = await withRetry(
+      () =>
+        provider.makeInvoice({
+          amount,
+          defaultMemo: memo || 'Sent with Lightning Piggy',
+        }),
+      { label: `makeInvoice(${walletId})`, attempts: 2, delayMs: 1500 },
+    );
+    recordRelayOutcome(walletId);
+    return invoice.paymentRequest;
+  } catch (error) {
+    recordRelayOutcome(walletId, error);
+    throw error;
+  }
 }
 
 /**

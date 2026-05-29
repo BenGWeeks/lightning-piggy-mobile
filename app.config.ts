@@ -223,6 +223,24 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'lightning' }],
       },
+      // LUD-17 LNURL-withdraw scheme — standalone withdraw tags / gift cards
+      // whose URI is `lnurlw://…` (no `lightning:` wrapper). Routed by App.tsx's
+      // Linking handler into the withdraw claim, same as `lightning:lnurl…`
+      // (#341). NDEF (NFC-tap) variants live in plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurlw' }],
+      },
+      // `lnurl://…` — the rare spec-allowed cleartext form App.tsx's Linking
+      // handler also routes; without this VIEW filter such links/taps are a
+      // silent no-op on Android (#341 Copilot review). NDEF variant in
+      // plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurl' }],
+      },
       // `nostr:` profile / entity URIs — NFC contact badges (#754) and
       // `Linking.openURL('nostr:nprofile1…')` from other Nostr clients.
       // Android shows its standard chooser when another Nostr-aware app
