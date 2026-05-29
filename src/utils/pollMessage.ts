@@ -36,8 +36,10 @@
  *     [POLL_VOTE] <poll_id> <option_id>
  *
  * `poll_id` is the poll-message's id within the conversation (the locally
- * stable id — for incoming this is the rumor event id, for outgoing local
- * sends it's the optimistic `local-…` id). Vote messages always show as
+ * stable id — for incoming this is the stored DM id, i.e. the kind-1059
+ * gift-wrap id, and for outgoing local sends it's the optimistic `local-…`
+ * id until the relay echo lands; voting is gated until then so a vote can't
+ * bake in a local id that later rotates). Vote messages always show as
  * plain-text bubbles to other clients; in-app we hide them from the
  * conversation list and surface them only as aggregated tally.
  */

@@ -262,6 +262,8 @@ const MessageBubble: React.FC<Props> = ({
     const agg = pollAggregates?.get(id);
     const total = agg?.totalVotes ?? 0;
     const myVote = agg?.myVote ?? null;
+    // Disable voting until the relay echo confirms the poll id: optimistic ids contain "local" and rotate to the gift-wrap id on dedup, which would orphan a vote that baked in the local id.
+    const pending = id.includes('local');
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View style={[styles.pollCard, fromMe ? styles.pollCardMe : styles.pollCardThem]}>
@@ -295,9 +297,9 @@ const MessageBubble: React.FC<Props> = ({
                   isMine && (fromMe ? styles.pollOptionRowMineMe : styles.pollOptionRowMineThem),
                 ]}
                 onPress={() => onVotePoll?.(id, opt.id)}
-                disabled={!onVotePoll}
+                disabled={!onVotePoll || pending}
                 accessibilityLabel={`${opt.text}, ${count} ${count === 1 ? 'vote' : 'votes'}${isMine ? ', your vote' : ''}`}
-                accessibilityState={{ selected: isMine, disabled: !onVotePoll }}
+                accessibilityState={{ selected: isMine, disabled: !onVotePoll || pending }}
                 testID={`${testIdPrefix}-poll-${id}-option-${opt.id}`}
               >
                 {/* Background fill bar — width tracks the percentage so
