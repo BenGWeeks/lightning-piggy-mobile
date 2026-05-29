@@ -98,7 +98,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(event === null);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
 
-  const { relays } = useNostr();
+  const { relays, profile } = useNostr();
   useEffect(() => {
     if (event !== null) return;
     let cancelled = false;
@@ -271,6 +271,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   lon={venueCoord.lng}
                   userLat={livePos?.lat ?? null}
                   userLon={livePos?.lon ?? null}
+                  userAvatarUri={profile?.picture ?? null}
                   userAccuracyMetres={livePos?.accuracy ?? null}
                   merchants={[]}
                   caches={[]}

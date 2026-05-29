@@ -60,7 +60,7 @@ interface Props {
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { pubkey, relays } = useNostr();
+  const { pubkey, relays, profile } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
@@ -373,6 +373,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           lon={livePos?.lon ?? pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
+          userAvatarUri={profile?.picture ?? null}
           // Only fall back to the initial-fetch accuracy when there's
           // no live fix yet; once livePos exists, trust its accuracy
           // (including null) so we never render a halo around live

@@ -19,6 +19,7 @@ import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -58,6 +59,7 @@ const LocationPickerSheet: React.FC<Props> = ({
   // CAMERA was seeded, which looks like the dot drifted as the user
   // panned the crosshair to a new spot.
   const { pos: livePos } = useUserLocation();
+  const { profile } = useNostr();
   // Map gets a fixed slice of the window (50%) so the sheet has a
   // determinate height for Gorhom's dynamic sizing to measure. Plenty of
   // pin-placement area, leaves the wizard header peeking behind, scales
@@ -273,6 +275,7 @@ const LocationPickerSheet: React.FC<Props> = ({
               // user as the user pans the crosshair around.
               userLat={livePos?.lat ?? null}
               userLon={livePos?.lon ?? null}
+              userAvatarUri={profile?.picture ?? null}
               userAccuracyMetres={livePos?.accuracy ?? null}
               merchants={[]}
               caches={[]}

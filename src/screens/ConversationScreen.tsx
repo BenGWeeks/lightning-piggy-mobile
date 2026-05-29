@@ -43,6 +43,9 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import { buildOsmViewUrl, SharedLocation } from '../services/locationService';
+import { useLiveLocation } from '../contexts/LiveLocationContext';
+import { useUserLocation } from '../contexts/UserLocationContext';
+import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
@@ -51,6 +54,7 @@ import { extractSharedContact } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
+import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import {
   type Item,
   type TimedItem,
@@ -85,14 +89,24 @@ const ConversationScreen: React.FC = () => {
   }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, getCachedConversation, contacts, armLiveDmSub } =
-    useNostr();
+  const {
+    isLoggedIn,
+    fetchConversation,
+    getCachedConversation,
+    signerType,
+    pubkey: myPubkey,
+    contacts,
+    relays,
+    profile,
+    armLiveDmSub,
+  } = useNostr();
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
   useEffect(() => {
     armLiveDmSub();
   }, [armLiveDmSub]);
   const { wallets } = useWallet();
+  const { startShare, stopShare } = useLiveLocation();
 
   const [messages, setMessages] = useState<
     { id: string; fromMe: boolean; text: string; createdAt: number }[]
@@ -166,6 +180,8 @@ const ConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Live-location chooser sheet (Snapshot vs Share live for…).
+  const [liveLocationPickerOpen, setLiveLocationPickerOpen] = useState(false);
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
@@ -393,6 +409,50 @@ const ConversationScreen: React.FC = () => {
     setVoiceSheetOpen,
   });
 
+  // Live-location entry point (#206). The Attach → Location tile opens a
+  // chooser sheet — snapshot or live for N — instead of going straight
+  // into the snapshot flow. The snapshot path reuses the shared composer
+  // hook's `handleShareLocation`; only the live path is screen-local
+  // (it drives the LiveLocationProvider).
+  const openLocationChooser = useCallback(() => {
+    if (sharingLocation) return;
+    setAttachPanelOpen(false);
+    setLiveLocationPickerOpen(true);
+  }, [sharingLocation]);
+
+  const handleShareSnapshot = useCallback(async () => {
+    setLiveLocationPickerOpen(false);
+    await handleShareLocation();
+  }, [handleShareLocation]);
+
+  // Live-location: kick off a continuously-updating share. The provider
+  // owns the watcher + ephemeral kind-20069 publishing; we just trigger
+  // it and let the in-thread bubble (rendered via the start marker DM
+  // that the provider sends as a side-effect) drive the visible state.
+  const handleShareLive = useCallback(
+    async (durationMs: number) => {
+      setLiveLocationPickerOpen(false);
+      const result = await startShare(pubkey, durationMs);
+      if (!result.ok) {
+        Alert.alert('Could not start live share', result.error);
+        return;
+      }
+      // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
+      appendOptimisticLocal(result.markerText);
+    },
+    [pubkey, startShare, appendOptimisticLocal],
+  );
+
+  const handleStopLive = useCallback(
+    async (sessionId: string) => {
+      const result = await stopShare(sessionId);
+      if (!result.ok) {
+        Alert.alert('Could not stop live share', result.error);
+      }
+    },
+    [stopShare],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -400,10 +460,34 @@ const ConversationScreen: React.FC = () => {
     });
   }, []);
 
+  // My live position for the location-card mini-maps (#206) — the blue
+  // "me" dot + accuracy halo. Shared GPS subscription, retained for this
+  // screen's lifetime (see UserLocationContext). Tapping a card's mini-map
+  // opens the full-screen Map, mirroring the detail screens' affordance.
+  const { pos: myPos } = useUserLocation();
+  // `Map` lives in the Explore sub-stack, so target it through the
+  // Explore tab rather than the root stack (the detail screens reach it
+  // via a CompositeNavigationProp; ConversationScreen is root-stack only).
+  const onOpenMap = useCallback(
+    () =>
+      navigation.navigate('Main', {
+        screen: 'MainTabs',
+        params: { screen: 'Explore', params: { screen: 'Map' } },
+      }),
+    [navigation],
+  );
+
   const handlePayInvoice = useCallback((raw: string) => {
     setInvoiceToPay(raw);
     setSendSheetOpen(true);
   }, []);
+
+  // Receive-side live-location plumbing (#206): the kind-20069 coordinate
+  // subscription + per-session status/remaining read models the bubble
+  // renders + a 1 Hz tick for the relative-time labels. Extracted to a hook
+  // so this screen stays under the #703 size cap.
+  const { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining } =
+    useConversationLiveLocation({ items, isLoggedIn, myPubkey, pubkey, signerType, relays });
 
   const renderItem = useCallback(
     ({ item }: { item: Item }) => (
@@ -419,6 +503,16 @@ const ConversationScreen: React.FC = () => {
         onOpenGifFullscreen={setFullscreenGifUrl}
         onToggleSecretMode={handleToggleSecretMode}
         onShowTxDetail={setDetailTx}
+        liveLocationLatest={liveLocationLatest}
+        liveLocationStatus={liveLocationBubbleStatus}
+        liveLocationRemainingMs={liveLocationBubbleRemaining}
+        onStopLiveLocation={handleStopLive}
+        myLat={myPos?.lat ?? null}
+        myLon={myPos?.lon ?? null}
+        myAccuracyMetres={myPos?.accuracy ?? null}
+        myAvatarUri={profile?.picture ?? null}
+        peerAvatarUri={picture ?? null}
+        onOpenMap={onOpenMap}
       />
     ),
     [
@@ -428,6 +522,14 @@ const ConversationScreen: React.FC = () => {
       openSharedContact,
       handlePayInvoice,
       handleToggleSecretMode,
+      liveLocationLatest,
+      liveLocationBubbleStatus,
+      liveLocationBubbleRemaining,
+      handleStopLive,
+      myPos,
+      picture,
+      profile,
+      onOpenMap,
       styles,
       colors,
     ],
@@ -639,7 +741,7 @@ const ConversationScreen: React.FC = () => {
           }}
           attachPanel={
             <AttachPanel
-              onShareLocation={handleShareLocation}
+              onShareLocation={openLocationChooser}
               onSendImage={handlePickAndSendImage}
               onTakePhoto={handleTakeAndSendPhoto}
               onSendZap={() => {
@@ -674,6 +776,12 @@ const ConversationScreen: React.FC = () => {
           }
         />
       </View>
+      <LiveLocationDurationPicker
+        visible={liveLocationPickerOpen}
+        onClose={() => setLiveLocationPickerOpen(false)}
+        onChooseSnapshot={handleShareSnapshot}
+        onChooseLive={handleShareLive}
+      />
       <VoiceRecordingSheet
         visible={voiceSheetOpen}
         onClose={() => setVoiceSheetOpen(false)}

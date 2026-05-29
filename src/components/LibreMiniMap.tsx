@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { Animated, View, TouchableOpacity, Text } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { NavigationContext } from '@react-navigation/native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
@@ -23,13 +24,15 @@ import {
   Calendar,
   LocateFixed,
   Crosshair,
+  UserRound,
 } from 'lucide-react-native';
 import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
-import type { Palette } from '../styles/palettes';
+import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 // `useIsFocused()` throws "Couldn't find a navigation object" when the
 // component renders OUTSIDE a navigator — e.g. inside a Gorhom
@@ -88,6 +91,11 @@ interface Props {
   // dot sits at lat/lon (mini-map default).
   userLat?: number | null;
   userLon?: number | null;
+  // The signed-in user's own avatar. When set (and a supported URL), the
+  // blue "me" dot is replaced by this profile image clipped to the same
+  // circle — the GPS-accuracy halo still renders behind it. Falls back to
+  // the plain blue dot when unset / unsupported.
+  userAvatarUri?: string | null;
   // "Open map" tap target. Surfaces the affordance the user uses to jump
   // to the full-screen MapScreen which is fully interactive (pan + zoom
   // + filters). If undefined, the button is hidden.
@@ -121,6 +129,21 @@ interface Props {
   // piggy/pin glyph at the spot the hider pinned (the map centres there
   // but otherwise has no marker). `isLpPiggy` picks the glyph + colour.
   pinMarker?: { lat: number; lon: number; isLpPiggy?: boolean } | null;
+  // The OTHER party's avatar marker, rendered as a ~28 px circular
+  // profile chip at their coordinate. Used by the DM location cards to
+  // show the peer's photo where they shared / where they are. Falls
+  // back to a UserRound glyph in the circle when `avatarUri` is
+  // missing / unsupported. Null = no profile marker (e.g. my own share).
+  profileMarker?: { lat: number; lon: number; avatarUri?: string | null } | null;
+  // Multiple peer avatar markers — the Full Map "friends sharing their
+  // live location with me" layer. Same circular-chip rendering as the
+  // single `profileMarker`; `key` is the peer pubkey for a stable React
+  // key + marker id.
+  profileMarkers?: { key: string; lat: number; lon: number; avatarUri?: string | null }[];
+  // Render every marker (merchant / cache / event pins, me-dot, friend
+  // avatars) at this pixel diameter instead of their per-type defaults, so
+  // the full Map can present one uniform icon size. Glyphs scale with it.
+  uniformMarkerSize?: number;
   // Marker-tap callbacks. Optional — when unset the pin is decorative
   // (mini-map use case). MapScreen wires these to open MerchantDetail-
   // Sheet / CacheDetailSheet.
@@ -201,13 +224,30 @@ const LibreMiniMapInner: React.FC<Props> = ({
   onBoundsChange,
   crosshair = false,
   pinMarker,
+  profileMarker,
+  profileMarkers,
+  userAvatarUri,
+  uniformMarkerSize,
   onSelectMerchant,
   onSelectCache,
   onSelectEvent,
   testID,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createLibreMiniMapStyles(colors), [colors]);
+  // When `uniformMarkerSize` is set (the full Map asks for it), every marker
+  // chassis renders at this diameter so merchant / cache / event pins, the
+  // me-dot and friend avatars all read at one size. Glyphs scale with it.
+  const markerDim = uniformMarkerSize
+    ? { width: uniformMarkerSize, height: uniformMarkerSize, borderRadius: uniformMarkerSize / 2 }
+    : null;
+  const pinGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.5) : 12;
+  const avatarGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.55) : 16;
+  // The avatar image fills its chassis (overflow-clipped), so its own corner
+  // radius must track the chassis diameter — otherwise at `uniformMarkerSize`
+  // the image keeps the default 14px radius inside a larger circle and a sliver
+  // of background peeks at the corners.
+  const avatarImageRadius = uniformMarkerSize ? { borderRadius: uniformMarkerSize / 2 } : null;
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
@@ -466,8 +506,8 @@ const LibreMiniMapInner: React.FC<Props> = ({
               lngLat={[m.lon, m.lat]}
               onPress={onSelectMerchant ? () => onSelectMerchant(m) : undefined}
             >
-              <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain]}>
-                <Icon size={12} color="#fff" strokeWidth={2.5} />
+              <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain, markerDim]}>
+                <Icon size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
               </View>
             </Marker>
           );
@@ -483,11 +523,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
               lngLat={[c.lng, c.lat]}
               onPress={onSelectCache && original ? () => onSelectCache(original) : undefined}
             >
-              <View style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
+              <View
+                style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache, markerDim]}
+              >
                 {c.isLpPiggy ? (
-                  <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+                  <PiggyBank size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
                 ) : (
-                  <MapPin size={12} color="#fff" strokeWidth={2.5} />
+                  <MapPin size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
                 )}
               </View>
             </Marker>
@@ -507,6 +549,45 @@ const LibreMiniMapInner: React.FC<Props> = ({
             </View>
           </Marker>
         ) : null}
+        {/* Profile marker — the OTHER party's avatar on the DM location
+            cards. 28 px circular chip; the photo z-stacks over a
+            UserRound silhouette so a missing / broken / unsupported URL
+            still reads as a person rather than an empty circle. */}
+        {profileMarker ? (
+          <Marker id="profile-marker" lngLat={[profileMarker.lon, profileMarker.lat]}>
+            <View style={[styles.profileMarker, markerDim]}>
+              <UserRound size={avatarGlyphSize} color={colors.textBody} strokeWidth={2} />
+              {profileMarker.avatarUri && isSupportedImageUrl(profileMarker.avatarUri) ? (
+                <ExpoImage
+                  source={{ uri: profileMarker.avatarUri }}
+                  style={[styles.profileMarkerImage, avatarImageRadius]}
+                  cachePolicy="memory-disk"
+                  recyclingKey={profileMarker.avatarUri}
+                  autoplay={false}
+                />
+              ) : null}
+            </View>
+          </Marker>
+        ) : null}
+        {/* Friends-sharing layer — one circular avatar chip per peer
+            currently sharing their live location with me (Full Map). Same
+            chassis as the single profileMarker; keyed by peer pubkey. */}
+        {profileMarkers?.map((pm) => (
+          <Marker key={pm.key} id={`friend-${pm.key}`} lngLat={[pm.lon, pm.lat]}>
+            <View style={[styles.profileMarker, markerDim]}>
+              <UserRound size={avatarGlyphSize} color={colors.textBody} strokeWidth={2} />
+              {pm.avatarUri && isSupportedImageUrl(pm.avatarUri) ? (
+                <ExpoImage
+                  source={{ uri: pm.avatarUri }}
+                  style={[styles.profileMarkerImage, avatarImageRadius]}
+                  cachePolicy="memory-disk"
+                  recyclingKey={pm.avatarUri}
+                  autoplay={false}
+                />
+              ) : null}
+            </View>
+          </Marker>
+        ))}
         {/* Events: Calendar glyph in deep-purple. */}
         {eventPoints.map((e) => {
           const original = eventByCoord.get(e.id);
@@ -517,8 +598,8 @@ const LibreMiniMapInner: React.FC<Props> = ({
               lngLat={[e.lng, e.lat]}
               onPress={onSelectEvent && original ? () => onSelectEvent(original) : undefined}
             >
-              <View style={[styles.pin, styles.pinEvent]}>
-                <Calendar size={12} color="#fff" strokeWidth={2.5} />
+              <View style={[styles.pin, styles.pinEvent, markerDim]}>
+                <Calendar size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
               </View>
             </Marker>
           );
@@ -565,7 +646,19 @@ const LibreMiniMapInner: React.FC<Props> = ({
                 {!haloFeature && (
                   <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
                 )}
-                <View style={styles.userDot} />
+                {userAvatarUri && isSupportedImageUrl(userAvatarUri) ? (
+                  <View style={[styles.userAvatarDot, markerDim]}>
+                    <ExpoImage
+                      source={{ uri: userAvatarUri }}
+                      style={styles.userAvatarImage}
+                      cachePolicy="memory-disk"
+                      recyclingKey={userAvatarUri}
+                      autoplay={false}
+                    />
+                  </View>
+                ) : (
+                  <View style={[styles.userDot, markerDim]} />
+                )}
               </View>
             </Marker>
           );
@@ -644,183 +737,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
   );
 };
 
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    // Matches ExploreMiniMap's container styling exactly so the swap is
-    // visually neutral. Fixed height + horizontal margins + corner
-    // radius + overflow:hidden to clip the map to the rounded corners.
-    container: {
-      height: 200,
-      marginHorizontal: 16,
-      marginBottom: 18,
-      borderRadius: 14,
-      overflow: 'hidden',
-      backgroundColor: colors.surface,
-      position: 'relative',
-    },
-    // Fill variant for MapScreen / LocationPickerSheet — no fixed height,
-    // no margins, no corner radius. The parent owns layout.
-    containerFill: {
-      flex: 1,
-      overflow: 'hidden',
-      backgroundColor: colors.surface,
-      position: 'relative',
-    },
-    map: { flex: 1 },
-    // Wrapper that centres the dot inside the pulsing halo. Without it
-    // Marker would anchor the top-left of the halo at the lng/lat, off
-    // by half the halo diameter.
-    userMarkerWrap: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Blue dot at the same 22 px diameter as the merchant / cache /
-    // event pin chassis so the GPS marker reads as a peer rather than a
-    // smaller secondary element. The accuracy halo sits behind it.
-    // Tappability of co-located pins is handled by rendering the
-    // user-dot Marker LAST with a pointerEvents="none" wrapper (see the
-    // marker JSX above), NOT by z-order here — the dot is removed from
-    // hit-testing entirely, so a co-located clickable pin (e.g. Bee
-    // Happy Farm) stays tappable even though the dot draws on top of it.
-    // (An earlier attempt lifted the dot with zIndex:2, which made it
-    // capture those taps; pointerEvents="none" is the correct fix.)
-    userDot: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: '#2D88FF',
-      borderWidth: 2,
-      borderColor: colors.white,
-    },
-    // Subtle "I'm here" pulse around the user dot. The geographic
-    // accuracy halo (rendered as a MapLibre fill layer behind the
-    // marker) is the precision indicator; this pulse is purely a
-    // helps-find-yourself affordance.
-    userDotPulse: {
-      position: 'absolute',
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: 'rgba(45, 136, 255, 0.22)',
-    },
-    // Shared pin chassis — circular white-bordered chip carrying the
-    // category Lucide glyph. 22 px matches the Leaflet `lp-pin` size in
-    // the WebView spec so the swap is visually consistent across the
-    // two renderers.
-    pin: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1.5,
-      borderColor: colors.white,
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 2,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 2,
-    },
-    pinLn: { backgroundColor: colors.brandPink },
-    pinOnchain: { backgroundColor: '#F7931A' },
-    pinPiglet: { backgroundColor: colors.brandPink },
-    pinCache: { backgroundColor: colors.cachePurple },
-    pinEvent: { backgroundColor: colors.eventViolet },
-    zoomColumn: {
-      position: 'absolute',
-      top: 10,
-      left: 10,
-      gap: 6,
-    },
-    zoomButton: {
-      width: 32,
-      height: 32,
-      borderRadius: 8,
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.18,
-      shadowRadius: 3,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 2,
-    },
-    openBadge: {
-      position: 'absolute',
-      bottom: 10,
-      right: 10,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: 'rgba(236, 0, 140, 0.92)',
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 100,
-    },
-    openBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-    crosshairWrap: {
-      position: 'absolute',
-      top: '50%',
-      left: '50%',
-      marginTop: -18,
-      marginLeft: -18,
-    },
-    // 34 px clears the MapLibre attribution logo + © OSM text strip
-    // that the native SDK pins to the bottom-left edge. Without this
-    // bump the recenter / legend buttons overlap the attribution and
-    // it reads as a layout bug.
-    recenterButton: {
-      position: 'absolute',
-      bottom: 34,
-      left: 10,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    // Legend sits above recenter when both exist (interactive mode);
-    // otherwise sits at the bottom-left on its own.
-    legendButtonAboveRecenter: {
-      position: 'absolute',
-      bottom: 76,
-      left: 10,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    legendButton: {
-      position: 'absolute',
-      bottom: 34,
-      left: 10,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-  });
-
 // Item-identity equality for memoised array props. ExploreHomeScreen
 // derives `cachesArr` via `useMemo(() => [...caches.values()], [caches])`
 // — the array is a fresh reference every time the underlying `caches`
@@ -845,6 +761,11 @@ const sameByItemRef = <T,>(a: readonly T[], b: readonly T[]): boolean => {
   return true;
 };
 
+// Content signature for the friends-sharing marker array — lets arePropsEqual
+// compare by value (the array reference churns every ping) without a deep walk.
+const profileMarkersSig = (markers: Props['profileMarkers']): string =>
+  markers == null ? '' : markers.map((m) => `${m.key}:${m.lat}:${m.lon}:${m.avatarUri}`).join('|');
+
 const arePropsEqual = (prev: Props, next: Props): boolean => {
   // Cheap primitives first — bail on the most common change paths.
   if (prev.lat !== next.lat) return false;
@@ -852,6 +773,8 @@ const arePropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.userAccuracyMetres !== next.userAccuracyMetres) return false;
   if (prev.userLat !== next.userLat) return false;
   if (prev.userLon !== next.userLon) return false;
+  if (prev.userAvatarUri !== next.userAvatarUri) return false;
+  if (prev.uniformMarkerSize !== next.uniformMarkerSize) return false;
   if (prev.defaultZoom !== next.defaultZoom) return false;
   if (prev.interactive !== next.interactive) return false;
   if (prev.fill !== next.fill) return false;
@@ -866,6 +789,20 @@ const arePropsEqual = (prev: Props, next: Props): boolean => {
     prev.pinMarker?.lon !== next.pinMarker?.lon ||
     prev.pinMarker?.isLpPiggy !== next.pinMarker?.isLpPiggy
   )
+    return false;
+  // profileMarker — same object-field treatment as pinMarker so a moved
+  // peer position or a newly-resolved avatar URL re-renders the chip.
+  if (
+    (prev.profileMarker == null) !== (next.profileMarker == null) ||
+    prev.profileMarker?.lat !== next.profileMarker?.lat ||
+    prev.profileMarker?.lon !== next.profileMarker?.lon ||
+    prev.profileMarker?.avatarUri !== next.profileMarker?.avatarUri
+  )
+    return false;
+  // profileMarkers — the friends-sharing layer. The array reference changes
+  // on every ping, so compare a cheap content signature (small list) rather
+  // than identity, else a moved friend or resolved avatar wouldn't re-render.
+  if (profileMarkersSig(prev.profileMarkers) !== profileMarkersSig(next.profileMarkers))
     return false;
   // Handlers — host screens should `useCallback` these but fall back
   // gracefully on reference identity if not.

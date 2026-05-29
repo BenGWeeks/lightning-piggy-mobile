@@ -165,7 +165,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and to share it in private messages.',
+          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and so you can share it (one-shot or live for a chosen duration) in a private message.',
         // Background location is needed for the opt-in "Nearby merchants"
         // alerts (#467) — geofences fire even when the app is backgrounded
         // so the user gets the notification while walking past the shop.

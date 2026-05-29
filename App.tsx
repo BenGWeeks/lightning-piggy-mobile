@@ -13,6 +13,7 @@ import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
+import { LiveLocationProvider } from './src/contexts/LiveLocationContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
@@ -469,21 +470,26 @@ export default function App() {
                   {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
                   <GroupsProvider>
-                    {/* UserLocationProvider: ONE GPS watch subscription
+                    {/* LiveLocationProvider sits inside Nostr (uses the
+                      signer + sendDirectMessage) but outside the
+                      navigator so an active share survives screen
+                      transitions and pause/resume cycles. */}
+                    <LiveLocationProvider>
+                      {/* UserLocationProvider: ONE GPS watch subscription
                         shared across every map surface, so all screens
                         see the same live position + accuracy halo and
                         we don't fan out to N concurrent watches. */}
-                    <UserLocationProvider>
-                      <BottomSheetModalProvider>
-                        <ThemedStatusBar />
-                        {/* Sits above the navigator so a single banner
+                      <UserLocationProvider>
+                        <BottomSheetModalProvider>
+                          <ThemedStatusBar />
+                          {/* Sits above the navigator so a single banner
                             covers every screen + tab when the device
                             loses connectivity. Slides on/off via the
                             internal `isConnected` check — no layout
                             penalty when online (returns null). See #634. */}
-                        <OfflineBanner />
-                        <AppNavigator />
-                        {/* Global claim sheet for standalone LNURL-withdraw
+                          <OfflineBanner />
+                          <AppNavigator />
+                          {/* Global claim sheet for standalone LNURL-withdraw
                             vouchers (gift cards, bounty stickers). Opened by the
                             `lightning:`/`lnurlw:` deep-link/intent-filter path
                             above via `openLnurlWithdrawSheet`. Generic (no Piggy
@@ -494,9 +500,10 @@ export default function App() {
                             that context) and inside WalletProvider (needs
                             makeInvoice). Replaced the broken passive foreground
                             NFC listener (#341). */}
-                        <LnurlWithdrawHost />
-                      </BottomSheetModalProvider>
-                    </UserLocationProvider>
+                          <LnurlWithdrawHost />
+                        </BottomSheetModalProvider>
+                      </UserLocationProvider>
+                    </LiveLocationProvider>
                     {/* BrandedToast: brand-themed wrapper around
                       `react-native-toast-message`. Single mount for the
                       app's toast slot — keeps styling (pink success

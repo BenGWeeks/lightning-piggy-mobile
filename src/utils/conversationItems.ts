@@ -1,4 +1,5 @@
 import type { SharedLocation } from '../services/locationService';
+import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
@@ -28,6 +29,13 @@ export type Item =
       id: string;
       fromMe: boolean;
       location: SharedLocation;
+      createdAt: number;
+    }
+  | {
+      kind: 'liveLocationMarker';
+      id: string;
+      fromMe: boolean;
+      marker: LiveLocationMarker;
       createdAt: number;
     }
   | {
@@ -123,6 +131,15 @@ export function buildConversationItems(
         id: `dm-${m.id}`,
         fromMe: m.fromMe,
         location: classified.location,
+        createdAt: m.createdAt,
+      };
+    }
+    if (classified.kind === 'liveLocationMarker') {
+      return {
+        kind: 'liveLocationMarker',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        marker: classified.marker,
         createdAt: m.createdAt,
       };
     }
