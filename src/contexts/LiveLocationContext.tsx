@@ -256,8 +256,11 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       lastWatcherLocationRef.current = fix.location;
       const startSent = await sendMarker(installed, 'start', fix.location);
       if (!startSent.ok) {
-        // Roll back — publish failed, no point keeping the watcher.
+        // Roll back — publish failed, no point keeping the watcher. Drop the
+        // start-fix ref too (mirrors the stop path) so repeated offline retries
+        // don't grow the map unbounded for the provider's lifetime.
         dispatch({ type: 'stop', sessionId });
+        startLocationRef.current.delete(sessionId);
         return { ok: false, error: 'Failed to send live-location start marker.' };
       }
       dispatch({ type: 'startMarkerSent', sessionId });

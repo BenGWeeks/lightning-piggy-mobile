@@ -400,6 +400,7 @@ const MessageBubble: React.FC<Props> = ({
               userLat={showMyDot ? (myLat ?? null) : null}
               userLon={showMyDot ? (myLon ?? null) : null}
               userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+              userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
               profileMarker={peerMarker}
               onTapMap={onOpenMap}
             />
