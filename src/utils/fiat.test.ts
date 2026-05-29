@@ -1,4 +1,4 @@
-import { FIAT_SYMBOLS, formatFiatApprox } from './fiat';
+import { fiatSymbol, formatFiatApprox } from './fiat';
 
 describe('formatFiatApprox', () => {
   // 100,000 sats = 0.001 BTC; at $60,000/BTC that's $60.00
@@ -28,9 +28,10 @@ describe('formatFiatApprox', () => {
     expect(formatFiatApprox(-5, PRICE, 'USD')).toBeNull();
   });
 
-  it('covers the common symbols', () => {
-    expect(FIAT_SYMBOLS.USD).toBe('$');
-    expect(FIAT_SYMBOLS.EUR).toBe('€');
-    expect(FIAT_SYMBOLS.ZAR).toBe('R');
+  it('resolves symbols from the authoritative CURRENCY_LIST', () => {
+    expect(fiatSymbol('USD')).toBe('$');
+    expect(fiatSymbol('EUR')).toBe('€');
+    expect(fiatSymbol('GBP')).toBe('£');
+    expect(fiatSymbol('XYZ')).toBe('');
   });
 });

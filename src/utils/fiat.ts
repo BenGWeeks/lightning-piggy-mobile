@@ -1,19 +1,15 @@
-// Shared fiat-symbol map + approximate fiat-label formatting for sats amounts.
-// Used by the LNURL-withdraw sheet and the geo-cache prize screen (and anywhere
-// else that shows "≈ $1.23" beside a sats figure) so the symbol table and
-// formatting stay in one place. #341.
+// Approximate fiat-label formatting for sats amounts (e.g. "≈ $1.23"). Used by
+// the LNURL-withdraw sheet and the geo-cache prize screen so the formatting
+// stays in one place. Symbols come from the app's authoritative CURRENCY_LIST
+// (fiatService) — no second symbol table. #341.
+import { CURRENCY_LIST } from '../services/fiatService';
 
-export const FIAT_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  JPY: '¥',
-  CNY: '¥',
-  CAD: 'C$',
-  AUD: 'A$',
-  CHF: 'CHF ',
-  ZAR: 'R',
-};
+const SYMBOL_BY_CODE = new Map(CURRENCY_LIST.map((c) => [c.code, c.symbol]));
+
+/** The currency symbol for a code (e.g. 'USD' → '$'), or '' if unknown. */
+export function fiatSymbol(currency: string): string {
+  return SYMBOL_BY_CODE.get(currency) ?? '';
+}
 
 /**
  * Format `sats` as an approximate fiat label (e.g. `≈ $1.23`) given the BTC
@@ -31,6 +27,6 @@ export function formatFiatApprox(
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  const symbol = FIAT_SYMBOLS[currency] ?? '';
+  const symbol = fiatSymbol(currency);
   return symbol ? `≈ ${symbol}${num}` : `≈ ${num} ${currency}`;
 }

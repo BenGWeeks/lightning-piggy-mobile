@@ -148,6 +148,11 @@ export function LnurlWithdrawHost(): React.ReactElement {
         });
         return;
       }
+      // Stamp BEFORE entering 'claiming' (not after success): the auto-dismiss
+      // effect runs in the 'claiming' stage too, and with claimedAtRef still 0 a
+      // stale `lastIncomingPayment` from an earlier receive would pass the
+      // `at < claimedAtRef` guard and dismiss the sheet mid-claim (Copilot).
+      claimedAtRef.current = Date.now();
       setStage({ kind: 'claiming' });
       try {
         const msat = sats * 1000;
@@ -158,9 +163,6 @@ export function LnurlWithdrawHost(): React.ReactElement {
         if (!mountedRef.current) return;
         await recordClaim({ lnurl: sourceLnurl, sats: result.sats });
         if (!mountedRef.current) return;
-        // Stamp the claim moment so the auto-dismiss effect only reacts to a
-        // settle that lands AFTER this point.
-        claimedAtRef.current = Date.now();
         claimedSatsRef.current = result.sats;
         setStage({ kind: 'claimed', sats: result.sats });
         // Register the invoice with the wallet context's ~1s aggressive poll so

@@ -46,7 +46,9 @@ export function AmountSlider({
     const usable = widthRef.current - THUMB_SIZE;
     if (usable <= 0) return;
     const f = Math.min(1, Math.max(0, (x - THUMB_SIZE / 2) / usable));
-    onChange(Math.round(min + f * range));
+    // Clamp to [min, max]: with min === max, `range` is floored to 1 to avoid a
+    // divide-by-zero, so the raw value could land at min+1 (out of bounds).
+    onChange(Math.min(max, Math.max(min, Math.round(min + f * range))));
   };
 
   const pan = useRef(
@@ -71,8 +73,17 @@ export function AmountSlider({
         setWidth(w);
       }}
       testID={testID}
+      accessible
       accessibilityRole="adjustable"
       accessibilityValue={{ min, max, now: value }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'increment') {
+          onChange(Math.min(max, value + 1));
+        } else if (e.nativeEvent.actionName === 'decrement') {
+          onChange(Math.max(min, value - 1));
+        }
+      }}
       {...pan.panHandlers}
     >
       <View style={styles.track} />
