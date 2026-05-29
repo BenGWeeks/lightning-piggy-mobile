@@ -218,9 +218,7 @@ const MessageBubble: React.FC<Props> = ({
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
     const titleText =
       marker.phase === 'end' || status === 'ended'
-        ? fromMe
-          ? 'Live location ended'
-          : 'Live location ended'
+        ? 'Live location ended'
         : status === 'paused'
           ? fromMe
             ? 'Live location paused'

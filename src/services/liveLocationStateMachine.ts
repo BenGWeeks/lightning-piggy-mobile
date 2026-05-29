@@ -28,6 +28,10 @@ export interface OutgoingSession {
   /** Opaque id minted by `newSessionId`. Same id appears on every
    *  kind-20069 ping for this share, so the receiver can filter. */
   sessionId: string;
+  /** Sender (owner) hex pubkey — the identity that started the share.
+   *  Used to scope persistence and reject sessions that don't belong to
+   *  the currently logged-in identity. */
+  senderPubkey: string;
   /** Recipient's hex pubkey. */
   recipientPubkey: string;
   /** Wall-clock epoch (ms) the share was kicked off. */
@@ -52,6 +56,7 @@ export type Action =
   | {
       type: 'start';
       sessionId: string;
+      senderPubkey: string;
       recipientPubkey: string;
       durationMs: number;
       now: number;
@@ -66,6 +71,10 @@ export type Action =
   /** App returned to foreground — resume an existing paused session
    *  if it hasn't yet expired. */
   | { type: 'resume'; sessionId: string; now: number }
+  /** User tapped Stop but the end marker hasn't landed yet. Moves the
+   *  session to `expired` (watcher stops pinging) without ending it, so
+   *  the tick-drain loop keeps retrying the end marker until it succeeds. */
+  | { type: 'stopPending'; sessionId: string }
   /** User tapped Stop, OR end marker has been published for an
    *  expired session. Marks the session terminal. */
   | { type: 'stop'; sessionId: string }
@@ -90,6 +99,7 @@ export function reduce(
       const durationMs = Math.max(0, Math.min(MAX_DURATION_MS, action.durationMs));
       next.set(action.sessionId, {
         sessionId: action.sessionId,
+        senderPubkey: action.senderPubkey,
         recipientPubkey: action.recipientPubkey,
         startedAt: action.now,
         durationMs,
@@ -156,6 +166,15 @@ export function reduce(
       if (!session) return state;
       const next = new Map(state);
       next.set(action.sessionId, { ...session, endMarkerSent: true });
+      return next;
+    }
+    case 'stopPending': {
+      const session = state.get(action.sessionId);
+      if (!session) return state;
+      // Terminal or already pending — nothing to do.
+      if (session.status === 'ended' || session.status === 'expired') return state;
+      const next = new Map(state);
+      next.set(action.sessionId, { ...session, status: 'expired' });
       return next;
     }
     case 'stop': {

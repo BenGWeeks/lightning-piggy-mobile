@@ -40,6 +40,42 @@ export function useConversationLiveLocation(params: {
     Record<string, { location: SharedLocation; ts: number } | undefined>
   >({});
 
+  // Find inbound (fromMe=false) start markers whose paired end marker
+  // (same sessionId) hasn't arrived AND whose wall-clock window is still
+  // open. The classifier already split markers out into a dedicated kind,
+  // so we walk `items` directly. Memoised so a new `items` array on every
+  // render doesn't tear down + recreate the relay subscriptions below.
+  const liveStarts = useMemo(() => {
+    const seenEnds = new Set<string>();
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.marker.phase === 'end') seenEnds.add(it.marker.sessionId);
+    }
+    const starts: { sessionId: string; startedAt: number; durationMs: number }[] = [];
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.fromMe) continue;
+      if (it.marker.phase !== 'start') continue;
+      if (seenEnds.has(it.marker.sessionId)) continue;
+      const expiresAt = it.marker.startedAt + it.marker.durationMs;
+      if (Date.now() >= expiresAt) continue;
+      starts.push({
+        sessionId: it.marker.sessionId,
+        startedAt: it.marker.startedAt,
+        durationMs: it.marker.durationMs,
+      });
+    }
+    return starts;
+  }, [items]);
+
+  // Stable key over the live-share set — the subscription effect depends
+  // on this instead of `liveStarts`, so it only re-subscribes when a
+  // session actually appears / expires, not on every keystroke render.
+  const liveStartsKey = useMemo(
+    () => liveStarts.map((s) => `${s.sessionId}:${s.startedAt}:${s.durationMs}`).join('|'),
+    [liveStarts],
+  );
+
   // Subscribe to live-location coordinate pings (kind-20069) for any
   // *inbound* live-share start marker we've seen in this thread that hasn't
   // yet been ended. The subscription stays open until either an end marker
@@ -49,29 +85,6 @@ export function useConversationLiveLocation(params: {
     if (!isLoggedIn || !myPubkey) return;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_NOSTR_RELAYS]));
-    // Find inbound (fromMe=false) start markers whose paired end marker
-    // (same sessionId) hasn't arrived AND whose wall-clock window is still
-    // open. The classifier already split markers out into a dedicated kind,
-    // so we walk `items` directly.
-    const seenEnds = new Set<string>();
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.marker.phase === 'end') seenEnds.add(it.marker.sessionId);
-    }
-    const liveStarts: { sessionId: string; startedAt: number; durationMs: number }[] = [];
-    for (const it of items) {
-      if (it.kind !== 'liveLocationMarker') continue;
-      if (it.fromMe) continue;
-      if (it.marker.phase !== 'start') continue;
-      if (seenEnds.has(it.marker.sessionId)) continue;
-      const expiresAt = it.marker.startedAt + it.marker.durationMs;
-      if (Date.now() >= expiresAt) continue;
-      liveStarts.push({
-        sessionId: it.marker.sessionId,
-        startedAt: it.marker.startedAt,
-        durationMs: it.marker.durationMs,
-      });
-    }
     if (liveStarts.length === 0) return;
     const unsubs: (() => void)[] = [];
     for (const start of liveStarts) {
@@ -136,7 +149,8 @@ export function useConversationLiveLocation(params: {
         }
       }
     };
-  }, [items, isLoggedIn, myPubkey, pubkey, signerType, relays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- liveStartsKey is the stable surrogate for liveStarts
+  }, [liveStartsKey, isLoggedIn, myPubkey, pubkey, signerType, relays]);
 
   // Per-session status the bubble renders: `ended` once an end marker arrives,
   // otherwise the context's authoritative status for our own shares, otherwise

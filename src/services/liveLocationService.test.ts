@@ -78,6 +78,13 @@ describe('formatLiveStartMessage / parseLiveLocationMarker', () => {
     ).toBeNull();
   });
 
+  it('rejects a DM that merely quotes the header mid-body', () => {
+    // The sentinel must be the first non-empty line — a chat message that
+    // happens to contain "[live-location:start]" elsewhere is a plain DM.
+    const text = `Heads up, I sent you ${LIVE_START_HEADER} earlier\ngeo:51.5,0`;
+    expect(parseLiveLocationMarker(text)).toBeNull();
+  });
+
   it('rejects coordinates outside earth bounds', () => {
     const text = `${LIVE_START_HEADER}\n{}\ngeo:200,0`;
     expect(parseLiveLocationMarker(text)).toBeNull();

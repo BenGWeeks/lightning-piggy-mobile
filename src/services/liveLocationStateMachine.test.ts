@@ -16,6 +16,7 @@ import {
 } from './liveLocationStateMachine';
 
 const RECIPIENT = 'a'.repeat(64);
+const SENDER = 'c'.repeat(64);
 
 function emptyState(): Map<string, OutgoingSession> {
   return new Map();
@@ -25,6 +26,7 @@ describe('liveLocationStateMachine', () => {
   it('start installs an active session capped at MAX_DURATION_MS', () => {
     const next = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       // 24 h — well past the 1 h cap.
@@ -42,6 +44,7 @@ describe('liveLocationStateMachine', () => {
   it('ping bumps lastPingAt only while active', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -59,6 +62,7 @@ describe('liveLocationStateMachine', () => {
   it('tickExpiryCheck flips active sessions whose window passed', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -75,6 +79,7 @@ describe('liveLocationStateMachine', () => {
   it('pause then resume flips back to active when within window', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -89,6 +94,7 @@ describe('liveLocationStateMachine', () => {
   it('resume after expiry transitions straight to expired', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -102,6 +108,7 @@ describe('liveLocationStateMachine', () => {
   it('stop is terminal — re-stopping is idempotent', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -119,6 +126,7 @@ describe('liveLocationStateMachine', () => {
   it('pendingEndMarkers reflects expired sessions awaiting end-marker publish', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -133,6 +141,7 @@ describe('liveLocationStateMachine', () => {
   it('multiple concurrent sessions track independent state', () => {
     let s = reduce(emptyState(), {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
       durationMs: 15 * 60 * 1000,
@@ -140,6 +149,7 @@ describe('liveLocationStateMachine', () => {
     });
     s = reduce(s, {
       type: 'start',
+      senderPubkey: SENDER,
       sessionId: 's2',
       recipientPubkey: 'b'.repeat(64),
       durationMs: 60 * 60 * 1000,
@@ -154,6 +164,7 @@ describe('liveLocationStateMachine', () => {
   it('expiresAt + remainingMs use the capped duration', () => {
     const session: OutgoingSession = {
       sessionId: 's1',
+      senderPubkey: SENDER,
       recipientPubkey: RECIPIENT,
       startedAt: 1_700_000_000_000,
       durationMs: 15 * 60 * 1000,

@@ -39,6 +39,7 @@ import { useNostr } from './NostrContext';
 import {
   DEFAULT_PING_INTERVAL_MS,
   LIVE_LOCATION_PING_KIND,
+  MAX_DURATION_MS,
   LiveLocationPhase,
   encodeLivePingPayload,
   expiryFor,
@@ -96,9 +97,21 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const sessionsRef = useRef(sessions);
   useEffect(() => {
     sessionsRef.current = sessions;
-    // Best-effort persist on every transition.
-    void savePersistedSessions(sessions.values());
-  }, [sessions]);
+    // Best-effort persist on every transition, scoped to the active
+    // identity so an account switch can't resume these under another key.
+    if (pubkey) void savePersistedSessions(pubkey, sessions.values());
+  }, [sessions, pubkey]);
+
+  // Reset the in-memory session set whenever the logged-in identity
+  // changes (or the user logs out), so a share started under account A
+  // can never publish pings / markers under account B's key.
+  const lastIdentityRef = useRef<string | null>(pubkey ?? null);
+  useEffect(() => {
+    const current = isLoggedIn ? (pubkey ?? null) : null;
+    if (lastIdentityRef.current === current) return;
+    lastIdentityRef.current = current;
+    setSessions(new Map());
+  }, [pubkey, isLoggedIn]);
 
   const dispatch = useCallback((action: Parameters<typeof reduce>[1]) => {
     setSessions((prev) => reduce(prev, action));
@@ -181,7 +194,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     async (
       session: OutgoingSession,
       phase: LiveLocationPhase,
-      location: SharedLocation,
+      location: SharedLocation | null,
     ): Promise<boolean> => {
       const text =
         phase === 'start'
@@ -189,7 +202,8 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
               sessionId: session.sessionId,
               durationMs: session.durationMs,
               startedAt: session.startedAt,
-              location,
+              // The start path always supplies a fresh fix.
+              location: location ?? { lat: 0, lon: 0, accuracyMeters: null },
             })
           : formatLiveEndMessage({
               sessionId: session.sessionId,
@@ -212,25 +226,33 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!fix.ok) return { ok: false, error: fix.message };
       const sessionId = newSessionId();
       const now = Date.now();
+      // Cap the duration once, up-front, so the start marker payload and
+      // the `installed` mirror match the value the reducer stores.
+      const cappedDurationMs = Math.max(0, Math.min(MAX_DURATION_MS, durationMs));
       // Optimistically install the session so the bubble renders even
       // if the start marker DM is slow to publish.
       dispatch({
         type: 'start',
         sessionId,
+        senderPubkey: pubkey,
         recipientPubkey,
-        durationMs,
+        durationMs: cappedDurationMs,
         now,
       });
       const installed: OutgoingSession = {
         sessionId,
+        senderPubkey: pubkey,
         recipientPubkey,
         startedAt: now,
-        durationMs,
+        durationMs: cappedDurationMs,
         lastPingAt: null,
         status: 'active',
         startMarkerSent: false,
         endMarkerSent: false,
       };
+      // Remember the start fix as the last-ditch end-marker fallback.
+      startLocationRef.current.set(sessionId, fix.location);
+      lastWatcherLocationRef.current = fix.location;
       const startSent = await sendMarker(installed, 'start', fix.location);
       if (!startSent) {
         // Roll back — publish failed, no point keeping the watcher.
@@ -260,19 +282,25 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const session = sessionsRef.current.get(sessionId);
       if (!session) return { ok: false, error: 'Session not found' };
       if (session.status === 'ended') return { ok: true };
-      // Best-effort final fix so the end marker carries the most
-      // recent coordinates; fall back to a plausible last-known sample
-      // if a fresh fix isn't available within the timeout.
+      // Best-effort final fix so the end marker carries the most recent
+      // coordinates; fall back to the last watcher fix, then the start
+      // location, and finally omit coords rather than send a 0,0 pin.
       const fix = await getCurrentLocation();
-      const finalLocation: SharedLocation = fix.ok
+      const finalLocation: SharedLocation | null = fix.ok
         ? fix.location
-        : { lat: 0, lon: 0, accuracyMeters: null };
+        : (lastWatcherLocationRef.current ?? startLocationRef.current.get(sessionId) ?? null);
       const sent = await sendMarker(session, 'end', finalLocation);
-      if (sent) dispatch({ type: 'endMarkerSent', sessionId });
-      // Flip to `ended` regardless — we don't want a stuck-watcher
-      // loop if the relay is unreachable.
-      dispatch({ type: 'stop', sessionId });
-      return { ok: true };
+      if (sent) {
+        dispatch({ type: 'endMarkerSent', sessionId });
+        dispatch({ type: 'stop', sessionId });
+        startLocationRef.current.delete(sessionId);
+        return { ok: true };
+      }
+      // End marker failed — keep the session in a retryable, non-active
+      // state (watcher stops, but it isn't ended) so the 5 s tick-drain
+      // loop retries the end marker until the peer is told we stopped.
+      dispatch({ type: 'stopPending', sessionId });
+      return { ok: false, error: 'Failed to send live-location end marker.' };
     },
     [dispatch, sendMarker],
   );
@@ -281,6 +309,13 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const watcherSubRef = useRef<Location.LocationSubscription | null>(null);
   const lastPublishedAtRef = useRef<Map<string, number>>(new Map());
+  // Most-recent coordinate the watcher delivered. Used as the end-marker
+  // fallback when a fresh fix isn't available on stop, so we never send
+  // a fabricated 0,0 pin.
+  const lastWatcherLocationRef = useRef<SharedLocation | null>(null);
+  // Per-session start coordinates — last-ditch end-marker fallback if the
+  // watcher never produced a fix (e.g. stopped before the first sample).
+  const startLocationRef = useRef<Map<string, SharedLocation>>(new Map());
 
   // Start / stop a single shared GPS watcher whenever the active-session
   // count crosses 0. One coordinate stream feeds every active recipient
@@ -311,6 +346,15 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           (pos) => {
             if (cancelled) return;
             const now = Date.now();
+            // Cache the freshest fix for the end-marker fallback.
+            lastWatcherLocationRef.current = {
+              lat: pos.coords.latitude,
+              lon: pos.coords.longitude,
+              accuracyMeters:
+                typeof pos.coords.accuracy === 'number' && isFinite(pos.coords.accuracy)
+                  ? Math.round(pos.coords.accuracy)
+                  : null,
+            };
             for (const session of sessionsRef.current.values()) {
               if (session.status !== 'active') continue;
               // Per-session debounce: keep one publish per session per
@@ -401,9 +445,10 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // ---- Hydrate persisted sessions on first mount -----------------------
 
   useEffect(() => {
+    if (!pubkey) return;
     let cancelled = false;
     void (async () => {
-      const persisted = await loadPersistedSessions();
+      const persisted = await loadPersistedSessions(pubkey);
       if (cancelled || persisted.length === 0) return;
       setSessions((prev) => {
         const next = new Map(prev);
@@ -426,7 +471,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pubkey]);
 
   // ---- Read models -------------------------------------------------------
 

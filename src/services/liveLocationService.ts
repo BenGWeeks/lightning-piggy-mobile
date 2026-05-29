@@ -110,14 +110,18 @@ export function formatLiveEndMessage(input: {
   sessionId: string;
   durationMs: number;
   startedAt: number;
-  location: SharedLocation;
+  /** Final known coordinates, or `null` when no fix is available — we
+   *  omit the geo URI rather than fabricate a 0,0 (Gulf of Guinea) pin. */
+  location: SharedLocation | null;
 }): string {
   const meta = JSON.stringify({
     sessionId: input.sessionId,
     durationMs: input.durationMs,
     startedAt: input.startedAt,
   });
-  return [LIVE_END_HEADER, meta, formatGeoMessage(input.location)].join('\n');
+  const lines = [LIVE_END_HEADER, meta];
+  if (input.location) lines.push(formatGeoMessage(input.location));
+  return lines.join('\n');
 }
 
 const COORD_RE = /\bgeo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:;u=(\d+(?:\.\d+)?))?/i;
@@ -133,9 +137,17 @@ const COORD_RE = /\bgeo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:;u=(\d+(?:\.\d+)?)
  */
 export function parseLiveLocationMarker(text: string): LiveLocationMarker | null {
   if (!text) return null;
+  // Require the sentinel to be the first non-empty line — matching on a
+  // bare `includes` would misclassify any DM that merely quotes the
+  // header text somewhere in its body.
+  const firstLine =
+    text
+      .split('\n')
+      .find((l) => l.trim() !== '')
+      ?.trim() ?? '';
   let phase: LiveLocationPhase;
-  if (text.includes(LIVE_START_HEADER)) phase = 'start';
-  else if (text.includes(LIVE_END_HEADER)) phase = 'end';
+  if (firstLine === LIVE_START_HEADER) phase = 'start';
+  else if (firstLine === LIVE_END_HEADER) phase = 'end';
   else return null;
 
   const coordMatch = text.match(COORD_RE);

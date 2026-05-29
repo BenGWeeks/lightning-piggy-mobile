@@ -87,8 +87,8 @@ const LiveLocationDurationPicker: React.FC<Props> = ({
           ))}
 
           <Text style={styles.footnote}>
-            ~3% battery per hour. End-to-end encrypted. Recipient sees a map that updates every ~30
-            seconds.
+            Sharing live location uses extra battery. End-to-end encrypted. Recipient sees a map
+            that updates every ~30 seconds.
           </Text>
 
           <TouchableOpacity

@@ -13,11 +13,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { OutgoingSession } from './liveLocationStateMachine';
 
-const STORAGE_KEY = 'live_location_sessions_v1';
+const STORAGE_KEY_BASE = 'live_location_sessions_v1';
+
+// Sessions are scoped per active identity so a multi-account switch can't
+// resume one identity's shares (and publish pings) under another pubkey.
+function storageKeyFor(pubkey: string): string {
+  return `${STORAGE_KEY_BASE}:${pubkey}`;
+}
 
 interface PersistedSession {
   sessionId: string;
   recipientPubkey: string;
+  // Sender (owner) hex pubkey — also checked on load as defence-in-depth
+  // in case a legacy unscoped blob is read back.
+  senderPubkey: string;
   startedAt: number;
   durationMs: number;
   startMarkerSent: boolean;
@@ -31,9 +40,10 @@ interface PersistedSession {
  * sessions that already have `endMarkerSent: true` are dropped — they
  * served their purpose on the previous run.
  */
-export async function loadPersistedSessions(): Promise<OutgoingSession[]> {
+export async function loadPersistedSessions(pubkey: string): Promise<OutgoingSession[]> {
+  if (!pubkey) return [];
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(storageKeyFor(pubkey));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -49,11 +59,16 @@ export async function loadPersistedSessions(): Promise<OutgoingSession[]> {
       ) {
         continue;
       }
+      // Discard sessions that don't belong to the current identity —
+      // belt-and-braces against a legacy unscoped blob being read back.
+      const senderPubkey = typeof e.senderPubkey === 'string' ? e.senderPubkey : pubkey;
+      if (senderPubkey !== pubkey) continue;
       const startMarkerSent = e.startMarkerSent === true;
       const endMarkerSent = e.endMarkerSent === true;
       if (endMarkerSent) continue;
       out.push({
         sessionId: e.sessionId,
+        senderPubkey,
         recipientPubkey: e.recipientPubkey,
         startedAt: e.startedAt,
         durationMs: e.durationMs,
@@ -76,13 +91,18 @@ export async function loadPersistedSessions(): Promise<OutgoingSession[]> {
  * state machine produces a meaningful transition — failure is logged
  * but doesn't block the in-memory state.
  */
-export async function savePersistedSessions(sessions: Iterable<OutgoingSession>): Promise<void> {
+export async function savePersistedSessions(
+  pubkey: string,
+  sessions: Iterable<OutgoingSession>,
+): Promise<void> {
+  if (!pubkey) return;
   const persisted: PersistedSession[] = [];
   for (const session of sessions) {
     // Already-ended sessions don't need to survive a restart.
     if (session.status === 'ended') continue;
     persisted.push({
       sessionId: session.sessionId,
+      senderPubkey: session.senderPubkey,
       recipientPubkey: session.recipientPubkey,
       startedAt: session.startedAt,
       durationMs: session.durationMs,
@@ -92,9 +112,9 @@ export async function savePersistedSessions(sessions: Iterable<OutgoingSession>)
   }
   try {
     if (persisted.length === 0) {
-      await AsyncStorage.removeItem(STORAGE_KEY);
+      await AsyncStorage.removeItem(storageKeyFor(pubkey));
     } else {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+      await AsyncStorage.setItem(storageKeyFor(pubkey), JSON.stringify(persisted));
     }
   } catch {
     // Best-effort — if AsyncStorage is full, the watcher still works
