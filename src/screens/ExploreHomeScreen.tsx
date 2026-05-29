@@ -197,11 +197,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- BTC Map merchants ------------------------------------------------
 
-  // Seed from the in-memory mirror — `btcMapService` kicks hydrate()
-  // at module import, so by first render the cached search result is
-  // typically ready and the rail paints instantly. The live fetch
-  // below replaces it once `pos` lands. Mirrors the same idiom used
-  // for `caches` + `events` immediately below.
+  // Seed from the in-memory mirror. The disk hydration that fills it is
+  // kicked off the cold-start critical path (audit HIGH 1) — see
+  // `kickPlacesHydration` in btcMapService, invoked from App.tsx after
+  // first paint rather than at module import. The live fetch below
+  // replaces this once `pos` lands.
   const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
   // If we already have cached merchants on first render there's no
   // skeleton to show — flip merchantsLoading false so the rail paints

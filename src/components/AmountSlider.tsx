@@ -42,6 +42,14 @@ export function AmountSlider({
   const range = Math.max(1, max - min);
   const frac = Math.min(1, Math.max(0, (value - min) / range));
 
+  // Last integer value we dispatched to the parent. PanResponderMove fires
+  // ~once per frame (60/s) but the slider value is an integer — most frames
+  // land on the same sat amount. Tracking the last-dispatched value and only
+  // calling `onChange` when the rounded integer actually changes throttles the
+  // parent re-render from per-frame to per-value-step (audit LOW 6). The slider
+  // renders its own thumb/fill from the `value` prop, so a 1-frame parent lag
+  // is imperceptible. Initialised to NaN so the first move always dispatches.
+  const lastDispatchedRef = useRef<number>(NaN);
   // The PanResponder is created once, so route every touch through a ref that
   // always holds the latest props (else min/max/onChange would be stale).
   const handleRef = useRef<(x: number) => void>(() => {});
@@ -51,7 +59,10 @@ export function AmountSlider({
     const f = Math.min(1, Math.max(0, (x - THUMB_SIZE / 2) / usable));
     // Clamp to [min, max]: with min === max, `range` is floored to 1 to avoid a
     // divide-by-zero, so the raw value could land at min+1 (out of bounds).
-    onChange(Math.min(max, Math.max(min, Math.round(min + f * range))));
+    const next = Math.min(max, Math.max(min, Math.round(min + f * range)));
+    if (next === lastDispatchedRef.current) return;
+    lastDispatchedRef.current = next;
+    onChange(next);
   };
 
   const pan = useRef(
@@ -82,10 +93,16 @@ export function AmountSlider({
       accessibilityValue={{ min, max, now: value }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
+        // Keep the drag throttle's last-dispatched ref in sync so a
+        // subsequent drag back onto a value the a11y action set still fires.
         if (e.nativeEvent.actionName === 'increment') {
-          onChange(Math.min(max, value + 1));
+          const next = Math.min(max, value + 1);
+          lastDispatchedRef.current = next;
+          onChange(next);
         } else if (e.nativeEvent.actionName === 'decrement') {
-          onChange(Math.max(min, value - 1));
+          const next = Math.max(min, value - 1);
+          lastDispatchedRef.current = next;
+          onChange(next);
         }
       }}
       {...pan.panHandlers}

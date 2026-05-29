@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -40,6 +41,7 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/nostrPlacesStorage';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -58,9 +60,21 @@ interface Props {
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [events, setEvents] = useState<Map<string, ParsedEvent>>(
-    () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
-  );
+  // Coalesce per-event setState bursts during the nearby-event relay
+  // backfill into one commit per ~100 ms window (audit MED 4) — the
+  // naive `new Map(prev)` clone per event was O(N²) over a cold-start
+  // burst. `shouldReplace` keeps the newest revision of a replaceable
+  // event. `enqueue` feeds the relay sub; `setEvents` covers the
+  // hydrate / clear-on-reload paths.
+  const {
+    map: events,
+    setMap: setEvents,
+    enqueue: enqueueEvent,
+    flush: flushEvents,
+  } = useCoalescedMap<ParsedEvent>({
+    initial: () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
+    shouldReplace: (existing, incoming) => existing.startsAt !== incoming.startsAt,
+  });
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -78,7 +92,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setEvents]);
   useEffect(() => {
     if (events.size === 0) return;
     const t = setTimeout(() => saveEvents([...events.values()]), 1500);
@@ -119,68 +133,100 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     isTrustedRef.current = isTrusted;
   }, [isTrusted]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setEvents(new Map());
-    setUntrustedHidden(0);
-    closerRef.current?.();
-    try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
-        setError(
-          'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
-        );
-        setLoading(false);
-        return;
-      }
-      const liveFix = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      const lat = liveFix.coords.latitude;
-      const lon = liveFix.coords.longitude;
-      setPos({ lat, lon });
-      const myGh = encodeGeohash(lat, lon, 7);
-      // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
-      // in cities; rural users would otherwise see an empty feed.
-      // NIP-52 publishers conventionally emit g tags at every
-      // precision 3..9, so 3-char prefix is enough to catch them.
-      const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
-      const closer = subscribeNearbyEvents(prefixes, (e) => {
-        // De-dupe by coord — replaceable events; only keep the
-        // newest revision and skip past events.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) {
-          return;
-        }
-        // WoT filter — see `trustGraphService` for the threat model.
-        // `isTrusted` is tier-aware post-#535 (returns true for 'all').
-        if (!isTrustedRef.current(e.organiserPubkey)) {
-          setUntrustedHidden((n) => n + 1);
-          return;
-        }
-        setEvents((prev) => {
-          const existing = prev.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return prev;
-          const next = new Map(prev);
-          next.set(e.coord, e);
-          return next;
-        });
-      });
-      closerRef.current = closer;
-      setTimeout(() => setLoading(false), 1500);
-    } catch (e) {
-      setError((e as Error).message);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-    return () => {
+  // `isCancelled` lets the focus effect abort a reload whose async location
+  // resolve outlived the focus window (blur-before-subscribe). Without it a
+  // reload kicked on focus could install a live relay sub AFTER blur — leaking
+  // exactly the stream this screen now scopes to focus. Button-triggered
+  // reloads pass nothing, so the guard is a no-op there.
+  const reload = useCallback(
+    async (isCancelled?: () => boolean) => {
+      setLoading(true);
+      setError(null);
+      setEvents(new Map());
+      setUntrustedHidden(0);
       closerRef.current?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') {
+          setError(
+            'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
+          );
+          setLoading(false);
+          return;
+        }
+        const liveFix = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        // Focus was lost while we awaited location — bail before opening a
+        // sub the cleanup already ran past.
+        if (isCancelled?.()) return;
+        const lat = liveFix.coords.latitude;
+        const lon = liveFix.coords.longitude;
+        setPos({ lat, lon });
+        const myGh = encodeGeohash(lat, lon, 7);
+        // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
+        // in cities; rural users would otherwise see an empty feed.
+        // NIP-52 publishers conventionally emit g tags at every
+        // precision 3..9, so 3-char prefix is enough to catch them.
+        const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+        const closer = subscribeNearbyEvents(prefixes, (e) => {
+          // De-dupe by coord — replaceable events; only keep the
+          // newest revision and skip past events.
+          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) {
+            return;
+          }
+          // WoT filter — see `trustGraphService` for the threat model.
+          // `isTrusted` is tier-aware post-#535 (returns true for 'all').
+          if (!isTrustedRef.current(e.organiserPubkey)) {
+            setUntrustedHidden((n) => n + 1);
+            return;
+          }
+          // Coalesced into one setState per flush window; the newest-wins
+          // replace rule (startsAt changed) lives in the hook's
+          // `shouldReplace`, re-applied against committed state on flush.
+          enqueueEvent(e.coord, e);
+        });
+        // Wrap the relay closer so blur / reload also drains the pending
+        // buffer — otherwise the tail of a backfill burst is stranded.
+        const wrappedCloser = () => {
+          closer();
+          flushEvents();
+        };
+        // If focus was lost in the same tick the sub opened, close it now
+        // rather than stranding it until the next blur.
+        if (isCancelled?.()) {
+          wrappedCloser();
+          return;
+        }
+        closerRef.current = wrappedCloser;
+        setTimeout(() => setLoading(false), 1500);
+      } catch (e) {
+        setError((e as Error).message);
+        setLoading(false);
+      }
+    },
+    [setEvents, enqueueEvent, flushEvents],
+  );
+
+  // Open the relay subscription only while the screen is focused (audit
+  // MED 3). With `freezeOnBlur: true` the Explore stack screens never
+  // unmount, so the previous bare `useEffect(reload)` left the NIP-52
+  // sub streaming forever after the first visit. `useFocusEffect` opens
+  // it on focus and closes (+ drains) it on blur; the next focus
+  // re-runs `reload`, which re-subscribes (cheap — SimplePool reuses the
+  // socket). Manual pull-to-refresh / retry still call `reload` directly
+  // while focused, swapping the closer in place.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      reload(() => !active);
+      return () => {
+        active = false;
+        closerRef.current?.();
+        closerRef.current = null;
+      };
+    }, [reload]),
+  );
 
   const sortedEvents = useMemo(() => {
     // Each row carries its precomputed distance so the badge text
@@ -337,7 +383,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={reload}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => reload()}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -356,7 +402,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             refreshControl={
               <RefreshControl
                 refreshing={loading && events.size > 0}
-                onRefresh={reload}
+                onRefresh={() => reload()}
                 tintColor={colors.brandPink}
                 colors={[colors.brandPink]}
               />
