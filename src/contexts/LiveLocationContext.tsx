@@ -455,14 +455,12 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const now = Date.now();
         for (const session of persisted) {
           if (next.has(session.sessionId)) continue;
-          // If the persisted session is already past its expiry, mark
-          // it expired so the next tick publishes the end marker.
-          // Otherwise leave it `paused` — the AppState listener will
-          // resume on the next foreground transition.
+          // Past expiry → `expired` (next tick publishes the end marker); else resume now if already foregrounded — cold start fires no AppState transition, so a `paused` hydrate would never resume — falling back to `paused` only when hydrating in the background.
           const expired = now >= expiryFor(session.startedAt, session.durationMs);
+          const resumeNow = AppState.currentState === 'active';
           next.set(session.sessionId, {
             ...session,
-            status: expired ? 'expired' : 'paused',
+            status: expired ? 'expired' : resumeNow ? 'active' : 'paused',
           });
         }
         return next;

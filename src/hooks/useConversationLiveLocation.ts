@@ -36,9 +36,14 @@ export function useConversationLiveLocation(params: {
   // sessionId. Fed by the kind-20069 subscription below; consumed by
   // MessageBubble's `liveLocationMarker` branch so the receiver's bubble
   // updates as new pings arrive.
-  const [liveLocationLatest, setLiveLocationLatest] = useState<
+  // Live coordinate pings (inbound shares only) keyed by sessionId. Merged
+  // with end-marker locations below into the `liveLocationLatest` the bubble reads.
+  const [pingLatest, setPingLatest] = useState<
     Record<string, { location: SharedLocation; ts: number } | undefined>
   >({});
+
+  // 1 Hz tick — included in the Date.now()-dependent memos below so countdown / "x ago" labels stay live and expired sessions actually drop between pings.
+  const [secondTick, setSecondTick] = useState(0);
 
   // Find inbound (fromMe=false) start markers whose paired end marker
   // (same sessionId) hasn't arrived AND whose wall-clock window is still
@@ -66,7 +71,8 @@ export function useConversationLiveLocation(params: {
       });
     }
     return starts;
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick forces the Date.now() expiry filter to re-run each second so expired sessions drop
+  }, [items, secondTick]);
 
   // Stable key over the live-share set — the subscription effect depends
   // on this instead of `liveStarts`, so it only re-subscribes when a
@@ -119,7 +125,7 @@ export function useConversationLiveLocation(params: {
           if (!plaintext) return;
           const payload = decodeLivePingPayload(plaintext);
           if (!payload || payload.sessionId !== start.sessionId) return;
-          setLiveLocationLatest((prev) => {
+          setPingLatest((prev) => {
             const existing = prev[start.sessionId];
             // Reject out-of-order pings — relay fan-out can briefly re-order
             // events, and the receiver's bubble shouldn't jump backwards.
@@ -181,7 +187,8 @@ export function useConversationLiveLocation(params: {
       out[id] = Date.now() >= expiresAt ? 'ended' : 'active';
     }
     return out;
-  }, [items, sessionsByRecipient, pubkey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() wall-clock status each second
+  }, [items, sessionsByRecipient, pubkey, secondTick]);
 
   const liveLocationBubbleRemaining = useMemo<Record<string, number | undefined>>(() => {
     const out: Record<string, number | undefined> = {};
@@ -201,16 +208,25 @@ export function useConversationLiveLocation(params: {
       out[id] = Math.max(0, expiresAt - now);
     }
     return out;
-  }, [items, remainingMsForSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
+  }, [items, remainingMsForSession, secondTick]);
 
-  // 1 Hz tick so the "Updated 30 s ago" / "12 min left" labels animate without
-  // us having to fire a render on every coordinate ping. Cheap — flips a
-  // single counter, the bubble subtree is memo'd elsewhere.
-  const [, setSecondTick] = useState(0);
+  // Drive the 1 Hz tick declared above — flips the counter the Date.now() memos depend on.
   useEffect(() => {
     const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // What the bubble plots: end-marker coords (last position sent/received once ended — the sender has no inbound pings, so this shows their final spot, not stale start coords) as the base, with live pings overriding for shares still streaming.
+  const liveLocationLatest = useMemo(() => {
+    const merged: Record<string, { location: SharedLocation; ts: number } | undefined> = {};
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.marker.phase !== 'end' || !it.marker.location) continue;
+      merged[it.marker.sessionId] = { location: it.marker.location, ts: it.createdAt * 1000 };
+    }
+    return { ...merged, ...pingLatest };
+  }, [items, pingLatest]);
 
   return { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining };
 }

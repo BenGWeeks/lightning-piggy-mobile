@@ -221,6 +221,8 @@ const MessageBubble: React.FC<Props> = ({
 
   if (content.kind === 'liveLocationMarker') {
     const { marker } = content;
+    // No separate card for the end marker — it would duplicate the start card (which flips to "ended"); its coords are folded into liveLocationLatest so the one card shows the last known location.
+    if (marker.phase === 'end') return null;
     // The receiver's running view of where the sender is right now —
     // ConversationScreen feeds this from its kind-20069 subscription.
     // Falls back to the marker's own coordinates so the bubble always
@@ -245,14 +247,14 @@ const MessageBubble: React.FC<Props> = ({
       !fromMe && displayLocation && peerAvatarUri !== undefined
         ? { lat: displayLocation.lat, lon: displayLocation.lon, avatarUri: peerAvatarUri ?? null }
         : null;
-    const status =
-      liveLocationStatus?.[marker.sessionId] ?? (marker.phase === 'end' ? 'ended' : 'active');
+    // Only `start` markers reach here (end markers return null above), so the wall-clock default is 'active' unless the context says otherwise.
+    const status = liveLocationStatus?.[marker.sessionId] ?? 'active';
     const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
     // Sender bubble while the share is still active gets a Stop button.
     // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
     const titleText =
-      marker.phase === 'end' || status === 'ended'
+      status === 'ended'
         ? 'Live location ended'
         : status === 'paused'
           ? fromMe
@@ -262,7 +264,7 @@ const MessageBubble: React.FC<Props> = ({
             ? 'Sharing live location'
             : 'Live location';
     const subtitleText: string | null = (() => {
-      if (marker.phase === 'end' || status === 'ended') {
+      if (status === 'ended') {
         return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
       }
       if (latest) {
@@ -275,7 +277,7 @@ const MessageBubble: React.FC<Props> = ({
       return 'Waiting for first update…';
     })();
     const remainingLabel: string | null = (() => {
-      if (status === 'ended' || marker.phase === 'end') return null;
+      if (status === 'ended') return null;
       if (remaining === null) return null;
       if (remaining <= 0) return 'Ending…';
       const mins = Math.ceil(remaining / 60_000);
