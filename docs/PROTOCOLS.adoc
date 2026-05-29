@@ -295,3 +295,45 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 ==== Code reference
 
 * `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+
+== NFC tag tap handling (#103, #341)
+
+How a physical NFC tag tap is routed into the app. There are two tag shapes and one routing mechanism.
+
+=== Tag shapes
+
+[cols="1,2,2",options="header"]
+|===
+| Tag | NDEF records (in order) | What a tap does
+
+| *Piglet / geo-cache* (written by `writeHuntTagToTag`)
+| 1. `lightningpiggy://hunt/<coord>` +
+  2. `nostr:naddr1…` +
+  3. _(optional)_ `lightning:LNURL1…`
+| Opens the *cache page* (`HuntPiggyDetail`), then offers *Claim Prize*.
+
+| *Standalone LNURL-withdraw* (gift card, bounty sticker)
+| 1. `lightning:LNURL1…` _or_ `lnurlw://…`
+| Opens the *withdraw claim* (`HuntFoundScreen`, `coord` absent).
+|===
+
+CAUTION: Android's NFC dispatch keys on the *first* NDEF record only. A Piglet's first record is `lightningpiggy://`, so adding `lightning:` / `lnurlw:` handlers (below) does **not** hijack Piglet taps — their `lightning:` bearer is record 3.
+
+=== Routing mechanism (intent filter → Linking → screen)
+
+The app does **not** use a passive always-on NFC listener. It rides Android's intent/deep-link system, the same path for both NFC taps and `Linking.openURL`:
+
+. *Intent filters* register the schemes LP handles:
+** `plugins/withNfc.js` — `android.nfc.action.NDEF_DISCOVERED` for `lightningpiggy`, `lightning`, and `lnurlw` (the NFC-tap path).
+** `app.config.ts` `intentFilters` — `VIEW` for `lightning` and `lnurlw` (the in-app/browser deep-link path).
+. *`App.tsx` Linking handler* (`getInitialURL` + `addEventListener('url')`) parses the delivered URI and navigates:
+** `lightningpiggy://hunt/<coord>` → `navigateToHuntPiggyDetail(coord)`
+** `nostr:naddr1…` → decode → `HuntPiggyDetail`
+** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `navigateToHuntFound(lnurl)` → `HuntFoundScreen`, which resolves the `withdrawRequest` and claims into the active wallet (`coord` optional, so a cache-less gift card works).
+. *In-app explicit scans* (`NfcReadSheet`, write flows) use *Reader Mode* (`requestTechnology(Ndef, READER_MODE_OPTS)` — see `src/services/nfcReaderMode.ts`), which grabs the tag exclusively so the OS never hands it to another wallet.
+
+=== Why no passive foreground listener (#341)
+
+The original #103 implementation used a passive `registerForegroundTagListener` (nostr-tools-style `registerTagEvent` / foreground dispatch). On Android that **loses to the system NDEF dispatch** — a `lightning:` / `lnurlw:` URI tag launches whichever wallet handles the scheme (Wallet of Satoshi, Phoenix) instead of firing our handler, so it never worked. #341 replaced it with the intent-filter + Linking path above (and removed `registerForegroundTagListener` + the `NfcWithdrawListener` component). Reader Mode remains the mechanism for *interactive* in-app scans.
+
+NOTE: cold taps offer LP in Android's app chooser only for the schemes LP registers; if another LN wallet is the user's default for `lightning:`/`lnurlw:`, Android shows the chooser rather than hijacking it.

@@ -33,7 +33,6 @@ import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
-import NfcWithdrawListener from './src/components/NfcWithdrawListener';
 import OfflineBanner from './src/components/OfflineBanner';
 
 // Renders the global incoming-payment celebration on top of the nav
@@ -253,6 +252,23 @@ export default function App() {
         }
       }
 
+      // Standalone LNURL-withdraw tag / deep link — a bare `lnurlw://…` (or
+      // `lnurl://…`) URI, i.e. record 1 of a withdraw / gift-card tag, NOT
+      // wrapped in `lightning:`. Route it to HuntFound's withdraw-claim flow,
+      // identical to a `lightning:lnurl…` withdraw. (#341 rework — replaced the
+      // passive foreground NFC listener with this intent-filter + deep-link
+      // path so it actually fires; Piglet tags are unaffected — their first
+      // record is `lightningpiggy://hunt/…`, handled above.)
+      if (/^lnurlw:\/\//i.test(trimmed) || /^lnurl:\/\//i.test(trimmed)) {
+        const tryNav = (attempt: number) => {
+          if (navigateToHuntFound(trimmed)) return;
+          if (attempt >= 20 || cancelled) return;
+          setTimeout(() => tryNav(attempt + 1), 100);
+        };
+        tryNav(0);
+        return;
+      }
+
       if (!/^lightning:/i.test(trimmed)) {
         console.log(`[Link] ignored: no handler for scheme`);
         return;
@@ -351,13 +367,12 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                     <BrandedToast />
                     <GlobalIncomingPaymentOverlay />
-                    {/* NfcWithdrawListener: passive foreground NFC tag
-                        listener that auto-claims LNURL-withdraw tags
-                        (gift cards, bounty stickers) into the active
-                        wallet. Lives inside WalletProvider so it can
-                        `makeInvoice`. AppState-gated so we don't poll
-                        the NFC radio in the background. Issue #103. */}
-                    <NfcWithdrawListener />
+                    {/* LNURL-withdraw NFC tags (gift cards, bounty stickers) are
+                        handled via the `lightning:`/`lnurlw:` intent filter →
+                        Linking handler above → HuntFound claim (#341). The
+                        earlier passive foreground listener was removed: it used
+                        `registerTagEvent` (foreground dispatch), which loses to
+                        Android's system NDEF dispatch, so it never fired. */}
                     {/* Fires OS notifications for incoming payments / zaps
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}

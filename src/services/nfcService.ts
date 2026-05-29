@@ -5,7 +5,7 @@
  * lightning addresses, and Nostr npub identities. Also supports writing
  * npub identities to NFC tags.
  */
-import NfcManager, { NfcTech, NfcEvents, Ndef, TagEvent } from 'react-native-nfc-manager';
+import NfcManager, { NfcTech, Ndef, TagEvent } from 'react-native-nfc-manager';
 import { Platform, Linking } from 'react-native';
 import {
   buildDisableAuthFrame,
@@ -920,61 +920,4 @@ export async function readHuntTagPayload(opts: ReadHuntTagOpts = {}): Promise<Hu
 export function cancelNfcOperation(): void {
   NfcManager.cancelTechnologyRequest().catch(() => {});
   NfcManager.unregisterTagEvent().catch(() => {});
-}
-
-/**
- * Register a passive foreground tag-discovery listener (issue #103).
- *
- * Unlike `scanNfcTag()` which holds an interactive `requestTechnology`
- * session, this uses Android foreground dispatch / iOS reader-session-
- * less polling to surface NDEF tag taps while the app is in the active
- * state. Suitable for "tap a gift-card tag and it just claims" UX.
- *
- * IMPORTANT: keep the listener bound to AppState `active` only —
- * leaving the radio polling in the background drains battery hard. The
- * caller is responsible for unregistering on background; see
- * `NfcWithdrawListener` for the canonical wiring.
- *
- * @param onTag - invoked with parsed tag content for every discovered
- *   tag while the listener is registered. Errors thrown from the
- *   callback are swallowed so a single bad tap can't kill the listener.
- * @returns an unregister function that tears down both the event
- *   listener and the underlying tag-event registration.
- */
-export async function registerForegroundTagListener(
-  onTag: (content: NfcTagContent) => void,
-): Promise<() => void> {
-  if (!(await ensureNfcStarted())) {
-    // No NFC hardware / driver — return a no-op cleanup so the caller's
-    // `useEffect` cleanup path still works without a null check.
-    return () => {};
-  }
-
-  const handler = (tag: TagEvent) => {
-    try {
-      const text = extractNdefText(tag);
-      if (!text) return;
-      const parsed = parseNfcContent(text);
-      onTag(parsed);
-    } catch {
-      // Swallow per-tap errors — logging here would spam in production
-      // for any malformed tag the user happens to brush past.
-    }
-  };
-
-  NfcManager.setEventListener(NfcEvents.DiscoverTag, handler);
-  try {
-    await NfcManager.registerTagEvent();
-  } catch {
-    // registerTagEvent rejects on iOS without a Core NFC entitlement,
-    // and on Android if NFC was disabled between `isEnabled()` and now.
-    // Detach the listener we just attached so we don't leak it.
-    NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
-    return () => {};
-  }
-
-  return () => {
-    NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
-    NfcManager.unregisterTagEvent().catch(() => {});
-  };
 }

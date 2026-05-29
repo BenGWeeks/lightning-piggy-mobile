@@ -223,6 +223,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'lightning' }],
       },
+      // LUD-17 LNURL-withdraw scheme — standalone withdraw tags / gift cards
+      // whose URI is `lnurlw://…` (no `lightning:` wrapper). Routed by App.tsx's
+      // Linking handler into the withdraw claim, same as `lightning:lnurl…`
+      // (#341). NDEF (NFC-tap) variants live in plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurlw' }],
+      },
     ],
     // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".
     versionCode: 70,
