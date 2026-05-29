@@ -393,7 +393,7 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 
 A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
 
-Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
 
 ==== Routing table
 
@@ -404,8 +404,10 @@ Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`
 | `nostr:naddr1…` (kind 37516) | Hunt listing coord | `HuntPiggyDetail` | #73
 | `nostr:npub1…` | bare pubkey | `ContactProfile` (profile screen) | #754
 | `nostr:nprofile1…` | pubkey **+ relay hints** | `ContactProfile`, kind-0 fetched off the embedded hints | #754
-| `lightning:lnurl1…` / `lnurlw://…` / `lnurl://…` | LNURL-withdraw voucher | `openLnurlWithdrawSheet` (claim sheet) | #103 / #341
-| `lightning:` (bolt11 / LNURL-pay / Lightning Address) | — | friendly "not supported yet" toast | #488
+| `lnurlw://…` / `lnurl://…` (standalone withdraw voucher) | LNURL-withdraw | `openLnurlWithdrawSheet` (claim bottom sheet) | #103 / #341
+| `lightning:lnbc…` (bolt11) / `lightning:user@host` (Lightning Address) | invoice / LN address | `SendSheet` (pay) | #756
+| `lightning:lnurl1…` / `lnurl(p\|w)://…` / `https://…` | resolved once; routed on the server `tag` | `withdrawRequest` → `openLnurlWithdrawSheet`; `payRequest` → `SendSheet` | #341 / #756
+| other `lightning:` payloads (undecodable) | — | friendly "Link not supported" toast | #488
 | `nostr:note1…` / `nostr:nevent1…` / undecodable `nostr:` | non-profile entity | `UnsupportedEntity` screen | #754
 |===
 
@@ -422,8 +424,8 @@ Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`
 | Path | What it does
 
 | `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
-| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning` + `nostr` schemes (cold launch / deep link).
-| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy` + `nostr` schemes (foreground tag tap).
+| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (cold launch / deep link).
+| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (foreground tag tap).
 | `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
 | `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
 | `src/services/nfcNostrWrite.ts` :: `writeNostrProfileToTag` | Writes a single `nostr:nprofile…` / `nostr:npub…` NDEF URI record.

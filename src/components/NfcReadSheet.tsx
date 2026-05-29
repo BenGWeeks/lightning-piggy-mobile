@@ -25,6 +25,7 @@ import {
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
+import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
@@ -49,35 +50,6 @@ interface Props {
 // in-sheet so the user lands back on the cache detail (with the find-
 // log composer already in view) the moment they dismiss.
 type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'error';
-
-// LNbits' withdraw endpoint returns 'Wait N seconds.' verbatim; older
-// versions / other backends use 'wait_time: N' or 'cooldown'. Match
-// any of those forms (and the budget-exhausted variants) — \bwait\b
-// catches the LNbits shape that the previous narrower regex was
-// missing, dropping the user into the red 'Couldn't claim' state
-// instead of the friendlier sleeping countdown.
-const SLEEPING_PATTERN = /\bwait\b|cooldown|budget|sleeping|exhausted|already used/i;
-
-// Parse the LNURLw's 'Wait N seconds' / 'wait_time: N' / 'cooldown Ns'
-// shape into the integer N — used to drive a live countdown in the
-// sleeping state. Returns null when the server's response doesn't
-// carry a time hint (budget exhausted, generic 'already used', etc.).
-const parseCooldownSeconds = (raw: string): number | null => {
-  const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
-  if (!m) return null;
-  const total = Number(m[1]);
-  if (!Number.isFinite(total) || total <= 0) return null;
-  return Math.round(total);
-};
-
-// Format a remaining-seconds count as either 'M:SS' (for ≥ 60 s) or
-// just 'Ns' so the countdown reads naturally as time runs down.
-const formatCountdown = (seconds: number): string => {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-};
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
