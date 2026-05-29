@@ -48,6 +48,12 @@ const SEEN_CAP = 1000;
 // (Copilot review #742). Bounded (5 s maxWait inside fetchCachesByAuthor)
 // and inexpensive (kind-37516 by one pubkey is replaceable + small).
 const REFETCH_COORDS_INTERVAL_MS = 60_000;
+// Minimum gap between actual refetch passes. The 60 s interval and one-time
+// mount call sit well above it; its job is to coalesce AppState 'active'
+// bursts — the OS can deliver several 'active' events back-to-back on resume,
+// each otherwise firing an overlapping fetchCachesByAuthor that piles onto the
+// JS thread during warm re-foreground (#751 warm-path audit #5).
+const REFETCH_MIN_GAP_MS = 10_000;
 
 export interface UseCacheNotificationsParams {
   /** Active viewer's hex pubkey. Null when logged out — sub stays closed. */
@@ -86,6 +92,8 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // Coord set the sub is currently armed with. Compared against each
     // refetch to skip tear-down + re-arm when nothing changed.
     let currentCoords: string[] = [];
+    // Wall-clock of the last refetch we actually started — see REFETCH_MIN_GAP_MS.
+    let lastRefetchStartedAt = 0;
     const seen = new Set<string>();
     const subOpenedAtSec = Math.floor(Date.now() / 1000);
 
@@ -138,6 +146,11 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
      */
     const refetchAndRearm = async (): Promise<void> => {
       if (cancelled) return;
+      // Throttle bursts (esp. multiple back-to-back AppState 'active' events on
+      // resume) so we don't fire overlapping relay fetches (#751 audit #5).
+      const startNow = Date.now();
+      if (startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
+      lastRefetchStartedAt = startNow;
       try {
         const myCaches = await fetchCachesByAuthor(pubkey, readRelays);
         if (cancelled) return;

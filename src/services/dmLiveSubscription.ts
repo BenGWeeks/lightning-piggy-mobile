@@ -34,6 +34,16 @@ export function subscribeInboxDmsForViewer(input: {
   onEose?: () => void;
   // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter resolves to `clamp(providedSince - 120s, now-7d, now)` — the 120 s safety buffer in case relay clock skew tagged a wrap slightly older than our cursor, the 7-day floor caps cold-start restream when the cursor is very stale, and the `now` cap defends against a future-dated cursor (corrupted persisted value or a wrap with a bad clock) that would otherwise silently miss new DMs until wall-clock catches up. If absent, falls back to the 7-day floor.
   sinceK4?: number;
+  // Cap on the kind-1059 backlog the relay re-streams when the sub opens.
+  // Wraps can't use a `since` cursor (randomised NIP-59 timestamps), so without
+  // a bound the relay replays the FULL wrap history on every arm and nostr-tools
+  // parses every event synchronously before our knownWrapIds early-return —
+  // re-introducing the cold-start ingest freeze via the live-sub path even when
+  // refreshDmInbox capped its own fetch (#751, Copilot review on #752). Defaults
+  // to DM_INBOX_LIMIT; callers pass the smaller cold-start limit. New wraps still
+  // arrive live after EOSE regardless of this cap, and the deeper backlog is
+  // covered by refreshDmInbox's deferred full backfill.
+  wrapsLimit?: number;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
@@ -73,8 +83,9 @@ export function subscribeInboxDmsForViewer(input: {
     {
       kinds: [1059],
       '#p': [input.viewerPubkey],
-      // No `since` — NIP-59 random timestamps would drop fresh wraps.
-      limit: DM_INBOX_LIMIT,
+      // No `since` — NIP-59 random timestamps would drop fresh wraps. Bound the
+      // backlog re-stream with `wrapsLimit` instead (see the input doc above).
+      limit: input.wrapsLimit ?? DM_INBOX_LIMIT,
     } as Filter,
     {
       onevent,

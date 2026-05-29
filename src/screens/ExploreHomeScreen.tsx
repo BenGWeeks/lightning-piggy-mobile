@@ -28,6 +28,7 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
+import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -502,21 +503,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // nearby sub filters by geohash prefix, which excludes the user's
   // own listing if they hid it outside their current viewport OR if
   // the sub was paused (#557) at the moment the relay echoed back.
-  // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
-  // don't refire.
+  // One-shot per (pubkey, refreshKey) via the module-scoped
+  // `claimExploreByAuthorFetch` guard — re-runs on pull-to-refresh and
+  // pubkey change but never on unrelated re-renders, and is immune to the
+  // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
-  // Track the (pubkey, refreshKey) tuple that last triggered the fetch
-  // so we re-run on pull-to-refresh AND on pubkey change, but never on
-  // unrelated re-renders.
-  const byAuthorFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
-    if (byAuthorFetchedForRef.current === fetchKey) return;
-    byAuthorFetchedForRef.current = fetchKey;
     let cancelled = false;
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+    // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
+    // requests, and the current run still merges on cancel (#752 Copilot).
+    joinExploreByAuthorFetch(fetchKey, () =>
+      fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined),
+    )
       .then((mine) => {
         if (cancelled) return;
         console.log(
