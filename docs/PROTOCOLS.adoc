@@ -329,7 +329,7 @@ The app does **not** use a passive always-on NFC listener. It rides Android's in
 . *`App.tsx` Linking handler* (`getInitialURL` + `addEventListener('url')`) parses the delivered URI and navigates:
 ** `lightningpiggy://hunt/<coord>` → `navigateToHuntPiggyDetail(coord)`
 ** `nostr:naddr1…` → decode → `HuntPiggyDetail`
-** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `navigateToHuntFound(lnurl)` → `HuntFoundScreen`, which resolves the `withdrawRequest` and claims into the active wallet (`coord` optional, so a cache-less gift card works).
+** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `navigateToHuntFound(lnurl)` → `HuntFoundScreen`, which resolves the `withdrawRequest` and claims into the active wallet (`coord` optional, so a cache-less gift card works). *Fixed-amount* tags (`minWithdrawable === maxWithdrawable`) auto-claim — the finder already opted in by tapping. *Variable-amount* tags (`min < max`) show an amount picker (slider + typed sats field, defaulting to max, with a fiat hint) so the finder chooses how much to take off the card.
 . *In-app explicit scans* (`NfcReadSheet`, write flows) use *Reader Mode* (`requestTechnology(Ndef, READER_MODE_OPTS)` — see `src/services/nfcReaderMode.ts`), which grabs the tag exclusively so the OS never hands it to another wallet.
 
 === Why no passive foreground listener (#341)
