@@ -208,8 +208,9 @@ const MessageBubble: React.FC<Props> = ({
     // Falls back to the marker's own coordinates so the bubble always
     // renders a map even before the first ping has landed.
     const latest = liveLocationLatest?.[marker.sessionId];
-    const displayLocation: SharedLocation = latest?.location ?? marker.location;
-    const mapUrl = buildStaticMapUrl(displayLocation);
+    // May be null on a coordless `end` marker (sender stopped with no fix).
+    const displayLocation: SharedLocation | null = latest?.location ?? marker.location;
+    const mapUrl = displayLocation ? buildStaticMapUrl(displayLocation) : null;
     const status =
       liveLocationStatus?.[marker.sessionId] ?? (marker.phase === 'end' ? 'ended' : 'active');
     const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
@@ -253,7 +254,7 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => onOpenLocation(displayLocation)}
+          onPress={() => displayLocation && onOpenLocation(displayLocation)}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={
             fromMe
@@ -263,14 +264,16 @@ const MessageBubble: React.FC<Props> = ({
           testID={`${testIdPrefix}-live-location-${id}`}
         >
           {SenderLabel}
-          <ExpoImage
-            source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-            style={styles.locationMap}
-            contentFit="cover"
-            cachePolicy="disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          {mapUrl ? (
+            <ExpoImage
+              source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
+              style={styles.locationMap}
+              contentFit="cover"
+              cachePolicy="disk"
+              transition={150}
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
           <View style={styles.locationBody}>
             <View style={styles.locationLabelRow}>
               <Radio
@@ -281,9 +284,11 @@ const MessageBubble: React.FC<Props> = ({
                 {titleText}
               </Text>
             </View>
-            <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
-              {formatCoordsForDisplay(displayLocation)}
-            </Text>
+            {displayLocation ? (
+              <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
+                {formatCoordsForDisplay(displayLocation)}
+              </Text>
+            ) : null}
             {subtitleText ? (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
                 {subtitleText}

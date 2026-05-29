@@ -1,5 +1,5 @@
 /**
- * Live-location share — the user picks a duration (15 min / 1 h / 8 h),
+ * Live-location share — the user picks a duration (15 min / 1 h),
  * we send a NIP-04 DM "Live location share started" with initial coords +
  * a sessionId + the chosen duration, then publish ephemeral kind-20069
  * pings every ~30 s with the latest coordinates while the watcher is
@@ -75,8 +75,9 @@ export interface LiveLocationMarker {
   durationMs: number;
   /** Wall-clock epoch (ms) the sender started the share. */
   startedAt: number;
-  /** Initial (start) or final (end) coordinates the sender published. */
-  location: SharedLocation;
+  /** Initial (start) or final (end) coordinates the sender published.
+   *  `null` on an `end` marker sent with no fix available. */
+  location: SharedLocation | null;
 }
 
 /**
@@ -150,17 +151,26 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
   else if (firstLine === LIVE_END_HEADER) phase = 'end';
   else return null;
 
+  // Coords are required for a `start` marker but optional for `end`: the
+  // sender may stop with no fix available, in which case the end marker
+  // omits the geo: URI (see formatLiveEndMessage) rather than fabricate a
+  // 0,0 pin. A coordless end marker must still classify as a marker so the
+  // receiver renders the "ended" bubble instead of raw text.
+  let location: SharedLocation | null = null;
   const coordMatch = text.match(COORD_RE);
-  if (!coordMatch) return null;
-  const lat = Number(coordMatch[1]);
-  const lon = Number(coordMatch[2]);
-  if (!isFinite(lat) || !isFinite(lon)) return null;
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-  let accuracyMeters: number | null = null;
-  if (coordMatch[3] !== undefined) {
-    const n = Number(coordMatch[3]);
-    if (isFinite(n) && n >= 0 && n < 40_000_000) accuracyMeters = Math.round(n);
+  if (coordMatch) {
+    const lat = Number(coordMatch[1]);
+    const lon = Number(coordMatch[2]);
+    if (isFinite(lat) && isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+      let accuracyMeters: number | null = null;
+      if (coordMatch[3] !== undefined) {
+        const n = Number(coordMatch[3]);
+        if (isFinite(n) && n >= 0 && n < 40_000_000) accuracyMeters = Math.round(n);
+      }
+      location = { lat, lon, accuracyMeters };
+    }
   }
+  if (location === null && phase === 'start') return null;
 
   // Best-effort metadata parse. A truncated / re-encoded message could
   // strip the JSON line, so we fall back to deterministic defaults.
@@ -193,7 +203,7 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
     sessionId,
     durationMs,
     startedAt,
-    location: { lat, lon, accuracyMeters },
+    location,
   };
 }
 

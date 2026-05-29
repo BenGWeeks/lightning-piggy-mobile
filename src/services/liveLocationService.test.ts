@@ -48,9 +48,10 @@ describe('formatLiveStartMessage / parseLiveLocationMarker', () => {
     expect(parsed?.sessionId).toBe(baseInput.sessionId);
     expect(parsed?.durationMs).toBe(baseInput.durationMs);
     expect(parsed?.startedAt).toBe(baseInput.startedAt);
-    expect(parsed?.location.lat).toBeCloseTo(baseInput.location.lat, 4);
-    expect(parsed?.location.lon).toBeCloseTo(baseInput.location.lon, 4);
-    expect(parsed?.location.accuracyMeters).toBe(12);
+    expect(parsed?.location).not.toBeNull();
+    expect(parsed?.location?.lat).toBeCloseTo(baseInput.location.lat, 4);
+    expect(parsed?.location?.lon).toBeCloseTo(baseInput.location.lon, 4);
+    expect(parsed?.location?.accuracyMeters).toBe(12);
   });
 
   it('round-trips an end marker', () => {
@@ -58,6 +59,21 @@ describe('formatLiveStartMessage / parseLiveLocationMarker', () => {
     expect(text.startsWith(LIVE_END_HEADER)).toBe(true);
     const parsed = parseLiveLocationMarker(text);
     expect(parsed?.phase).toBe('end');
+  });
+
+  it('classifies a coordless end marker (no fix at stop) with null location', () => {
+    // formatLiveEndMessage omits the geo: URI when location is null; the
+    // parser must still recognise it as an end marker, not fall through to
+    // raw text (which would leave the receiver bubble stuck "active").
+    const text = formatLiveEndMessage({ ...baseInput, location: null });
+    const parsed = parseLiveLocationMarker(text);
+    expect(parsed?.phase).toBe('end');
+    expect(parsed?.location).toBeNull();
+  });
+
+  it('still rejects a coordless start marker (start needs coords)', () => {
+    const text = formatLiveStartMessage(baseInput).split('\n')[0];
+    expect(parseLiveLocationMarker(text)).toBeNull();
   });
 
   it('caps an oversized durationMs to MAX_DURATION_MS during parse', () => {
