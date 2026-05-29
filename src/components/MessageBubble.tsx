@@ -1,9 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, BarChart3, Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import {
+  createMessageBubbleStyles,
+  type MessageBubbleStyles,
+} from '../styles/MessageBubble.styles';
 import type { NostrProfile } from '../types/nostr';
 import {
   buildStaticMapUrl,
@@ -24,6 +27,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import type { PollAggregate } from '../utils/pollMessage';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
@@ -67,6 +71,14 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Pre-aggregated poll tally keyed by poll-message id. The parent runs
+  // `aggregateVotes` over the conversation history once per messages
+  // update; the bubble looks up its own row by `id`. When `undefined`,
+  // poll bubbles still render but with zero counts (cold start).
+  pollAggregates?: Map<string, PollAggregate>;
+  // Tap an option row on a poll → parent sends the vote message.
+  // Optional: omit on read-only contexts (none currently).
+  onVotePoll?: (pollId: string, optionId: number) => void;
   // Tapping the "Toggle Secret Mode" button on the magic-trigger card
   // (when the message body is exactly "secretthreewords"). Parent
   // owns the secretMode setter + celebration overlay so a list of
@@ -77,7 +89,7 @@ interface Props {
   testIdPrefix: string;
 }
 
-type Styles = ReturnType<typeof createStyles>;
+type Styles = MessageBubbleStyles;
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
@@ -144,11 +156,13 @@ const MessageBubble: React.FC<Props> = ({
   onOpenLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  pollAggregates,
+  onVotePoll,
   onToggleSecretMode,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
 
   // Sender label only renders on group bubbles for incoming messages —
   // identical to existing GroupConversationScreen behaviour. Pulled into
@@ -229,6 +243,106 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
           </View>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (content.kind === 'pollVote') {
+    // Vote events are an internal protocol message — they're rolled up
+    // into the referenced poll's tally by the parent's `aggregateVotes`
+    // call, so the in-app conversation never shows them as bubbles.
+    // Foreign clients (Damus, Amethyst) still see a plain-text bubble
+    // because they don't recognise the [POLL_VOTE] prefix; that's an
+    // accepted limitation of the text-encoded MVP.
+    return null;
+  }
+
+  if (content.kind === 'poll') {
+    const { poll } = content;
+    const agg = pollAggregates?.get(id);
+    const total = agg?.totalVotes ?? 0;
+    const myVote = agg?.myVote ?? null;
+    // Disable voting until the relay echo confirms the poll id: optimistic ids contain "local" and rotate to the gift-wrap id on dedup, which would orphan a vote that baked in the local id.
+    const pending = id.includes('local');
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.pollCard, fromMe ? styles.pollCardMe : styles.pollCardThem]}>
+          {SenderLabel}
+          <View style={styles.pollHeaderRow}>
+            <BarChart3
+              size={14}
+              color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+            />
+            <Text style={[styles.pollLabel, fromMe && styles.pollLabelMe]}>Poll</Text>
+          </View>
+          <Text style={[styles.pollQuestion, fromMe && styles.pollQuestionMe]}>
+            {poll.question}
+          </Text>
+          {poll.options.map((opt) => {
+            // Per-option count + percentage. Falls back to the parsed poll
+            // (zero counts) when the aggregate hasn't been computed yet,
+            // so the bubble lays out fully on cold start instead of
+            // jumping when votes load.
+            const optAgg = agg?.options.find((o) => o.id === opt.id);
+            const count = optAgg?.count ?? 0;
+            const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+            const isMine = myVote === opt.id;
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                activeOpacity={0.85}
+                style={[
+                  styles.pollOptionRow,
+                  fromMe && styles.pollOptionRowMe,
+                  isMine && (fromMe ? styles.pollOptionRowMineMe : styles.pollOptionRowMineThem),
+                ]}
+                onPress={() => onVotePoll?.(id, opt.id)}
+                disabled={!onVotePoll || pending}
+                accessibilityLabel={`${opt.text}, ${count} ${count === 1 ? 'vote' : 'votes'}${isMine ? ', your vote' : ''}`}
+                accessibilityState={{ selected: isMine, disabled: !onVotePoll || pending }}
+                testID={`${testIdPrefix}-poll-${id}-option-${opt.id}`}
+              >
+                {/* Background fill bar — width tracks the percentage so
+                    even at total=0 the row collapses to a flat track.
+                    Stays absolute-positioned so the option text sits in
+                    its own layer regardless of percentage width. */}
+                <View
+                  style={[
+                    styles.pollOptionFill,
+                    fromMe ? styles.pollOptionFillMe : styles.pollOptionFillThem,
+                    { width: `${pct}%` },
+                  ]}
+                />
+                <View style={styles.pollOptionContent}>
+                  <Text
+                    style={[styles.pollOptionText, fromMe && styles.pollOptionTextMe]}
+                    numberOfLines={2}
+                  >
+                    {opt.text}
+                  </Text>
+                  <View style={styles.pollOptionMeta}>
+                    {isMine ? (
+                      <Check
+                        size={14}
+                        color={fromMe ? colors.white : colors.brandPink}
+                        strokeWidth={3}
+                      />
+                    ) : null}
+                    <Text style={[styles.pollOptionCount, fromMe && styles.pollOptionCountMe]}>
+                      {total > 0 ? `${pct}% · ${count}` : count}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={[styles.pollFooter, fromMe && styles.pollFooterMe]}>
+            {total === 0 ? 'No votes yet' : `${total} ${total === 1 ? 'vote' : 'votes'}`}
+          </Text>
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
       </View>
     );
   }
@@ -563,364 +677,5 @@ const MessageBubble: React.FC<Props> = ({
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    bubbleRow: {
-      flexDirection: 'row',
-      marginVertical: 2,
-    },
-    bubbleRowLeft: { justifyContent: 'flex-start' },
-    bubbleRowRight: { justifyContent: 'flex-end' },
-    senderLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      marginBottom: 2,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    bubble: {
-      maxWidth: '80%',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      paddingBottom: 4,
-      borderRadius: 16,
-    },
-    bubbleThem: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    bubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    bubbleText: {
-      fontSize: 15,
-      color: colors.textBody,
-      lineHeight: 20,
-    },
-    bubbleTextMe: {
-      color: colors.white,
-    },
-    // Tappable URL span inside a received bubble (surface bg) — brand accent.
-    bubbleLink: {
-      color: colors.brandPink,
-      textDecorationLine: 'underline',
-    },
-    // …and inside a sent bubble (pink bg) — white so it stays legible.
-    bubbleLinkMe: {
-      color: colors.white,
-      textDecorationLine: 'underline',
-      fontWeight: '600',
-    },
-    bubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      alignSelf: 'flex-end',
-    },
-    bubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceCard: {
-      width: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      gap: 6,
-    },
-    invoiceCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    invoiceCardThem: {
-      backgroundColor: colors.surface,
-    },
-    invoiceLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    invoiceLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceAmount: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    invoiceAmountMe: {
-      color: colors.white,
-    },
-    invoiceMemo: {
-      fontSize: 14,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-    invoiceMemoMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    invoiceExpiry: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    invoiceExpiryMe: {
-      color: 'rgba(255,255,255,0.75)',
-    },
-    invoiceTagRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 6,
-    },
-    invoiceTag: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 10,
-      alignSelf: 'flex-start',
-    },
-    invoiceTagPaid: {
-      backgroundColor: '#2e7d32',
-    },
-    invoiceTagPaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagUnpaid: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
-    },
-    invoiceTagUnpaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagExpired: {
-      backgroundColor: 'rgba(0,0,0,0.32)',
-    },
-    invoiceTagExpiredText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoicePayButton: {
-      marginTop: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    invoicePayText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    contactCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    contactCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    contactCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    contactLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    contactLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    contactBodyRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    contactAvatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.background,
-    },
-    contactAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    contactInfo: {
-      flex: 1,
-      minWidth: 0,
-    },
-    contactName: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    contactNameMe: {
-      color: colors.white,
-    },
-    contactLn: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    contactLnMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    gifCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    gifCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    gifCardThem: {
-      backgroundColor: colors.surface,
-    },
-    gifImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    gifTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    gifTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      borderWidth: 1,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    locationCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    locationCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    locationMap: {
-      width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
-    },
-    locationBody: {
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 4,
-      gap: 2,
-    },
-    locationLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    locationLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    locationLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCoords: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    locationCoordsMe: {
-      color: colors.white,
-    },
-    locationAccuracy: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    locationAccuracyMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    imageBubble: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    imageBubbleMe: {
-      backgroundColor: colors.brandPink,
-    },
-    imageBubbleThem: {
-      backgroundColor: colors.surface,
-    },
-    imageBubbleImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    imageBubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    imageBubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-  });
 
 export default MessageBubble;

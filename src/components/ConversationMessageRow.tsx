@@ -23,6 +23,8 @@ export interface ConversationMessageRowProps {
   onOpenLocation: BubbleProps['onOpenLocation'];
   onOpenGifFullscreen: BubbleProps['onOpenGifFullscreen'];
   onToggleSecretMode: BubbleProps['onToggleSecretMode'];
+  pollAggregates: BubbleProps['pollAggregates'];
+  onVotePoll: BubbleProps['onVotePoll'];
   onShowTxDetail: (tx: TransactionDetailData) => void;
 }
 
@@ -43,6 +45,8 @@ function ConversationMessageRow({
   onOpenLocation,
   onOpenGifFullscreen,
   onToggleSecretMode,
+  pollAggregates,
+  onVotePoll,
   onShowTxDetail,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
@@ -109,7 +113,9 @@ function ConversationMessageRow({
       ? ({ kind: 'gif', url: item.url } as const)
       : item.kind === 'location'
         ? ({ kind: 'location', location: item.location } as const)
-        : ({ kind: 'text', text: item.text } as const);
+        : item.kind === 'poll'
+          ? ({ kind: 'poll', poll: item.poll } as const)
+          : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}
@@ -124,6 +130,8 @@ function ConversationMessageRow({
       onOpenLocation={onOpenLocation}
       onOpenGifFullscreen={onOpenGifFullscreen}
       onToggleSecretMode={onToggleSecretMode}
+      pollAggregates={pollAggregates}
+      onVotePoll={onVotePoll}
       testIdPrefix="conversation"
     />
   );

@@ -1,5 +1,6 @@
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
+import { parsePoll, isPollVoteMessage } from './pollMessage';
 
 export interface ConversationSummary {
   /**
@@ -130,8 +131,13 @@ export function formatConversationTimestamp(tsSeconds: number, now: Date = new D
 export function conversationPreview(s: ConversationSummary): string {
   const amount = s.lastAmountSats.toLocaleString();
   const prefix = s.lastDirection === 'outgoing' ? 'You: ' : '';
-  if (s.lastComment.trim()) {
-    return `${prefix}${s.lastComment.trim()}`;
+  const comment = s.lastComment.trim();
+  if (comment) {
+    // Don't leak the poll wire-format into the inbox row — show a friendly label.
+    const poll = parsePoll(comment);
+    if (poll) return `${prefix}📊 Poll: ${poll.question}`;
+    if (isPollVoteMessage(comment)) return `${prefix}📊 Voted on a poll`;
+    return `${prefix}${comment}`;
   }
   return `${prefix}⚡ ${amount} sats`;
 }

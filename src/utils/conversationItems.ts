@@ -2,6 +2,7 @@ import type { SharedLocation } from '../services/locationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
+import type { ParsedPoll } from './pollMessage';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -35,6 +36,13 @@ export type Item =
       id: string;
       fromMe: boolean;
       url: string;
+      createdAt: number;
+    }
+  | {
+      kind: 'poll';
+      id: string;
+      fromMe: boolean;
+      poll: ParsedPoll;
       createdAt: number;
     }
   | {
@@ -103,36 +111,56 @@ export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
 ): Item[] {
-  const msgItems: TimedItem[] = messages.map((m) => {
+  const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
-    // — keeps gif / geo detection in one place.
+    // — keeps gif / geo / poll detection in one place.
     const classified = classifyMessageContent(m.text);
+    // Vote messages aren't shown as bubbles — they're aggregated into the
+    // referenced poll's tally by the screen, so drop them from the row list.
+    if (classified.kind === 'pollVote') return [];
     if (classified.kind === 'gif') {
-      return {
-        kind: 'gif',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        url: classified.url,
-        createdAt: m.createdAt,
-      };
+      return [
+        {
+          kind: 'gif',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          url: classified.url,
+          createdAt: m.createdAt,
+        },
+      ];
     }
     if (classified.kind === 'location') {
-      return {
-        kind: 'location',
+      return [
+        {
+          kind: 'location',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          location: classified.location,
+          createdAt: m.createdAt,
+        },
+      ];
+    }
+    if (classified.kind === 'poll') {
+      return [
+        {
+          kind: 'poll',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          poll: classified.poll,
+          createdAt: m.createdAt,
+        },
+      ];
+    }
+    return [
+      {
+        kind: 'message',
         id: `dm-${m.id}`,
         fromMe: m.fromMe,
-        location: classified.location,
+        text: m.text,
         createdAt: m.createdAt,
-      };
-    }
-    return {
-      kind: 'message',
-      id: `dm-${m.id}`,
-      fromMe: m.fromMe,
-      text: m.text,
-      createdAt: m.createdAt,
-    };
+      },
+    ];
   });
   // Descending order — index 0 is newest. The FlatList is `inverted`, so
   // index 0 renders at the visual bottom (chat default) and the

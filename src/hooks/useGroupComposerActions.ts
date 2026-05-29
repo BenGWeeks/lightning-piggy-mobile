@@ -153,5 +153,7 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  return { ...actions, handleSendInvoiceToGroup };
+  // `sendText` is also exposed so poll-share / poll-vote can post arbitrary
+  // serialised bodies through the same optimistic-append path as the composer.
+  return { ...actions, sendText, handleSendInvoiceToGroup };
 }
