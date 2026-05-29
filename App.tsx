@@ -16,10 +16,10 @@ import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
-  navigateToHuntFound,
   navigateToHuntPiggyDetail,
   navigateFromNotification,
 } from './src/navigation/AppNavigator';
+import { openLnurlWithdrawSheet, LnurlWithdrawHost } from './src/components/LnurlWithdrawSheet';
 import {
   ensureNotificationsInitialised,
   requestNotificationPermission,
@@ -253,19 +253,19 @@ export default function App() {
       }
 
       // Standalone LNURL-withdraw tag / deep link — a bare `lnurlw://…` (or
-      // `lnurl://…`) URI, i.e. record 1 of a withdraw / gift-card tag, NOT
-      // wrapped in `lightning:`. Route it to HuntFound's withdraw-claim flow,
-      // identical to a `lightning:lnurl…` withdraw. (#341 rework — replaced the
-      // passive foreground NFC listener with this intent-filter + deep-link
-      // path so it actually fires; Piglet tags are unaffected — their first
-      // record is `lightningpiggy://hunt/…`, handled above.)
+      // `lnurl://…`) URI, i.e. record 1 of a standalone withdraw / gift-card
+      // tag, NOT wrapped in `lightning:`. Open the generic withdraw bottom
+      // sheet (NOT the Hunt/Piglet full screen — a plain voucher needn't be a
+      // geo-cache). #341. Piglet tags are unaffected — their first record is
+      // `lightningpiggy://hunt/…`, handled above. Retry while the sheet host
+      // mounts on a cold launch.
       if (/^lnurlw:\/\//i.test(trimmed) || /^lnurl:\/\//i.test(trimmed)) {
-        const tryNav = (attempt: number) => {
-          if (navigateToHuntFound(trimmed)) return;
+        const tryOpen = (attempt: number) => {
+          if (openLnurlWithdrawSheet(trimmed)) return;
           if (attempt >= 20 || cancelled) return;
-          setTimeout(() => tryNav(attempt + 1), 100);
+          setTimeout(() => tryOpen(attempt + 1), 100);
         };
-        tryNav(0);
+        tryOpen(0);
         return;
       }
 
@@ -303,12 +303,15 @@ export default function App() {
         });
         return;
       }
-      const tryNav = (attempt: number) => {
-        if (navigateToHuntFound(lnurl)) return;
+      // Standalone `lightning:lnurl…` withdraw voucher → the generic withdraw
+      // bottom sheet (a Piglet would arrive as `lightningpiggy://`, handled
+      // above; this deep-link path is never a geo-cache). #341.
+      const tryOpen = (attempt: number) => {
+        if (openLnurlWithdrawSheet(lnurl)) return;
         if (attempt >= 20 || cancelled) return;
-        setTimeout(() => tryNav(attempt + 1), 100);
+        setTimeout(() => tryOpen(attempt + 1), 100);
       };
-      tryNav(0);
+      tryOpen(0);
     };
     Linking.getInitialURL().then(route);
     const sub = Linking.addEventListener('url', (e) => route(e.url));
@@ -367,12 +370,16 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                     <BrandedToast />
                     <GlobalIncomingPaymentOverlay />
-                    {/* LNURL-withdraw NFC tags (gift cards, bounty stickers) are
-                        handled via the `lightning:`/`lnurlw:` intent filter →
-                        Linking handler above → HuntFound claim (#341). The
-                        earlier passive foreground listener was removed: it used
-                        `registerTagEvent` (foreground dispatch), which loses to
-                        Android's system NDEF dispatch, so it never fired. */}
+                    {/* Global claim sheet for standalone LNURL-withdraw vouchers
+                        (gift cards, bounty stickers). Opened by the `lightning:`/
+                        `lnurlw:` deep-link/intent-filter path above via
+                        `openLnurlWithdrawSheet`. Generic (no Piggy branding) and
+                        a bottom sheet, not a full screen — Piglet/geo-cache taps
+                        keep HuntFoundScreen via their `lightningpiggy://` record.
+                        Inside WalletProvider (needs makeInvoice) + the bottom-
+                        sheet provider. Replaced the broken passive foreground NFC
+                        listener (#341). */}
+                    <LnurlWithdrawHost />
                     {/* Fires OS notifications for incoming payments / zaps
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}
