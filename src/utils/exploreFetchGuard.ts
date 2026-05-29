@@ -1,34 +1,35 @@
-// One-shot guard for ExploreHomeScreen's by-author cache fetch. Module-scoped
-// on purpose (NOT a component useRef): React 18 concurrent scheduling re-runs
-// the triggering effect 2–3× in quick succession on mount — `userRelays`
-// changes reference as relays hydrate — and the re-runs can fire before a ref
-// write is observed, launching parallel `fetchCachesByAuthor` calls (3 to 5
-// relays each). That was a real symptom in the #751 warm-path audit (three
-// completions within 10 ms). Module state is synchronous and shared across
-// those runs, so the first to claim a key wins and the rest skip.
+// In-flight de-duplication for ExploreHomeScreen's by-author cache fetch.
 //
-// Keyed by `${pubkey}:${refreshKey}`, so pull-to-refresh (new refreshKey) and
-// an account switch (new pubkey) still re-fetch — only the redundant parallel
-// re-fires of the *same* key are suppressed.
-const claimedKeys = new Set<string>();
+// React 18 concurrent scheduling re-runs the triggering effect 2–3× in quick
+// succession on mount (`userRelays` changes reference as relays hydrate). A
+// plain "claimed keys" Set prevented the parallel fetches but had a stranding
+// race (#752 Copilot): if the effect was cleaned up mid-flight, the replacement
+// run saw the key still claimed and skipped, and when the old promise later
+// resolved it discarded the data — so the user's own Piggies could stay missing
+// until a pull-to-refresh changed the key.
+//
+// Instead we store the in-flight PROMISE per key. Concurrent callers JOIN it
+// rather than starting a parallel request, and — crucially — the current
+// (non-cancelled) effect run shares that same promise and performs the merge
+// when it resolves, so cancellation never strands the data. The entry clears on
+// settle, so a later mount or a failed fetch re-fetches.
+const inFlight = new Map<string, Promise<unknown>>();
 
 /**
- * Claim a fetch key. Returns `true` the first time a key is seen (the caller
- * should proceed with the fetch) and `false` on every subsequent call for that
- * key (the caller should skip — a fetch for it already started).
+ * Run `fetchFn` for `key` at most once concurrently. The first caller starts the
+ * request; concurrent callers with the same key receive the same promise. The
+ * entry is removed once the promise settles (success or failure), so subsequent
+ * calls start a fresh request.
  */
-export function claimExploreByAuthorFetch(key: string): boolean {
-  if (claimedKeys.has(key)) return false;
-  claimedKeys.add(key);
-  return true;
-}
-
-/**
- * Release a previously-claimed key so a later mount can retry. Call this when
- * the fetch failed or was cancelled before its result was merged — otherwise a
- * claim that never produced data would permanently suppress the fetch for that
- * key (Copilot review on #752).
- */
-export function releaseExploreByAuthorFetch(key: string): void {
-  claimedKeys.delete(key);
+export function joinExploreByAuthorFetch<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
+  const existing = inFlight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = fetchFn();
+  inFlight.set(key, p);
+  void Promise.resolve(p)
+    .catch(() => undefined)
+    .finally(() => {
+      if (inFlight.get(key) === p) inFlight.delete(key);
+    });
+  return p;
 }

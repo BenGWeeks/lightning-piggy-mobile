@@ -28,7 +28,7 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
-import { claimExploreByAuthorFetch, releaseExploreByAuthorFetch } from '../utils/exploreFetchGuard';
+import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -511,14 +511,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
-    if (!claimExploreByAuthorFetch(fetchKey)) return;
     let cancelled = false;
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+    // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
+    // requests, and the current run still merges on cancel (#752 Copilot).
+    joinExploreByAuthorFetch(fetchKey, () =>
+      fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined),
+    )
       .then((mine) => {
-        // Release on cancel too so a remount can retry — safe: async, after the
-        // claim-deduped mount burst (#752 Copilot).
-        if (cancelled) return releaseExploreByAuthorFetch(fetchKey);
+        if (cancelled) return;
         console.log(
           `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
             mine.map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`).join(', '),
@@ -541,7 +542,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         });
       })
       .catch((e) => {
-        releaseExploreByAuthorFetch(fetchKey);
         console.warn(`[PerfBlock] ExploreHome by-author fetch threw: ${(e as Error).message}`);
       });
     return () => {
