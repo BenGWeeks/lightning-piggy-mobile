@@ -208,6 +208,64 @@ export function parseLiveLocationMarker(text: string): LiveLocationMarker | null
   };
 }
 
+/** An inbound (peer-sent) live-location share discovered by scanning the
+ *  decrypted DM inbox. `hasEnd` is true once the paired end marker has
+ *  arrived; callers apply the wall-clock expiry filter themselves so the
+ *  (cheap) per-second re-check doesn't force a full inbox re-scan. */
+export interface InboundLiveSession {
+  pubkey: string;
+  sessionId: string;
+  startedAt: number;
+  durationMs: number;
+  /** Coordinates from the start marker — the base map position until the
+   *  first live ping arrives. */
+  startLocation: SharedLocation;
+  hasEnd: boolean;
+}
+
+/**
+ * Scan decrypted DM inbox entries for inbound live-location shares — the
+ * data source for the Full Map "friends sharing with me" layer. Pure +
+ * RN-free so the discovery logic is unit-testable; the React hook layers
+ * the relay ping subscription + avatar resolution on top.
+ *
+ * Returns one entry per (peer, session) that has an inbound start marker,
+ * flagging whether its end marker has been seen. Outbound (my own) shares
+ * and coordless starts are skipped — they don't belong on the map as a
+ * "friend" pin. Expiry is intentionally left to the caller.
+ */
+export function collectInboundLiveSessions(
+  entries: { partnerPubkey: string; fromMe: boolean; text: string }[],
+): InboundLiveSession[] {
+  const sentinel = LIVE_START_HEADER.slice(0, LIVE_START_HEADER.indexOf(':') + 1);
+  const byKey = new Map<string, InboundLiveSession>();
+  const endedKeys = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.text || !entry.text.includes(sentinel)) continue;
+    const marker = parseLiveLocationMarker(entry.text);
+    if (!marker) continue;
+    const key = `${entry.partnerPubkey}:${marker.sessionId}`;
+    if (marker.phase === 'end') {
+      endedKeys.add(key);
+      continue;
+    }
+    if (entry.fromMe || !marker.location) continue;
+    byKey.set(key, {
+      pubkey: entry.partnerPubkey,
+      sessionId: marker.sessionId,
+      startedAt: marker.startedAt,
+      durationMs: marker.durationMs,
+      startLocation: marker.location,
+      hasEnd: false,
+    });
+  }
+  const out: InboundLiveSession[] = [];
+  for (const [key, session] of byKey) {
+    out.push({ ...session, hasEnd: endedKeys.has(key) });
+  }
+  return out;
+}
+
 export interface LivePingPayload {
   /** Latitude in decimal degrees. */
   lat: number;

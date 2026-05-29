@@ -14,6 +14,7 @@ import {
   LIVE_START_HEADER,
   LIVE_END_HEADER,
   MAX_DURATION_MS,
+  collectInboundLiveSessions,
   decodeLivePingPayload,
   encodeLivePingPayload,
   expiryFor,
@@ -168,5 +169,82 @@ describe('expiryFor', () => {
 
   it('passes a within-range duration through', () => {
     expect(expiryFor(1000, 60_000)).toBe(61_000);
+  });
+});
+
+describe('collectInboundLiveSessions', () => {
+  const PEER = 'a'.repeat(64);
+  const PEER2 = 'b'.repeat(64);
+  const startText = (
+    sessionId: string,
+    startedAt: number,
+    durationMs: number,
+    lat = 51.5,
+    lon = -0.1,
+  ) =>
+    formatLiveStartMessage({
+      sessionId,
+      startedAt,
+      durationMs,
+      location: { lat, lon, accuracyMeters: 10 },
+    });
+  const endText = (sessionId: string, startedAt: number, durationMs: number) =>
+    formatLiveEndMessage({
+      sessionId,
+      startedAt,
+      durationMs,
+      location: { lat: 51.6, lon: -0.2, accuracyMeters: 5 },
+    });
+
+  it('discovers an inbound start marker as an unended session with its coords', () => {
+    const out = collectInboundLiveSessions([
+      { partnerPubkey: PEER, fromMe: false, text: startText('s1', 1000, 900_000) },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      pubkey: PEER,
+      sessionId: 's1',
+      startedAt: 1000,
+      durationMs: 900_000,
+      hasEnd: false,
+    });
+    expect(out[0].startLocation).toEqual({ lat: 51.5, lon: -0.1, accuracyMeters: 10 });
+  });
+
+  it('flags hasEnd once the paired end marker is present', () => {
+    const out = collectInboundLiveSessions([
+      { partnerPubkey: PEER, fromMe: false, text: startText('s1', 1000, 900_000) },
+      { partnerPubkey: PEER, fromMe: false, text: endText('s1', 1000, 900_000) },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].hasEnd).toBe(true);
+  });
+
+  it('skips my own outgoing shares (fromMe) — they are not friend pins', () => {
+    const out = collectInboundLiveSessions([
+      { partnerPubkey: PEER, fromMe: true, text: startText('s1', 1000, 900_000) },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it('ignores plain DMs without the live-location sentinel', () => {
+    const out = collectInboundLiveSessions([
+      { partnerPubkey: PEER, fromMe: false, text: 'just a normal message' },
+      { partnerPubkey: PEER, fromMe: false, text: '' },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it('tracks concurrent sessions from different peers independently', () => {
+    const out = collectInboundLiveSessions([
+      { partnerPubkey: PEER, fromMe: false, text: startText('s1', 1000, 900_000) },
+      { partnerPubkey: PEER2, fromMe: false, text: startText('s2', 2000, 60_000) },
+      { partnerPubkey: PEER2, fromMe: false, text: endText('s2', 2000, 60_000) },
+    ]);
+    const byId = new Map(out.map((s) => [s.sessionId, s]));
+    expect(byId.get('s1')?.hasEnd).toBe(false);
+    expect(byId.get('s2')?.hasEnd).toBe(true);
+    expect(byId.get('s1')?.pubkey).toBe(PEER);
+    expect(byId.get('s2')?.pubkey).toBe(PEER2);
   });
 });

@@ -35,6 +35,7 @@ export interface ConversationMessageRowProps {
   myLat: BubbleProps['myLat'];
   myLon: BubbleProps['myLon'];
   myAccuracyMetres: BubbleProps['myAccuracyMetres'];
+  myAvatarUri: BubbleProps['myAvatarUri'];
   peerAvatarUri: BubbleProps['peerAvatarUri'];
   onOpenMap: BubbleProps['onOpenMap'];
 }
@@ -64,6 +65,7 @@ function ConversationMessageRow({
   myLat,
   myLon,
   myAccuracyMetres,
+  myAvatarUri,
   peerAvatarUri,
   onOpenMap,
 }: ConversationMessageRowProps): React.ReactElement {
@@ -155,6 +157,7 @@ function ConversationMessageRow({
       myLat={myLat}
       myLon={myLon}
       myAccuracyMetres={myAccuracyMetres}
+      myAvatarUri={myAvatarUri}
       peerAvatarUri={peerAvatarUri}
       onOpenMap={onOpenMap}
       testIdPrefix="conversation"

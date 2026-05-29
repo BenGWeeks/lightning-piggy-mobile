@@ -1,13 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import { LIVE_LOCATION_PING_KIND, decodeLivePingPayload } from '../services/liveLocationService';
+import { LIVE_LOCATION_PING_KIND } from '../services/liveLocationService';
 import { subscribeLiveLocationPings } from '../services/nostrLiveLocation';
-import {
-  decodeNsec,
-  decryptNip04WithSecret,
-  DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS,
-} from '../services/nostrService';
-import * as amberService from '../services/amberService';
+import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
+import { DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS } from '../services/nostrService';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
 import type { SharedLocation } from '../services/locationService';
 import type { Item } from '../utils/conversationItems';
@@ -105,25 +100,12 @@ export function useConversationLiveLocation(params: {
         since: Math.floor(start.startedAt / 1000),
         relays: targetRelays,
         onEvent: async (ev) => {
-          // Decrypt the ciphertext content with whichever signer is active.
-          // Amber goes through the platform IPC; nsec uses the local secret.
-          // Either way the decoded JSON is fed into `decodeLivePingPayload`
-          // which validates ranges.
-          let plaintext: string | null = null;
-          try {
-            if (signerType === 'nsec') {
-              const nsec = await SecureStore.getItemAsync('nostr_nsec');
-              if (!nsec) return;
-              const { secretKey } = decodeNsec(nsec);
-              plaintext = await decryptNip04WithSecret(secretKey, ev.pubkey, ev.content);
-            } else if (signerType === 'amber') {
-              plaintext = await amberService.requestNip04Decrypt(ev.content, ev.pubkey, myPubkey);
-            }
-          } catch {
-            return;
-          }
-          if (!plaintext) return;
-          const payload = decodeLivePingPayload(plaintext);
+          const payload = await decryptIncomingLivePing({
+            signerType,
+            content: ev.content,
+            senderPubkey: ev.pubkey,
+            viewerPubkey: myPubkey,
+          });
           if (!payload || payload.sessionId !== start.sessionId) return;
           setPingLatest((prev) => {
             const existing = prev[start.sessionId];

@@ -84,3 +84,55 @@ export function subscribeLiveLocationPings(input: {
     }
   };
 }
+
+/**
+ * Subscribe to live-location pings for MANY sessions over a SINGLE relay REQ.
+ * The full-Map "friends sharing with me" layer can watch a dozen concurrent
+ * inbound shares; opening one REQ per session (as the per-conversation viewer
+ * does for its handful) floods relays — nos.lol / Primal reject with "too many
+ * concurrent REQs", which also starves the app's other subscriptions. One
+ * filter with `authors` + `#d` arrays collapses them into a single REQ; since
+ * sessionIds are unique random hex, the receiver still routes each ping to the
+ * right session by its `d` tag (the caller decodes + matches on sessionId).
+ *
+ * No-op (returns a noop unsub) when there are no sessions to watch.
+ */
+export function subscribeLiveLocationPingsMulti(input: {
+  viewerPubkey: string;
+  senderPubkeys: string[];
+  sessionIds: string[];
+  kind: number;
+  /** Unix epoch SECONDS — earliest session start, to bound the window. */
+  since: number;
+  relays: string[];
+  onEvent: (ev: {
+    id: string;
+    pubkey: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  }) => void;
+}): () => void {
+  if (input.senderPubkeys.length === 0 || input.sessionIds.length === 0) {
+    return () => {};
+  }
+  trackRelays(input.relays);
+  const filter: Filter = {
+    kinds: [input.kind],
+    authors: input.senderPubkeys,
+    '#p': [input.viewerPubkey],
+    '#d': input.sessionIds,
+    since: input.since,
+  };
+  const sub = pool.subscribeMany(input.relays, filter, {
+    onevent: (ev) => input.onEvent(ev),
+  });
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort
+    }
+  };
+}

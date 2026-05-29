@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
@@ -126,6 +127,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // is centred on the merchant, but the user-dot follows the visitor
   // as they walk towards it.
   const { pos: livePos } = useUserLocation();
+  const { profile } = useNostr();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -349,6 +351,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 lon={place.lon}
                 userLat={livePos?.lat ?? pos?.lat ?? null}
                 userLon={livePos?.lon ?? pos?.lon ?? null}
+                userAvatarUri={profile?.picture ?? null}
                 userAccuracyMetres={livePos?.accuracy ?? null}
                 merchants={[place]}
                 caches={[]}

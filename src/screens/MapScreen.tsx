@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Linking,
   ScrollView,
@@ -31,6 +30,7 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
+import { createMapScreenStyles, type MapScreenStyles } from '../styles/MapScreen.styles';
 import { ExploreNavigation } from '../navigation/types';
 import {
   Bbox,
@@ -56,6 +56,8 @@ import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
+import { useFriendsLiveLocations } from '../hooks/useFriendsLiveLocations';
+import { useIsFocused } from '@react-navigation/native';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -81,7 +83,17 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // 306270c — the full map was the last surface still showing every
   // cache regardless of trust.
   const { isTrusted, wotTier } = useTrustGraph();
-  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  const { pubkey: signedInPubkey, relays: userRelays, profile } = useNostr();
+  // Friends currently sharing their live location with me — plotted as
+  // circular avatar chips. Gated on screen focus so the underlying
+  // kind-20069 ping subscriptions go quiet when a detail sheet/screen
+  // covers the map or we navigate away (no background battery cost).
+  const isFocused = useIsFocused();
+  const friends = useFriendsLiveLocations({ enabled: isFocused });
+  const friendMarkers = useMemo(
+    () => friends.map((f) => ({ key: f.pubkey, lat: f.lat, lon: f.lon, avatarUri: f.avatarUri })),
+    [friends],
+  );
   // WoT bottom-sheet visibility — opened from the chip inside the
   // FilterSheet so the user can change tier without leaving the map.
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
@@ -89,7 +101,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // Recenter at the map's bottom-left. Replaces the inline legend
   // strip that used to sit under the map and ate vertical space.
   const [legendVisible, setLegendVisible] = useState(false);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBbox = useRef<Bbox | null>(null);
 
@@ -385,6 +397,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           // the halo — using `pos.accuracy` here would draw a halo
           // around live coords using accuracy from a different fix.
           userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          userAvatarUri={profile?.picture ?? null}
+          profileMarkers={friendMarkers}
+          uniformMarkerSize={32}
           merchants={visibleMerchants}
           caches={visibleCaches}
           events={[]}
@@ -484,7 +499,7 @@ const Header: React.FC<{
   onOpenFilters: () => void;
   colors: Palette;
 }> = ({ onBack, onOpenFilters, colors }) => {
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
     <View style={styles.header}>
       <TouchableOpacity
@@ -573,7 +588,7 @@ const MerchantDetailSheet: React.FC<{
   onClose: () => void;
   onViewDetails: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({ place, onClose, onViewDetails, colors, styles }) => {
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const days = daysSinceVerified(place);
@@ -799,7 +814,7 @@ const CacheDetailSheet: React.FC<{
   onClose: () => void;
   onViewDetails: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({ cache, onClose, onViewDetails, colors, styles }) => {
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
@@ -919,7 +934,7 @@ const FilterSheet: React.FC<{
   untrustedCacheCount: number;
   onOpenWotPicker: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({
   filters,
   onChange,
@@ -1074,489 +1089,5 @@ const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
 // -----------------------------------------------------------------------------
 // styles
 // -----------------------------------------------------------------------------
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerRightSpacer: {
-      width: 24,
-    },
-    webviewWrapper: {
-      flex: 1,
-      position: 'relative',
-    },
-    webview: {
-      flex: 1,
-    },
-    recenterButton: {
-      position: 'absolute',
-      left: 14,
-      bottom: 14,
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    // Legend button — sits just above the recenter at bottom-left so
-    // the two map utilities cluster visually. Same surface treatment
-    // as recenterButton (white circle + shadow) so they read as a pair.
-    legendButton: {
-      position: 'absolute',
-      left: 14,
-      bottom: 62,
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    footer: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    legend: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 14,
-      rowGap: 6,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    legendItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    legendDot: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-      borderWidth: 1.5,
-      borderColor: '#fff',
-    },
-    legendDiamond: {
-      width: 11,
-      height: 11,
-      transform: [{ rotate: '45deg' }],
-      borderWidth: 1.5,
-      borderColor: '#fff',
-    },
-    legendText: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    footerText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    footerError: {
-      fontSize: 13,
-      color: colors.brandPink,
-      fontWeight: '600',
-    },
-    loadingOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: 'rgba(0,0,0,0.05)',
-    },
-    deniedBody: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 32,
-      gap: 12,
-    },
-    deniedTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    deniedSubtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-    },
-    deniedButton: {
-      marginTop: 12,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 18,
-      paddingVertical: 10,
-      borderRadius: 100,
-    },
-    deniedButtonText: {
-      color: colors.white,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    // ----- bottom sheet
-    sheetBackdrop: {
-      ...StyleSheet.absoluteFillObject,
-      justifyContent: 'flex-end',
-      backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-    sheetTapAway: {
-      flex: 1,
-    },
-    sheet: {
-      backgroundColor: colors.surface,
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 28,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-      gap: 8,
-      // Cap so the FilterSheet's category list can scroll instead of
-      // pushing the sheet off the top of the screen.
-      maxHeight: '80%',
-    },
-    // Touch target around the visible handle bar — bigger than the
-    // 4px-tall pill itself so a swipe from anywhere in the top of the
-    // sheet actually reaches the PanResponder. Without this you'd
-    // need pixel-precise drag aim.
-    sheetHandleGrabber: {
-      width: '100%',
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-    sheetHandle: {
-      alignSelf: 'center',
-      width: 36,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.divider,
-      marginBottom: 6,
-    },
-    sheetTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    sheetSubtitle: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-    },
-    wotRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-    },
-    wotHiddenCount: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    sheetChipRow: {
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 6,
-    },
-    sheetChipPink: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipPinkText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipFeatured: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.zapYellow,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipFeaturedText: {
-      color: colors.textHeader,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipGrey: {
-      backgroundColor: colors.divider,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipGreyText: {
-      color: colors.textSupplementary,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipOrange: {
-      backgroundColor: '#F7931A',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipOrangeText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetVerify: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    sheetDescription: {
-      fontSize: 13,
-      color: colors.textBody,
-      lineHeight: 18,
-      marginTop: 8,
-      marginBottom: 4,
-    },
-    sheetActions: {
-      flexDirection: 'row',
-      gap: 12,
-      marginTop: 14,
-    },
-    sheetButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 12,
-      borderRadius: 100,
-    },
-    sheetButtonDisabled: {
-      backgroundColor: colors.divider,
-    },
-    sheetButtonText: {
-      color: colors.white,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    sheetButtonSecondary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: 'transparent',
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetButtonSecondaryText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    sheetContactRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    sheetContactChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    sheetContactText: {
-      color: colors.textHeader,
-      fontSize: 12,
-      fontWeight: '600',
-      maxWidth: 160,
-    },
-    sheetTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginBottom: 4,
-    },
-    sheetIconWrap: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sheetBtcMapActionsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 12,
-      paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    sheetBtcMapActionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetBtcMapActionText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    sheetMetaRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 6,
-    },
-    sheetMetaText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      flexShrink: 1,
-    },
-    filterRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-      paddingVertical: 10,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-    },
-    filterSwatchDot: {
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-    },
-    filterSwatchDiamond: {
-      width: 14,
-      height: 14,
-      transform: [{ rotate: '45deg' }],
-    },
-    filterTextWrap: {
-      flex: 1,
-    },
-    filterLabel: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    filterHint: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      marginTop: 1,
-    },
-    filterToggle: {
-      width: 40,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: colors.divider,
-      padding: 2,
-      justifyContent: 'center',
-    },
-    filterToggleOn: {
-      backgroundColor: colors.brandPink,
-    },
-    filterToggleThumb: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: colors.white,
-    },
-    filterToggleThumbOn: {
-      transform: [{ translateX: 16 }],
-    },
-    categoryHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    categoryClearText: {
-      color: colors.brandPink,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    categoryChipsWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 10,
-    },
-    categoryChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-    },
-    categoryChipOff: {
-      backgroundColor: 'transparent',
-      borderColor: colors.divider,
-    },
-    categoryChipOn: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    categoryChipText: {
-      fontSize: 12,
-      color: colors.textHeader,
-      fontWeight: '600',
-      textTransform: 'capitalize',
-    },
-    categoryChipTextOn: {
-      color: colors.white,
-    },
-  });
 
 export default MapScreen;

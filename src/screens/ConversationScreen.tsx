@@ -97,6 +97,7 @@ const ConversationScreen: React.FC = () => {
     pubkey: myPubkey,
     contacts,
     relays,
+    profile,
     armLiveDmSub,
   } = useNostr();
   // Cover the deep-link path (notification → straight to ConversationScreen
@@ -509,6 +510,7 @@ const ConversationScreen: React.FC = () => {
         myLat={myPos?.lat ?? null}
         myLon={myPos?.lon ?? null}
         myAccuracyMetres={myPos?.accuracy ?? null}
+        myAvatarUri={profile?.picture ?? null}
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
       />
@@ -526,6 +528,7 @@ const ConversationScreen: React.FC = () => {
       handleStopLive,
       myPos,
       picture,
+      profile,
       onOpenMap,
       styles,
       colors,

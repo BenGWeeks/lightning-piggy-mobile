@@ -90,6 +90,7 @@ interface Props {
   myLat?: number | null; // my live latitude (for the blue "me" dot)
   myLon?: number | null; // my live longitude
   myAccuracyMetres?: number | null; // my GPS accuracy → blue halo radius
+  myAvatarUri?: string | null; // my own profile picture → "me" dot avatar
   peerAvatarUri?: string | null; // the other party's profile picture URL
   onOpenMap?: () => void; // tap the mini-map → open the full-screen Map
   // Tap a GIF or image bubble → parent shows fullscreen modal. Optional —
@@ -178,6 +179,7 @@ const MessageBubble: React.FC<Props> = ({
   myLat,
   myLon,
   myAccuracyMetres,
+  myAvatarUri,
   peerAvatarUri,
   onOpenMap,
   onOpenGifFullscreen,
@@ -313,6 +315,7 @@ const MessageBubble: React.FC<Props> = ({
                 userLat={showMyDot ? (myLat ?? null) : null}
                 userLon={showMyDot ? (myLon ?? null) : null}
                 userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+                userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
                 profileMarker={peerMarker}
                 onTapMap={onOpenMap}
               />

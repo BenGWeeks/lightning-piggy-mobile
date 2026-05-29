@@ -504,7 +504,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // the sub was paused (#557) at the moment the relay echoed back.
   // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
   // don't refire.
-  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  const { pubkey: signedInPubkey, relays: userRelays, profile } = useNostr();
   // Track the (pubkey, refreshKey) tuple that last triggered the fetch
   // so we re-run on pull-to-refresh AND on pubkey change, but never on
   // unrelated re-renders.
@@ -885,6 +885,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             lon={livePos?.lon ?? pos?.lon ?? null}
             userLat={livePos?.lat ?? null}
             userLon={livePos?.lon ?? null}
+            userAvatarUri={profile?.picture ?? null}
             // Cached anchor accuracy is only useful BEFORE a live fix
             // arrives. Once livePos exists, trust its accuracy (even
             // if null) so the halo never renders around live coords

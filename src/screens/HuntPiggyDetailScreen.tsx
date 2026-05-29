@@ -126,7 +126,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { coord, openComposer: openComposerParam } = route.params;
-  const { signEvent, relays, pubkey } = useNostr();
+  const { signEvent, relays, pubkey, profile } = useNostr();
 
   // Seed from the in-memory cache mirror so the screen paints instantly
   // when the user navigates from Explore / Hunt rails (where the cache
@@ -607,6 +607,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       lon={decodeGeohash(cache.geohash).lng}
                       userLat={userPos?.lat ?? null}
                       userLon={userPos?.lon ?? null}
+                      userAvatarUri={profile?.picture ?? null}
                       userAccuracyMetres={userAccuracy}
                       merchants={[]}
                       caches={[cache]}
