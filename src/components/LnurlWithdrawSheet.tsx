@@ -178,13 +178,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
           setStage({ kind: 'sleeping', reason: friendlyCooldownReason('') });
           return;
         }
-        if (!activeWalletId) {
-          setStage({
-            kind: 'error',
-            reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
-          });
-          return;
-        }
+        // Show what's on the voucher (and the amount picker) regardless of
+        // wallet state — only require a connected wallet at Redeem time. A user
+        // scanning a gift card should see its value before being told to add a
+        // wallet; `handleClaim` guards the actual claim.
         const lo = Math.ceil(params.minWithdrawable / 1000);
         const hi = Math.floor(params.maxWithdrawable / 1000);
         if (lo < hi) {

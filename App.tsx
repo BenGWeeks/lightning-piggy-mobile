@@ -360,6 +360,18 @@ export default function App() {
                             penalty when online (returns null). See #634. */}
                         <OfflineBanner />
                         <AppNavigator />
+                        {/* Global claim sheet for standalone LNURL-withdraw
+                            vouchers (gift cards, bounty stickers). Opened by the
+                            `lightning:`/`lnurlw:` deep-link/intent-filter path
+                            above via `openLnurlWithdrawSheet`. Generic (no Piggy
+                            branding) and a bottom sheet, not a full screen —
+                            Piglet/geo-cache taps keep HuntFoundScreen via their
+                            `lightningpiggy://` record. MUST live inside
+                            BottomSheetModalProvider (its BottomSheetModal needs
+                            that context) and inside WalletProvider (needs
+                            makeInvoice). Replaced the broken passive foreground
+                            NFC listener (#341). */}
+                        <LnurlWithdrawHost />
                       </BottomSheetModalProvider>
                     </UserLocationProvider>
                     {/* BrandedToast: brand-themed wrapper around
@@ -370,16 +382,6 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                     <BrandedToast />
                     <GlobalIncomingPaymentOverlay />
-                    {/* Global claim sheet for standalone LNURL-withdraw vouchers
-                        (gift cards, bounty stickers). Opened by the `lightning:`/
-                        `lnurlw:` deep-link/intent-filter path above via
-                        `openLnurlWithdrawSheet`. Generic (no Piggy branding) and
-                        a bottom sheet, not a full screen — Piglet/geo-cache taps
-                        keep HuntFoundScreen via their `lightningpiggy://` record.
-                        Inside WalletProvider (needs makeInvoice) + the bottom-
-                        sheet provider. Replaced the broken passive foreground NFC
-                        listener (#341). */}
-                    <LnurlWithdrawHost />
                     {/* Fires OS notifications for incoming payments / zaps
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}
