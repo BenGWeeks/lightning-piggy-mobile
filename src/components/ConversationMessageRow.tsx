@@ -30,6 +30,13 @@ export interface ConversationMessageRowProps {
   liveLocationStatus: BubbleProps['liveLocationStatus'];
   liveLocationRemainingMs: BubbleProps['liveLocationRemainingMs'];
   onStopLiveLocation: BubbleProps['onStopLiveLocation'];
+  // Location-card mini-map plumbing (#206) — my live position (for the
+  // blue "me" dot + halo), the peer's avatar, and the Open-Map handler.
+  myLat: BubbleProps['myLat'];
+  myLon: BubbleProps['myLon'];
+  myAccuracyMetres: BubbleProps['myAccuracyMetres'];
+  peerAvatarUri: BubbleProps['peerAvatarUri'];
+  onOpenMap: BubbleProps['onOpenMap'];
 }
 
 /**
@@ -54,6 +61,11 @@ function ConversationMessageRow({
   liveLocationStatus,
   liveLocationRemainingMs,
   onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  peerAvatarUri,
+  onOpenMap,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -140,6 +152,11 @@ function ConversationMessageRow({
       liveLocationStatus={liveLocationStatus}
       liveLocationRemainingMs={liveLocationRemainingMs}
       onStopLiveLocation={onStopLiveLocation}
+      myLat={myLat}
+      myLon={myLon}
+      myAccuracyMetres={myAccuracyMetres}
+      peerAvatarUri={peerAvatarUri}
+      onOpenMap={onOpenMap}
       testIdPrefix="conversation"
     />
   );

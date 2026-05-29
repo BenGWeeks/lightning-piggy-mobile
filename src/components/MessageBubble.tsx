@@ -8,12 +8,9 @@ import {
   type MessageBubbleStyles,
 } from '../styles/MessageBubble.styles';
 import type { NostrProfile } from '../types/nostr';
-import {
-  buildStaticMapUrl,
-  formatCoordsForDisplay,
-  USER_AGENT,
-  type SharedLocation,
-} from '../services/locationService';
+import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
+import type { BtcMapPlace } from '../services/btcMapService';
+import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import {
   type BubbleContent,
   type ParsedImageMessage,
@@ -34,6 +31,14 @@ import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
+import LibreMiniMap from './LibreMiniMap';
+
+// Stable empty arrays for the location-card mini-maps — LibreMiniMap
+// requires merchants/caches/events, but DM cards never plot any. Module
+// constants so the memoised map doesn't see a fresh [] each render.
+const EMPTY_MERCHANTS: BtcMapPlace[] = [];
+const EMPTY_CACHES: ParsedCache[] = [];
+const EMPTY_EVENTS: ParsedEvent[] = [];
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -79,6 +84,14 @@ interface Props {
   liveLocationStatus?: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>;
   liveLocationRemainingMs?: Record<string, number | undefined>;
   onStopLiveLocation?: (sessionId: string) => void;
+  // Location-card mini-map plumbing (#206). All optional — group bubbles
+  // pass none, so their cards just centre on the shared point with no
+  // me-dot / peer marker.
+  myLat?: number | null; // my live latitude (for the blue "me" dot)
+  myLon?: number | null; // my live longitude
+  myAccuracyMetres?: number | null; // my GPS accuracy → blue halo radius
+  peerAvatarUri?: string | null; // the other party's profile picture URL
+  onOpenMap?: () => void; // tap the mini-map → open the full-screen Map
   // Tap a GIF or image bubble → parent shows fullscreen modal. Optional —
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
@@ -162,6 +175,11 @@ const MessageBubble: React.FC<Props> = ({
   liveLocationStatus,
   liveLocationRemainingMs,
   onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  peerAvatarUri,
+  onOpenMap,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
   onToggleSecretMode,
@@ -210,7 +228,23 @@ const MessageBubble: React.FC<Props> = ({
     const latest = liveLocationLatest?.[marker.sessionId];
     // May be null on a coordless `end` marker (sender stopped with no fix).
     const displayLocation: SharedLocation | null = latest?.location ?? marker.location;
-    const mapUrl = displayLocation ? buildStaticMapUrl(displayLocation) : null;
+    // Map centre: my own live position on my outgoing share, the peer's
+    // latest position on an incoming one. Falls back to the marker coords
+    // when my live fix isn't wired / hasn't landed yet.
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    const centreLat = fromMe && haveMine ? myLat : (displayLocation?.lat ?? null);
+    const centreLon = fromMe && haveMine ? myLon : (displayLocation?.lon ?? null);
+    // My blue dot shows on incoming cards (where am I vs them) and on my
+    // own live share. Suppressed when I have no fix.
+    const showMyDot = haveMine;
+    // Peer avatar marker only on incoming cards, at their location. The
+    // `peerAvatarUri !== undefined` guard scopes this to the 1:1 path —
+    // group bubbles pass no avatar plumbing, so their card just centres
+    // on the point with no peer chip (#206 group follow-up).
+    const peerMarker =
+      !fromMe && displayLocation && peerAvatarUri !== undefined
+        ? { lat: displayLocation.lat, lon: displayLocation.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
     const status =
       liveLocationStatus?.[marker.sessionId] ?? (marker.phase === 'end' ? 'ended' : 'active');
     const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
@@ -264,15 +298,23 @@ const MessageBubble: React.FC<Props> = ({
           testID={`${testIdPrefix}-live-location-${id}`}
         >
           {SenderLabel}
-          {mapUrl ? (
-            <ExpoImage
-              source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-              style={styles.locationMap}
-              contentFit="cover"
-              cachePolicy="disk"
-              transition={150}
-              accessibilityIgnoresInvertColors
-            />
+          {centreLat !== null && centreLon !== null ? (
+            <View style={styles.locationMap}>
+              <LibreMiniMap
+                lat={centreLat}
+                lon={centreLon}
+                merchants={EMPTY_MERCHANTS}
+                caches={EMPTY_CACHES}
+                events={EMPTY_EVENTS}
+                fill
+                defaultZoom={15}
+                userLat={showMyDot ? (myLat ?? null) : null}
+                userLon={showMyDot ? (myLon ?? null) : null}
+                userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+                profileMarker={peerMarker}
+                onTapMap={onOpenMap}
+              />
+            </View>
           ) : null}
           <View style={styles.locationBody}>
             <View style={styles.locationLabelRow}>
@@ -320,7 +362,17 @@ const MessageBubble: React.FC<Props> = ({
 
   if (content.kind === 'location') {
     const { location } = content;
-    const mapUrl = buildStaticMapUrl(location);
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    // My blue dot only on a received static card — not on my own share
+    // (a static share is a single point, my live position is irrelevant).
+    const showMyDot = !fromMe && haveMine;
+    // Peer avatar marker only on a received card, at the shared point.
+    // `peerAvatarUri !== undefined` scopes the chip to the 1:1 path —
+    // group bubbles pass no avatar plumbing (#206 group follow-up).
+    const peerMarker =
+      !fromMe && peerAvatarUri !== undefined
+        ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
@@ -331,14 +383,22 @@ const MessageBubble: React.FC<Props> = ({
           testID={`${testIdPrefix}-location-${id}`}
         >
           {SenderLabel}
-          <ExpoImage
-            source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-            style={styles.locationMap}
-            contentFit="cover"
-            cachePolicy="disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          <View style={styles.locationMap}>
+            <LibreMiniMap
+              lat={location.lat}
+              lon={location.lon}
+              merchants={EMPTY_MERCHANTS}
+              caches={EMPTY_CACHES}
+              events={EMPTY_EVENTS}
+              fill
+              defaultZoom={15}
+              userLat={showMyDot ? (myLat ?? null) : null}
+              userLon={showMyDot ? (myLon ?? null) : null}
+              userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+              profileMarker={peerMarker}
+              onTapMap={onOpenMap}
+            />
+          </View>
           <View style={styles.locationBody}>
             <View style={styles.locationLabelRow}>
               <MapPin

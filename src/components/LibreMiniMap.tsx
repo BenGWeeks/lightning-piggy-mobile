@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { NavigationContext } from '@react-navigation/native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
@@ -23,10 +24,12 @@ import {
   Calendar,
   LocateFixed,
   Crosshair,
+  UserRound,
 } from 'lucide-react-native';
 import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import type { Palette } from '../styles/palettes';
@@ -121,6 +124,12 @@ interface Props {
   // piggy/pin glyph at the spot the hider pinned (the map centres there
   // but otherwise has no marker). `isLpPiggy` picks the glyph + colour.
   pinMarker?: { lat: number; lon: number; isLpPiggy?: boolean } | null;
+  // The OTHER party's avatar marker, rendered as a ~28 px circular
+  // profile chip at their coordinate. Used by the DM location cards to
+  // show the peer's photo where they shared / where they are. Falls
+  // back to a UserRound glyph in the circle when `avatarUri` is
+  // missing / unsupported. Null = no profile marker (e.g. my own share).
+  profileMarker?: { lat: number; lon: number; avatarUri?: string | null } | null;
   // Marker-tap callbacks. Optional — when unset the pin is decorative
   // (mini-map use case). MapScreen wires these to open MerchantDetail-
   // Sheet / CacheDetailSheet.
@@ -201,6 +210,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
   onBoundsChange,
   crosshair = false,
   pinMarker,
+  profileMarker,
   onSelectMerchant,
   onSelectCache,
   onSelectEvent,
@@ -545,6 +555,26 @@ const LibreMiniMapInner: React.FC<Props> = ({
             </View>
           </Marker>
         ) : null}
+        {/* Profile marker — the OTHER party's avatar on the DM location
+            cards. 28 px circular chip; the photo z-stacks over a
+            UserRound silhouette so a missing / broken / unsupported URL
+            still reads as a person rather than an empty circle. */}
+        {profileMarker ? (
+          <Marker id="profile-marker" lngLat={[profileMarker.lon, profileMarker.lat]}>
+            <View style={styles.profileMarker}>
+              <UserRound size={16} color={colors.textBody} strokeWidth={2} />
+              {profileMarker.avatarUri && isSupportedImageUrl(profileMarker.avatarUri) ? (
+                <ExpoImage
+                  source={{ uri: profileMarker.avatarUri }}
+                  style={styles.profileMarkerImage}
+                  cachePolicy="memory-disk"
+                  recyclingKey={profileMarker.avatarUri}
+                  autoplay={false}
+                />
+              ) : null}
+            </View>
+          </Marker>
+        ) : null}
         {/* Events: Calendar glyph in deep-purple. */}
         {eventPoints.map((e) => {
           const original = eventByCoord.get(e.id);
@@ -715,6 +745,29 @@ const createStyles = (colors: Palette) =>
     pinPiglet: { backgroundColor: colors.brandPink },
     pinCache: { backgroundColor: colors.cachePurple },
     pinEvent: { backgroundColor: colors.eventViolet },
+    // Peer avatar chip. 28 px circle, white ring so it stands off the
+    // map tiles; the silhouette + photo are centred and clipped to the
+    // circle via overflow:hidden.
+    profileMarker: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderColor: colors.white,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 2,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 2,
+    },
+    profileMarkerImage: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 14,
+    },
     zoomColumn: {
       position: 'absolute',
       top: 10,
@@ -854,6 +907,15 @@ const arePropsEqual = (prev: Props, next: Props): boolean => {
     prev.pinMarker?.lat !== next.pinMarker?.lat ||
     prev.pinMarker?.lon !== next.pinMarker?.lon ||
     prev.pinMarker?.isLpPiggy !== next.pinMarker?.isLpPiggy
+  )
+    return false;
+  // profileMarker — same object-field treatment as pinMarker so a moved
+  // peer position or a newly-resolved avatar URL re-renders the chip.
+  if (
+    (prev.profileMarker == null) !== (next.profileMarker == null) ||
+    prev.profileMarker?.lat !== next.profileMarker?.lat ||
+    prev.profileMarker?.lon !== next.profileMarker?.lon ||
+    prev.profileMarker?.avatarUri !== next.profileMarker?.avatarUri
   )
     return false;
   // Handlers — host screens should `useCallback` these but fall back

@@ -44,6 +44,7 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import { formatGeoMessage, buildOsmViewUrl, SharedLocation } from '../services/locationService';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
@@ -471,6 +472,23 @@ const ConversationScreen: React.FC = () => {
     });
   }, []);
 
+  // My live position for the location-card mini-maps (#206) — the blue
+  // "me" dot + accuracy halo. Shared GPS subscription, retained for this
+  // screen's lifetime (see UserLocationContext). Tapping a card's mini-map
+  // opens the full-screen Map, mirroring the detail screens' affordance.
+  const { pos: myPos } = useUserLocation();
+  // `Map` lives in the Explore sub-stack, so target it through the
+  // Explore tab rather than the root stack (the detail screens reach it
+  // via a CompositeNavigationProp; ConversationScreen is root-stack only).
+  const onOpenMap = useCallback(
+    () =>
+      navigation.navigate('Main', {
+        screen: 'MainTabs',
+        params: { screen: 'Explore', params: { screen: 'Map' } },
+      }),
+    [navigation],
+  );
+
   const handlePayInvoice = useCallback((raw: string) => {
     setInvoiceToPay(raw);
     setSendSheetOpen(true);
@@ -501,6 +519,11 @@ const ConversationScreen: React.FC = () => {
         liveLocationStatus={liveLocationBubbleStatus}
         liveLocationRemainingMs={liveLocationBubbleRemaining}
         onStopLiveLocation={handleStopLive}
+        myLat={myPos?.lat ?? null}
+        myLon={myPos?.lon ?? null}
+        myAccuracyMetres={myPos?.accuracy ?? null}
+        peerAvatarUri={picture ?? null}
+        onOpenMap={onOpenMap}
       />
     ),
     [
@@ -514,6 +537,9 @@ const ConversationScreen: React.FC = () => {
       liveLocationBubbleStatus,
       liveLocationBubbleRemaining,
       handleStopLive,
+      myPos,
+      picture,
+      onOpenMap,
       styles,
       colors,
     ],
