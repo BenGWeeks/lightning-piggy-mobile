@@ -333,9 +333,11 @@ export function LnurlWithdrawHost(): React.ReactElement {
           contentContainerStyle={[
             styles.content,
             // The scroll viewport extends under the keyboard, so the visible gap
-            // below the Redeem button is (paddingBottom − keyboardHeight). Pad by
-            // keyboardHeight + 32 so that gap matches the 32 we use when closed.
-            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 32 : 32 },
+            // below the Redeem button is roughly (paddingBottom − keyboardHeight).
+            // +56 lands the keyboard-open gap close to the closed-state spacing
+            // (32 content pad + the sheet's bottom safe-area, which the keyboard
+            // hides). Tuned on-device.
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 56 : 32 },
           ]}
           keyboardShouldPersistTaps="handled"
           testID="lnurl-withdraw-sheet"
