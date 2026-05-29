@@ -288,10 +288,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // become no-ops AND the cache hydrate skips its filter so the
       // already-cached unfollowed entries don't get masked.
       const includeNonFollows = opts?.includeNonFollows === true;
-      // Cold start = first (non-force) refresh this session: fetch only
-      // COLD_INITIAL_WRAP_LIMIT wraps for a fast paint, then backfill the full
-      // limit in the background (#751). Read before the TTL gate writes the ref.
-      const isColdStart = dmInboxLastRefreshAt.current === 0 && !forceRefresh;
+      // Cold start = first refresh this session (incl. force: the real cold load
+      // is MessagesScreen's on-mount enforce-flip refresh, which is force:true —
+      // excluding force never capped it; #751). 200-wrap paint, then backfill.
+      const isColdStart = dmInboxLastRefreshAt.current === 0;
       // Gate for negative-result skip-set lookups (#743). Bypass when:
       //   force=true (pull-to-refresh) — newly-followed contacts' older
       //     wraps must surface on the next explicit refresh.
