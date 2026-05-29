@@ -10,6 +10,7 @@ import {
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
+import { querySyncAbortable } from './relayQuery';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
@@ -959,7 +960,7 @@ export interface FetchedInboxEvents {
 export async function fetchInboxDmEvents(
   myPubkey: string,
   relays: string[],
-  options: { limit?: number; since?: number } = {},
+  options: { limit?: number; since?: number; signal?: AbortSignal } = {},
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
@@ -998,9 +999,9 @@ export async function fetchInboxDmEvents(
     // inbox fetch genuinely terminates — unlike withTimeout which only raced the
     // Promise and left the underlying subscribeEose sub running for up to ~60 s.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      pool.querySync(allRelays, sentK4Filter, { maxWait: 15000 }),
-      pool.querySync(allRelays, recvK4Filter, { maxWait: 15000 }),
-      pool.querySync(allRelays, wrapsFilter, { maxWait: 15000 }),
+      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 15000, signal: options.signal }),
     ]);
     // [Perf] Cold-start freeze attribution (#751). querySync ingests every
     // returned event synchronously (JSON.parse + validateEvent + matchFilters)
