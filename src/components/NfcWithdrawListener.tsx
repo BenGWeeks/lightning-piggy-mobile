@@ -27,6 +27,8 @@ import { Alert } from './BrandedAlert';
 import { useWallet } from '../contexts/WalletContext';
 import { registerForegroundTagListener, type NfcTagContent } from '../services/nfcService';
 import { resolveLnurl, resolveLnurlUrl, claimLnurlWithdraw } from '../services/lnurlService';
+import { recordClaim } from '../services/claimHistoryService';
+import { friendlyClaimError } from '../utils/claimErrorMessage';
 
 const NfcWithdrawListener: React.FC = () => {
   const { makeInvoiceForWallet, activeWalletId } = useWallet();
@@ -88,16 +90,19 @@ const NfcWithdrawListener: React.FC = () => {
                         description || 'NFC LNURL-withdraw claim',
                       );
                       await claimLnurlWithdraw(callback, k1, bolt11);
+                      // Record in the shared claim history (same store as the geo-cache prize flow); no piggyId since generic withdraw tags aren't geo-caches.
+                      await recordClaim({ lnurl: content.data, sats: amountSats });
                       // Settle confetti is handled by the global
                       // incoming-payment overlay (WalletContext's
                       // balance-poll fires `lastIncomingPayment`); no
                       // explicit success alert needed here.
                     } catch (err) {
-                      const msg =
+                      const raw =
                         err instanceof Error
                           ? err.message
                           : 'Failed to claim funds from this NFC tag.';
-                      Alert.alert('Claim failed', msg);
+                      // Reuse the prize-claim error mapper for consistent friendly wording (falls back to the raw message).
+                      Alert.alert('Claim failed', friendlyClaimError(raw) ?? raw);
                     }
                   })();
                 },
