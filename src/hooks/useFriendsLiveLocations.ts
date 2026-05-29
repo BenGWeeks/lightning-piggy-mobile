@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   LIVE_LOCATION_PING_KIND,
   collectInboundLiveSessions,
@@ -7,6 +7,7 @@ import {
 import { subscribeLiveLocationPingsMulti } from '../services/nostrLiveLocation';
 import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
 import { DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS } from '../services/nostrService';
+import { DM_INBOX_REFRESH_TTL_MS } from '../contexts/nostrDmCache';
 import { useNostr } from '../contexts/NostrContext';
 import type { SharedLocation } from '../services/locationService';
 import type { NostrProfile } from '../types/nostr';
@@ -56,8 +57,24 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   // Without includeNonFollows, a non-followed sharer's wraps are dropped before
   // they ever reach `dmInbox` (useDmInbox `passesFollowGate`), so they'd never
   // plot — which is exactly what the on-device debug showed (inboundLoc=0).
+  //
+  // Throttled to the same 30 s TTL the Messages tab uses: a `force` refresh is a
+  // full NIP-17 re-decrypt (~14.8 s / 500+ wraps on a busy inbox) AND
+  // `includeNonFollows` bypasses the #743 skip-set, so firing it on every focus
+  // transition (tab tap, pop back from a conversation, dismiss a sheet) would
+  // pin the JS thread repeatedly. Once per 30 s is plenty — the live DM
+  // subscription surfaces anything newer in real time.
+  const lastForceRefreshRef = useRef(0);
   useEffect(() => {
     if (!enabled || !isLoggedIn) return;
+    const now = performance.now();
+    if (
+      lastForceRefreshRef.current > 0 &&
+      now - lastForceRefreshRef.current < DM_INBOX_REFRESH_TTL_MS
+    ) {
+      return;
+    }
+    lastForceRefreshRef.current = now;
     void refreshDmInbox({ force: true, includeNonFollows: true }).catch(() => {});
   }, [enabled, isLoggedIn, refreshDmInbox]);
 
@@ -80,11 +97,23 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   );
 
   // Pass 2 — cheap per-second filter over the (small) session list: an active
-  // inbound share has no end marker and a window that's still open.
+  // inbound share has no end marker and a window that's still open. The 1 Hz
+  // `secondTick` re-runs this so expired shares drop — but `Array.filter`
+  // returns a NEW array each tick even when nothing changed, which would
+  // cascade a 1 Hz re-render through `friends` → MapScreen. Return the previous
+  // reference when the session set is identical so the chain stays still.
+  const prevActiveRef = useRef<InboundLiveSession[]>([]);
   const activeSessions = useMemo<InboundLiveSession[]>(() => {
-    if (!enabled) return [];
+    if (!enabled) {
+      prevActiveRef.current = [];
+      return prevActiveRef.current;
+    }
     const now = Date.now();
-    return inboundSessions.filter((s) => !s.hasEnd && now < s.startedAt + s.durationMs);
+    const next = inboundSessions.filter((s) => !s.hasEnd && now < s.startedAt + s.durationMs);
+    const prev = prevActiveRef.current;
+    if (next.length === prev.length && next.every((s, i) => s === prev[i])) return prev;
+    prevActiveRef.current = next;
+    return next;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() expiry filter each second so closed shares drop
   }, [inboundSessions, enabled, secondTick]);
 
@@ -93,6 +122,19 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   const activeKey = useMemo(
     () => activeSessions.map((s) => `${s.pubkey}:${s.sessionId}`).join('|'),
     [activeSessions],
+  );
+
+  // Same trick for the read-relay set: `relays` is a fresh array on every
+  // NostrContext render, which would otherwise tear down + reopen the ping
+  // subscription on unrelated context updates (login/profile state, etc.).
+  const relayKey = useMemo(
+    () =>
+      relays
+        .filter((r) => r.read)
+        .map((r) => r.url)
+        .sort()
+        .join('|'),
+    [relays],
   );
 
   // Subscribe to kind-20069 pings for each active inbound session. Mirrors the
@@ -144,8 +186,8 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
         // best-effort
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeKey is the stable surrogate for activeSessions
-  }, [activeKey, enabled, isLoggedIn, myPubkey, signerType, relays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeKey/relayKey are stable surrogates for activeSessions/relays
+  }, [activeKey, enabled, isLoggedIn, myPubkey, signerType, relayKey]);
 
   // Drive the 1 Hz tick only while the map is up AND something is being shared
   // — an idle map (or a map with no inbound shares) never re-renders for this.
