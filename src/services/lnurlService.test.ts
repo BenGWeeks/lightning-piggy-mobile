@@ -32,6 +32,15 @@ describe('normalizeLnurlToUrl', () => {
     );
   });
 
+  it('uses http:// for .onion cleartext hosts (LUD-17)', () => {
+    expect(normalizeLnurlToUrl('lnurlw://abc123.onion/w')).toBe('http://abc123.onion/w');
+    expect(normalizeLnurlToUrl('lnurlw://abc123.onion:8080/w')).toBe('http://abc123.onion:8080/w');
+  });
+
+  it('rejects a nested-scheme cleartext payload (no https://https://…)', () => {
+    expect(() => normalizeLnurlToUrl('lnurl://https://evil.example.com/x')).toThrow(/malformed/i);
+  });
+
   it('throws on an empty or unrecognised payload', () => {
     expect(() => normalizeLnurlToUrl('   ')).toThrow(/empty/i);
     expect(() => normalizeLnurlToUrl('not-an-lnurl')).toThrow(/not a recognised/i);

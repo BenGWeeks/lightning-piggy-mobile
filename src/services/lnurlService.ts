@@ -9,6 +9,10 @@
 // Bech32 charset for LNURL decoding
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
+// Cap LNURL endpoint resolution so a network stall can't hang a cold-start
+// deep link indefinitely (#756 Copilot review).
+const LNURL_FETCH_TIMEOUT_MS = 15_000;
+
 export interface LnurlWithdrawParams {
   callback: string;
   k1: string;
@@ -175,10 +179,28 @@ export function normalizeLnurlToUrl(input: string): string {
     s = s.slice('lightning:'.length).trim();
   }
 
-  // Cleartext LUD-17 forms: `lnurlp://`, `lnurlw://`, `lnurl://`.
-  const cleartext = s.match(/^(lnurlp|lnurlw|lnurl):\/\/(.+)$/i);
+  // Cleartext LUD-17 forms: `lnurlp://`, `lnurlw://`, `lnurl://`. Per LUD-17
+  // these map to http:// for `.onion` Tor hosts and https:// elsewhere.
+  const cleartext = s.match(/^(?:lnurlp|lnurlw|lnurl):\/\/(.+)$/i);
   if (cleartext) {
-    return 'https://' + cleartext[2];
+    const rest = cleartext[1];
+    // Reject a nested scheme (e.g. `lnurl://https://evil/…`) — concatenating
+    // would yield `https://https://…`, a malformed/confusable URL.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) {
+      throw new Error('Malformed LNURL endpoint (nested scheme)');
+    }
+    const host = rest.split(/[/:?#]/, 1)[0].toLowerCase();
+    const built = (host.endsWith('.onion') ? 'http://' : 'https://') + rest;
+    let parsed: URL;
+    try {
+      parsed = new URL(built);
+    } catch {
+      throw new Error('Malformed LNURL endpoint');
+    }
+    if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) {
+      throw new Error('Malformed LNURL endpoint');
+    }
+    return built;
   }
 
   // bech32 form. decodeLnurl validates HRP + checksum + HTTPS scheme.
@@ -248,7 +270,19 @@ async function resolveLnurlFromUrl(
   | { tag: 'payRequest'; params: LnurlPayParams }
   | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
 > {
-  const response = await fetch(url);
+  // Bound the fetch — RN's fetch can hang indefinitely on a network stall, and
+  // for a cold-start deep link that would leave the user with no resolution and
+  // no error toast for an unbounded time.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LNURL_FETCH_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+  } catch (e) {
+    throw new Error(`Could not reach LNURL endpoint: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to resolve LNURL (${response.status})`);
