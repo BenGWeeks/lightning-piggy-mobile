@@ -17,12 +17,12 @@
  * auto-dismisses.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Keyboard, Platform } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { Gift, PartyPopper } from 'lucide-react-native';
@@ -90,6 +90,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
     useWallet();
 
   const sheetRef = useRef<BottomSheetModal>(null);
+  // Untyped like NostrLoginSheet's scrollRef — the gorhom ScrollView ref methods
+  // type omits scrollToEnd, which the underlying RN ScrollView does expose.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scrollRef = useRef<any>(null);
   const mountedRef = useRef(true);
   useEffect(
     () => () => {
@@ -101,6 +105,24 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const [lnurl, setLnurl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [amountSats, setAmountSats] = useState<number>(0);
+  // Track keyboard height so the scroll content can pad past the IME — without
+  // this the sheet doesn't lift on Android and the keypad covers the amount
+  // input / slider / Redeem button. See TROUBLESHOOTING → "Bottom sheet doesn't
+  // slide up when keyboard opens" + NostrLoginSheet (the reference).
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Destination-wallet chooser (same model as the geo-cache prize sheet): only
   // Lightning (NWC) wallets can mint a bolt11 to receive the withdrawal.
@@ -320,7 +342,15 @@ export function LnurlWithdrawHost(): React.ReactElement {
           setAmountSats(0);
         }}
       >
-        <BottomSheetView style={styles.content} testID="lnurl-withdraw-sheet">
+        <BottomSheetScrollView
+          ref={scrollRef}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 32 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          testID="lnurl-withdraw-sheet"
+        >
           {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
             <>
               <View style={styles.iconWrap}>
@@ -466,7 +496,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
               </TouchableOpacity>
             </>
           )}
-        </BottomSheetView>
+        </BottomSheetScrollView>
       </BottomSheetModal>
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
     </>
