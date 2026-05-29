@@ -46,13 +46,19 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   } = useNostr();
 
   // Force a fresh inbox fetch whenever the Map opens. The aggregator only sees
-  // what's in `dmInbox`, and the normal inbox refresh is throttled — so a share
-  // a friend started while we weren't on the Messages tab can sit unfetched and
-  // never plot. `force: true` bypasses the throttle so opening the Map always
-  // reflects who's actually sharing right now.
+  // what's in `dmInbox`, so two filters have to be bypassed:
+  //   • `force: true` — skips the throttle AND the `since` cutoff (NIP-17 wraps
+  //     are randomly back-dated, so a `since` filter misses fresh shares).
+  //   • `includeNonFollows: true` — skips the follow gate. Someone sharing their
+  //     live location with you has deliberately targeted you, so they belong on
+  //     the map whether or not you follow them (matches the per-conversation
+  //     view, which shows the share in-thread regardless of follow status).
+  // Without includeNonFollows, a non-followed sharer's wraps are dropped before
+  // they ever reach `dmInbox` (useDmInbox `passesFollowGate`), so they'd never
+  // plot — which is exactly what the on-device debug showed (inboundLoc=0).
   useEffect(() => {
     if (!enabled || !isLoggedIn) return;
-    void refreshDmInbox({ force: true }).catch(() => {});
+    void refreshDmInbox({ force: true, includeNonFollows: true }).catch(() => {});
   }, [enabled, isLoggedIn, refreshDmInbox]);
 
   // Latest coordinate ping per inbound session, keyed by sessionId.
@@ -150,12 +156,14 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     return () => clearInterval(id);
   }, [enabled, hasActive]);
 
-  // Resolve avatars for sharers who aren't followed contacts (those already
-  // carry a cached profile). Keyed on the active peer set so a stable group of
-  // sharers fetches exactly once.
+  // Avatars: prefer a contact's already-cached picture. Only contacts that
+  // actually HAVE a picture go in this map — a followed contact whose kind-0
+  // hasn't resolved yet must fall through to the on-demand fetch below, else
+  // it's stuck rendering a silhouette forever (the fetch only fired for
+  // pubkeys absent from this map).
   const contactPicByPubkey = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const c of contacts) m.set(c.pubkey, c.profile?.picture ?? null);
+    const m = new Map<string, string>();
+    for (const c of contacts) if (c.profile?.picture) m.set(c.pubkey, c.profile.picture);
     return m;
   }, [contacts]);
 
@@ -190,7 +198,7 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
 
   // Final markers: one per peer (latest active session by start time), plotted
   // at the freshest ping or the start coordinate until a ping lands.
-  return useMemo<FriendLiveLocation[]>(() => {
+  const friends = useMemo<FriendLiveLocation[]>(() => {
     const byPeer = new Map<string, InboundLiveSession>();
     for (const s of activeSessions) {
       const cur = byPeer.get(s.pubkey);
@@ -212,4 +220,6 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     }
     return out;
   }, [activeSessions, pingLatest, contactPicByPubkey, fetchedProfiles]);
+
+  return friends;
 }
