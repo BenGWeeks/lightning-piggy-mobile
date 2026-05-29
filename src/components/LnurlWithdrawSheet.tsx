@@ -34,6 +34,7 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
@@ -82,7 +83,7 @@ type Stage =
 export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice, btcPrice, currency } = useWallet();
+  const { activeWalletId, makeInvoice, btcPrice, currency, expectPayment } = useWallet();
 
   const sheetRef = useRef<BottomSheetModal>(null);
   const mountedRef = useRef(true);
@@ -131,6 +132,15 @@ export function LnurlWithdrawHost(): React.ReactElement {
         await recordClaim({ lnurl: sourceLnurl, sats: result.sats });
         if (!mountedRef.current) return;
         setStage({ kind: 'claimed', sats: result.sats });
+        // Register the invoice with the wallet context's ~1s aggressive poll so
+        // the incoming-payment celebration fires and the balance + transaction
+        // list refresh within ~1s of the issuer paying. Without this the only
+        // signal is the baseline 30s balance poll, so the sats don't appear
+        // until a manual pull-to-refresh. Mirrors NfcReadSheet (#341 follow-up).
+        const paymentHash = paymentHashFromBolt11(result.bolt11);
+        if (paymentHash) {
+          expectPayment(activeWalletId, paymentHash, result.sats);
+        }
       } catch (e) {
         if (!mountedRef.current) return;
         const reason =
@@ -150,7 +160,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         setStage({ kind: 'error', reason: friendly ?? reason });
       }
     },
-    [activeWalletId, makeInvoice],
+    [activeWalletId, makeInvoice, expectPayment],
   );
 
   // Open + resolve when a deep-link fires.
