@@ -81,6 +81,26 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
 
+=== Live location: kind-20069 pings + NIP-17 markers (#206)
+
+Live-location sharing rides on the DM pipeline above plus one ephemeral event kind. A share has three on-wire parts:
+
+[cols="1,3",options="header"]
+|===
+| Part | Wire format
+
+| *Start marker* (NIP-17 DM)
+| A normal kind-14 rumor (sealed + gift-wrapped as usual) whose body is, first line first: `[live-location:start]`, then a `geo:<lat>,<lon>` (optionally `;u=<accuracy>`) URI, then a JSON metadata line `{"sessionId":"…","durationMs":900000,"startedAt":<epoch_ms>}`. The sentinel MUST be the first non-empty line to classify (quoting it mid-body does not).
+
+| *Pings* (kind 20069, ephemeral)
+| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. Payload carries `{ lat, lon, accuracy, heading, ts }` for the session.
+
+| *End marker* (NIP-17 DM)
+| First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.
+|===
+
+Durations are capped to `MAX_DURATION_MS` (1 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
+
 === Hunt: Lightning extension to NIP-GC (#468)
 
 ==== Summary

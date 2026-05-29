@@ -667,6 +667,35 @@ A single-flight guard (`useRef<Promise>`) coalesces overlapping `refreshDmInbox`
 
 The 30 / 90-day chip on MessagesScreen filters summaries by `lastActivityAt` at render time. It's user-selectable and persists via `AsyncStorage.messages_window_days`. The fetch itself isn't time-bounded (relays return the most recent 500 matching events); the chip just narrows what's displayed.
 
+== Location sharing (snapshot + live, #206)
+
+Two location message types ride on the NIP-17 DM pipeline:
+
+- **Snapshot** — a one-shot `geo:<lat>,<lon>` DM (the original "Send current location").
+- **Live** — an ongoing share for a chosen window (15 min / 1 h). The sender publishes:
+  * a NIP-17 *start* marker DM — first line `[live-location:start]`, a `geo:` URI, and a JSON line carrying `{ sessionId, durationMs, startedAt }`;
+  * **ephemeral kind-20069 pings** every ~30 s with the latest coordinates (accuracy + heading + timestamp) while the watcher runs;
+  * a NIP-17 *end* marker DM — first line `[live-location:end]` — when the user stops or the window expires.
+
+`parseLiveLocationMarker` classifies a DM as a marker only when the sentinel is the *first non-empty line* (so quoting the header mid-body can't false-positive). Coordinates are required for `start` but optional for `end`: a stop with no GPS fix omits the `geo:` URI rather than fabricate a `0,0` pin, and the parser still recognises the coordless end marker so the receiver bubble flips to "ended".
+
+The sender's session is a small state machine (`src/services/liveLocationStateMachine.ts`): `active → paused → expired → ended`, plus a `stopPending` state so a *failed* end-marker send is retried on the 5 s tick-drain loop until it lands — the peer always learns the share ended. Sessions persist **per active pubkey** (`liveLocationStorage` keys by identity; `LiveLocationProvider` clears state when the Nostr `pubkey` changes or on logout), so a session started under one account can never resume/publish under another.
+
+=== Location-card map
+
+Both location cards render the shared `LibreMiniMap` (OpenFreeMap vector tiles — see _Maps_) rather than a static tile, plotting up to two points:
+
+[cols="1,1,1",options="header"]
+|===
+| Card | Other party's marker | My blue "me" dot
+| I share — live | — | yes
+| Received — live | profile-circle at their live position | yes (my live position)
+| Received — snapshot | profile-circle at the shared point | yes (my live position)
+| I share — snapshot | the shared point | no
+|===
+
+My position is fed from `useUserLocation()`; the peer avatar comes from the conversation's `route.params.picture` (falling back to a `UserRound` silhouette). The card's built-in "Open Map" affordance (`LibreMiniMap.onTapMap`) jumps to the full-screen interactive `MapScreen`. Group location cards currently centre on the shared point only — no me-dot or peer chip yet (follow-up).
+
 == Group Chat (NIP-17 multi-recipient + kind:30200, PR #227)
 
 Client-side group chat layered on top of the existing NIP-17 DM pipeline. No relay-side support is required — every group is just a set of recipients sharing a name, agreed on by the participating clients.
@@ -939,7 +968,7 @@ The `Tab.Navigator` (`src/navigation/AppNavigator.tsx`) sets `lazy: true` (commi
 | `src/services/nearbyRadiusService.ts` | Single AsyncStorage key for the user's "within X km" preference (default 50 km, options 5 / 25 / 50 / 150 km — no "All" / 500 km options after user feedback that those bands made the list useless).
 | `src/hooks/useNearbyRadius.ts` | React subscription to the shared radius value.
 | `src/hooks/usePubkeyProfile.ts` | Pubkey → kind-0 metadata slice. Reads `zapSenderProfileStorage` first (in-memory + AsyncStorage), falls through to `nostrService.fetchProfile` on miss and writes back. Used by hider attribution on cache rows + detail, finder chips on the find-log, and the organiser row on EventDetail.
-| `src/components/LibreMiniMap.tsx` | Native MapLibre map — single shared component used on every map surface (Explore hub, Geo-caches / Hunt, Places, full-screen MapScreen, LocationPickerSheet, and the four detail screens). Replaced the Leaflet WebView in #552 / #563 to dodge GrapheneOS Vanadium sandbox freezing and kill the ~30 s WebView cold-mount. Props gate behaviour: `interactive` enables pan + recenter, `fill` fills the parent, `crosshair` overlays the location-picker reticle, `onBoundsChange` emits viewport bbox for list-filter hosts (debounced 500 ms on MapScreen via `onRegionDidChange`). Pins are RN `<Marker>` children with a 22 px chassis + Lucide glyph per BTC Map category — the SymbolLayer port for dense-city density lives as a follow-up.
+| `src/components/LibreMiniMap.tsx` | Native MapLibre map — single shared component used on every map surface (Explore hub, Geo-caches / Hunt, Places, full-screen MapScreen, LocationPickerSheet, the four detail screens, and the DM location cards — #206). Replaced the Leaflet WebView in #552 / #563 to dodge GrapheneOS Vanadium sandbox freezing and kill the ~30 s WebView cold-mount. Props gate behaviour: `interactive` enables pan + recenter, `fill` fills the parent, `crosshair` overlays the location-picker reticle, `onBoundsChange` emits viewport bbox for list-filter hosts (debounced 500 ms on MapScreen via `onRegionDidChange`), `profileMarker` drops a circular avatar chip for the other party on a DM location card (#206). Pins are RN `<Marker>` children with a 22 px chassis + Lucide glyph per BTC Map category — the SymbolLayer port for dense-city density lives as a follow-up.
 | `src/components/BtcMapAttribution.tsx` | "Powered by BTC Map" chip — attribution required by the BTC Map data licence.
 | `src/components/SocialIcon.tsx` | Inline Simple-Icons brand SVGs for X / Facebook / Instagram / Telegram / WhatsApp. Lucide dropped brand glyphs in v0.34, so we ship the SVG paths ourselves.
 |===
