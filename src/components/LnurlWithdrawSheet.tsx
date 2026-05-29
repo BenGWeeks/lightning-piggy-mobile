@@ -36,6 +36,7 @@ import {
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { formatFiatApprox } from '../utils/fiat';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { AmountSlider } from './AmountSlider';
@@ -55,18 +56,6 @@ export function openLnurlWithdrawSheet(lnurl: string): boolean {
   }
   return false;
 }
-
-const FIAT_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  JPY: '¥',
-  CNY: '¥',
-  CAD: 'C$',
-  AUD: 'A$',
-  CHF: 'CHF ',
-  ZAR: 'R',
-};
 
 // Fallback copy when a cooldown carries no parseable time hint (budget
 // exhausted) — the live countdown can't run, so show static text instead.
@@ -144,16 +133,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const minSats = stage.kind === 'ready' ? Math.ceil(stage.params.minWithdrawable / 1000) : 0;
   const maxSats = stage.kind === 'ready' ? Math.floor(stage.params.maxWithdrawable / 1000) : 0;
 
-  const fiatLabel = useMemo(() => {
-    if (!btcPrice || amountSats <= 0) return null;
-    const value = (amountSats / 1e8) * btcPrice;
-    const num = value.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    const symbol = FIAT_SYMBOLS[currency] ?? '';
-    return symbol ? `≈ ${symbol}${num}` : `≈ ${num} ${currency}`;
-  }, [amountSats, btcPrice, currency]);
+  const fiatLabel = useMemo(
+    () => formatFiatApprox(amountSats, btcPrice, currency),
+    [amountSats, btcPrice, currency],
+  );
 
   const handleClaim = useCallback(
     async (params: LnurlWithdrawParams, sats: number, sourceLnurl: string) => {
@@ -249,9 +232,12 @@ export function LnurlWithdrawHost(): React.ReactElement {
           });
           return;
         }
-        // Show the voucher + picker regardless of wallet state — a connected
-        // wallet is only required at Redeem time (the picker offers Add wallet).
-        if (lo < hi) {
+        // Variable amount → show the picker. Fixed amount (lo === hi) →
+        // auto-claim, BUT only when a wallet is connected; with no wallet fall
+        // through to the ready state so the picker's Add-wallet path shows
+        // instead of auto-claiming straight into a hard error (Copilot #341).
+        // Either way the voucher value is visible before a wallet is required.
+        if (lo < hi || !selectedWalletId) {
           setAmountSats(hi);
           setStage({ kind: 'ready', params });
           return;
@@ -269,7 +255,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [lnurl, stage.kind, handleClaim]);
+  }, [lnurl, stage.kind, handleClaim, selectedWalletId]);
 
   // Tick the cooldown countdown each second while sleeping. Decrements the
   // `remaining` carried in the sleeping stage; stops at 0 (the user can then
@@ -346,7 +332,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
           ref={scrollRef}
           contentContainerStyle={[
             styles.content,
-            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 32 },
+            // The scroll viewport extends under the keyboard, so the visible gap
+            // below the Redeem button is (paddingBottom − keyboardHeight). Pad by
+            // keyboardHeight + 32 so that gap matches the 32 we use when closed.
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 32 : 32 },
           ]}
           keyboardShouldPersistTaps="handled"
           testID="lnurl-withdraw-sheet"

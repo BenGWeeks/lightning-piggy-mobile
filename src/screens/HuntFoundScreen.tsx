@@ -20,22 +20,9 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
+import { formatFiatApprox } from '../utils/fiat';
+import { SLEEPING_PATTERN } from '../utils/lnurlCooldown';
 import type { RouteProp } from '@react-navigation/native';
-
-// Currency symbols for the amount-picker fiat hint. Hermes' Intl currency
-// formatting isn't reliable across builds, so we map the common codes and
-// fall back to "<amount> <CODE>" for anything not listed.
-const FIAT_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  JPY: '¥',
-  CNY: '¥',
-  CAD: 'C$',
-  AUD: 'A$',
-  CHF: 'CHF ',
-  ZAR: 'R',
-};
 
 // LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
 // Neutral about who triggered the cooldown — anyone could have just
@@ -120,16 +107,10 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Fiat label for the chosen amount in the user's currency. (Hermes Intl
   // currency formatting is patchy, so format manually with a symbol map.)
-  const fiatLabel = useMemo(() => {
-    if (!btcPrice || amountSats <= 0) return null;
-    const value = (amountSats / 1e8) * btcPrice;
-    const num = value.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    const symbol = FIAT_SYMBOLS[currency] ?? '';
-    return symbol ? `≈ ${symbol}${num}` : `≈ ${num} ${currency}`;
-  }, [amountSats, btcPrice, currency]);
+  const fiatLabel = useMemo(
+    () => formatFiatApprox(amountSats, btcPrice, currency),
+    [amountSats, btcPrice, currency],
+  );
 
   // Shared claim path — used by the fixed-amount auto-claim (mount) and the
   // variable-amount 'Claim' button. Locks the LUD-03 min/max to the chosen
@@ -160,11 +141,10 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!mountedRef.current) return;
         const reason =
           e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
-        const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(
-          reason,
-        );
+        // Shared matcher so "already used" (a consumed single-use voucher) is a
+        // hard error shown as-is, NOT the benign cooldown UI (Copilot #341).
         setStage(
-          sleepy
+          SLEEPING_PATTERN.test(reason)
             ? { kind: 'sleeping', reason: friendlyCooldownReason(reason) }
             : { kind: 'error', reason },
         );

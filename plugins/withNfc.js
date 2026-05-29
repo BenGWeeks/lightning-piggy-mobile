@@ -58,12 +58,13 @@ function withNfcAndroid(config) {
           // NDEF_DISCOVERED filters for the schemes LP handles on an NFC tap.
           // Without these, tapping a tag does nothing in foreground/background
           // (or lands in another wallet) — Android's NFC dispatch has no LP
-          // activity to route the URI to. All three are routed by the Linking
+          // activity to route the URI to. All four are routed by the Linking
           // handler in App.tsx:
           //   - `lightningpiggy` — record 1 of a Hunt/Piglet tag
           //     (`lightningpiggy://hunt/<coord>`) → opens the cache page.
-          //   - `lightning` / `lnurlw` — standalone LNURL-withdraw tags / gift
-          //     cards whose FIRST record is the withdraw URI → in-app claim
+          //   - `lightning` / `lnurlw` / `lnurl` — standalone LNURL-withdraw
+          //     tags / gift cards whose FIRST record is the withdraw URI
+          //     (`lnurl://` is the rare spec-allowed cleartext form) → in-app claim
           //     (#341 rework: replaced a passive foreground listener that lost
           //     to the system dispatch). Android dispatches on the FIRST NDEF
           //     record only, so Piglets (record 1 = `lightningpiggy`) are

@@ -216,9 +216,11 @@ function lud17ToHttp(input: string): string | null {
 export function parseNfcContent(raw: string): NfcTagContent {
   let input = raw.trim();
 
-  // Strip lightning: prefix
+  // Strip lightning: prefix, then re-trim — some tags/encoders emit
+  // `lightning: lnurlw://…` with a space after the scheme, which would
+  // otherwise defeat the scheme checks below.
   if (input.toLowerCase().startsWith('lightning:')) {
-    input = input.substring(10);
+    input = input.substring(10).trim();
   }
 
   // LUD-17 LNURL-withdraw scheme (`lnurlw://host/...`), plus the rare
