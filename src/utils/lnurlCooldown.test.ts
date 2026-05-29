@@ -7,18 +7,22 @@ describe('SLEEPING_PATTERN', () => {
     'You must wait 30 more seconds',
     'cooldown still running',
     'daily budget exhausted',
-    'voucher already used',
     'too soon, try later',
   ])('matches benign cooldown message: %s', (msg) => {
     expect(SLEEPING_PATTERN.test(msg)).toBe(true);
   });
 
-  it.each(['Invalid LNURL', 'Network request failed', 'Not connected'])(
-    'does not match hard error: %s',
-    (msg) => {
-      expect(SLEEPING_PATTERN.test(msg)).toBe(false);
-    },
-  );
+  it.each([
+    'Invalid LNURL',
+    'Network request failed',
+    'Not connected',
+    // A consumed single-use voucher is a permanent hard error, NOT a cooldown —
+    // it must be shown as-is, never routed into the counting-down sleeping UI.
+    'voucher already used',
+    'This withdraw link was already claimed',
+  ])('does not match hard error: %s', (msg) => {
+    expect(SLEEPING_PATTERN.test(msg)).toBe(false);
+  });
 });
 
 describe('parseCooldownSeconds', () => {

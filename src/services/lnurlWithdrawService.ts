@@ -50,14 +50,20 @@ export const decodeLnurlWithdraw = (input: string): string => {
     s = s.slice('lightning:'.length).trim();
   }
 
-  // `lnurlw://host/path` is the cleartext form some wallets emit.
+  // LUD-17 cleartext forms (`lnurlw://host/path`, and the rare spec-allowed
+  // `lnurl://host/path`). Per LUD-17 these map to `http://` for `.onion` Tor
+  // hosts and `https://` everywhere else — rewriting `.onion` to https breaks
+  // Tor-only withdraw endpoints. The host is the authority up to the first
+  // `/ : ? #`; strip any port before the `.onion` test.
+  const cleartextToHttp = (rest: string): string => {
+    const host = rest.split(/[/:?#]/, 1)[0].toLowerCase();
+    return (host.endsWith('.onion') ? 'http://' : 'https://') + rest;
+  };
   if (/^lnurlw:\/\//i.test(s)) {
-    return 'https://' + s.slice('lnurlw://'.length);
+    return cleartextToHttp(s.slice('lnurlw://'.length));
   }
-
-  // `lnurl://host/path` (rare but spec-allowed).
   if (/^lnurl:\/\//i.test(s)) {
-    return 'https://' + s.slice('lnurl://'.length);
+    return cleartextToHttp(s.slice('lnurl://'.length));
   }
 
   // bech32 form. HRP is "lnurl"; we accept any case but bech32 itself

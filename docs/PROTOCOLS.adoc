@@ -313,8 +313,8 @@ How a physical NFC tag tap is routed into the app. There are two tag shapes and 
 | Opens the *cache page* (`HuntPiggyDetail`), then offers *Claim Prize*.
 
 | *Standalone LNURL-withdraw* (gift card, bounty sticker)
-| 1. `lightning:LNURL1…` _or_ `lnurlw://…`
-| Opens the *withdraw claim* (`HuntFoundScreen`, `coord` absent).
+| 1. `lightning:LNURL1…` _or_ `lnurlw://…` _or_ `lnurl://…`
+| Opens the generic *withdraw claim bottom sheet* (`LnurlWithdrawSheet`, no Piggy branding) over the current screen — not a full page.
 |===
 
 CAUTION: Android's NFC dispatch keys on the *first* NDEF record only. A Piglet's first record is `lightningpiggy://`, so adding `lightning:` / `lnurlw:` handlers (below) does **not** hijack Piglet taps — their `lightning:` bearer is record 3.
@@ -324,12 +324,12 @@ CAUTION: Android's NFC dispatch keys on the *first* NDEF record only. A Piglet's
 The app does **not** use a passive always-on NFC listener. It rides Android's intent/deep-link system, the same path for both NFC taps and `Linking.openURL`:
 
 . *Intent filters* register the schemes LP handles:
-** `plugins/withNfc.js` — `android.nfc.action.NDEF_DISCOVERED` for `lightningpiggy`, `lightning`, and `lnurlw` (the NFC-tap path).
-** `app.config.ts` `intentFilters` — `VIEW` for `lightning` and `lnurlw` (the in-app/browser deep-link path).
+** `plugins/withNfc.js` — `android.nfc.action.NDEF_DISCOVERED` for `lightningpiggy`, `lightning`, `lnurlw`, and `lnurl` (the NFC-tap path).
+** `app.config.ts` `intentFilters` — `VIEW` for `lightning`, `lnurlw`, and `lnurl` (the in-app/browser deep-link path).
 . *`App.tsx` Linking handler* (`getInitialURL` + `addEventListener('url')`) parses the delivered URI and navigates:
 ** `lightningpiggy://hunt/<coord>` → `navigateToHuntPiggyDetail(coord)`
 ** `nostr:naddr1…` → decode → `HuntPiggyDetail`
-** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `navigateToHuntFound(lnurl)` → `HuntFoundScreen`, which resolves the `withdrawRequest` and claims into the active wallet (`coord` optional, so a cache-less gift card works). *Fixed-amount* tags (`minWithdrawable === maxWithdrawable`) auto-claim — the finder already opted in by tapping. *Variable-amount* tags (`min < max`) show an amount picker (slider + typed sats field, defaulting to max, with a fiat hint) so the finder chooses how much to take off the card.
+** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `openLnurlWithdrawSheet(lnurl)` → the global `LnurlWithdrawHost` (`LnurlWithdrawSheet` bottom sheet), which resolves the `withdrawRequest` and claims into the active wallet. Generic (no Piggy branding) — a plain voucher needn't be a geo-cache. *Fixed-amount* tags (`minWithdrawable === maxWithdrawable`) auto-claim — the finder already opted in by tapping. *Variable-amount* tags (`min < max`) show an amount picker (slider + typed sats field, defaulting to max, with a fiat hint) so the finder chooses how much to take off the card. A reuse cooldown surfaces as a live counting-down timer (shared with the geo-cache prize sheet via `src/utils/lnurlCooldown.ts`). Geo-cache/Piglet taps keep the full `HuntFoundScreen` prize flow via their `lightningpiggy://` first record.
 . *In-app explicit scans* (`NfcReadSheet`, write flows) use *Reader Mode* (`requestTechnology(Ndef, READER_MODE_OPTS)` — see `src/services/nfcReaderMode.ts`), which grabs the tag exclusively so the OS never hands it to another wallet.
 
 === Why no passive foreground listener (#341)

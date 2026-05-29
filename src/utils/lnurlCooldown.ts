@@ -12,8 +12,12 @@
 // and "must wait" — a trailing \b would miss "wait_time" since '_' is a word
 // char. Dropping into this benign sleeping countdown beats the red 'Couldn't
 // claim' state for what is really just a rate-limit.
+//
+// NOT included: "already used" / "already claimed" — a consumed single-use
+// voucher is a permanent hard failure, not a "come back later" state, so it
+// must surface as a plain issuer error (shown as-is), never the cooldown UI.
 export const SLEEPING_PATTERN =
-  /\bwait|cooldown|budget|sleeping|exhausted|already used|too (?:soon|early|many)/i;
+  /\bwait|cooldown|budget|sleeping|exhausted|too (?:soon|early|many)/i;
 
 // Parse the LNURLw's 'Wait N seconds' / 'wait_time: N' / 'cooldown Ns' shape
 // into the integer N — used to drive the live countdown. Returns null when the

@@ -183,8 +183,19 @@ export function LnurlWithdrawHost(): React.ReactElement {
         // wallet state — only require a connected wallet at Redeem time. A user
         // scanning a gift card should see its value before being told to add a
         // wallet; `handleClaim` guards the actual claim.
+        // Whole-sat bounds. `lo`/`hi` can invert (hi < lo) when the issuer's
+        // millisat range brackets no integer sat (e.g. 2500–2999 msat → lo=3,
+        // hi=2). Auto-claiming hi there sends an amount below min and the claim
+        // always fails — surface it as an error instead.
         const lo = Math.ceil(params.minWithdrawable / 1000);
         const hi = Math.floor(params.maxWithdrawable / 1000);
+        if (hi < lo) {
+          setStage({
+            kind: 'error',
+            reason: "This voucher's amount can't be claimed in whole sats.",
+          });
+          return;
+        }
         if (lo < hi) {
           setAmountSats(hi);
           setStage({ kind: 'ready', params });

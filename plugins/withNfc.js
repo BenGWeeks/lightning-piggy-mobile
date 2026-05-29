@@ -89,7 +89,9 @@ function withNfcAndroid(config) {
               });
             }
           };
-          ['lightningpiggy', 'lightning', 'lnurlw'].forEach(addNdefScheme);
+          // `lnurl` is the rare spec-allowed cleartext form App.tsx also routes;
+          // register it so `lnurl://…` tags aren't a silent no-op on Android.
+          ['lightningpiggy', 'lightning', 'lnurlw', 'lnurl'].forEach(addNdefScheme);
         }
       }
     }

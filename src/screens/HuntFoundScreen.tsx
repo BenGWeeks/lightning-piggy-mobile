@@ -194,8 +194,15 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
           });
           return;
         }
+        // Whole-sat bounds can invert (hi < lo) when the issuer's millisat
+        // range brackets no integer sat (e.g. 2500–2999 msat → lo=3, hi=2).
+        // Auto-claiming hi there is below min and always fails — error instead.
         const lo = Math.ceil(params.minWithdrawable / 1000);
         const hi = Math.floor(params.maxWithdrawable / 1000);
+        if (hi < lo) {
+          setStage({ kind: 'error', reason: "This prize can't be claimed in whole sats." });
+          return;
+        }
         if (lo < hi) {
           setAmountSats(hi);
           setStage({ kind: 'ready', params });

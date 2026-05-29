@@ -31,9 +31,10 @@ export type NfcTagContent =
   // (could be a payRequest or withdrawRequest); the caller fetches and
   // branches on the server's `tag` field.
   | { type: 'lnurl'; data: string }
-  // Plain HTTPS LNURL-withdraw endpoint (per LUD-17 the canonical wire
-  // form is `lnurlw://…`; this is the same URL with the scheme rewritten
-  // to https so it can be GET'd directly). Issue #103.
+  // Plain HTTP(S) LNURL-withdraw endpoint (per LUD-17 the canonical wire
+  // form is `lnurlw://…`; this is the same URL with the scheme rewritten to
+  // http(s) — http:// for `.onion`, https:// otherwise — so it can be GET'd
+  // directly). Issue #103.
   | { type: 'lnurl-withdraw'; data: string }
   | { type: 'lightning-invoice'; data: string }
   | { type: 'lightning-address'; data: string }
@@ -190,6 +191,9 @@ function lud17ToHttp(input: string): string | null {
   let scheme: string | null = null;
   if (lower.startsWith('lnurlw://')) scheme = 'lnurlw://';
   else if (lower.startsWith('lnurlp://')) scheme = 'lnurlp://';
+  // `lnurl://` is the rare spec-allowed cleartext form (checked AFTER the more
+  // specific `lnurlw://` / `lnurlp://`). `decodeLnurlWithdraw` accepts it too.
+  else if (lower.startsWith('lnurl://')) scheme = 'lnurl://';
   else if (lower.startsWith('keyauth://')) scheme = 'keyauth://';
   if (!scheme) return null;
 
@@ -217,11 +221,13 @@ export function parseNfcContent(raw: string): NfcTagContent {
     input = input.substring(10);
   }
 
-  // LUD-17 LNURL-withdraw scheme (`lnurlw://host/...`). Convert to its
-  // https (or http-on-onion) transport form so the caller can GET it
-  // directly without re-parsing the scheme.
+  // LUD-17 LNURL-withdraw scheme (`lnurlw://host/...`), plus the rare
+  // spec-allowed cleartext `lnurl://host/...` that `decodeLnurlWithdraw` also
+  // accepts. Convert to the https (or http-on-onion) transport form so the
+  // caller can GET it directly without re-parsing the scheme. (Pay-vs-withdraw
+  // disambiguation for the generic `lnurl://` form is tracked in #756.)
   const lower = input.toLowerCase();
-  if (lower.startsWith('lnurlw://')) {
+  if (lower.startsWith('lnurlw://') || lower.startsWith('lnurl://')) {
     const url = lud17ToHttp(input);
     if (url) return { type: 'lnurl-withdraw', data: url };
   }

@@ -46,6 +46,19 @@ describe('parseNfcContent', () => {
       const result = parseNfcContent('LNURLW://example.com/cb');
       expect(result.type).toBe('lnurl-withdraw');
     });
+
+    it('classifies the rare cleartext lnurl:// form as lnurl-withdraw (https rewrite)', () => {
+      const result = parseNfcContent('lnurl://example.com/api/v1/lnurl/cb/abc123');
+      expect(result).toEqual({
+        type: 'lnurl-withdraw',
+        data: 'https://example.com/api/v1/lnurl/cb/abc123',
+      });
+    });
+
+    it('rewrites lnurl:// .onion hosts to http:// (incl. lightning: prefix)', () => {
+      const result = parseNfcContent('lightning:lnurl://abc123.onion/cb');
+      expect(result).toEqual({ type: 'lnurl-withdraw', data: 'http://abc123.onion/cb' });
+    });
   });
 
   describe('LNURL bech32 (lnurl1…)', () => {
