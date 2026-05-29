@@ -401,7 +401,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             refreshForPubkey,
             readRelays,
             {
-              ...(opts?.force ? {} : { since: lastSeen }),
+              // Cold start keeps `since` for kind-4 even under force — the on-mount enforce-flip refresh is force but doesn't need the full kind-4 backlog (that was the ~11s cold remainder; #751). Non-cold force still drops it so a follow-toggle / pull-to-refresh re-fetches older kind-4. Wraps ignore `since` internally regardless (random NIP-59 ts).
+              ...(opts?.force && !isColdStart ? {} : { since: lastSeen }),
               signal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
