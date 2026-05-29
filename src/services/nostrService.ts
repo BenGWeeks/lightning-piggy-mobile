@@ -225,6 +225,28 @@ export function buildProfileRelayHints(
   return deduped;
 }
 
+// Relay hints to embed in the user's OWN nprofile when sharing it to an
+// NFC tag / QR for first contact (#755). A conference badge is a cold
+// first-contact medium: the scanner doesn't follow us yet, so the hints
+// must point at our NIP-65 *write* (outbox) relays — the places we
+// actually publish kind-0 + notes — so their client resolves us even on
+// niche relays. Capped at `max` (default 2) to keep the payload inside an
+// NTAG213's ~144 B and limit staleness if we later migrate relays. Falls
+// back to the app defaults when the user has published no write relays,
+// since a hint (even a generic one) still beats a bare npub. The bare
+// pubkey is always in the nprofile, so a reader can fall back to outbox
+// discovery if these hints go dead.
+export function buildOwnProfileRelayHints(ownWriteRelays: string[], max = 2): string[] {
+  const deduped: string[] = [];
+  for (const r of [...ownWriteRelays, ...DEFAULT_RELAYS]) {
+    if (!r) continue;
+    if (deduped.includes(r)) continue;
+    deduped.push(r);
+    if (deduped.length >= max) break;
+  }
+  return deduped;
+}
+
 // Accepts a NIP-21 `nostr:` URI or a bare bech32 identifier and returns
 // the pubkey + optional relay hints when it's a profile reference
 // (npub or nprofile). Returns null for anything else (note, nevent, …).

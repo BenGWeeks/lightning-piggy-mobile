@@ -58,7 +58,7 @@ function withNfcAndroid(config) {
           // NDEF_DISCOVERED filters for the schemes LP handles on an NFC tap.
           // Without these, tapping a tag does nothing in foreground/background
           // (or lands in another wallet) — Android's NFC dispatch has no LP
-          // activity to route the URI to. All four are routed by the Linking
+          // activity to route the URI to. All five are routed by the Linking
           // handler in App.tsx:
           //   - `lightningpiggy` — record 1 of a Hunt/Piglet tag
           //     (`lightningpiggy://hunt/<coord>`) → opens the cache page.
@@ -72,6 +72,9 @@ function withNfcAndroid(config) {
           //     shows its app chooser if another LN wallet also handles
           //     `lightning`/`lnurlw`, so we don't hijack the user's preferred
           //     wallet.
+          //   - `nostr` — conference contact badges whose first record is
+          //     `nostr:nprofile1…` / `nostr:npub1…` (#754) → ContactProfile
+          //     (UnsupportedEntity for note / nevent).
           const addNdefScheme = (scheme) => {
             const exists = filters.some(
               (f) =>
@@ -91,8 +94,9 @@ function withNfcAndroid(config) {
             }
           };
           // `lnurl` is the rare spec-allowed cleartext form App.tsx also routes;
-          // register it so `lnurl://…` tags aren't a silent no-op on Android.
-          ['lightningpiggy', 'lightning', 'lnurlw', 'lnurl'].forEach(addNdefScheme);
+          // `nostr` covers contact badges (#754). Register all so their tags
+          // aren't a silent no-op on Android.
+          ['lightningpiggy', 'lightning', 'lnurlw', 'lnurl', 'nostr'].forEach(addNdefScheme);
         }
       }
     }

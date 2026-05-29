@@ -23,6 +23,10 @@ import {
   type WriteLnurlResult,
 } from './nfcReaderMode';
 
+// Re-export the reader-mode infra (now homed in nfcReaderMode.ts) so existing
+// importers — including the extracted single-record writers in
+// nfcNostrWrite.ts (#754/#755) which import READER_MODE_OPTS from './nfcService'
+// — keep working without reaching into nfcReaderMode directly.
 export { READER_MODE_OPTS, inferTagFamily };
 export type { TagFamily, WriteLnurlResult };
 
@@ -84,7 +88,10 @@ export function openNfcSettings(): void {
 // try/catch). Call `initNfc()` at app startup if you want to warm
 // the connection before the first user action.
 let nfcStarted = false;
-async function ensureNfcStarted(): Promise<boolean> {
+// Exported (alongside READER_MODE_OPTS) so extracted writers share the one
+// session-start flag instead of forking it. Owns the single source of truth
+// for `nfcStarted`; nfcNostrWrite.ts calls in rather than re-tracking state.
+export async function ensureNfcStarted(): Promise<boolean> {
   if (nfcStarted) return true;
   try {
     await NfcManager.start();
@@ -288,48 +295,13 @@ export async function scanNfcTag(): Promise<NfcTagContent> {
   }
 }
 
-/**
- * Write an npub to an NFC tag as an NDEF URI record.
- * Format: nostr:npub1...
- *
- * @param npub - The npub string to write
- * @param onTagDetected - Optional callback fired when a tag is detected (before write)
- */
-export async function writeNpubToTag(npub: string, onTagDetected?: () => void): Promise<void> {
-  if (!npub.startsWith('npub1')) {
-    throw new Error('Invalid npub format');
-  }
-
-  const uri = `nostr:${npub}`;
-
-  try {
-    if (!(await ensureNfcStarted())) {
-      throw new Error('NFC unavailable on this device');
-    }
-    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
-
-    const tag = await NfcManager.getTag();
-    if (!tag) {
-      throw new Error('No tag detected');
-    }
-
-    // Notify caller that tag was detected (writing begins)
-    onTagDetected?.();
-
-    // Build NDEF message with a URI record
-    // Since "nostr:" is not in the standard NFC URI prefix table,
-    // we use prefix code 0x00 (no prefix) and include the full URI
-    const bytes = Ndef.encodeMessage([Ndef.uriRecord(uri)]);
-
-    if (!bytes) {
-      throw new Error('Failed to encode NDEF message');
-    }
-
-    await NfcManager.ndefHandler.writeNdefMessage(bytes);
-  } finally {
-    NfcManager.cancelTechnologyRequest().catch(() => {});
-  }
-}
+// The single-record Nostr profile writers (`writeNostrProfileToTag` /
+// `writeNpubToTag`) now live in `./nfcNostrWrite` — extracted so this
+// over-cap service shrinks while keeping the Hunt / LNURL multi-record
+// write path here. They share this file's exported `READER_MODE_OPTS` +
+// `ensureNfcStarted`. Import them directly from `./nfcNostrWrite` (no
+// re-export here, to keep the dependency one-directional and avoid a
+// service ↔ service import cycle).
 
 /**
  * Write an LNURL string to an NFC tag as an NDEF URI record. Used by

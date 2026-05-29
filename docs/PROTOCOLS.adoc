@@ -222,6 +222,45 @@ Reasons it's the right call:
 | `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events (7-day TTL, 500-cap, sync peek). See `docs/SOLUTION_DESIGN.adoc` → "Explore tab".
 |===
 
+==== `lightning:` tag-tap / deep-link routing
+
+An NFC tag tap, a QR scan, or a `Linking` call from another app wakes
+Lightning Piggy via the `lightning:` scheme (registered in `app.config.ts`).
+The single handler in `App.tsx`'s Linking listener decides the *direction*
+of money flow and routes to the matching surface. There are two directions:
+
+* **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
+  claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
+* **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
+  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+
+The critical rule: for LNURL forms the direction is keyed off the
+**resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32
+prefix — a `lnurl1…` can be either kind. `resolveLnurlDirection`
+(`src/services/lnurlService.ts`) does one fetch and returns
+`{ kind: 'pay' | 'withdraw', … }`; both directions branch on that one
+answer so they can never disagree.
+
+|===
+| Tapped / scanned payload | Spec | Direction | Routes to
+
+| `lightning:lnbc…` (also `lntb` / `lnts` / `lnbs`) | BOLT-11 | Pay → out | `SendSheet` prefilled (amount + memo from the invoice; zero-amount invoices prompt for an amount)
+| `lightning:user@host` | LUD-16 | Pay → out | `SendSheet` — resolves the address, prompts for an amount
+| `lightning:lnurl1…` / `lnurlp://` / `https://…` resolving to `payRequest` | LUD-06/17 | Pay → out | `SendSheet`
+| `lightning:lnurl1…` / `lnurlw://` / `lnurl://` resolving to `withdrawRequest` | LUD-03 | Claim → in | `HuntFoundScreen` (no regression to #341)
+| anything else under `lightning:` | — | — | friendly "Link not supported" toast (no silent dead end — Copilot review #488)
+|===
+
+Cold launch is handled the same way as the withdraw and notification
+paths: each route returns a boolean "did it land", and the handler retries
+(~2 s, 100 ms cadence) until `navigationRef.isReady()`.
+
+NOTE: The `payRequest → SendSheet` leg currently passes the resolved
+endpoint URL to `SendSheet.processInput`, which today only decodes bolt11
+and Lightning Addresses. Teaching `processInput` to also resolve a raw
+LNURL-pay endpoint is the remaining wiring (tracked in #756); the bolt11
+and Lightning-Address pay legs are fully wired.
+
 === Events: NIP-52 calendar consumption
 
 ==== Summary
@@ -296,44 +335,47 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 
 * `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
 
-== NFC tag tap handling (#103, #341)
+=== Deep-link & NFC tag-tap routing
 
-How a physical NFC tag tap is routed into the app. There are two tag shapes and one routing mechanism.
+==== Summary
 
-=== Tag shapes
+A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
 
-[cols="1,2,2",options="header"]
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+
+==== Routing table
+
 |===
-| Tag | NDEF records (in order) | What a tap does
+| Tag / link payload | Decodes to | Routes to | Issue
 
-| *Piglet / geo-cache* (written by `writeHuntTagToTag`)
-| 1. `lightningpiggy://hunt/<coord>` +
-  2. `nostr:naddr1…` +
-  3. _(optional)_ `lightning:LNURL1…`
-| Opens the *cache page* (`HuntPiggyDetail`), then offers *Claim Prize*.
-
-| *Standalone LNURL-withdraw* (gift card, bounty sticker)
-| 1. `lightning:LNURL1…` _or_ `lnurlw://…` _or_ `lnurl://…`
-| Opens the generic *withdraw claim bottom sheet* (`LnurlWithdrawSheet`, no Piggy branding) over the current screen — not a full page.
+| `https://www.lightningpiggy.com/hunt/<coord>` or `lightningpiggy://hunt/<coord>` | `kind:pubkey:d` coord | `HuntPiggyDetail` (Piglet detail) | #73
+| `nostr:naddr1…` (kind 37516) | Hunt listing coord | `HuntPiggyDetail` | #73
+| `nostr:npub1…` | bare pubkey | `ContactProfile` (profile screen) | #754
+| `nostr:nprofile1…` | pubkey **+ relay hints** | `ContactProfile`, kind-0 fetched off the embedded hints | #754
+| `lnurlw://…` / `lnurl://…` (standalone withdraw voucher) | LNURL-withdraw | `openLnurlWithdrawSheet` (claim bottom sheet) | #103 / #341
+| `lightning:lnbc…` (bolt11) / `lightning:user@host` (Lightning Address) | invoice / LN address | `SendSheet` (pay) | #756
+| `lightning:lnurl1…` / `lnurl(p\|w)://…` / `https://…` | resolved once; routed on the server `tag` | `withdrawRequest` → `openLnurlWithdrawSheet`; `payRequest` → `SendSheet` | #341 / #756
+| other `lightning:` payloads (undecodable) | — | friendly "Link not supported" toast | #488
+| `nostr:note1…` / `nostr:nevent1…` / undecodable `nostr:` | non-profile entity | `UnsupportedEntity` screen | #754
 |===
 
-CAUTION: Android's NFC dispatch keys on the *first* NDEF record only. A Piglet's first record is `lightningpiggy://`, so adding `lightning:` / `lnurlw:` handlers (below) does **not** hijack Piglet taps — their `lightning:` bearer is record 3.
+==== npub vs nprofile (read + write)
 
-=== Routing mechanism (intent filter → Linking → screen)
+`npub` is the bech32 of the bare 32-byte pubkey — identity only. `nprofile` is the NIP-19 TLV encoding of the pubkey **plus optional relay hints**. For a conference badge / contact tap (cold first contact — the scanner doesn't follow the owner yet) `nprofile` is strongly preferred: the embedded hints let the scanner's client find the owner's kind-0 metadata + notes even on niche relays, where a bare `npub` would force a default-relay guess and could render a blank profile.
 
-The app does **not** use a passive always-on NFC listener. It rides Android's intent/deep-link system, the same path for both NFC taps and `Linking.openURL`:
+* **Read (#754):** the `App.tsx` router decodes the reference via `decodeProfileReference` (`src/services/nostrService.ts`), fetches kind-0 off the embedded hints (`fetchProfile(pubkey, hints)` — a bare `npub` carries none, so it falls back to the app's `PROFILE_RELAYS`), and navigates to `ContactProfile`. The fetch races a short budget so a dead relay never strands the user; the pubkey-only stub lets `ContactProfileScreen` retry on the viewer's own relays. Pure decode / shaping helpers are in `src/utils/nostrProfileLink.ts`.
+* **Write (#755):** the "share my profile to NFC" path (`ProfileScreen` / `AccountDrawerContent` → `NfcWriteSheet`) writes `nostr:nprofile1…`, embedding the user's NIP-65 **write (outbox)** relays via `buildOwnProfileRelayHints` (`src/services/nostrService.ts`), capped at 2 to fit an NTAG213 (~144 B) and limit staleness. Falls back to the app defaults when the user has no published write relays — a generic hint still beats none. The bare pubkey is always embedded, so a reader can fall back to outbox discovery if the hints go dead. Sharing a *contact's* profile (`ContactProfileScreen`) writes their `nprofile` too, hints sourced via `buildProfileRelayHints`.
 
-. *Intent filters* register the schemes LP handles:
-** `plugins/withNfc.js` — `android.nfc.action.NDEF_DISCOVERED` for `lightningpiggy`, `lightning`, `lnurlw`, and `lnurl` (the NFC-tap path).
-** `app.config.ts` `intentFilters` — `VIEW` for `lightning`, `lnurlw`, and `lnurl` (the in-app/browser deep-link path).
-. *`App.tsx` Linking handler* (`getInitialURL` + `addEventListener('url')`) parses the delivered URI and navigates:
-** `lightningpiggy://hunt/<coord>` → `navigateToHuntPiggyDetail(coord)`
-** `nostr:naddr1…` → decode → `HuntPiggyDetail`
-** `lightning:lnurl…` / `lnurlw://…` / `lnurl://…` (withdraw forms) → `openLnurlWithdrawSheet(lnurl)` → the global `LnurlWithdrawHost` (`LnurlWithdrawSheet` bottom sheet), which resolves the `withdrawRequest` and claims into the active wallet. Generic (no Piggy branding) — a plain voucher needn't be a geo-cache. *Fixed-amount* tags (`minWithdrawable === maxWithdrawable`) auto-claim — the finder already opted in by tapping. *Variable-amount* tags (`min < max`) show an amount picker (slider + typed sats field, defaulting to max, with a fiat hint) so the finder chooses how much to take off the card. A reuse cooldown surfaces as a live counting-down timer (shared with the geo-cache prize sheet via `src/utils/lnurlCooldown.ts`). Geo-cache/Piglet taps keep the full `HuntFoundScreen` prize flow via their `lightningpiggy://` first record.
-. *In-app explicit scans* (`NfcReadSheet`, write flows) use *Reader Mode* (`requestTechnology(Ndef, READER_MODE_OPTS)` — see `src/services/nfcReaderMode.ts`), which grabs the tag exclusively so the OS never hands it to another wallet.
+==== Code references
 
-=== Why no passive foreground listener (#341)
+|===
+| Path | What it does
 
-The original #103 implementation used a passive `registerForegroundTagListener` (nostr-tools-style `registerTagEvent` / foreground dispatch). On Android that **loses to the system NDEF dispatch** — a `lightning:` / `lnurlw:` URI tag launches whichever wallet handles the scheme (Wallet of Satoshi, Phoenix) instead of firing our handler, so it never worked. #341 replaced it with the intent-filter + Linking path above (and removed `registerForegroundTagListener` + the `NfcWithdrawListener` component). Reader Mode remains the mechanism for *interactive* in-app scans.
-
-NOTE: cold taps offer LP in Android's app chooser only for the schemes LP registers; if another LN wallet is the user's default for `lightning:`/`lnurlw:`, Android shows the chooser rather than hijacking it.
+| `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
+| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (cold launch / deep link).
+| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (foreground tag tap).
+| `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
+| `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
+| `src/services/nfcNostrWrite.ts` :: `writeNostrProfileToTag` | Writes a single `nostr:nprofile…` / `nostr:npub…` NDEF URI record.
+| `src/navigation/AppNavigator.tsx` :: `navigateToContactProfile` / `navigateToUnsupportedEntity` | Imperative nav helpers callable from outside the React tree.
+|===
