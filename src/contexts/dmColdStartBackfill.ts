@@ -28,6 +28,12 @@ export function scheduleColdStartBackfill(args: {
 }): void {
   if (!args.isColdStart || args.signal?.aborted) return;
   InteractionManager.runAfterInteractions(() => {
+    // Re-check: the signal may have aborted between scheduling and now (e.g. a
+    // tab blur during the interaction window). Skip so we don't toggle loading
+    // state or advance the refresh TTL for a backfill the user no longer wants
+    // (#752 Copilot). querySyncAbortable would also short-circuit, but bailing
+    // here avoids the wasted refreshDmInbox setup entirely.
+    if (args.signal?.aborted) return;
     void args.refreshRef.current?.({
       force: true,
       includeNonFollows: args.includeNonFollows,

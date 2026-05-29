@@ -516,7 +516,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
     fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
       .then((mine) => {
-        if (cancelled) return;
+        // Release on cancel too so a remount can retry — safe: async, after the
+        // claim-deduped mount burst (#752 Copilot).
+        if (cancelled) return releaseExploreByAuthorFetch(fetchKey);
         console.log(
           `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
             mine.map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`).join(', '),
