@@ -83,6 +83,16 @@ const GroupsScreen: React.FC = () => {
   // logged in #560. Same shape MessagesScreen uses for the Messages
   // tab (#412).
   const refreshAbortRef = useRef<AbortController | null>(null);
+  // Screen-level TTL gate (mirrors MessagesScreen #412/#731). Without it the
+  // `force: true` below — kept so newly-arrived group rumors, whose NIP-59 wrap
+  // timestamps are randomised, aren't dropped by a `since` filter — also
+  // bypasses refreshDmInbox's own TTL gate, re-ingesting the ENTIRE wrap
+  // backlog on every Groups focus (~10 s JS-thread lock per visit; #751
+  // warm-path audit). The gate preserves `force` semantics when we do fetch
+  // but skips the fetch on a re-focus within the TTL window. 0 = never.
+  const dmInboxLastRefreshAt = useRef<number>(0);
+  const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  const DM_INBOX_ABORT_TTL_MS = 10_000;
   const newRefreshSignal = useCallback((): AbortSignal => {
     refreshAbortRef.current?.abort();
     const ctrl = new AbortController();
@@ -92,13 +102,29 @@ const GroupsScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() =>
+      const handle = InteractionManager.runAfterInteractions(() => {
+        // Skip entirely if the inbox was refreshed within the TTL window —
+        // tab-bouncing into Groups no longer re-runs the full relay fetch.
+        if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
+        const startedAt = Date.now();
+        const signal = newRefreshSignal();
         refreshDmInbox({
           force: true,
           includeNonFollows: !enforceFollowingOnly,
-          signal: newRefreshSignal(),
-        }),
-      );
+          signal,
+        })
+          .then(() => {
+            // Aborted (fast tab-hop) → short TTL so we retry sooner; clean
+            // completion → full 30 s TTL. Same shape as MessagesScreen.
+            dmInboxLastRefreshAt.current = signal.aborted
+              ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
+              : startedAt;
+          })
+          .catch(() => {
+            dmInboxLastRefreshAt.current =
+              Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS);
+          });
+      });
       return () => {
         handle.cancel();
         refreshAbortRef.current?.abort();

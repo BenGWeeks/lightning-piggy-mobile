@@ -223,6 +223,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'lightning' }],
       },
+      // `nostr:` profile / entity URIs — NFC contact badges (#754) and
+      // `Linking.openURL('nostr:nprofile1…')` from other Nostr clients.
+      // Android shows its standard chooser when another Nostr-aware app
+      // also registers the scheme, so this doesn't hijack the user's
+      // preferred client. The App.tsx router decodes npub / nprofile →
+      // ContactProfile and falls back to UnsupportedEntity for the rest.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'nostr' }],
+      },
     ],
     // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".
     versionCode: 70,

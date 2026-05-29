@@ -19,8 +19,18 @@ import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
   navigateToHuntFound,
   navigateToHuntPiggyDetail,
+  navigateToContactProfile,
+  navigateToUnsupportedEntity,
+  navigateToSend,
   navigateFromNotification,
 } from './src/navigation/AppNavigator';
+import { fetchProfile, decodeProfileReference } from './src/services/nostrService';
+import {
+  isProfileReferenceUri,
+  profileToContactBody,
+  pubkeyToContactBodyStub,
+} from './src/utils/nostrProfileLink';
+import { resolveLnurlDirection } from './src/services/lnurlService';
 import {
   ensureNotificationsInitialised,
   requestNotificationPermission,
@@ -141,16 +151,20 @@ export default function App() {
     };
   }, []);
 
-  // `lightning:` deep-link listener (Hunt finder flow, #468). LP registers
-  // the scheme in app.config.ts so an NFC tag tap or a Linking call wakes
-  // the app. We strip the `lightning:` prefix and hand the bare LNURL
-  // (or LUD-17 / https URL) to HuntFoundScreen via the navigation ref;
-  // resolveLnurlWithdraw normalises the rest. The screen falls back to
-  // a friendly "couldn't claim" state for non-withdrawRequest payloads
-  // (e.g. a LUD-06 LNURL-pay tag landed here by accident), which is the
-  // simplest UX while a proper Hunt-vs-generic-LNURL split waits on
-  // pay-flow integration. Cold-start case races the navigation tree's
-  // mount, so we retry briefly until `navigationRef.isReady()`.
+  // `lightning:` deep-link listener — the NFC tag-tap / deep-link entry
+  // point for BOTH directions of the tag-tap story:
+  //   - claim  (money IN):  withdrawRequest → HuntFoundScreen      (#341/#468)
+  //   - pay    (money OUT):  bolt11 / Lightning Address / payRequest
+  //                          → SendSheet on the Home tab            (#756)
+  // LP registers the scheme in app.config.ts so an NFC tag tap or a
+  // Linking call wakes the app. Direction is decided by the RESOLVED
+  // LNURL `tag` (payRequest vs withdrawRequest), NOT the bech32 prefix —
+  // a `lnurl1…` can be either kind, so we resolve once and route on the
+  // answer (see `resolveLnurlDirection`). bolt11 invoices and Lightning
+  // Addresses are unambiguously pay → straight to SendSheet, which
+  // already decodes them in `processInput`. Cold-start case races the
+  // navigation tree's mount, so every route retries briefly until
+  // `navigationRef.isReady()` (mirrors the withdraw / notification paths).
   useEffect(() => {
     let cancelled = false;
     // Very short in-memory dedupe to absorb the cold-start race where
@@ -223,6 +237,68 @@ export default function App() {
         return;
       }
 
+      // `nostr:npub1…` / `nostr:nprofile1…` — a profile reference, the
+      // conference-badge / contact-tap case (#754). Distinct from the
+      // Hunt `naddr` branch below and the `lightning:` withdraw branch.
+      // We decode the pubkey (+ relay hints for nprofile), fetch the
+      // kind-0 metadata off those hints so a stranger on niche relays
+      // still resolves, then open the full-page ContactProfile. The
+      // fetch is best-effort: if it fails we still navigate with a
+      // pubkey-only stub and let ContactProfileScreen retry on the
+      // viewer's own relays. Cold-start races the nav tree → retry like
+      // the Hunt/withdraw paths.
+      if (isProfileReferenceUri(trimmed)) {
+        const decoded = decodeProfileReference(trimmed);
+        if (!decoded) {
+          console.warn(`[Link] nostr: profile ref failed to decode — friendly fallback`);
+          const tryFail = (attempt: number) => {
+            if (navigateToUnsupportedEntity('this Nostr link', trimmed)) return;
+            if (attempt >= 20 || cancelled) return;
+            setTimeout(() => tryFail(attempt + 1), 100);
+          };
+          tryFail(0);
+          return;
+        }
+        const { pubkey, relays: hints } = decoded;
+        console.log(`[Link] → ContactProfile pubkey=${pubkey.slice(0, 12)}… hints=${hints.length}`);
+        const openWith = (contact: ReturnType<typeof pubkeyToContactBodyStub>) => {
+          const tryNav = (attempt: number) => {
+            if (navigateToContactProfile(contact)) return;
+            if (attempt >= 20 || cancelled) return;
+            setTimeout(() => tryNav(attempt + 1), 100);
+          };
+          tryNav(0);
+        };
+        // Fetch kind-0 off the EMBEDDED relay hints (nprofile) so a
+        // not-yet-followed contact on niche relays resolves — that's the
+        // whole point of nprofile over a bare npub. A bare npub carries
+        // no hints, so fetchProfile falls back to the app's PROFILE_RELAYS.
+        // Race the fetch against a 2.5s budget so a dead relay never
+        // strands the user on a blank screen: whichever resolves first
+        // navigates, and the pubkey-only stub lets ContactProfileScreen
+        // retry the metadata on the viewer's own relays. The screen is
+        // reused on a same-pubkey re-nav (its re-sync is pubkey-gated),
+        // so we navigate exactly once with the best data we have.
+        const stub = pubkeyToContactBodyStub(pubkey);
+        let navigated = false;
+        const navOnce = (contact: ReturnType<typeof pubkeyToContactBodyStub>) => {
+          if (navigated || cancelled) return;
+          navigated = true;
+          openWith(contact);
+        };
+        const budget = setTimeout(() => navOnce(stub), 2_500);
+        fetchProfile(pubkey, hints)
+          .then((profile) => {
+            clearTimeout(budget);
+            navOnce(profile ? profileToContactBody(profile) : stub);
+          })
+          .catch(() => {
+            clearTimeout(budget);
+            navOnce(stub);
+          });
+        return;
+      }
+
       // `nostr:naddr1...` — record 2 of a Hunt tag, or a manual
       // share from a generic Nostr client. We decode the naddr to
       // recover { kind, pubkey, identifier } and assemble the same
@@ -259,40 +335,84 @@ export default function App() {
       }
       const lnurl = trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;
-      // Only route Hunt-eligible payloads (LNURL-withdraw forms) into
-      // HuntFound. Bolt11 invoices (`lnbc…`), LNURL-pay (`lnurl1…` may
-      // be either kind — accept and let HuntFound disambiguate),
-      // Lightning Addresses (`user@host`), and raw https URLs land
-      // elsewhere in the future pay-flow integration, so we ignore
-      // them here rather than hijacking the URI. Per Copilot review
-      // on PR #488: previous logic routed every `lightning:` URI into
-      // HuntFound which would have hijacked invoice / pay-link shares.
-      const isHuntEligible =
-        /^lnurl1/i.test(lnurl) || /^lnurlw:\/\//i.test(lnurl) || /^lnurl:\/\//i.test(lnurl);
-      if (!isHuntEligible) {
-        // Otherwise the user lands in LP with no feedback when the
-        // OS routes a non-Hunt `lightning:` URI here (bolt11 invoice,
-        // LNURL-pay, raw https, Lightning Address). Surface a toast so
-        // they know the link type isn't supported yet, instead of a
-        // silent dead end (Copilot review #488). Full pay-flow
-        // integration would absorb these into SendSheet — until then
-        // the toast nudges them to use a wallet that does handle the
-        // URI type.
+
+      // Retry helper for the cold-start race — the nav tree may not be
+      // mounted yet when the launch URL arrives. Each route returns a
+      // boolean "did it land"; we retry ~2s before giving up.
+      const tryNav = (nav: () => boolean) => {
+        const attempt = (n: number) => {
+          if (nav()) return;
+          if (n >= 20 || cancelled) return;
+          setTimeout(() => attempt(n + 1), 100);
+        };
+        attempt(0);
+      };
+
+      // --- Unambiguous PAY payloads → SendSheet (#756) ---------------
+      // bolt11 invoices (mainnet/testnet/signet/regtest prefixes) and
+      // Lightning Addresses (`user@host`) can only be paid, never
+      // claimed, so route them straight to the SendSheet — it decodes
+      // the bolt11 (amount/memo; zero-amount → amount prompt) and
+      // resolves the Lightning Address (amount prompt) in `processInput`.
+      // Pass the raw `lightning:`-prefixed URI; SendSheet strips the
+      // prefix itself.
+      const isBolt11 = /^ln(bc|tb|ts|bs)/i.test(lnurl);
+      const isLightningAddress = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(lnurl) && !isBolt11;
+      if (isBolt11 || isLightningAddress) {
+        console.log(`[Link] → SendSheet (${isBolt11 ? 'bolt11' : 'lnaddress'})`);
+        tryNav(() => navigateToSend(trimmed));
+        return;
+      }
+
+      // --- LNURL forms: resolve ONCE, route on the resolved tag ------
+      // `lnurl1…` / `lnurlp://` / `lnurlw://` / `lnurl://` / raw https.
+      // The bech32 prefix does NOT tell us pay vs withdraw — only the
+      // server's `tag` does (Copilot review #488 / disambiguation trap
+      // in #756). So resolve and branch:
+      //   withdrawRequest → HuntFoundScreen (claim, no regression to #341)
+      //   payRequest      → SendSheet (pay)
+      const isLnurlForm =
+        /^lnurl1/i.test(lnurl) || /^lnurl(p|w)?:\/\//i.test(lnurl) || /^https:\/\//i.test(lnurl);
+      if (!isLnurlForm) {
+        // Unknown payload under the lightning: scheme — friendly nudge
+        // rather than a silent dead end (Copilot review #488).
         Toast.show({
           type: 'info',
-          text1: 'Link not supported yet',
-          text2:
-            "Lightning Piggy currently opens `lightning:lnurl…` withdraw tags. Bolt11 invoices and pay links aren't routed yet.",
+          text1: 'Link not supported',
+          text2: "That isn't an invoice, Lightning Address, or LNURL Lightning Piggy can open.",
           visibilityTime: 4500,
         });
         return;
       }
-      const tryNav = (attempt: number) => {
-        if (navigateToHuntFound(lnurl)) return;
-        if (attempt >= 20 || cancelled) return;
-        setTimeout(() => tryNav(attempt + 1), 100);
-      };
-      tryNav(0);
+
+      void (async () => {
+        try {
+          const resolved = await resolveLnurlDirection(lnurl);
+          if (cancelled) return;
+          if (resolved.kind === 'withdraw') {
+            console.log(`[Link] → HuntFound (LNURL withdrawRequest)`);
+            tryNav(() => navigateToHuntFound(lnurl));
+          } else {
+            // payRequest → SendSheet. Hand it the resolved endpoint URL
+            // so SendSheet doesn't have to re-decode the bech32 (and so
+            // `lnurlp://` / raw-https forms work even though
+            // `processInput` only understands bolt11 + Lightning
+            // Address today — see the SendSheet TODO in the PR).
+            console.log(`[Link] → SendSheet (LNURL payRequest)`);
+            tryNav(() => navigateToSend(resolved.url));
+          }
+        } catch (err) {
+          if (cancelled) return;
+          // Friendly message — never surface the raw SDK / relay string.
+          console.warn(`[Link] LNURL resolve failed: ${(err as Error)?.message ?? err}`);
+          Toast.show({
+            type: 'info',
+            text1: "Couldn't open that link",
+            text2: 'The Lightning link could not be resolved. Check your connection and try again.',
+            visibilityTime: 4500,
+          });
+        }
+      })();
     };
     Linking.getInitialURL().then(route);
     const sub = Linking.addEventListener('url', (e) => route(e.url));

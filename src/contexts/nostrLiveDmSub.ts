@@ -25,6 +25,7 @@ import {
   type Nip17CacheEntry,
   safeParseRecord,
   writeNip17Cache,
+  COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   inboxCacheKey,
   inboxLastSeenKey,
@@ -551,6 +552,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       viewerPubkey,
       relays: readRelays,
       sinceK4,
+      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
+      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
+      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
+      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
       onEvent: (ev) => {
         // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
         handleInboxEvent(ev).catch((e) => {

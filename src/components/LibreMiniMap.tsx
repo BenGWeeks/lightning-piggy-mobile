@@ -485,56 +485,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
             (dev-pinned positions, no-GPS state) — silently misleading
             the user about their precision was the pre-fix behaviour. */}
         {haloFeature && <AccuracyHalo feature={haloFeature} />}
-        {/* User position — solid dot. Three prop modes:
-              - userLat/userLon both numbers → render there.
-              - userLat/userLon both undefined (mini-map default: not
-                passed) → render at camera centre [lon, lat]; centre
-                IS the user in those flows.
-              - userLat/userLon explicitly null → the caller (a detail
-                screen) is telling us "we don't know yet". DON'T fall
-                through to camera centre — that would plant the dot
-                on the cache / merchant / event for one frame before
-                the cached fix arrives, which is exactly the
-                "location momentarily showed as the geo-cache then
-                jumped" bug we hit.
-            The pixel-sized Marker stays a position indicator — sizing
-            it geographically would make it vanish at wide zoom and
-            dominate at close zoom. */}
-        {(() => {
-          const userLatProvided = userLat !== undefined;
-          const userLonProvided = userLon !== undefined;
-          const dotLat = userLatProvided ? userLat : lat;
-          const dotLon = userLonProvided ? userLon : lon;
-          if (dotLat === null || dotLon === null) return null;
-          return (
-            <Marker id="user" lngLat={[dotLon, dotLat]}>
-              <View style={styles.userMarkerWrap}>
-                {/* Pixel-marker pulse is only useful as a "find
-                    yourself" affordance when no geographic halo is
-                    rendered (no accuracy / dev-pinned position). Once
-                    the GeoJSON halo is in place it makes the dot
-                    look like it has two halos — drop the pixel
-                    pulse in that case. */}
-                {!haloFeature && (
-                  <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
-                )}
-                {userAvatarUri && isSupportedImageUrl(userAvatarUri) ? (
-                  <View style={[styles.userAvatarDot, markerDim]}>
-                    <ExpoImage
-                      source={{ uri: userAvatarUri }}
-                      style={styles.userAvatarImage}
-                      cachePolicy="memory-disk"
-                      recyclingKey={userAvatarUri}
-                      autoplay={false}
-                    />
-                  </View>
-                ) : (
-                  <View style={[styles.userDot, markerDim]} />
-                )}
-              </View>
-            </Marker>
-          );
-        })()}
         {/* Merchants: pin colour signals payment type (pink Lightning,
             orange on-chain only). Glyph mirrors the BTC Map category
             icon the user sees on the Places-for-you rail card for the
@@ -649,6 +599,65 @@ const LibreMiniMapInner: React.FC<Props> = ({
             </Marker>
           );
         })}
+        {/* User position — solid dot, rendered LAST so it draws on top
+            of any co-located place pin (e.g. when the user is standing
+            at a merchant like Bee Happy Farm) instead of being hidden
+            behind it. The wrapper is pointerEvents="none" so the
+            decorative dot (no onPress) never captures taps — the
+            co-located clickable merchant / cache / event pin underneath
+            stays tappable even though the dot sits visually on top.
+            This supersedes the earlier "no zIndex, render underneath"
+            approach, which kept the dot invisible whenever a pin shared
+            its coordinate. Three prop modes:
+              - userLat/userLon both numbers → render there.
+              - userLat/userLon both undefined (mini-map default: not
+                passed) → render at camera centre [lon, lat]; centre
+                IS the user in those flows.
+              - userLat/userLon explicitly null → the caller (a detail
+                screen) is telling us "we don't know yet". DON'T fall
+                through to camera centre — that would plant the dot
+                on the cache / merchant / event for one frame before
+                the cached fix arrives, which is exactly the
+                "location momentarily showed as the geo-cache then
+                jumped" bug we hit.
+            The pixel-sized Marker stays a position indicator — sizing
+            it geographically would make it vanish at wide zoom and
+            dominate at close zoom. */}
+        {(() => {
+          const userLatProvided = userLat !== undefined;
+          const userLonProvided = userLon !== undefined;
+          const dotLat = userLatProvided ? userLat : lat;
+          const dotLon = userLonProvided ? userLon : lon;
+          if (dotLat === null || dotLon === null) return null;
+          return (
+            <Marker id="user" lngLat={[dotLon, dotLat]}>
+              <View style={styles.userMarkerWrap} pointerEvents="none">
+                {/* Pixel-marker pulse is only useful as a "find
+                    yourself" affordance when no geographic halo is
+                    rendered (no accuracy / dev-pinned position). Once
+                    the GeoJSON halo is in place it makes the dot
+                    look like it has two halos — drop the pixel
+                    pulse in that case. */}
+                {!haloFeature && (
+                  <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
+                )}
+                {userAvatarUri && isSupportedImageUrl(userAvatarUri) ? (
+                  <View style={[styles.userAvatarDot, markerDim]}>
+                    <ExpoImage
+                      source={{ uri: userAvatarUri }}
+                      style={styles.userAvatarImage}
+                      cachePolicy="memory-disk"
+                      recyclingKey={userAvatarUri}
+                      autoplay={false}
+                    />
+                  </View>
+                ) : (
+                  <View style={[styles.userDot, markerDim]} />
+                )}
+              </View>
+            </Marker>
+          );
+        })()}
       </MapLibreMap>
 
       {/* Top-left: +/− zoom column. Matches ExploreMiniMap's layout

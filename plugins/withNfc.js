@@ -83,6 +83,32 @@ function withNfcAndroid(config) {
               data: [{ $: { 'android:scheme': 'lightningpiggy' } }],
             });
           }
+
+          // NDEF_DISCOVERED for the `nostr:` scheme — conference contact
+          // badges whose first record is `nostr:nprofile1…` / `nostr:npub1…`
+          // (#754). Without this, tapping such a tag while the app is
+          // foreground/background routes to whatever generic Nostr app the
+          // OS picks (or nothing). The VIEW intent filter in app.config.ts
+          // covers the deep-link / cold-launch case; this NDEF filter covers
+          // a foreground tag tap. Scoped to `nostr` only — the JS router in
+          // App.tsx decodes npub / nprofile → ContactProfile and falls back
+          // to UnsupportedEntity for note / nevent.
+          const hasNdefNostrFilter = filters.some(
+            (f) =>
+              Array.isArray(f.action) &&
+              f.action.some(
+                (a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED',
+              ) &&
+              Array.isArray(f.data) &&
+              f.data.some((d) => d.$?.['android:scheme'] === 'nostr'),
+          );
+          if (!hasNdefNostrFilter) {
+            filters.push({
+              action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
+              category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+              data: [{ $: { 'android:scheme': 'nostr' } }],
+            });
+          }
         }
       }
     }
