@@ -34,6 +34,7 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
+import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
 
 // Imperative open — mirrors the BrandedAlert host pattern so the global
@@ -61,27 +62,20 @@ const FIAT_SYMBOLS: Record<string, string> = {
   ZAR: 'R',
 };
 
-const friendlyCooldownReason = (raw: string): string => {
-  const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
-  const total = m ? Number(m[1]) : 0;
-  if (!Number.isFinite(total) || total <= 0) {
-    return 'Cooldown is still running, or the sats budget is used up. Try again later.';
-  }
-  if (total < 90) return 'Claimed very recently — try again in a moment.';
-  const minutes = Math.round(total / 60);
-  if (minutes < 60)
-    return `Claimed recently — try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`;
-  const hours = Math.round(total / 3600);
-  return `Claimed recently — try again in about ${hours} hour${hours === 1 ? '' : 's'}.`;
-};
+// Fallback copy when a cooldown carries no parseable time hint (budget
+// exhausted, generic 'already used') — the live countdown can't run, so show
+// static text instead.
+const COOLDOWN_NO_HINT =
+  'Cooldown is still running, or the sats budget is used up. Try again later.';
 
 type Stage =
   | { kind: 'idle' }
   | { kind: 'resolving' }
   | { kind: 'ready'; params: LnurlWithdrawParams }
   | { kind: 'claiming' }
+  // `remaining` drives the live countdown (null = no time hint from the server).
+  | { kind: 'sleeping'; remaining: number | null }
   | { kind: 'claimed'; sats: number }
-  | { kind: 'sleeping'; reason: string }
   | { kind: 'error'; reason: string };
 
 export function LnurlWithdrawHost(): React.ReactElement {
@@ -140,12 +134,12 @@ export function LnurlWithdrawHost(): React.ReactElement {
         if (!mountedRef.current) return;
         const reason =
           e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
-        const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(
-          reason,
-        );
+        // A "you must wait N / cooldown / used-up budget" reply is a benign
+        // "come back later" — LNbits reusable links rate-limit between uses.
+        // Drive a live countdown from the parsed seconds (null → static copy).
         setStage(
-          sleepy
-            ? { kind: 'sleeping', reason: friendlyCooldownReason(reason) }
+          SLEEPING_PATTERN.test(reason)
+            ? { kind: 'sleeping', remaining: parseCooldownSeconds(reason) }
             : { kind: 'error', reason },
         );
       }
@@ -176,7 +170,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         const params = await resolveLnurlWithdraw(lnurl);
         if (cancelled || !mountedRef.current) return;
         if (params.maxWithdrawable <= 0) {
-          setStage({ kind: 'sleeping', reason: friendlyCooldownReason('') });
+          setStage({ kind: 'sleeping', remaining: null });
           return;
         }
         // Show what's on the voucher (and the amount picker) regardless of
@@ -204,6 +198,22 @@ export function LnurlWithdrawHost(): React.ReactElement {
       cancelled = true;
     };
   }, [lnurl, stage.kind, activeWalletId, handleClaim]);
+
+  // Tick the cooldown countdown each second while sleeping. Decrements the
+  // `remaining` carried in the sleeping stage; stops at 0 (the user can then
+  // re-scan to retry). Mirrors the geo-cache prize sheet (NfcReadSheet).
+  const sleepingRemaining = stage.kind === 'sleeping' ? stage.remaining : null;
+  useEffect(() => {
+    if (sleepingRemaining === null || sleepingRemaining <= 0) return;
+    const t = setInterval(() => {
+      setStage((s) =>
+        s.kind === 'sleeping' && s.remaining !== null && s.remaining > 0
+          ? { ...s, remaining: s.remaining - 1 }
+          : s,
+      );
+    }, 1000);
+    return () => clearInterval(t);
+  }, [sleepingRemaining]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -333,14 +343,43 @@ export function LnurlWithdrawHost(): React.ReactElement {
           </>
         )}
 
-        {(stage.kind === 'sleeping' || stage.kind === 'error') && (
+        {stage.kind === 'sleeping' && (
           <>
             <View style={styles.iconWrap}>
               <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
             </View>
-            <Text style={styles.title}>
-              {stage.kind === 'sleeping' ? 'Nothing to claim right now' : "Couldn't claim"}
-            </Text>
+            <Text style={styles.title}>On cooldown</Text>
+            {stage.remaining !== null && stage.remaining > 0 ? (
+              <>
+                <Text style={styles.countdown} testID="lnurl-withdraw-cooldown">
+                  {formatCountdown(stage.remaining)}
+                </Text>
+                <Text style={styles.memo}>
+                  This voucher was claimed recently — it unlocks when the timer hits zero. Scan
+                  again then.
+                </Text>
+              </>
+            ) : stage.remaining === 0 ? (
+              <Text style={styles.memo}>Unlocked — scan again to claim.</Text>
+            ) : (
+              <Text style={styles.memo}>{COOLDOWN_NO_HINT}</Text>
+            )}
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={close}
+              testID="lnurl-withdraw-close-button"
+            >
+              <Text style={styles.secondaryButtonText}>Close</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {stage.kind === 'error' && (
+          <>
+            <View style={styles.iconWrap}>
+              <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
+            </View>
+            <Text style={styles.title}>Couldn&rsquo;t claim</Text>
             <Text style={styles.memo}>{stage.reason}</Text>
             <TouchableOpacity
               style={styles.secondaryButton}

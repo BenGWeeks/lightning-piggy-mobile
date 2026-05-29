@@ -57,6 +57,13 @@ export const createLnurlWithdrawSheetStyles = (colors: Palette) =>
       marginTop: 2,
     },
     amountFiat: { fontSize: 14, color: colors.textSupplementary },
+    countdown: {
+      fontSize: 36,
+      fontWeight: '800',
+      color: colors.brandPink,
+      fontVariant: ['tabular-nums'],
+      marginVertical: 4,
+    },
     slider: { width: '100%', height: 40, marginTop: 4 },
     rangeRow: {
       flexDirection: 'row',
