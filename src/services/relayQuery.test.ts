@@ -1,4 +1,4 @@
-import { querySyncAbortable } from '../../src/services/relayQuery';
+import { querySyncAbortable } from './relayQuery';
 import type { SimplePool } from 'nostr-tools/pool';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 
