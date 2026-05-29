@@ -672,7 +672,7 @@ The 30 / 90-day chip on MessagesScreen filters summaries by `lastActivityAt` at 
 Two location message types ride on the NIP-17 DM pipeline:
 
 - **Snapshot** — a one-shot `geo:<lat>,<lon>` DM (the original "Send current location").
-- **Live** — an ongoing share for a chosen window (15 min / 1 h). The sender publishes:
+- **Live** — an ongoing share for a chosen window (15 min / 1 h / 8 h). The sender publishes:
   * a NIP-17 *start* marker DM — first line `[live-location:start]`, a `geo:` URI, and a JSON line carrying `{ sessionId, durationMs, startedAt }`;
   * **ephemeral kind-20069 pings** every ~30 s with the latest coordinates (accuracy + heading + timestamp) while the watcher runs;
   * a NIP-17 *end* marker DM — first line `[live-location:end]` — when the user stops or the window expires.

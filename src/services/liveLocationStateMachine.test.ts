@@ -14,6 +14,7 @@ import {
   expiresAt,
   type OutgoingSession,
 } from './liveLocationStateMachine';
+import { MAX_DURATION_MS } from './liveLocationService';
 
 const RECIPIENT = 'a'.repeat(64);
 const SENDER = 'c'.repeat(64);
@@ -29,14 +30,14 @@ describe('liveLocationStateMachine', () => {
       senderPubkey: SENDER,
       sessionId: 's1',
       recipientPubkey: RECIPIENT,
-      // 24 h — well past the 1 h cap.
+      // 24 h — well past MAX_DURATION_MS.
       durationMs: 24 * 60 * 60 * 1000,
       now: 1_700_000_000_000,
     });
     const session = next.get('s1');
     expect(session).toBeDefined();
     expect(session?.status).toBe('active');
-    expect(session?.durationMs).toBe(60 * 60 * 1000);
+    expect(session?.durationMs).toBe(MAX_DURATION_MS);
     expect(session?.startMarkerSent).toBe(false);
     expect(activeSessions(next)).toHaveLength(1);
   });

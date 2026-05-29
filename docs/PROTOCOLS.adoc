@@ -99,7 +99,7 @@ Live-location sharing rides on the DM pipeline above plus one ephemeral event ki
 | First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.
 |===
 
-Durations are capped to `MAX_DURATION_MS` (1 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
+Durations are capped to `MAX_DURATION_MS` (8 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
 
 === Hunt: Lightning extension to NIP-GC (#468)
 

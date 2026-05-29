@@ -1,5 +1,5 @@
 /**
- * Live-location share — the user picks a duration (15 min / 1 h),
+ * Live-location share — the user picks a duration (15 min / 1 h / 8 h),
  * we send a NIP-17 DM "Live location share started" with initial coords +
  * a sessionId + the chosen duration, then publish ephemeral kind-20069
  * pings every ~30 s with the latest coordinates while the watcher is
@@ -44,19 +44,20 @@ export const DEFAULT_PING_INTERVAL_MS = 30_000;
 /** Cap on a single live-share session. Prevents runaway shares if the
  *  app is left running unattended; the user can stop earlier at any
  *  time from the in-thread bubble. */
-export const MAX_DURATION_MS = 60 * 60 * 1000;
+export const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
 
 /** Predefined duration options users can pick from in the chooser. */
-export const DURATION_OPTIONS: ReadonlyArray<{
+export const DURATION_OPTIONS: readonly {
   /** Stable id used as a Maestro test selector. */
-  id: '15m' | '1h';
+  id: '15m' | '1h' | '8h';
   /** Human label for the picker row. */
   label: string;
   /** Duration in milliseconds. Always ≤ MAX_DURATION_MS. */
   ms: number;
-}> = [
+}[] = [
   { id: '15m', label: '15 minutes', ms: 15 * 60 * 1000 },
   { id: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
+  { id: '8h', label: '8 hours', ms: 8 * 60 * 60 * 1000 },
 ];
 
 /** Sentinel headers — the receiver matches these to classify a regular
