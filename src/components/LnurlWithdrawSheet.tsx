@@ -148,11 +148,16 @@ export function LnurlWithdrawHost(): React.ReactElement {
         });
         return;
       }
-      // Stamp BEFORE entering 'claiming' (not after success): the auto-dismiss
-      // effect runs in the 'claiming' stage too, and with claimedAtRef still 0 a
-      // stale `lastIncomingPayment` from an earlier receive would pass the
-      // `at < claimedAtRef` guard and dismiss the sheet mid-claim (Copilot).
+      // Reset the match refs at the START of each claim, BEFORE entering
+      // 'claiming': the auto-dismiss effect runs in 'claiming' too, and stale
+      // values from a PREVIOUS claim would otherwise leak — a left-over
+      // `expectedPaymentHashRef` (or, on the hashless amount-match fallback, a
+      // left-over `claimedSatsRef`) could make an unrelated incoming payment
+      // dismiss the sheet. `claimedAtRef = now` also fails the `at < claimedAtRef`
+      // guard for any pre-existing `lastIncomingPayment` (Copilot).
       claimedAtRef.current = Date.now();
+      claimedSatsRef.current = 0;
+      expectedPaymentHashRef.current = null;
       setStage({ kind: 'claiming' });
       try {
         const msat = sats * 1000;
@@ -340,6 +345,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
           setLnurl(null);
           setStage({ kind: 'idle' });
           setAmountSats(0);
+          // Close the Add-wallet wizard too, so it can't linger orphaned after
+          // the claim sheet that launched it is gone (Copilot).
+          setWizardOpen(false);
         }}
       >
         <BottomSheetScrollView
@@ -405,6 +413,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 onChange={setAmountSats}
                 colors={colors}
                 testID="lnurl-withdraw-amount-slider"
+                accessibilityLabel="Claim amount in sats"
               />
               <View style={styles.rangeRow}>
                 <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>

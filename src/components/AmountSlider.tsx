@@ -15,6 +15,8 @@ interface Props {
   onChange: (value: number) => void;
   colors: Palette;
   testID?: string;
+  /** Spoken label for the adjustable control (e.g. "Claim amount in sats"). */
+  accessibilityLabel?: string;
 }
 
 /**
@@ -31,6 +33,7 @@ export function AmountSlider({
   onChange,
   colors,
   testID,
+  accessibilityLabel,
 }: Props): React.ReactElement {
   const styles = useMemo(() => createAmountSliderStyles(colors), [colors]);
   const [width, setWidth] = useState(0);
@@ -74,6 +77,7 @@ export function AmountSlider({
       }}
       testID={testID}
       accessible
+      accessibilityLabel={accessibilityLabel}
       accessibilityRole="adjustable"
       accessibilityValue={{ min, max, now: value }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
