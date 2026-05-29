@@ -9,6 +9,10 @@
 // Bech32 charset for LNURL decoding
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
+// Cap LNURL endpoint resolution so a network stall can't hang a cold-start
+// deep link indefinitely (#756 Copilot review).
+const LNURL_FETCH_TIMEOUT_MS = 15_000;
+
 export interface LnurlWithdrawParams {
   callback: string;
   k1: string;
@@ -153,6 +157,95 @@ export function decodeLnurl(lnurl: string): string {
 }
 
 /**
+ * Normalise any user-pasteable / tapped LNURL form into the underlying
+ * HTTPS endpoint URL, WITHOUT fetching it:
+ *   - `lightning:` URI prefix (stripped)
+ *   - bech32 `lnurl1…` / `LNURL1…` (decoded via {@link decodeLnurl})
+ *   - cleartext `lnurlp://` / `lnurlw://` / `lnurl://host/path` (→ `https://`)
+ *   - raw `https://…` endpoint URLs (passed through)
+ *
+ * Mirrors `lnurlWithdrawService.decodeLnurlWithdraw` but is direction-
+ * agnostic: it does not assume pay vs withdraw — the resolved `tag`
+ * decides that (see {@link resolveLnurlDirection}). Throws on anything
+ * that isn't a recognisable LNURL form, or that decodes to a non-HTTPS
+ * URL (the LUD-01 .onion-over-HTTP exception is allowed via decodeLnurl).
+ */
+export function normalizeLnurlToUrl(input: string): string {
+  let s = input.trim();
+  if (!s) throw new Error('Empty LNURL');
+
+  // Strip the Lightning URI prefix when present.
+  if (/^lightning:/i.test(s)) {
+    s = s.slice('lightning:'.length).trim();
+  }
+
+  // Cleartext LUD-17 forms: `lnurlp://`, `lnurlw://`, `lnurl://`. Per LUD-17
+  // these map to http:// for `.onion` Tor hosts and https:// elsewhere.
+  const cleartext = s.match(/^(?:lnurlp|lnurlw|lnurl):\/\/(.+)$/i);
+  if (cleartext) {
+    const rest = cleartext[1];
+    // Reject a nested scheme (e.g. `lnurl://https://evil/…`) — concatenating
+    // would yield `https://https://…`, a malformed/confusable URL.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) {
+      throw new Error('Malformed LNURL endpoint (nested scheme)');
+    }
+    const host = rest.split(/[/:?#]/, 1)[0].toLowerCase();
+    const built = (host.endsWith('.onion') ? 'http://' : 'https://') + rest;
+    let parsed: URL;
+    try {
+      parsed = new URL(built);
+    } catch {
+      throw new Error('Malformed LNURL endpoint');
+    }
+    if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) {
+      throw new Error('Malformed LNURL endpoint');
+    }
+    return built;
+  }
+
+  // bech32 form. decodeLnurl validates HRP + checksum + HTTPS scheme.
+  if (/^lnurl1/i.test(s)) {
+    return decodeLnurl(s);
+  }
+
+  // Raw https endpoint (e.g. a LUD-06 LNURL-pay URL).
+  if (/^https:\/\//i.test(s)) return s;
+
+  throw new Error(
+    'Not a recognised LNURL — expected lnurl1…, lnurlp://, lnurlw://, lightning:LNURL1…, or https://',
+  );
+}
+
+/**
+ * Single shared resolver that fetches an LNURL endpoint ONCE and reports
+ * which *direction* the link is — pay (money out → SendSheet) vs withdraw
+ * (money in → claim sheet) — keyed off the server's resolved `tag`, NOT
+ * the bech32 prefix.
+ *
+ * This is the disambiguation point the scan-to-pay (#756) and
+ * scan-to-claim (#341) flows both agree on: a `lnurl1…` that *looks*
+ * payable might actually be a withdrawRequest and vice-versa, so the only
+ * correct signal is the `tag` the endpoint returns.
+ *
+ * @returns `{ kind: 'pay', tag: 'payRequest', params }` or
+ *          `{ kind: 'withdraw', tag: 'withdrawRequest', params }`.
+ * @throws on transport failure, non-OK status, or an unsupported tag.
+ */
+export async function resolveLnurlDirection(
+  input: string,
+): Promise<
+  | { kind: 'pay'; tag: 'payRequest'; params: LnurlPayParams; url: string }
+  | { kind: 'withdraw'; tag: 'withdrawRequest'; params: LnurlWithdrawParams; url: string }
+> {
+  const url = normalizeLnurlToUrl(input);
+  const resolved = await resolveLnurlFromUrl(url);
+  if (resolved.tag === 'payRequest') {
+    return { kind: 'pay', tag: 'payRequest', params: resolved.params, url };
+  }
+  return { kind: 'withdraw', tag: 'withdrawRequest', params: resolved.params, url };
+}
+
+/**
  * Resolve an LNURL string to either pay or withdraw parameters.
  * Returns an object with a `tag` field indicating the type.
  */
@@ -163,7 +256,33 @@ export async function resolveLnurl(
   | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
 > {
   const url = decodeLnurl(lnurl); // decodeLnurl validates HTTPS
-  const response = await fetch(url);
+  return resolveLnurlFromUrl(url);
+}
+
+/**
+ * Fetch an already-resolved LNURL endpoint URL and shape its JSON into the
+ * pay / withdraw param objects. Shared by {@link resolveLnurl} (bech32-only
+ * entry) and {@link resolveLnurlDirection} (all URI forms).
+ */
+async function resolveLnurlFromUrl(
+  url: string,
+): Promise<
+  | { tag: 'payRequest'; params: LnurlPayParams }
+  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
+> {
+  // Bound the fetch — RN's fetch can hang indefinitely on a network stall, and
+  // for a cold-start deep link that would leave the user with no resolution and
+  // no error toast for an unbounded time.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LNURL_FETCH_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+  } catch (e) {
+    throw new Error(`Could not reach LNURL endpoint: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to resolve LNURL (${response.status})`);

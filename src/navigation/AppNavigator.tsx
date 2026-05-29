@@ -76,6 +76,27 @@ let __appNavigatorFirstRenderLogged = false;
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
+/**
+ * Open the SendSheet on the Home (wallet) tab pre-filled with a pay
+ * payload — a bolt11 invoice (`lnbc…`), a Lightning Address (`user@host`),
+ * or a resolved LNURL-pay endpoint URL. Consumed by `App.tsx`'s Linking
+ * listener for scan-to-pay (#756), the outbound mirror of
+ * `navigateToHuntFound` (scan-to-claim / withdraw, #341).
+ *
+ * HomeScreen reads `route.params.sendToAddress` and feeds it straight into
+ * SendSheet's `processInput`, which already decodes bolt11 + Lightning
+ * Address. Returns false if the nav tree isn't mounted yet so the caller
+ * can retry on cold start.
+ */
+export const navigateToSend = (initialAddress: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: { screen: 'Home', params: { sendToAddress: initialAddress } },
+  });
+  return true;
+};
+
 export const navigateToHuntFound = (lnurl: string): boolean => {
   if (!navigationRef.isReady()) return false;
   navigationRef.navigate('Main', {
