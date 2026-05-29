@@ -34,6 +34,7 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
+import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
 
@@ -137,11 +138,16 @@ export function LnurlWithdrawHost(): React.ReactElement {
         // A "you must wait N / cooldown / used-up budget" reply is a benign
         // "come back later" — LNbits reusable links rate-limit between uses.
         // Drive a live countdown from the parsed seconds (null → static copy).
-        setStage(
-          SLEEPING_PATTERN.test(reason)
-            ? { kind: 'sleeping', remaining: parseCooldownSeconds(reason) }
-            : { kind: 'error', reason },
-        );
+        if (SLEEPING_PATTERN.test(reason)) {
+          setStage({ kind: 'sleeping', remaining: parseCooldownSeconds(reason) });
+          return;
+        }
+        // LNURL-issuer errors are meaningful → show as-is. Wallet-side NWC/relay
+        // failures surface a cryptic SDK string ("reply timeout: event …") → map
+        // to friendly copy (#734).
+        const friendly =
+          e instanceof LnurlWithdrawError ? null : friendlyClaimError(reason, 'the funds');
+        setStage({ kind: 'error', reason: friendly ?? reason });
       }
     },
     [activeWalletId, makeInvoice],
