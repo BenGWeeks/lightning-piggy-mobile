@@ -128,6 +128,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
 
   // Stamps so the auto-dismiss effect only reacts to OUR claim's settle.
   const claimedAtRef = useRef(0);
+  const claimedSatsRef = useRef(0);
   const expectedPaymentHashRef = useRef<string | null>(null);
 
   const minSats = stage.kind === 'ready' ? Math.ceil(stage.params.minWithdrawable / 1000) : 0;
@@ -160,6 +161,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         // Stamp the claim moment so the auto-dismiss effect only reacts to a
         // settle that lands AFTER this point.
         claimedAtRef.current = Date.now();
+        claimedSatsRef.current = result.sats;
         setStage({ kind: 'claimed', sats: result.sats });
         // Register the invoice with the wallet context's ~1s aggressive poll so
         // the incoming-payment celebration fires and the balance + transaction
@@ -260,9 +262,12 @@ export function LnurlWithdrawHost(): React.ReactElement {
   // Tick the cooldown countdown each second while sleeping. Decrements the
   // `remaining` carried in the sleeping stage; stops at 0 (the user can then
   // re-scan to retry). Mirrors the geo-cache prize sheet (NfcReadSheet).
-  const sleepingRemaining = stage.kind === 'sleeping' ? stage.remaining : null;
+  // Dep on a BOOLEAN (counting-down or not), not the numeric remaining — else
+  // every 1s decrement would tear down + recreate the interval (Stevie review).
+  const isCountingDown =
+    stage.kind === 'sleeping' && stage.remaining !== null && stage.remaining > 0;
   useEffect(() => {
-    if (sleepingRemaining === null || sleepingRemaining <= 0) return;
+    if (!isCountingDown) return;
     const t = setInterval(() => {
       setStage((s) =>
         s.kind === 'sleeping' && s.remaining !== null && s.remaining > 0
@@ -271,7 +276,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
       );
     }, 1000);
     return () => clearInterval(t);
-  }, [sleepingRemaining]);
+  }, [isCountingDown]);
 
   // Auto-dismiss once OUR claim's payment actually lands. The app-root
   // GlobalIncomingPaymentOverlay shows the celebration; we close the sheet
@@ -283,11 +288,18 @@ export function LnurlWithdrawHost(): React.ReactElement {
     if (!lastIncomingPayment) return;
     if (lastIncomingPayment.at < claimedAtRef.current) return;
     if (lastIncomingPayment.walletId !== selectedWalletId) return;
-    if (
-      expectedPaymentHashRef.current &&
-      lastIncomingPayment.paymentHash &&
-      lastIncomingPayment.paymentHash !== expectedPaymentHashRef.current
-    ) {
+    if (expectedPaymentHashRef.current) {
+      // Hash known → it must match our invoice.
+      if (
+        lastIncomingPayment.paymentHash &&
+        lastIncomingPayment.paymentHash !== expectedPaymentHashRef.current
+      ) {
+        return;
+      }
+    } else if (lastIncomingPayment.amountSats !== claimedSatsRef.current) {
+      // No invoice hash to match on (paymentHashFromBolt11 returned null) → fall
+      // back to an exact amount match so an unrelated same-wallet zap landing
+      // right after the claim can't dismiss the sheet prematurely (Archie review).
       return;
     }
     sheetRef.current?.dismiss();
@@ -407,8 +419,14 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 />
               </View>
               <TouchableOpacity
-                style={[styles.primaryButton, !selectedWalletId && styles.primaryButtonDisabled]}
-                disabled={!selectedWalletId}
+                style={[
+                  styles.primaryButton,
+                  (!selectedWalletId || amountSats < minSats || amountSats > maxSats) &&
+                    styles.primaryButtonDisabled,
+                ]}
+                // Block a sub-min / over-max claim — the typed field allows
+                // below-min until blur, and the issuer would reject it (Archie).
+                disabled={!selectedWalletId || amountSats < minSats || amountSats > maxSats}
                 onPress={() => lnurl && handleClaim(stage.params, amountSats, lnurl)}
                 accessibilityLabel={`Claim ${amountSats} sats`}
                 testID="lnurl-withdraw-claim-button"

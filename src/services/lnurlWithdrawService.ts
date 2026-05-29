@@ -182,10 +182,12 @@ export const claimLnurlWithdraw = async (
   params: LnurlWithdrawParams,
   getInvoice: (sats: number, memo: string) => Promise<string>,
 ): Promise<{ sats: number; bolt11: string }> => {
-  // Always claim the maximum the issuer offers. Min/max being equal is
-  // the common case (single-amount Piggy); when they differ we still
-  // pick max — finders want the biggest claim available, not the
-  // smallest. The bolt11 we generate has the exact amount baked in.
+  // Claims `params.maxWithdrawable`. There is no separate amount argument by
+  // design: to claim a specific amount, the caller pre-clamps the params so
+  // `minWithdrawable === maxWithdrawable === <chosen msats>` (both UI callers do
+  // this from the amount picker). With an un-clamped range this claims the max,
+  // which is the right default for a single-amount voucher. The bolt11 we
+  // generate has the exact amount baked in.
   const sats = msatToSats(params.maxWithdrawable);
   if (sats <= 0) {
     throw new LnurlWithdrawError(

@@ -72,6 +72,7 @@ export function AmountSlider({
       }}
       testID={testID}
       accessibilityRole="adjustable"
+      accessibilityValue={{ min, max, now: value }}
       {...pan.panHandlers}
     >
       <View style={styles.track} />
