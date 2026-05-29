@@ -15,12 +15,13 @@
  * hint) → claim into the active wallet.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
+  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import Slider from '@react-native-community/slider';
 import { Gift, PartyPopper } from 'lucide-react-native';
@@ -222,6 +223,15 @@ export function LnurlWithdrawHost(): React.ReactElement {
     <BottomSheetModal
       ref={sheetRef}
       enableDynamicSizing
+      // The native Slider needs the horizontal drag — without this the sheet's
+      // content pan-gesture swallows it and the thumb won't move. The sheet is
+      // still draggable/dismissable via its handle + backdrop.
+      enableContentPanningGesture={false}
+      // Lift the sheet above the keyboard so the typed amount field stays
+      // visible (paired with BottomSheetTextInput below).
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handle}
       backdropComponent={renderBackdrop}
@@ -275,7 +285,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <Text style={styles.rangeText}>{maxSats.toLocaleString()} max</Text>
             </View>
             <View style={styles.amountInputRow}>
-              <TextInput
+              <BottomSheetTextInput
                 style={styles.amountInput}
                 keyboardType="number-pad"
                 value={String(amountSats)}
