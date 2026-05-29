@@ -166,6 +166,19 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
+    // Stop-share button sits on the pink (outgoing) live-location card — it can't reuse the brand-pink invoice button (pink-on-pink), so it gets a white border + subtle translucent fill to read as a button.
+    liveStopButton: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.7)',
+      backgroundColor: 'rgba(255,255,255,0.15)',
+    },
     contactCard: {
       maxWidth: '85%',
       minWidth: 240,

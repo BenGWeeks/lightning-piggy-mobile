@@ -343,7 +343,7 @@ const MessageBubble: React.FC<Props> = ({
             ) : null}
             {showStop ? (
               <TouchableOpacity
-                style={styles.invoicePayButton}
+                style={styles.liveStopButton}
                 onPress={() => onStopLiveLocation?.(marker.sessionId)}
                 accessibilityLabel="Stop sharing live location"
                 testID={`${testIdPrefix}-live-location-stop-${id}`}
