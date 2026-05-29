@@ -50,12 +50,27 @@ export const createLnurlWithdrawSheetStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       textAlign: 'center',
     },
-    amountValue: {
+    // The headline amount is itself the editable field — big, bold, with a
+    // pink underline to signal it's tappable/typeable.
+    amountRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 2,
+    },
+    amountInput: {
+      minWidth: 90,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderBottomWidth: 2,
+      borderBottomColor: colors.brandPink,
       fontSize: 30,
       fontWeight: '800',
       color: colors.textHeader,
-      marginTop: 2,
+      textAlign: 'center',
     },
+    amountUnit: { fontSize: 30, fontWeight: '800', color: colors.textHeader },
     amountFiat: { fontSize: 14, color: colors.textSupplementary },
     countdown: {
       fontSize: 36,
@@ -64,7 +79,6 @@ export const createLnurlWithdrawSheetStyles = (colors: Palette) =>
       fontVariant: ['tabular-nums'],
       marginVertical: 4,
     },
-    slider: { width: '100%', height: 40, marginTop: 4 },
     rangeRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -72,20 +86,7 @@ export const createLnurlWithdrawSheetStyles = (colors: Palette) =>
       marginTop: -6,
     },
     rangeText: { fontSize: 12, color: colors.textSupplementary },
-    amountInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
-    amountInput: {
-      minWidth: 130,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    amountInputUnit: { fontSize: 15, color: colors.textSupplementary, fontWeight: '600' },
+    pickerWrap: { alignSelf: 'stretch', marginTop: 4 },
     primaryButton: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -98,6 +99,7 @@ export const createLnurlWithdrawSheetStyles = (colors: Palette) =>
       marginTop: 8,
       alignSelf: 'stretch',
     },
+    primaryButtonDisabled: { opacity: 0.5 },
     primaryButtonText: { color: colors.white, fontSize: 16, fontWeight: '700' },
     secondaryButton: { paddingVertical: 12, paddingHorizontal: 24 },
     secondaryButtonText: { color: colors.brandPink, fontSize: 14, fontWeight: '700' },

@@ -11,8 +11,10 @@
  * a full-screen page.
  *
  * Flow: resolve LUD-03 → fixed-amount (min === max) auto-claims; variable
- * (min < max) shows an amount picker (slider + typed field, default max, fiat
- * hint) → claim into the active wallet.
+ * (min < max) shows an amount picker (editable amount + bold slider, default
+ * max, fiat hint) and a destination-wallet chooser → claim into the chosen
+ * Lightning wallet. On settle the app-root celebration fires and the sheet
+ * auto-dismisses.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
@@ -23,7 +25,6 @@ import {
   BottomSheetView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
-import Slider from '@react-native-community/slider';
 import { Gift, PartyPopper } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
@@ -37,6 +38,9 @@ import { recordClaim } from '../services/claimHistoryService';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
+import { AmountSlider } from './AmountSlider';
+import PrizeWalletPicker from './PrizeWalletPicker';
+import AddWalletWizard from './AddWalletWizard';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
 
 // Imperative open — mirrors the BrandedAlert host pattern so the global
@@ -65,8 +69,7 @@ const FIAT_SYMBOLS: Record<string, string> = {
 };
 
 // Fallback copy when a cooldown carries no parseable time hint (budget
-// exhausted, generic 'already used') — the live countdown can't run, so show
-// static text instead.
+// exhausted) — the live countdown can't run, so show static text instead.
 const COOLDOWN_NO_HINT =
   'Cooldown is still running, or the sats budget is used up. Try again later.';
 
@@ -83,7 +86,8 @@ type Stage =
 export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice, btcPrice, currency, expectPayment } = useWallet();
+  const { wallets, makeInvoiceForWallet, btcPrice, currency, expectPayment, lastIncomingPayment } =
+    useWallet();
 
   const sheetRef = useRef<BottomSheetModal>(null);
   const mountedRef = useRef(true);
@@ -97,6 +101,23 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const [lnurl, setLnurl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [amountSats, setAmountSats] = useState<number>(0);
+
+  // Destination-wallet chooser (same model as the geo-cache prize sheet): only
+  // Lightning (NWC) wallets can mint a bolt11 to receive the withdrawal.
+  const lightningWallets = useMemo(() => wallets.filter((w) => w.walletType === 'nwc'), [wallets]);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // Default to the first Lightning wallet; keep a manual pick while it's valid.
+  useEffect(() => {
+    const stillValid =
+      selectedWalletId !== null && lightningWallets.some((w) => w.id === selectedWalletId);
+    if (stillValid) return;
+    setSelectedWalletId(lightningWallets[0]?.id ?? null);
+  }, [lightningWallets, selectedWalletId]);
+
+  // Stamps so the auto-dismiss effect only reacts to OUR claim's settle.
+  const claimedAtRef = useRef(0);
+  const expectedPaymentHashRef = useRef<string | null>(null);
 
   const minSats = stage.kind === 'ready' ? Math.ceil(stage.params.minWithdrawable / 1000) : 0;
   const maxSats = stage.kind === 'ready' ? Math.floor(stage.params.maxWithdrawable / 1000) : 0;
@@ -114,10 +135,10 @@ export function LnurlWithdrawHost(): React.ReactElement {
 
   const handleClaim = useCallback(
     async (params: LnurlWithdrawParams, sats: number, sourceLnurl: string) => {
-      if (!activeWalletId) {
+      if (!selectedWalletId) {
         setStage({
           kind: 'error',
-          reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+          reason: 'No Lightning wallet connected — add one first, then try again.',
         });
         return;
       }
@@ -126,11 +147,14 @@ export function LnurlWithdrawHost(): React.ReactElement {
         const msat = sats * 1000;
         const result = await claimLnurlWithdraw(
           { ...params, minWithdrawable: msat, maxWithdrawable: msat },
-          async (s, memo) => makeInvoice(s, memo),
+          async (s, memo) => makeInvoiceForWallet(selectedWalletId, s, memo),
         );
         if (!mountedRef.current) return;
         await recordClaim({ lnurl: sourceLnurl, sats: result.sats });
         if (!mountedRef.current) return;
+        // Stamp the claim moment so the auto-dismiss effect only reacts to a
+        // settle that lands AFTER this point.
+        claimedAtRef.current = Date.now();
         setStage({ kind: 'claimed', sats: result.sats });
         // Register the invoice with the wallet context's ~1s aggressive poll so
         // the incoming-payment celebration fires and the balance + transaction
@@ -139,7 +163,8 @@ export function LnurlWithdrawHost(): React.ReactElement {
         // until a manual pull-to-refresh. Mirrors NfcReadSheet (#341 follow-up).
         const paymentHash = paymentHashFromBolt11(result.bolt11);
         if (paymentHash) {
-          expectPayment(activeWalletId, paymentHash, result.sats);
+          expectedPaymentHashRef.current = paymentHash;
+          expectPayment(selectedWalletId, paymentHash, result.sats);
         }
       } catch (e) {
         if (!mountedRef.current) return;
@@ -160,7 +185,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         setStage({ kind: 'error', reason: friendly ?? reason });
       }
     },
-    [activeWalletId, makeInvoice, expectPayment],
+    [selectedWalletId, makeInvoiceForWallet, expectPayment],
   );
 
   // Open + resolve when a deep-link fires.
@@ -189,10 +214,6 @@ export function LnurlWithdrawHost(): React.ReactElement {
           setStage({ kind: 'sleeping', remaining: null });
           return;
         }
-        // Show what's on the voucher (and the amount picker) regardless of
-        // wallet state — only require a connected wallet at Redeem time. A user
-        // scanning a gift card should see its value before being told to add a
-        // wallet; `handleClaim` guards the actual claim.
         // Whole-sat bounds. `lo`/`hi` can invert (hi < lo) when the issuer's
         // millisat range brackets no integer sat (e.g. 2500–2999 msat → lo=3,
         // hi=2). Auto-claiming hi there sends an amount below min and the claim
@@ -206,6 +227,8 @@ export function LnurlWithdrawHost(): React.ReactElement {
           });
           return;
         }
+        // Show the voucher + picker regardless of wallet state — a connected
+        // wallet is only required at Redeem time (the picker offers Add wallet).
         if (lo < hi) {
           setAmountSats(hi);
           setStage({ kind: 'ready', params });
@@ -224,7 +247,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [lnurl, stage.kind, activeWalletId, handleClaim]);
+  }, [lnurl, stage.kind, handleClaim]);
 
   // Tick the cooldown countdown each second while sleeping. Decrements the
   // `remaining` carried in the sleeping stage; stops at 0 (the user can then
@@ -242,6 +265,26 @@ export function LnurlWithdrawHost(): React.ReactElement {
     return () => clearInterval(t);
   }, [sleepingRemaining]);
 
+  // Auto-dismiss once OUR claim's payment actually lands. The app-root
+  // GlobalIncomingPaymentOverlay shows the celebration; we close the sheet
+  // behind it so tapping its OK doesn't reveal a stale "X sats inbound!" sheet.
+  // Hash-scoped (when known) + post-claim + same-wallet so unrelated incoming
+  // payments can't dismiss it. #341.
+  useEffect(() => {
+    if (stage.kind !== 'claimed' && stage.kind !== 'claiming') return;
+    if (!lastIncomingPayment) return;
+    if (lastIncomingPayment.at < claimedAtRef.current) return;
+    if (lastIncomingPayment.walletId !== selectedWalletId) return;
+    if (
+      expectedPaymentHashRef.current &&
+      lastIncomingPayment.paymentHash &&
+      lastIncomingPayment.paymentHash !== expectedPaymentHashRef.current
+    ) {
+      return;
+    }
+    sheetRef.current?.dismiss();
+  }, [lastIncomingPayment, stage.kind, selectedWalletId]);
+
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop
@@ -257,167 +300,175 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const close = () => sheetRef.current?.dismiss();
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      enableDynamicSizing
-      // The native Slider needs the horizontal drag — without this the sheet's
-      // content pan-gesture swallows it and the thumb won't move. The sheet is
-      // still draggable/dismissable via its handle + backdrop.
-      enableContentPanningGesture={false}
-      // Lift the sheet above the keyboard so the typed amount field stays
-      // visible (paired with BottomSheetTextInput below).
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handle}
-      backdropComponent={renderBackdrop}
-      onDismiss={() => {
-        setLnurl(null);
-        setStage({ kind: 'idle' });
-        setAmountSats(0);
-      }}
-    >
-      <BottomSheetView style={styles.content} testID="lnurl-withdraw-sheet">
-        {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
-          <>
-            <View style={styles.iconWrap}>
-              <Gift size={56} color={colors.brandPink} strokeWidth={2} />
-            </View>
-            <Text style={styles.title}>Claim funds</Text>
-            <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 4 }} />
-            <Text style={styles.fineprint}>
-              {stage.kind === 'resolving' ? 'Looking up this voucher…' : 'Claiming sats…'}
-            </Text>
-          </>
-        )}
-
-        {stage.kind === 'ready' && (
-          <>
-            <View style={styles.iconWrap}>
-              <Gift size={56} color={colors.brandPink} strokeWidth={2} />
-            </View>
-            <Text style={styles.title}>Claim funds</Text>
-            {stage.params.defaultDescription ? (
-              <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
-            ) : null}
-            <Text style={styles.amountValue} testID="lnurl-withdraw-amount-sats">
-              {amountSats.toLocaleString()} sats
-            </Text>
-            {fiatLabel ? <Text style={styles.amountFiat}>{fiatLabel}</Text> : null}
-            <Slider
-              style={styles.slider}
-              minimumValue={minSats}
-              maximumValue={maxSats}
-              step={1}
-              value={amountSats}
-              onValueChange={(v) => setAmountSats(Math.round(v))}
-              minimumTrackTintColor={colors.brandPink}
-              maximumTrackTintColor={colors.textSupplementary}
-              thumbTintColor={colors.brandPink}
-              testID="lnurl-withdraw-amount-slider"
-            />
-            <View style={styles.rangeRow}>
-              <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
-              <Text style={styles.rangeText}>{maxSats.toLocaleString()} max</Text>
-            </View>
-            <View style={styles.amountInputRow}>
-              <BottomSheetTextInput
-                style={styles.amountInput}
-                keyboardType="number-pad"
-                value={String(amountSats)}
-                onChangeText={(t) => {
-                  const n = parseInt(t.replace(/[^0-9]/g, ''), 10);
-                  setAmountSats(
-                    Number.isFinite(n) ? Math.min(maxSats, Math.max(minSats, n)) : minSats,
-                  );
-                }}
-                testID="lnurl-withdraw-amount-input"
-                accessibilityLabel="Claim amount in sats"
-              />
-              <Text style={styles.amountInputUnit}>sats</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => lnurl && handleClaim(stage.params, amountSats, lnurl)}
-              accessibilityLabel={`Claim ${amountSats} sats`}
-              testID="lnurl-withdraw-claim-button"
-            >
-              <Gift size={20} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.primaryButtonText}>
-                Redeem {amountSats.toLocaleString()} sats
+    <>
+      <BottomSheetModal
+        ref={sheetRef}
+        enableDynamicSizing
+        // The custom slider + dropdown need the touch; let the sheet be dragged
+        // / dismissed via its handle + backdrop only.
+        enableContentPanningGesture={false}
+        // Lift the sheet above the keyboard so the editable amount stays visible.
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handle}
+        backdropComponent={renderBackdrop}
+        onDismiss={() => {
+          setLnurl(null);
+          setStage({ kind: 'idle' });
+          setAmountSats(0);
+        }}
+      >
+        <BottomSheetView style={styles.content} testID="lnurl-withdraw-sheet">
+          {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
+            <>
+              <View style={styles.iconWrap}>
+                <Gift size={56} color={colors.brandPink} strokeWidth={2} />
+              </View>
+              <Text style={styles.title}>Claim funds</Text>
+              <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 4 }} />
+              <Text style={styles.fineprint}>
+                {stage.kind === 'resolving' ? 'Looking up this voucher…' : 'Claiming sats…'}
               </Text>
-            </TouchableOpacity>
-          </>
-        )}
+            </>
+          )}
 
-        {stage.kind === 'claimed' && (
-          <>
-            <View style={styles.iconWrapSuccess}>
-              <PartyPopper size={56} color={colors.green} strokeWidth={2} />
-            </View>
-            <Text style={styles.title}>{stage.sats.toLocaleString()} sats inbound!</Text>
-            <Text style={styles.memo}>
-              Sent to your wallet — the celebration fires when they land.
-            </Text>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={close}
-              testID="lnurl-withdraw-done-button"
-            >
-              <Text style={styles.primaryButtonText}>Done</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {stage.kind === 'sleeping' && (
-          <>
-            <View style={styles.iconWrap}>
-              <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-            </View>
-            <Text style={styles.title}>On cooldown</Text>
-            {stage.remaining !== null && stage.remaining > 0 ? (
-              <>
-                <Text style={styles.countdown} testID="lnurl-withdraw-cooldown">
-                  {formatCountdown(stage.remaining)}
+          {stage.kind === 'ready' && (
+            <>
+              <View style={styles.iconWrap}>
+                <Gift size={56} color={colors.brandPink} strokeWidth={2} />
+              </View>
+              <Text style={styles.title}>Claim funds</Text>
+              {stage.params.defaultDescription ? (
+                <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
+              ) : null}
+              {/* Big, editable amount — the headline figure IS the input. */}
+              <View style={styles.amountRow}>
+                <BottomSheetTextInput
+                  style={styles.amountInput}
+                  keyboardType="number-pad"
+                  value={amountSats > 0 ? String(amountSats) : ''}
+                  onChangeText={(t) => {
+                    const digits = t.replace(/[^0-9]/g, '');
+                    const n = digits === '' ? 0 : parseInt(digits, 10);
+                    setAmountSats(Math.min(maxSats, Number.isFinite(n) ? n : 0));
+                  }}
+                  onBlur={() => {
+                    if (amountSats < minSats) setAmountSats(minSats);
+                  }}
+                  testID="lnurl-withdraw-amount-input"
+                  accessibilityLabel="Claim amount in sats"
+                />
+                <Text style={styles.amountUnit}>sats</Text>
+              </View>
+              {fiatLabel ? <Text style={styles.amountFiat}>{fiatLabel}</Text> : null}
+              <AmountSlider
+                min={minSats}
+                max={maxSats}
+                value={amountSats}
+                onChange={setAmountSats}
+                colors={colors}
+                testID="lnurl-withdraw-amount-slider"
+              />
+              <View style={styles.rangeRow}>
+                <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
+                <Text style={styles.rangeText}>{maxSats.toLocaleString()} max</Text>
+              </View>
+              {/* Destination-wallet chooser (reused from the geo-cache prize flow). */}
+              <View style={styles.pickerWrap}>
+                <PrizeWalletPicker
+                  lightningWallets={lightningWallets}
+                  selectedWalletId={selectedWalletId}
+                  onSelect={setSelectedWalletId}
+                  onAddWallet={() => setWizardOpen(true)}
+                  colors={colors}
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.primaryButton, !selectedWalletId && styles.primaryButtonDisabled]}
+                disabled={!selectedWalletId}
+                onPress={() => lnurl && handleClaim(stage.params, amountSats, lnurl)}
+                accessibilityLabel={`Claim ${amountSats} sats`}
+                testID="lnurl-withdraw-claim-button"
+              >
+                <Gift size={20} color={colors.white} strokeWidth={2.5} />
+                <Text style={styles.primaryButtonText}>
+                  Redeem {amountSats.toLocaleString()} sats
                 </Text>
-                <Text style={styles.memo}>
-                  This voucher was claimed recently — it unlocks when the timer hits zero. Scan
-                  again then.
-                </Text>
-              </>
-            ) : stage.remaining === 0 ? (
-              <Text style={styles.memo}>Unlocked — scan again to claim.</Text>
-            ) : (
-              <Text style={styles.memo}>{COOLDOWN_NO_HINT}</Text>
-            )}
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={close}
-              testID="lnurl-withdraw-close-button"
-            >
-              <Text style={styles.secondaryButtonText}>Close</Text>
-            </TouchableOpacity>
-          </>
-        )}
+              </TouchableOpacity>
+            </>
+          )}
 
-        {stage.kind === 'error' && (
-          <>
-            <View style={styles.iconWrap}>
-              <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-            </View>
-            <Text style={styles.title}>Couldn&rsquo;t claim</Text>
-            <Text style={styles.memo}>{stage.reason}</Text>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={close}
-              testID="lnurl-withdraw-close-button"
-            >
-              <Text style={styles.secondaryButtonText}>Close</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </BottomSheetView>
-    </BottomSheetModal>
+          {stage.kind === 'claimed' && (
+            <>
+              <View style={styles.iconWrapSuccess}>
+                <PartyPopper size={56} color={colors.green} strokeWidth={2} />
+              </View>
+              <Text style={styles.title}>{stage.sats.toLocaleString()} sats inbound!</Text>
+              <Text style={styles.memo}>
+                Sent to your wallet — the celebration fires when they land.
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={close}
+                testID="lnurl-withdraw-done-button"
+              >
+                <Text style={styles.primaryButtonText}>Done</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {stage.kind === 'sleeping' && (
+            <>
+              <View style={styles.iconWrap}>
+                <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
+              </View>
+              <Text style={styles.title}>On cooldown</Text>
+              {stage.remaining !== null && stage.remaining > 0 ? (
+                <>
+                  <Text style={styles.countdown} testID="lnurl-withdraw-cooldown">
+                    {formatCountdown(stage.remaining)}
+                  </Text>
+                  <Text style={styles.memo}>
+                    This voucher was claimed recently — it unlocks when the timer hits zero. Scan
+                    again then.
+                  </Text>
+                </>
+              ) : stage.remaining === 0 ? (
+                <Text style={styles.memo}>Unlocked — scan again to claim.</Text>
+              ) : (
+                <Text style={styles.memo}>{COOLDOWN_NO_HINT}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={close}
+                testID="lnurl-withdraw-close-button"
+              >
+                <Text style={styles.secondaryButtonText}>Close</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {stage.kind === 'error' && (
+            <>
+              <View style={styles.iconWrap}>
+                <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
+              </View>
+              <Text style={styles.title}>Couldn&rsquo;t claim</Text>
+              <Text style={styles.memo}>{stage.reason}</Text>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={close}
+                testID="lnurl-withdraw-close-button"
+              >
+                <Text style={styles.secondaryButtonText}>Close</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </BottomSheetView>
+      </BottomSheetModal>
+      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+    </>
   );
 }
