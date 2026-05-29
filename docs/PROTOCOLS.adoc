@@ -222,6 +222,45 @@ Reasons it's the right call:
 | `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events (7-day TTL, 500-cap, sync peek). See `docs/SOLUTION_DESIGN.adoc` → "Explore tab".
 |===
 
+==== `lightning:` tag-tap / deep-link routing
+
+An NFC tag tap, a QR scan, or a `Linking` call from another app wakes
+Lightning Piggy via the `lightning:` scheme (registered in `app.config.ts`).
+The single handler in `App.tsx`'s Linking listener decides the *direction*
+of money flow and routes to the matching surface. There are two directions:
+
+* **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
+  claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
+* **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
+  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+
+The critical rule: for LNURL forms the direction is keyed off the
+**resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32
+prefix — a `lnurl1…` can be either kind. `resolveLnurlDirection`
+(`src/services/lnurlService.ts`) does one fetch and returns
+`{ kind: 'pay' | 'withdraw', … }`; both directions branch on that one
+answer so they can never disagree.
+
+|===
+| Tapped / scanned payload | Spec | Direction | Routes to
+
+| `lightning:lnbc…` (also `lntb` / `lnts` / `lnbs`) | BOLT-11 | Pay → out | `SendSheet` prefilled (amount + memo from the invoice; zero-amount invoices prompt for an amount)
+| `lightning:user@host` | LUD-16 | Pay → out | `SendSheet` — resolves the address, prompts for an amount
+| `lightning:lnurl1…` / `lnurlp://` / `https://…` resolving to `payRequest` | LUD-06/17 | Pay → out | `SendSheet`
+| `lightning:lnurl1…` / `lnurlw://` / `lnurl://` resolving to `withdrawRequest` | LUD-03 | Claim → in | `HuntFoundScreen` (no regression to #341)
+| anything else under `lightning:` | — | — | friendly "Link not supported" toast (no silent dead end — Copilot review #488)
+|===
+
+Cold launch is handled the same way as the withdraw and notification
+paths: each route returns a boolean "did it land", and the handler retries
+(~2 s, 100 ms cadence) until `navigationRef.isReady()`.
+
+NOTE: The `payRequest → SendSheet` leg currently passes the resolved
+endpoint URL to `SendSheet.processInput`, which today only decodes bolt11
+and Lightning Addresses. Teaching `processInput` to also resolve a raw
+LNURL-pay endpoint is the remaining wiring (tracked in #756); the bolt11
+and Lightning-Address pay legs are fully wired.
+
 === Events: NIP-52 calendar consumption
 
 ==== Summary
