@@ -42,7 +42,18 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     signerType,
     relays,
     isLoggedIn,
+    refreshDmInbox,
   } = useNostr();
+
+  // Force a fresh inbox fetch whenever the Map opens. The aggregator only sees
+  // what's in `dmInbox`, and the normal inbox refresh is throttled — so a share
+  // a friend started while we weren't on the Messages tab can sit unfetched and
+  // never plot. `force: true` bypasses the throttle so opening the Map always
+  // reflects who's actually sharing right now.
+  useEffect(() => {
+    if (!enabled || !isLoggedIn) return;
+    void refreshDmInbox({ force: true }).catch(() => {});
+  }, [enabled, isLoggedIn, refreshDmInbox]);
 
   // Latest coordinate ping per inbound session, keyed by sessionId.
   const [pingLatest, setPingLatest] = useState<
