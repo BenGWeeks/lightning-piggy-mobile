@@ -204,7 +204,10 @@ export function useConversationLiveLocation(params: {
     return () => clearInterval(id);
   }, [hasLiveMarkers]);
 
-  // What the bubble plots: end-marker coords (last position sent/received once ended — the sender has no inbound pings, so this shows their final spot, not stale start coords) as the base, with live pings overriding for shares still streaming.
+  // What the bubble plots: live pings are the base for shares still streaming;
+  // once a share ends, its end-marker coords (the sender's final spot, not a
+  // stale start/ping coordinate) take precedence — so end markers are spread
+  // LAST, overriding any lingering ping for the same session.
   const liveLocationLatest = useMemo(() => {
     const merged: Record<string, { location: SharedLocation; ts: number } | undefined> = {};
     for (const it of items) {
@@ -212,7 +215,7 @@ export function useConversationLiveLocation(params: {
       if (it.marker.phase !== 'end' || !it.marker.location) continue;
       merged[it.marker.sessionId] = { location: it.marker.location, ts: it.createdAt * 1000 };
     }
-    return { ...merged, ...pingLatest };
+    return { ...pingLatest, ...merged };
   }, [items, pingLatest]);
 
   return { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining };

@@ -88,8 +88,8 @@ export async function loadPersistedSessions(pubkey: string): Promise<OutgoingSes
 
 /**
  * Persist the current session map. Called best-effort whenever the
- * state machine produces a meaningful transition — failure is logged
- * but doesn't block the in-memory state.
+ * state machine produces a meaningful transition — a write failure is
+ * swallowed (see the catch below) and doesn't block the in-memory state.
  */
 export async function savePersistedSessions(
   pubkey: string,

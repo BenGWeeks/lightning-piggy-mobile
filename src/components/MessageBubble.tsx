@@ -256,7 +256,7 @@ const MessageBubble: React.FC<Props> = ({
     // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
     const titleText =
-      status === 'ended'
+      status === 'ended' || status === 'expired'
         ? 'Live location ended'
         : status === 'paused'
           ? fromMe
@@ -266,7 +266,7 @@ const MessageBubble: React.FC<Props> = ({
             ? 'Sharing live location'
             : 'Live location';
     const subtitleText: string | null = (() => {
-      if (status === 'ended') {
+      if (status === 'ended' || status === 'expired') {
         return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
       }
       if (latest) {
@@ -279,7 +279,7 @@ const MessageBubble: React.FC<Props> = ({
       return 'Waiting for first update…';
     })();
     const remainingLabel: string | null = (() => {
-      if (status === 'ended') return null;
+      if (status === 'ended' || status === 'expired') return null;
       if (remaining === null) return null;
       if (remaining <= 0) return 'Ending…';
       const mins = Math.ceil(remaining / 60_000);

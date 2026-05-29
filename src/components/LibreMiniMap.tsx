@@ -243,6 +243,11 @@ const LibreMiniMapInner: React.FC<Props> = ({
     : null;
   const pinGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.5) : 12;
   const avatarGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.55) : 16;
+  // The avatar image fills its chassis (overflow-clipped), so its own corner
+  // radius must track the chassis diameter — otherwise at `uniformMarkerSize`
+  // the image keeps the default 14px radius inside a larger circle and a sliver
+  // of background peeks at the corners.
+  const avatarImageRadius = uniformMarkerSize ? { borderRadius: uniformMarkerSize / 2 } : null;
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
@@ -555,7 +560,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
               {profileMarker.avatarUri && isSupportedImageUrl(profileMarker.avatarUri) ? (
                 <ExpoImage
                   source={{ uri: profileMarker.avatarUri }}
-                  style={styles.profileMarkerImage}
+                  style={[styles.profileMarkerImage, avatarImageRadius]}
                   cachePolicy="memory-disk"
                   recyclingKey={profileMarker.avatarUri}
                   autoplay={false}
@@ -574,7 +579,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
               {pm.avatarUri && isSupportedImageUrl(pm.avatarUri) ? (
                 <ExpoImage
                   source={{ uri: pm.avatarUri }}
-                  style={styles.profileMarkerImage}
+                  style={[styles.profileMarkerImage, avatarImageRadius]}
                   cachePolicy="memory-disk"
                   recyclingKey={pm.avatarUri}
                   autoplay={false}

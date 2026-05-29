@@ -321,13 +321,21 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // watcher never produced a fix (e.g. stopped before the first sample).
   const startLocationRef = useRef<Map<string, SharedLocation>>(new Map());
 
+  // Derived: does ANY session still need the GPS watch? The effect below keys
+  // off this boolean rather than the whole `sessions` Map, so a 30s ping
+  // dispatch — or the burst of hydrate dispatches on cold-start resume —
+  // doesn't re-run the effect and race a second `watchPositionAsync` into a
+  // leaked watcher (battery drain on the GrapheneOS target). See #759.
+  const anyActiveSession = Array.from(sessions.values()).some((s) => s.status === 'active');
+
   // Start / stop a single shared GPS watcher whenever the active-session
   // count crosses 0. One coordinate stream feeds every active recipient
-  // — no point opening N watchers.
+  // — no point opening N watchers. Live session data is read inside the
+  // callback via `sessionsRef.current`, so dropping `sessions` from the deps
+  // doesn't stale it.
   useEffect(() => {
     let cancelled = false;
-    const anyActive = Array.from(sessions.values()).some((s) => s.status === 'active');
-    if (!anyActive) {
+    if (!anyActiveSession) {
       watcherSubRef.current?.remove();
       watcherSubRef.current = null;
       lastPublishedAtRef.current.clear();
@@ -400,7 +408,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return () => {
       cancelled = true;
     };
-  }, [sessions, publishPing, dispatch]);
+  }, [anyActiveSession, publishPing, dispatch]);
 
   // ---- Expiry tick + end-marker publish ---------------------------------
 
