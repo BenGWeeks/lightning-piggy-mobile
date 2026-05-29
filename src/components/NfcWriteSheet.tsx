@@ -18,13 +18,13 @@ import { Nfc, AlertCircle, Copy, Eye, EyeOff, Lock } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Toast } from './BrandedToast';
 import {
-  writeNpubToTag,
   writeLnurlToTag,
   writeHuntTagToTag,
   cancelNfcOperation,
   isNfcEnabled,
   type HuntTagPayload,
 } from '../services/nfcService';
+import { writeNostrProfileToTag } from '../services/nfcNostrWrite';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -39,6 +39,15 @@ interface Props {
   mode?: 'npub' | 'piglet';
   /** npub mode — the Nostr identity to write + the name shown in copy. */
   npub?: string;
+  /**
+   * npub mode (preferred) — a `nostr:nprofile1…` reference (pubkey +
+   * outbox relay hints, NIP-65) to write instead of the bare npub.
+   * When supplied it takes precedence over `npub` so a cold first-contact
+   * scanner resolves the profile even on niche relays (#755). Bare-bech32
+   * (`nprofile1…`) or `nostr:`-prefixed forms both accepted. Falls back to
+   * `npub` when absent.
+   */
+  nostrRef?: string;
   displayName?: string;
   /** piglet mode — the LNURL-withdraw link to write to the tag.
    * Legacy single-record path used when `huntPayload` is absent. */
@@ -74,6 +83,7 @@ const NfcWriteSheet: React.FC<Props> = ({
   onClose,
   mode = 'npub',
   npub = '',
+  nostrRef = '',
   displayName = '',
   lnurl = '',
   huntPayload,
@@ -211,7 +221,10 @@ const NfcWriteSheet: React.FC<Props> = ({
           writeResult = result;
         }
       } else {
-        await writeNpubToTag(npub, onTagDetected);
+        // Prefer the nprofile reference (pubkey + relay hints) so the tag
+        // resolves on cold first contact; fall back to the bare npub when
+        // the caller didn't supply one (#755).
+        await writeNostrProfileToTag(nostrRef || npub, onTagDetected);
       }
       if (mountedRef.current) {
         if (writeResult?.lock) {

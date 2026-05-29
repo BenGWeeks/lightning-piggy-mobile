@@ -30,6 +30,7 @@ import {
   MainTabParamList,
   AccountDrawerParamList,
 } from './types';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
@@ -118,6 +119,28 @@ export const navigateToHuntPiggyDetail = (coord: string): boolean => {
       },
     },
   });
+  return true;
+};
+
+// Open a contact's full-page profile from outside the React tree —
+// the App.tsx deep-link / NFC handler for `nostr:npub…` / `nostr:nprofile…`
+// (#754). `contact` is a ready-built ContactProfileBodyData; when the
+// kind-0 fetch hasn't resolved yet the caller passes a pubkey-only stub
+// and the screen fills in the bio + Lightning address itself. Returns
+// false until the nav tree is ready so a cold-start tap can retry.
+export const navigateToContactProfile = (contact: ContactProfileBodyData): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('ContactProfile', { contact });
+  return true;
+};
+
+// Graceful fallback for a scanned tag / nostr: link whose entity type
+// has no in-app screen (e.g. a kind-1 note, or a `nostr:` URI we can't
+// decode). Mirrors the Hunt deep-link retry contract — returns false
+// until the nav tree mounts. Used by the App.tsx nostr: router (#754).
+export const navigateToUnsupportedEntity = (entity: string, detail?: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('UnsupportedEntity', { entity, detail });
   return true;
 };
 

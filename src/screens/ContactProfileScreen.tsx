@@ -109,6 +109,17 @@ const ContactProfileScreen: React.FC = () => {
   );
   const npubDisplay = npub ? `${npub.slice(0, 12)}...${npub.slice(-6)}` : null;
 
+  // `nostr:nprofile1…` (pubkey + relay hints) to write to an NFC tag —
+  // strictly more useful than a bare npub for a cold-contact scanner, who
+  // can resolve this person's metadata even on niche relays (#755). Mirrors
+  // the relay-hint sourcing used by the OS/DM share handlers below.
+  const nprofileRef = useMemo(() => {
+    if (!contact.pubkey) return undefined;
+    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+    const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
+    return `nostr:${nprofileEncode(contact.pubkey, relayHints)}`;
+  }, [contact.pubkey, contacts, relays]);
+
   // Probe NFC capability once on mount.
   useEffect(() => {
     let cancelled = false;
@@ -619,6 +630,7 @@ const ContactProfileScreen: React.FC = () => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={npub}
+          nostrRef={nprofileRef}
           lightningAddress={contact.lightningAddress}
         />
       )}
@@ -628,6 +640,7 @@ const ContactProfileScreen: React.FC = () => {
           visible={nfcWriteVisible}
           onClose={() => setNfcWriteVisible(false)}
           npub={npub}
+          nostrRef={nprofileRef}
           displayName={contact.name}
         />
       )}

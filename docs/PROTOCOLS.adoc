@@ -295,3 +295,46 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 ==== Code reference
 
 * `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+
+=== Deep-link & NFC tag-tap routing
+
+==== Summary
+
+A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
+
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+
+==== Routing table
+
+|===
+| Tag / link payload | Decodes to | Routes to | Issue
+
+| `https://www.lightningpiggy.com/hunt/<coord>` or `lightningpiggy://hunt/<coord>` | `kind:pubkey:d` coord | `HuntPiggyDetail` (Piglet detail) | #73
+| `nostr:naddr1…` (kind 37516) | Hunt listing coord | `HuntPiggyDetail` | #73
+| `nostr:npub1…` | bare pubkey | `ContactProfile` (profile screen) | #754
+| `nostr:nprofile1…` | pubkey **+ relay hints** | `ContactProfile`, kind-0 fetched off the embedded hints | #754
+| `lightning:lnurl1…` / `lnurlw://…` / `lnurl://…` | LNURL-withdraw voucher | `openLnurlWithdrawSheet` (claim sheet) | #103 / #341
+| `lightning:` (bolt11 / LNURL-pay / Lightning Address) | — | friendly "not supported yet" toast | #488
+| `nostr:note1…` / `nostr:nevent1…` / undecodable `nostr:` | non-profile entity | `UnsupportedEntity` screen | #754
+|===
+
+==== npub vs nprofile (read + write)
+
+`npub` is the bech32 of the bare 32-byte pubkey — identity only. `nprofile` is the NIP-19 TLV encoding of the pubkey **plus optional relay hints**. For a conference badge / contact tap (cold first contact — the scanner doesn't follow the owner yet) `nprofile` is strongly preferred: the embedded hints let the scanner's client find the owner's kind-0 metadata + notes even on niche relays, where a bare `npub` would force a default-relay guess and could render a blank profile.
+
+* **Read (#754):** the `App.tsx` router decodes the reference via `decodeProfileReference` (`src/services/nostrService.ts`), fetches kind-0 off the embedded hints (`fetchProfile(pubkey, hints)` — a bare `npub` carries none, so it falls back to the app's `PROFILE_RELAYS`), and navigates to `ContactProfile`. The fetch races a short budget so a dead relay never strands the user; the pubkey-only stub lets `ContactProfileScreen` retry on the viewer's own relays. Pure decode / shaping helpers are in `src/utils/nostrProfileLink.ts`.
+* **Write (#755):** the "share my profile to NFC" path (`ProfileScreen` / `AccountDrawerContent` → `NfcWriteSheet`) writes `nostr:nprofile1…`, embedding the user's NIP-65 **write (outbox)** relays via `buildOwnProfileRelayHints` (`src/services/nostrService.ts`), capped at 2 to fit an NTAG213 (~144 B) and limit staleness. Falls back to the app defaults when the user has no published write relays — a generic hint still beats none. The bare pubkey is always embedded, so a reader can fall back to outbox discovery if the hints go dead. Sharing a *contact's* profile (`ContactProfileScreen`) writes their `nprofile` too, hints sourced via `buildProfileRelayHints`.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
+| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning` + `nostr` schemes (cold launch / deep link).
+| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy` + `nostr` schemes (foreground tag tap).
+| `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
+| `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
+| `src/services/nfcNostrWrite.ts` :: `writeNostrProfileToTag` | Writes a single `nostr:nprofile…` / `nostr:npub…` NDEF URI record.
+| `src/navigation/AppNavigator.tsx` :: `navigateToContactProfile` / `navigateToUnsupportedEntity` | Imperative nav helpers callable from outside the React tree.
+|===
