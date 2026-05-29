@@ -5,7 +5,7 @@
  *     active sessions — coordinates feed every recipient)
  *   - the state machine (active / paused / expired / ended)
  *   - the publishing loop for kind-20069 ephemeral pings
- *   - the start / end NIP-04 marker DMs
+ *   - the start / end NIP-17 marker DMs
  *   - per-app-restart resume + cleanup of orphaned sessions
  *
  * The receiver side is owned by ConversationScreen — each conversation
@@ -58,7 +58,8 @@ import { reduce, remainingMs, type OutgoingSession } from '../services/liveLocat
 const NSEC_KEY = 'nostr_nsec';
 
 export type LiveShareStartResult =
-  | { ok: true; sessionId: string; location: SharedLocation }
+  // `markerText` is the exact published DM body, so the screen's optimistic bubble dedupes byte-for-byte against the relay echo.
+  | { ok: true; sessionId: string; location: SharedLocation; markerText: string }
   | { ok: false; error: string };
 
 export type LiveShareStopResult = { ok: true } | { ok: false; error: string };
@@ -186,16 +187,16 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     [pubkey, signerType, writeRelays],
   );
 
-  // Send the start / end marker as a regular NIP-04 DM. We reuse the
-  // existing `sendDirectMessage` so the receiver's threaded view —
-  // which already merges kind-4 events into the conversation — picks
-  // it up without any new transport plumbing.
+  // Send the start / end marker as a regular DM via `sendDirectMessage`
+  // (NIP-17 gift-wrapped in this codebase) so the receiver's threaded view —
+  // which already merges DM events into the conversation — picks it up
+  // without any new transport plumbing.
   const sendMarker = useCallback(
     async (
       session: OutgoingSession,
       phase: LiveLocationPhase,
       location: SharedLocation | null,
-    ): Promise<boolean> => {
+    ): Promise<{ ok: boolean; text: string }> => {
       const text =
         phase === 'start'
           ? formatLiveStartMessage({
@@ -212,7 +213,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
               location,
             });
       const result = await sendDirectMessage(session.recipientPubkey, text);
-      return result.success;
+      return { ok: result.success, text };
     },
     [sendDirectMessage],
   );
@@ -254,7 +255,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       startLocationRef.current.set(sessionId, fix.location);
       lastWatcherLocationRef.current = fix.location;
       const startSent = await sendMarker(installed, 'start', fix.location);
-      if (!startSent) {
+      if (!startSent.ok) {
         // Roll back — publish failed, no point keeping the watcher.
         dispatch({ type: 'stop', sessionId });
         return { ok: false, error: 'Failed to send live-location start marker.' };
@@ -272,7 +273,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }).then((ok) => {
         if (ok) dispatch({ type: 'ping', sessionId, now: Date.now() });
       });
-      return { ok: true, sessionId, location: fix.location };
+      return { ok: true, sessionId, location: fix.location, markerText: startSent.text };
     },
     [pubkey, isLoggedIn, dispatch, sendMarker, publishPing],
   );
@@ -290,7 +291,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         ? fix.location
         : (lastWatcherLocationRef.current ?? startLocationRef.current.get(sessionId) ?? null);
       const sent = await sendMarker(session, 'end', finalLocation);
-      if (sent) {
+      if (sent.ok) {
         dispatch({ type: 'endMarkerSent', sessionId });
         dispatch({ type: 'stop', sessionId });
         startLocationRef.current.delete(sessionId);

@@ -93,7 +93,7 @@ Live-location sharing rides on the DM pipeline above plus one ephemeral event ki
 | A normal kind-14 rumor (sealed + gift-wrapped as usual) whose body is, first line first: `[live-location:start]`, then a `geo:<lat>,<lon>` (optionally `;u=<accuracy>`) URI, then a JSON metadata line `{"sessionId":"…","durationMs":900000,"startedAt":<epoch_ms>}`. The sentinel MUST be the first non-empty line to classify (quoting it mid-body does not).
 
 | *Pings* (kind 20069, ephemeral)
-| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. Payload carries `{ lat, lon, accuracy, heading, ts }` for the session.
+| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. The NIP-04-encrypted JSON payload carries `{ sessionId, lat, lon, accuracy, heading, ts }` — `sessionId` is validated on decode so a ping is matched to its share (a `['d', sessionId]` tag also scopes the subscription filter).
 
 | *End marker* (NIP-17 DM)
 | First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.

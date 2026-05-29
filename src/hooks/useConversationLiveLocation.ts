@@ -211,11 +211,16 @@ export function useConversationLiveLocation(params: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
   }, [items, remainingMsForSession, secondTick]);
 
-  // Drive the 1 Hz tick declared above — flips the counter the Date.now() memos depend on.
+  // Drive the 1 Hz tick declared above — but only when the thread actually has a live-location bubble, so chats with none don't re-render once a second for nothing.
+  const hasLiveMarkers = useMemo(
+    () => items.some((it) => it.kind === 'liveLocationMarker'),
+    [items],
+  );
   useEffect(() => {
+    if (!hasLiveMarkers) return;
     const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [hasLiveMarkers]);
 
   // What the bubble plots: end-marker coords (last position sent/received once ended — the sender has no inbound pings, so this shows their final spot, not stale start coords) as the base, with live pings overriding for shares still streaming.
   const liveLocationLatest = useMemo(() => {

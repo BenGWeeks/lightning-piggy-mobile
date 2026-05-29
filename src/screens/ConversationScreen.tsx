@@ -42,7 +42,7 @@ import TransactionDetailSheet, {
 import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
-import { formatGeoMessage, buildOsmViewUrl, SharedLocation } from '../services/locationService';
+import { buildOsmViewUrl, SharedLocation } from '../services/locationService';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
@@ -436,21 +436,8 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Could not start live share', result.error);
         return;
       }
-      // Mirror the start marker locally so the bubble appears
-      // instantly without waiting for the relay round-trip on the
-      // sender's own re-fetch.
-      const startedAt = Math.floor(Date.now() / 1000);
-      appendOptimisticLocal(
-        [
-          '[live-location:start]',
-          JSON.stringify({
-            sessionId: result.sessionId,
-            durationMs,
-            startedAt: startedAt * 1000,
-          }),
-          formatGeoMessage(result.location),
-        ].join('\n'),
-      );
+      // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
+      appendOptimisticLocal(result.markerText);
     },
     [pubkey, startShare, appendOptimisticLocal],
   );

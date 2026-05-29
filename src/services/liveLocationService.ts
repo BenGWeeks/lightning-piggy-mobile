@@ -1,6 +1,6 @@
 /**
  * Live-location share — the user picks a duration (15 min / 1 h),
- * we send a NIP-04 DM "Live location share started" with initial coords +
+ * we send a NIP-17 DM "Live location share started" with initial coords +
  * a sessionId + the chosen duration, then publish ephemeral kind-20069
  * pings every ~30 s with the latest coordinates while the watcher is
  * running. On stop / expiry / app shutdown we send a "Live location share
@@ -9,8 +9,8 @@
  *
  * Wire format choices:
  *
- *   1. Start / end markers go through `sendDirectMessage` (NIP-04 kind-4
- *      to match the existing snapshot share). The body embeds a `geo:`
+ *   1. Start / end markers go through `sendDirectMessage` (NIP-17
+ *      gift-wrapped, same path as the existing snapshot share). The body embeds a `geo:`
  *      URI so existing clients still render a location card, plus a
  *      sentinel header line ("[live-location:start]" or ":end") followed
  *      by a JSON metadata block with sessionId / duration / phase.
