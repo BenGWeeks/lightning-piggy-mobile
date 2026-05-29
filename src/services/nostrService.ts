@@ -10,6 +10,7 @@ import {
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
+import { querySyncAbortable } from './relayQuery';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
@@ -959,7 +960,7 @@ export interface FetchedInboxEvents {
 export async function fetchInboxDmEvents(
   myPubkey: string,
   relays: string[],
-  options: { limit?: number; since?: number } = {},
+  options: { limit?: number; since?: number; signal?: AbortSignal } = {},
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
@@ -992,15 +993,28 @@ export async function fetchInboxDmEvents(
     sentK4Filter.since = since;
     recvK4Filter.since = since;
   }
+  const __t0 = performance.now();
   try {
     // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
     // inbox fetch genuinely terminates — unlike withTimeout which only raced the
     // Promise and left the underlying subscribeEose sub running for up to ~60 s.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      pool.querySync(allRelays, sentK4Filter, { maxWait: 15000 }),
-      pool.querySync(allRelays, recvK4Filter, { maxWait: 15000 }),
-      pool.querySync(allRelays, wrapsFilter, { maxWait: 15000 }),
+      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 15000, signal: options.signal }),
     ]);
+    // [Perf] Cold-start freeze attribution (#751). querySync ingests every
+    // returned event synchronously (JSON.parse + validateEvent + matchFilters)
+    // before resolving — logs the wrap count + wall-clock so we can tell
+    // whether the dominant cost is fetch volume (reduce limit/fan-out) or
+    // per-event ingest (yield). Prints here, inside the fetch, so it survives
+    // the caller's post-fetch abort short-circuit (useDmInbox.ts:395) which
+    // otherwise suppresses the [Perf] refreshDmInbox count line.
+    console.log(
+      `[Perf] fetchInboxDmEvents: ${(performance.now() - __t0).toFixed(0)}ms ` +
+        `wraps=${wraps.length} sentK4=${sentK4.length} recvK4=${receivedK4.length} ` +
+        `relays=${allRelays.length} limit=${limit}`,
+    );
     const k4 = new Map<string, RawDmEvent>();
     for (const ev of sentK4) k4.set(ev.id, ev as RawDmEvent);
     for (const ev of receivedK4) k4.set(ev.id, ev as RawDmEvent);

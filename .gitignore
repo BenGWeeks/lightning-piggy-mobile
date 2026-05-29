@@ -70,3 +70,11 @@ docs/*.pdf
 # regardless of subsequent `!` exceptions.
 .claude/*
 !.claude/agents/
+
+# Local-only dev/debug scripts that must never be committed — some embed
+# LNURL-withdraw k1 bearer secrets. Kept on disk for local use; ignored so an
+# accidental `git add -A` can't sweep them into a (public) commit again (#752).
+scripts/check-hawthorn.mjs
+scripts/check-lnurlw.mjs
+scripts/send-test-dm.mjs
+scripts/wait-compare.mjs

@@ -163,6 +163,15 @@ export async function writeNip17Cache(
 export const DM_INBOX_REFRESH_TTL_MS = 30_000;
 
 /**
+ * Cold-start initial wrap fetch size (#751). The first inbox refresh of a
+ * session fetches only this many kind-1059 wraps so the Messages tab paints
+ * fast instead of blocking the JS thread on the full backlog ingest (508 wraps
+ * × 5 relays measured at ~12 s). `refreshDmInbox` then schedules a full-limit
+ * backfill in the background, deferred past interactions and abortable on blur.
+ */
+export const COLD_INITIAL_WRAP_LIMIT = 200;
+
+/**
  * Persisted inbox + per-peer message caches (PR B).
  *
  * Key shape: `<prefix>_<userPubkeyHex>` — per-user so multiple nsec
