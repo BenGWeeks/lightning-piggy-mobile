@@ -18,9 +18,17 @@ import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
   navigateToHuntFound,
   navigateToHuntPiggyDetail,
+  navigateToContactProfile,
+  navigateToUnsupportedEntity,
   navigateToSend,
   navigateFromNotification,
 } from './src/navigation/AppNavigator';
+import { fetchProfile, decodeProfileReference } from './src/services/nostrService';
+import {
+  isProfileReferenceUri,
+  profileToContactBody,
+  pubkeyToContactBodyStub,
+} from './src/utils/nostrProfileLink';
 import { resolveLnurlDirection } from './src/services/lnurlService';
 import {
   ensureNotificationsInitialised,
@@ -225,6 +233,68 @@ export default function App() {
           setTimeout(() => tryNav(attempt + 1), 100);
         };
         tryNav(0);
+        return;
+      }
+
+      // `nostr:npub1…` / `nostr:nprofile1…` — a profile reference, the
+      // conference-badge / contact-tap case (#754). Distinct from the
+      // Hunt `naddr` branch below and the `lightning:` withdraw branch.
+      // We decode the pubkey (+ relay hints for nprofile), fetch the
+      // kind-0 metadata off those hints so a stranger on niche relays
+      // still resolves, then open the full-page ContactProfile. The
+      // fetch is best-effort: if it fails we still navigate with a
+      // pubkey-only stub and let ContactProfileScreen retry on the
+      // viewer's own relays. Cold-start races the nav tree → retry like
+      // the Hunt/withdraw paths.
+      if (isProfileReferenceUri(trimmed)) {
+        const decoded = decodeProfileReference(trimmed);
+        if (!decoded) {
+          console.warn(`[Link] nostr: profile ref failed to decode — friendly fallback`);
+          const tryFail = (attempt: number) => {
+            if (navigateToUnsupportedEntity('this Nostr link', trimmed)) return;
+            if (attempt >= 20 || cancelled) return;
+            setTimeout(() => tryFail(attempt + 1), 100);
+          };
+          tryFail(0);
+          return;
+        }
+        const { pubkey, relays: hints } = decoded;
+        console.log(`[Link] → ContactProfile pubkey=${pubkey.slice(0, 12)}… hints=${hints.length}`);
+        const openWith = (contact: ReturnType<typeof pubkeyToContactBodyStub>) => {
+          const tryNav = (attempt: number) => {
+            if (navigateToContactProfile(contact)) return;
+            if (attempt >= 20 || cancelled) return;
+            setTimeout(() => tryNav(attempt + 1), 100);
+          };
+          tryNav(0);
+        };
+        // Fetch kind-0 off the EMBEDDED relay hints (nprofile) so a
+        // not-yet-followed contact on niche relays resolves — that's the
+        // whole point of nprofile over a bare npub. A bare npub carries
+        // no hints, so fetchProfile falls back to the app's PROFILE_RELAYS.
+        // Race the fetch against a 2.5s budget so a dead relay never
+        // strands the user on a blank screen: whichever resolves first
+        // navigates, and the pubkey-only stub lets ContactProfileScreen
+        // retry the metadata on the viewer's own relays. The screen is
+        // reused on a same-pubkey re-nav (its re-sync is pubkey-gated),
+        // so we navigate exactly once with the best data we have.
+        const stub = pubkeyToContactBodyStub(pubkey);
+        let navigated = false;
+        const navOnce = (contact: ReturnType<typeof pubkeyToContactBodyStub>) => {
+          if (navigated || cancelled) return;
+          navigated = true;
+          openWith(contact);
+        };
+        const budget = setTimeout(() => navOnce(stub), 2_500);
+        fetchProfile(pubkey, hints)
+          .then((profile) => {
+            clearTimeout(budget);
+            navOnce(profile ? profileToContactBody(profile) : stub);
+          })
+          .catch(() => {
+            clearTimeout(budget);
+            navOnce(stub);
+          });
         return;
       }
 

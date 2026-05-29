@@ -10,6 +10,7 @@ import EditProfileSheet from '../../components/EditProfileSheet';
 import QrWithIdentityToggle from '../../components/QrWithIdentityToggle';
 import NfcWriteSheet from '../../components/NfcWriteSheet';
 import { isNfcSupported } from '../../services/nfcService';
+import { nprofileEncode, buildOwnProfileRelayHints } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
@@ -18,7 +19,20 @@ const ProfileScreen: React.FC = () => {
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { isLoggedIn, profile, refreshProfile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, pubkey, relays } = useNostr();
+
+  // Build the `nostr:nprofile1…` to write to an NFC tag when sharing my
+  // own profile (#755). Embeds my NIP-65 *write* (outbox) relays, capped
+  // at 2, so a cold first-contact scanner resolves my metadata even if I
+  // use niche relays — strictly more useful than a bare npub. Falls back
+  // to app defaults when I've published no write relays. Recomputed only
+  // when my identity or relay set changes.
+  const nprofileRef = useMemo(() => {
+    if (!pubkey) return undefined;
+    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+    const hints = buildOwnProfileRelayHints(writeRelays, 2);
+    return `nostr:${nprofileEncode(pubkey, hints)}`;
+  }, [pubkey, relays]);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
@@ -121,6 +135,7 @@ const ProfileScreen: React.FC = () => {
           visible={nfcWriteVisible}
           onClose={() => setNfcWriteVisible(false)}
           npub={profile.npub}
+          nostrRef={nprofileRef}
           displayName={profile.displayName || profile.name || 'You'}
         />
       )}

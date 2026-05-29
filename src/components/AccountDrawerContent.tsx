@@ -125,6 +125,17 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
       .slice(0, 3);
   }, [identities, pubkey]);
 
+  // `nostr:nprofile1…` for the QR / NFC share of MY own profile (#755) —
+  // embeds my NIP-65 write (outbox) relays (capped 2) so a cold-contact
+  // scanner resolves me on niche relays. Falls back to app defaults when
+  // I have no published write relays.
+  const ownNprofileRef = useMemo(() => {
+    if (!pubkey) return undefined;
+    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+    const hints = nostrService.buildOwnProfileRelayHints(writeRelays, 2);
+    return `nostr:${nostrService.nprofileEncode(pubkey, hints)}`;
+  }, [pubkey, relays]);
+
   // Lazy-fetch kind-0 for the small switcher avatars. The active
   // identity already has its profile in `profile`; only the others
   // need fan-out. Two phases mirror AccountSwitcherSheet: (1) seed
@@ -382,6 +393,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={profile.npub}
+          nostrRef={ownNprofileRef}
           lightningAddress={profile.lud16 ?? null}
           defaultMode="npub"
         />
