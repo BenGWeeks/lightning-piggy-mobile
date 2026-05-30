@@ -24,7 +24,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import SendSheet from '../components/SendSheet';
@@ -95,11 +95,11 @@ const ConversationScreen: React.FC = () => {
     getCachedConversation,
     signerType,
     pubkey: myPubkey,
-    contacts,
     relays,
     profile,
     armLiveDmSub,
   } = useNostr();
+  const { contacts } = useNostrContacts();
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
   useEffect(() => {

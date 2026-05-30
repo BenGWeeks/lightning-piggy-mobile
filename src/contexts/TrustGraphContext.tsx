@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNostr } from './NostrContext';
+import { useNostr, useNostrContacts } from './NostrContext';
 import {
   DEFAULT_SEED_PUBKEYS,
   computeTrustSet,
@@ -96,7 +96,8 @@ interface ProviderProps {
 }
 
 export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
-  const { pubkey, contacts } = useNostr();
+  const { pubkey } = useNostr();
+  const { contacts } = useNostrContacts();
 
   // Direct follows (L1) — derived from NostrContext's contacts state.
   const l1Follows = useMemo(() => {

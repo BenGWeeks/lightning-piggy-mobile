@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -68,8 +68,6 @@ const MessagesScreen: React.FC = () => {
   const {
     isLoggedIn,
     profile,
-    contacts,
-    refreshContacts,
     refreshProfile,
     dmInbox,
     refreshDmInbox,
@@ -77,6 +75,7 @@ const MessagesScreen: React.FC = () => {
     fetchProfilesForPubkeys,
     pubkey,
   } = useNostr();
+  const { contacts, refreshContacts } = useNostrContacts();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();
   // `trustSetForTier` rather than the raw `trustSet` so the screen's

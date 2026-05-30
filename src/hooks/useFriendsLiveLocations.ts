@@ -8,7 +8,7 @@ import { subscribeLiveLocationPingsMulti } from '../services/nostrLiveLocation';
 import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
 import { DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS } from '../services/nostrService';
 import { DM_INBOX_REFRESH_TTL_MS } from '../contexts/nostrDmCache';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import type { SharedLocation } from '../services/locationService';
 import type { NostrProfile } from '../types/nostr';
 
@@ -37,7 +37,6 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
   const { enabled } = opts;
   const {
     dmInbox,
-    contacts,
     fetchProfilesForPubkeys,
     pubkey: myPubkey,
     signerType,
@@ -45,6 +44,7 @@ export function useFriendsLiveLocations(opts: { enabled: boolean }): FriendLiveL
     isLoggedIn,
     refreshDmInbox,
   } = useNostr();
+  const { contacts } = useNostrContacts();
 
   // Force a fresh inbox fetch whenever the Map opens. The aggregator only sees
   // what's in `dmInbox`, so two filters have to be bypassed:

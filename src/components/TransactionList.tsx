@@ -7,7 +7,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostrContacts } from '../contexts/NostrContext';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ContactProfileBodyData } from './ContactProfileBody';
 import TransactionDetailSheet, {
@@ -105,7 +105,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { btcPrice, currency, activeWalletId } = useWallet();
-  const { contacts } = useNostr();
+  const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   // When contacts' profiles refresh, we want transaction rows to pick up
   // the newer name/picture immediately. Tx's embedded `zapCounterparty`

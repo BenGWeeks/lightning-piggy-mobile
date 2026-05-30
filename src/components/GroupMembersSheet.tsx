@@ -11,7 +11,7 @@ import { UserPlus, UserRound, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { Alert as BrandedAlert } from './BrandedAlert';
 import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -55,7 +55,8 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
-  const { contacts, pubkey: selfPubkey, profile: selfProfile } = useNostr();
+  const { pubkey: selfPubkey, profile: selfProfile } = useNostr();
+  const { contacts } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const [pickerOpen, setPickerOpen] = useState(false);

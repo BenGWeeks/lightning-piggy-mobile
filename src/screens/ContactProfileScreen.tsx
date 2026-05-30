@@ -33,7 +33,7 @@ import FriendNoteFeed from '../components/FriendNoteFeed';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
 import FullscreenImageModal from '../components/FullscreenImageModal';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -64,7 +64,8 @@ const ContactProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<ContactProfileNavigation>();
   const route = useRoute<ContactProfileRoute>();
-  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
+  const { sendDirectMessage, relays } = useNostr();
+  const { contacts, followContact, unfollowContact } = useNostrContacts();
   const { hasWallets } = useWallet();
 
   const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);

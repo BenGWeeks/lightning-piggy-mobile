@@ -17,7 +17,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import GroupAvatar, { type ContactInfo } from '../components/GroupAvatar';
 import type { RootStackParamList } from '../navigation/types';
@@ -36,7 +36,8 @@ const GroupsScreen: React.FC = () => {
   // shim — `followingOnly` is now derived from `effectiveWotTier !== 'all'`
   // and `setFollowingOnly` writes back via `setWotTier`).
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
-  const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
+  const { isLoggedIn, refreshDmInbox, pubkey: myPubkey } = useNostr();
+  const { contacts } = useNostrContacts();
 
   // Built once per render and shared by every row's GroupAvatar so we
   // do O(contacts) per render instead of O(rows × avatars × contacts).

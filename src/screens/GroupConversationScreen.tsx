@@ -24,7 +24,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, subscribeGroupMessages } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
 import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
@@ -85,7 +85,8 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
-  const { contacts, pubkey: myPubkey, profile: myProfile } = useNostr();
+  const { pubkey: myPubkey, profile: myProfile } = useNostr();
+  const { contacts } = useNostrContacts();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
