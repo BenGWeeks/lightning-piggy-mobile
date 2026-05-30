@@ -34,6 +34,13 @@ export interface CoalescedMap<V> {
   enqueue: (key: string, value: V) => void;
   /** Drain the staged buffer into one commit now. No-op when empty/unmounted. */
   flush: () => void;
+  /**
+   * Clear the committed Map AND DISCARD the staged buffer + pending timer.
+   * Unlike {@link flush}, staged items are dropped, not committed — use this on
+   * a reload/refetch-from-scratch so a previous subscription's buffered tail
+   * can't repopulate the just-cleared list.
+   */
+  reset: () => void;
 }
 
 export function useCoalescedMap<V>(options?: {
@@ -112,5 +119,15 @@ export function useCoalescedMap<V>(options?: {
     [flush, flushMs, flushThreshold],
   );
 
-  return { map, setMap, enqueue, flush };
+  const reset = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    // Drop staged items (do NOT commit them) so a reload starts truly empty.
+    pendingRef.current = new Map();
+    if (!isUnmountedRef.current) setMap(new Map());
+  }, []);
+
+  return { map, setMap, enqueue, flush, reset };
 }

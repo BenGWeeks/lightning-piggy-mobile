@@ -107,4 +107,24 @@ describe('useCoalescedMap', () => {
     expect(result.current.map.has('seed')).toBe(false);
     expect(result.current.map.get('fresh')).toBe(1);
   });
+
+  it('reset() clears committed state AND discards the staged buffer (no late repopulate)', () => {
+    const { result } = renderHook(() => useCoalescedMap<number>({ flushMs: 100 }));
+    // Commit one item, then stage another that hasn't flushed yet.
+    act(() => {
+      result.current.enqueue('a', 1);
+      jest.advanceTimersByTime(100);
+    });
+    expect(result.current.map.get('a')).toBe(1);
+    act(() => {
+      result.current.enqueue('b', 2); // staged, debounce not yet elapsed
+      result.current.reset(); // clears committed 'a' AND drops staged 'b'
+    });
+    expect(result.current.map.size).toBe(0);
+    // Advancing past the old debounce must NOT repopulate from the dropped buffer.
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(result.current.map.size).toBe(0);
+  });
 });

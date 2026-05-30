@@ -71,6 +71,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     setMap: setEvents,
     enqueue: enqueueEvent,
     flush: flushEvents,
+    reset: resetEvents,
   } = useCoalescedMap<ParsedEvent>({
     initial: () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
     shouldReplace: (existing, incoming) => existing.startsAt !== incoming.startsAt,
@@ -123,6 +124,14 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const [sortBy, setSortBy] = useState<EventsSortKey>('date');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
+  // True only while the screen is focused — lets a manual reload (Retry /
+  // pull-to-refresh, which pass no explicit guard) abort if its async location
+  // resolve outlives the focus window, so it can't install a sub after blur.
+  const isFocusedRef = useRef(false);
+  // The "drop the spinner" settle timer, tracked so a reload / blur can cancel
+  // it — otherwise a stale timer from a prior subscription fires during the
+  // next reload and clears loading for the wrong sub.
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Post-#535: `wotTier` replaces the legacy `filterEnabled` boolean.
   // `isTrusted` is tier-aware (returns true for 'all') so callers no
@@ -140,13 +149,29 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // reloads pass nothing, so the guard is a no-op there.
   const reload = useCallback(
     async (isCancelled?: () => boolean) => {
+      // Manual reloads (Retry / pull-to-refresh) pass no guard — default to a
+      // focus check so a reload whose async location resolve outlives the focus
+      // window can't install a live relay sub after blur (Copilot review).
+      const cancelled = isCancelled ?? (() => !isFocusedRef.current);
+      // Cancel any in-flight settle timer from the previous sub so it can't fire
+      // mid-reload and clear the spinner for the sub we're about to replace.
+      if (loadingTimerRef.current) {
+        clearTimeout(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
+      // Tear down the previous sub WITHOUT draining its buffer: `resetEvents`
+      // discards the staged tail (and clears the committed list) so a
+      // pull-to-refresh can't briefly repopulate the cleared list with the old
+      // subscription's buffered events (Copilot review).
+      closerRef.current?.();
+      closerRef.current = null;
+      resetEvents();
       setLoading(true);
       setError(null);
-      setEvents(new Map());
       setUntrustedHidden(0);
-      closerRef.current?.();
       try {
         const perm = await Location.requestForegroundPermissionsAsync();
+        if (cancelled()) return;
         if (perm.status !== 'granted') {
           setError(
             'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
@@ -159,7 +184,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         });
         // Focus was lost while we awaited location — bail before opening a
         // sub the cleanup already ran past.
-        if (isCancelled?.()) return;
+        if (cancelled()) return;
         const lat = liveFix.coords.latitude;
         const lon = liveFix.coords.longitude;
         setPos({ lat, lon });
@@ -186,26 +211,25 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           // `shouldReplace`, re-applied against committed state on flush.
           enqueueEvent(e.coord, e);
         });
-        // Wrap the relay closer so blur / reload also drains the pending
-        // buffer — otherwise the tail of a backfill burst is stranded.
-        const wrappedCloser = () => {
-          closer();
-          flushEvents();
-        };
         // If focus was lost in the same tick the sub opened, close it now
-        // rather than stranding it until the next blur.
-        if (isCancelled?.()) {
-          wrappedCloser();
+        // rather than stranding it until the next blur. The focus cleanup
+        // owns draining the tail (flushEvents); a reload discards it.
+        if (cancelled()) {
+          closer();
           return;
         }
-        closerRef.current = wrappedCloser;
-        setTimeout(() => setLoading(false), 1500);
+        closerRef.current = closer;
+        loadingTimerRef.current = setTimeout(() => {
+          loadingTimerRef.current = null;
+          if (!cancelled()) setLoading(false);
+        }, 1500);
       } catch (e) {
+        if (cancelled()) return;
         setError((e as Error).message);
         setLoading(false);
       }
     },
-    [setEvents, enqueueEvent, flushEvents],
+    [resetEvents, enqueueEvent],
   );
 
   // Open the relay subscription only while the screen is focused (audit
@@ -218,14 +242,25 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // while focused, swapping the closer in place.
   useFocusEffect(
     useCallback(() => {
+      isFocusedRef.current = true;
       let active = true;
       reload(() => !active);
       return () => {
         active = false;
+        isFocusedRef.current = false;
+        if (loadingTimerRef.current) {
+          clearTimeout(loadingTimerRef.current);
+          loadingTimerRef.current = null;
+        }
+        // Drain the tail of the burst into the visible list, THEN close the
+        // relay sub — so events that arrived just before blur aren't stranded
+        // in the staged buffer until next focus. (A reload, by contrast,
+        // discards the buffer via resetEvents.)
+        flushEvents();
         closerRef.current?.();
         closerRef.current = null;
       };
-    }, [reload]),
+    }, [reload, flushEvents]),
   );
 
   const sortedEvents = useMemo(() => {
