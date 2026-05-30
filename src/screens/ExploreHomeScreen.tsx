@@ -20,7 +20,7 @@ import {
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
-import { LibreMiniMap } from '../components/LibreMiniMap';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
@@ -864,53 +864,29 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           />
         }
       >
-        {locationDenied ? (
-          <View style={localStyles.deniedCard}>
-            <MapPin size={20} color={colors.brandPink} strokeWidth={2.5} />
-            <View style={{ flex: 1 }}>
-              <Text style={localStyles.deniedTitle}>Allow location for nearby content</Text>
-              <Text style={localStyles.deniedSub}>
-                We use a coarse 5 km area to find merchants, caches, and meetups around you. Nothing
-                leaves your device beyond that.
-              </Text>
-            </View>
-          </View>
-        ) : (
-          <LibreMiniMap
-            // Mini-map is non-interactive (zoom-only, follows GPS) — so
-            // the camera anchor SHOULD track the live position, not
-            // the stale one-shot `pos` (which was seeded from a cached
-            // merchant-centroid anchor on cold start). Falls back to
-            // `pos` only while the live fix is still resolving.
-            lat={livePos?.lat ?? pos?.lat ?? null}
-            lon={livePos?.lon ?? pos?.lon ?? null}
-            userLat={livePos?.lat ?? null}
-            userLon={livePos?.lon ?? null}
-            // Cached anchor accuracy is only useful BEFORE a live fix
-            // arrives. Once livePos exists, trust its accuracy (even
-            // if null) so the halo never renders around live coords
-            // using stale data from a different measurement.
-            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
-            merchants={merchants}
-            caches={cachesArr}
-            events={eventsArr}
-            onTapMap={onTapMap}
-            onOpenLegend={onOpenLegend}
-            // Pin-tap handlers — open the same MerchantDetailSheet /
-            // CacheDetailSheet that MapScreen renders so the interaction
-            // shape is identical across surfaces (PR #630). Events have
-            // no dedicated sheet in MapScreen either, so the event tap
-            // navigates directly to EventDetail — consistent with the
-            // event rail card tap below.
-            onSelectMerchant={(m) => setSelectedMerchant(m)}
-            onSelectCache={(c) => setSelectedCache(c)}
-            onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
-            // Maestro flow test-explore-tab-rename.yaml asserts this
-            // testID — preserved across the MapLibre swap so the e2e
-            // smoke test doesn't need to be repointed.
-            testID="explore-minimap"
-          />
-        )}
+        <ExploreMiniMap
+          locationDenied={locationDenied}
+          // Mini-map is non-interactive (zoom-only, follows GPS) — so the
+          // camera anchor SHOULD track the live position, not the stale
+          // one-shot `pos` (seeded from a cached merchant-centroid anchor on
+          // cold start). Falls back to `pos` only while the live fix resolves.
+          lat={livePos?.lat ?? pos?.lat ?? null}
+          lon={livePos?.lon ?? pos?.lon ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          // Cached anchor accuracy is only useful BEFORE a live fix arrives.
+          // Once livePos exists, trust its accuracy (even if null) so the halo
+          // never renders around live coords using stale data.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          merchants={merchants}
+          caches={cachesArr}
+          events={eventsArr}
+          onTapMap={onTapMap}
+          onOpenLegend={onOpenLegend}
+          onSelectMerchant={(m) => setSelectedMerchant(m)}
+          onSelectCache={(c) => setSelectedCache(c)}
+          onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
+        />
 
         <ContentRail<{ place: BtcMapPlace; distance: number }>
           title="Places near you"
@@ -1332,27 +1308,6 @@ const createLocalStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
       lineHeight: 19,
-    },
-    deniedCard: {
-      flexDirection: 'row',
-      gap: 12,
-      backgroundColor: colors.surface,
-      marginHorizontal: 16,
-      marginBottom: 18,
-      padding: 14,
-      borderRadius: 12,
-      alignItems: 'flex-start',
-    },
-    deniedTitle: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    deniedSub: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      lineHeight: 17,
     },
   });
 

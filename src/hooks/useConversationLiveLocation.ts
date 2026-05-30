@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LIVE_LOCATION_PING_KIND } from '../services/liveLocationService';
 import { subscribeLiveLocationPings } from '../services/nostrLiveLocation';
 import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
@@ -9,6 +9,22 @@ import type { Item } from '../utils/conversationItems';
 import type { RelayConfig } from '../types/nostr';
 
 type LiveStatus = 'active' | 'paused' | 'ended' | 'expired' | undefined;
+
+// Stabilise an object's identity across renders (#778). The status / remaining
+// read-models below are rebuilt every 1 Hz `secondTick`, handing back a NEW
+// Record each second even when nothing changed. That new reference flows into
+// ConversationScreen's `renderItem` deps → a new `renderItem` → FlatList
+// re-evaluates every visible row → every `ConversationMessageRow` (React.memo,
+// shallow compare) re-renders once a second during a live share. Returning the
+// PREVIOUS object when its content is unchanged (cheap JSON compare — these
+// maps hold at most a handful of small entries) keeps `renderItem` stable, so
+// only the countdown bubble's own row re-renders when its value actually moves.
+export function useStableRecord<T extends object>(next: T): T {
+  const prevRef = useRef<T>(next);
+  if (JSON.stringify(next) === JSON.stringify(prevRef.current)) return prevRef.current;
+  prevRef.current = next;
+  return next;
+}
 
 // Receive-side live-location plumbing for the 1:1 ConversationScreen (#206).
 // Extracted from the screen (#703 size cap): owns the kind-20069 coordinate
@@ -143,7 +159,7 @@ export function useConversationLiveLocation(params: {
   // Per-session status the bubble renders: `ended` once an end marker arrives,
   // otherwise the context's authoritative status for our own shares, otherwise
   // active/ended by wall-clock for inbound shares.
-  const liveLocationBubbleStatus = useMemo<Record<string, LiveStatus>>(() => {
+  const liveLocationBubbleStatusRaw = useMemo<Record<string, LiveStatus>>(() => {
     const out: Record<string, LiveStatus> = {};
     const seenEndIds = new Set<string>();
     for (const it of items) {
@@ -171,8 +187,11 @@ export function useConversationLiveLocation(params: {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() wall-clock status each second
   }, [items, sessionsByRecipient, pubkey, secondTick]);
+  // Keep a stable reference while content is unchanged so the 1 Hz tick doesn't
+  // churn ConversationScreen's renderItem (#778).
+  const liveLocationBubbleStatus = useStableRecord(liveLocationBubbleStatusRaw);
 
-  const liveLocationBubbleRemaining = useMemo<Record<string, number | undefined>>(() => {
+  const liveLocationBubbleRemainingRaw = useMemo<Record<string, number | undefined>>(() => {
     const out: Record<string, number | undefined> = {};
     const now = Date.now();
     for (const it of items) {
@@ -192,6 +211,10 @@ export function useConversationLiveLocation(params: {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
   }, [items, remainingMsForSession, secondTick]);
+  // Stable reference while content is unchanged (#778). NOTE: the remaining-ms
+  // values DO change each second for an active share, so the countdown bubble's
+  // own row still re-renders every tick — only unrelated rows are spared.
+  const liveLocationBubbleRemaining = useStableRecord(liveLocationBubbleRemainingRaw);
 
   // Drive the 1 Hz tick declared above — but only when the thread actually has a live-location bubble, so chats with none don't re-render once a second for nothing.
   const hasLiveMarkers = useMemo(
