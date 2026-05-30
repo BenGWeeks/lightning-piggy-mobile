@@ -202,6 +202,22 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     if (locationDenied) setLoading(false);
   }, [locationDenied]);
 
+  // Backstop: `useLiveUserLocation` swallows GPS errors WITHOUT flipping
+  // `denied` (e.g. permission granted but no last-known fix and both
+  // getCurrentPositionAsync/watchPositionAsync reject). In that case
+  // `pos` is never seeded and the subscribe-settle timer never arms, so
+  // the spinner would hang on "Looking for geo-caches near you…"
+  // forever. Mirror the resilience of the old getCurrentPositionAsync
+  // catch path: after a few seconds without a fix, drop the spinner so
+  // the empty state shows. Cleared early on the happy path (pos seeded →
+  // settle timer fires at ~1.5 s) — this only ever fires on the failure
+  // path.
+  useEffect(() => {
+    if (pos) return;
+    const t = setTimeout(() => setLoading(false), 10_000);
+    return () => clearTimeout(t);
+  }, [pos]);
+
   // Cache subscription — kicks off once we have a fix, but only while
   // the screen is focused (audit MED 3). With `freezeOnBlur: true` on
   // the tab navigator the Explore stack screens never unmount, so a
