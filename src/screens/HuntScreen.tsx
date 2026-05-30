@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import * as Location from 'expo-location';
 import {
   ChevronLeft,
   ChevronRight,
@@ -69,7 +68,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Live position for the user dot — refreshes as the user walks
   // around without re-firing the nearby-cache subscription (which is
   // keyed on the initial `pos`).
-  const { pos: livePos } = useUserLocation();
+  const { pos: livePos, denied: locationDenied } = useUserLocation();
   // Coalesce per-event setState bursts during the nearby-cache relay
   // backfill into one commit per ~100 ms window (audit MED 4) — the
   // naive `new Map(prev)` clone per event was O(N²) over a 50+ event
@@ -159,16 +158,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // true for the 'all' tier) and is applied at render time in
   // `sortedCaches`, so flipping the tier re-filters instantly.
   const { isTrusted, wotTier } = useTrustGraph();
-  // Visible bbox from the mini-map at the top of the screen. The list
-  // below filters to caches whose decoded geohash lies inside this
-  // bbox, so "zoom out → see more" emerges naturally and there's no
-  // distance chip row to bias the user.
-  const [mapBbox, setMapBbox] = useState<{
-    minLat: number;
-    maxLat: number;
-    minLon: number;
-    maxLon: number;
-  } | null>(null);
   // NIP-GC difficulty / terrain are integer 1-5 scales (geocaching
   // convention). Multi-select Sets so a user can pick e.g. D1 + D3
   // (skip the cunning level in the middle). Empty Set = no filter.
@@ -189,39 +178,29 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // to zero when a hider uses an unusual cache type.
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
-  // Location resolve.
+  // Seed the subscription anchor from the first live fix. `pos` is a
+  // capture-once anchor — deliberately NOT updated as the user walks —
+  // so `subscribeNearbyCaches` queries a stable set of geohash tiles
+  // instead of re-subscribing on every GPS step. `useUserLocation`
+  // already runs the foreground-permission check and delivers a fix
+  // (warm, via `getLastKnownPositionAsync`) carrying the same
+  // `accuracy` field, so deriving the anchor from `livePos` here avoids
+  // a second, redundant high-accuracy `getCurrentPositionAsync` native
+  // call on every HuntScreen mount (perf audit: duplicate GPS bridge
+  // call during the cold-start window). A precision-5 geohash tile + 8
+  // neighbours (~15 km of coverage) easily absorbs the small staleness
+  // of a last-known anchor.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        if (perm.status !== 'granted') {
-          setLoading(false);
-          return;
-        }
-        const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        if (!cancelled) {
-          // `coords.accuracy` is 1-σ horizontal accuracy in metres on
-          // expo-location; null on platforms that don't report it.
-          // Threaded through to ExploreMiniMap so the accuracy halo
-          // can render around the "you" dot (shared
-          // drawAccuracyCircle in src/utils/mapMeDot.ts).
-          setPos({
-            lat: fix.coords.latitude,
-            lon: fix.coords.longitude,
-            accuracy: typeof fix.coords.accuracy === 'number' ? fix.coords.accuracy : null,
-          });
-        }
-      } catch {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (pos || !livePos) return;
+    setPos({ lat: livePos.lat, lon: livePos.lon, accuracy: livePos.accuracy });
+  }, [livePos, pos]);
+
+  // Drop the spinner when location permission is denied. Without a fix
+  // we never seed `pos`, so the subscribe-settle timer below never arms
+  // — the spinner would otherwise hang forever on a denied device.
+  useEffect(() => {
+    if (locationDenied) setLoading(false);
+  }, [locationDenied]);
 
   // Cache subscription — kicks off once we have a fix, but only while
   // the screen is focused (audit MED 3). With `freezeOnBlur: true` on
@@ -273,21 +252,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     // keep serving them, so the client filters them out here.
     const nowSec = Date.now() / 1000;
     items = items.filter(({ cache }) => cache.expiresAt === null || cache.expiresAt > nowSec);
-    // Restrict to caches whose decoded position is inside the
-    // mini-map's visible bbox. As the user zooms out the bbox grows
-    // and more caches surface; no chip-row to set "within X km".
-    if (mapBbox) {
-      items = items.filter(({ cache }) => {
-        if (!cache.geohash) return false;
-        const c = decodeGeohash(cache.geohash);
-        return (
-          c.lat >= mapBbox.minLat &&
-          c.lat <= mapBbox.maxLat &&
-          c.lng >= mapBbox.minLon &&
-          c.lng <= mapBbox.maxLon
-        );
-      });
-    }
     if (selectedDifficulties.size > 0) {
       // A cache with no difficulty tag is treated as "1" — typical
       // hider convention for a trivial walk-up; otherwise filtering
@@ -306,7 +270,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     // tier's trust graph. `isTrusted` short-circuits to true for 'all'.
     items = items.filter(({ cache }) => isTrusted(cache.hiderPubkey));
     return items;
-  }, [caches, pos, mapBbox, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
+  }, [caches, pos, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
 
   const activeFilterCount = useMemo(
     () =>
