@@ -44,19 +44,11 @@ const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mo
 // scenarios it covers (unfollowed-sender / Following-only toggle).
 // Label is only used for log lines — we never overwrite an existing
 // `name` / `display_name` on the kind-0 if it's already published.
-// Scenic farm-themed Unsplash photo IDs picked for banner aesthetic
-// (rolling fields, barns, farm animals). All licensed under the
-// Unsplash Free License — free to use commercially, attribution
-// optional but appreciated. URLs below resolve to a wide-aspect crop
-// at 1500x500 which fits the ProfileScreen banner slot well after
-// `resizeMode: 'cover'`.
-//
-// Swap to dedicated artwork hosted in this repo (e.g.
-// `tests/e2e/fixtures/<name>-banner.png`) when proper banner art
-// exists.
-// Banners are farmyard scenes re-hosted to Blossom (blossom.primal.net) —
-// content-addressed + signed by each Piggy's own nsec, so they don't depend
-// on a third-party hotlink staying alive.
+// Banners are farmyard scenes (1500x500 crops, fit the ProfileScreen
+// banner slot after `resizeMode: 'cover'`) re-hosted to Blossom
+// (blossom.primal.net) — content-addressed + signed by each Piggy's own
+// nsec, so they don't depend on a third-party hotlink staying alive.
+// Re-host via the BUD-02 upload flow if a blob ever 404s.
 const PIGGIES = [
   // Mapping matches tests/e2e/README.adoc — note NSEC2=Little, NSEC3=Middle.
   {
