@@ -51,8 +51,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Back button floats above scroll — pink chevron on white pill so
-       * it stays visible against any course hero image. */}
+      {/* Pink chevron on a white pill, floating above the scroll — stays visible against any course hero image. Fixes #523 (white-on-white arrow); shipped in v1.1.0. */}
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => navigation.goBack()}
