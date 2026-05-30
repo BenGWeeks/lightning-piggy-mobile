@@ -31,7 +31,8 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
 import { createMapScreenStyles, type MapScreenStyles } from '../styles/MapScreen.styles';
-import { ExploreNavigation } from '../navigation/types';
+import { ExploreNavigation, RootNavigation, ExploreStackParamList } from '../navigation/types';
+import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import {
   Bbox,
   BtcMapPlace,
@@ -60,7 +61,10 @@ import { useFriendsLiveLocations } from '../hooks/useFriendsLiveLocations';
 import { useIsFocused } from '@react-navigation/native';
 
 interface Props {
-  navigation: ExploreNavigation;
+  // Composite so the back handler can return to the DM (`Conversation` is a
+  // RootStack screen) when the Map is opened from a live-location card.
+  navigation: CompositeNavigationProp<ExploreNavigation, RootNavigation>;
+  route: RouteProp<ExploreStackParamList, 'Map'>;
 }
 
 type PermissionState = 'unknown' | 'granted' | 'denied';
@@ -73,7 +77,7 @@ type PermissionState = 'unknown' | 'granted' | 'denied';
  * Renderer is native MapLibre via the shared LibreMiniMap component (no
  * Google Maps, no API key, OSM tiles streamed from openstreetmap.org).
  */
-const MapScreen: React.FC<Props> = ({ navigation }) => {
+const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   // Tier-aware predicate from the Web-of-Trust context. `isTrusted`
   // already encodes the current wotTier (Friends / FoF / All), so
@@ -367,15 +371,36 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     [refreshPlaces],
   );
 
+  // Back target: when opened from a DM live-location card the route carries
+  // `returnTo`, so return to that conversation; otherwise pop the stack —
+  // preserving back for the Explore / Places / Events / Hunt entry points.
+  const handleBack = useCallback(() => {
+    const returnTo = route.params?.returnTo;
+    if (returnTo?.screen === 'Conversation') {
+      // Pop this Map off the Explore stack first, otherwise it stays mounted
+      // (with its returnTo param) underneath the DM and re-appears next time
+      // the user visits the Explore tab.
+      navigation.popToTop();
+      navigation.navigate('Conversation', returnTo.params);
+      return;
+    }
+    navigation.goBack();
+  }, [navigation, route.params]);
+
+  // The header + permission-screen back button can now return to a DM, so the
+  // "Back to Explore" wording only fits the in-stack entry points.
+  const backLabel = route.params?.returnTo ? 'Back' : 'Back to Explore';
+
   // ------- render --------------------------------------------------------
 
   if (permission === 'denied') {
     return (
       <View style={styles.container} testID="map-screen">
         <Header
-          onBack={() => navigation.goBack()}
+          onBack={handleBack}
           onOpenFilters={() => setFiltersOpen(true)}
           colors={colors}
+          backLabel={backLabel}
         />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
@@ -386,10 +411,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
           <TouchableOpacity
             style={styles.deniedButton}
-            onPress={() => navigation.goBack()}
+            onPress={handleBack}
             testID="map-permission-back-button"
           >
-            <Text style={styles.deniedButtonText}>Back to Explore</Text>
+            <Text style={styles.deniedButtonText}>{backLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -399,9 +424,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="map-screen">
       <Header
-        onBack={() => navigation.goBack()}
+        onBack={handleBack}
         onOpenFilters={() => setFiltersOpen(true)}
         colors={colors}
+        backLabel={backLabel}
       />
       <View style={styles.webviewWrapper}>
         <LibreMiniMap
@@ -516,13 +542,14 @@ const Header: React.FC<{
   onBack: () => void;
   onOpenFilters: () => void;
   colors: Palette;
-}> = ({ onBack, onOpenFilters, colors }) => {
+  backLabel: string;
+}> = ({ onBack, onOpenFilters, colors, backLabel }) => {
   const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
     <View style={styles.header}>
       <TouchableOpacity
         onPress={onBack}
-        accessibilityLabel="Back to Explore"
+        accessibilityLabel={backLabel}
         testID="map-back-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
