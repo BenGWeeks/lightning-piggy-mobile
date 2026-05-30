@@ -96,4 +96,24 @@ describe('yieldMacrotask', () => {
     await p;
     expect(resolved).toBe(true);
   });
+
+  it('removes its abort listener on normal fire — no accumulation across yields (#789 review)', async () => {
+    // The decrypt loop calls this many times on ONE long-lived signal; a leaked
+    // listener per yield means a later abort fans out to thousands of stale
+    // handlers. add/remove must stay balanced.
+    const ctrl = new AbortController();
+    const addSpy = jest.spyOn(ctrl.signal, 'addEventListener');
+    const removeSpy = jest.spyOn(ctrl.signal, 'removeEventListener');
+
+    for (let i = 0; i < 5; i++) {
+      const p = yieldMacrotask(ctrl.signal);
+      jest.runOnlyPendingTimers();
+      await p;
+    }
+
+    expect(addSpy).toHaveBeenCalledTimes(5);
+    expect(removeSpy).toHaveBeenCalledTimes(5); // each normal fire cleans up its own listener
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+  });
 });

@@ -51,13 +51,17 @@
 export function yieldMacrotask(signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const id = setTimeout(resolve, 0);
-    if (signal) {
-      const onAbort = () => {
-        clearTimeout(id);
-        resolve();
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
+    const onAbort = () => {
+      clearTimeout(id);
+      resolve();
+    };
+    const id = setTimeout(() => {
+      // Normal fire: drop the abort listener so it doesn't accumulate on a
+      // long-lived signal across the (many) yields of one decrypt pass (#789
+      // review). `{ once: true }` only auto-removes on the abort path.
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, 0);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
