@@ -365,12 +365,12 @@ const GroupConversationScreen: React.FC = () => {
 
   const trackedMessages = useMemo(
     () =>
-      messages.map((m) => ({
-        text: sanitizeDisplayText(m.text),
+      classifiedMessages.map((m) => ({
+        text: m.text,
         fromMe: m.senderPubkey === myPubkey,
         createdAt: m.createdAt,
       })),
-    [messages, myPubkey],
+    [classifiedMessages, myPubkey],
   );
   const { isInvoicePaid } = usePaidInvoiceTracker(trackedMessages);
 
