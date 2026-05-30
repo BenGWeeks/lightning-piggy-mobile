@@ -472,9 +472,17 @@ const ConversationScreen: React.FC = () => {
     () =>
       navigation.navigate('Main', {
         screen: 'MainTabs',
-        params: { screen: 'Explore', params: { screen: 'Map' } },
+        params: {
+          screen: 'Explore',
+          params: {
+            screen: 'Map',
+            // Carry this DM's route so the Map's back button returns here
+            // instead of dropping the user on the Explore tab.
+            params: { returnTo: { screen: 'Conversation', params: route.params } },
+          },
+        },
       }),
-    [navigation],
+    [navigation, route.params],
   );
 
   const handlePayInvoice = useCallback((raw: string) => {
