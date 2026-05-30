@@ -314,8 +314,16 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   }, [places, filters.lightning, filters.onchain, categoryFilter]);
 
   const visibleCaches = useMemo(() => {
+    // Drop NIP-40-expired caches — relays that don't honour expiration keep
+    // serving them, so the client filters them out. The Geo-caches list
+    // (HuntScreen) already does this; the map must too, else an expired Piglet
+    // lingers on the map after it's gone from the list (#762).
+    const nowSec = Date.now() / 1000;
     return [...caches.values()].filter(
-      (c) => (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
+      (c) =>
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
+        isTrusted(c.hiderPubkey) &&
+        (c.expiresAt === null || c.expiresAt > nowSec),
     );
   }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
 
