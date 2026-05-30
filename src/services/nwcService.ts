@@ -904,15 +904,23 @@ export async function lookupInvoice(
   }
 }
 
-export function isWalletConnected(walletId: string): boolean {
+/**
+ * Raw WebSocket transport state — is the relay socket actually open? Unlike
+ * `isWalletConnected`, this is NOT gated by relay-health, so a caller can tell
+ * "socket up but relay not answering" (→ amber `degraded`) apart from "socket
+ * down" (→ red `disconnected`). Feeds `getWalletHealth` (#786 review).
+ */
+export function isSocketConnected(walletId: string): boolean {
   const provider = providers.get(walletId);
   if (!provider) return false;
-  // Check the actual WebSocket connection state
   const client = (provider as any).client;
-  if (!(client?.connected ?? false)) return false;
+  return client?.connected ?? false;
+}
+
+export function isWalletConnected(walletId: string): boolean {
   // Transport "connected" can lie: a hung relay / dead link leaves the socket
   // in ESTABLISHED while nothing gets through. Treat a run of unanswered
   // requests as not-connected so the UI is honest and the 30s connection-check
   // triggers a reconnect (#654).
-  return !isRelayDead(walletId);
+  return isSocketConnected(walletId) && !isRelayDead(walletId);
 }

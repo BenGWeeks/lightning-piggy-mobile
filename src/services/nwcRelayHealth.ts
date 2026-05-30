@@ -131,9 +131,11 @@ export function isRelayInCooldown(walletId: string): boolean {
   if (rlUntil !== undefined) {
     if (now >= rlUntil) {
       // The rate-limit back-off clears only on its own timer — drop both the
-      // timestamp and reset the strikes so a recovered relay starts fresh.
+      // timestamp and the strikes so a recovered relay starts fresh AND the
+      // Maps don't retain a key forever for any wallet that was ever throttled
+      // (#787 review). A missing strikes entry reads as 0 in `recordRateLimited`.
       relayRateLimitUntil.delete(walletId);
-      relayRateLimitStrikes.set(walletId, 0);
+      relayRateLimitStrikes.delete(walletId);
     } else {
       parked = true;
     }
