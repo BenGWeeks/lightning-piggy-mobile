@@ -815,10 +815,16 @@ const SendSheet: React.FC<Props> = ({
           </BottomSheetView>
         ) : (
           <BottomSheetScrollView
-            contentContainerStyle={[
-              styles.content,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
+            // Padding only — NOT `styles.content` (flex: 1). A flex-1 scroll
+            // content-container sizes to the viewport, so when the keyboard
+            // shrinks the window the content collapses and dynamic sizing
+            // re-measures the sheet down to header height (the "sheet doesn't
+            // show fully / doesn't lift" bug). Matching NostrLoginSheet —
+            // intrinsic content height + interactive keyboard — lifts the
+            // whole sheet above the keyboard. See #521 / #522.
+            contentContainerStyle={{
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
+            }}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.innerContent}>
