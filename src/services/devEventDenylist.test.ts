@@ -9,16 +9,18 @@ const { DEV_LEFTOVER_PUBKEYS } = __TEST__;
 
 describe('devEventDenylist', () => {
   describe('DEV_LEFTOVER_PUBKEYS', () => {
-    it('contains the four disposable-nsec Geo-Cache 1 signers', () => {
-      // These are the four signers discovered 2026-05-18 — locked in
-      // here so a careless edit to the deny-list (e.g. accidental
-      // dedupe past zero) shows up as a test failure rather than a
-      // silent regression where leftover events leak back into the UI.
+    it('contains the disposable-nsec test signers (4 Geo-Cache 1 + Swavesey Stash)', () => {
+      // Locked in here so a careless edit to the deny-list (e.g. accidental
+      // dedupe past zero) shows up as a test failure rather than a silent
+      // regression where leftover events leak back into the UI.
       const expected = [
+        // Four signers of d=big-piggy-geo-cache-1, discovered 2026-05-18.
         'b8d38e654adff224418002ae752155a84a86dab6fa94b4bc9e81ca9e25dce9e7',
         '1251920ed2f86d0ff2e14d95a2dba42e5f0c23da6e766549ec28318fd2a6004c',
         '5a6f56679c4d6d6b0a6c0be95cb1bed7758c53b618420e3dda579a98e277c372',
         'b94b5013aa137c1ecddffaea073b279a0c7a7d1a350d30a6bded87d2068f5e97',
+        // One-off signer of d=swavesey-trad-cache ("Swavesey Stash"), #774.
+        'b5ce7bd9825e3e6176d13dcfb34ed36b700215bfa6f70cf51e802225f558146e',
       ];
       for (const pk of expected) {
         expect(DEV_LEFTOVER_PUBKEYS.has(pk)).toBe(true);
