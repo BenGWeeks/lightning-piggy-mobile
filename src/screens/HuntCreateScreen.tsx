@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
   Image,
@@ -50,6 +49,7 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
+import { createHuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
 import type { RouteProp } from '@react-navigation/native';
 import { ExploreNavigation, ExploreStackParamList, HuntCacheFallback } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -91,7 +91,7 @@ type Stage =
 
 const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createHuntCreateScreenStyles(colors), [colors]);
   const { signEvent, relays, pubkey } = useNostr();
   // Live user position for the hide-pin preview map. Map is centred on
   // the pin the user picked; the user dot follows them as they
@@ -204,6 +204,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // step can be skipped through.
   const [cacheName, setCacheName] = useState('');
   const [cacheDescription, setCacheDescription] = useState('');
+  // NIP-GC revealable hint — a light, opt-in clue for stuck hunters. Stored
+  // ROT13-obfuscated on the relay (the publisher applies rot13 from
+  // `piggy.hint`), so this state always holds the PLAINTEXT the hider typed.
+  const [cacheHint, setCacheHint] = useState('');
   const [difficulty, setDifficulty] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [terrain, setTerrain] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [cacheSize, setCacheSize] = useState<'micro' | 'small' | 'regular' | 'large' | 'other'>(
@@ -244,6 +248,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         }
         setCacheName(fc.name ?? '');
         setCacheDescription(fc.description ?? '');
+        // fc.hint is already ROT13-DECODED plaintext (ParsedCache.hint) — pre-fill
+        // it raw so the publisher's re-rot13 round-trips it, no double-encode.
+        setCacheHint(fc.hint ?? '');
         if (typeof fc.difficulty === 'number')
           setDifficulty(Math.min(5, Math.max(1, fc.difficulty)) as 1 | 2 | 3 | 4 | 5);
         if (typeof fc.terrain === 'number')
@@ -436,6 +443,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       setCacheName(piggy.name ?? '');
       setCacheDescription(piggy.description ?? '');
+      // piggy.hint is stored as decoded plaintext (the publisher applies rot13
+      // on write) — pre-fill as-is so re-publishing round-trips it unchanged.
+      setCacheHint(piggy.hint ?? '');
       setDifficulty(piggy.difficulty ?? 1);
       setTerrain(piggy.terrain ?? 1);
       setCacheSize(piggy.size ?? 'micro');
@@ -660,6 +670,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       // Geocache-info step — finder-facing metadata.
       name: cacheName.trim() || undefined,
       description: cacheDescription.trim() || undefined,
+      // Plaintext hint — the publisher ROT13-obfuscates it onto the kind 37516
+      // event (`['hint', rot13(piggy.hint)]`). Empty → undefined drops the tag.
+      hint: cacheHint.trim() || undefined,
       difficulty,
       terrain,
       size: cacheSize,
@@ -780,6 +793,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     pin,
     cacheName,
     cacheDescription,
+    cacheHint,
     difficulty,
     terrain,
     cacheSize,
@@ -1772,6 +1786,24 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 />
               </View>
 
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint (optional)</Text>
+              <Text style={styles.helper}>
+                A light clue a stuck hunter can reveal — not a secret. It&apos;s stored lightly
+                obfuscated (ROT13) on the relay, so don&apos;t put anything sensitive here.
+              </Text>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline]}
+                  placeholder="e.g. Behind the third fence post, under the flat rock."
+                  placeholderTextColor={colors.textSupplementary}
+                  value={cacheHint}
+                  onChangeText={setCacheHint}
+                  multiline
+                  accessibilityLabel="Cache hint"
+                  testID="hunt-create-hint-input"
+                />
+              </View>
+
               <Text style={[styles.subSectionLabel, styles.sectionGap]}>
                 Difficulty · {difficulty}/5
               </Text>
@@ -2130,7 +2162,7 @@ const StepHeader: React.FC<{
   subtitle: string;
   status: 'active' | 'done';
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
 }> = ({ n, title, subtitle, status, colors, styles }) => (
   <View style={styles.stepHeader} accessibilityRole="header">
     <View style={[styles.stepBadge, status === 'done' && styles.stepBadgeDone]}>
@@ -2162,7 +2194,7 @@ const STEP_LABELS: { n: number; label: string }[] = [
 const StepProgressBar: React.FC<{
   currentStep: 1 | 2 | 3 | 4 | 5 | 6;
   onPipPress: (n: 1 | 2 | 3 | 4 | 5 | 6) => void;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
 }> = ({ currentStep, onPipPress, styles }) => {
   return (
     <View style={styles.stepperRow} accessibilityRole="progressbar">
@@ -2228,7 +2260,7 @@ const StepNavRow: React.FC<{
   // Optional leading icon for the next button — the final step uses it
   // for the Publish / Save / Done action so it isn't text-only.
   nextIcon?: typeof Check;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
   colors: Palette;
 }> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, nextIcon: NextIcon, styles, colors }) => (
   <View style={styles.stepNavRow}>
@@ -2264,7 +2296,7 @@ const StepNavRow: React.FC<{
 const LevelPicker: React.FC<{
   value: number;
   onChange: (v: number) => void;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
 }> = ({ value, onChange, styles }) => (
   <View style={styles.levelPickerRow}>
     {[1, 2, 3, 4, 5].map((n) => (
@@ -2286,7 +2318,7 @@ const OptionPicker: React.FC<{
   value: string;
   options: { v: string; label: string }[];
   onChange: (v: string) => void;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
 }> = ({ value, options, onChange, styles }) => (
   <View style={styles.optionPickerRow}>
     {options.map((o) => {
@@ -2310,7 +2342,7 @@ const OptionPicker: React.FC<{
 
 const NfcSupportedTagsCard: React.FC<{
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: ReturnType<typeof createHuntCreateScreenStyles>;
 }> = ({ colors, styles }) => (
   <View style={styles.tagsCard} testID="hunt-create-supported-tags">
     <View style={styles.tagsCardHeader}>
@@ -2350,772 +2382,5 @@ const NfcSupportedTagsCard: React.FC<{
     </View>
   </View>
 );
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerRightSpacer: { width: 24 },
-    body: { padding: 16, gap: 10 },
-    getPiggyCard: {
-      backgroundColor: colors.surface,
-      borderRadius: 14,
-      padding: 14,
-      // No marginBottom — StepNavRow's own marginTop (16) is the only
-      // inter-section gap. Avoids the previous 12 + 16 stack that
-      // dropped a 28 px hole between the card and the Next button.
-      gap: 10,
-    },
-    getPiggyTitle: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    getPiggyHelper: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    getPiggyPhoto: {
-      width: '100%',
-      // Wide-and-short crop keeps the card compact so the title, photo,
-      // and both CTAs sit above the fold on a stock 6.1" device. The
-      // underlying photo is 4:3, so we let it letterbox via objectFit
-      // = "cover" inside the constrained box.
-      height: 140,
-      borderRadius: 10,
-      backgroundColor: colors.background,
-    },
-    getPiggyButtonsRow: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    getPiggyButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 10,
-    },
-    getPiggyButtonPrint: {
-      backgroundColor: colors.brandPink,
-    },
-    getPiggyButtonBuy: {
-      // Robotechy's brand surface is a dark charcoal; keeps the logo
-      // legible without re-tinting it.
-      backgroundColor: '#1a1a1a',
-    },
-    getPiggyButtonText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    robotechyLogo: {
-      height: 16,
-      width: 70,
-      marginLeft: 2,
-    },
-    getPiggyTagsHint: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 6,
-      marginTop: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      borderRadius: 8,
-      backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    getPiggyTagsHintText: {
-      flex: 1,
-      fontSize: 11,
-      lineHeight: 15,
-      color: colors.textSupplementary,
-    },
-    getPiggyTagsHintBold: {
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    sectionLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 4,
-    },
-    // Sub-section heading inside a Step (e.g. "Memo" under Step 3, "Hint
-    // photo" under Step 3) — same weight as the legacy sectionLabel so
-    // existing copy keeps its visual rhythm, just renamed to reflect the
-    // new outer-step containers.
-    subSectionLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 4,
-    },
-    sectionGap: { marginTop: 16 },
-    stepHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      marginTop: 4,
-      marginBottom: 8,
-    },
-    stepBadge: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stepBadgeDone: {
-      backgroundColor: colors.green,
-    },
-    stepBadgeText: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: colors.white,
-    },
-    stepHeaderText: {
-      flex: 1,
-    },
-    stepHeaderTitle: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: colors.textHeader,
-    },
-    stepHeaderSubtitle: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 1,
-    },
-    // Horizontal 5-pip progress bar at the top of the screen. Sits
-    // between the brand-pink screen header and the scrollable body so
-    // it's always visible while the user works through the form.
-    stepperRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      paddingHorizontal: 12,
-      paddingTop: 14,
-      paddingBottom: 10,
-      backgroundColor: colors.surface,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-    },
-    stepperPipWrap: {
-      alignItems: 'center',
-      width: 56,
-    },
-    stepperPip: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1.5,
-    },
-    stepperPipActive: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
-    stepperPipPending: { backgroundColor: 'transparent', borderColor: colors.textSupplementary },
-    stepperPipText: { fontSize: 12, fontWeight: '800', color: colors.white },
-    stepperPipTextPending: { color: colors.textSupplementary },
-    stepperLabel: {
-      marginTop: 4,
-      fontSize: 10,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    stepperLabelPending: { color: colors.textSupplementary, fontWeight: '500' },
-    stepperConnector: {
-      flex: 1,
-      height: 2,
-      marginTop: 13,
-      marginHorizontal: -4,
-    },
-    stepperConnectorReached: { backgroundColor: colors.brandPink },
-    stepperConnectorPending: { backgroundColor: colors.divider },
-    stepperPipCurrent: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-      transform: [{ scale: 1.08 }],
-    },
-    stepperLabelCurrent: { color: colors.brandPink, fontWeight: '800' },
-    // Bottom-of-step Back / Next navigation row. When there's no Back
-    // button (step 1) the row collapses to just the Next button via
-    // `flex: 1` — symmetric paddingHorizontal on the button gives even
-    // left/right text padding without needing a width-matching spacer.
-    stepNavRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginTop: 8,
-      marginBottom: 8,
-      gap: 12,
-    },
-    stepNavBackButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      backgroundColor: colors.surface,
-    },
-    stepNavBackText: {
-      marginLeft: 4,
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    // ---- Publish step "Published" confirmation strip ----------------------
-    publishedStrip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.greenLight,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      borderRadius: 10,
-      marginTop: 8,
-    },
-    publishedText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.green,
-    },
-    // ---- NFC payload preview card (step 6) -------------------------------
-    payloadPreview: {
-      backgroundColor: colors.surface,
-      borderRadius: 10,
-      padding: 12,
-      marginTop: 8,
-      gap: 4,
-    },
-    payloadPreviewLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      marginBottom: 2,
-    },
-    payloadPreviewLine: {
-      fontSize: 12,
-      color: colors.textBody,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    // ---- Lock-tag toggle (step 6, #567) ----------------------------------
-    lockToggleRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 12,
-      padding: 12,
-      marginTop: 8,
-      marginBottom: 12,
-      borderRadius: 12,
-      backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    lockToggleMain: { flex: 1 },
-    lockToggleTitle: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 2,
-    },
-    lockToggleHelper: { fontSize: 12, color: colors.textSupplementary, lineHeight: 16 },
-    lockToggleSwitch: {
-      width: 40,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: colors.divider,
-      justifyContent: 'center',
-      paddingHorizontal: 2,
-      marginTop: 2,
-    },
-    lockToggleSwitchOn: { backgroundColor: colors.brandPink },
-    lockToggleKnob: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: colors.white,
-      alignSelf: 'flex-start',
-    },
-    lockToggleKnobOn: { alignSelf: 'flex-end' },
-    // ---- Post-write PIN card (step 6, #567) ------------------------------
-    pinCard: {
-      marginTop: 16,
-      padding: 14,
-      borderRadius: 12,
-      backgroundColor: colors.brandPinkLight,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      gap: 10,
-    },
-    pinHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    pinHeaderText: {
-      fontSize: 13,
-      fontWeight: '800',
-      color: colors.brandPink,
-      letterSpacing: 0.3,
-      textTransform: 'uppercase',
-    },
-    pinHelper: { fontSize: 12, color: colors.textBody, lineHeight: 17 },
-    pinValueRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      borderRadius: 10,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    pinValueText: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      letterSpacing: 2,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    pinActionsRow: { flexDirection: 'row', gap: 10 },
-    pinActionSecondary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      backgroundColor: colors.surface,
-    },
-    pinActionSecondaryText: { fontSize: 13, fontWeight: '700', color: colors.brandPink },
-    // ---- QR scanner modal -------------------------------------------------
-    scannerRoot: { flex: 1, backgroundColor: '#000' },
-    scannerCamera: { flex: 1 },
-    scannerPermission: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 32,
-      gap: 16,
-      backgroundColor: '#000',
-    },
-    scannerPermissionText: {
-      color: colors.white,
-      fontSize: 15,
-      textAlign: 'center',
-      lineHeight: 22,
-    },
-    scannerHintBar: {
-      position: 'absolute',
-      bottom: 48,
-      left: 0,
-      right: 0,
-      alignItems: 'center',
-    },
-    scannerHint: {
-      color: colors.white,
-      fontSize: 14,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      borderRadius: 100,
-    },
-    scannerCloseButton: {
-      position: 'absolute',
-      top: 56,
-      right: 20,
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stepNavNextButton: {
-      flex: 1,
-      flexDirection: 'row',
-      gap: 6,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      paddingHorizontal: 18,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    stepNavNextButtonDisabled: { backgroundColor: colors.textSupplementary },
-    stepNavNextText: { fontSize: 15, fontWeight: '800', color: colors.white },
-    helper: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    inputRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 8,
-      marginTop: 6,
-    },
-    input: {
-      flex: 1,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-      fontSize: 14,
-      color: colors.textBody,
-      minHeight: 44,
-    },
-    inputMultiline: { minHeight: 76, textAlignVertical: 'top' },
-    levelPickerRow: { flexDirection: 'row', gap: 4, marginTop: 8 },
-    levelSegment: {
-      flex: 1,
-      height: 30,
-      borderRadius: 6,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      backgroundColor: colors.surface,
-    },
-    levelSegmentFilled: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
-    optionPickerRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 8,
-    },
-    optionPill: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      backgroundColor: colors.surface,
-    },
-    optionPillActive: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
-    optionPillText: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
-    optionPillTextActive: { color: colors.white },
-    pasteButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    primaryButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 100,
-      marginTop: 16,
-    },
-    primaryButtonDisabled: {
-      opacity: 0.4,
-    },
-    primaryButtonText: {
-      color: colors.white,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    crossDeviceBanner: {
-      backgroundColor: colors.surface,
-      borderLeftWidth: 3,
-      borderLeftColor: colors.brandPink,
-      borderRadius: 8,
-      padding: 12,
-      marginTop: 12,
-      marginBottom: 4,
-    },
-    crossDeviceBannerText: {
-      color: colors.textHeader,
-      fontSize: 13,
-      lineHeight: 18,
-    },
-    validatedCard: {
-      flexDirection: 'row',
-      gap: 12,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-      marginTop: 12,
-    },
-    validatedTextWrapper: { flex: 1 },
-    validatedTitle: {
-      color: colors.textHeader,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    validatedMeta: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-    },
-    validatedDescription: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 4,
-      fontStyle: 'italic',
-    },
-    publicRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-    },
-    publicTextWrapper: { flex: 1 },
-    publicTitle: {
-      color: colors.textHeader,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    publicSub: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-    },
-    toggleTrack: {
-      width: 44,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: colors.divider,
-      justifyContent: 'center',
-      paddingHorizontal: 2,
-    },
-    toggleTrackOn: { backgroundColor: colors.green },
-    toggleThumb: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: colors.white,
-    },
-    toggleThumbOn: { alignSelf: 'flex-end' },
-    warning: {
-      marginTop: 12,
-      color: colors.textSupplementary,
-      fontSize: 12,
-      lineHeight: 17,
-    },
-    savedActions: { gap: 12 },
-    tagsCard: {
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-      gap: 10,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    tagsCardHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    tagsCardHeaderText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    tagsCardIntro: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    tagsCardRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 10,
-    },
-    tagsCardDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      marginTop: 4,
-    },
-    tagsCardName: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    tagsCardParagraph: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 10,
-    },
-    tagsCardCheck: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: colors.green,
-      lineHeight: 18,
-    },
-    tagsCardCross: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: colors.red,
-      lineHeight: 18,
-    },
-    tagsCardParagraphText: {
-      flex: 1,
-      fontSize: 12,
-      lineHeight: 17,
-      color: colors.textBody,
-    },
-    tagsCardBlurb: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 16,
-      marginTop: 2,
-    },
-    tagsCardCapacity: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-      marginTop: 1,
-    },
-    hintPreviewWrapper: {
-      position: 'relative',
-      marginTop: 4,
-    },
-    hintPreview: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      borderRadius: 12,
-      backgroundColor: colors.divider,
-    },
-    hintRemoveButton: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    hintUploadingWrapper: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-    },
-    hintButtonsRow: {
-      flexDirection: 'row',
-      gap: 10,
-      marginTop: 4,
-    },
-    hintButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 12,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.brandPinkLight,
-    },
-    hintButtonText: {
-      color: colors.brandPink,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    hintsRow: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    hintField: {
-      flex: 1,
-    },
-    hintFieldLabel: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      fontWeight: '600',
-      marginBottom: 4,
-    },
-    // Cancel ExploreMiniMap's built-in 16px hub margin so the preview lines up with step content.
-    pinMapPreview: { marginHorizontal: -16, marginBottom: 4 },
-    pinRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-    },
-    pinTextWrapper: { flex: 1 },
-    pinTitle: {
-      color: colors.textHeader,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    pinSub: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-      fontFamily: 'monospace',
-    },
-    pinClearButton: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    pinButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.brandPinkLight,
-    },
-    // Side-by-side "Use my location" / "Pick on map" when no pin is set.
-    pinButtonsRow: {
-      flexDirection: 'row',
-      gap: 10,
-    },
-    pinButtonHalf: {
-      flex: 1,
-    },
-    pinButtonText: {
-      color: colors.brandPink,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-  });
 
 export default HuntCreateScreen;
