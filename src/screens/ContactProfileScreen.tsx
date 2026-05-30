@@ -197,7 +197,7 @@ const ContactProfileScreen: React.FC = () => {
           banner: fresh.banner ?? null,
           about: fresh.about ?? null,
           lightningAddress: fresh.lud16 ?? null,
-          nip05: fresh.nip05 ?? prev.nip05 ?? null,
+          nip05: fresh.nip05 ?? null,
         }));
       }
     } catch {
