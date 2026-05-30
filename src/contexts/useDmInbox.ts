@@ -520,10 +520,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               // scheduler hard-cancels any pending setTimeout so the
               // loop unwinds in the next microtask instead of waiting
               // out one more scheduler round-trip.
-              const nsecYield = createYieldScheduler({
-                signal,
-                safetyEvery: NIP17_LOOP_YIELD_EVERY,
-              });
+              // coldStart (#788): swap RAF yields for setTimeout(0) macro-task
+              // yields on the first refresh, where RAF starves and the loop
+              // otherwise stalls the JS thread in 1.4–2.1 s bursts.
+              const nsecYield = createYieldScheduler({ signal, safetyEvery: NIP17_LOOP_YIELD_EVERY, coldStart: isColdStart }); // prettier-ignore
               try {
                 for (const wrap of kind1059) {
                   // Time-budget yield + abort check (#286, #532). Covers
@@ -663,11 +663,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             let touched = 0;
             let unfollowedPurged = 0;
             let amberSkipSetDirty = false;
-            // Frame-budget scheduler (#532) — see nsec branch above.
-            const amberYield = createYieldScheduler({
-              signal,
-              safetyEvery: NIP17_LOOP_YIELD_EVERY,
-            });
+            // Frame-budget scheduler (#532) + coldStart macro-task yields
+            // (#788) — see nsec branch above for the rationale on both.
+            const amberYield = createYieldScheduler({ signal, safetyEvery: NIP17_LOOP_YIELD_EVERY, coldStart: isColdStart }); // prettier-ignore
             try {
               for (const wrap of kind1059) {
                 // Time-budget yield + abort check (#286, #532) — see nsec branch above for rationale.
