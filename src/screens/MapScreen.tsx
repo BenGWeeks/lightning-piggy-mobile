@@ -313,11 +313,29 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, [places, filters.lightning, filters.onchain, categoryFilter]);
 
+  // Re-evaluate the NIP-40 expiry filter as time advances even if nothing else
+  // changes — a cache can expire while the map just sits open. A 60s tick is
+  // plenty (expiry is a slow day/year-scale boundary) and, unlike putting a
+  // per-render `Date.now()` in the memo deps (which would recompute
+  // visibleCaches every render), keeps the memo cached between ticks (#763).
+  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Date.now() / 1000), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   const visibleCaches = useMemo(() => {
+    // Drop NIP-40-expired caches — relays that don't honour expiration keep
+    // serving them, so the client filters them out. The Geo-caches list
+    // (HuntScreen) already does this; the map must too, else an expired Piglet
+    // lingers on the map after it's gone from the list (#762).
     return [...caches.values()].filter(
-      (c) => (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
+      (c) =>
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
+        isTrusted(c.hiderPubkey) &&
+        (c.expiresAt === null || c.expiresAt > nowSec),
     );
-  }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
+  }, [caches, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
