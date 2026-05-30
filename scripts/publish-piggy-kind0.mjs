@@ -54,7 +54,9 @@ const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mo
 // Swap to dedicated artwork hosted in this repo (e.g.
 // `tests/e2e/fixtures/<name>-banner.png`) when proper banner art
 // exists.
-const UNSPLASH_BANNER_BASE = 'https://images.unsplash.com';
+// Banners are farmyard scenes re-hosted to Blossom (blossom.primal.net) —
+// content-addressed + signed by each Piggy's own nsec, so they don't depend
+// on a third-party hotlink staying alive.
 const PIGGIES = [
   // Mapping matches tests/e2e/README.adoc — note NSEC2=Little, NSEC3=Middle.
   {
@@ -63,7 +65,8 @@ const PIGGIES = [
     label: 'Big Piggy',
     lud16: 'big.piggy@bank.weeksfamily.me',
     about: 'The biggest of the Piggies. Saves more than she spends.',
-    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1500595046743-cd271d694d30?w=1500&h=500&fit=crop&auto=format`,
+    bannerUrl:
+      'https://blossom.primal.net/e4541a2c43c067cbe8977a5a986cc507c19674b555cc3ce1a359c15453424348.jpg',
   },
   {
     envVar: 'MAESTRO_NSEC_LITTLE',
@@ -71,7 +74,8 @@ const PIGGIES = [
     label: 'Little Piggy',
     lud16: 'little.piggy@bank.weeksfamily.me',
     about: 'The littlest Piggy. Just learning about sats and zaps.',
-    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1605185189676-cda1e2bdc1a8?w=1500&h=500&fit=crop&auto=format`,
+    bannerUrl:
+      'https://blossom.primal.net/78768018cf54486a7750ca8b16f49fc9a2ce69994b210938083ce37c99ab53ae.jpg',
   },
   {
     envVar: 'MAESTRO_NSEC_MIDDLE',
@@ -79,7 +83,8 @@ const PIGGIES = [
     label: 'Middle Piggy',
     lud16: 'middle.piggy@bank.weeksfamily.me',
     about: 'The middle Piggy. Splits the difference between Big and Little.',
-    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1500382017468-9049fed747ef?w=1500&h=500&fit=crop&auto=format`,
+    bannerUrl:
+      'https://blossom.primal.net/611658ea525b4484dd4e1a9fef5e86161b56f60bcb62d85965be58491e0d8bf6.jpg',
   },
   {
     envVar: 'MAESTRO_NSEC_EVIL',
@@ -87,7 +92,8 @@ const PIGGIES = [
     label: 'Evil Piggy',
     lud16: 'ben.weeks@bank.weeksfamily.me',
     about: 'A mysterious unfriended Piggy. Used in test flows for the unfollowed-sender path.',
-    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1518866509036-a1c41fc40f1e?w=1500&h=500&fit=crop&auto=format`,
+    bannerUrl:
+      'https://blossom.primal.net/ad9421cf466eeaa51df1f084b0babe4318ebe0970efd6dfd8c3ddcf83ac12ef0.jpg',
   },
 ];
 
