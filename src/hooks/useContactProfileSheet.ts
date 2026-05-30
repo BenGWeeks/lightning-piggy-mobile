@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
@@ -47,6 +47,8 @@ interface ProfileSheetState {
   name: string;
   picture: string | null;
   banner: string | null;
+  /** kind-0 `about` bio, patched in by the verified fetch. */
+  about: string | null;
   lightningAddress: string | null;
 }
 
@@ -80,6 +82,10 @@ export function useContactProfileSheet(
 ): UseContactProfileSheet {
   const { relays } = useNostr();
   const [profileSheet, setProfileSheet] = useState<ProfileSheetState | null>(null);
+  // Latest read-relay URLs held in a ref so `openProfileSheet` stays
+  // referentially stable across `relays` array-identity churn (see its deps).
+  const readRelaysRef = useRef<string[]>([]);
+  readRelaysRef.current = useMemo(() => relays.filter((r) => r.read).map((r) => r.url), [relays]);
 
   const openProfileSheet = useCallback(
     (pubkey: string, name: string | null, picture: string | null, lud16: string | null) => {
@@ -90,15 +96,15 @@ export function useContactProfileSheet(
         name: display,
         picture,
         banner: null,
+        about: null,
         lightningAddress: lud16,
       });
-      // Re-resolve the verified profile so the banner and Lightning address
-      // are real (the row's `usePubkeyProfile` slim path drops both). Verified
-      // because `lud16` feeds a payment destination — never trust the slim
-      // batch value for a zap.
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      // Re-resolve the verified profile so the banner, bio and Lightning
+      // address are real (the row's `usePubkeyProfile` slim path drops them).
+      // Verified because `lud16` feeds a payment destination — never trust the
+      // slim batch value for a zap.
       nostrService
-        .fetchProfile(pubkey, readRelays)
+        .fetchProfile(pubkey, readRelaysRef.current)
         .then((profile) => {
           if (!profile) return;
           setProfileSheet((prev) => {
@@ -111,13 +117,22 @@ export function useContactProfileSheet(
               name: profile.displayName ?? profile.name ?? prev.name,
               picture: profile.picture ?? prev.picture,
               banner: profile.banner ?? null,
-              lightningAddress: profile.lud16 ?? prev.lightningAddress,
+              about: profile.about ?? null,
+              // The verified fetch is AUTHORITATIVE for the payment address:
+              // do NOT fall back to the seeded value, so a profile that has
+              // cleared/removed its `lud16` correctly disables the zap rather
+              // than letting a stale cached address mis-target funds (#771
+              // review). `canZap`/`onZap` follow from this null.
+              lightningAddress: profile.lud16 ?? null,
             };
           });
         })
         .catch(() => {});
     },
-    [relays],
+    // Stable across `relays` array-identity churn (NostrContext re-emits fresh
+    // `relays` arrays on relay-list updates) — the read-relay set is read from
+    // a ref, so rows holding `openProfileSheet` don't re-render needlessly.
+    [],
   );
 
   const closeProfileSheet = useCallback(() => setProfileSheet(null), []);
@@ -130,6 +145,7 @@ export function useContactProfileSheet(
             name: profileSheet.name,
             picture: profileSheet.picture,
             banner: profileSheet.banner,
+            about: profileSheet.about,
             lightningAddress: profileSheet.lightningAddress,
             source: 'nostr',
           }

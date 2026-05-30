@@ -169,4 +169,36 @@ describe('useContactProfileSheet', () => {
     });
     expect(result.current.profileSheet).toBeNull();
   });
+
+  it('clears a seeded Lightning address when the verified fetch has none', async () => {
+    // The row seeded a (possibly stale) address, but the verified profile no
+    // longer carries a lud16. The verified fetch is authoritative for the
+    // payment destination, so the sheet must DROP the seeded address rather
+    // than zap a stale target (#771 review).
+    mockedFetchProfile.mockResolvedValue(profileWith({ lud16: null }));
+    const { result } = renderHook(() => useContactProfileSheet(makeNav(), jest.fn()));
+
+    act(() => {
+      result.current.openProfileSheet(PK, 'The Hider', null, 'stale@example.com');
+    });
+    // Optimistically zappable from the seed...
+    expect(result.current.canZap).toBe(true);
+
+    // ...until the authoritative fetch clears it.
+    await waitFor(() => expect(result.current.contact?.lightningAddress).toBeNull());
+    expect(result.current.canZap).toBe(false);
+    expect(result.current.onZap).toBeUndefined();
+  });
+
+  it('surfaces the verified profile bio (about) on the sheet', async () => {
+    mockedFetchProfile.mockResolvedValue(profileWith({ about: 'Geocaching dad ⚡' }));
+    const { result } = renderHook(() => useContactProfileSheet(makeNav(), jest.fn()));
+
+    act(() => {
+      result.current.openProfileSheet(PK, 'The Hider', null, null);
+    });
+    expect(result.current.contact?.about).toBeNull(); // seeded without a bio
+
+    await waitFor(() => expect(result.current.contact?.about).toBe('Geocaching dad ⚡'));
+  });
 });
