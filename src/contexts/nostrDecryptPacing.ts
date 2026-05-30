@@ -1,3 +1,5 @@
+import { yieldMacrotask } from '../utils/yieldingBatch';
+
 /** Yield to the native event loop so UI interactions and paint can tick
  * between chunks of a synchronous decrypt loop (#177, #731).
  *
@@ -71,8 +73,21 @@ export function createYieldScheduler(opts: {
   safetyEvery: number;
   /** ms of unbroken JS work before we force a yield. */
   budgetMs?: number;
+  /** Cold-start mode (#788): yield via a `setTimeout(0)` macro-task instead
+   * of `requestAnimationFrame`. RAF rides the Choreographer vsync signal,
+   * which is the right primitive once the app is settled — but during cold
+   * start the Choreographer hasn't stabilised, so RAF callbacks coalesce and
+   * the decrypt loop runs 1.4–2.1 s synchronous bursts between actual yields
+   * (the gaps Stev.ie measured). A macro-task drains on the next event-loop
+   * tick regardless of vsync, so the loop reliably hands the thread back to
+   * native (touch / render) between chunks while the app is still warming up.
+   * The frame-budget gate below keeps the timer count low (one per ~budgetMs
+   * of work, not one per iteration), so this does NOT reintroduce the #731
+   * Looper timer-flood. Cryptography, dedup and ordering are untouched — only
+   * the yield primitive changes. */
+  coldStart?: boolean;
 }): YieldScheduler {
-  const { signal, safetyEvery, budgetMs = DECRYPT_FRAME_BUDGET_MS } = opts;
+  const { signal, safetyEvery, budgetMs = DECRYPT_FRAME_BUDGET_MS, coldStart = false } = opts;
   let iteration = 0;
   let yields = 0;
   let lastYieldAt = performance.now();
@@ -110,16 +125,23 @@ export function createYieldScheduler(opts: {
     const safetyHit = iteration % safetyEvery === 0;
     if (!overBudget && !safetyHit) return;
     yields++;
-    await new Promise<void>((resolve, reject) => {
-      pendingReject = reject;
-      pendingHandle = requestAnimationFrame(() => {
-        pendingHandle = null;
-        pendingReject = null;
-        resolve();
+    if (coldStart) {
+      // Cold start (#788): macro-task yield. `yieldMacrotask` owns its own
+      // timer + abort-cancel, so the RAF pending-handle bookkeeping is
+      // bypassed entirely on this path.
+      await yieldMacrotask(signal);
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        pendingReject = reject;
+        pendingHandle = requestAnimationFrame(() => {
+          pendingHandle = null;
+          pendingReject = null;
+          resolve();
+        });
+      }).catch(() => {
+        // Aborted — swallow; caller checks signal.aborted after maybeYield.
       });
-    }).catch(() => {
-      // Aborted — swallow; caller checks signal.aborted after maybeYield.
-    });
+    }
     lastYieldAt = performance.now();
   };
 
