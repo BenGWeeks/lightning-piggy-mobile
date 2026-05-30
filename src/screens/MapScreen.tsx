@@ -377,18 +377,31 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleBack = useCallback(() => {
     const returnTo = route.params?.returnTo;
     if (returnTo?.screen === 'Conversation') {
+      // Pop this Map off the Explore stack first, otherwise it stays mounted
+      // (with its returnTo param) underneath the DM and re-appears next time
+      // the user visits the Explore tab.
+      navigation.popToTop();
       navigation.navigate('Conversation', returnTo.params);
       return;
     }
     navigation.goBack();
   }, [navigation, route.params]);
 
+  // The header + permission-screen back button can now return to a DM, so the
+  // "Back to Explore" wording only fits the in-stack entry points.
+  const backLabel = route.params?.returnTo ? 'Back' : 'Back to Explore';
+
   // ------- render --------------------------------------------------------
 
   if (permission === 'denied') {
     return (
       <View style={styles.container} testID="map-screen">
-        <Header onBack={handleBack} onOpenFilters={() => setFiltersOpen(true)} colors={colors} />
+        <Header
+          onBack={handleBack}
+          onOpenFilters={() => setFiltersOpen(true)}
+          colors={colors}
+          backLabel={backLabel}
+        />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
           <Text style={styles.deniedTitle}>Location permission required</Text>
@@ -401,7 +414,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={handleBack}
             testID="map-permission-back-button"
           >
-            <Text style={styles.deniedButtonText}>Back to Explore</Text>
+            <Text style={styles.deniedButtonText}>{backLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -410,7 +423,12 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={styles.container} testID="map-screen">
-      <Header onBack={handleBack} onOpenFilters={() => setFiltersOpen(true)} colors={colors} />
+      <Header
+        onBack={handleBack}
+        onOpenFilters={() => setFiltersOpen(true)}
+        colors={colors}
+        backLabel={backLabel}
+      />
       <View style={styles.webviewWrapper}>
         <LibreMiniMap
           lat={pos?.lat ?? null}
@@ -524,13 +542,14 @@ const Header: React.FC<{
   onBack: () => void;
   onOpenFilters: () => void;
   colors: Palette;
-}> = ({ onBack, onOpenFilters, colors }) => {
+  backLabel: string;
+}> = ({ onBack, onOpenFilters, colors, backLabel }) => {
   const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
     <View style={styles.header}>
       <TouchableOpacity
         onPress={onBack}
-        accessibilityLabel="Back to Explore"
+        accessibilityLabel={backLabel}
         testID="map-back-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
