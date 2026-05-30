@@ -30,6 +30,14 @@ jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({ relays: [{ url: 'wss://relay.example', read: true, write: true }] }),
 }));
 
+// `mock`-prefixed so jest's hoist allows the factory to close over it; read
+// lazily when useWallet() is called, toggled per test for the wallet-gate.
+let mockHasWallets = true;
+jest.mock('../contexts/WalletContext', () => ({
+  __esModule: true,
+  useWallet: () => ({ hasWallets: mockHasWallets }),
+}));
+
 const mockedFetchProfile = nostrService.fetchProfile as jest.MockedFunction<
   typeof nostrService.fetchProfile
 >;
@@ -54,6 +62,7 @@ const profileWith = (over: Partial<NostrProfile>): NostrProfile =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockHasWallets = true;
 });
 
 describe('useContactProfileSheet', () => {
@@ -174,7 +183,7 @@ describe('useContactProfileSheet', () => {
     // The row seeded a (possibly stale) address, but the verified profile no
     // longer carries a lud16. The verified fetch is authoritative for the
     // payment destination, so the sheet must DROP the seeded address rather
-    // than zap a stale target (#771 review).
+    // than zap a stale target (#770).
     mockedFetchProfile.mockResolvedValue(profileWith({ lud16: null }));
     const { result } = renderHook(() => useContactProfileSheet(makeNav(), jest.fn()));
 
@@ -186,6 +195,23 @@ describe('useContactProfileSheet', () => {
 
     // ...until the authoritative fetch clears it.
     await waitFor(() => expect(result.current.contact?.lightningAddress).toBeNull());
+    expect(result.current.canZap).toBe(false);
+    expect(result.current.onZap).toBeUndefined();
+  });
+
+  it('keeps zap disabled when no wallet is configured, even with an address', async () => {
+    // A zap opens the in-app SendSheet, which assumes a non-null walletId —
+    // so with no wallet configured the zap must stay disabled regardless of
+    // the contact's Lightning address (#770 [blocking]).
+    mockHasWallets = false;
+    mockedFetchProfile.mockResolvedValue(profileWith({}));
+    const { result } = renderHook(() => useContactProfileSheet(makeNav(), jest.fn()));
+
+    act(() => {
+      result.current.openProfileSheet(PK, 'The Hider', null, 'hider@example.com');
+    });
+    await waitFor(() => expect(result.current.contact?.lightningAddress).toBe('hider@example.com'));
+    // Address present, but no wallet → zap stays locked.
     expect(result.current.canZap).toBe(false);
     expect(result.current.onZap).toBeUndefined();
   });

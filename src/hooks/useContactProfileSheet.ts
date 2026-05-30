@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import type { ExploreNavigation, RootStackParamList } from '../navigation/types';
 import * as nostrService from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
+import { useWallet } from '../contexts/WalletContext';
 import { shortNpub } from '../utils/shortNpub';
 
 /**
@@ -81,11 +82,24 @@ export function useContactProfileSheet(
   onRequestZap: (target: { pubkey: string; name: string; lud16: string }) => void,
 ): UseContactProfileSheet {
   const { relays } = useNostr();
+  // A zap needs a wallet to actually pay — gate `canZap`/`onZap` on it so the
+  // sheet never opens the in-app SendSheet (which assumes a non-null walletId)
+  // with no wallet configured (#770 [blocking]).
+  const { hasWallets } = useWallet();
   const [profileSheet, setProfileSheet] = useState<ProfileSheetState | null>(null);
   // Latest read-relay URLs held in a ref so `openProfileSheet` stays
   // referentially stable across `relays` array-identity churn (see its deps).
   const readRelaysRef = useRef<string[]>([]);
   readRelaysRef.current = useMemo(() => relays.filter((r) => r.read).map((r) => r.url), [relays]);
+  // Guards the async verified-profile patch against a setState after the host
+  // screen unmounts mid-fetch (#770).
+  const isMountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+    },
+    [],
+  );
 
   const openProfileSheet = useCallback(
     (pubkey: string, name: string | null, picture: string | null, lud16: string | null) => {
@@ -106,7 +120,7 @@ export function useContactProfileSheet(
       nostrService
         .fetchProfile(pubkey, readRelaysRef.current)
         .then((profile) => {
-          if (!profile) return;
+          if (!profile || !isMountedRef.current) return;
           setProfileSheet((prev) => {
             // The user may have closed the sheet or opened a different
             // contact while the fetch was in flight — only patch if this is
@@ -121,7 +135,7 @@ export function useContactProfileSheet(
               // The verified fetch is AUTHORITATIVE for the payment address:
               // do NOT fall back to the seeded value, so a profile that has
               // cleared/removed its `lud16` correctly disables the zap rather
-              // than letting a stale cached address mis-target funds (#771
+              // than letting a stale cached address mis-target funds (#770
               // review). `canZap`/`onZap` follow from this null.
               lightningAddress: profile.lud16 ?? null,
             };
@@ -153,7 +167,7 @@ export function useContactProfileSheet(
     [profileSheet],
   );
 
-  const canZap = Boolean(profileSheet?.lightningAddress);
+  const canZap = hasWallets && Boolean(profileSheet?.lightningAddress);
 
   const onMessage = useMemo(
     () =>
@@ -174,7 +188,7 @@ export function useContactProfileSheet(
 
   const onZap = useMemo(
     () =>
-      profileSheet?.lightningAddress
+      hasWallets && profileSheet?.lightningAddress
         ? () => {
             const target = profileSheet;
             setProfileSheet(null);
@@ -185,7 +199,7 @@ export function useContactProfileSheet(
             });
           }
         : undefined,
-    [profileSheet, onRequestZap],
+    [hasWallets, profileSheet, onRequestZap],
   );
 
   const onViewFullProfile = useCallback(() => {

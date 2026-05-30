@@ -1,5 +1,5 @@
 appId: com.lightningpiggy.app.dev
-name: Screenshot — hider contact sheet shows banner + zap + view-full (PR #771)
+name: Screenshot — hider contact sheet shows banner + zap + view-full (PR #770)
 ---
 # Walks Explore → Geo-caches → "The Allotment Watch" → taps the
 # "Hidden by Ben Weeks" attribution row to open the contact bottom
@@ -7,7 +7,7 @@ name: Screenshot — hider contact sheet shows banner + zap + view-full (PR #771
 # (fix/hider-profile-sheet-banner-zap-viewfull) the sheet shows the
 # real kind-0 banner, an enabled (pink) Zap button, and a
 # "View full profile" link. Used to capture the AFTER image for the
-# PR #771 before/after pair.
+# PR #770 before/after pair.
 #
 # Run from repo root:
 #   maestro test tests/e2e/screenshot-hider-sheet.yaml

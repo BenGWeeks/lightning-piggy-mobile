@@ -37,9 +37,9 @@ export interface PubkeyProfileSlice {
   name: string | null;
   picture: string | null;
   /** kind-0 banner URL, used by surfaces that render a profile header
-   * (e.g. the contact profile sheet). Cosmetic-only, so it survives the
-   * slim/batch path — but the slim cache doesn't persist it, so a real
-   * banner only lands once the verified `fetchProfile` fallback runs. */
+   * (e.g. the contact profile sheet). The slim cache path does NOT persist a
+   * banner, so it is `null` there; a real banner only lands once the verified
+   * `fetchProfile` fallback runs. */
   banner: string | null;
   lud16: string | null;
   /** True while the relay fallback is in flight. */

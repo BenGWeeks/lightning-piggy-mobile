@@ -150,7 +150,7 @@ const ContactProfileBody: React.FC<Props> = ({
         </Text>
       ) : null}
 
-      {contact.about ? (
+      {contact.about && contact.about.trim().length > 0 ? (
         <Text style={styles.about} numberOfLines={3} testID="contact-profile-about">
           {contact.about.trim()}
         </Text>
