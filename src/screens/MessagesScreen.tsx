@@ -94,8 +94,22 @@ const MessagesScreen: React.FC = () => {
   // already collapses 'all' → 'friends' for non-secret-mode users, so a
   // stale persisted 'all' can't leak past the parental-control gate.
   const enforceFollowingOnly = effectiveWotTier !== 'all';
-  // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
-  const lastAppliedEnforceRef = useRef<boolean>(true);
+  // Tracks the `enforceFollowingOnly` value the LAST refresh actually
+  // applied, so a genuine later toggle triggers a data-layer re-fetch
+  // (not just a UI re-filter). Seeded to `null` (= "no refresh has run
+  // yet") rather than a hardcoded boolean: the WoT tier hydrates async
+  // from AsyncStorage, so on first render `enforceFollowingOnly` reflects
+  // the transient default ('all' → false), not the persisted value. A
+  // hardcoded seed of `true` made the first settle read as a flip, which
+  // fired a SECOND `refreshDmInbox` whose `newRefreshSignal()` aborted the
+  // focus-effect's cold refresh mid-decrypt — stamping the freshness
+  // cursor so the retry no longer counted as a cold start and #788's
+  // macro-task yield never ran (a double-fetch that no-op'd the
+  // optimisation). With `null`, the enforce-flip effect stays dormant
+  // until a refresh has actually recorded which filter it used; the cold
+  // focus refresh is then the SINGLE fetch and carries the correct filter.
+  // (#788)
+  const lastAppliedEnforceRef = useRef<boolean | null>(null);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -198,9 +212,17 @@ const MessagesScreen: React.FC = () => {
     enforceFollowingOnlyRef.current = enforceFollowingOnly;
   }, [enforceFollowingOnly]);
 
-  // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
+  // Force-refresh the inbox whenever the effective enforcement GENUINELY
+  // flips (a real WoT-tier toggle), so all data-layer paths re-apply the
+  // new filter. Dormant until the cold focus refresh below has recorded
+  // which filter it applied (`lastAppliedEnforceRef.current !== null`):
+  // on first render the WoT tier is still hydrating, so firing here would
+  // abort the cold refresh and defeat #788's macro-task yield. Once a
+  // refresh has run, a later toggle that differs from the applied value
+  // re-fetches with `force: true` so newly-(un)trusted senders surface.
   useEffect(() => {
     if (!isLoggedIn) return;
+    if (lastAppliedEnforceRef.current === null) return;
     if (lastAppliedEnforceRef.current === enforceFollowingOnly) return;
     lastAppliedEnforceRef.current = enforceFollowingOnly;
     refreshDmInbox({
@@ -243,6 +265,15 @@ const MessagesScreen: React.FC = () => {
           // is effectively dead for aborts. We therefore branch on the signal
           // (not the catch) to choose the TTL marker.
           const signal = newRefreshSignal();
+          // Record the filter this (cold) refresh applies so the
+          // enforce-flip effect above stops being dormant and only
+          // re-fires on a GENUINE later toggle away from this value.
+          // Reading `enforceFollowingOnlyRef.current` here (vs. a stale
+          // closure) means the WoT tier has had until now — past
+          // InteractionManager + the 120 ms margin, comfortably longer
+          // than the AsyncStorage hydrate — to settle, so this single
+          // fetch carries the correct, settled filter. (#788)
+          lastAppliedEnforceRef.current = enforceFollowingOnlyRef.current;
           refreshDmInbox({
             includeNonFollows: !enforceFollowingOnlyRef.current,
             signal,
@@ -550,6 +581,11 @@ const MessagesScreen: React.FC = () => {
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
       // Pull-to-refresh deliberately does NOT call newRefreshSignal() here. If a focus refresh is already in flight, refreshDmInbox's single-flight guard returns the existing promise; aborting that promise via newRefreshSignal() then awaiting it would resolve to AbortError and never start a fresh refresh — making pull-to-refresh a no-op whenever a focus refresh was running. We let the in-flight one finish (its result is what the user wants anyway) and only kick off a new refresh if none is running. The focus-effect signal still aborts on blur, which covers the original snappiness goal. (#413 review)
+      // Record the filter this refresh applies, same as the cold focus
+      // refresh: if pull-to-refresh is the first refresh of the session
+      // it must take the enforce-flip effect out of its dormant (`null`)
+      // state so a later genuine WoT-tier toggle still re-fetches. (#788)
+      lastAppliedEnforceRef.current = enforceFollowingOnly;
       await refreshDmInbox({
         force: true,
         includeNonFollows: !enforceFollowingOnly,

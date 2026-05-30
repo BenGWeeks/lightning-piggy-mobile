@@ -35,7 +35,6 @@ import {
   writeNip17Cache,
   loadNip17SkipSet,
   writeNip17SkipSet,
-  DM_INBOX_REFRESH_TTL_MS,
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   DM_CONV_CAP,
@@ -48,6 +47,7 @@ import {
   mergeInboxEntries,
 } from './nostrDmCache';
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
+import { isColdStartRefresh, shouldSkipForFreshness, shouldStampCursor } from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
@@ -116,9 +116,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     promise: Promise<void>;
     includeNonFollows: boolean;
   } | null>(null);
-  /** `performance.now()` of last successful `refreshDmInbox` completion.
-   * Gate for the `DM_INBOX_REFRESH_TTL_MS` throttle so that Messages-tab
-   * focus doesn't re-fire full relay queries on every tab bounce. */
+  /** `performance.now()` of the last COMPLETED `refreshDmInbox` (`0` before
+   * any). Drives the cold-start + freshness-TTL gates — see dmRefreshGate. */
   const dmInboxLastRefreshAt = useRef<number>(0);
 
   /** Eagerly hydrate `dmInbox` from the persisted NIP-17 inbox cache so
@@ -288,10 +287,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // become no-ops AND the cache hydrate skips its filter so the
       // already-cached unfollowed entries don't get masked.
       const includeNonFollows = opts?.includeNonFollows === true;
-      // Cold start = first refresh this session (incl. force: the real cold load
-      // is MessagesScreen's on-mount enforce-flip refresh, which is force:true —
-      // excluding force never capped it; #751). 200-wrap paint, then backfill.
-      const isColdStart = dmInboxLastRefreshAt.current === 0;
+      // Cold start = first refresh this session (incl. force: the real cold
+      // load is MessagesScreen's on-mount focus refresh; the cold-start wrap
+      // cap + #788 macro-task yield must apply to it). See dmRefreshGate.
+      const isColdStart = isColdStartRefresh(dmInboxLastRefreshAt.current);
       // Gate for negative-result skip-set lookups (#743). Bypass when:
       //   force=true (pull-to-refresh) — newly-followed contacts' older
       //     wraps must surface on the next explicit refresh.
@@ -302,15 +301,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       //     (Copilot review finding on #744)
       const bypassSkipSet = forceRefresh || includeNonFollows;
       // Freshness TTL: skip the refresh entirely if the previous one
-      // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
-      // explicitly opts into a forced refresh (pull-to-refresh). The
-      // Messages tab's `useFocusEffect` uses the default TTL path so
-      // tab-bouncing doesn't retrigger expensive relay+decrypt work.
-      if (!opts?.force) {
-        const age = performance.now() - dmInboxLastRefreshAt.current;
-        if (dmInboxLastRefreshAt.current > 0 && age < DM_INBOX_REFRESH_TTL_MS) {
-          return;
-        }
+      // COMPLETED within DM_INBOX_REFRESH_TTL_MS, unless the caller forces it
+      // (pull-to-refresh). Messages-tab `useFocusEffect` uses the default path
+      // so tab-bouncing doesn't retrigger relay+decrypt work. See dmRefreshGate.
+      if (shouldSkipForFreshness(dmInboxLastRefreshAt.current, forceRefresh, performance.now())) {
+        return;
       }
       // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
       if (dmInboxInFlight.current) {
@@ -844,7 +839,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       dmInboxInFlight.current = { promise: task, includeNonFollows };
       try {
         await task;
-        dmInboxLastRefreshAt.current = performance.now();
+        // Stamp the freshness cursor ONLY when the refresh completed (not
+        // aborted). The task resolves on abort too, so stamping here
+        // unconditionally would flip the next refresh's `isColdStart` to
+        // false (defeating #788's macro-task yield) and wrongly satisfy the
+        // TTL gate. See dmRefreshGate.shouldStampCursor. (#788)
+        if (shouldStampCursor(signal?.aborted === true)) {
+          dmInboxLastRefreshAt.current = performance.now();
+        }
       } finally {
         dmInboxInFlight.current = null;
         const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
