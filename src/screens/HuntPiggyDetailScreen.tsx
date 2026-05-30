@@ -45,7 +45,7 @@ import {
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import type { VerifiedEvent } from 'nostr-tools';
+import { parseFoundLog, type FoundLog } from '../utils/foundLog';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
@@ -86,28 +86,6 @@ interface Props {
   navigation: HuntPiggyDetailNavigation;
   route: RouteProp<ExploreStackParamList, 'HuntPiggyDetail'>;
 }
-
-type FoundLog = {
-  id: string;
-  pubkey: string;
-  createdAt: number;
-  content: string;
-  imageUrl: string | null;
-  amountSats: number | null;
-};
-
-const parseFoundLog = (e: VerifiedEvent): FoundLog => {
-  const tag = (k: string): string | undefined => e.tags.find((t) => t[0] === k)?.[1];
-  const amt = parseInt(tag('amount') ?? '', 10);
-  return {
-    id: e.id,
-    pubkey: e.pubkey,
-    createdAt: e.created_at,
-    content: e.content,
-    imageUrl: tag('image') ?? null,
-    amountSats: Number.isFinite(amt) && amt > 0 ? amt : null,
-  };
-};
 
 /**
  * Detail view for a single Hunt cache. Resolves the kind 37516 listing

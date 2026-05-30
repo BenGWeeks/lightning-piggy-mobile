@@ -3,6 +3,7 @@ import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
+import { sanitizeDisplayText } from './sanitizeDisplayText';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -147,7 +148,9 @@ export function buildConversationItems(
       kind: 'message',
       id: `dm-${m.id}`,
       fromMe: m.fromMe,
-      text: m.text,
+      // Drop orphaned object-replacement / zero-width placeholders so an
+      // inline-attachment artifact doesn't render as a tofu box (#764).
+      text: sanitizeDisplayText(m.text),
       createdAt: m.createdAt,
     };
   });
