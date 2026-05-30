@@ -3,6 +3,7 @@ import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
+import { sanitizeDisplayText } from './sanitizeDisplayText';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -112,10 +113,11 @@ export function buildConversationItems(
   zapItems: TimedItem[],
 ): Item[] {
   const msgItems: TimedItem[] = messages.map((m) => {
+    const text = sanitizeDisplayText(m.text);
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo detection in one place.
-    const classified = classifyMessageContent(m.text);
+    const classified = classifyMessageContent(text);
     if (classified.kind === 'gif') {
       return {
         kind: 'gif',
@@ -147,7 +149,7 @@ export function buildConversationItems(
       kind: 'message',
       id: `dm-${m.id}`,
       fromMe: m.fromMe,
-      text: m.text,
+      text,
       createdAt: m.createdAt,
     };
   });

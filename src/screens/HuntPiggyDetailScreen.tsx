@@ -72,6 +72,7 @@ import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
 import NfcReadSheet from '../components/NfcReadSheet';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -103,7 +104,7 @@ const parseFoundLog = (e: VerifiedEvent): FoundLog => {
     id: e.id,
     pubkey: e.pubkey,
     createdAt: e.created_at,
-    content: e.content,
+    content: sanitizeDisplayText(e.content),
     imageUrl: tag('image') ?? null,
     amountSats: Number.isFinite(amt) && amt > 0 ? amt : null,
   };

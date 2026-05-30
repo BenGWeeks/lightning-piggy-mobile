@@ -62,6 +62,18 @@ describe('buildConversationItems', () => {
     expect(nonHeaders[1]).toMatchObject({ kind: 'message', id: 'dm-1', text: 'older' });
   });
 
+  it('sanitizes orphaned inline-object placeholders from DM text at shaping time', () => {
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: 'Stay out!\uFFFC', createdAt: DAY2 }],
+      [],
+    );
+    expect(items.find((i) => i.kind === 'message')).toMatchObject({
+      kind: 'message',
+      id: 'dm-1',
+      text: 'Stay out!',
+    });
+  });
+
   it('inserts a day-header divider between messages from different days', () => {
     const messages: ConversationMessageInput[] = [
       { id: '1', fromMe: false, text: 'day one', createdAt: DAY1 },

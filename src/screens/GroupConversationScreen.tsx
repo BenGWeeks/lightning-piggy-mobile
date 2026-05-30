@@ -48,6 +48,7 @@ import {
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
@@ -354,14 +355,18 @@ const GroupConversationScreen: React.FC = () => {
   // frame for every visible bubble. Mirror of ConversationScreen's items
   // useMemo which does the same classification.
   const classifiedMessages = useMemo<ClassifiedMessage[]>(
-    () => messages.map((m) => ({ ...m, content: classifyMessageContent(m.text) })),
+    () =>
+      messages.map((m) => {
+        const text = sanitizeDisplayText(m.text);
+        return { ...m, text, content: classifyMessageContent(text) };
+      }),
     [messages],
   );
 
   const trackedMessages = useMemo(
     () =>
       messages.map((m) => ({
-        text: m.text,
+        text: sanitizeDisplayText(m.text),
         fromMe: m.senderPubkey === myPubkey,
         createdAt: m.createdAt,
       })),
