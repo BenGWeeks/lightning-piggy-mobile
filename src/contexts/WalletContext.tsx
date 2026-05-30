@@ -776,11 +776,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
           // Sync stored state to relay *responsiveness* (does it answer?), not
           // connect()'s socket-level success — so a dead relay stays
-          // Disconnected instead of flapping back to Connected (#654). Write
-          // only on change to avoid needless re-renders.
-          const responsive = nwcService.isWalletConnected(w.id);
-          if (responsive !== w.isConnected) {
-            updateWalletInState(w.id, { isConnected: responsive });
+          // Disconnected instead of flapping back to Connected (#654). Also
+          // surface the tri-state health so the card can show amber "Not
+          // responding" when the socket is up but the relay is parked /
+          // rate-limited (#786). Write only on change to avoid re-renders.
+          const isConnected = nwcService.isWalletConnected(w.id);
+          // getWalletHealth needs the SOCKET-only state to tell amber
+          // "Not responding" (socket up, relay parked) from red "Disconnected"
+          // (socket down) — isWalletConnected is already false for the degraded
+          // case, which would force red instead of amber (#786 review).
+          const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
+          if (isConnected !== w.isConnected || health !== w.connectionHealth) {
+            updateWalletInState(w.id, { isConnected, connectionHealth: health });
           }
         }
       } finally {

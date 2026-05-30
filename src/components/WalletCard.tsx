@@ -2,11 +2,12 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
-import { WalletState } from '../types/wallet';
+import { WalletState, WalletConnectionHealth } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
+import { useThemeColors } from '../contexts/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -39,6 +40,7 @@ const CardContent: React.FC<{
   btcPrice?: number | null;
   currency?: FiatCurrency;
   isConnected?: boolean;
+  connectionHealth?: WalletConnectionHealth;
   walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
   hideBalance?: boolean;
@@ -52,6 +54,7 @@ const CardContent: React.FC<{
   btcPrice,
   currency,
   isConnected,
+  connectionHealth,
   walletType = 'nwc',
   walletAlias,
   hideBalance,
@@ -59,6 +62,27 @@ const CardContent: React.FC<{
   showDetails = true,
   isWatchOnly = false,
 }) => {
+  const colors = useThemeColors();
+
+  // Tri-state relay status for the dot + label (#786). On-chain wallets have no
+  // relay, so they stay binary (balance present → Connected). For NWC we prefer
+  // the live `connectionHealth`; before the first connection check it's
+  // undefined, so we fall back to the binary `isConnected`.
+  const health: WalletConnectionHealth =
+    walletType === 'onchain'
+      ? balance !== null
+        ? 'responsive'
+        : 'disconnected'
+      : (connectionHealth ?? (isConnected ? 'responsive' : 'disconnected'));
+  const statusColor =
+    health === 'responsive' ? colors.green : health === 'degraded' ? colors.amber : colors.red;
+  const statusLabel =
+    health === 'responsive'
+      ? 'Connected'
+      : health === 'degraded'
+        ? 'Not responding'
+        : 'Disconnected';
+
   const toGrey = (hex: string): string => {
     const h = hex.replace('#', '');
     const r = parseInt(h.substring(0, 2), 16);
@@ -101,28 +125,14 @@ const CardContent: React.FC<{
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
               <View
-                style={[
-                  styles.statusDot,
-                  {
-                    backgroundColor:
-                      walletType === 'onchain'
-                        ? balance !== null
-                          ? '#4CAF50'
-                          : '#F44336'
-                        : isConnected
-                          ? '#4CAF50'
-                          : '#F44336',
-                  },
-                ]}
+                style={[styles.statusDot, { backgroundColor: statusColor }]}
+                testID={`wallet-status-${health}`}
               />
-              <Text style={[styles.statusText, { color: theme.textColor }]}>
-                {walletType === 'onchain'
-                  ? balance !== null
-                    ? 'Connected'
-                    : 'Disconnected'
-                  : isConnected
-                    ? 'Connected'
-                    : 'Disconnected'}
+              <Text
+                style={[styles.statusText, { color: theme.textColor }]}
+                accessibilityLabel={`Wallet status: ${statusLabel}`}
+              >
+                {statusLabel}
               </Text>
             </View>
             <View style={styles.topRightIcons}>
@@ -235,6 +245,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         btcPrice={btcPrice}
         currency={currency}
         isConnected={wallet.isConnected}
+        connectionHealth={wallet.connectionHealth}
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
         hideBalance={wallet.hideBalance}

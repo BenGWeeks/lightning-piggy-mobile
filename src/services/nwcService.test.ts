@@ -32,7 +32,6 @@ import {
   connect,
   getBalance,
   isConnectionError,
-  isRelayInCooldown,
   isReplyTimeoutError,
   isWalletConnected,
 } from './nwcService';
@@ -198,38 +197,8 @@ describe('isWalletConnected (#654 — relay responsiveness, not just transport)'
   });
 });
 
-describe('isRelayInCooldown (#656 — back off a dead relay instead of hammering it)', () => {
-  const failConnect = async () => {
-    throw new Error('Failed to connect to wss://relay.example.com');
-  };
-
-  it('is false for a fresh, responsive connection', () => {
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
-  });
-
-  it('stays false until the relay crosses the dead threshold', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false); // 2 failures < threshold (3)
-  });
-
-  it('enters cooldown once the relay is considered dead', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
-  });
-
-  it('clears cooldown the moment the relay answers again', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
-    mockGetBalanceImpl = async () => ({ balance: 7 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
-  });
-});
+// NB: the relay cooldown / rate-limit back-off internals now live in
+// `nwcRelayHealth.ts` and are covered directly in `nwcRelayHealth.test.ts`
+// (#785). The service-level behaviour that relay-health drives — e.g.
+// `isWalletConnected` flipping after a run of unanswered requests — stays
+// tested above through the mocked provider.

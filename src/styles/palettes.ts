@@ -15,6 +15,9 @@ export const lightPalette = {
   green: '#4CAF50',
   greenLight: '#E8F5E9',
   greenDark: '#2E7D32',
+  // Amber status colour — the middle of the wallet-card health traffic light
+  // (green Connected / amber "Not responding" / red Disconnected, #786).
+  amber: '#FF9800',
   red: '#F44336',
   redLight: '#FFEBEE',
   courseTeal: '#109AB8',
@@ -58,6 +61,9 @@ export const darkPalette: typeof lightPalette = {
   green: '#66BB6A',
   greenLight: '#1B3A1F',
   greenDark: '#A5D6A7',
+  // Slightly brighter amber so the "Not responding" status reads clearly on a
+  // dark card gradient (#786).
+  amber: '#FFA726',
   red: '#EF5350',
   redLight: '#3A1010',
   courseTeal: '#2EB8D6',
