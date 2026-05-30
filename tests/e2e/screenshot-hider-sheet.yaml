@@ -1,0 +1,61 @@
+appId: com.lightningpiggy.app.dev
+name: Screenshot — hider contact sheet shows banner + zap + view-full (PR #771)
+---
+# Walks Explore → Geo-caches → "The Allotment Watch" → taps the
+# "Hidden by Ben Weeks" attribution row to open the contact bottom
+# sheet, then shoots it. In the FIX
+# (fix/hider-profile-sheet-banner-zap-viewfull) the sheet shows the
+# real kind-0 banner, an enabled (pink) Zap button, and a
+# "View full profile" link. Used to capture the AFTER image for the
+# PR #771 before/after pair.
+#
+# Run from repo root:
+#   maestro test tests/e2e/screenshot-hider-sheet.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'geocaches-screen'
+
+- tapOn:
+    text: 'The Allotment Watch'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'hunt-piggy-detail-screen'
+
+# Open the contact sheet by tapping the "Hidden by …" attribution row.
+- tapOn:
+    id: 'hunt-piggy-detail-attribution'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# Confirm the fixed sheet surfaces: enabled zap button + view-full link.
+- assertVisible:
+    id: 'profile-sheet-zap-button'
+- assertVisible:
+    id: 'contact-view-full-profile'
+
+# Let the verified-profile re-resolve land (banner + Lightning address
+# patch in after the instant slim-field paint) and the sheet settle to
+# its full height before the shot.
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- takeScreenshot: hider-sheet-after
