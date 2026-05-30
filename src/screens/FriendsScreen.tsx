@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { fetchProfile } from '../services/nostrService';
 import { useWallet } from '../contexts/WalletContext';
 import TabHeader from '../components/TabHeader';
@@ -79,8 +79,8 @@ const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact, relays } =
-    useNostr();
+  const { isLoggedIn, profile, refreshProfile, relays } = useNostr();
+  const { contacts, refreshContacts, addContact } = useNostrContacts();
   // Wallet-attached flag drives the per-row zap gate alongside the
   // contact's Lightning address. Without a wallet there's nothing to
   // pay from, so the zap action is rendered disabled even when the

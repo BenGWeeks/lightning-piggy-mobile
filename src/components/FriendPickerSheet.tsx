@@ -18,7 +18,7 @@ import {
   BottomSheetTextInput,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import AlphabetBar from './AlphabetBar';
@@ -95,7 +95,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   // the notification threshold but leaves plenty of room for keyboard
   // expansion (sheet can still reach ~94% of the screen).
   const topInset = 60;
-  const { contacts } = useNostr();
+  const { contacts } = useNostrContacts();
   const [search, setSearch] = useState('');
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
   // Canonical bottom-sheet + keyboard pattern from TROUBLESHOOTING.adoc

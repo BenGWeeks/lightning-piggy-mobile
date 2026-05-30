@@ -25,7 +25,7 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { parseBip21 } from '../utils/bip21';
 import { useWallet } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
@@ -129,7 +129,8 @@ const SendSheet: React.FC<Props> = ({
     btcPrice,
     currency,
   } = useWallet();
-  const { signZapRequest, contacts } = useNostr();
+  const { signZapRequest } = useNostr();
+  const { contacts } = useNostrContacts();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -139,8 +140,7 @@ const SendSheet: React.FC<Props> = ({
   const [scanned, setScanned] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('scan');
   const [pasteText, setPasteText] = useState('');
-  // Amount input for lightning addresses (no amount in invoice)
-  const [satsValue, setSatsValue] = useState('');
+  const [satsValue, setSatsValue] = useState(''); // amount input for lightning addresses (no invoice amount)
   const [step, setStep] = useState<Step>('main');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);

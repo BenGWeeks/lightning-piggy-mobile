@@ -23,7 +23,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { buildBip21 } from '../utils/bip21';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { walletLabel } from '../types/wallet';
 import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
@@ -100,7 +100,8 @@ const ReceiveSheet: React.FC<Props> = ({
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  const { sendDirectMessage, contacts } = useNostr();
+  const { sendDirectMessage } = useNostr();
+  const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // No explicit snapPoints — gorhom v5's default enableDynamicSizing=true

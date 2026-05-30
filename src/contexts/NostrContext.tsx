@@ -77,7 +77,6 @@ interface NostrContextType {
   /** Logged-in user's hex pubkey, or null when logged out. */
   pubkey: string | null;
   profile: NostrProfile | null;
-  contacts: NostrContact[];
   relays: RelayConfig[];
   /**
    * Relays the user has explicitly added in-app via the Nostr settings
@@ -125,7 +124,6 @@ interface NostrContextType {
    * "reload my profile" actions).
    */
   refreshProfile: (opts?: { force?: boolean }) => Promise<void>;
-  refreshContacts: () => Promise<void>;
   // Fetch kind-0 profiles for arbitrary pubkeys (non-followed DM senders) (#664).
   fetchProfilesForPubkeys: (pubkeys: string[]) => Promise<Map<string, NostrProfile>>;
   signZapRequest: (
@@ -147,14 +145,6 @@ interface NostrContextType {
     lud16?: string;
     nip05?: string;
   }) => Promise<boolean>;
-  followContact: (pubkey: string) => Promise<boolean>;
-  unfollowContact: (pubkey: string) => Promise<boolean>;
-  addContact: (
-    npubOrHex: string,
-  ) => Promise<
-    | { success: true; pubkey: string; alreadyFollowing?: boolean }
-    | { success: false; error: string }
-  >;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
@@ -257,6 +247,32 @@ interface NostrContextType {
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
+
+/**
+ * Sibling context carrying the follow-list (`contacts`) and its mutators
+ * (#779). Split out of `NostrContextType` so that `setContacts` — which
+ * fires on cold start when ~600 follows load from cache — rebuilds ONLY
+ * this value, not the main `contextValue`. Consumers that read only
+ * `pubkey`/`relays` (e.g. `ExploreHomeScreen`) no longer re-render when
+ * the contact list arrives, killing the measured ~340 ms cascade.
+ *
+ * NOTE: `contacts` STATE still lives in `NostrProvider` (it feeds
+ * `followPubkeys` → `useDmInbox`); only the EXPOSED value moved here.
+ */
+interface NostrContactsContextType {
+  contacts: NostrContact[];
+  refreshContacts: () => Promise<void>;
+  followContact: (pubkey: string) => Promise<boolean>;
+  unfollowContact: (pubkey: string) => Promise<boolean>;
+  addContact: (
+    npubOrHex: string,
+  ) => Promise<
+    | { success: true; pubkey: string; alreadyFollowing?: boolean }
+    | { success: false; error: string }
+  >;
+}
+
+const NostrContactsContext = createContext<NostrContactsContextType | undefined>(undefined);
 
 // Module-evaluation perf marker. Fires the first time this file is parsed,
 // before any provider mounts. Catches "RN bundle finished loading,
@@ -1741,7 +1757,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isLoggingIn,
       pubkey,
       profile,
-      contacts,
       relays,
       userRelays,
       addUserRelay,
@@ -1754,13 +1769,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       loginWithAmber,
       logout,
       refreshProfile,
-      refreshContacts,
       fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
-      followContact,
-      unfollowContact,
-      addContact,
       sendDirectMessage,
       sendFileMessage,
       sendGroupMessage,
@@ -1780,7 +1791,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isLoggingIn,
       pubkey,
       profile,
-      contacts,
       relays,
       userRelays,
       addUserRelay,
@@ -1793,13 +1803,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       loginWithAmber,
       logout,
       refreshProfile,
-      refreshContacts,
       fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
-      followContact,
-      unfollowContact,
-      addContact,
       sendDirectMessage,
       sendFileMessage,
       sendGroupMessage,
@@ -1816,13 +1822,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ],
   );
 
-  return <NostrContext.Provider value={contextValue}>{children}</NostrContext.Provider>;
+  // Sibling value carrying contacts + mutators (#779). Memoised separately
+  // so `setContacts` rebuilds only this — not `contextValue` above.
+  const contactsValue = useMemo(
+    () => ({ contacts, refreshContacts, followContact, unfollowContact, addContact }),
+    [contacts, refreshContacts, followContact, unfollowContact, addContact],
+  );
+
+  return (
+    <NostrContext.Provider value={contextValue}>
+      <NostrContactsContext.Provider value={contactsValue}>
+        {children}
+      </NostrContactsContext.Provider>
+    </NostrContext.Provider>
+  );
 };
 
 export function useNostr() {
   const context = useContext(NostrContext);
   if (!context) {
     throw new Error('useNostr must be used within a NostrProvider');
+  }
+  return context;
+}
+
+/**
+ * Access the follow-list (`contacts`) and its mutators (#779). Served
+ * from a sibling provider so consumers of this hook re-render on
+ * `setContacts` while plain `useNostr()` consumers do not.
+ */
+export function useNostrContacts() {
+  const context = useContext(NostrContactsContext);
+  if (!context) {
+    throw new Error('useNostrContacts must be used within a NostrProvider');
   }
   return context;
 }

@@ -21,7 +21,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostrContacts } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
 import type { Group } from '../types/groups';
 import type { NostrContact } from '../types/nostr';
@@ -127,7 +127,7 @@ MemberRow.displayName = 'MemberRow';
 const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { contacts } = useNostr();
+  const { contacts } = useNostrContacts();
   const { createGroup } = useGroups();
   const [step, setStep] = useState<Step>('members');
   const [name, setName] = useState('');

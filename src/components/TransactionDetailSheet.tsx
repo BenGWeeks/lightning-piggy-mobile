@@ -12,7 +12,7 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
 import { createTransactionDetailSheetStyles } from '../styles/TransactionDetailSheet.styles';
@@ -132,7 +132,8 @@ const TransactionDetailSheet: React.FC<Props> = ({
     </TouchableOpacity>
   );
   const { btcPrice, currency, activeWallet } = useWallet();
-  const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
+  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
+  const { contacts } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [resolvedSwapId, setResolvedSwapId] = useState<string | null>(null);
