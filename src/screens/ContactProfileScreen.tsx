@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  RefreshControl,
   Linking,
   Share,
 } from 'react-native';
@@ -83,6 +84,9 @@ const ContactProfileScreen: React.FC = () => {
   const [sharing, setSharing] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // Bumped on pull-to-refresh to make FriendNoteFeed re-query for new posts.
+  const [notesReloadNonce, setNotesReloadNonce] = useState(0);
 
   // React Navigation may reuse this screen instance and only update params
   // when navigating to ContactProfile while it's already in the stack.
@@ -172,6 +176,38 @@ const ContactProfileScreen: React.FC = () => {
       cancelled = true;
     };
   }, [contact.pubkey, contact.about, contact.lightningAddress, relays]);
+
+  // Pull-to-refresh: unlike the gap-fill effect above (which only fills
+  // missing about/lud16, once), this re-fetches the kind-0 from relays and
+  // OVERWRITES every displayed field with the latest — so a friend who
+  // updated their name, picture, banner, bio or Lightning address surfaces
+  // without waiting out the 24h profile cache. `fetchProfile` is a direct
+  // relay query, so there's no cache to bypass.
+  const handleRefresh = useCallback(async () => {
+    if (!contact.pubkey) return;
+    setRefreshing(true);
+    try {
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const fresh = await fetchProfile(contact.pubkey, readRelays);
+      if (fresh) {
+        setContact((prev) => ({
+          ...prev,
+          name: fresh.displayName ?? fresh.name ?? prev.name,
+          picture: fresh.picture ?? null,
+          banner: fresh.banner ?? null,
+          about: fresh.about ?? null,
+          lightningAddress: fresh.lud16 ?? null,
+          nip05: fresh.nip05 ?? prev.nip05 ?? null,
+        }));
+      }
+    } catch {
+      // best-effort — a failed refresh leaves the current data in place
+    } finally {
+      setRefreshing(false);
+    }
+    // Re-query the kind-1 note feed for new posts too.
+    setNotesReloadNonce((n) => n + 1);
+  }, [contact.pubkey, relays]);
 
   useEffect(() => {
     if (contact.pubkey) {
@@ -405,7 +441,11 @@ const ContactProfileScreen: React.FC = () => {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
         {/* Banner — contact's own if set, else the brand pink-ostrich texture. */}
         <View style={styles.bannerContainer}>
           {contact.banner ? (
@@ -622,7 +662,9 @@ const ContactProfileScreen: React.FC = () => {
         )}
 
         {/* Friend's recent kind-1 notes. Hidden for phone-only contacts. */}
-        {contact.pubkey && <FriendNoteFeed authorPubkey={contact.pubkey} />}
+        {contact.pubkey && (
+          <FriendNoteFeed authorPubkey={contact.pubkey} reloadNonce={notesReloadNonce} />
+        )}
       </ScrollView>
 
       {npub && (

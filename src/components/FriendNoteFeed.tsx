@@ -18,6 +18,9 @@ import type { Palette } from '../styles/palettes';
 interface Props {
   authorPubkey: string;
   limit?: number;
+  // Bumped by the parent's pull-to-refresh to re-open the subscription and
+  // re-query for new posts (the sub is otherwise opened once per focus).
+  reloadNonce?: number;
 }
 
 const RENDER_CAP = 20;
@@ -25,7 +28,7 @@ const RENDER_CAP = 20;
 // sub stays open in the background but the UI shifts to the empty state.
 const FIRST_EVENT_GRACE_MS = 6000;
 
-const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
+const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30, reloadNonce = 0 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { relays } = useNostr();
@@ -126,7 +129,7 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
         clearTimeout(graceTimer);
         unsubscribe();
       };
-    }, [authorPubkey, readRelays, limit]),
+    }, [authorPubkey, readRelays, limit, reloadNonce]),
   );
 
   if (!authorPubkey) return null;
