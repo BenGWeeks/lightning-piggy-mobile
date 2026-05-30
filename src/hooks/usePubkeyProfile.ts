@@ -36,12 +36,23 @@ import type { NostrProfile } from '../types/nostr';
 export interface PubkeyProfileSlice {
   name: string | null;
   picture: string | null;
+  /** kind-0 banner URL, used by surfaces that render a profile header
+   * (e.g. the contact profile sheet). The slim cache path does NOT persist a
+   * banner, so it is `null` there; a real banner only lands once the verified
+   * `fetchProfile` fallback runs. */
+  banner: string | null;
   lud16: string | null;
   /** True while the relay fallback is in flight. */
   loading: boolean;
 }
 
-const empty: PubkeyProfileSlice = { name: null, picture: null, lud16: null, loading: false };
+const empty: PubkeyProfileSlice = {
+  name: null,
+  picture: null,
+  banner: null,
+  lud16: null,
+  loading: false,
+};
 
 // In-flight de-duplication: concurrent consumers asking for the same
 // pubkey share one fetch. Cleared when the promise settles so a later
@@ -97,6 +108,12 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
         setSlice({
           name: cached.displayName ?? cached.name ?? null,
           picture: cached.picture ?? null,
+          // The slim cache never persists `banner` (cosmetic-only, not
+          // worth the storage), so a complete cache-hit can't surface
+          // one. Surfaces that need the banner (the contact sheet)
+          // re-resolve the verified profile on demand — see
+          // `useContactProfileSheet`.
+          banner: null,
           lud16: cached.lud16,
           loading: false,
         });
@@ -108,6 +125,7 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
         setSlice({
           name: cached.displayName ?? cached.name ?? null,
           picture: cached.picture ?? null,
+          banner: null,
           lud16: null,
           loading: true,
         });
@@ -121,6 +139,7 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
         setSlice({
           name: profile.displayName ?? profile.name ?? null,
           picture: profile.picture ?? null,
+          banner: profile.banner ?? null,
           lud16: profile.lud16 ?? null,
           loading: false,
         });

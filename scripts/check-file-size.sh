@@ -16,7 +16,7 @@ LIMIT=1000
 # here; never raise it. Delete the entry once a file drops under the cap.
 declare -A BASELINE=(
   ["src/contexts/NostrContext.tsx"]=1879
-  ["src/screens/HuntCreateScreen.tsx"]=3121
+  ["src/screens/HuntCreateScreen.tsx"]=2386
   ["src/contexts/WalletContext.tsx"]=2173
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1710
   ["src/screens/MapScreen.tsx"]=1562

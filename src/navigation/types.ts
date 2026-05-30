@@ -99,7 +99,13 @@ export type ExploreStackParamList = {
   Lessons: undefined;
   CourseDetail: { courseId: string };
   MissionDetail: { courseId: string; missionId: string };
-  Map: undefined;
+  // `returnTo` is set only when the Map is opened from a DM conversation's
+  // live-location card — it carries that conversation's route so Map's back
+  // button returns to the DM rather than the Explore tab. In-stack entry
+  // points (Explore/Places/Events/Hunt) omit it and fall back to goBack().
+  Map:
+    | { returnTo?: { screen: 'Conversation'; params: RootStackParamList['Conversation'] } }
+    | undefined;
   Places: undefined;
   PlaceDetail: { placeId: number };
   Hunt: undefined;
