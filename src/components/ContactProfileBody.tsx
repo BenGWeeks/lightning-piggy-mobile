@@ -150,6 +150,12 @@ const ContactProfileBody: React.FC<Props> = ({
         </Text>
       ) : null}
 
+      {contact.about && contact.about.trim().length > 0 ? (
+        <Text style={styles.about} numberOfLines={3} testID="contact-profile-about">
+          {contact.about.trim()}
+        </Text>
+      ) : null}
+
       {/* The npub/Lightning QR box was dropped from this quick sheet to keep it
           compact — sharing now lives in the action row's Share button, and the
           full QR is still on the "View profile" page (#666/#18). */}
@@ -330,6 +336,14 @@ const createStyles = (colors: Palette) =>
       textAlign: 'center',
       marginTop: 2,
       paddingHorizontal: 24,
+    },
+    about: {
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.textBody,
+      textAlign: 'center',
+      marginTop: 10,
+      paddingHorizontal: 28,
     },
     qrToggleWrapper: {
       alignSelf: 'stretch',
