@@ -146,6 +146,15 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # `eas build:list` (below) resolves the EAS project by EVALUATING
+      # app.config.ts, whose `extra.eas.projectId` is the only place the id
+      # lives. app.config.ts `import`s `expo/config` + ./package.json, so it
+      # can't load without node_modules — without this step every build:list
+      # call dies with a bare `Error: build:list command failed.` (the build
+      # job works only because it runs npm ci; this job and Attach didn't).
+      - name: Install dependencies
+        run: npm ci
+
       - name: Verify ASC API key is wired
         env:
           # The ASC API key is stored under the EXPO_ASC_* secret names (the
@@ -267,6 +276,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+
+      # Required so `eas build:list` can evaluate app.config.ts (which holds
+      # the only copy of extra.eas.projectId and imports expo/config). Missing
+      # this is what made every poll attempt below fail with `Error: build:list
+      # command failed.` on v1.3.0 — the retries masked a hard config-load
+      # error as a transient hiccup, burning the full poll then erroring.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Resolve latest finished Android APK URL
         id: find
