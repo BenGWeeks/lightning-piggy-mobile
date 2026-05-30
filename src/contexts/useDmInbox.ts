@@ -36,6 +36,7 @@ import {
   loadNip17SkipSet,
   writeNip17SkipSet,
   DM_INBOX_REFRESH_TTL_MS,
+  COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   DM_CONV_CAP,
   inboxCacheKey,
@@ -49,6 +50,7 @@ import {
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
+import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -258,6 +260,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
 
+  // Stable self-reference so the cold-start backfill can re-invoke
+  // refreshDmInbox without it listing itself as a dependency (declared here,
+  // assigned just after the useCallback).
+  const refreshDmInboxRef = useRef<((opts?: RefreshDmInboxOptions) => Promise<void>) | null>(null);
   const refreshDmInbox = useCallback(
     async (opts?: RefreshDmInboxOptions): Promise<void> => {
       if (!pubkey || !isLoggedIn) {
@@ -282,6 +288,19 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // become no-ops AND the cache hydrate skips its filter so the
       // already-cached unfollowed entries don't get masked.
       const includeNonFollows = opts?.includeNonFollows === true;
+      // Cold start = first refresh this session (incl. force: the real cold load
+      // is MessagesScreen's on-mount enforce-flip refresh, which is force:true —
+      // excluding force never capped it; #751). 200-wrap paint, then backfill.
+      const isColdStart = dmInboxLastRefreshAt.current === 0;
+      // Gate for negative-result skip-set lookups (#743). Bypass when:
+      //   force=true (pull-to-refresh) — newly-followed contacts' older
+      //     wraps must surface on the next explicit refresh.
+      //   includeNonFollows=true ("All (dev)" toggle) — the follow gate is
+      //     disabled, so wraps from non-followed senders that were already
+      //     added to the skip-set must now be re-evaluated and surfaced.
+      //     Without this, "Following only=off" would silently skip them.
+      //     (Copilot review finding on #744)
+      const bypassSkipSet = forceRefresh || includeNonFollows;
       // Freshness TTL: skip the refresh entirely if the previous one
       // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
       // explicitly opts into a forced refresh (pull-to-refresh). The
@@ -381,7 +400,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
-            opts?.force ? {} : { since: lastSeen },
+            {
+              // Cold start keeps `since` for kind-4 even under force — the on-mount enforce-flip refresh is force but doesn't need the full kind-4 backlog (that was the ~11s cold remainder; #751). Non-cold force still drops it so a follow-toggle / pull-to-refresh re-fetches older kind-4. Wraps ignore `since` internally regardless (random NIP-59 ts).
+              ...(opts?.force && !isColdStart ? {} : { since: lastSeen }),
+              signal,
+              ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
+            },
           );
           if (signal?.aborted) return;
           const entries: DmInboxEntry[] = [];
@@ -544,7 +568,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   // short-circuit without re-paying the NIP-44 decrypt cost.
                   // Bypassed on force-refresh so a newly-followed contact's
                   // older wraps get re-evaluated. (#743)
-                  if (!forceRefresh && skipSet.has(wrap.id)) {
+                  if (!bypassSkipSet && skipSet.has(wrap.id)) {
                     nip17SkipHits++;
                     continue;
                   }
@@ -672,7 +696,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 }
                 // Skip-set hit — short-circuit without an Amber IPC call.
                 // Bypassed on force-refresh. (#743)
-                if (!forceRefresh && amberSkipSet.has(wrap.id)) {
+                if (!bypassSkipSet && amberSkipSet.has(wrap.id)) {
                   nip17SkipHits++;
                   continue;
                 }
@@ -832,6 +856,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           console.log(`[PerfBlock] refreshDmInbox: ${__perfBlockMs}ms`);
         }
       }
+
+      // Cold-start backfill (#751) — recent slice painted fast above; top up to
+      // the full backlog in the background (deferred + abortable). See module.
+      scheduleColdStartBackfill({
+        isColdStart,
+        signal,
+        includeNonFollows,
+        refreshRef: refreshDmInboxRef,
+      });
     },
     [
       pubkey,
@@ -843,6 +876,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       amberNip44DecryptSilent,
     ],
   );
+  // Keep the self-ref pointed at the latest refreshDmInbox closure.
+  refreshDmInboxRef.current = refreshDmInbox;
 
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);

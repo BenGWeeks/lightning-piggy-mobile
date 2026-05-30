@@ -165,7 +165,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and to share it in private messages.',
+          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and so you can share it (one-shot or live for a chosen duration) in a private message.',
         // Background location is needed for the opt-in "Nearby merchants"
         // alerts (#467) — geofences fire even when the app is backgrounded
         // so the user gets the notification while walking past the shop.
@@ -222,6 +222,35 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         action: 'VIEW',
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'lightning' }],
+      },
+      // LUD-17 LNURL-withdraw scheme — standalone withdraw tags / gift cards
+      // whose URI is `lnurlw://…` (no `lightning:` wrapper). Routed by App.tsx's
+      // Linking handler into the withdraw claim, same as `lightning:lnurl…`
+      // (#341). NDEF (NFC-tap) variants live in plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurlw' }],
+      },
+      // `lnurl://…` — the rare spec-allowed cleartext form App.tsx's Linking
+      // handler also routes; without this VIEW filter such links/taps are a
+      // silent no-op on Android (#341 Copilot review). NDEF variant in
+      // plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurl' }],
+      },
+      // `nostr:` profile / entity URIs — NFC contact badges (#754) and
+      // `Linking.openURL('nostr:nprofile1…')` from other Nostr clients.
+      // Android shows its standard chooser when another Nostr-aware app
+      // also registers the scheme, so this doesn't hijack the user's
+      // preferred client. The App.tsx router decodes npub / nprofile →
+      // ContactProfile and falls back to UnsupportedEntity for the rest.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'nostr' }],
       },
     ],
     // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".

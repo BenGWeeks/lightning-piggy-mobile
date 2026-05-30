@@ -24,6 +24,20 @@ export interface ConversationMessageRowProps {
   onOpenGifFullscreen: BubbleProps['onOpenGifFullscreen'];
   onToggleSecretMode: BubbleProps['onToggleSecretMode'];
   onShowTxDetail: (tx: TransactionDetailData) => void;
+  // Live-location pass-throughs (#206) — latest coords / status / countdown
+  // per session, plus the in-bubble "Stop" handler for the sender.
+  liveLocationLatest: BubbleProps['liveLocationLatest'];
+  liveLocationStatus: BubbleProps['liveLocationStatus'];
+  liveLocationRemainingMs: BubbleProps['liveLocationRemainingMs'];
+  onStopLiveLocation: BubbleProps['onStopLiveLocation'];
+  // Location-card mini-map plumbing (#206) — my live position (for the
+  // blue "me" dot + halo), the peer's avatar, and the Open-Map handler.
+  myLat: BubbleProps['myLat'];
+  myLon: BubbleProps['myLon'];
+  myAccuracyMetres: BubbleProps['myAccuracyMetres'];
+  myAvatarUri: BubbleProps['myAvatarUri'];
+  peerAvatarUri: BubbleProps['peerAvatarUri'];
+  onOpenMap: BubbleProps['onOpenMap'];
 }
 
 /**
@@ -44,6 +58,16 @@ function ConversationMessageRow({
   onOpenGifFullscreen,
   onToggleSecretMode,
   onShowTxDetail,
+  liveLocationLatest,
+  liveLocationStatus,
+  liveLocationRemainingMs,
+  onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  myAvatarUri,
+  peerAvatarUri,
+  onOpenMap,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -109,7 +133,9 @@ function ConversationMessageRow({
       ? ({ kind: 'gif', url: item.url } as const)
       : item.kind === 'location'
         ? ({ kind: 'location', location: item.location } as const)
-        : ({ kind: 'text', text: item.text } as const);
+        : item.kind === 'liveLocationMarker'
+          ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
+          : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}
@@ -124,6 +150,16 @@ function ConversationMessageRow({
       onOpenLocation={onOpenLocation}
       onOpenGifFullscreen={onOpenGifFullscreen}
       onToggleSecretMode={onToggleSecretMode}
+      liveLocationLatest={liveLocationLatest}
+      liveLocationStatus={liveLocationStatus}
+      liveLocationRemainingMs={liveLocationRemainingMs}
+      onStopLiveLocation={onStopLiveLocation}
+      myLat={myLat}
+      myLon={myLon}
+      myAccuracyMetres={myAccuracyMetres}
+      myAvatarUri={myAvatarUri}
+      peerAvatarUri={peerAvatarUri}
+      onOpenMap={onOpenMap}
       testIdPrefix="conversation"
     />
   );

@@ -30,40 +30,57 @@ import {
   MainTabParamList,
   AccountDrawerParamList,
 } from './types';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
+import { lazyScreen } from './lazyScreen';
+
+// Tab-root + drawer-chrome screens stay EAGER — they must render instantly on
+// tab switch / drawer open, so paying their Hermes parse cost up-front is the
+// right trade. Everything reachable only via a stack push is `lazyScreen`'d
+// below so its module isn't evaluated until first navigate (audit HIGH 1).
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
 import ExploreHomeScreen from '../screens/ExploreHomeScreen';
-import LessonsScreen from '../screens/LessonsScreen';
-import MapScreen from '../screens/MapScreen';
-import PlacesScreen from '../screens/PlacesScreen';
-import PlaceDetailScreen from '../screens/PlaceDetailScreen';
-import HuntScreen from '../screens/HuntScreen';
-import HuntCreateScreen from '../screens/HuntCreateScreen';
-import HuntFoundScreen from '../screens/HuntFoundScreen';
-import HuntPiggyDetailScreen from '../screens/HuntPiggyDetailScreen';
-import MyPigletsScreen from '../screens/MyPigletsScreen';
-import EventsScreen from '../screens/EventsScreen';
-import EventDetailScreen from '../screens/EventDetailScreen';
-import CourseDetailScreen from '../screens/CourseDetailScreen';
-import MissionDetailScreen from '../screens/MissionDetailScreen';
 import FriendsScreen from '../screens/FriendsScreen';
-import ConversationScreen from '../screens/ConversationScreen';
-import GroupsScreen from '../screens/GroupsScreen';
-import GroupConversationScreen from '../screens/GroupConversationScreen';
-import ContactProfileScreen from '../screens/ContactProfileScreen';
-import UnsupportedEntityScreen from '../screens/UnsupportedEntityScreen';
-import ProfileScreen from '../screens/account/ProfileScreen';
-import WalletsScreen from '../screens/account/WalletsScreen';
-import NostrScreen from '../screens/account/NostrScreen';
-import OnChainScreen from '../screens/account/OnChainScreen';
-import DisplayScreen from '../screens/account/DisplayScreen';
-import AppearanceScreen from '../screens/account/AppearanceScreen';
-import NearbyScreen from '../screens/account/NearbyScreen';
-import SecurityScreen from '../screens/account/SecurityScreen';
-import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
+
+// Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
+// Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
+// spinner for that screen and never tears down siblings (keeps `freezeOnBlur` +
+// persisted nav state intact). Imperative deep-link routes
+// (`navigationRef.navigate(...)`) mount these the same way a user tap does, so
+// the Suspense resolves the import before the screen renders — every entry
+// point in this file (navigateToHuntFound / navigateToHuntPiggyDetail /
+// navigateToContactProfile / navigateToUnsupportedEntity / navigateToSend /
+// navigateFromNotification) continues to work.
+const LessonsScreen = lazyScreen(() => import('../screens/LessonsScreen'));
+const MapScreen = lazyScreen(() => import('../screens/MapScreen'));
+const PlacesScreen = lazyScreen(() => import('../screens/PlacesScreen'));
+const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'));
+const HuntScreen = lazyScreen(() => import('../screens/HuntScreen'));
+const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'));
+const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
+const HuntPiggyDetailScreen = lazyScreen(() => import('../screens/HuntPiggyDetailScreen'));
+const MyPigletsScreen = lazyScreen(() => import('../screens/MyPigletsScreen'));
+const EventsScreen = lazyScreen(() => import('../screens/EventsScreen'));
+const EventDetailScreen = lazyScreen(() => import('../screens/EventDetailScreen'));
+const CourseDetailScreen = lazyScreen(() => import('../screens/CourseDetailScreen'));
+const MissionDetailScreen = lazyScreen(() => import('../screens/MissionDetailScreen'));
+const ConversationScreen = lazyScreen(() => import('../screens/ConversationScreen'));
+const GroupsScreen = lazyScreen(() => import('../screens/GroupsScreen'));
+const GroupConversationScreen = lazyScreen(() => import('../screens/GroupConversationScreen'));
+const ContactProfileScreen = lazyScreen(() => import('../screens/ContactProfileScreen'));
+const UnsupportedEntityScreen = lazyScreen(() => import('../screens/UnsupportedEntityScreen'));
+const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
+const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
+const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
+const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
+const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
+const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceScreen'));
+const NearbyScreen = lazyScreen(() => import('../screens/account/NearbyScreen'));
+const SecurityScreen = lazyScreen(() => import('../screens/account/SecurityScreen'));
+const AboutScreen = lazyScreen(() => import('../screens/account/AboutScreen'));
 
 let __appNavigatorFirstRenderLogged = false;
 
@@ -75,6 +92,27 @@ let __appNavigatorFirstRenderLogged = false;
  * cleanly. Use `navigateToHuntFound(lnurl)` from outside the React tree.
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+/**
+ * Open the SendSheet on the Home (wallet) tab pre-filled with a pay
+ * payload — a bolt11 invoice (`lnbc…`), a Lightning Address (`user@host`),
+ * or a resolved LNURL-pay endpoint URL. Consumed by `App.tsx`'s Linking
+ * listener for scan-to-pay (#756), the outbound mirror of
+ * `navigateToHuntFound` (scan-to-claim / withdraw, #341).
+ *
+ * HomeScreen reads `route.params.sendToAddress` and feeds it straight into
+ * SendSheet's `processInput`, which already decodes bolt11 + Lightning
+ * Address. Returns false if the nav tree isn't mounted yet so the caller
+ * can retry on cold start.
+ */
+export const navigateToSend = (initialAddress: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: { screen: 'Home', params: { sendToAddress: initialAddress } },
+  });
+  return true;
+};
 
 export const navigateToHuntFound = (lnurl: string): boolean => {
   if (!navigationRef.isReady()) return false;
@@ -118,6 +156,28 @@ export const navigateToHuntPiggyDetail = (coord: string): boolean => {
       },
     },
   });
+  return true;
+};
+
+// Open a contact's full-page profile from outside the React tree —
+// the App.tsx deep-link / NFC handler for `nostr:npub…` / `nostr:nprofile…`
+// (#754). `contact` is a ready-built ContactProfileBodyData; when the
+// kind-0 fetch hasn't resolved yet the caller passes a pubkey-only stub
+// and the screen fills in the bio + Lightning address itself. Returns
+// false until the nav tree is ready so a cold-start tap can retry.
+export const navigateToContactProfile = (contact: ContactProfileBodyData): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('ContactProfile', { contact });
+  return true;
+};
+
+// Graceful fallback for a scanned tag / nostr: link whose entity type
+// has no in-app screen (e.g. a kind-1 note, or a `nostr:` URI we can't
+// decode). Mirrors the Hunt deep-link retry contract — returns false
+// until the nav tree mounts. Used by the App.tsx nostr: router (#754).
+export const navigateToUnsupportedEntity = (entity: string, detail?: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('UnsupportedEntity', { entity, detail });
   return true;
 };
 

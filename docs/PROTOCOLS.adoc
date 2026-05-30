@@ -81,6 +81,58 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
 
+=== Live location: kind-20069 pings + NIP-17 markers (#206)
+
+Live-location sharing rides on the DM pipeline above plus one ephemeral event kind. A share has three on-wire parts:
+
+[cols="1,3",options="header"]
+|===
+| Part | Wire format
+
+| *Start marker* (NIP-17 DM)
+| A normal kind-14 rumor (sealed + gift-wrapped as usual) whose body is, first line first: `[live-location:start]`, then a `geo:<lat>,<lon>` (optionally `;u=<accuracy>`) URI, then a JSON metadata line `{"sessionId":"…","durationMs":900000,"startedAt":<epoch_ms>}`. The sentinel MUST be the first non-empty line to classify (quoting it mid-body does not).
+
+| *Pings* (kind 20069, ephemeral)
+| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. The NIP-04-encrypted JSON payload carries `{ sessionId, lat, lon, accuracy, heading, ts }` — `sessionId` is validated on decode so a ping is matched to its share (a `['d', sessionId]` tag also scopes the subscription filter).
+
+| *End marker* (NIP-17 DM)
+| First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.
+|===
+
+Durations are capped to `MAX_DURATION_MS` (8 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
+
+=== Sharing rich objects in a DM: the publish-and-reference pattern (interop)
+
+Recurring question: to share a contact / calendar event / location / poll *inside* a DM and have other clients (Amethyst, Damus, …) render it, do we wrap a dedicated event kind inside NIP-17? *No.* The interoperable Nostr pattern is **publish-and-reference**: the object is published as its own standard event, and the DM only carries a `nostr:` *pointer* to it (NIP-21 / NIP-27) in the kind-14 `content`. The receiving client resolves the pointer and renders the appropriate embedded card. Confirmed against Amethyst's `quartz` (it parses `nostr:naddr`/`nevent`/`nprofile` out of content and renders the referenced event).
+
+[cols="1,2,2",options="header"]
+|===
+| Object | Published as its own event | Referenced in the kind-14 as
+
+| Contact / profile | kind 0 (already exists) | `nostr:nprofile…` in content (no `p` tag — see below)
+| Calendar event | kind 31922 (date) / 31923 (time) — NIP-52, addressable | `nostr:naddr…` in content + `q` tag
+| Note / post | kind 1 | `nostr:nevent…` + `q` tag
+| Article | kind 30023 | `nostr:naddr…` + `q` tag
+| Location (a point) | *no standard kind exists* | best-effort only — see below
+|===
+
+Two hard constraints:
+
+* *The referenced object is public.* The DM envelope stays private (the pointer is inside the encrypted kind-14), but the referenced event is a normal published event anyone can fetch with the `naddr`/`nevent`. There is **no interoperable way to share a _private_ rich object**: per NIP-17, other clients only unwrap kinds *14 (chat), 15 (file), and 7 (reaction)* from a gift wrap — a gift-wrapped kind-31923 or kind-1068 is invisible to them. Private + rich + interoperable: pick two.
+* *Tag rules differ inside a kind-14.* Referencing an **event** → add a `q` (quote) tag (safe, conventional). Referencing a **profile** → content only, *never* a `p` tag — in NIP-17 the kind-14 `p` tags are the chat participants, so tagging a mentioned person would add them to the conversation and re-route a copy to them.
+
+*Location is the genuine exception.* There is no location *event kind* anywhere in the NIPs — NIP-52 carries location as a `location` string tag + a `g` geohash tag on a calendar event, and Amethyst's own "location" is geohash-tagged notes (NIP-73 geohash scope) + a geohash feed. So there is no published "location object" to point an `naddr` at, and the best-effort for a point in a DM is a `geo:` URI in the `content` (a client that decrypts the DM may linkify it). A live, moving pin in a DM is therefore *inherently app-specific* — which is exactly why our live location is a private convention (`[live-location]` markers + kind-20069 pings) rather than a portable card. Polls (NIP-88) are public-only for the same family of reasons (votes must be public to tally), so our `[POLL]` DM encoding is likewise app-private by necessity.
+
+*Why not add a `g` geohash tag to the markers?* Because inside NIP-17 the kind-14's tags are encrypted (the rumor is sealed + gift-wrapped), a `g` tag would be *private* — but that also means relays never see it and so cannot index it. The whole purpose of a `g` tag is relay-side `#g` discovery (geohash feeds), which is impossible on an encrypted rumor. So the tag would add no discovery value and ~no rendering value over the `geo:` URI already in the body. It is **not** worth adding. (Geohash tags *are* best practice on *public* events — kind-1 geo-notes, kind-31923 calendar events — precisely because relays index them; that rationale evaporates inside an encrypted DM.) The one real rule it illustrates: never move location onto the *outer* gift wrap (kind 1059) or seal (kind 13) — only the `["p", recipient]` routing tag belongs there, and anything sensitive must stay inside the encrypted kind-14.
+
+What this means for us:
+
+* *Contact* — already done the interoperable way: `Shared contact: <name>\nnostr:<nprofile>` in the kind-14 content, `nprofile` carrying relay hints, recipient as the only `p` tag (`src/screens/ContactProfileScreen.tsx`, `extractSharedContact` in `MessageBubble.tsx`). No change needed.
+* *Calendar event* — if we ever add "share an event to a DM", publish a NIP-52 kind-31923 and embed its `naddr` + a `q` tag; that interops with Amethyst's calendar for free.
+* *Location / polls* — no interoperable card exists; the app-private encoding is the ceiling. A `g` geohash tag is *not* worth adding (encrypted inside the wrap → relays can't index it → no discovery, ~no rendering gain over the `geo:` URI); keep location in the kind-14 `content` and never on the outer wrap.
+
+References: NIP-17 (DMs, allowed inner kinds 14/15/7), NIP-21 (`nostr:` URIs), NIP-27 (mentions in content; tags optional, only for notification), NIP-52 (calendar kinds + location tags), NIP-88 (polls, public-only). Cross-checked against `vitorpamplona/amethyst` `quartz` (`nip17Dm`, `nip52Calendar`, `nip19Bech32`).
+
 === Hunt: Lightning extension to NIP-GC (#468)
 
 ==== Summary
@@ -222,6 +274,45 @@ Reasons it's the right call:
 | `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events (7-day TTL, 500-cap, sync peek). See `docs/SOLUTION_DESIGN.adoc` → "Explore tab".
 |===
 
+==== `lightning:` tag-tap / deep-link routing
+
+An NFC tag tap, a QR scan, or a `Linking` call from another app wakes
+Lightning Piggy via the `lightning:` scheme (registered in `app.config.ts`).
+The single handler in `App.tsx`'s Linking listener decides the *direction*
+of money flow and routes to the matching surface. There are two directions:
+
+* **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
+  claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
+* **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
+  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+
+The critical rule: for LNURL forms the direction is keyed off the
+**resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32
+prefix — a `lnurl1…` can be either kind. `resolveLnurlDirection`
+(`src/services/lnurlService.ts`) does one fetch and returns
+`{ kind: 'pay' | 'withdraw', … }`; both directions branch on that one
+answer so they can never disagree.
+
+|===
+| Tapped / scanned payload | Spec | Direction | Routes to
+
+| `lightning:lnbc…` (also `lntb` / `lnts` / `lnbs`) | BOLT-11 | Pay → out | `SendSheet` prefilled (amount + memo from the invoice; zero-amount invoices prompt for an amount)
+| `lightning:user@host` | LUD-16 | Pay → out | `SendSheet` — resolves the address, prompts for an amount
+| `lightning:lnurl1…` / `lnurlp://` / `https://…` resolving to `payRequest` | LUD-06/17 | Pay → out | `SendSheet`
+| `lightning:lnurl1…` / `lnurlw://` / `lnurl://` resolving to `withdrawRequest` | LUD-03 | Claim → in | `HuntFoundScreen` (no regression to #341)
+| anything else under `lightning:` | — | — | friendly "Link not supported" toast (no silent dead end — Copilot review #488)
+|===
+
+Cold launch is handled the same way as the withdraw and notification
+paths: each route returns a boolean "did it land", and the handler retries
+(~2 s, 100 ms cadence) until `navigationRef.isReady()`.
+
+NOTE: The `payRequest → SendSheet` leg currently passes the resolved
+endpoint URL to `SendSheet.processInput`, which today only decodes bolt11
+and Lightning Addresses. Teaching `processInput` to also resolve a raw
+LNURL-pay endpoint is the remaining wiring (tracked in #756); the bolt11
+and Lightning-Address pay legs are fully wired.
+
 === Events: NIP-52 calendar consumption
 
 ==== Summary
@@ -295,3 +386,48 @@ The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is th
 ==== Code reference
 
 * `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+
+=== Deep-link & NFC tag-tap routing
+
+==== Summary
+
+A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
+
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+
+==== Routing table
+
+|===
+| Tag / link payload | Decodes to | Routes to | Issue
+
+| `https://www.lightningpiggy.com/hunt/<coord>` or `lightningpiggy://hunt/<coord>` | `kind:pubkey:d` coord | `HuntPiggyDetail` (Piglet detail) | #73
+| `nostr:naddr1…` (kind 37516) | Hunt listing coord | `HuntPiggyDetail` | #73
+| `nostr:npub1…` | bare pubkey | `ContactProfile` (profile screen) | #754
+| `nostr:nprofile1…` | pubkey **+ relay hints** | `ContactProfile`, kind-0 fetched off the embedded hints | #754
+| `lnurlw://…` / `lnurl://…` (standalone withdraw voucher) | LNURL-withdraw | `openLnurlWithdrawSheet` (claim bottom sheet) | #103 / #341
+| `lightning:lnbc…` (bolt11) / `lightning:user@host` (Lightning Address) | invoice / LN address | `SendSheet` (pay) | #756
+| `lightning:lnurl1…` / `lnurl(p\|w)://…` / `https://…` | resolved once; routed on the server `tag` | `withdrawRequest` → `openLnurlWithdrawSheet`; `payRequest` → `SendSheet` | #341 / #756
+| other `lightning:` payloads (undecodable) | — | friendly "Link not supported" toast | #488
+| `nostr:note1…` / `nostr:nevent1…` / undecodable `nostr:` | non-profile entity | `UnsupportedEntity` screen | #754
+|===
+
+==== npub vs nprofile (read + write)
+
+`npub` is the bech32 of the bare 32-byte pubkey — identity only. `nprofile` is the NIP-19 TLV encoding of the pubkey **plus optional relay hints**. For a conference badge / contact tap (cold first contact — the scanner doesn't follow the owner yet) `nprofile` is strongly preferred: the embedded hints let the scanner's client find the owner's kind-0 metadata + notes even on niche relays, where a bare `npub` would force a default-relay guess and could render a blank profile.
+
+* **Read (#754):** the `App.tsx` router decodes the reference via `decodeProfileReference` (`src/services/nostrService.ts`), fetches kind-0 off the embedded hints (`fetchProfile(pubkey, hints)` — a bare `npub` carries none, so it falls back to the app's `PROFILE_RELAYS`), and navigates to `ContactProfile`. The fetch races a short budget so a dead relay never strands the user; the pubkey-only stub lets `ContactProfileScreen` retry on the viewer's own relays. Pure decode / shaping helpers are in `src/utils/nostrProfileLink.ts`.
+* **Write (#755):** the "share my profile to NFC" path (`ProfileScreen` / `AccountDrawerContent` → `NfcWriteSheet`) writes `nostr:nprofile1…`, embedding the user's NIP-65 **write (outbox)** relays via `buildOwnProfileRelayHints` (`src/services/nostrService.ts`), capped at 2 to fit an NTAG213 (~144 B) and limit staleness. Falls back to the app defaults when the user has no published write relays — a generic hint still beats none. The bare pubkey is always embedded, so a reader can fall back to outbox discovery if the hints go dead. Sharing a *contact's* profile (`ContactProfileScreen`) writes their `nprofile` too, hints sourced via `buildProfileRelayHints`.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
+| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (cold launch / deep link).
+| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (foreground tag tap).
+| `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
+| `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
+| `src/services/nfcNostrWrite.ts` :: `writeNostrProfileToTag` | Writes a single `nostr:nprofile…` / `nostr:npub…` NDEF URI record.
+| `src/navigation/AppNavigator.tsx` :: `navigateToContactProfile` / `navigateToUnsupportedEntity` | Imperative nav helpers callable from outside the React tree.
+|===

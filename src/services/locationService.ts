@@ -1,5 +1,4 @@
 import * as Location from 'expo-location';
-import Constants from 'expo-constants';
 
 export interface SharedLocation {
   lat: number;
@@ -175,40 +174,9 @@ export function buildOsmViewUrl(loc: SharedLocation, zoom = 16): string {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=${zoom}/${lat}/${lon}`;
 }
 
-// A single slippy-map tile from the official OSMF tile server. No API key
-// and no stitching service: compute (x,y,z) from the coordinates and fetch
-// one 256×256 PNG. Per the OSMF tile usage policy we must cache responses
-// and identify ourselves with a specific User-Agent — the caller is
-// responsible for passing `USER_AGENT` through `source.headers`.
-// See https://operations.osmfoundation.org/policies/tiles/
-//
-// The UA includes the app version so OSMF ops can correlate requests with
-// a specific release if one misbehaves. `expo-constants` reads version
-// from `app.config.ts` at build time and works in all environments
-// (dev, preview, production) without a separate native module.
-const APP_VERSION =
-  (Constants.expoConfig?.version as string | undefined) ??
-  (Constants.manifest?.version as string | undefined) ??
-  '0.0.0';
-export const USER_AGENT = `LightningPiggyMobile/${APP_VERSION} (+https://lightningpiggy.com)`;
-
-function lonToTileX(lon: number, z: number): number {
-  return Math.floor(((lon + 180) / 360) * Math.pow(2, z));
-}
-
-function latToTileY(lat: number, z: number): number {
-  const rad = (lat * Math.PI) / 180;
-  return Math.floor(
-    ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * Math.pow(2, z),
-  );
-}
-
-export function buildStaticMapUrl(loc: SharedLocation, opts: { zoom?: number } = {}): string {
-  const zoom = opts.zoom ?? 15;
-  const x = lonToTileX(loc.lon, zoom);
-  const y = latToTileY(loc.lat, zoom);
-  return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
-}
+// Location-card map rendering moved to the shared MapLibre mini-map
+// (`LibreMiniMap`, OpenFreeMap vector tiles) in #206 — the old single-tile
+// `buildStaticMapUrl` / `USER_AGENT` helper was removed with it.
 
 export function formatCoordsForDisplay(loc: SharedLocation): string {
   const ns = loc.lat >= 0 ? 'N' : 'S';

@@ -1,16 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
-import type { NostrProfile } from '../types/nostr';
 import {
-  buildStaticMapUrl,
-  formatCoordsForDisplay,
-  USER_AGENT,
-  type SharedLocation,
-} from '../services/locationService';
+  createMessageBubbleStyles,
+  type MessageBubbleStyles,
+} from '../styles/MessageBubble.styles';
+import type { NostrProfile } from '../types/nostr';
+import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
+import type { BtcMapPlace } from '../services/btcMapService';
+import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import {
   type BubbleContent,
   type ParsedImageMessage,
@@ -31,6 +31,14 @@ import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
+import LibreMiniMap from './LibreMiniMap';
+
+// Stable empty arrays for the location-card mini-maps — LibreMiniMap
+// requires merchants/caches/events, but DM cards never plot any. Module
+// constants so the memoised map doesn't see a fresh [] each render.
+const EMPTY_MERCHANTS: BtcMapPlace[] = [];
+const EMPTY_CACHES: ParsedCache[] = [];
+const EMPTY_EVENTS: ParsedEvent[] = [];
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -63,6 +71,28 @@ interface Props {
   onOpenContact: (pubkey: string, profile: NostrProfile | null) => void;
   // Tap a location card → parent opens OSM in the system browser.
   onOpenLocation: (location: SharedLocation) => void;
+  // Live-location bubble extras. The parent owns the live state (most
+  // recent ping, remaining time) so the bubble stays a pure renderer
+  // and doesn't need its own context dependency.
+  //   - `liveLocationLatest`: latest coords seen since the start marker
+  //     landed, keyed by sessionId. Falls back to the marker's coords.
+  //   - `liveLocationStatus`: `active` | `paused` | `ended` per session.
+  //   - `liveLocationRemainingMs`: countdown for the sender's bubble.
+  //   - `onStopLiveLocation`: tapped the in-bubble "Stop" button (sender
+  //     side only — pass `undefined` for receiver bubbles).
+  liveLocationLatest?: Record<string, { location: SharedLocation; ts: number } | undefined>;
+  liveLocationStatus?: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>;
+  liveLocationRemainingMs?: Record<string, number | undefined>;
+  onStopLiveLocation?: (sessionId: string) => void;
+  // Location-card mini-map plumbing (#206). All optional — group bubbles
+  // pass none, so their cards just centre on the shared point with no
+  // me-dot / peer marker.
+  myLat?: number | null; // my live latitude (for the blue "me" dot)
+  myLon?: number | null; // my live longitude
+  myAccuracyMetres?: number | null; // my GPS accuracy → blue halo radius
+  myAvatarUri?: string | null; // my own profile picture → "me" dot avatar
+  peerAvatarUri?: string | null; // the other party's profile picture URL
+  onOpenMap?: () => void; // tap the mini-map → open the full-screen Map
   // Tap a GIF or image bubble → parent shows fullscreen modal. Optional —
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
@@ -77,7 +107,7 @@ interface Props {
   testIdPrefix: string;
 }
 
-type Styles = ReturnType<typeof createStyles>;
+type Styles = MessageBubbleStyles;
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
@@ -142,13 +172,23 @@ const MessageBubble: React.FC<Props> = ({
   onPayLightningAddress,
   onOpenContact,
   onOpenLocation,
+  liveLocationLatest,
+  liveLocationStatus,
+  liveLocationRemainingMs,
+  onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  myAvatarUri,
+  peerAvatarUri,
+  onOpenMap,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
   onToggleSecretMode,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
 
   // Sender label only renders on group bubbles for incoming messages —
   // identical to existing GroupConversationScreen behaviour. Pulled into
@@ -181,9 +221,163 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
+  if (content.kind === 'liveLocationMarker') {
+    const { marker } = content;
+    // No separate card for the end marker — it would duplicate the start card (which flips to "ended"); its coords are folded into liveLocationLatest so the one card shows the last known location.
+    if (marker.phase === 'end') return null;
+    // The receiver's running view of where the sender is right now —
+    // ConversationScreen feeds this from its kind-20069 subscription.
+    // Falls back to the marker's own coordinates so the bubble always
+    // renders a map even before the first ping has landed.
+    const latest = liveLocationLatest?.[marker.sessionId];
+    // May be null on a coordless `end` marker (sender stopped with no fix).
+    const displayLocation: SharedLocation | null = latest?.location ?? marker.location;
+    // Map centre: my own live position on my outgoing share, the peer's
+    // latest position on an incoming one. Falls back to the marker coords
+    // when my live fix isn't wired / hasn't landed yet.
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    const centreLat = fromMe && haveMine ? myLat : (displayLocation?.lat ?? null);
+    const centreLon = fromMe && haveMine ? myLon : (displayLocation?.lon ?? null);
+    // My blue dot shows on incoming cards (where am I vs them) and on my
+    // own live share. Suppressed when I have no fix.
+    const showMyDot = haveMine;
+    // Peer avatar marker only on incoming cards, at their location. The
+    // `peerAvatarUri !== undefined` guard scopes this to the 1:1 path —
+    // group bubbles pass no avatar plumbing, so their card just centres
+    // on the point with no peer chip (#206 group follow-up).
+    const peerMarker =
+      !fromMe && displayLocation && peerAvatarUri !== undefined
+        ? { lat: displayLocation.lat, lon: displayLocation.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
+    // Only `start` markers reach here (end markers return null above), so the wall-clock default is 'active' unless the context says otherwise.
+    const status = liveLocationStatus?.[marker.sessionId] ?? 'active';
+    const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
+    // Sender bubble while the share is still active gets a Stop button.
+    // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
+    const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
+    const titleText =
+      status === 'ended' || status === 'expired'
+        ? 'Live location ended'
+        : status === 'paused'
+          ? fromMe
+            ? 'Live location paused'
+            : 'Live location · paused'
+          : fromMe
+            ? 'Sharing live location'
+            : 'Live location';
+    const subtitleText: string | null = (() => {
+      if (status === 'ended' || status === 'expired') {
+        return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
+      }
+      if (latest) {
+        const ageMs = Math.max(0, Date.now() - latest.ts);
+        const mins = Math.floor(ageMs / 60_000);
+        const secs = Math.floor((ageMs % 60_000) / 1000);
+        if (mins >= 1) return `Updated ${mins}m ago`;
+        return `Updated ${secs}s ago`;
+      }
+      return 'Waiting for first update…';
+    })();
+    const remainingLabel: string | null = (() => {
+      if (status === 'ended' || status === 'expired') return null;
+      if (remaining === null) return null;
+      if (remaining <= 0) return 'Ending…';
+      const mins = Math.ceil(remaining / 60_000);
+      if (mins < 60) return `${mins} min left`;
+      const hours = Math.floor(mins / 60);
+      const remMin = mins % 60;
+      return remMin === 0 ? `${hours}h left` : `${hours}h ${remMin}m left`;
+    })();
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => displayLocation && onOpenLocation(displayLocation)}
+          style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
+          accessibilityLabel={
+            fromMe
+              ? `Sharing live location with peer, ${remainingLabel ?? 'no time remaining'}`
+              : `Receiving live location, ${subtitleText ?? 'waiting'}`
+          }
+          testID={`${testIdPrefix}-live-location-${id}`}
+        >
+          {SenderLabel}
+          {centreLat !== null && centreLon !== null ? (
+            <View style={styles.locationMap}>
+              <LibreMiniMap
+                lat={centreLat}
+                lon={centreLon}
+                merchants={EMPTY_MERCHANTS}
+                caches={EMPTY_CACHES}
+                events={EMPTY_EVENTS}
+                fill
+                defaultZoom={15}
+                userLat={showMyDot ? (myLat ?? null) : null}
+                userLon={showMyDot ? (myLon ?? null) : null}
+                userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+                userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
+                profileMarker={peerMarker}
+                onTapMap={onOpenMap}
+              />
+            </View>
+          ) : null}
+          <View style={styles.locationBody}>
+            <View style={styles.locationLabelRow}>
+              <Radio
+                size={14}
+                color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+              />
+              <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
+                {titleText}
+              </Text>
+            </View>
+            {displayLocation ? (
+              <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
+                {formatCoordsForDisplay(displayLocation)}
+              </Text>
+            ) : null}
+            {subtitleText ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {subtitleText}
+              </Text>
+            ) : null}
+            {remainingLabel ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {remainingLabel}
+              </Text>
+            ) : null}
+            {showStop ? (
+              <TouchableOpacity
+                style={styles.liveStopButton}
+                onPress={() => onStopLiveLocation?.(marker.sessionId)}
+                accessibilityLabel="Stop sharing live location"
+                testID={`${testIdPrefix}-live-location-stop-${id}`}
+              >
+                <Text style={styles.invoicePayText}>Stop sharing</Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (content.kind === 'location') {
     const { location } = content;
-    const mapUrl = buildStaticMapUrl(location);
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    // My blue dot only on a received static card — not on my own share
+    // (a static share is a single point, my live position is irrelevant).
+    const showMyDot = !fromMe && haveMine;
+    // Peer avatar marker only on a received card, at the shared point.
+    // `peerAvatarUri !== undefined` scopes the chip to the 1:1 path —
+    // group bubbles pass no avatar plumbing (#206 group follow-up).
+    const peerMarker =
+      !fromMe && peerAvatarUri !== undefined
+        ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
@@ -194,14 +388,23 @@ const MessageBubble: React.FC<Props> = ({
           testID={`${testIdPrefix}-location-${id}`}
         >
           {SenderLabel}
-          <ExpoImage
-            source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-            style={styles.locationMap}
-            contentFit="cover"
-            cachePolicy="disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          <View style={styles.locationMap}>
+            <LibreMiniMap
+              lat={location.lat}
+              lon={location.lon}
+              merchants={EMPTY_MERCHANTS}
+              caches={EMPTY_CACHES}
+              events={EMPTY_EVENTS}
+              fill
+              defaultZoom={15}
+              userLat={showMyDot ? (myLat ?? null) : null}
+              userLon={showMyDot ? (myLon ?? null) : null}
+              userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+              userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
+              profileMarker={peerMarker}
+              onTapMap={onOpenMap}
+            />
+          </View>
           <View style={styles.locationBody}>
             <View style={styles.locationLabelRow}>
               <MapPin
@@ -563,364 +766,5 @@ const MessageBubble: React.FC<Props> = ({
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    bubbleRow: {
-      flexDirection: 'row',
-      marginVertical: 2,
-    },
-    bubbleRowLeft: { justifyContent: 'flex-start' },
-    bubbleRowRight: { justifyContent: 'flex-end' },
-    senderLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      marginBottom: 2,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    bubble: {
-      maxWidth: '80%',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      paddingBottom: 4,
-      borderRadius: 16,
-    },
-    bubbleThem: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    bubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    bubbleText: {
-      fontSize: 15,
-      color: colors.textBody,
-      lineHeight: 20,
-    },
-    bubbleTextMe: {
-      color: colors.white,
-    },
-    // Tappable URL span inside a received bubble (surface bg) — brand accent.
-    bubbleLink: {
-      color: colors.brandPink,
-      textDecorationLine: 'underline',
-    },
-    // …and inside a sent bubble (pink bg) — white so it stays legible.
-    bubbleLinkMe: {
-      color: colors.white,
-      textDecorationLine: 'underline',
-      fontWeight: '600',
-    },
-    bubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      alignSelf: 'flex-end',
-    },
-    bubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceCard: {
-      width: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      gap: 6,
-    },
-    invoiceCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    invoiceCardThem: {
-      backgroundColor: colors.surface,
-    },
-    invoiceLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    invoiceLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceAmount: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    invoiceAmountMe: {
-      color: colors.white,
-    },
-    invoiceMemo: {
-      fontSize: 14,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-    invoiceMemoMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    invoiceExpiry: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    invoiceExpiryMe: {
-      color: 'rgba(255,255,255,0.75)',
-    },
-    invoiceTagRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 6,
-    },
-    invoiceTag: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 10,
-      alignSelf: 'flex-start',
-    },
-    invoiceTagPaid: {
-      backgroundColor: '#2e7d32',
-    },
-    invoiceTagPaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagUnpaid: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
-    },
-    invoiceTagUnpaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagExpired: {
-      backgroundColor: 'rgba(0,0,0,0.32)',
-    },
-    invoiceTagExpiredText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoicePayButton: {
-      marginTop: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    invoicePayText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    contactCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    contactCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    contactCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    contactLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    contactLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    contactBodyRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    contactAvatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.background,
-    },
-    contactAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    contactInfo: {
-      flex: 1,
-      minWidth: 0,
-    },
-    contactName: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    contactNameMe: {
-      color: colors.white,
-    },
-    contactLn: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    contactLnMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    gifCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    gifCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    gifCardThem: {
-      backgroundColor: colors.surface,
-    },
-    gifImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    gifTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    gifTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      borderWidth: 1,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    locationCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    locationCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    locationMap: {
-      width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
-    },
-    locationBody: {
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 4,
-      gap: 2,
-    },
-    locationLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    locationLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    locationLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCoords: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    locationCoordsMe: {
-      color: colors.white,
-    },
-    locationAccuracy: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    locationAccuracyMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    imageBubble: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    imageBubbleMe: {
-      backgroundColor: colors.brandPink,
-    },
-    imageBubbleThem: {
-      backgroundColor: colors.surface,
-    },
-    imageBubbleImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    imageBubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    imageBubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-  });
 
 export default MessageBubble;

@@ -28,6 +28,7 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
+import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -196,11 +197,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- BTC Map merchants ------------------------------------------------
 
-  // Seed from the in-memory mirror — `btcMapService` kicks hydrate()
-  // at module import, so by first render the cached search result is
-  // typically ready and the rail paints instantly. The live fetch
-  // below replaces it once `pos` lands. Mirrors the same idiom used
-  // for `caches` + `events` immediately below.
+  // Seed from the in-memory mirror. The disk hydration that fills it is
+  // kicked off the cold-start critical path (audit HIGH 1) — see
+  // `kickPlacesHydration` in btcMapService, invoked from App.tsx after
+  // first paint rather than at module import. The live fetch below
+  // replaces this once `pos` lands.
   const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
   // If we already have cached merchants on first render there's no
   // skeleton to show — flip merchantsLoading false so the rail paints
@@ -502,21 +503,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // nearby sub filters by geohash prefix, which excludes the user's
   // own listing if they hid it outside their current viewport OR if
   // the sub was paused (#557) at the moment the relay echoed back.
-  // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
-  // don't refire.
+  // One-shot per (pubkey, refreshKey) via the module-scoped
+  // `claimExploreByAuthorFetch` guard — re-runs on pull-to-refresh and
+  // pubkey change but never on unrelated re-renders, and is immune to the
+  // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
-  // Track the (pubkey, refreshKey) tuple that last triggered the fetch
-  // so we re-run on pull-to-refresh AND on pubkey change, but never on
-  // unrelated re-renders.
-  const byAuthorFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
-    if (byAuthorFetchedForRef.current === fetchKey) return;
-    byAuthorFetchedForRef.current = fetchKey;
     let cancelled = false;
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+    // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
+    // requests, and the current run still merges on cancel (#752 Copilot).
+    joinExploreByAuthorFetch(fetchKey, () =>
+      fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined),
+    )
       .then((mine) => {
         if (cancelled) return;
         console.log(

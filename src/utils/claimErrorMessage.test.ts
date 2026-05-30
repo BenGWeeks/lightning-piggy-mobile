@@ -22,4 +22,14 @@ describe('friendlyClaimError', () => {
   ])('returns null (show as-is) for meaningful issuer messages: %s', (raw) => {
     expect(friendlyClaimError(raw)).toBeNull();
   });
+
+  it('maps the NWC reply-timeout string to friendly copy', () => {
+    expect(friendlyClaimError('reply timeout: event d8932dd2bd615ffe48f1d275bdad')).toBe(FRIENDLY);
+  });
+
+  it('uses the given subject so non-prize contexts read naturally', () => {
+    expect(friendlyClaimError('reply timeout: event abc', 'the funds')).toBe(
+      "Couldn't reach your wallet to receive the funds. Check your wallet's connection, then try again.",
+    );
+  });
 });

@@ -22,6 +22,7 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import {
@@ -79,6 +80,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   // as the user walks around without re-running the nearby-places fetch
   // (that fires once from `pos` above).
   const { pos: livePos } = useUserLocation();
+  const { profile } = useNostr();
   const lastReloadRef = useRef<number>(0);
 
   const reload = useCallback(async () => {
@@ -272,6 +274,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 lon={livePos?.lon ?? pos?.lon ?? null}
                 userLat={livePos?.lat ?? null}
                 userLon={livePos?.lon ?? null}
+                userAvatarUri={profile?.picture ?? null}
                 userAccuracyMetres={livePos?.accuracy ?? null}
                 merchants={sortedPlaces.map((p) => p.place)}
                 caches={[]}

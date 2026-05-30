@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -40,6 +41,7 @@ import {
   geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -60,7 +62,7 @@ interface Props {
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { pubkey, relays } = useNostr();
+  const { pubkey, relays, profile } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
@@ -68,9 +70,23 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // around without re-firing the nearby-cache subscription (which is
   // keyed on the initial `pos`).
   const { pos: livePos } = useUserLocation();
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(
-    () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
-  );
+  // Coalesce per-event setState bursts during the nearby-cache relay
+  // backfill into one commit per ~100 ms window (audit MED 4) — the
+  // naive `new Map(prev)` clone per event was O(N²) over a 50+ event
+  // cold-start burst. `shouldReplace` keeps the newest revision of a
+  // replaceable cache (and is re-applied in the flush against committed
+  // state, so a stale wrap can't clobber a fresher one). `enqueue` feeds
+  // the relay sub; `setCaches` covers the hydrate / refresh / by-author
+  // paths that aren't hot.
+  const {
+    map: caches,
+    setMap: setCaches,
+    enqueue: enqueueCache,
+    flush: flushCaches,
+  } = useCoalescedMap<ParsedCache>({
+    initial: () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
+    shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+  });
   // Pull-to-refresh: re-load the on-disk cache AND query relays for
   // every kind 37516 listing by the signed-in user, so the rail
   // includes the user's own historical Piggies even if the nearby
@@ -111,7 +127,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       clearTimeout(safetyTimer);
       setRefreshing(false);
     }
-  }, [pubkey, relays]);
+  }, [pubkey, relays, setCaches]);
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -129,7 +145,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setCaches]);
   // Write-through (debounced) so the next cold start has fresh data.
   useEffect(() => {
     if (caches.size === 0) return;
@@ -207,35 +223,41 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     };
   }, []);
 
-  // Cache subscription — kicks off once we have a fix.
-  useEffect(() => {
-    if (!pos) return;
-    // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
-    // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
-    // got the same treatment earlier in this branch. Pre-#631 the
-    // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
-    // returned only the user's own truncation, so a cache 500 m across
-    // a tile boundary stayed invisible.
-    const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
-    // Load every nearby cache regardless of trust — the WoT filter is
-    // applied at render time (sortedCaches), so flipping the tier
-    // re-filters instantly with no re-subscribe or relay round-trip.
-    const closer = subscribeNearbyCaches(prefixes, (c) => {
-      setCaches((prev) => {
-        const existing = prev.get(c.coord);
-        if (existing && existing.createdAt >= c.createdAt) return prev;
-        const next = new Map(prev);
-        next.set(c.coord, c);
-        return next;
-      });
-    });
-    // Drop the spinner after a beat — relays stream continuously, no EOSE wait.
-    const settleTimer = setTimeout(() => setLoading(false), 1500);
-    return () => {
-      closer();
-      clearTimeout(settleTimer);
-    };
-  }, [pos]);
+  // Cache subscription — kicks off once we have a fix, but only while
+  // the screen is focused (audit MED 3). With `freezeOnBlur: true` on
+  // the tab navigator the Explore stack screens never unmount, so a
+  // bare `useEffect` left this relay sub streaming forever after the
+  // first visit. `useFocusEffect` opens it on focus and closes it on
+  // blur; the next focus re-opens (cheap — the SimplePool reuses the
+  // socket). `pos` is read inside via a ref-free closure because the
+  // focus callback re-runs whenever `pos` changes anyway (it's in deps).
+  useFocusEffect(
+    useCallback(() => {
+      if (!pos) return;
+      // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
+      // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
+      // got the same treatment earlier in this branch. Pre-#631 the
+      // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
+      // returned only the user's own truncation, so a cache 500 m across
+      // a tile boundary stayed invisible.
+      const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
+      // Load every nearby cache regardless of trust — the WoT filter is
+      // applied at render time (sortedCaches), so flipping the tier
+      // re-filters instantly with no re-subscribe or relay round-trip.
+      // Per-event work is just the coalescing enqueue (staleness drop +
+      // newest-wins live in the hook's `shouldReplace`).
+      const closer = subscribeNearbyCaches(prefixes, (c) => enqueueCache(c.coord, c));
+      // Drop the spinner after a beat — relays stream continuously, no EOSE wait.
+      const settleTimer = setTimeout(() => setLoading(false), 1500);
+      return () => {
+        closer();
+        clearTimeout(settleTimer);
+        // Drain the tail of the burst so events that arrived just before
+        // blur aren't stranded in the pending buffer until next focus.
+        flushCaches();
+      };
+    }, [pos, enqueueCache, flushCaches]),
+  );
 
   const sortedCaches = useMemo(() => {
     let items = [...caches.values()].map((cache) => {
@@ -373,6 +395,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           lon={livePos?.lon ?? pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
+          userAvatarUri={profile?.picture ?? null}
           // Only fall back to the initial-fetch accuracy when there's
           // no live fix yet; once livePos exists, trust its accuracy
           // (including null) so we never render a halo around live
