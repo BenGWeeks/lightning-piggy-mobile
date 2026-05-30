@@ -329,6 +329,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshFollows = followPubkeys;
       const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
+      let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+
       const task = (async () => {
         setDmInboxLoading(true);
         try {
@@ -829,6 +831,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 )
               : Promise.resolve(),
           ]);
+          refreshCompleted = true; // inbox committed — safe to stamp the cursor
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
@@ -839,12 +842,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       dmInboxInFlight.current = { promise: task, includeNonFollows };
       try {
         await task;
-        // Stamp the freshness cursor ONLY when the refresh completed (not
-        // aborted). The task resolves on abort too, so stamping here
-        // unconditionally would flip the next refresh's `isColdStart` to
-        // false (defeating #788's macro-task yield) and wrongly satisfy the
-        // TTL gate. See dmRefreshGate.shouldStampCursor. (#788)
-        if (shouldStampCursor(signal?.aborted === true)) {
+        // Stamp only for a refresh that COMPLETED its work — gate on
+        // `refreshCompleted`, not `signal.aborted` (see the helper). #788.
+        if (shouldStampCursor(!refreshCompleted)) {
           dmInboxLastRefreshAt.current = performance.now();
         }
       } finally {

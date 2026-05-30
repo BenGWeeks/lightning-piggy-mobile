@@ -44,8 +44,18 @@ export function shouldSkipForFreshness(
  * Whether the completion of a refresh should advance the freshness cursor.
  * The refresh task RESOLVES (never rejects) on abort — it early-returns
  * internally on `signal.aborted` — so the `await task` site runs in both the
- * completed and aborted cases. We therefore stamp ONLY when the signal was not
- * aborted, so an interrupted refresh leaves the next one a genuine cold start.
+ * completed and aborted cases. We stamp ONLY when the refresh was NOT aborted,
+ * so an interrupted refresh leaves the next one a genuine cold start.
+ *
+ * IMPORTANT — pass "did this refresh fail to complete its work", NOT
+ * `signal.aborted` read at the stamp site. Those differ in a race: a refresh
+ * can finish (commit + persist) and then have its `AbortController` aborted in
+ * the SAME tick (the user navigates away the instant it resolves). Reading
+ * `signal.aborted` afterward would see `true` and skip the stamp, wrongly
+ * making the NEXT refresh a cold start that bypasses the freshness TTL even
+ * though a refresh genuinely completed. Callers therefore track a
+ * `refreshCompleted` flag set after the commit and pass `!refreshCompleted`
+ * here — a post-completion abort can't flip it (#788 review).
  */
 export function shouldStampCursor(aborted: boolean): boolean {
   return !aborted;
