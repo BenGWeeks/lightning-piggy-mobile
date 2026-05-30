@@ -99,7 +99,15 @@ export function LnurlWithdrawHost(): React.ReactElement {
   // input / slider / Redeem button. See TROUBLESHOOTING → "Bottom sheet doesn't
   // slide up when keyboard opens" + NostrLoginSheet (the reference).
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Whether the sheet is currently presented. The keyboard listeners are
+  // gated on this (audit LOW 5): the host is always mounted at app root
+  // (App.tsx), so without the gate its two `Keyboard.addListener`s fired
+  // `setKeyboardHeight` on EVERY app-wide keyboard open/close — a DM
+  // composer, a search box, anything — even though this sheet was idle.
+  // Driven by the modal's `onChange` below (index ≥ 0 = open).
+  const [sheetOpen, setSheetOpen] = useState(false);
   useEffect(() => {
+    if (!sheetOpen) return;
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, (e) => {
@@ -111,7 +119,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [sheetOpen]);
 
   // Destination-wallet chooser (same model as the geo-cache prize sheet): only
   // Lightning (NWC) wallets can mint a bolt11 to receive the withdrawal.
@@ -341,10 +349,16 @@ export function LnurlWithdrawHost(): React.ReactElement {
         backgroundStyle={styles.sheetBackground}
         handleIndicatorStyle={styles.handle}
         backdropComponent={renderBackdrop}
+        // Drive the keyboard-listener gate: index ≥ 0 means the sheet is
+        // presented, -1 means dismissed. Keeping the listeners inert while
+        // the sheet is idle (audit LOW 5).
+        onChange={(index) => setSheetOpen(index >= 0)}
         onDismiss={() => {
           setLnurl(null);
           setStage({ kind: 'idle' });
           setAmountSats(0);
+          setKeyboardHeight(0);
+          setSheetOpen(false);
           // Close the Add-wallet wizard too, so it can't linger orphaned after
           // the claim sheet that launched it is gone (Copilot).
           setWizardOpen(false);

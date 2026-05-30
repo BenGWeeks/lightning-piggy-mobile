@@ -516,13 +516,17 @@ const hydrateLastResult = async (): Promise<void> => {
   return hydratePromise;
 };
 
-// Kick off hydration at module-import time. The Explore hub imports
-// this file at startup; by the time React mounts the screen (one
-// microtask + a render later) the AsyncStorage / file read has
-// usually resolved, so `peekCachedPlacesSync` can return a non-empty
-// array on the very first render. Mirrors the pattern in
-// `nostrPlacesStorage` — fire-and-forget, failures are silent.
-void hydrateLastResult();
+/**
+ * Kick the (one-shot, memoised) merchant-cache hydration. Previously this fired
+ * at module-import time — but `ExploreHomeScreen` imports this file, and that
+ * screen is an eager tab root, so the import-time `void hydrateLastResult()`
+ * ran a synchronous `JSON.parse` of a 100s-of-KB cache file ON THE COLD-START
+ * CRITICAL PATH (audit HIGH 1 fallback). Moving the kick behind this exported
+ * function lets the Explore hub trigger it on first focus instead, off the
+ * boot path. Returns the shared promise so callers can re-seed once it
+ * resolves. Idempotent — safe to call repeatedly.
+ */
+export const kickPlacesHydration = (): Promise<void> => hydrateLastResult();
 
 /**
  * The last successful search result — in memory, or hydrated from disk

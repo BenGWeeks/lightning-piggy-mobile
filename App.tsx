@@ -2,7 +2,7 @@
 import './src/polyfills';
 
 import React, { useEffect, useState } from 'react';
-import { AppState, Linking, StyleSheet } from 'react-native';
+import { AppState, InteractionManager, Linking, StyleSheet } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -37,6 +37,7 @@ import {
   setNotificationsForeground,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
+import { kickPlacesHydration } from './src/services/btcMapService';
 import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
@@ -98,6 +99,20 @@ export default function App() {
   // re-tries via `ensureNfcStarted` on its own).
   useEffect(() => {
     void initNfc();
+  }, []);
+
+  // Hydrate the BTC-Map merchant cache AFTER first paint, not at
+  // btcMapService module-import time (audit HIGH 1). The hydration does a
+  // synchronous `JSON.parse` of a 100s-of-KB cache file; firing it at
+  // import dropped it onto the cold-start critical path before the first
+  // frame. `runAfterInteractions` defers it past the initial render +
+  // navigation animation so the Explore hub's first `peekCachedPlacesSync`
+  // still resolves quickly without blocking boot. Idempotent + memoised.
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      void kickPlacesHydration();
+    });
+    return () => task.cancel();
   }, []);
 
   // OS notifications (#279): create the Android channels up-front, track

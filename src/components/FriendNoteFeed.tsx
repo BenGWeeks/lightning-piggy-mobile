@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { FlashList } from '@shopify/flash-list';
 import NotePreview from './NotePreview';
 import { subscribeAuthorNotes, type RawAuthorNote } from '../services/nostrService';
@@ -58,66 +59,75 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
     [readRelaysKey],
   );
 
-  useEffect(() => {
-    if (!authorPubkey || readRelays.length === 0) {
-      setLoading(false);
-      return;
-    }
-    mountTimeRef.current = Date.now();
-    firstEventLoggedRef.current = false;
-    setLoading(true);
-    setNotes([]);
-
-    const seen = new Set<string>();
-    const unsubscribe = subscribeAuthorNotes({
-      authorPubkey,
-      relays: readRelays,
-      limit,
-      onEose: () => setLoading(false),
-      onEvent: (note) => {
-        if (seen.has(note.id)) return;
-        seen.add(note.id);
-        if (__DEV__ && !firstEventLoggedRef.current) {
-          firstEventLoggedRef.current = true;
-          console.log(
-            `[Perf] ContactProfileScreen feed first event: ${Date.now() - mountTimeRef.current}ms`,
-          );
-        }
-        setNotes((prev) => {
-          // Binary-insert into a desc-sorted-by-created_at array
-          // (newest-first) instead of pushing + full-sort on every
-          // event. With 5 relays × limit = up to 150 events on a
-          // wide-following user, the full-sort cost was O(n² log n)
-          // total; binary insert + splice is O(n²) and avoids the
-          // log factor.
-          let lo = 0;
-          let hi = prev.length;
-          while (lo < hi) {
-            const mid = (lo + hi) >>> 1;
-            if (prev[mid].created_at > note.created_at) lo = mid + 1;
-            else hi = mid;
-          }
-          if (lo >= RENDER_CAP) return prev; // newer events already saturate the cap
-          const next = prev.slice();
-          next.splice(lo, 0, note);
-          if (next.length > RENDER_CAP) next.length = RENDER_CAP;
-          return next;
-        });
+  // Gate the relay subscription on screen focus (audit HIGH 2). The
+  // previous bare `useEffect` opened the sub at mount — which, on a cold
+  // start that restores onto ContactProfileScreen (persisted nav state),
+  // fired a relay subscription before the screen was even visible,
+  // adding 633–1045 ms of JS-thread work at +4–5 s. `useFocusEffect`
+  // defers it until the profile is actually on-screen; behaviour while
+  // focused is identical (same sub, same grace timer, same teardown).
+  useFocusEffect(
+    useCallback(() => {
+      if (!authorPubkey || readRelays.length === 0) {
         setLoading(false);
-      },
-    });
+        return;
+      }
+      mountTimeRef.current = Date.now();
+      firstEventLoggedRef.current = false;
+      setLoading(true);
+      setNotes([]);
 
-    // Grace timer to drop the spinner so the user sees "No posts yet"
-    // rather than a perpetual loader on quiet pubkeys.
-    const graceTimer = setTimeout(() => {
-      setLoading(false);
-    }, FIRST_EVENT_GRACE_MS);
+      const seen = new Set<string>();
+      const unsubscribe = subscribeAuthorNotes({
+        authorPubkey,
+        relays: readRelays,
+        limit,
+        onEose: () => setLoading(false),
+        onEvent: (note) => {
+          if (seen.has(note.id)) return;
+          seen.add(note.id);
+          if (__DEV__ && !firstEventLoggedRef.current) {
+            firstEventLoggedRef.current = true;
+            console.log(
+              `[Perf] ContactProfileScreen feed first event: ${Date.now() - mountTimeRef.current}ms`,
+            );
+          }
+          setNotes((prev) => {
+            // Binary-insert into a desc-sorted-by-created_at array
+            // (newest-first) instead of pushing + full-sort on every
+            // event. With 5 relays × limit = up to 150 events on a
+            // wide-following user, the full-sort cost was O(n² log n)
+            // total; binary insert + splice is O(n²) and avoids the
+            // log factor.
+            let lo = 0;
+            let hi = prev.length;
+            while (lo < hi) {
+              const mid = (lo + hi) >>> 1;
+              if (prev[mid].created_at > note.created_at) lo = mid + 1;
+              else hi = mid;
+            }
+            if (lo >= RENDER_CAP) return prev; // newer events already saturate the cap
+            const next = prev.slice();
+            next.splice(lo, 0, note);
+            if (next.length > RENDER_CAP) next.length = RENDER_CAP;
+            return next;
+          });
+          setLoading(false);
+        },
+      });
 
-    return () => {
-      clearTimeout(graceTimer);
-      unsubscribe();
-    };
-  }, [authorPubkey, readRelays, limit]);
+      // Grace timer to drop the spinner so the user sees "No posts yet"
+      // rather than a perpetual loader on quiet pubkeys.
+      const graceTimer = setTimeout(() => {
+        setLoading(false);
+      }, FIRST_EVENT_GRACE_MS);
+
+      return () => {
+        clearTimeout(graceTimer);
+        unsubscribe();
+      };
+    }, [authorPubkey, readRelays, limit]),
+  );
 
   if (!authorPubkey) return null;
 
