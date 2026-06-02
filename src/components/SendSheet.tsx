@@ -31,7 +31,12 @@ import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
-import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import {
+  resolveLightningAddress,
+  fetchInvoice,
+  resolveLnurlDirection,
+  LnurlPayParams,
+} from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -103,6 +108,20 @@ function isValidInvoice(data: string): boolean {
   );
 }
 
+// Raw LNURL strings the scanner/paste box can hand us: bech32 `lnurl1…`
+// (LUD-01/06) and the cleartext LUD-17 `lnurlp://` / `lnurlw://` /
+// `lnurl://` schemes, with or without a `lightning:` URI prefix. Direction
+// (pay vs withdraw) is NOT inferred here — the resolved server `tag` decides
+// that downstream via resolveLnurlDirection(). Lightning addresses (which
+// contain `@`) and bolt11 invoices (`lnbc…`) are deliberately not matched.
+function isLnurlString(input: string): boolean {
+  let s = input.trim();
+  if (/^lightning:/i.test(s)) {
+    s = s.slice('lightning:'.length).trim();
+  }
+  return /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
+}
+
 let __sendSheetFirstVisibleLogged = false;
 const SendSheet: React.FC<Props> = ({
   visible,
@@ -148,6 +167,7 @@ const SendSheet: React.FC<Props> = ({
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+  const [isLnurl, setIsLnurl] = useState(false);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
@@ -176,10 +196,12 @@ const SendSheet: React.FC<Props> = ({
     scanned &&
     !isLightningAddress(invoiceData || '') &&
     !isOnchainAddress &&
+    !isLnurl &&
     !!invoiceData &&
     decoded?.amountSats === null;
   const needsAmount =
-    scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11);
+    scanned &&
+    (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11 || isLnurl);
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -205,6 +227,7 @@ const SendSheet: React.FC<Props> = ({
       setStep('main');
       setLnurlParams(null);
       setResolving(false);
+      setIsLnurl(false);
       setMemo('');
       // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
       // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
@@ -283,6 +306,56 @@ const SendSheet: React.FC<Props> = ({
     };
   }, [scanned, invoiceData, recipientName, activePubkey]);
 
+  // Resolve a raw LNURL string when scanned/pasted. Unlike a lightning
+  // address (always LNURL-pay), a bech32 `lnurl1…` / cleartext `lnurlp://`
+  // can resolve to EITHER a payRequest or a withdrawRequest — only the
+  // server's `tag` disambiguates (see resolveLnurlDirection). A payRequest
+  // reuses the lightning-address amount/send flow by populating lnurlParams;
+  // a withdrawRequest is a claim (money-IN) code that the Send sheet can't
+  // action, so we surface a message and return to the scan/paste view.
+  useEffect(() => {
+    if (!scanned || !invoiceData || !isLnurl) return;
+    let cancelled = false;
+    (async () => {
+      setResolving(true);
+      try {
+        const resolved = await resolveLnurlDirection(invoiceData);
+        if (cancelled) return;
+        if (resolved.kind === 'pay') {
+          setLnurlParams(resolved.params);
+          setDecoded((prev) => ({
+            ...prev!,
+            description: resolved.params.description || prev?.description || null,
+          }));
+        } else {
+          // withdrawRequest — a claim code, not payable from here.
+          Alert.alert(
+            'This is a claim code',
+            'This LNURL is a withdraw (claim) code, not a payment request. Use Receive to claim it.',
+          );
+          setInvoiceData(null);
+          setDecoded(null);
+          setScanned(false);
+          setIsLnurl(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const msg = error instanceof Error ? error.message : 'Failed to resolve LNURL';
+          Alert.alert('Error', msg);
+          setInvoiceData(null);
+          setDecoded(null);
+          setScanned(false);
+          setIsLnurl(false);
+        }
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scanned, invoiceData, isLnurl]);
+
   const processInput = (data: string) => {
     let input = data.trim();
     let bip21Amount: number | null = null;
@@ -299,6 +372,7 @@ const SendSheet: React.FC<Props> = ({
 
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       // Only use the caller-supplied friend name while we're still
       // pointed at that friend (activePubkey set). After "Scan / paste
@@ -312,6 +386,7 @@ const SendSheet: React.FC<Props> = ({
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
+      setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
       setScanned(true);
@@ -347,8 +422,20 @@ const SendSheet: React.FC<Props> = ({
         });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       setDecoded(decodeInvoice(input));
+      setScanned(true);
+    } else if (isLnurlString(input)) {
+      // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
+      // pay vs withdraw from the string alone, so stash it and let the
+      // resolve effect above hit the endpoint and route on the server's
+      // tag — payRequest wires up lnurlParams (same amount/send path as a
+      // lightning address), withdrawRequest reports a claim code.
+      setIsOnchainAddress(false);
+      setIsLnurl(true);
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     }
   };
@@ -488,7 +575,7 @@ const SendSheet: React.FC<Props> = ({
             throw new Error(`Boltz swap failed: ${detail}`);
           }
         }
-      } else if (isLightningAddress(invoiceData)) {
+      } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
           setSending(false);
@@ -759,6 +846,7 @@ const SendSheet: React.FC<Props> = ({
     setActivePubkey(undefined);
     setActivePicture(undefined);
     setIsOnchainAddress(false);
+    setIsLnurl(false);
     setBoltzFees(null);
     setLoadingBoltzFees(false);
   };
