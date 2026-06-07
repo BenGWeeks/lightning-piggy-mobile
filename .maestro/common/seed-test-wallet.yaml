@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.lightningpiggy.app.dev}
+appId: com.lightningpiggy.app.dev
 name: Internal — seed a test wallet via the AddWalletWizard
 ---
 # Composable subflow that walks the AddWalletWizard with credentials

@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.lightningpiggy.app}
+appId: com.lightningpiggy.app.dev
 name: Nostr Logout Test
 ---
 # Tests logging out from Nostr (assumes already logged in)

@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.lightningpiggy.app}
+appId: com.lightningpiggy.app.dev
 name: Nostr Login Test
 ---
 # Tests logging in with an nsec key
