@@ -62,7 +62,7 @@ adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox
 adb shell pm disable-user --user 0 com.google.android.apps.maps
 # undo with: adb shell pm enable <package>
 ----
-*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `.maestro/common/login-as-piggy.yaml` / `_subflow-seed-test-wallet.yaml`.
+*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `.maestro/common/login-as-piggy.yaml` / `.maestro/common/seed-test-wallet.yaml`.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
