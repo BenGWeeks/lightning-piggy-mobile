@@ -33,7 +33,7 @@ set -u
 
 DEVICE="${DEVICE:-${PIXEL_DEVICE:-37111FDJH0067B}}"
 PKG="${PKG:-${PIXEL_PKG:-com.lightningpiggy.app}}"
-FLOW="${FLOW:-tests/e2e/test-offline-cold-start.yaml}"
+FLOW="${FLOW:-.maestro/authentication/flow-009-offline-cold-start.yaml}"
 
 ADB="adb -s $DEVICE"
 

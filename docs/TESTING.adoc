@@ -107,10 +107,10 @@ Ensure the app is built and running on a connected device or emulator before run
 [source,bash]
 ----
 # Run a single test
-maestro test tests/e2e/test-login.yaml
+maestro test .maestro/authentication/flow-006-login.yaml
 
 # Run all tests
-maestro test tests/e2e/
+maestro test .maestro/
 ----
 
 ==== Test Inventory
@@ -175,7 +175,7 @@ If a component is missing an accessibility label, add one to the source code rat
 
 ===== Composable Subflows
 
-Subflows are reusable Maestro flows whose filenames are prefixed with an underscore (e.g. `_subflow-login-as.yaml`). They aren't picked up by `maestro test tests/e2e/` directly — callers `runFlow:` them as a step inside a regular test flow. Use them whenever multiple tests share a setup walk.
+Subflows are reusable Maestro flows whose filenames are prefixed with an underscore (e.g. `_subflow-login-as.yaml`). They aren't picked up by `maestro test .maestro/` directly — callers `runFlow:` them as a step inside a regular test flow. Use them whenever multiple tests share a setup walk.
 
 Available subflows:
 

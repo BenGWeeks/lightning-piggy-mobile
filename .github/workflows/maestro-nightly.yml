@@ -1,0 +1,89 @@
+name: Maestro Cloud E2E (nightly)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DISABLED SCAFFOLD — do not enable without a Maestro Cloud subscription.
+#
+# This runs the `cloud`-tagged Maestro flows from `.maestro/` on Maestro Cloud
+# (app.maestro.dev) against an EAS-built dev APK. Maestro Cloud is a PAID
+# product, so this workflow is deliberately inert:
+#   • the nightly `schedule:` trigger is commented out, and
+#   • the job is gated behind the repo variable ENABLE_MAESTRO_NIGHTLY=='true',
+#     so even a manual "Run workflow" no-ops until we opt in.
+#
+# To turn it on later:
+#   1. Subscribe to Maestro Cloud and add the secrets listed below.
+#   2. Set repo variable ENABLE_MAESTRO_NIGHTLY=true (Settings → Variables).
+#   3. Uncomment the `schedule:` block for an automatic nightly run.
+#   4. Tag the flows you want in the run with `tags: [cloud]` (only tagged
+#      flows run; start with the ones that don't need a warm signed-in device).
+#
+# Required GitHub Secrets (none of these exist yet — that's expected while off):
+#   MAESTRO_CLOUD_API_KEY  app.maestro.dev project API key
+#   EXPO_TOKEN             Expo access token (used by `eas build`)
+#   MAESTRO_NSEC_BIG       test identity (Big Piggy) nsec
+#   MAESTRO_NSEC_MIDDLE    test identity (Middle Piggy) nsec
+#   MAESTRO_NSEC_LITTLE    test identity (Little Piggy) nsec
+#   MAESTRO_TEST_NWC       nostr+walletconnect:// URI for a test wallet
+#   MAESTRO_TEST_MNEMONIC  seed for a test on-chain hot wallet
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  # schedule:
+  #   - cron: '0 2 * * *' # 02:00 UTC nightly — enable once subscribed
+  workflow_dispatch: {} # manual "Run workflow" button (still gated below)
+
+concurrency:
+  group: maestro-cloud-e2e
+  cancel-in-progress: false
+
+jobs:
+  android:
+    # Hard off-switch: no-op until the repo opts in, so a stray dispatch can't
+    # spend EAS build credits or Maestro Cloud minutes.
+    if: ${{ vars.ENABLE_MAESTRO_NIGHTLY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150 # EAS build queue + build + the cloud run
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android dev APK on EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          # development profile (eas.json) → APK, built on Expo's builders.
+          # --wait blocks until done; --json yields the artifact URL.
+          npx -y -p eas-cli@latest eas build --platform android --profile development \
+            --non-interactive --wait --json > eas-build-android.json
+          URL=$(node -e "const b=require('./eas-build-android.json');const x=Array.isArray(b)?b[0]:b;const u=x?.artifacts?.applicationArchiveUrl||x?.artifacts?.buildUrl;if(!u){console.error('no artifact url',JSON.stringify(b));process.exit(1)}process.stdout.write(u)")
+          curl -fLs "$URL" -o app-android.apk
+          ls -lh app-android.apk
+
+      - name: Install Maestro CLI
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run cloud-tagged flows on Maestro Cloud
+        run: |
+          maestro cloud \
+            --apiKey "${{ secrets.MAESTRO_CLOUD_API_KEY }}" \
+            --timeout 90 \
+            --android-api-level 34 \
+            --include-tags cloud \
+            --name "nightly-android-${{ github.run_id }}" \
+            -e APP_ID=com.lightningpiggy.app.dev \
+            -e MAESTRO_NSEC_BIG="${{ secrets.MAESTRO_NSEC_BIG }}" \
+            -e MAESTRO_NSEC_MIDDLE="${{ secrets.MAESTRO_NSEC_MIDDLE }}" \
+            -e MAESTRO_NSEC_LITTLE="${{ secrets.MAESTRO_NSEC_LITTLE }}" \
+            -e MAESTRO_TEST_NWC="${{ secrets.MAESTRO_TEST_NWC }}" \
+            -e MAESTRO_TEST_MNEMONIC="${{ secrets.MAESTRO_TEST_MNEMONIC }}" \
+            app-android.apk \
+            .maestro

@@ -1,0 +1,58 @@
+appId: com.lightningpiggy.app.dev
+name: Geo-caches list → Detail navigation works
+---
+# Walks Explore → Geo-caches → tap first cache row → assert the
+# detail screen mounts, regardless of whether the cache is a Piglet
+# or a standard NIP-GC cache. The compose CTA's visibility depends on
+# whether the user has a recent claim recorded locally; we don't gate
+# the assertion on it. Updated after the Hunt+Discover merge in
+# PR #488 — the dedicated Discover screen no longer exists; the list
+# is part of the merged Geo-caches screen.
+#
+# Skipped if the list has no caches at run time (live relay state).
+#
+# Run: maestro test .maestro/hunt/flow-035-hunt-detail-via-discover.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'hunt-screen'
+
+# Empty state? Bail — no cache to navigate into. Otherwise tap the
+# first row and confirm detail mounts.
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - tapOn:
+          id:
+            'hunt-discover-row-0' # First row by FlatList index —
+            # kept on the merged Geo-caches
+            # screen so Maestro flows can tap
+            # deterministically without
+            # coordinates (CLAUDE.md rule).
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'hunt-piggy-detail-screen'
+      - tapOn:
+          id: 'hunt-piggy-detail-back-button'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'hunt-screen'

@@ -34,9 +34,10 @@
 
 ## Testing
 
-- E2E tests use Maestro and live in `tests/e2e/`
+- E2E tests use Maestro and live in `.maestro/`, organised one folder deep by feature area (`authentication/`, `wallets/`, `payments/`, `messaging/`, `groups/`, `friends/`, `hunt/`, `profile/`, `map/`, `ui/`, `cards/`). Composed flows are named `flow-NNN-<description>.yaml` (globally sequential); shared building blocks live un-numbered in `common/` and are pulled in via `runFlow` (never run on their own). `perf/` and `keyboard-audit/` are kept as their own sub-sections. See `.maestro/README.adoc` for the full layout + the relay/identity safety rules.
 - Install Maestro: `curl -Ls "https://get.maestro.mobile.dev" | bash`
-- Run tests: `maestro test tests/e2e/<test-file>.yaml`
+- Run one flow: `maestro test .maestro/<area>/flow-NNN-<name>.yaml` · Run the curated wallet/transfer suite: `source .env && bash .maestro/reporting/run-all.sh`
+- A **disabled** nightly Maestro Cloud workflow (`.github/workflows/maestro-nightly.yml`) is scaffolded — gated off behind `vars.ENABLE_MAESTRO_NIGHTLY`; enable only with a Maestro Cloud subscription.
 - **NEVER use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests or when interacting with the app** — coordinates are fragile and break across screen sizes, devices, and OS versions. Always add `accessibilityLabel` and/or `testID` props to components and use `id:` or `text:` selectors in Maestro instead.
 - If a component is missing an accessibility label, add one to the source code rather than using coordinates as a workaround
 - All interactive elements (buttons, tabs, alphabet letters, etc.) must have `accessibilityLabel` and/or `testID` props

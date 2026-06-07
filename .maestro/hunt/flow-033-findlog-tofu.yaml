@@ -1,0 +1,62 @@
+appId: com.lightningpiggy.app.dev
+name: Screenshot — find-log no longer renders the U+FFFC tofu box (PR #765)
+---
+# Walks Explore → Geo-caches → "The Allotment Watch" → scrolls to the
+# Find log section and shoots the find-log area. In the FIX
+# (fix/strip-tofu-placeholder-text) the Ninimonk05 entry reads a clean
+# "…Stay out!" with no trailing object-replacement box. Used to
+# capture the AFTER image for the PR #765 before/after pair.
+#
+# Run from repo root:
+#   maestro test .maestro/hunt/flow-033-findlog-tofu.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'geocaches-screen'
+
+# Open the specific cache by its name (rows carry
+# accessibilityLabel={cache.name}).
+- tapOn:
+    text: 'The Allotment Watch'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'hunt-piggy-detail-screen'
+
+# Scroll down to the Find log section so the Ninimonk05 entry is in
+# view, then nudge once more so the full "…Stay out!" line (where the
+# tofu box used to sit) clears the bottom tab bar before the shot.
+- scrollUntilVisible:
+    element:
+      text: 'Ninimonk05'
+    direction: DOWN
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Share your find'
+    direction: DOWN
+    timeout: 10000
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- takeScreenshot: findlog-tofu-after

@@ -572,8 +572,8 @@ Used by three flows: profile picture / banner (EditProfileSheet), chat image att
 
 === Verification
 
-- `tests/e2e/test-edit-profile-picture.yaml` — drives the UI, asserts no `Upload Failed` alert (#141 regression guard).
-- `tests/e2e/test-exif-strip.yaml` + `scripts/verify_exif_strip.sh` — two-stage check: Maestro drives upload, shell wrapper seeds a JPEG with known GPS / Make / Model / DateTimeOriginal / Software tags, greps logcat for the Blossom URL, downloads the uploaded bytes, and asserts `exiftool` sees none of the seeded tags. Exits 3 on privacy regression.
+- `.maestro/profile/flow-096-edit-profile-picture.yaml` — drives the UI, asserts no `Upload Failed` alert (#141 regression guard).
+- `.maestro/messaging/flow-067-exif-strip.yaml` + `scripts/verify_exif_strip.sh` — two-stage check: Maestro drives upload, shell wrapper seeds a JPEG with known GPS / Make / Model / DateTimeOriginal / Software tags, greps logcat for the Blossom URL, downloads the uploaded bytes, and asserts `exiftool` sees none of the seeded tags. Exits 3 on privacy regression.
 
 == Direct Messages (NIP-04 + NIP-17)
 
@@ -1046,7 +1046,7 @@ End-to-end guard that the cache layers above actually paint without network:
 
 . Shell wrapper disables Wi-Fi + mobile data via `adb shell svc wifi disable` / `svc data disable`.
 . Force-stops the app and cold-launches it.
-. Runs `tests/e2e/test-offline-cold-start.yaml` which asserts every cached surface (Home tx list, Friends, DM inbox, Explore hub, Places list, Hunt list, Events list) paints within the Maestro default timeout.
+. Runs `.maestro/authentication/flow-009-offline-cold-start.yaml` which asserts every cached surface (Home tx list, Friends, DM inbox, Explore hub, Places list, Hunt list, Events list) paints within the Maestro default timeout.
 . `trap` restores network whether the flow passes or fails — a regression doesn't strand the device offline.
 
 Pre-req: the app must have been opened at least once on the device with network, so BTC Map + NIP-GC + NIP-52 caches are on disk. Run nightly on the AVD; spot-checked on the Pixel before each prod release.

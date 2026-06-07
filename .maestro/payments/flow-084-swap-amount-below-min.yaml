@@ -1,0 +1,104 @@
+appId: com.lightningpiggy.app.dev
+name: Boltz reverse swap — amount below minimum surfaces "Minimum is" warning
+---
+# Scaffold for issue #453. Pure-UI bounds check — no on-chain or
+# Lightning traffic, no funds at risk. Verifies the AmountEntryScreen
+# warning copy fires when the user enters a swap amount below
+# Boltz's minimum (currently boltzService.BOLTZ_MIN_SATS = 25,000).
+#
+# AmountEntryScreen.tsx:300-302 renders:
+#
+#   {belowMin ? <Text>Minimum is {minSats} sats.</Text> : null}
+#
+# and disables the Done button (canConfirm = !belowMin && !aboveMax
+# && currentSats > 0) so the user can't proceed.
+#
+# Preconditions (same as test-swap-reverse-fee-render.yaml):
+#   - AVD logged in, active wallet is Lightning (NWC)
+#   - Clipboard pre-seeded with a plain (no-amount) BIP-21:
+#
+#       source .env
+#       echo -n "bitcoin:${MAESTRO_ADDR_BIG}" | xclip -selection clipboard
+#       maestro test .maestro/payments/flow-084-swap-amount-below-min.yaml
+#
+# Why no amount in the URI:
+#   - With an amount, SendSheet skips the amount picker entirely.
+#   - We want the picker to appear so we can drive the keypad and
+#     watch the warning toggle.
+
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'btn-send'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'send-tab-input'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'send-paste-clipboard'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'send-paste-go'
+- waitForAnimationToEnd:
+    timeout: 6000
+
+# Drill into the amount picker. Boltz min/max only populate after
+# getSwapFees resolves.
+- tapOn:
+    id: 'send-amount-picker'
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+
+# Wait for the Boltz min/max range copy to render before typing —
+# AmountEntryScreen only emits the "Minimum is …" warning once
+# `minSats` / `maxSats` are populated from the Boltz fees fetch.
+# Without this gate, a slow network leaves min/max undefined → the
+# warning never fires → false-pass. The range text in
+# AmountEntryScreen renders as "<min> – <max> sats", em-dash from
+# U+2013, so substring-match `.*–.*sats` works regardless of the
+# live numbers.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
+
+# Enter 1,000 sats — well below BOLTZ_MIN_SATS (25,000).
+- tapOn: { id: 'amount-entry-key-1' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- assertVisible: '1,000'
+
+# Warning copy lives in AmountEntryScreen — substring-match because
+# the actual minimum depends on the live Boltz quote.
+- assertVisible:
+    text: '.*Minimum is.*sats.*'
+
+# Confirm button must be disabled. Maestro can't directly assert
+# `disabled={true}` on a TouchableOpacity, so we tap it and verify
+# we're still on amount-entry-screen — a working flow would have
+# transitioned back to the SendSheet main step.
+- tapOn:
+    id: 'amount-entry-confirm'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'amount-entry-screen'

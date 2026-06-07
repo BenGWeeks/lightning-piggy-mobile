@@ -1,0 +1,136 @@
+appId: com.lightningpiggy.app.dev
+name: Explore tour — captures screenshots for the PR description
+---
+# Single Maestro flow that walks the full Explore feature and shoots
+# a screenshot at each stop. Used by M8 to populate the PR with the
+# 13 shots called for in the original plan. Run from repo root:
+#
+#   maestro test .maestro/ui/flow-104-explore-tour.yaml
+#
+# Screenshots land in ~/.maestro/tests/<run-id>/screenshot-*.png. Move
+# them to docs/screenshots/explore/ + resize to ≤1200px before
+# attaching to the PR (per CLAUDE.md screenshot conventions).
+#
+# Some screens (Hunt Create form filled, Finder celebration, NFC
+# write success) need bespoke setup; this flow covers the
+# discoverable surfaces. The tour SKIPS Hunt Create-fill / Finder
+# claim because they need a logged-in wallet + a real tag tap.
+
+- launchApp:
+    permissions:
+      location: allow
+      camera: allow
+      notifications: allow
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# 01 — Home tab as the user lands. Captures the new bottom tab bar
+# (Home / Messages / Explore / Friends with the Compass icon).
+- takeScreenshot: 01-tab-bar-home
+
+# 02 — Explore hub. The hub subscribes to live data (BTC Map merchants,
+# NIP-GC kind 37516 caches, NIP-52 events, lessons progress) and shows
+# a mini-map preview at the top. Wait long enough for the location
+# resolve + first-relay-event to land before capturing, otherwise the
+# screenshot shows the "Locating you…" placeholder.
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: 02-explore-hub
+
+# 03 — Lessons sub-screen (regression baseline — courses identical
+# to old Learn tab).
+- tapOn:
+    id: 'explore-card-lessons'
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 03-lessons
+
+- back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# 04 — Map sub-screen with BTC Map merchants + (when relays carry any
+# in this geohash) NIP-GC cache pins overlaid.
+- tapOn:
+    id: 'explore-card-map'
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: 04-map-merchants-and-caches
+
+- tapOn:
+    id: 'map-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# 05 — Hunt hub with empty state + Hide / Discover CTAs.
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 05-hunt-hub
+
+# 06 — Hunt Create (paste field, validate button, helper copy about
+# bearer-token leak).
+- tapOn:
+    id: 'hunt-create-piggy-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 06-hunt-create
+
+- tapOn:
+    id: 'hunt-create-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# 07 — Hunt Discover (live nearby caches OR empty state).
+- tapOn:
+    id: 'hunt-discover-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: 07-hunt-discover
+
+- tapOn:
+    id: 'hunt-discover-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'hunt-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# 08 — Events sub-screen (NIP-52 list or empty state).
+- tapOn:
+    id: 'explore-card-events'
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: 08-events
+
+- tapOn:
+    id: 'events-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# 09 — Account drawer → Nearby merchants settings (toggle + radius
+# preset chips + quiet hours toggle).
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 1500
+- swipe:
+    start: 95%, 30%
+    end: 30%, 30%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'drawer-row-nearby'
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 09-settings-nearby-merchants
+
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000

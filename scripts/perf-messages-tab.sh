@@ -22,7 +22,7 @@ OUT="/tmp/perf-messages-${LABEL}"
 # don't have to edit the script. Defaults match the dev-AVD setup.
 PKG="${PKG:-com.lightningpiggy.app.dev}"
 DEVICE="${DEVICE:-emulator-5554}"
-FLOW="tests/e2e/perf-messages-tab-open.yaml"
+FLOW=".maestro/perf/perf-messages-tab-open.yaml"
 
 mkdir -p "$OUT"
 echo "→ writing to $OUT"
