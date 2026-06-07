@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: NIP-17 1:1 DM send (PR #334)
 ---
 # Smoke test for PR #334 — verifies the 1:1 DM send path migrated from

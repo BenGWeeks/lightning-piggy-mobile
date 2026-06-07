@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Multi-account cold-start wallet isolation regression guard (#442)
 ---
 # Regression guard for the mount-order race in WalletContext /

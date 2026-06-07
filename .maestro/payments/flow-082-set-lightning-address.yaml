@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Set Lightning Address on Wallet
 ---
 # Sets a lightning address on the first wallet via Wallet Settings. LN

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach tile — Location triggers OS permission / share
 ---
 # Tap the Location tile in the inline AttachPanel. On a fresh install

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach Panel — each tile opens its downstream sheet
 ---
 # Verifies that each tile in the inline AttachPanel actually wires up

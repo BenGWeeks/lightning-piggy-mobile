@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Receive landing depends on wallet's lud16
 ---
 # Covers #168/#169. The active wallet's `lightningAddress` drives which

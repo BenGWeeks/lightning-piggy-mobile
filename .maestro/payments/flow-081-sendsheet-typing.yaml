@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: SendSheet keeps every character of the zap message (#159, #160 regression guard)
 ---
 # What this guards:

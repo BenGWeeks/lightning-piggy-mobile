@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
 ---
 # Regression coverage for issue #373.

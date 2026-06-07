@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Share Location sheet opens from conversation composer
 ---
 # Opens a conversation with FRIEND_NAME and verifies that the composer's

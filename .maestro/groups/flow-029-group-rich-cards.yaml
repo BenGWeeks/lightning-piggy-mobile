@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group chat — rich content (contact / invoice / location) renders as cards
 ---
 # Verifies that the shared MessageBubble (#239 fix) actually upgrades

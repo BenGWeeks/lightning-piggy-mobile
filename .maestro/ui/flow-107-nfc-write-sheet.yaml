@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: NFC write sheet opens from Profile + ContactProfile
 ---
 # Verifies the Lucide NFC button is present + tapping it opens the

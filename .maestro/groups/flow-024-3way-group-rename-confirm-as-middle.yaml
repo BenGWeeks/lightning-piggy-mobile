@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: 3-way group chat — Middle Piggy sees rename
 ---
 # Phase 5. Logs in as Middle Piggy and verifies the rename has propagated

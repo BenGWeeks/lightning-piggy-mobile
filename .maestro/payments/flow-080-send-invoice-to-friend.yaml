@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Send 21 sat Invoice to Friend
 ---
 # Generates a 21 sat bolt11 invoice from Receive → Amount, sends it as an

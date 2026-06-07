@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Geo-caches screen renders nearby caches list (or empty state)
 ---
 # Smoke flow for the merged Geo-caches screen (was HuntDiscoverScreen

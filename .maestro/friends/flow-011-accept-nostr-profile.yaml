@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Accept Nostr profile (adopt displayName)
 ---
 # After logging in, the app offers to overwrite the locally-entered name

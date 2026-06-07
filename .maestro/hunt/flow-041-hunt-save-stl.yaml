@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Hunt Create — Save STL surfaces the Save / Share branded alert
 ---
 # Smoke flow for the Save-STL action on step 1 of Hide-a-Piglet (#75).

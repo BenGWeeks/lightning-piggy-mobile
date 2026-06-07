@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap — amount above maximum surfaces "Maximum is" warning
 ---
 # Scaffold for issue #453. Symmetric to test-swap-amount-below-min:

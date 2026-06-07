@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Geo-caches empty list renders Create CTA
 ---
 # Smoke flow for the Geo-caches screen (was the Hunt hub before the

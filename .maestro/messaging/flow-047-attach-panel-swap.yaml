@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: WhatsApp-style Attach Panel Swap Test
 ---
 # Verifies the new inline attachment panel that replaces the keyboard at

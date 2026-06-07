@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz submarine swap — full happy path, on-chain → Lightning
 ---
 # REAL-MONEY TEST. Sweeps Big Piggy's on-chain balance back to his

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Map sub-screen renders with WebView and recenter control
 ---
 # Smoke flow for the Map sub-screen: grant foreground location, open

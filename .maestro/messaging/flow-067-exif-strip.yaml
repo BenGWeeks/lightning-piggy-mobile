@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: EXIF strip upload — #145 regression guard
 ---
 # This flow is the UI driver for scripts/verify_exif_strip.sh. Maestro

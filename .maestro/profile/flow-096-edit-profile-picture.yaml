@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Edit Profile picture upload — #141 regression guard
 ---
 # Preconditions:

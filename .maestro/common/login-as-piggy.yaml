@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Internal — login as the nsec passed via PIGGY_NSEC env var
 ---
 # Parametrised version of common/login-as.yaml. The original is

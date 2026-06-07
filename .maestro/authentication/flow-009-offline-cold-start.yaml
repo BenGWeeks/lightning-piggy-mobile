@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: All cached surfaces render on cold start without internet
 ---
 # Asserts that with Wi-Fi + mobile data disabled, the app's persistent

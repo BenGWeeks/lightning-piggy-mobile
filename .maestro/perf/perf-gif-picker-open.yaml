@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: PERF — open the GIF picker (no assertions)
 ---
 # Companion to scripts/perf-gif-picker.sh — drives the navigation

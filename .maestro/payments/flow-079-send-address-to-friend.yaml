@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Send Lightning Address to Friend (dev)
 ---
 # Opens the Receive sheet in Address mode (requires an NWC wallet with

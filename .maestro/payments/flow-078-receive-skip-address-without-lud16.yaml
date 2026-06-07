@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Receive skips straight to AmountEntryScreen without a lud16
 ---
 # Covers #168 / #169. When the selected wallet has no lightningAddress

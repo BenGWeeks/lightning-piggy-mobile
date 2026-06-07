@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Dismiss Nostr profile-update alert
 ---
 # The Nostr login flow pops a "Update from Nostr Profile?" alert when a

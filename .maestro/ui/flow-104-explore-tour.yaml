@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Explore tour — captures screenshots for the PR description
 ---
 # Single Maestro flow that walks the full Explore feature and shoots

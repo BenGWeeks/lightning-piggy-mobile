@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: FriendPicker — alphabet bar shows A–Z
 ---
 # Regression guard: the FriendPickerSheet's alphabet sidebar must show

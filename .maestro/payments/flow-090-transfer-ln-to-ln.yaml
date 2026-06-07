@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Transfer LN to LN Test
 ---
 # Tests transferring 7 sats between two NWC wallets (Lightning to Lightning).

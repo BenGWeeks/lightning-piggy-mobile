@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Messages Search Filters Inbox by Preview Text
 ---
 # Verifies that the Messages inbox search input filters conversation rows

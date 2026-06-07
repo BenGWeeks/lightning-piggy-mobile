@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Create a group, then leave it (assert it's gone)
 ---
 # Standalone test for the create + leave round-trip on a single account.

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Rename a group via the GroupConversationScreen header
 ---
 # Standalone test for the rename flow (not part of the 3-way suite).

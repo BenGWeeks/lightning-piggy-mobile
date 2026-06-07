@@ -3,7 +3,7 @@
 # 1:1 conversation via the friend picker and verifies the refactored screen +
 # composer + attach panel render and respond. Not a regression suite — a quick
 # "did the extraction break rendering" check.
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 ---
 - launchApp
 - tapOn:

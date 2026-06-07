@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.preview
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: PERF — DM pull-to-refresh contended with Explore mount (PR #533 regression guard)
 ---
 # Companion to scripts/perf-dm-refresh-explore.sh. Drives the worst-case

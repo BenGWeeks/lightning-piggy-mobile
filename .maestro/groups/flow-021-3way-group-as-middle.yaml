@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: 3-way group chat — Middle Piggy joins
 ---
 # Phase 2 of the 3-way group-chat test. Logs in as Middle Piggy

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach tile — Gallery triggers OS photo picker
 ---
 # Tap the Gallery tile in the inline AttachPanel. Triggers Android's

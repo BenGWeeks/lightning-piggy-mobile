@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Screenshot — find-log no longer renders the U+FFFC tofu box (PR #765)
 ---
 # Walks Explore → Geo-caches → "The Allotment Watch" → scrolls to the

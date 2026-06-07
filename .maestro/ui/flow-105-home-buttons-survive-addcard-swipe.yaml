@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Home Send/Receive buttons stay enabled after swiping to Add card
 ---
 # Covers #166. Swiping the wallet carousel onto the trailing "Add wallet"

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach tile — GIF opens GifPickerSheet
 ---
 # Tap the GIF tile in the inline AttachPanel and verify the

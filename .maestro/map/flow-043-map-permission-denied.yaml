@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Map shows a friendly empty state when foreground location is denied
 ---
 # When the user denies the foreground location permission Maestro proxies

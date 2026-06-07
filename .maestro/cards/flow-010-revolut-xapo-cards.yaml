@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add Revolut + Xapo themed on-chain wallets (visual check)
 ---
 # Manual screenshot helper for PR feat/revolut-xapo-wallet-cards.

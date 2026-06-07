@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Friends tab — filter selection persists across app restart (#311)
 ---
 # Verifies the Friends-tab chip filter (All / Nostr / Contacts) is

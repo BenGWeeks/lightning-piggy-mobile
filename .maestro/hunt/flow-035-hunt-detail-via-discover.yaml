@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Geo-caches list → Detail navigation works
 ---
 # Walks Explore → Geo-caches → tap first cache row → assert the

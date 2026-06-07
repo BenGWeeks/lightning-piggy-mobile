@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Events sub-screen renders list or empty state
 ---
 # Smoke flow for EventsScreen (M7). Subscribes to NIP-52 kind 31923

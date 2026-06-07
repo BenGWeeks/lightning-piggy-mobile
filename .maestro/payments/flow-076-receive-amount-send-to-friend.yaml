@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Receive → Amount → Friend regression guard for #457
 ---
 # Regression guard for issue #457 — when sending a generated bolt11

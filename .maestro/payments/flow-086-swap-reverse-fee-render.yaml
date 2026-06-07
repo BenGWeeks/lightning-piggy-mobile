@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap — fee summary renders for Lightning → on-chain
 ---
 # Scaffold for issue #453. Cheapest of the Boltz E2E suite — does NOT

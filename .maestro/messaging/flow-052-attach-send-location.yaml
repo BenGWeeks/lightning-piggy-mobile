@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach — send location to Little Piggy
 ---
 # Sends the user's CURRENT location to Little Piggy as a NIP-44 DM and

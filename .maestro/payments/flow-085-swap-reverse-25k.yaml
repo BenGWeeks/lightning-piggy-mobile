@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
 ---
 # REAL-MONEY TEST. Issues a Boltz reverse swap of 25,000 sats from

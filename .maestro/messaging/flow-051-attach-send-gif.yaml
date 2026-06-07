@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach — send a GIF to Little Piggy
 ---
 # Opens the AttachPanel → GIF tile → GifPickerSheet → searches for a

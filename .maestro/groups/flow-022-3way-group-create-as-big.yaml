@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: 3-way group chat — Big Piggy creates "Triad"
 ---
 # Phase 1 of the 3-way group-chat test (PR #227). Logs in as Big Piggy

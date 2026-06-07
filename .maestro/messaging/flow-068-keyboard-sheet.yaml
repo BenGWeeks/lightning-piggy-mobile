@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Bottom Sheet Keyboard Slide Test
 ---
 # Verifies that the Connect Nostr bottom sheet slides up when keyboard opens

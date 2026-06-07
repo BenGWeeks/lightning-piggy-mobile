@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Nearby merchants — toggle, radius preset, quiet hours
 ---
 # Walks through the new "Nearby merchants" drawer settings introduced for

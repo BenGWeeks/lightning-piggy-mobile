@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Lessons Search Filters Course Grid by Title / Mission Text
 ---
 # Verifies that the Lessons sub-screen search input filters the course grid

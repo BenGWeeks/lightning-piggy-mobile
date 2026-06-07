@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Dismiss any open modal dialogs
 ---
 # Best-effort dismissal of stacked modal dialogs so subsequent flows have a

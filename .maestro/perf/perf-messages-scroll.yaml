@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: PERF — warmup → tab Messages (no swipes)
 ---
 # Phase 1 of perf-scroll.sh: launch + Messages tab tap. The wrapper

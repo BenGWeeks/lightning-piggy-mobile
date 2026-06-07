@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Screenshot — hider contact sheet shows banner + zap + view-full (PR #770)
 ---
 # Walks Explore → Geo-caches → "The Allotment Watch" → taps the

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group send via Amber — #356 regression (no Send-failed alert)
 ---
 # Regression coverage for issue #356.

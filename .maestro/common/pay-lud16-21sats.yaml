@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Subflow — pay a lightning-address bubble for 21 sats
 ---
 # Reusable subflow: tap Pay on a "Lightning address" bubble in the

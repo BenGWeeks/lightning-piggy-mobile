@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
 ---
 # Like test-login-dev.yaml but with no hardcoded "Ben" post-login

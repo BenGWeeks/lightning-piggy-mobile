@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: AttachSheet exposes both Send image and Send GIF rows
 env:
   FRIEND_NAME: Isaac Weeks

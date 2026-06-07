@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: WoT bottom sheet — open from Hunt filter, verify tier states (#535 / #536)
 ---
 # Flow: Explore → Hunt rail → See all → filter button → WoT chip → sheet.

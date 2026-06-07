@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Explore tab renders the hub with Places / Geo-caches / Events / Lessons rails
 ---
 # Verifies the rename of the Learn tab to Explore: the bottom-tab button

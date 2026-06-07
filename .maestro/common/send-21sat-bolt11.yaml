@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Subflow — generate a 21-sat bolt11 and share it to the open thread
 ---
 # Reusable subflow: from the currently-open conversation thread (1:1

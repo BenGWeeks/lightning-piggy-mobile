@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add Hot Wallet Test
 ---
 # Imports a hot wallet via mnemonic seed phrase.

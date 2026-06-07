@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: 3-way group chat — Big Piggy renames "Triad" → "Triad-renamed"
 ---
 # Phase 4. Logs back in as Big Piggy (MAESTRO_NSEC_BIG), opens "Triad",

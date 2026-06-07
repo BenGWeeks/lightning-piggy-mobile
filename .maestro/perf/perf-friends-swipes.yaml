@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: PERF — Friends tab scroll iterations
 ---
 # Phase 2 of perf-scroll.sh: assumes Friends tab is already on screen

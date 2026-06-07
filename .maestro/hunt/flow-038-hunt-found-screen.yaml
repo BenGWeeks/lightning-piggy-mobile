@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Hunt finder celebration screen renders + claim button is reachable
 ---
 # Verifies HuntFoundScreen mounts when the user navigates manually

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Login to Friends Performance Test
 ---
 # Measures time from nsec login to Friends tab being responsive

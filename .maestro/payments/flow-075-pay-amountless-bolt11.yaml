@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Pay 21 sats on an amount-less bolt11
 ---
 # Regression guard for PR #451: tapping Pay on a zero-amount bolt11

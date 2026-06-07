@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group manage-members sheet — open + add picker + remove flow
 ---
 # Verifies the new GroupMembersSheet (issue #259) replaces the inert

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap — amount below minimum surfaces "Minimum is" warning
 ---
 # Scaffold for issue #453. Pure-UI bounds check — no on-chain or

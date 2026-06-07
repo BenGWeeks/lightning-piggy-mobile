@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz reverse swap via Transfer — Lightning → on-chain, 25k sats
 ---
 # REAL-MONEY TEST. Drives the *TransferSheet* reverse-swap path

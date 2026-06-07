@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach Panel — Android hardware back closes panel, stays on conversation
 ---
 # When the inline AttachPanel is open, pressing the Android hardware

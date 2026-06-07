@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add NWC wallet via clipboard paste
 ---
 # Workaround for the BottomSheetTextInput + New Architecture bug where

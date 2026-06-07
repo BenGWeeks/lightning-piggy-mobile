@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Group attach panel — Zap (disabled), Invoice, Contact tiles render
 ---
 # Verifies that opening the inline AttachPanel inside a group chat

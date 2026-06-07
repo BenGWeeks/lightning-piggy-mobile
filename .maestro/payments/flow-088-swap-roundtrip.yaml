@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Boltz roundtrip — Lightning → on-chain → Lightning (sweep-back)
 ---
 # REAL-MONEY TEST. Wraps the two real-swap tests into a single

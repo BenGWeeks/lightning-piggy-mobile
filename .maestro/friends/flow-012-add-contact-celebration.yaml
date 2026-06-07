@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add-contact celebration (#660/#662)
 ---
 # Adds a contact via the Add Friend sheet and asserts the celebration card

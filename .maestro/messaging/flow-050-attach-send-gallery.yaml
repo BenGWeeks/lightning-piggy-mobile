@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach — send a gallery image to Little Piggy
 ---
 # Opens the AttachPanel → Gallery tile → OS image picker → selects the

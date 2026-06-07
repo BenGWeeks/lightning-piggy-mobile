@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach tile — Zap opens SendSheet
 ---
 # Tap the Zap tile in the inline AttachPanel and verify the SendSheet

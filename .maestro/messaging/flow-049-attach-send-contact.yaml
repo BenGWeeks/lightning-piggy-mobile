@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach — share a contact with Little Piggy
 ---
 # Opens the AttachPanel → Contact tile → FriendPickerSheet → picks the

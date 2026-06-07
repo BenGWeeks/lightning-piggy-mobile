@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Set Big Piggy's profile image via EditProfileSheet
 ---
 # Pushes the BP fixture image into the emulator's gallery, opens the

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Keyboard audit — AddFriendSheet npub input
 ---
 - launchApp:

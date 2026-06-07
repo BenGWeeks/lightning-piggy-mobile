@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: AmountEntryScreen — shared component regression guard
 ---
 # AmountEntryScreen is reused by Send, Receive, and Transfer — a keypad /

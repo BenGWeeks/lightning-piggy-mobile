@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Hunt Create — toggle Public publishes to relays after save
 ---
 # Smoke flow for the M6.2 publish path. Walks the hider through:
