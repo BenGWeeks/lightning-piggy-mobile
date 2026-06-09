@@ -50,6 +50,7 @@ import {
   inboxLastSeenKey,
 } from './nostrDmCache';
 import { useDmInbox } from './useDmInbox';
+import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import {
@@ -70,6 +71,10 @@ import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
 export { notifyGroupMessage, subscribeGroupMessages, subscribeDmMessages } from './nostrEventBus';
 export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+// DM-inbox sibling context (#806) lives in its own module; re-export the
+// consumer hook so the public surface stays at `NostrContext` like
+// `useNostr` / `useNostrContacts`.
+export { useNostrDmInbox } from './DmInboxContext';
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -202,33 +207,6 @@ interface NostrContextType {
    * merge replaces it once relay returns.
    */
   getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
-  dmInbox: DmInboxEntry[];
-  dmInboxLoading: boolean;
-  /**
-   * Refresh the NIP-04 + NIP-17 DM inbox from read relays.
-   *
-   * Default (no arg / `force: false`): honours a 30s TTL — calls
-   * within that window are no-ops. Safe to call from
-   * `useFocusEffect` on the Messages tab without racking up relay
-   * round-trips on every tab bounce.
-   *
-   * `force: true`: bypass the TTL and hit relays. Reserved for
-   * explicit user-initiated refreshes (pull-to-refresh).
-   *
-   * `signal`: optional AbortSignal for cancelling the in-flight
-   * refresh. Checked between batches in the decrypt loops so a
-   * navigation-away can stop the JS-thread churn (#286). Aborting
-   * is best-effort — a refresh that's mid-batch will finish that
-   * batch (≤ DECRYPT_YIELD_EVERY items) before bailing out.
-   */
-  refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
-  /**
-   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
-   * DM-receiving screen (Messages tab, ConversationScreen) via
-   * useFocusEffect — first call opens the sub, subsequent are no-ops.
-   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
-   */
-  armLiveDmSub: () => void;
   /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
@@ -1779,10 +1757,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
-      dmInbox,
-      dmInboxLoading,
-      refreshDmInbox,
-      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     }),
@@ -1813,10 +1787,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
-      dmInbox,
-      dmInboxLoading,
-      refreshDmInbox,
-      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     ],
@@ -1829,10 +1799,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [contacts, refreshContacts, followContact, unfollowContact, addContact],
   );
 
+  // Sibling value carrying the hot DM-inbox slice (#806). Memoised separately
+  // so a decrypted message rebuilds only this — not `contextValue` above — and
+  // only `useNostrDmInbox()` consumers re-render on inbox churn.
+  const dmInboxValue = useMemo(
+    () => ({ dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub }),
+    [dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub],
+  );
+
   return (
     <NostrContext.Provider value={contextValue}>
       <NostrContactsContext.Provider value={contactsValue}>
-        {children}
+        <DmInboxContext.Provider value={dmInboxValue}>{children}</DmInboxContext.Provider>
       </NostrContactsContext.Provider>
     </NostrContext.Provider>
   );
