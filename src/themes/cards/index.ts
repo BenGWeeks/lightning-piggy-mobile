@@ -36,6 +36,13 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   coinos: coinosStyle.full,
   revolut: revolutStyle.full,
   xapo: xapoStyle.full,
+  // Sports themes (#102) have no background image yet, so they fall
+  // back to `defaultStyle`. When art lands, swap in a per-theme style
+  // sized for that illustration.
+  tennis: defaultStyle.full,
+  football: defaultStyle.full,
+  basketball: defaultStyle.full,
+  f1: defaultStyle.full,
 };
 
 export function getCardBgStyle(styleName: CardTheme | undefined, _mini: boolean): ImageStyle {
