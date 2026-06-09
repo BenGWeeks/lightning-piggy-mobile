@@ -570,11 +570,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     continue;
                   }
                   nip17Misses++;
+                  if (signal?.aborted) return; // bail before the ~25ms schnorr unwrapWrapNsec
                   const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
-                  // No per-decrypt yield here: the frame-budget scheduler
-                  // at the top of the loop already yields whenever the
-                  // accumulated work exceeds DECRYPT_FRAME_BUDGET_MS,
-                  // which captures the cost of unwrapWrapNsec naturally.
+                  // No per-decrypt yield: the frame-budget scheduler at the loop top
+                  // already yields on DECRYPT_FRAME_BUDGET_MS, covering unwrapWrapNsec.
                   if (!rumor) continue;
                   // Multi-recipient (group) rumors: route to group storage
                   // and short-circuit the DM-inbox path. The 1:1 inbox
@@ -696,6 +695,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   continue;
                 }
                 nip17Misses++;
+                if (signal?.aborted) return; // bail before the Amber IPC round-trip (same as nsec path)
                 // Uncached — unwrap via Amber's silent content-resolver path.
                 // If Amber hasn't granted blanket nip44_decrypt permission,
                 // this throws PERMISSION_NOT_GRANTED and we stop iterating.
