@@ -8,9 +8,11 @@ import { createExploreMiniMapStyles } from '../styles/ExploreMiniMap.styles';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 
-// Stable empty-array identities for the marker-stagger gate (#815) — inline
-// `[]` would be a fresh reference each render and defeat LibreMiniMap's
-// `arePropsEqual` memo, forcing the very reconciliation we're trying to split.
+// Stable empty-array placeholders for the marker-stagger gate (#815). While
+// markers are deferred we hand LibreMiniMap these instead of allocating a fresh
+// `[]` each render. (Its `sameByItemRef` comparator already treats two empty
+// arrays as equal by length, so this isn't about the memo — purely avoiding a
+// per-render allocation while deferred.)
 const NO_MERCHANTS: BtcMapPlace[] = [];
 const NO_CACHES: ParsedCache[] = [];
 const NO_EVENTS: ParsedEvent[] = [];
