@@ -5,9 +5,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   BackHandler,
-  Keyboard,
   Linking,
-  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
@@ -28,6 +26,7 @@ import { walletLabel } from '../types/wallet';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
@@ -166,7 +165,7 @@ const SendSheet: React.FC<Props> = ({
   // fixed-footer structure in the render output below) so they stay
   // reachable even when the form content is tall enough to require
   // internal scrolling.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardHeight = useKeyboardHeight();
 
   // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
   // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
@@ -229,24 +228,6 @@ const SendSheet: React.FC<Props> = ({
     });
     return () => handler.remove();
   }, [visible, onClose]);
-
-  // Track keyboard height so the BottomSheetScrollView has enough bottom
-  // padding to reach past the keyboard to the last field. Mirrors the
-  // pattern in NostrLoginSheet / EditProfileSheet / TransferSheet —
-  // rule 5 of the "Bottom sheet doesn't slide up when keyboard opens"
-  // checklist in docs/TROUBLESHOOTING.adoc.
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   // Resolve lightning address when scanned
   useEffect(() => {
@@ -834,10 +815,16 @@ const SendSheet: React.FC<Props> = ({
           </BottomSheetView>
         ) : (
           <BottomSheetScrollView
-            contentContainerStyle={[
-              styles.content,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
+            // Padding only — NOT `styles.content` (flex: 1). A flex-1 scroll
+            // content-container sizes to the viewport, so when the keyboard
+            // shrinks the window the content collapses and dynamic sizing
+            // re-measures the sheet down to header height (the "sheet doesn't
+            // show fully / doesn't lift" bug). Matching NostrLoginSheet —
+            // intrinsic content height + interactive keyboard — lifts the
+            // whole sheet above the keyboard. See #521 / #522.
+            contentContainerStyle={{
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
+            }}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.innerContent}>
