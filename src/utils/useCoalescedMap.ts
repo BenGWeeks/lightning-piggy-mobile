@@ -50,6 +50,14 @@ export function useCoalescedMap<V>(options?: {
   shouldReplace?: (existing: V, incoming: V) => boolean;
   flushMs?: number;
   flushThreshold?: number;
+  /**
+   * Cap the committed Map. On each flush, once the Map exceeds this size the
+   * oldest-inserted entries are evicted (Map preserves insertion order) down to
+   * the cap. Use for a long-lived subscription whose key space grows unbounded
+   * (e.g. per-event-id feeds) so the Map can't balloon over a long session.
+   * Omit for naturally-bounded key spaces (e.g. keyed per-cache).
+   */
+  maxSize?: number;
 }): CoalescedMap<V> {
   // 100 ms feels instant (≤120 ms reads as same-frame) yet coalesces a typical
   // relay event burst into 2–3 commits. 25-item threshold flushes early when a
@@ -61,6 +69,9 @@ export function useCoalescedMap<V>(options?: {
   // stable (callers pass an inline arrow each render).
   const shouldReplaceRef = useRef(options?.shouldReplace);
   shouldReplaceRef.current = options?.shouldReplace;
+  // Held in a ref so `flush` (deps: []) stays referentially stable.
+  const maxSizeRef = useRef(options?.maxSize);
+  maxSizeRef.current = options?.maxSize;
 
   const [map, setMap] = useState<Map<string, V>>(() => options?.initial?.() ?? new Map());
   const pendingRef = useRef<Map<string, V>>(new Map());
@@ -96,6 +107,16 @@ export function useCoalescedMap<V>(options?: {
         const existing = next.get(key);
         if (existing !== undefined && replace && !replace(existing, value)) continue;
         next.set(key, value);
+      }
+      // Evict oldest-inserted entries once over the cap so a long-lived
+      // subscription can't grow the committed Map unbounded.
+      const maxSize = maxSizeRef.current;
+      if (maxSize !== undefined && next.size > maxSize) {
+        let toDelete = next.size - maxSize;
+        for (const key of next.keys()) {
+          if (toDelete-- <= 0) break;
+          next.delete(key);
+        }
       }
       return next;
     });
