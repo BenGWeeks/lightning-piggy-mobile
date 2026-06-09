@@ -228,6 +228,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [legendVisible, setLegendVisible] = useState(false);
   const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
   const onOpenLegend = useCallback(() => setLegendVisible(true), []);
+  // Stable handlers so a parent re-render (e.g. a DM-inbox flush bubbling
+  // through useNostr()) doesn't hand ExploreMiniMap/ContentRail fresh function
+  // identities each time — inline arrows defeat LibreMiniMap's arePropsEqual
+  // memo (ExploreMiniMap renders LibreMiniMap when focused) and force a full
+  // MapLibre marker reconciliation on every render (#798).
+  const onSelectMerchant = useCallback((m: BtcMapPlace) => setSelectedMerchant(m), []);
+  const onSelectCache = useCallback((c: ParsedCache) => setSelectedCache(c), []);
+  const onSelectEvent = useCallback(
+    (e: ParsedEvent) => navigation.navigate('EventDetail', { coord: e.coord }),
+    [navigation],
+  );
+  const onSeeAllPlaces = useCallback(() => navigation.navigate('Places'), [navigation]);
+  const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
+  const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
   // the initial `merchants` state above; the live fetch below replaces
@@ -395,10 +410,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // backlog. Without it, a 200-event burst would sit in the buffer for
   // the full 100 ms even if it landed in 20 ms.
   const PENDING_FLUSH_THRESHOLD = 25;
-  // Cap the caches and events Maps so the O(N) new Map(prev) clone on
-  // every flush doesn't accumulate frame drops over long sessions.
-  // Entries beyond the cap are evicted oldest-first.
-  const MAP_MAX_SIZE = 1000;
   const flushPendingCaches = useCallback(() => {
     if (pendingCachesTimerRef.current) {
       clearTimeout(pendingCachesTimerRef.current);
@@ -420,12 +431,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       for (const [coord, c] of batch) {
         const existing = next.get(coord);
         if (!existing || existing.createdAt < c.createdAt) next.set(coord, c);
-      }
-      if (next.size > MAP_MAX_SIZE) {
-        const sorted = [...next.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
-        for (let i = 0; i < sorted.length - MAP_MAX_SIZE; i++) {
-          next.delete(sorted[i][0]);
-        }
       }
       const __dt = performance.now() - __t0;
       if (__dt > 30) {
@@ -455,16 +460,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       for (const [coord, e] of batch) {
         const existing = next.get(coord);
         if (!existing || existing.startsAt !== e.startsAt) next.set(coord, e);
-      }
-      if (next.size > MAP_MAX_SIZE) {
-        const sorted = [...next.entries()].sort((a, b) => {
-          const aTs = a[1].startsAt ?? 0;
-          const bTs = b[1].startsAt ?? 0;
-          return aTs - bTs;
-        });
-        for (let i = 0; i < sorted.length - MAP_MAX_SIZE; i++) {
-          next.delete(sorted[i][0]);
-        }
       }
       const __dt = performance.now() - __t0;
       if (__dt > 30) {
@@ -528,11 +523,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // pubkey change but never on unrelated re-renders, and is immune to the
   // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  // The user's read-relay URLs, plus a content key that only changes when the
+  // URL *set* changes — not when useNostr() hands back a new array with the same
+  // URLs (cold-start cache→network churn), which used to double-fire the
+  // by-author fetch below (#798).
+  const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+  const readRelayKey = readRelays.join(',');
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
     let cancelled = false;
-    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
     // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
     // requests, and the current run still merges on cancel (#752 Copilot).
     joinExploreByAuthorFetch(fetchKey, () =>
@@ -567,7 +567,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [signedInPubkey, userRelays, refreshKey]);
+    // Depend on readRelayKey (the relay-URL *content*), not the userRelays array
+    // identity: a genuine relay-set change still re-fires the fetch (parity with
+    // MapScreen's by-author fetch), but the cold-start new-array-same-URLs churn
+    // no longer does — that double-fired a redundant ~20s query (#798).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedInPubkey, refreshKey, readRelayKey]);
 
   // Write-through to AsyncStorage whenever the in-memory state grows
   // so the next cold start has fresh content to hydrate from. Debounced
@@ -778,6 +783,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     );
   }, [merchants, posLat, posLon, maxDistanceMetres]);
 
+  // Distinct merchant categories for the legend. Memoised so the
+  // flatMap + Set + spread over all merchants doesn't run on every render
+  // (and so LegendSheet gets a stable array reference) (#798).
+  const availableCategories = useMemo(
+    () => [...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean))],
+    [merchants],
+  );
+
   const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
@@ -903,9 +916,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           events={eventsArr}
           onTapMap={onTapMap}
           onOpenLegend={onOpenLegend}
-          onSelectMerchant={(m) => setSelectedMerchant(m)}
-          onSelectCache={(c) => setSelectedCache(c)}
-          onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
+          onSelectMerchant={onSelectMerchant}
+          onSelectCache={onSelectCache}
+          onSelectEvent={onSelectEvent}
         />
 
         <ContentRail<{ place: BtcMapPlace; distance: number }>
@@ -915,7 +928,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           loading={merchantsLoading && sortedMerchants.length === 0 && !!pos}
           // "See all" lands on the Places list (with map button in
           // its header); the dedicated Map view is one tap away.
-          onSeeAll={() => navigation.navigate('Places')}
+          onSeeAll={onSeeAllPlaces}
           seeAllTestId="explore-card-map"
           keyExtractor={(p) => String(p.place.id)}
           emptyState={
@@ -953,7 +966,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           // "See all" lands on the merged Geo-caches page (map + list
           // + [+] in header for the hider flow). Was a two-screen
           // Hunt/Discover split before the May 2026 UX merge.
-          onSeeAll={() => navigation.navigate('Hunt')}
+          onSeeAll={onSeeAllHunt}
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.cache.coord}
           emptyState={
@@ -994,7 +1007,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           }
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
-          onSeeAll={() => navigation.navigate('Events')}
+          onSeeAll={onSeeAllEvents}
           seeAllTestId="explore-card-events"
           keyExtractor={(e) => e.event.coord}
           emptyState={
@@ -1017,7 +1030,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           title="Lessons in progress"
           caption={`${progress.completedMissions.length} / ${courses.reduce((a, c) => a + c.missions.length, 0)} missions done`}
           items={courses}
-          onSeeAll={() => navigation.navigate('Lessons')}
+          onSeeAll={onSeeAllLessons}
           seeAllTestId="explore-card-lessons"
           keyExtractor={(c) => c.id}
           renderItem={(course) => (
@@ -1040,9 +1053,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         visible={legendVisible}
         onClose={onCloseLegend}
         placesVisible
-        availableCategories={[
-          ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
-        ]}
+        availableCategories={availableCategories}
       />
       {/* Mini-map pin-tap sheets — share the components with MapScreen
           so the interaction shape (drag-to-dismiss, tap-away, View
