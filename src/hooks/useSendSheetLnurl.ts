@@ -105,6 +105,7 @@ export function useSendSheetLnurl(opts: {
             'This is a claim code',
             'This LNURL is a withdraw (claim) code, not a payment request. Use Receive to claim it.',
           );
+          setLnurlParams(null);
           setInvoiceData(null);
           setDecoded(null);
           setScanned(false);
@@ -114,6 +115,7 @@ export function useSendSheetLnurl(opts: {
         if (!cancelled) {
           const msg = error instanceof Error ? error.message : 'Failed to resolve LNURL';
           Alert.alert('Error', msg);
+          setLnurlParams(null);
           setInvoiceData(null);
           setDecoded(null);
           setScanned(false);
