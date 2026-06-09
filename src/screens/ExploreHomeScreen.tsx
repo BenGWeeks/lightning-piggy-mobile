@@ -524,11 +524,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
   // The user's read-relay URLs, plus a content key that only changes when the
-  // URL *set* changes — not when useNostr() hands back a new array with the same
-  // URLs (cold-start cache→network churn), which used to double-fire the
-  // by-author fetch below (#798).
+  // URL *set* changes (sorted so a mere reorder doesn't) — not when useNostr()
+  // hands back a new array with the same URLs (cold-start cache→network churn),
+  // which used to double-fire the by-author fetch below (#798).
   const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-  const readRelayKey = readRelays.join(',');
+  const readRelayKey = [...readRelays].sort().join(',');
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
