@@ -43,6 +43,16 @@ export interface CoalescedMap<V> {
   reset: () => void;
 }
 
+/** Evict oldest-inserted entries (Map preserves insertion order) down to `max`. */
+function capOldest<V>(map: Map<string, V>, max: number | undefined): void {
+  if (max === undefined || map.size <= max) return;
+  let toDelete = map.size - max;
+  for (const key of map.keys()) {
+    if (toDelete-- <= 0) break;
+    map.delete(key);
+  }
+}
+
 export function useCoalescedMap<V>(options?: {
   /** Seed the committed Map on first render (e.g. from a sync cache peek). */
   initial?: () => Map<string, V>;
@@ -73,7 +83,13 @@ export function useCoalescedMap<V>(options?: {
   const maxSizeRef = useRef(options?.maxSize);
   maxSizeRef.current = options?.maxSize;
 
-  const [map, setMap] = useState<Map<string, V>>(() => options?.initial?.() ?? new Map());
+  const [map, setMap] = useState<Map<string, V>>(() => {
+    // Cap the seed too, so a caller seeding via `initial` over the cap isn't
+    // left oversized until the first flush (Copilot review).
+    const seed = options?.initial?.() ?? new Map();
+    capOldest(seed, options?.maxSize);
+    return seed;
+  });
   const pendingRef = useRef<Map<string, V>>(new Map());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Distinguish full unmount (React throws on setState) from a focus blur — the
@@ -110,14 +126,7 @@ export function useCoalescedMap<V>(options?: {
       }
       // Evict oldest-inserted entries once over the cap so a long-lived
       // subscription can't grow the committed Map unbounded.
-      const maxSize = maxSizeRef.current;
-      if (maxSize !== undefined && next.size > maxSize) {
-        let toDelete = next.size - maxSize;
-        for (const key of next.keys()) {
-          if (toDelete-- <= 0) break;
-          next.delete(key);
-        }
-      }
+      capOldest(next, maxSizeRef.current);
       return next;
     });
   }, []);
