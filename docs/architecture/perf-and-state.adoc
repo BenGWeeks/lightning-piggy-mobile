@@ -217,9 +217,8 @@ consumer; they don't remove the firehose-into-React-state coupling, so the
 next consumer re-creates the symptom.
 |===
 
-[plantuml,perf-causal-chain,svg]
+[mermaid,perf-causal-chain,svg]
 ....
-@startmermaid
 flowchart TD
   A[Relay onevent firehose<br/>50+ events / 200ms] --> B[Sync NIP-17 decrypt<br/>on JS thread]
   B --> C[setState dmInbox<br/>per message]
@@ -230,7 +229,6 @@ flowchart TD
   F --> G[UI freeze / dropped touches]
   style F fill:#f88,stroke:#900
   style G fill:#f88,stroke:#900
-@endmermaid
 ....
 
 == Remediation strategy (prioritised)
