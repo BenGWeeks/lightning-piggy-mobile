@@ -31,7 +31,16 @@ import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
-import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import {
+  type DecodedInvoice,
+  decodeInvoice,
+  isLightningAddress,
+  isValidInvoice,
+  isLnurlString,
+  stripLightningPrefix,
+} from '../utils/sendSheetInput';
+import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -60,48 +69,6 @@ interface Props {
 
 type InputMode = 'scan' | 'paste';
 type Step = 'main' | 'amount';
-
-interface DecodedInvoice {
-  amountSats: number | null;
-  description: string | null;
-  expiry: number | null;
-}
-
-function decodeInvoice(bolt11: string): DecodedInvoice {
-  try {
-    const decoded = bolt11Decode(bolt11);
-    let amountSats: number | null = null;
-    let description: string | null = null;
-    let expiry: number | null = null;
-
-    for (const section of decoded.sections) {
-      if (section.name === 'amount') {
-        amountSats = Math.round(Number(section.value) / 1000);
-      } else if (section.name === 'description') {
-        description = section.value as string;
-      } else if (section.name === 'expiry') {
-        expiry = section.value as number;
-      }
-    }
-    return { amountSats, description, expiry };
-  } catch {
-    return { amountSats: null, description: null, expiry: null };
-  }
-}
-
-function isLightningAddress(input: string): boolean {
-  return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
-}
-
-function isValidInvoice(data: string): boolean {
-  const lower = data.toLowerCase();
-  return (
-    lower.startsWith('lnbc') ||
-    lower.startsWith('lntb') ||
-    lower.startsWith('lnts') ||
-    lower.startsWith('lnbs')
-  );
-}
 
 let __sendSheetFirstVisibleLogged = false;
 const SendSheet: React.FC<Props> = ({
@@ -148,6 +115,7 @@ const SendSheet: React.FC<Props> = ({
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+  const [isLnurl, setIsLnurl] = useState(false);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
@@ -176,10 +144,12 @@ const SendSheet: React.FC<Props> = ({
     scanned &&
     !isLightningAddress(invoiceData || '') &&
     !isOnchainAddress &&
+    !isLnurl &&
     !!invoiceData &&
     decoded?.amountSats === null;
   const needsAmount =
-    scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11);
+    scanned &&
+    (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11 || isLnurl);
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -205,6 +175,7 @@ const SendSheet: React.FC<Props> = ({
       setStep('main');
       setLnurlParams(null);
       setResolving(false);
+      setIsLnurl(false);
       setMemo('');
       // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
       // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
@@ -248,47 +219,26 @@ const SendSheet: React.FC<Props> = ({
     };
   }, []);
 
-  // Resolve lightning address when scanned
-  useEffect(() => {
-    if (!scanned || !invoiceData || !isLightningAddress(invoiceData)) return;
-    let cancelled = false;
-    (async () => {
-      setResolving(true);
-      try {
-        const params = await resolveLightningAddress(invoiceData);
-        if (!cancelled) {
-          setLnurlParams(params);
-          // When we're still pointed at a named friend (activePubkey +
-          // recipientName both set), keep the friendly `Pay to <Name>`
-          // label. After "Scan / paste different invoice" clears
-          // activePubkey, let the LNURL server's metadata win again.
-          if (!(activePubkey && recipientName)) {
-            setDecoded((prev) => ({
-              ...prev!,
-              description: params.description || prev?.description || null,
-            }));
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve address';
-          Alert.alert('Error', msg);
-        }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [scanned, invoiceData, recipientName, activePubkey]);
+  // Resolve a scanned/pasted lightning address or raw LNURL into LNURL-pay
+  // params (or report a withdraw claim code). Extracted to keep SendSheet
+  // under the file-size cap — see useSendSheetLnurl.
+  useSendSheetLnurl({
+    scanned,
+    invoiceData,
+    isLnurl,
+    recipientName,
+    activePubkey,
+    setLnurlParams,
+    setDecoded,
+    setResolving,
+    setInvoiceData,
+    setScanned,
+    setIsLnurl,
+  });
 
   const processInput = (data: string) => {
-    let input = data.trim();
+    let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
-    if (input.toLowerCase().startsWith('lightning:')) {
-      input = input.substring(10);
-    }
     if (input.toLowerCase().startsWith('bitcoin:')) {
       const parsed = parseBip21(input);
       if (parsed) {
@@ -299,6 +249,7 @@ const SendSheet: React.FC<Props> = ({
 
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       // Only use the caller-supplied friend name while we're still
       // pointed at that friend (activePubkey set). After "Scan / paste
@@ -312,6 +263,7 @@ const SendSheet: React.FC<Props> = ({
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
+      setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
       setScanned(true);
@@ -347,8 +299,20 @@ const SendSheet: React.FC<Props> = ({
         });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       setDecoded(decodeInvoice(input));
+      setScanned(true);
+    } else if (isLnurlString(input)) {
+      // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
+      // pay vs withdraw from the string alone, so stash it and let the
+      // resolve effect above hit the endpoint and route on the server's
+      // tag — payRequest wires up lnurlParams (same amount/send path as a
+      // lightning address), withdrawRequest reports a claim code.
+      setIsOnchainAddress(false);
+      setIsLnurl(true);
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     }
   };
@@ -488,7 +452,7 @@ const SendSheet: React.FC<Props> = ({
             throw new Error(`Boltz swap failed: ${detail}`);
           }
         }
-      } else if (isLightningAddress(invoiceData)) {
+      } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
           setSending(false);
@@ -759,6 +723,7 @@ const SendSheet: React.FC<Props> = ({
     setActivePubkey(undefined);
     setActivePicture(undefined);
     setIsOnchainAddress(false);
+    setIsLnurl(false);
     setBoltzFees(null);
     setLoadingBoltzFees(false);
   };
