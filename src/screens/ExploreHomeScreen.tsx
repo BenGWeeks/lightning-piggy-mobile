@@ -395,6 +395,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // backlog. Without it, a 200-event burst would sit in the buffer for
   // the full 100 ms even if it landed in 20 ms.
   const PENDING_FLUSH_THRESHOLD = 25;
+  // Cap the caches and events Maps so the O(N) new Map(prev) clone on
+  // every flush doesn't accumulate frame drops over long sessions.
+  // Entries beyond the cap are evicted oldest-first.
+  const MAP_MAX_SIZE = 1000;
   const flushPendingCaches = useCallback(() => {
     if (pendingCachesTimerRef.current) {
       clearTimeout(pendingCachesTimerRef.current);
@@ -416,6 +420,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       for (const [coord, c] of batch) {
         const existing = next.get(coord);
         if (!existing || existing.createdAt < c.createdAt) next.set(coord, c);
+      }
+      if (next.size > MAP_MAX_SIZE) {
+        const sorted = [...next.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+        for (let i = 0; i < sorted.length - MAP_MAX_SIZE; i++) {
+          next.delete(sorted[i][0]);
+        }
       }
       const __dt = performance.now() - __t0;
       if (__dt > 30) {
@@ -445,6 +455,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       for (const [coord, e] of batch) {
         const existing = next.get(coord);
         if (!existing || existing.startsAt !== e.startsAt) next.set(coord, e);
+      }
+      if (next.size > MAP_MAX_SIZE) {
+        const sorted = [...next.entries()].sort((a, b) => {
+          const aTs = a[1].startsAt ?? 0;
+          const bTs = b[1].startsAt ?? 0;
+          return aTs - bTs;
+        });
+        for (let i = 0; i < sorted.length - MAP_MAX_SIZE; i++) {
+          next.delete(sorted[i][0]);
+        }
       }
       const __dt = performance.now() - __t0;
       if (__dt > 30) {

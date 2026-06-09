@@ -570,6 +570,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                     continue;
                   }
                   nip17Misses++;
+                  // Check abort before paying the ~25ms schnorr cost of
+                  // unwrapWrapNsec. Without this, a tab-switch mid-loop waits
+                  // until the next maybeYield() — up to DECRYPT_FRAME_BUDGET_MS
+                  // + one decrypt — before the blur handler's abort takes hold.
+                  if (signal?.aborted) return;
                   const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
                   // No per-decrypt yield here: the frame-budget scheduler
                   // at the top of the loop already yields whenever the
@@ -696,6 +701,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   continue;
                 }
                 nip17Misses++;
+                // Check abort before launching the Amber IPC call. Same
+                // rationale as the nsec path: a tab-switch during cache-hit
+                // processing shouldn't have to pay one more IPC round-trip
+                // before the abort takes hold.
+                if (signal?.aborted) return;
                 // Uncached — unwrap via Amber's silent content-resolver path.
                 // If Amber hasn't granted blanket nip44_decrypt permission,
                 // this throws PERMISSION_NOT_GRANTED and we stop iterating.
