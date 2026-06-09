@@ -235,10 +235,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
 
   // Friends' finds — batched with CoalescedMap so a burst of kind 7516
   // events doesn't clone the friend-finds Map N times. Keyed by event id
-  // (never replaced) so the key space is unbounded — cap it so relay history
-  // over a long session can't grow the Map (and the sort-then-slice-50 in
-  // `friendList`) without limit. 200 keeps a comfortable buffer above the 50
-  // shown and matches `subscribeFoundLogsByAuthors`'s per-query `limit`.
+  // (never replaced) so the key space is unbounded — and the subscription
+  // sets no `limit` of its own, so this cap is what bounds growth: it stops
+  // relay history over a long session from ballooning the Map (and the
+  // sort-then-slice-50 in `friendList`). 200 keeps a comfortable buffer above
+  // the 50 shown.
   const friendFinds = useCoalescedMap<FoundEntry>({
     // Keyed by event id per the social-feed convention — never replace.
     shouldReplace: () => false,
