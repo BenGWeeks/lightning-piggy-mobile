@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, InteractionManager } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { MapPin } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
@@ -7,6 +7,13 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { createExploreMiniMapStyles } from '../styles/ExploreMiniMap.styles';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
+
+// Stable empty-array identities for the marker-stagger gate (#815) — inline
+// `[]` would be a fresh reference each render and defeat LibreMiniMap's
+// `arePropsEqual` memo, forcing the very reconciliation we're trying to split.
+const NO_MERCHANTS: BtcMapPlace[] = [];
+const NO_CACHES: ParsedCache[] = [];
+const NO_EVENTS: ParsedEvent[] = [];
 
 interface Props {
   locationDenied: boolean;
@@ -60,6 +67,22 @@ export const ExploreMiniMap: React.FC<Props> = ({
   const styles = useMemo(() => createExploreMiniMapStyles(colors), [colors]);
   const isFocused = useIsFocused();
 
+  // Marker stagger (#815). On (re)focus MapLibre re-creates its GL context and
+  // reconciles markers; handing it ~160 merchant pins in the SAME first commit
+  // as the style + camera makes one ~1.4s GL block (39.75% cold-tap jank,
+  // Stevie). Defer the marker set until the screen settles so the map presents
+  // its first frame (style + camera) cheaply, then markers land in a second,
+  // smaller reconciliation. Resets on blur so each re-focus re-staggers.
+  const [markersReady, setMarkersReady] = useState(false);
+  useEffect(() => {
+    if (!isFocused) {
+      setMarkersReady(false);
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => setMarkersReady(true));
+    return () => task.cancel();
+  }, [isFocused]);
+
   if (locationDenied) {
     return (
       <View style={styles.deniedCard}>
@@ -93,9 +116,9 @@ export const ExploreMiniMap: React.FC<Props> = ({
       userLat={userLat}
       userLon={userLon}
       userAccuracyMetres={userAccuracyMetres}
-      merchants={merchants}
-      caches={caches}
-      events={events}
+      merchants={markersReady ? merchants : NO_MERCHANTS}
+      caches={markersReady ? caches : NO_CACHES}
+      events={markersReady ? events : NO_EVENTS}
       onTapMap={onTapMap}
       onOpenLegend={onOpenLegend}
       // Pin-tap handlers — open the same MerchantDetailSheet / CacheDetailSheet
