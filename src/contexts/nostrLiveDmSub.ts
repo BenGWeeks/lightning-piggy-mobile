@@ -438,7 +438,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     writeChain = writeChain
       .then(async () => {
         if (cancelled) return;
-        const wrapRaw = await AsyncStorage.getItem(cacheKey);
+        // Read the file-backed wrap cache (NOT AsyncStorage, whose row
+        // writeNip17Cache deletes). Reading the wrong store here returned an
+        // empty `{}`, so this read→merge→write OVERWROTE the file with just
+        // this one wrap on every live arrival — clobbering the whole cache and
+        // defeating the persisted dedup (#811).
+        const wrapRaw = await safeGetDmCacheItem(cacheKey);
         const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
         if (wrapCache[wrap.id]) {
           knownWrapIds?.add(wrap.id);
@@ -549,8 +554,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         //      runs unnecessarily for each cached wrap (1–3 ms each).
         // The persistent on-disk wrapCache write is idempotent —
         // it doesn't grow unboundedly. We accept this regression on
-        // the failure path because (a) AsyncStorage.getItem I/O
-        // errors are extremely rare on Android, and (b) the
+        // the failure path because (a) safeGetDmCacheItem file
+        // read/migration failures are extremely rare, and (b) the
         // alternative (resurrecting the lazy-load inside the
         // handler) would re-introduce the race + per-event prologue
         // cost that motivated #505 in the first place.
