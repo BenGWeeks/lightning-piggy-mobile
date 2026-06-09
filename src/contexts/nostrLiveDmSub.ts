@@ -19,6 +19,7 @@ import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
 import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
+import { capKnownWrapIds } from './knownWrapIdsCap';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -155,7 +156,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the early-return because the Set hasn't been updated yet.
     // Set.add is idempotent so the trailing writeChain add becomes
     // a no-op. kind 4 has its own `seen` Set below.
-    if (ev.kind === 1059) knownWrapIds.add(ev.id);
+    if (ev.kind === 1059) {
+      knownWrapIds.add(ev.id);
+      capKnownWrapIds(knownWrapIds);
+    }
     if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
     if (cancelled) return;
     if (seen.has(ev.id)) {
@@ -525,6 +529,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
           );
         }
+        capKnownWrapIds(knownWrapIds);
       } catch (e) {
         // Seed-from-disk failed — leave knownWrapIds as the empty
         // Set we initialised at outer-scope. Cached wraps re-stream
