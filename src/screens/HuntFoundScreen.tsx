@@ -10,7 +10,7 @@ import {
 import Slider from '@react-native-community/slider';
 import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
@@ -84,7 +84,8 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { lnurl, coord } = route.params;
-  const { activeWalletId, makeInvoice, btcPrice, currency } = useWallet();
+  const { activeWalletId, makeInvoice, currency } = useWallet();
+  const { btcPrice } = useWalletLive();
 
   const [stage, setStage] = useState<Stage>({ kind: 'resolving' });
   // Chosen claim amount (sats) for variable-amount tags. Defaults to max

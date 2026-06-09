@@ -27,7 +27,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Gift, PartyPopper } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import {
   LnurlWithdrawError,
   LnurlWithdrawParams,
@@ -75,8 +75,8 @@ type Stage =
 export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, btcPrice, currency, expectPayment, lastIncomingPayment } =
-    useWallet();
+  const { wallets, makeInvoiceForWallet, currency, expectPayment } = useWallet();
+  const { btcPrice, lastIncomingPayment } = useWalletLive();
 
   const sheetRef = useRef<BottomSheetModal>(null);
   // Untyped like NostrLoginSheet's scrollRef — the gorhom ScrollView ref methods

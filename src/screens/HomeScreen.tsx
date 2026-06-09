@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -50,10 +50,10 @@ const HomeScreen: React.FC = () => {
     refreshActiveBalance,
     fetchTransactionsForWallet,
     setActiveWallet,
-    btcPrice,
     currency,
     requestBalancePoll,
   } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
