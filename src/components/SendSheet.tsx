@@ -31,12 +31,15 @@ import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
+import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import {
-  resolveLightningAddress,
-  fetchInvoice,
-  resolveLnurlDirection,
-  LnurlPayParams,
-} from '../services/lnurlService';
+  type DecodedInvoice,
+  decodeInvoice,
+  isLightningAddress,
+  isValidInvoice,
+  isLnurlString,
+} from '../utils/sendSheetInput';
+import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -65,62 +68,6 @@ interface Props {
 
 type InputMode = 'scan' | 'paste';
 type Step = 'main' | 'amount';
-
-interface DecodedInvoice {
-  amountSats: number | null;
-  description: string | null;
-  expiry: number | null;
-}
-
-function decodeInvoice(bolt11: string): DecodedInvoice {
-  try {
-    const decoded = bolt11Decode(bolt11);
-    let amountSats: number | null = null;
-    let description: string | null = null;
-    let expiry: number | null = null;
-
-    for (const section of decoded.sections) {
-      if (section.name === 'amount') {
-        amountSats = Math.round(Number(section.value) / 1000);
-      } else if (section.name === 'description') {
-        description = section.value as string;
-      } else if (section.name === 'expiry') {
-        expiry = section.value as number;
-      }
-    }
-    return { amountSats, description, expiry };
-  } catch {
-    return { amountSats: null, description: null, expiry: null };
-  }
-}
-
-function isLightningAddress(input: string): boolean {
-  return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
-}
-
-function isValidInvoice(data: string): boolean {
-  const lower = data.toLowerCase();
-  return (
-    lower.startsWith('lnbc') ||
-    lower.startsWith('lntb') ||
-    lower.startsWith('lnts') ||
-    lower.startsWith('lnbs')
-  );
-}
-
-// Raw LNURL strings the scanner/paste box can hand us: bech32 `lnurl1…`
-// (LUD-01/06) and the cleartext LUD-17 `lnurlp://` / `lnurlw://` /
-// `lnurl://` schemes, with or without a `lightning:` URI prefix. Direction
-// (pay vs withdraw) is NOT inferred here — the resolved server `tag` decides
-// that downstream via resolveLnurlDirection(). Lightning addresses (which
-// contain `@`) and bolt11 invoices (`lnbc…`) are deliberately not matched.
-function isLnurlString(input: string): boolean {
-  let s = input.trim();
-  if (/^lightning:/i.test(s)) {
-    s = s.slice('lightning:'.length).trim();
-  }
-  return /^lnurl1/i.test(s) || /^(?:lnurlp|lnurlw|lnurl):\/\//i.test(s);
-}
 
 let __sendSheetFirstVisibleLogged = false;
 const SendSheet: React.FC<Props> = ({
@@ -271,90 +218,22 @@ const SendSheet: React.FC<Props> = ({
     };
   }, []);
 
-  // Resolve lightning address when scanned
-  useEffect(() => {
-    if (!scanned || !invoiceData || !isLightningAddress(invoiceData)) return;
-    let cancelled = false;
-    (async () => {
-      setResolving(true);
-      try {
-        const params = await resolveLightningAddress(invoiceData);
-        if (!cancelled) {
-          setLnurlParams(params);
-          // When we're still pointed at a named friend (activePubkey +
-          // recipientName both set), keep the friendly `Pay to <Name>`
-          // label. After "Scan / paste different invoice" clears
-          // activePubkey, let the LNURL server's metadata win again.
-          if (!(activePubkey && recipientName)) {
-            setDecoded((prev) => ({
-              ...prev!,
-              description: params.description || prev?.description || null,
-            }));
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve address';
-          Alert.alert('Error', msg);
-        }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [scanned, invoiceData, recipientName, activePubkey]);
-
-  // Resolve a raw LNURL string when scanned/pasted. Unlike a lightning
-  // address (always LNURL-pay), a bech32 `lnurl1…` / cleartext `lnurlp://`
-  // can resolve to EITHER a payRequest or a withdrawRequest — only the
-  // server's `tag` disambiguates (see resolveLnurlDirection). A payRequest
-  // reuses the lightning-address amount/send flow by populating lnurlParams;
-  // a withdrawRequest is a claim (money-IN) code that the Send sheet can't
-  // action, so we surface a message and return to the scan/paste view.
-  useEffect(() => {
-    if (!scanned || !invoiceData || !isLnurl) return;
-    let cancelled = false;
-    (async () => {
-      setResolving(true);
-      try {
-        const resolved = await resolveLnurlDirection(invoiceData);
-        if (cancelled) return;
-        if (resolved.kind === 'pay') {
-          setLnurlParams(resolved.params);
-          setDecoded((prev) => ({
-            ...prev!,
-            description: resolved.params.description || prev?.description || null,
-          }));
-        } else {
-          // withdrawRequest — a claim code, not payable from here.
-          Alert.alert(
-            'This is a claim code',
-            'This LNURL is a withdraw (claim) code, not a payment request. Use Receive to claim it.',
-          );
-          setInvoiceData(null);
-          setDecoded(null);
-          setScanned(false);
-          setIsLnurl(false);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve LNURL';
-          Alert.alert('Error', msg);
-          setInvoiceData(null);
-          setDecoded(null);
-          setScanned(false);
-          setIsLnurl(false);
-        }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [scanned, invoiceData, isLnurl]);
+  // Resolve a scanned/pasted lightning address or raw LNURL into LNURL-pay
+  // params (or report a withdraw claim code). Extracted to keep SendSheet
+  // under the file-size cap — see useSendSheetLnurl.
+  useSendSheetLnurl({
+    scanned,
+    invoiceData,
+    isLnurl,
+    recipientName,
+    activePubkey,
+    setLnurlParams,
+    setDecoded,
+    setResolving,
+    setInvoiceData,
+    setScanned,
+    setIsLnurl,
+  });
 
   const processInput = (data: string) => {
     let input = data.trim();
