@@ -1,0 +1,320 @@
+= Performance & State Architecture: Root-Cause Diagnosis
+Archie the Architect
+:toc: left
+:toclevels: 3
+:source-highlighter: highlight.js
+:icons: font
+
+[NOTE]
+====
+This is a *read-and-diagnose* pass (no source changes, no commits). It explains
+*why* we keep shipping perf fixes that each hold for one screen and then a new
+freeze appears elsewhere — and what the *structural* fix is that stops the
+whole class.
+====
+
+== TL;DR
+
+The recurring perf degradations and UI freezes are *not* a string of unrelated
+bugs. They are symptoms of **one structural decision repeated across the
+codebase**:
+
+[quote]
+____
+Hot, high-frequency event streams (DM inbox, wallet balance, live location) are
+stored as React `useState` inside *monolithic "god" context value objects*, and
+heavy CPU work (Nostr decryption) runs synchronously on the JS thread.
+____
+
+Two compounding mechanisms follow from that one decision:
+
+. **Context-value churn → mass re-render → JS-thread starvation.** Every relay
+  event mutates a `useState` slice inside a single `useMemo`'d context value, so
+  the value's identity changes and *every consumer re-renders* — 36–42 for
+  Nostr, 23–26 for Wallet. Nine screens read *both* and so re-render on the
+  union of both event streams.
+. **Synchronous crypto on the JS thread.** NIP-17/NIP-04 unwrap
+  (`nip59.unwrapEvent` → secp256k1/schnorr) runs in-loop on the JS thread during
+  cold-start backfill, producing the *self-documented* "1.4–2.1 s bursts" and
+  "multi-second freezes".
+
+Every fix shipped so far (#788/#789 decrypt yield, #798/#799 Explore memoisation,
+`useCoalescedMap`, NWC backoff) treats *one consumer or one loop*. None changes
+the structure, so the next screen that touches a god-context inherits the same
+failure mode.
+
+== Evidence
+
+=== Anti-pattern 1 — God-contexts mixing stable config with hot streams
+
+`src/contexts/NostrContext.tsx` (1,860 lines) exposes a *single* memoised value
+that bundles stable identity/config (`isLoggedIn`, `pubkey`, `relays`,
+`signEvent`, the login/logout actions) together with the **hottest stream in the
+app**, `dmInbox`:
+
+[source]
+----
+src/contexts/NostrContext.tsx:1754  const contextValue = useMemo(() => ({
+  isLoggedIn, isLoggingIn, pubkey, profile, relays, ...        // STABLE config
+  signEvent, logout, loginWithNsec, sendDirectMessage, ...     // STABLE actions
+  dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub,       // HOT stream  <-- churns
+}), [ ...all of the above... ]);
+----
+
+`dmInbox` is a `DmInboxEntry[]` re-`setState`'d on *every* decrypted NIP-17
+message (`src/contexts/useDmInbox.ts`). Because it shares the value object and
+the dependency array, **one DM arriving rebuilds `contextValue`** and re-renders
+all consumers:
+
+* `useNostr()` consumers: *42* `.ts`/`.tsx`, *36* `.tsx` screens/components
+  (`grep -rl "useNostr()"`). Brief said 36 — confirmed, and the raw count is
+  higher.
+
+The team already discovered this seam once: PR #779 split `contacts` into a
+*sibling* `NostrContactsContext` (`NostrContext.tsx:1827`). That is exactly the
+right move — but it was applied only to `contacts`, **not to `dmInbox`**, which
+is far hotter. The structural fix was identified and then *not generalised*.
+
+`src/contexts/WalletContext.tsx` (2,164 lines) repeats it verbatim
+(`WalletContext.tsx:2080`): one value object carrying `wallets`, `balance`,
+`btcPrice`, `lastIncomingPayment` (each mutated by a 5-minute price poll, a
+connection-check interval, and every incoming payment) *plus* all the stable
+action methods. *26* `useWallet()` consumers re-render on any of those.
+
+The pattern is **repo-wide**, not limited to the two named files — 6 of 7
+contexts ship a single monolithic value object:
+
+[cols="2,1,3"]
+|===
+|Context |Lines |Single value object mixes…
+
+|`NostrContext` |1,860 |config + actions + `dmInbox` hot stream
+|`WalletContext` |2,164 |config + actions + `balance`/`btcPrice`/`lastIncomingPayment`
+|`GroupsContext` |907 |config + group message streams
+|`LiveLocationContext` |527 |config + live position pings (high frequency)
+|`TrustGraphContext` |263 |graph + derived
+|`ThemeContext` |89 |genuinely stable — fine
+|===
+
+**Re-render multiplier.** Nine components read *both* god-contexts and so
+re-render on the *union* of both event firehoses:
+
+----
+ReceiveSheet, SendSheet, TransferSheet, TransactionDetailSheet,
+ConversationScreen, FriendsScreen, HomeScreen, MessagesScreen,
+ContactProfileScreen
+----
+
+**Consumers don't defend themselves.** Only *3 of 23* screens use `React.memo`.
+Even where a child's props are stable, a context-value identity change forces it
+through render. Memoising props can't help a context consumer — *context change
+bypasses `React.memo`*. So the only defences available today are per-consumer
+hacks (see Anti-pattern 3).
+
+=== Anti-pattern 2 — Synchronous crypto on the JS thread ("the lock")
+
+This is the concrete *freeze* mechanism, and the code says so in its own
+comments.
+
+DM decryption is synchronous secp256k1/schnorr work running *in a loop on the JS
+thread*:
+
+[source]
+----
+src/services/nostrService.ts:1070  nip59.unwrapEvent(wrap, secretKey)   // NIP-17 unwrap (schnorr)
+src/services/nostrService.ts:1085  nip04.decrypt(secretKey, otherPubkey, ciphertext)
+src/utils/nip17Unwrap.ts:165       nip59.unwrapEvent(wrap, secretKey)
+----
+
+driven by the cold-start backfill loop in `useDmInbox.ts`, whose comments
+diagnose the symptom precisely:
+
+[source]
+----
+src/contexts/useDmInbox.ts:520  // coldStart (#788): swap RAF yields for setTimeout(0) ...
+                          :522  //   ... the loop otherwise stalls the JS thread in 1.4–2.1 s bursts.
+src/contexts/useDmInbox.ts:275  //   ... multi-second freezes that coincide with this call. #554.
+----
+
+`src/contexts/nostrDecryptPacing.ts` is an entire sub-system built to *pace* this
+synchronous work with `requestAnimationFrame`/`setTimeout(0)` yields and a 4 ms
+frame budget (`DECRYPT_FRAME_BUDGET_MS`). It is a sophisticated mitigation —
+but it is still **the wrong thread**. Cooperative yielding interleaves crypto
+with paint at *best effort*; the crypto never leaves the JS thread, so:
+
+* a back-tap during refresh "appears frozen" until the next yield
+  (`useDmInbox.ts:529` says exactly this), and
+* the yields themselves cost RAF round-trips, which under load
+  (`nostrDecryptPacing.ts` header: "83 active timers ... ~90 ms per yield") add
+  their own latency.
+
+The structural fix is to move the crypto *off the JS thread entirely* (native
+module / JSI, or a worker), not to keep slicing it finer.
+
+There is **no** `useSyncExternalStore`, no external store library (zustand /
+jotai / valtio), and no `react-context-selector` anywhere in the tree
+(`grep` returns nothing). So today there is *no* mechanism for a consumer to
+subscribe to *just* the slice it needs — it's all-or-nothing context.
+
+=== Anti-pattern 3 — Band-aids that encode the real problem
+
+When a state architecture is wrong, the fixes accrete as helpers whose very
+existence names the defect:
+
+* **`src/utils/useCoalescedMap.ts`** — a hook invented solely to batch the
+  `O(N²)` `setState(prev => new Map(prev))` bursts a relay `onevent` callback
+  produces ("50+ times in <200 ms", its own docstring). Used by `HuntScreen`,
+  `EventsScreen`, `MyPigletsScreen`. It is *good engineering of a bad
+  requirement*: the requirement (absorb an event firehose into React state)
+  shouldn't exist — the firehose belongs in a store outside React that consumers
+  *select* from.
+* **`ExploreHomeScreen` `readRelayKey`** (`ExploreHomeScreen.tsx:531`) —
+  `const readRelayKey = [...readRelays].sort().join(',')` exists *only* to avoid
+  depending on the churning `userRelays` array reference from `useNostr()`. This
+  is the #798/#799 "fix": derive a stable string so this *one* screen stops
+  re-running an effect on every DM. The next screen that reads the same context
+  must re-derive the same trick. (The screen also re-implements the
+  coalescing inline at `flushPendingCaches`/`flushPendingEvents`.)
+* **`InteractionManager.runAfterInteractions`** scattered in `HomeScreen`,
+  `GroupsScreen`, `FriendPickerSheet` to defer JS work past the freeze window —
+  again, per-screen deferral of a global thread-contention problem.
+
+Each is a local epicycle around the same two structural facts (Anti-patterns 1
+and 2).
+
+=== Anti-pattern 4 — File size as a coupling signal (secondary)
+
+The 1,000-line cap and its "known offenders" list (`NostrContext` 1,860,
+`WalletContext` 2,164, `nostrService` 1,529, `HuntCreateScreen` 3,121, …) are a
+*symptom* of the missing module boundaries above, not an independent problem. A
+2,164-line context is unreviewable precisely because it owns config + actions +
+multiple hot streams in one closure. **Fixing Anti-pattern 1 (decompose by
+volatility) is what makes these files shrink** — the size gate and the perf
+problem have the same cure.
+
+== The locking mechanism, pinned
+
+[cols="1,3"]
+|===
+|Question |Answer (with evidence)
+
+|Which thread locks? |The **JS thread**, not the UI/native thread. Reanimated
+worklets aren't implicated; the evidence is all in JS loops.
+
+|Proximate cause |Synchronous NIP-17/NIP-04 decrypt loop on cold start
+(`useDmInbox.ts:520–522`, `nostrService.ts:1070/1085`) holding the JS thread in
+"1.4–2.1 s bursts".
+
+|Amplifier |Each decrypted message `setState`s `dmInbox`, rebuilding the
+`NostrContext` value (`NostrContext.tsx:1754`) → 36+ consumers re-render →
+reconciliation competes with the decrypt loop for the *same* starved JS thread.
+A re-render storm on a thread already pinned by crypto = multi-second
+unresponsiveness.
+
+|Why fixes don't hold |Both the pacing system and the memoisation fixes operate
+*inside* the broken structure. They reduce the blast radius of one loop / one
+consumer; they don't remove the firehose-into-React-state coupling, so the
+next consumer re-creates the symptom.
+|===
+
+[plantuml,perf-causal-chain,svg]
+....
+@startmermaid
+flowchart TD
+  A[Relay onevent firehose<br/>50+ events / 200ms] --> B[Sync NIP-17 decrypt<br/>on JS thread]
+  B --> C[setState dmInbox<br/>per message]
+  C --> D[NostrContext value identity changes]
+  D --> E[36+ consumers re-render]
+  B --> F[JS thread pinned 1.4-2.1s]
+  E --> F
+  F --> G[UI freeze / dropped touches]
+  style F fill:#f88,stroke:#900
+  style G fill:#f88,stroke:#900
+@endmermaid
+....
+
+== Remediation strategy (prioritised)
+
+=== CRITICAL — Decompose contexts by *volatility*, not by feature
+
+Split each god-context into (a) a *stable* provider (config + action methods,
+identity-stable for a session) and (b) one provider per *hot stream*. Generalise
+exactly what #779 already did for `contacts`.
+
+* **First move:** lift `dmInbox` / `dmInboxLoading` / `refreshDmInbox` out of
+  `NostrContext`'s value into a dedicated `DmInboxContext` (the `useDmInbox`
+  hook already exists — just give it its own Provider + `useDmInbox()` consumer
+  hook). Then the 30-odd screens that use `useNostr()` for *identity/relays/
+  actions* stop re-rendering on DM traffic. Files: `NostrContext.tsx`
+  (remove from value), new `src/contexts/DmInboxContext.tsx`, update the ~6
+  DM-consuming screens to read the new hook.
+* **Next:** same surgery on `WalletContext` — `balance`/`btcPrice`/
+  `lastIncomingPayment` into a `WalletLiveContext`; keep `wallets` + actions in
+  the stable provider. Files: `WalletContext.tsx`, new
+  `src/contexts/WalletLiveContext.tsx`.
+* This is *the* highest-leverage change: it shrinks the two biggest "offender"
+  files **and** kills the re-render storm at the source.
+
+=== CRITICAL — Move DM decryption off the JS thread
+
+Cooperative yielding (`nostrDecryptPacing.ts`) is a ceiling, not a fix. Route
+`nip59.unwrapEvent` / `nip04.decrypt` through a native/JSI crypto module or a
+background worker so the JS thread is never pinned by schnorr work.
+
+* **First move:** spike whether the existing secp256k1 dependency has a JSI/
+  native path (or wrap it) and run the cold-start backfill loop there; keep the
+  pacing scheduler only as a fallback. Files: `nostrService.ts:1064–1085`,
+  `nip17Unwrap.ts`, `useDmInbox.ts` backfill loop.
+* If full native offload is large, the *interim* structural step is to drain the
+  decrypt loop into an **external store** (below) and `setState` once at the
+  end, so render storms can't compound the crypto stall.
+
+=== WARNING — Introduce a relay-event store *outside* React
+
+Put the relay firehose into a plain store (a small `useSyncExternalStore`-backed
+store, or zustand with `subscribeWithSelector`). Consumers *select* the slice
+they need; an event that touches one entry re-renders only selectors that read
+it. This **retires `useCoalescedMap` and the inline coalescing** in
+`ExploreHomeScreen` — batching becomes the store's job, and per-screen
+`readRelayKey`-style hacks disappear.
+
+* **First move:** prototype the store for `dmInbox` behind the new
+  `DmInboxContext` so the API to screens (`useDmInbox()` selector) is stable
+  while the internals move from `useState` to the store. Files:
+  `useDmInbox.ts`, new `src/state/dmInboxStore.ts`.
+
+=== WARNING — Subscription lifecycle & backpressure audit
+
+There are *22* relay-subscribe call sites across `src/services` + `src/contexts`.
+Confirm each closes on unmount/blur and caps its in-memory growth (the
+`useCoalescedMap` `maxSize` is the right idea — verify the live DM sub and group
+subs apply the same bound). The `knownWrapIds` `Set` in `nostrLiveDmSub.ts:96`
+grows per session — confirm it's bounded or reset.
+
+=== SUGGESTION — Make the file-size gate fall out of the above
+
+Don't line-golf the offenders. As the volatility split lands, `NostrContext` and
+`WalletContext` shed their hot-stream code naturally. Track that the cap is met
+*as a result* of decomposition, not as a separate task.
+
+=== SUGGESTION — Add a render-count guardrail
+
+A dev-only `useWhyDidYouRender`-style counter (or a `perfLog` on each god-context
+consumer's render) would catch the *next* hot slice someone adds to a shared
+value before it ships. Cheap early-warning for the regression class.
+
+== Proposed follow-up issues (for approval — NOT filed)
+
+. `refactor(nostr): split dmInbox out of NostrContext into DmInboxContext` —
+  generalise the #779 contacts split to the hottest slice; stop ~30 screens
+  re-rendering on DM traffic.
+. `refactor(wallet): split balance/btcPrice/lastIncomingPayment into WalletLiveContext` —
+  same volatility decomposition for the second god-context.
+. `perf(dm): move NIP-17/NIP-04 decrypt off the JS thread (native/JSI or worker)` —
+  remove the structural cause of the 1.4–2.1 s cold-start freezes; keep pacing as fallback.
+. `refactor(state): introduce selector-based relay-event store (useSyncExternalStore/zustand)` —
+  retire `useCoalescedMap` + inline coalescing; consumers select slices.
+. `chore(perf): audit 22 relay-subscription call sites for unmount-close + Map/Set growth bounds` —
+  lifecycle + backpressure sweep, including `knownWrapIds`.
+. `chore(dx): dev-only render-count guardrail on god-context consumers` —
+  catch the next hot slice added to a shared value before it ships.
