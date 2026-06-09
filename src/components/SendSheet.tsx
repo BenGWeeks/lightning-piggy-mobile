@@ -23,7 +23,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { parseBip21 } from '../utils/bip21';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -93,9 +93,9 @@ const SendSheet: React.FC<Props> = ({
     addPendingTransaction,
     activeWalletId,
     wallets,
-    btcPrice,
     currency,
   } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { signZapRequest } = useNostr();
   const { contacts } = useNostrContacts();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);

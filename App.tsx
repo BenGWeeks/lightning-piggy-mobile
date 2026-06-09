@@ -9,7 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { WalletProvider, useWallet } from './src/contexts/WalletContext';
+import { WalletProvider, useWalletLive } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
@@ -52,7 +52,7 @@ import OfflineBanner from './src/components/OfflineBanner';
 // context's incoming-payment event bus, and above any screen so the
 // confetti pops no matter where the user is when a payment lands.
 function GlobalIncomingPaymentOverlay() {
-  const { lastIncomingPayment, clearLastIncomingPayment } = useWallet();
+  const { lastIncomingPayment, clearLastIncomingPayment } = useWalletLive();
   // Key on the event timestamp so a second payment arriving while the
   // overlay is still visible remounts the component and re-arms the
   // confetti animation. Without this, a second `success` in a row

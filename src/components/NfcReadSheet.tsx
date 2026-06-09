@@ -27,7 +27,7 @@ import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
 import PrizeWalletPicker from './PrizeWalletPicker';
 import ScanRingSpinner from './ScanRingSpinner';
@@ -54,7 +54,8 @@ type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'e
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, lastIncomingPayment, expectPayment } = useWallet();
+  const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
+  const { lastIncomingPayment } = useWalletLive();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);

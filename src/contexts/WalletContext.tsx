@@ -28,6 +28,7 @@ import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { WalletLiveContext } from './WalletLiveContext';
 import {
   CardTheme,
   WalletMetadata,
@@ -110,7 +111,6 @@ interface WalletContextType {
   // User prefs
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
-  btcPrice: number | null;
 
   // Wallet actions
   addNwcWallet: (
@@ -167,12 +167,6 @@ interface WalletContextType {
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
-  // Incoming payment event bus. Set whenever any connected wallet's
-  // balance goes UP; consumed by the app-root PaymentProgressOverlay
-  // so the celebration appears regardless of which screen is active.
-  lastIncomingPayment: IncomingPayment | null;
-  clearLastIncomingPayment: () => void;
-
   /**
    * Kick off aggressive 1 s polling for a specific NWC invoice for up
    * to `durationMs` (default 3 min). Called by ReceiveSheet when an
@@ -224,6 +218,10 @@ interface WalletContextType {
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
+
+// Live price/receive slices (#801) live in their own module; re-export the
+// consumer hook so the public surface stays at one path, like `useWallet`.
+export { useWalletLive } from './WalletLiveContext';
 
 // Persist a wallet's announced-receipt hashes so a payment is announced once,
 // EVER — not once per JS session. The in-memory set resets on every cold start
@@ -2088,7 +2086,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2106,8 +2103,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
       isConnected,
@@ -2127,7 +2122,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2145,14 +2139,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
     ],
   );
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
+  // Sibling value carrying the high-frequency price/receive slices (#801).
+  // Memoised separately so a fiat-price poll or a settled receive rebuilds only
+  // this — not `contextValue` — and only `useWalletLive()` consumers re-render.
+  const walletLiveValue = useMemo(
+    () => ({ btcPrice, lastIncomingPayment, clearLastIncomingPayment }),
+    [btcPrice, lastIncomingPayment, clearLastIncomingPayment],
+  );
+
+  return (
+    <WalletContext.Provider value={contextValue}>
+      <WalletLiveContext.Provider value={walletLiveValue}>{children}</WalletLiveContext.Provider>
+    </WalletContext.Provider>
+  );
 };
 
 export function useWallet() {

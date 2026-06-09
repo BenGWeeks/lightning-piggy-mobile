@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createAmountEntryStyles } from '../styles/AmountEntryScreen.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
@@ -60,7 +60,8 @@ const AmountEntryScreen: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createAmountEntryStyles(colors), [colors]);
-  const { btcPrice, currency } = useWallet();
+  const { currency } = useWallet();
+  const { btcPrice } = useWalletLive();
   const [memo, setMemo] = useState(initialMemo);
 
   const [primaryUnit, setPrimaryUnit] = useState<Unit>('sats');

@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ContactProfileBodyData } from './ContactProfileBody';
@@ -104,7 +104,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   }
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { btcPrice, currency, activeWalletId } = useWallet();
+  const { currency, activeWalletId } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   // When contacts' profiles refresh, we want transaction rows to pick up

@@ -17,7 +17,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import { Check } from 'lucide-react-native';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { satsToFiatString } from '../services/fiatService';
 import { Course } from '../data/learnContent';
@@ -32,7 +32,8 @@ interface Props {
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createTipSheetStyles(colors), [colors]);
-  const { makeInvoice, refreshActiveBalance, balance, btcPrice, currency } = useWallet();
+  const { makeInvoice, refreshActiveBalance, balance, currency } = useWallet();
+  const { btcPrice } = useWalletLive();
   const [invoice, setInvoice] = useState('');
   const [loading, setLoading] = useState(false);
   const [paymentReceived, setPaymentReceived] = useState(false);

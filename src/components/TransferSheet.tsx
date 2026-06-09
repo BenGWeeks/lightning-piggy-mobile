@@ -22,7 +22,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
@@ -51,7 +51,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const {
     wallets,
     activeWalletId,
-    btcPrice,
     currency,
     makeInvoiceForWallet,
     payInvoiceForWallet,
@@ -59,6 +58,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     fetchTransactionsForWallet,
     addPendingTransaction,
   } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { identities, pubkey: activePubkey } = useNostr();
 
   const [sourceId, setSourceId] = useState<string | null>(null);
