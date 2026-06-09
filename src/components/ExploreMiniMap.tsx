@@ -8,6 +8,11 @@ import { createExploreMiniMapStyles } from '../styles/ExploreMiniMap.styles';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 
+// How long MapLibre's GL context lingers after the Explore tab blurs before
+// it's released (#810). Long enough to make quick tab bounces instant, short
+// enough that leaving Explore for real still reclaims the ~130–175 MB promptly.
+const GL_RELEASE_GRACE_MS = 15_000;
+
 // Stable empty-array placeholders for the marker-stagger gate (#815). While
 // markers are deferred we hand LibreMiniMap these instead of allocating a fresh
 // `[]` each render. (Its `sameByItemRef` comparator already treats two empty
@@ -41,9 +46,9 @@ interface Props {
  * whole session once Explore is visited — `react-native-screens`'
  * `freezeOnBlur` releases the SurfaceView buffers but NOT the GL context, so
  * a second RenderThread leaks for the session. Gating the `LibreMiniMap`
- * render on `useIsFocused()` means the GL context is torn down whenever the
- * tab is frozen and only re-created on re-focus (the intended tradeoff: a
- * one-off re-init for a permanent memory win).
+ * render on focus (with a short release grace, #810) tears the GL context down
+ * once the tab stays blurred and re-creates it on focus — the intended tradeoff
+ * of a re-init for a permanent memory win, minus the per-bounce thrash.
  *
  * While unfocused we render a lightweight placeholder occupying the same
  * layout slot (mirrors LibreMiniMap's own null-`lat` empty-View placeholder)
@@ -69,21 +74,40 @@ export const ExploreMiniMap: React.FC<Props> = ({
   const styles = useMemo(() => createExploreMiniMapStyles(colors), [colors]);
   const isFocused = useIsFocused();
 
-  // Marker stagger (#815). On (re)focus MapLibre re-creates its GL context and
-  // reconciles markers; handing it ~160 merchant pins in the SAME first commit
-  // as the style + camera makes one ~1.4s GL block (39.75% cold-tap jank,
-  // Stevie). Defer the marker set until the screen settles so the map presents
-  // its first frame (style + camera) cheaply, then markers land in a second,
-  // smaller reconciliation. Resets on blur so each re-focus re-staggers.
+  // Deferred GL release (#810). The focus-gate below tears MapLibre's GL
+  // context down on blur and re-creates it on focus — a permanent ~130–175 MB
+  // memory win (#778) — but it makes EVERY Explore tab-switch pay MapLibre's
+  // create/destroy in BOTH directions ("moving to/from Explore feels slow").
+  // Keep the GL context alive for a short grace period after blur so quick tab
+  // bounces (Explore → Home → Explore) reuse the live context and feel instant;
+  // release it only if the tab stays blurred past the grace, reclaiming memory.
+  const [glAlive, setGlAlive] = useState(isFocused);
+  useEffect(() => {
+    if (isFocused) {
+      setGlAlive(true);
+      return;
+    }
+    const t = setTimeout(() => setGlAlive(false), GL_RELEASE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [isFocused]);
+
+  // Marker stagger (#815). On a FRESH GL context (first focus, or re-focus
+  // after the grace released it) handing MapLibre ~160 merchant pins in the
+  // same first commit as style + camera makes one ~1.4s GL block (39.75%
+  // cold-tap jank, Stevie). Defer the marker set until the screen settles so
+  // the map's first frame (style + camera) is cheap, then markers land in a
+  // second, smaller reconciliation. Keyed on `glAlive` (not `isFocused`) so a
+  // quick re-focus within the grace keeps the already-rendered markers — no
+  // re-stagger, instant.
   const [markersReady, setMarkersReady] = useState(false);
   useEffect(() => {
-    if (!isFocused) {
+    if (!glAlive) {
       setMarkersReady(false);
       return;
     }
     const task = InteractionManager.runAfterInteractions(() => setMarkersReady(true));
     return () => task.cancel();
-  }, [isFocused]);
+  }, [glAlive]);
 
   if (locationDenied) {
     return (
@@ -100,10 +124,11 @@ export const ExploreMiniMap: React.FC<Props> = ({
     );
   }
 
-  // Unfocused: don't mount MapLibre at all — render an empty layout-matching
-  // placeholder so the GL context is released while the tab is frozen. Keep
-  // the testID so flows still find the slot.
-  if (!isFocused) {
+  // Released (blurred past the grace): don't mount MapLibre — render an empty
+  // layout-matching placeholder so the GL context is freed. Keep the testID so
+  // flows still find the slot. Within the grace window `glAlive` stays true, so
+  // the live map is reused on a quick re-focus.
+  if (!glAlive) {
     return <View style={styles.placeholder} testID="explore-minimap" />;
   }
 
