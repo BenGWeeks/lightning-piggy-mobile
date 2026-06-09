@@ -86,7 +86,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
   // by `knownWrapIdsRef` so the Set survives this effect's re-runs
   // (relay-list change → fresh effect instance). Seeded by union
-  // below from AsyncStorage's wrap cache, but does NOT replace any
+  // below from the file-backed wrap cache, but does NOT replace any
   // entries the prior sub instance added in-memory but the deferred
   // writeChain hasn't persisted yet. Per issue #505 — the relay
   // re-streams the backlog since the last `since` cursor, and on a
@@ -438,7 +438,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     writeChain = writeChain
       .then(async () => {
         if (cancelled) return;
-        const wrapRaw = await AsyncStorage.getItem(cacheKey);
+        // Read the file-backed wrap cache (NOT AsyncStorage, whose row
+        // writeNip17Cache deletes). Reading the wrong store here returned an
+        // empty `{}`, so this read→merge→write OVERWROTE the file with just
+        // this one wrap on every live arrival — clobbering the whole cache and
+        // defeating the persisted dedup (#811).
+        const wrapRaw = await safeGetDmCacheItem(cacheKey);
         const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
         if (wrapCache[wrap.id]) {
           knownWrapIds?.add(wrap.id);
@@ -513,7 +518,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           : null;
     if (wrapCacheKey) {
       try {
-        const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
+        // Read the file-backed wrap cache (via safeGetDmCacheItem), NOT
+        // AsyncStorage directly: writeNip17Cache persists to a file and
+        // deletes the legacy AsyncStorage row, so a raw `AsyncStorage.getItem`
+        // here returns null on every file-backed install → seeds 0 wraps →
+        // blinds the dedup → the relay's wrap re-stream re-decrypts the whole
+        // backlog on each sub-open (the freeze, #811).
+        const seedRaw = await safeGetDmCacheItem(wrapCacheKey);
         const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
         for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
         // Also seed from persisted group messages — group-routed wraps
@@ -543,8 +554,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         //      runs unnecessarily for each cached wrap (1–3 ms each).
         // The persistent on-disk wrapCache write is idempotent —
         // it doesn't grow unboundedly. We accept this regression on
-        // the failure path because (a) AsyncStorage.getItem I/O
-        // errors are extremely rare on Android, and (b) the
+        // the failure path because (a) safeGetDmCacheItem file
+        // read/migration failures are extremely rare, and (b) the
         // alternative (resurrecting the lazy-load inside the
         // handler) would re-introduce the race + per-event prologue
         // cost that motivated #505 in the first place.
