@@ -230,8 +230,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onOpenLegend = useCallback(() => setLegendVisible(true), []);
   // Stable handlers so a parent re-render (e.g. a DM-inbox flush bubbling
   // through useNostr()) doesn't hand ExploreMiniMap/ContentRail fresh function
-  // identities each time — inline arrows defeat ExploreMiniMap's arePropsEqual
-  // memo and force a full MapLibre marker reconciliation on every render (#798).
+  // identities each time — inline arrows defeat LibreMiniMap's arePropsEqual
+  // memo (ExploreMiniMap renders LibreMiniMap when focused) and force a full
+  // MapLibre marker reconciliation on every render (#798).
   const onSelectMerchant = useCallback((m: BtcMapPlace) => setSelectedMerchant(m), []);
   const onSelectCache = useCallback((c: ParsedCache) => setSelectedCache(c), []);
   const onSelectEvent = useCallback(
@@ -522,11 +523,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // pubkey change but never on unrelated re-renders, and is immune to the
   // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  // The user's read-relay URLs, plus a content key that only changes when the
+  // URL *set* changes — not when useNostr() hands back a new array with the same
+  // URLs (cold-start cache→network churn), which used to double-fire the
+  // by-author fetch below (#798).
+  const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+  const readRelayKey = readRelays.join(',');
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
     let cancelled = false;
-    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
     // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
     // requests, and the current run still merges on cancel (#752 Copilot).
     joinExploreByAuthorFetch(fetchKey, () =>
@@ -561,13 +567,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-    // `userRelays` intentionally excluded: at cold start the relay list churns
-    // (cache → network = two array refs), which re-fired this fetch a second
-    // time after the first resolved — a redundant ~20s by-author query (#798).
-    // readRelays is captured from the current render; a mid-session relay
-    // change is picked up on the next refreshKey bump (pull-to-refresh).
+    // Depend on readRelayKey (the relay-URL *content*), not the userRelays array
+    // identity: a genuine relay-set change still re-fires the fetch (parity with
+    // MapScreen's by-author fetch), but the cold-start new-array-same-URLs churn
+    // no longer does — that double-fired a redundant ~20s query (#798).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signedInPubkey, refreshKey]);
+  }, [signedInPubkey, refreshKey, readRelayKey]);
 
   // Write-through to AsyncStorage whenever the in-memory state grows
   // so the next cold start has fresh content to hydrate from. Debounced
