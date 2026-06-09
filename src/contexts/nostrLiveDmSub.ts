@@ -86,7 +86,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
   // by `knownWrapIdsRef` so the Set survives this effect's re-runs
   // (relay-list change → fresh effect instance). Seeded by union
-  // below from AsyncStorage's wrap cache, but does NOT replace any
+  // below from the file-backed wrap cache, but does NOT replace any
   // entries the prior sub instance added in-memory but the deferred
   // writeChain hasn't persisted yet. Per issue #505 — the relay
   // re-streams the backlog since the last `since` cursor, and on a
@@ -513,7 +513,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           : null;
     if (wrapCacheKey) {
       try {
-        const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
+        // Read the file-backed wrap cache (via safeGetDmCacheItem), NOT
+        // AsyncStorage directly: writeNip17Cache persists to a file and
+        // deletes the legacy AsyncStorage row, so a raw `AsyncStorage.getItem`
+        // here returns null on every file-backed install → seeds 0 wraps →
+        // blinds the dedup → the relay's wrap re-stream re-decrypts the whole
+        // backlog on each sub-open (the freeze, #811).
+        const seedRaw = await safeGetDmCacheItem(wrapCacheKey);
         const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
         for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
         // Also seed from persisted group messages — group-routed wraps
