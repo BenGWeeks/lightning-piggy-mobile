@@ -1,4 +1,9 @@
-import { isLnurlString, isLightningAddress, isValidInvoice } from './sendSheetInput';
+import {
+  isLnurlString,
+  isLightningAddress,
+  isValidInvoice,
+  stripLightningPrefix,
+} from './sendSheetInput';
 
 describe('sendSheetInput detectors', () => {
   describe('isLnurlString', () => {
@@ -32,6 +37,24 @@ describe('sendSheetInput detectors', () => {
       expect(isValidInvoice('lnbc100n1p...')).toBe(true);
       expect(isValidInvoice('LNTB100n...')).toBe(true);
       expect(isValidInvoice('alice@example.com')).toBe(false);
+    });
+  });
+
+  describe('stripLightningPrefix', () => {
+    it('strips a case-insensitive lightning: prefix and surrounding whitespace', () => {
+      expect(stripLightningPrefix('lightning:lnbc100n1p')).toBe('lnbc100n1p');
+      expect(stripLightningPrefix('LIGHTNING:lnbc100n1p')).toBe('lnbc100n1p');
+      expect(stripLightningPrefix('  lightning:LNURL1DP68  ')).toBe('LNURL1DP68');
+    });
+    it('leaves a bare payload untouched', () => {
+      expect(stripLightningPrefix('lnbc100n1p')).toBe('lnbc100n1p');
+      expect(stripLightningPrefix('alice@example.com')).toBe('alice@example.com');
+    });
+    it('keeps a prefixed bolt11 invoice payable — the strip yields a valid invoice', () => {
+      // The defect users hit: pasting `lightning:lnbc…` (copied with the URI
+      // scheme) must still decode/pay. After stripping, isValidInvoice agrees.
+      expect(isValidInvoice('lightning:lnbc100n1p')).toBe(false); // prefix not stripped → rejected
+      expect(isValidInvoice(stripLightningPrefix('lightning:lnbc100n1p'))).toBe(true);
     });
   });
 });

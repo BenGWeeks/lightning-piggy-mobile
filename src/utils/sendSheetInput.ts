@@ -43,6 +43,19 @@ export function isValidInvoice(data: string): boolean {
   );
 }
 
+// Strip a `lightning:` URI prefix (case-insensitive) that wallets and QR codes
+// commonly prepend to a bolt11 invoice or LNURL — users often copy/paste it
+// along with the payload. Returns the bare string so the detectors above and
+// `decodeInvoice` see a clean `lnbc…` / `lnurl1…` and the invoice stays
+// payable. Non-prefixed input is returned trimmed but otherwise untouched.
+export function stripLightningPrefix(input: string): string {
+  const s = input.trim();
+  if (/^lightning:/i.test(s)) {
+    return s.slice('lightning:'.length).trim();
+  }
+  return s;
+}
+
 // Raw LNURL strings the scanner/paste box can hand us: bech32 `lnurl1…`
 // (LUD-01/06) and the cleartext LUD-17 `lnurlp://` / `lnurlw://` /
 // `lnurl://` schemes, with or without a `lightning:` URI prefix. Direction

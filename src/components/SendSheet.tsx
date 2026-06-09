@@ -38,6 +38,7 @@ import {
   isLightningAddress,
   isValidInvoice,
   isLnurlString,
+  stripLightningPrefix,
 } from '../utils/sendSheetInput';
 import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import * as boltzService from '../services/boltzService';
@@ -236,11 +237,8 @@ const SendSheet: React.FC<Props> = ({
   });
 
   const processInput = (data: string) => {
-    let input = data.trim();
+    let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
-    if (input.toLowerCase().startsWith('lightning:')) {
-      input = input.substring(10);
-    }
     if (input.toLowerCase().startsWith('bitcoin:')) {
       const parsed = parseBip21(input);
       if (parsed) {
