@@ -5,7 +5,15 @@
  * Issue #271.
  */
 
-import { subjectFromRumor, textForRumor, partnerFromRumor, type DecodedRumor } from './nip17Unwrap';
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { wrapEvent } from 'nostr-tools/nip59';
+import {
+  subjectFromRumor,
+  textForRumor,
+  partnerFromRumor,
+  unwrapWrapNsec,
+  type DecodedRumor,
+} from './nip17Unwrap';
 
 const PK_A = 'a'.repeat(64);
 const PK_B = 'b'.repeat(64);
@@ -132,5 +140,70 @@ describe('textForRumor (kind-15 → bubble text)', () => {
     expect(
       textForRumor({ pubkey: PK_A, created_at: 0, kind: 14, content: 'hi there', tags: [] }),
     ).toBe('hi there');
+  });
+});
+
+/**
+ * Security characterisation for the #802 change: the gift-wrap schnorr
+ * verify was dropped from the nsec decrypt path. These tests prove the
+ * security model is unchanged — integrity is still enforced by the NIP-44
+ * MAC, and authenticity by the seal ECDH — while the (redundant, expensive)
+ * signature verify no longer gates the hot loop.
+ */
+describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
+  // Build a real NIP-17 gift wrap from `sender` to `recipient`.
+  function makeWrap(content: string) {
+    const senderSk = generateSecretKey();
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const senderPk = getPublicKey(senderSk);
+    const wrap = wrapEvent(
+      { kind: 14, content, tags: [['p', recipientPk]] },
+      senderSk,
+      recipientPk,
+    );
+    return { wrap, recipientSk, senderPk };
+  }
+
+  // Cast helper — `wrapEvent` returns a fully-typed VerifiedEvent; the
+  // unwrap function takes the looser RawGiftWrapEvent shape.
+  type WrapArg = Parameters<typeof unwrapWrapNsec>[0];
+
+  it('round-trips a kind-14 rumor (decrypt works without a sig verify)', () => {
+    const { wrap, recipientSk, senderPk } = makeWrap('hello piggy');
+    const rumor = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk);
+    expect(rumor).not.toBeNull();
+    expect(rumor?.content).toBe('hello piggy');
+    expect(rumor?.kind).toBe(14);
+    // Sender identity comes from the seal ECDH, surfaced as rumor.pubkey.
+    expect(rumor?.pubkey).toBe(senderPk);
+  });
+
+  it('STILL decrypts when the wrap signature is invalid (verify is gone, #802)', () => {
+    const { wrap, recipientSk } = makeWrap('sig should not matter');
+    // Corrupt the ephemeral-key signature. Pre-#802 this returned null
+    // ('wrap signature invalid'); now the sig is never consulted, so the
+    // NIP-44 layers decrypt regardless — that's the whole point.
+    (wrap as unknown as { sig: string }).sig = 'f'.repeat(128);
+    const rumor = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk);
+    expect(rumor?.content).toBe('sig should not matter');
+  });
+
+  it('still REJECTS a wrap whose ciphertext was tampered (MAC enforces integrity)', () => {
+    const { wrap, recipientSk } = makeWrap('tamper me');
+    // Flip one base64 char inside the wrap ciphertext → NIP-44 MAC mismatch
+    // → decrypt throws → unwrapWrapNsec skips (returns null). This is the
+    // guarantee that replaced the schnorr verify: integrity is preserved.
+    const i = 60;
+    const swapped = wrap.content[i] === 'A' ? 'B' : 'A';
+    const tampered = wrap.content.slice(0, i) + swapped + wrap.content.slice(i + 1);
+    const onSkip = jest.fn();
+    const rumor = unwrapWrapNsec(
+      { ...wrap, content: tampered } as unknown as WrapArg,
+      recipientSk,
+      onSkip,
+    );
+    expect(rumor).toBeNull();
+    expect(onSkip).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 import * as nip59 from 'nostr-tools/nip59';
-import { verifyEvent, type NostrEvent } from 'nostr-tools/pure';
+import type { NostrEvent } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 
@@ -79,18 +79,32 @@ function parseRumor(raw: string): DecodedRumor | null {
 }
 
 /**
- * Asserts the wrap event's signature before we trust its `pubkey` /
- * `content`. The wrap is signed by a random ephemeral key per the spec —
- * we don't care who the ephemeral key belongs to, only that the payload
- * wasn't mutated in transit. Returns true on valid sig.
+ * Why we do NOT schnorr-verify the gift-wrap signature
+ * ----------------------------------------------------
+ * A NIP-59 gift wrap (kind 1059) is signed by a **throwaway ephemeral
+ * key** the sender generates per-wrap — so the signature authenticates
+ * *nothing* about who sent the message: anyone can mint a valid ephemeral
+ * key and sign a wrap. nostr-tools' `nip59.unwrapEvent` doesn't even
+ * consult the signature; it just performs the two NIP-44 decrypts.
+ *
+ * Integrity and authenticity are both supplied by those decrypts, not by
+ * the schnorr verify:
+ *   - **Integrity** ("not mutated in transit") — each NIP-44 layer carries
+ *     an HMAC-SHA256 over the ciphertext; a tampered wrap fails the MAC
+ *     and the decrypt throws (we skip it).
+ *   - **Authenticity** — the seal layer's conversation key is
+ *     ECDH(viewerPriv, sealPubkey) = ECDH(senderPriv, viewerPub); only the
+ *     real sender's secret key can produce a seal that decrypts. The
+ *     `rumor.pubkey === seal.pubkey` check (below, Amber path) binds the
+ *     claimed sender to that ECDH-authenticated key.
+ *
+ * The wrap-sig `verifyEvent` was therefore pure defense-in-depth — and an
+ * expensive one: a full schnorr verify (~25 ms/wrap) that dominated
+ * cold-start inbox drain and froze the JS thread on a large backlog
+ * (#802). Every failure mode it caught (mutated content / pubkey / id) is
+ * *also* caught one step later by the cheaper MAC check, so dropping it
+ * removes the freeze without weakening the security model.
  */
-export function verifyWrapSig(wrap: RawGiftWrapEvent): boolean {
-  try {
-    return verifyEvent(wrap as unknown as NostrEvent);
-  } catch {
-    return false;
-  }
-}
 
 type Nip44Decrypt = (ciphertext: string, counterpartyPubkey: string) => Promise<string>;
 
@@ -113,8 +127,9 @@ export async function unwrapWrapViaNip44(
     return null;
   };
 
-  if (!verifyWrapSig(wrap)) return skip('wrap signature invalid');
-
+  // No wrap-sig verify — see the note above `Nip44Decrypt`. The MAC on the
+  // decrypt below rejects a tampered wrap; authenticity comes from the seal
+  // ECDH + the `rumor.pubkey === seal.pubkey` check.
   let sealJson: string;
   try {
     sealJson = await decryptNip44(wrap.content, wrap.pubkey);
@@ -148,19 +163,18 @@ export async function unwrapWrapViaNip44(
 
 /**
  * Convenience wrapper for the nsec path: invokes nostr-tools' nip59
- * unwrapEvent directly. Still runs verifyWrapSig for parity with the
- * Amber path (nostr-tools' unwrap will throw if the payload is malformed
- * but doesn't re-verify the sig — that's the caller's job per NIP-01).
+ * unwrapEvent directly. We deliberately do NOT schnorr-verify the wrap
+ * signature first — see the note above `Nip44Decrypt` for why that verify
+ * was redundant (the ephemeral wrap key authenticates nothing; the NIP-44
+ * MAC + seal ECDH carry the real integrity/authenticity). Dropping it is
+ * the #802 cold-start freeze fix. `nip59.unwrapEvent` throws on a malformed
+ * or tampered payload (MAC failure), which we catch and skip below.
  */
 export function unwrapWrapNsec(
   wrap: RawGiftWrapEvent,
   secretKey: Uint8Array,
   onSkip?: (reason: string, wrapId: string) => void,
 ): DecodedRumor | null {
-  if (!verifyWrapSig(wrap)) {
-    onSkip?.('wrap signature invalid', wrap.id);
-    return null;
-  }
   try {
     const rumor = nip59.unwrapEvent(wrap as unknown as NostrEvent, secretKey);
     const r: unknown = rumor;
