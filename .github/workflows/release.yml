@@ -474,8 +474,10 @@ jobs:
           # mmdc renders DATA_STORAGE.adoc's [mermaid] blocks; generate-docs.sh
           # points its headless Chrome at docs/puppeteer-mermaid.json
           # (--no-sandbox) so it launches on the CI runner. Without this the
-          # PDF job failed every release ("mmdc is not installed").
-          npm install -g @mermaid-js/mermaid-cli
+          # PDF job failed every release ("mmdc is not installed"). Pinned (like
+          # EAS_CLI_VERSION) for reproducible release docs — 11.9.0 is the
+          # version v1.3.1's PDF was generated with.
+          npm install -g @mermaid-js/mermaid-cli@11.9.0
 
       - name: Generate PDF
         run: bash docs/generate-docs.sh
