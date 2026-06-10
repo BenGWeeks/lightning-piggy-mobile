@@ -146,6 +146,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Install dependencies (eas build:list needs app.config.ts)
+        run: npm ci
+
       - name: Verify ASC API key is wired
         env:
           # The ASC API key is stored under the EXPO_ASC_* secret names (the
@@ -267,6 +270,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+
+      # eas build:list resolves the project via app.config.ts, which imports
+      # from node_modules — without `npm ci` the CLI errors out and the jq
+      # parse fails. This job (and the two below) failed every release for
+      # this reason; the working build-and-submit job already does npm ci.
+      - name: Install dependencies (eas build:list needs app.config.ts)
+        run: npm ci
 
       - name: Resolve latest finished Android APK URL
         id: find
@@ -395,6 +405,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+
+      - name: Install dependencies (eas build:list needs app.config.ts)
+        run: npm ci
 
       - name: Resolve build numbers + edit Release title
         run: |
