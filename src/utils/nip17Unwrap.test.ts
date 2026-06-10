@@ -195,12 +195,10 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
 
   it('still REJECTS a wrap whose ciphertext was tampered (MAC enforces integrity)', () => {
     const { wrap, recipientSk } = makeWrap('tamper me');
-    // Flip one base64 char inside the wrap ciphertext → NIP-44 MAC mismatch
-    // → decrypt throws → unwrapWrapNsec skips (returns null). This is the
-    // guarantee that replaced the schnorr verify: integrity is preserved.
-    // Index is relative to the payload length (mid-ciphertext) so it stays
-    // in-bounds if nostr-tools' payload format/size changes.
-    expect(wrap.content.length).toBeGreaterThan(100);
+    // Flip one base64 char mid-payload → NIP-44 MAC mismatch → decrypt throws
+    // → unwrapWrapNsec skips (returns null). This is the guarantee that
+    // replaced the schnorr verify: integrity is preserved. The midpoint is
+    // always in-bounds (a valid NIP-44 payload is ≥132 chars).
     const i = Math.floor(wrap.content.length / 2);
     const swapped = wrap.content[i] === 'A' ? 'B' : 'A';
     const tampered = wrap.content.slice(0, i) + swapped + wrap.content.slice(i + 1);
