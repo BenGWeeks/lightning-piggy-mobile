@@ -466,7 +466,7 @@ jobs:
       - name: Setup Node (for the mermaid CLI)
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install asciidoctor-pdf + rouge + mermaid CLI
         run: |
