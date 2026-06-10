@@ -113,7 +113,20 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
     }
     // Re-seed synchronously from the in-memory cache so a pubkey change paints
     // the cached avatar immediately, before the async get / relay fetch (#388).
-    setSlice(peekSlice(pubkey));
+    // Functional + equality-gated: this effect also re-fires on a relay-list
+    // (`readRelaysKey`) change for the SAME pubkey, where the seeded values are
+    // unchanged — keep `prev` then so we don't churn a re-render in list-heavy
+    // surfaces (Copilot review on #826).
+    setSlice((prev) => {
+      const seeded = peekSlice(pubkey);
+      return prev.name === seeded.name &&
+        prev.picture === seeded.picture &&
+        prev.banner === seeded.banner &&
+        prev.lud16 === seeded.lud16 &&
+        prev.loading === seeded.loading
+        ? prev
+        : seeded;
+    });
     let cancelled = false;
     (async () => {
       // Cache hit — sync-fast, no relay round-trip.
