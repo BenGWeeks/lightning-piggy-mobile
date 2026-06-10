@@ -468,7 +468,7 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Install asciidoctor-pdf + rouge + mermaid CLI
+      - name: Install asciidoctor-pdf + asciidoctor-diagram + rouge + mermaid CLI
         run: |
           gem install asciidoctor-pdf asciidoctor-diagram rouge
           # mmdc renders DATA_STORAGE.adoc's [mermaid] blocks; generate-docs.sh
