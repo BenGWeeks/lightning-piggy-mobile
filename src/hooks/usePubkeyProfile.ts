@@ -54,6 +54,24 @@ const empty: PubkeyProfileSlice = {
   loading: false,
 };
 
+// Build the slice synchronously from the in-memory profile cache so a warm
+// avatar (its `picture`) paints on the FIRST frame instead of after the async
+// `get` resolves (the "avatars load late" symptom, #388). `loading` stays true
+// when the cache lacks `lud16`, so the effect still fetches the remaining
+// fields — but the picture is already on screen.
+function peekSlice(pubkey: string | null | undefined): PubkeyProfileSlice {
+  if (!pubkey) return empty;
+  const cached = zapSenderProfileStorage.peekSync(pubkey);
+  if (!cached) return empty;
+  return {
+    name: cached.displayName ?? cached.name ?? null,
+    picture: cached.picture ?? null,
+    banner: null,
+    lud16: cached.lud16 ?? null,
+    loading: cached.lud16 === undefined,
+  };
+}
+
 // In-flight de-duplication: concurrent consumers asking for the same
 // pubkey share one fetch. Cleared when the promise settles so a later
 // remount triggers a fresh fetch if the cache has aged past TTL.
@@ -86,13 +104,16 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
     .map((r) => r.url)
     .sort()
     .join('|');
-  const [slice, setSlice] = useState<PubkeyProfileSlice>(empty);
+  const [slice, setSlice] = useState<PubkeyProfileSlice>(() => peekSlice(pubkey));
 
   useEffect(() => {
     if (!pubkey) {
       setSlice(empty);
       return;
     }
+    // Re-seed synchronously from the in-memory cache so a pubkey change paints
+    // the cached avatar immediately, before the async get / relay fetch (#388).
+    setSlice(peekSlice(pubkey));
     let cancelled = false;
     (async () => {
       // Cache hit — sync-fast, no relay round-trip.
