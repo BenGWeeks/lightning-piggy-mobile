@@ -5,8 +5,9 @@
  * Issue #271.
  */
 
-import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { wrapEvent } from 'nostr-tools/nip59';
+import * as nip44 from 'nostr-tools/nip44';
 import {
   subjectFromRumor,
   textForRumor,
@@ -144,13 +145,13 @@ describe('textForRumor (kind-15 → bubble text)', () => {
 });
 
 /**
- * Security characterisation for the #802 change: the gift-wrap schnorr
- * verify was dropped from the nsec decrypt path. These tests prove what
- * that path actually guarantees — the wrap signature no longer gates
- * decryption, and the NIP-44 MAC still rejects a tampered ciphertext —
- * while the (redundant, expensive) signature verify no longer runs in the
- * hot loop. (Full rumor↔seal sender binding is a separate concern handled
- * in `unwrapWrapViaNip44`, not asserted here — see #830.)
+ * Security characterisation for the nsec decrypt path. Proves the guarantees
+ * after #802 (the redundant gift-wrap schnorr verify no longer gates
+ * decryption) and #830 (the path now binds `rumor.pubkey === seal.pubkey`):
+ *   - a wrap with an invalid signature still decrypts (verify is gone),
+ *   - a tampered ciphertext is still rejected by the NIP-44 MAC,
+ *   - a rumor claiming a different pubkey than its seal is rejected
+ *     (sender-spoofing blocked).
  */
 describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
   // Build a real NIP-17 gift wrap from `sender` to `recipient`.
@@ -177,9 +178,8 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
     expect(rumor).not.toBeNull();
     expect(rumor?.content).toBe('hello piggy');
     expect(rumor?.kind).toBe(14);
-    // `unwrapEvent` returns the inner rumor's own pubkey field. For a
-    // well-formed wrap from `wrapEvent` that equals the sender; this path
-    // does not itself bind it to the seal key (#830).
+    // For a well-formed wrap, rumor.pubkey == seal.pubkey == sender, so the
+    // #830 binding passes and the sender is surfaced as rumor.pubkey.
     expect(rumor?.pubkey).toBe(senderPk);
   });
 
@@ -212,5 +212,52 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
     );
     expect(rumor).toBeNull();
     expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it('REJECTS a wrap whose rumor.pubkey != seal.pubkey (sender spoofing, #830)', () => {
+    // Hand-craft a malicious wrap: the seal is sealed (and ECDH-authenticated)
+    // by the *attacker*, but the inner rumor claims it was sent by a different
+    // pubkey (the victim being impersonated). `wrapEvent` can't produce this —
+    // it always sets rumor.pubkey == seal sender — so we build the two NIP-44
+    // layers by hand.
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const attackerSk = generateSecretKey(); // the key that actually seals
+    const victimPk = 'd'.repeat(64); // the pubkey the rumor falsely claims
+
+    const rumor = {
+      pubkey: victimPk,
+      created_at: 1,
+      kind: 14,
+      content: 'transfer 1000 sats, trust me',
+      tags: [['p', recipientPk]],
+    };
+    const sealKey = nip44.v2.utils.getConversationKey(attackerSk, recipientPk);
+    const seal = finalizeEvent(
+      {
+        kind: 13,
+        content: nip44.v2.encrypt(JSON.stringify(rumor), sealKey),
+        created_at: 1,
+        tags: [],
+      },
+      attackerSk,
+    );
+    const ephemeralSk = generateSecretKey();
+    const wrapKey = nip44.v2.utils.getConversationKey(ephemeralSk, recipientPk);
+    const wrap = finalizeEvent(
+      {
+        kind: 1059,
+        content: nip44.v2.encrypt(JSON.stringify(seal), wrapKey),
+        created_at: 1,
+        tags: [['p', recipientPk]],
+      },
+      ephemeralSk,
+    );
+
+    const onSkip = jest.fn();
+    const out = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk, onSkip);
+    expect(out).toBeNull();
+    // Skipped specifically for the pubkey-binding mismatch, not a decrypt error.
+    expect(onSkip).toHaveBeenCalledWith(expect.stringContaining('!='), expect.any(String));
   });
 });
