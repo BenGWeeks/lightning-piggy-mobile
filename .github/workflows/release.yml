@@ -145,6 +145,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          cache: npm
 
       - name: Install dependencies (eas build:list needs app.config.ts)
         run: npm ci
@@ -270,6 +271,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
 
       # eas build:list resolves the project via app.config.ts, which imports
       # from node_modules — without `npm ci` the CLI errors out and the jq
@@ -405,6 +407,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
 
       - name: Install dependencies (eas build:list needs app.config.ts)
         run: npm ci
