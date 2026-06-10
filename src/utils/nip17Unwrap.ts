@@ -87,16 +87,21 @@ function parseRumor(raw: string): DecodedRumor | null {
  * key and sign a wrap. nostr-tools' `nip59.unwrapEvent` doesn't even
  * consult the signature; it just performs the two NIP-44 decrypts.
  *
- * Integrity and authenticity are both supplied by those decrypts, not by
- * the schnorr verify:
+ * What the schnorr verify provided is supplied (better) by those decrypts:
  *   - **Integrity** ("not mutated in transit") — each NIP-44 layer carries
  *     an HMAC-SHA256 over the ciphertext; a tampered wrap fails the MAC
  *     and the decrypt throws (we skip it).
- *   - **Authenticity** — the seal layer's conversation key is
+ *   - **Seal-key authentication** — the seal layer's conversation key is
  *     ECDH(viewerPriv, sealPubkey) = ECDH(senderPriv, viewerPub); only the
- *     real sender's secret key can produce a seal that decrypts. The
- *     `rumor.pubkey === seal.pubkey` check (below, Amber path) binds the
- *     claimed sender to that ECDH-authenticated key.
+ *     holder of `sealPubkey`'s secret can produce a seal that decrypts, so
+ *     a successful decrypt authenticates the *seal sender key*.
+ *
+ * NOTE — *full* sender binding (the inner `rumor.pubkey` actually equals the
+ * authenticated `seal.pubkey`) is a *separate* check, enforced only in
+ * `unwrapWrapViaNip44` (Amber path) below. The nsec path here delegates to
+ * nostr-tools' `unwrapEvent`, which does not expose the seal and does not
+ * bind the two — a pre-existing gap tracked in #830, orthogonal to this
+ * change (the ephemeral wrap-sig verify never bound them either).
  *
  * The wrap-sig `verifyEvent` was therefore pure defense-in-depth — and an
  * expensive one: a full schnorr verify (~25 ms/wrap) that dominated
@@ -165,10 +170,12 @@ export async function unwrapWrapViaNip44(
  * Convenience wrapper for the nsec path: invokes nostr-tools' nip59
  * unwrapEvent directly. We deliberately do NOT schnorr-verify the wrap
  * signature first — see the note above `Nip44Decrypt` for why that verify
- * was redundant (the ephemeral wrap key authenticates nothing; the NIP-44
- * MAC + seal ECDH carry the real integrity/authenticity). Dropping it is
- * the #802 cold-start freeze fix. `nip59.unwrapEvent` throws on a malformed
- * or tampered payload (MAC failure), which we catch and skip below.
+ * was redundant: the ephemeral wrap key authenticates nothing, the NIP-44
+ * MAC enforces integrity, and the seal ECDH authenticates the seal sender
+ * key. Dropping it is the #802 cold-start freeze fix. `nip59.unwrapEvent`
+ * throws on a malformed or tampered payload (MAC failure), which we catch
+ * and skip below. (Unlike `unwrapWrapViaNip44`, this path does NOT bind
+ * `rumor.pubkey` to `seal.pubkey` — pre-existing gap #830, unaffected here.)
  */
 export function unwrapWrapNsec(
   wrap: RawGiftWrapEvent,

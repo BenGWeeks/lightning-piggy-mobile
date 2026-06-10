@@ -145,10 +145,12 @@ describe('textForRumor (kind-15 → bubble text)', () => {
 
 /**
  * Security characterisation for the #802 change: the gift-wrap schnorr
- * verify was dropped from the nsec decrypt path. These tests prove the
- * security model is unchanged — integrity is still enforced by the NIP-44
- * MAC, and authenticity by the seal ECDH — while the (redundant, expensive)
- * signature verify no longer gates the hot loop.
+ * verify was dropped from the nsec decrypt path. These tests prove what
+ * that path actually guarantees — the wrap signature no longer gates
+ * decryption, and the NIP-44 MAC still rejects a tampered ciphertext —
+ * while the (redundant, expensive) signature verify no longer runs in the
+ * hot loop. (Full rumor↔seal sender binding is a separate concern handled
+ * in `unwrapWrapViaNip44`, not asserted here — see #830.)
  */
 describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
   // Build a real NIP-17 gift wrap from `sender` to `recipient`.
@@ -175,7 +177,9 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
     expect(rumor).not.toBeNull();
     expect(rumor?.content).toBe('hello piggy');
     expect(rumor?.kind).toBe(14);
-    // Sender identity comes from the seal ECDH, surfaced as rumor.pubkey.
+    // `unwrapEvent` returns the inner rumor's own pubkey field. For a
+    // well-formed wrap from `wrapEvent` that equals the sender; this path
+    // does not itself bind it to the seal key (#830).
     expect(rumor?.pubkey).toBe(senderPk);
   });
 
@@ -194,7 +198,10 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
     // Flip one base64 char inside the wrap ciphertext → NIP-44 MAC mismatch
     // → decrypt throws → unwrapWrapNsec skips (returns null). This is the
     // guarantee that replaced the schnorr verify: integrity is preserved.
-    const i = 60;
+    // Index is relative to the payload length (mid-ciphertext) so it stays
+    // in-bounds if nostr-tools' payload format/size changes.
+    expect(wrap.content.length).toBeGreaterThan(100);
+    const i = Math.floor(wrap.content.length / 2);
     const swapped = wrap.content[i] === 'A' ? 'B' : 'A';
     const tampered = wrap.content.slice(0, i) + swapped + wrap.content.slice(i + 1);
     const onSkip = jest.fn();
