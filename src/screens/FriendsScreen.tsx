@@ -75,6 +75,59 @@ interface ListItem {
   source: 'nostr' | 'contacts';
 }
 
+// Stable-callback wrapper so React.memo(ContactListItem) can skip re-renders
+// during scroll. renderItem would otherwise create fresh onPress/onZap/onMessage
+// closures per row on every pass, defeating ContactListItem's memo.
+interface ContactRowProps {
+  item: ListItem;
+  hasWallets: boolean;
+  onContactPress: (item: ListItem) => void;
+  onZapPress: (item: ListItem) => void;
+  navigation: FriendsNavigation;
+}
+
+const ContactRow = React.memo(
+  ({ item, hasWallets, onContactPress, onZapPress, navigation }: ContactRowProps) => {
+    const handlePress = React.useCallback(
+      () => onContactPress(item),
+      [onContactPress, item],
+    );
+    const handleZap = React.useCallback(() => onZapPress(item), [onZapPress, item]);
+    const handleMessage = React.useMemo(() => {
+      const pubkey = item.pubkey;
+      if (!pubkey) return undefined;
+      return () =>
+        navigation.navigate('Conversation', {
+          pubkey,
+          name: item.name,
+          picture: item.picture,
+          lightningAddress: item.lightningAddress,
+        });
+    }, [navigation, item.pubkey, item.name, item.picture, item.lightningAddress]);
+
+    const canZap = hasWallets;
+    const zapDisabledReason = 'no wallet attached';
+
+    return (
+      <ContactListItem
+        name={item.name}
+        picture={item.picture}
+        lightningAddress={item.lightningAddress}
+        canMessage={!!item.pubkey}
+        canZap={canZap}
+        showZap={item.hasLightningAddress}
+        zapDisabledReason={zapDisabledReason}
+        onPress={handlePress}
+        onZap={handleZap}
+        onMessage={handleMessage}
+        testID={`friend-row-${item.id}`}
+      />
+    );
+  },
+  (prev, next) =>
+    prev.item.id === next.item.id && prev.hasWallets === next.hasWallets,
+);
+
 const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
@@ -111,6 +164,8 @@ const FriendsScreen: React.FC = () => {
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  const currentLetterRef = useRef(currentLetter);
+  currentLetterRef.current = currentLetter;
   const scrollTrackingPaused = useRef(false);
   // Performance instrumentation (dev only)
   const screenMountTime = useRef(Date.now());
@@ -238,7 +293,16 @@ const FriendsScreen: React.FC = () => {
       }
     }
 
-    items.sort((a, b) => NAME_COLLATOR.compare(a.name, b.name));
+    items.sort((a, b) => {
+      const alphaA = firstAlpha(a.name);
+      const alphaB = firstAlpha(b.name);
+      if (alphaA !== alphaB) {
+        if (alphaA === '#') return -1;
+        if (alphaB === '#') return 1;
+        return alphaA < alphaB ? -1 : 1;
+      }
+      return NAME_COLLATOR.compare(a.name, b.name);
+    });
     return items;
   }, [contacts, phoneContacts, filter]);
 
@@ -288,12 +352,12 @@ const FriendsScreen: React.FC = () => {
       const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
         const letter = firstAlpha(combinedList[index].name);
-        if (letter !== currentLetter) {
+        if (letter !== currentLetterRef.current) {
           setCurrentLetter(letter);
         }
       }
     },
-    [combinedList, currentLetter],
+    [combinedList],
   );
 
   const scrollToLetter = useCallback(
@@ -456,46 +520,15 @@ const FriendsScreen: React.FC = () => {
   }, [celebration, celebDisplay, contacts, navigation]);
 
   const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => {
-      // Zap affordance only shows for contacts that actually have a
-      // Lightning address (hasLightningAddress). When shown it's enabled
-      // as long as the user has a wallet — the verified address is
-      // re-resolved on tap; greyed + tappable-for-why when there's no
-      // wallet. Message needs a Nostr pubkey (phone-only contacts don't
-      // have one). Disabled-reason strings are read to screen readers.
-      const canZap = hasWallets;
-      const zapDisabledReason = 'no wallet attached';
-      return (
-        <ContactListItem
-          name={item.name}
-          picture={item.picture}
-          lightningAddress={item.lightningAddress}
-          canMessage={!!item.pubkey}
-          canZap={canZap}
-          showZap={item.hasLightningAddress}
-          zapDisabledReason={zapDisabledReason}
-          onPress={() => handleContactPress(item)}
-          onZap={() => handleZap(item)}
-          onMessage={
-            // Capture pubkey in a non-null const so TS narrows it inside
-            // the closure — referencing item.pubkey directly inside the
-            // arrow body widens it back to `string | null`.
-            (() => {
-              const pubkey = item.pubkey;
-              if (!pubkey) return undefined;
-              return () =>
-                navigation.navigate('Conversation', {
-                  pubkey,
-                  name: item.name,
-                  picture: item.picture,
-                  lightningAddress: item.lightningAddress,
-                });
-            })()
-          }
-          testID={`friend-row-${item.id}`}
-        />
-      );
-    },
+    ({ item }: { item: ListItem }) => (
+      <ContactRow
+        item={item}
+        hasWallets={hasWallets}
+        onContactPress={handleContactPress}
+        onZapPress={handleZap}
+        navigation={navigation}
+      />
+    ),
     [handleZap, handleContactPress, hasWallets, navigation],
   );
 
