@@ -295,6 +295,10 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
       .then((mine) => {
         if (cancelled || mine.length === 0) return;
         for (const c of mine) caches.enqueue(c.coord, c);
+        // One-shot fetch — flush now so the author's own pins commit on this
+        // frame instead of waiting on the coalesce debounce (~100ms) when the
+        // batch is under the flush threshold (Copilot review on #825).
+        caches.flush();
       })
       .catch(() => {
         // Best-effort — the nearby subscription will fill the gap if the
@@ -314,6 +318,18 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
     return [...seen].sort();
   }, [places]);
+
+  // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
+  // filtering `caches.map.values()` twice every render (Copilot review on #825).
+  const cacheCounts = useMemo(() => {
+    let piglets = 0;
+    let others = 0;
+    for (const c of caches.map.values()) {
+      if (c.isLpPiggy) piglets++;
+      else others++;
+    }
+    return { piglets, others };
+  }, [caches.map]);
 
   // Filtered arrays for LibreMiniMap. Same predicates the WebView path
   // used to send across the bridge — now plain memoised derived state.
@@ -477,9 +493,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.footerText}>
             {places.length} merchants
             {caches.map.size > 0
-              ? ` · ${[...caches.map.values()].filter((c) => c.isLpPiggy).length} Piglets · ${
-                  [...caches.map.values()].filter((c) => !c.isLpPiggy).length
-                } caches`
+              ? ` · ${cacheCounts.piglets} Piglets · ${cacheCounts.others} caches`
               : ''}
           </Text>
         )}
