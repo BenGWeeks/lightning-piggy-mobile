@@ -463,9 +463,19 @@ jobs:
         with:
           ruby-version: '3.3'
 
-      - name: Install asciidoctor-pdf + rouge
+      - name: Setup Node (for the mermaid CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install asciidoctor-pdf + rouge + mermaid CLI
         run: |
           gem install asciidoctor-pdf asciidoctor-diagram rouge
+          # mmdc renders DATA_STORAGE.adoc's [mermaid] blocks; generate-docs.sh
+          # points its headless Chrome at docs/puppeteer-mermaid.json
+          # (--no-sandbox) so it launches on the CI runner. Without this the
+          # PDF job failed every release ("mmdc is not installed").
+          npm install -g @mermaid-js/mermaid-cli
 
       - name: Generate PDF
         run: bash docs/generate-docs.sh
