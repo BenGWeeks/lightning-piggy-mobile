@@ -38,4 +38,19 @@ export const createSendScanPaneStyles = (colors: Palette) =>
       color: colors.white,
       fontWeight: '700',
     },
+    zoomBadge: {
+      position: 'absolute',
+      bottom: 10,
+      alignSelf: 'center',
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+    },
+    zoomBadgeText: {
+      color: colors.white,
+      fontSize: 12,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
   });
