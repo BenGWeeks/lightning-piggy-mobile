@@ -109,7 +109,7 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
       {/* Spin from first paint (checking) through armed; stop only in the
           dead states (unsupported / error) where no scan can happen. */}
       <NfcScanIndicator
-        spinning={status === 'armed' || status === 'checking'}
+        spinning={status !== 'unsupported' && status !== 'error'}
         testID="send-nfc-indicator"
       />
       {status === 'unsupported' ? (
