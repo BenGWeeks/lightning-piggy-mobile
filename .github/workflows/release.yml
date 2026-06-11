@@ -414,6 +414,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
+
+      # `eas build:list` resolves the EAS project by evaluating app.config.ts,
+      # which can't load without node_modules — same failure class as #791.
+      # This job was missed by #792 (it only fixed whats-new + attach) and
+      # broke the v1.3.2 title sync.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Resolve build numbers + edit Release title
         run: |
