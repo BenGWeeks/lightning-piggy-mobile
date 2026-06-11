@@ -24,7 +24,12 @@ const SendScanPane: React.FC<Props> = ({
       {!permissionGranted ? (
         <View style={styles.permissionContainer}>
           <Text style={styles.permissionText}>Camera access needed to scan QR codes</Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={onRequestPermission}>
+          <TouchableOpacity
+            style={styles.permissionButton}
+            onPress={onRequestPermission}
+            accessibilityLabel="Grant camera permission"
+            testID="send-scan-grant-permission"
+          >
             <Text style={styles.permissionButtonText}>Grant Permission</Text>
           </TouchableOpacity>
         </View>
