@@ -397,3 +397,5 @@ export const createSendSheetStyles = (colors: Palette) =>
       color: colors.textSupplementary,
     },
   });
+
+export type SendSheetStyles = ReturnType<typeof createSendSheetStyles>;
