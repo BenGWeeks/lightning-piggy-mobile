@@ -106,7 +106,7 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
 
   return (
     <View style={styles.container} testID="send-nfc-pane">
-      <NfcScanIndicator spinning={status === 'armed'} testID="send-nfc-indicator" />
+      <NfcScanIndicator spinning={true} testID="send-nfc-indicator" />
       {status === 'unsupported' ? (
         <Text style={styles.description}>NFC isn't available on this device.</Text>
       ) : status === 'error' ? (
