@@ -6,15 +6,15 @@ name: Send — fixed-amount LNURL (min = max) skips the amount prompt
 # The Send sheet pre-fills the only valid value and renders it read-only
 # (id: send-amount-fixed) with a "Fixed amount" caption.
 #
-# Fixture: the lnurl1 string below bech32-encodes a gist raw URL serving
-# static LUD-06 payRequest JSON with minSendable = maxSendable = 100000
-# msat (100 sats):
-#   https://gist.githubusercontent.com/BenGWeeks/dee66c68f929bc414489b9a39c47f58d/raw/pay.json
-#   {"tag":"payRequest","callback":"https://example.com/cb",
-#    "minSendable":100000,"maxSendable":100000,
-#    "metadata":"[[\"text/plain\",\"Birthday card: 100 sats\"]]","commentAllowed":0}
-# No payment is made — the test stops at the details card (the callback
-# host is example.com, so a send attempt would fail anyway).
+# Fixture: the lnurl1 string below bech32-encodes a commit-SHA-pinned
+# raw.githubusercontent.com URL of tests/fixtures/lnurl/pay-fixed-100.json
+# (LUD-06 payRequest with minSendable = maxSendable = 100000 msat).
+# SHA-pinning makes the URL immutable and repo-owned — it survives branch
+# deletion and can't drift, unlike a personal gist. To regenerate after
+# editing the fixture: commit it, then
+#   node -e "const{bech32}=require('bech32');const u='https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/<commit-sha>/tests/fixtures/lnurl/pay-fixed-100.json';console.log(bech32.encode('lnurl',bech32.toWords(Buffer.from(u)),2000))"
+# No payment is made — the test stops at the details card (the fixture's
+# callback host is example.com, so a send attempt would fail anyway).
 
 - launchApp
 
@@ -64,12 +64,12 @@ name: Send — fixed-amount LNURL (min = max) skips the amount prompt
 
 # Paste the fixed-amount LNURL via the in-app clipboard button. Do NOT
 # use inputText here: Maestro's synthetic keystrokes race RN's controlled
-# TextInput and the 156-char string arrives scrambled (one wrong char =
-# bech32 checksum failure). Same workaround as test-add-wallet-via-paste.
+# TextInput and the long bech32 string arrives scrambled (one wrong char
+# = checksum failure). Same workaround as test-add-wallet-via-paste.
 #
 # Prerequisite: seed the host clipboard, then focus the emulator window
 # once so it syncs to the device (run before `maestro test`):
-#   LNURL='lnurl1dp68gurn8ghj7emfwd6zuemfw3582cn4wdjhycm0de6x2mn59e3k7mf0gfjku36hv4jkkue0v3jk2d3kvvmrse3exgukyce5xy6rgwpevgukzveevv6rwe348pjz7unpwuhhqcte9e48xmmwq0efhw'
+#   LNURL='lnurl1dp68gurn8ghj7unpwuhxw6t5dp6kyatnv4exxmmww3jkuapwvdhk6t6zv4hyw4m9v44hxtmvd9nksarwd9hxwttsd9nkw7fdd4hky6tvv5hkzde3v4jrjwtpxp3nwwtzvc6rxdmxx56kzdtzv93rge3kvgcrydphvvckvwrzvgcj7ar9wd68xtmxd9u8gatjv4ej7mrww4exctmsv9uj6enf0pjkgtf3xqczu6nndahq8mer97'
 #   qdbus6 org.kde.klipper /klipper org.kde.klipper.klipper.setClipboardContents "$LNURL" \
 #     || echo -n "$LNURL" | wl-copy   # or: xclip -selection clipboard
 #   xdotool windowactivate $(xdotool search --name "Android Emulator" | head -1)
