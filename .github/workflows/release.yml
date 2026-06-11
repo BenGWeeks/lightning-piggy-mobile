@@ -183,13 +183,16 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         id: iosbuild
         run: |
-          # Pick the iOS build EAS just produced for this commit. buildVersion
-          # is the CFBundleVersion (the integer in parens that TestFlight shows
-          # next to the X.Y.Z marketing version).
+          # Pick the iOS build EAS just produced for this commit. The build
+          # number (CFBundleVersion — the integer in parens TestFlight shows
+          # next to the X.Y.Z marketing version) is `appBuildVersion` in
+          # eas-cli >= 18 JSON output; `.buildVersion` is kept as a fallback
+          # for older CLIs. Reading the wrong field made this step report
+          # "no build found" on every release even when the build existed.
           version=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
             --platform ios --status finished --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
           if [ -z "$version" ] || [ "$version" = "null" ]; then
             echo "::warning title=No iOS build resolved::Could not find a finished iOS build for commit ${{ github.sha }}. Skipping whatsNew."
             echo "version=" >> "$GITHUB_OUTPUT"
@@ -431,11 +434,11 @@ jobs:
           ios_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
             --platform ios --status finished --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
           android_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
             --platform android --status finished --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
 
           # Derive the original title from the release event payload.
           # Fall back to the tag name if no title was set.
