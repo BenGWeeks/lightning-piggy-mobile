@@ -36,6 +36,9 @@ const SendScanPane: React.FC<Props> = ({
   const pinchBaseRef = useRef(0);
   const applyZoom = useCallback((value: number) => {
     const clamped = Math.min(1, Math.max(0, value));
+    // Pinch onUpdate fires at gesture-frame rate; skip imperceptible
+    // deltas so we don't re-render the camera view every frame.
+    if (Math.abs(clamped - zoomRef.current) < 0.003) return;
     zoomRef.current = clamped;
     setZoom(clamped);
   }, []);
@@ -78,7 +81,7 @@ const SendScanPane: React.FC<Props> = ({
             style={styles.camera}
             testID="send-scan-camera"
             accessible
-            accessibilityLabel="QR code viewfinder. Pinch to zoom, double-tap to toggle zoom."
+            accessibilityLabel="QR code viewfinder"
           >
             <CameraView
               style={styles.camera}
