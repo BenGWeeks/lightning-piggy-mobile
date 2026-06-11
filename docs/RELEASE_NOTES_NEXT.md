@@ -14,5 +14,4 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### Fixed
 
-- **Zap (⚡) buttons work again.** On the Friends list the zap button now appears for any contact who has a Lightning address and sends sats when tapped. On a contact's profile the zap button is **always shown** — and if you can't zap yet (no wallet connected, or that person hasn't published a Lightning address) tapping it now tells you **why** instead of doing nothing.
 - **Fixed-amount payment codes no longer ask for an amount.** Scanning or pasting an LNURL pay code whose minimum and maximum are the same (a fixed price) now fills the amount in automatically and shows it read-only — just tap Send.
