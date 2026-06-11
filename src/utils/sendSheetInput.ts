@@ -29,6 +29,17 @@ export function decodeInvoice(bolt11: string): DecodedInvoice {
   }
 }
 
+// LUD-06 servers may pin the amount by returning minSendable === maxSendable.
+// In that case there is nothing for the user to choose, so the Send sheet
+// pre-fills the value and skips the amount-entry step. Returns the fixed
+// sats amount, or null when the range is open (or params are absent).
+export function lnurlFixedAmountSats(
+  params: { minSats: number; maxSats: number } | null,
+): number | null {
+  if (!params) return null;
+  return params.minSats === params.maxSats && params.minSats > 0 ? params.minSats : null;
+}
+
 export function isLightningAddress(input: string): boolean {
   return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
 }

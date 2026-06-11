@@ -2,6 +2,7 @@ import {
   isLnurlString,
   isLightningAddress,
   isValidInvoice,
+  lnurlFixedAmountSats,
   stripLightningPrefix,
 } from './sendSheetInput';
 
@@ -55,6 +56,21 @@ describe('sendSheetInput detectors', () => {
       // scheme) must still decode/pay. After stripping, isValidInvoice agrees.
       expect(isValidInvoice('lightning:lnbc100n1p')).toBe(false); // prefix not stripped → rejected
       expect(isValidInvoice(stripLightningPrefix('lightning:lnbc100n1p'))).toBe(true);
+    });
+  });
+
+  describe('lnurlFixedAmountSats', () => {
+    it('returns the amount when min === max', () => {
+      expect(lnurlFixedAmountSats({ minSats: 100, maxSats: 100 })).toBe(100);
+      expect(lnurlFixedAmountSats({ minSats: 1, maxSats: 1 })).toBe(1);
+    });
+    it('returns null for an open range', () => {
+      expect(lnurlFixedAmountSats({ minSats: 1, maxSats: 100_000 })).toBe(null);
+      expect(lnurlFixedAmountSats({ minSats: 99, maxSats: 100 })).toBe(null);
+    });
+    it('returns null for missing params or a zero amount', () => {
+      expect(lnurlFixedAmountSats(null)).toBe(null);
+      expect(lnurlFixedAmountSats({ minSats: 0, maxSats: 0 })).toBe(null);
     });
   });
 });

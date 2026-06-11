@@ -50,6 +50,7 @@ import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCou
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
+import SendAmountSection from './SendAmountSection';
 import { perfLog } from '../utils/perfLog';
 
 interface Props {
@@ -234,6 +235,7 @@ const SendSheet: React.FC<Props> = ({
     setInvoiceData,
     setScanned,
     setIsLnurl,
+    setSatsValue,
   });
 
   const processInput = (data: string) => {
@@ -960,56 +962,20 @@ const SendSheet: React.FC<Props> = ({
                     <Text style={styles.detailDescription}>{decoded.description}</Text>
                   ) : null}
 
-                  {needsAmount ? (
-                    /* Lightning address, on-chain, or amount-less bolt11: amount entered on a dedicated step */
-                    <View style={styles.amountSection}>
-                      {resolving ? (
-                        <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
-                        <TouchableOpacity
-                          style={styles.amountPickerRow}
-                          onPress={() => setStep('amount')}
-                          testID="send-amount-picker"
-                          accessibilityLabel="Enter amount"
-                        >
-                          {currentSats > 0 ? (
-                            <>
-                              <Text style={styles.amountPickerValue}>
-                                {currentSats.toLocaleString()} sats
-                              </Text>
-                              {btcPrice ? (
-                                <Text style={styles.amountPickerFiat}>
-                                  {satsToFiatString(currentSats, btcPrice, currency)}
-                                </Text>
-                              ) : null}
-                            </>
-                          ) : (
-                            <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
-                          )}
-                        </TouchableOpacity>
-                      ) : null}
-                      {lnurlParams ? (
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
-                    /* Bolt11 with amount */
-                    <View style={styles.amountDisplay}>
-                      <Text style={styles.amountValue}>
-                        {decoded.amountSats.toLocaleString()} sats
-                      </Text>
-                      {btcPrice ? (
-                        <Text style={styles.amountFiat}>
-                          {satsToFiatString(decoded.amountSats, btcPrice, currency)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : (
-                    <Text style={styles.amountValue}>Amount not specified</Text>
-                  )}
+                  <SendAmountSection
+                    needsAmount={needsAmount}
+                    resolving={resolving}
+                    lnurlParams={lnurlParams}
+                    isOnchainAddress={isOnchainAddress}
+                    isAmountlessBolt11={isAmountlessBolt11}
+                    currentSats={currentSats}
+                    decodedAmountSats={decoded?.amountSats}
+                    btcPrice={btcPrice}
+                    currency={currency}
+                    onEnterAmount={() => setStep('amount')}
+                    styles={styles}
+                    spinnerColor={colors.brandPink}
+                  />
 
                   {isOnchainAddress && invoiceData ? (
                     <Text style={styles.detailAddress}>

@@ -5,7 +5,11 @@ import {
   resolveLnurlDirection,
   LnurlPayParams,
 } from '../services/lnurlService';
-import { type DecodedInvoice, isLightningAddress } from '../utils/sendSheetInput';
+import {
+  type DecodedInvoice,
+  isLightningAddress,
+  lnurlFixedAmountSats,
+} from '../utils/sendSheetInput';
 
 /**
  * Resolves a scanned/pasted payment target — a lightning address or a raw
@@ -27,6 +31,7 @@ export function useSendSheetLnurl(opts: {
   setInvoiceData: (v: string | null) => void;
   setScanned: (v: boolean) => void;
   setIsLnurl: (v: boolean) => void;
+  setSatsValue: (v: string) => void;
 }): void {
   const {
     scanned,
@@ -40,7 +45,15 @@ export function useSendSheetLnurl(opts: {
     setInvoiceData,
     setScanned,
     setIsLnurl,
+    setSatsValue,
   } = opts;
+
+  // Fixed-amount LNURL (min === max): pre-fill the only valid value so the
+  // user isn't prompted to type an amount they have no say over (#833).
+  const prefillFixedAmount = (params: LnurlPayParams) => {
+    const fixed = lnurlFixedAmountSats(params);
+    if (fixed !== null) setSatsValue(String(fixed));
+  };
 
   // Resolve lightning address when scanned.
   useEffect(() => {
@@ -52,6 +65,7 @@ export function useSendSheetLnurl(opts: {
         const params = await resolveLightningAddress(invoiceData);
         if (!cancelled) {
           setLnurlParams(params);
+          prefillFixedAmount(params);
           // When we're still pointed at a named friend (activePubkey +
           // recipientName both set), keep the friendly `Pay to <Name>`
           // label. After "Scan / paste different invoice" clears
@@ -95,6 +109,7 @@ export function useSendSheetLnurl(opts: {
         if (cancelled) return;
         if (resolved.kind === 'pay') {
           setLnurlParams(resolved.params);
+          prefillFixedAmount(resolved.params);
           setDecoded((prev) => ({
             ...prev!,
             description: resolved.params.description || prev?.description || null,
