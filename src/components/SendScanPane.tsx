@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { CameraView } from 'expo-camera';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -34,11 +34,11 @@ const SendScanPane: React.FC<Props> = ({
   // from where the previous one ended.
   const zoomRef = useRef(0);
   const pinchBaseRef = useRef(0);
-  const applyZoom = (value: number) => {
+  const applyZoom = useCallback((value: number) => {
     const clamped = Math.min(1, Math.max(0, value));
     zoomRef.current = clamped;
     setZoom(clamped);
-  };
+  }, []);
 
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
@@ -56,7 +56,7 @@ const SendScanPane: React.FC<Props> = ({
         applyZoom(zoomRef.current > 0 ? 0 : 0.5);
       });
     return Gesture.Simultaneous(pinch, doubleTap);
-  }, []);
+  }, [applyZoom]);
 
   return (
     <View style={styles.cameraContainer}>
@@ -74,7 +74,12 @@ const SendScanPane: React.FC<Props> = ({
         </View>
       ) : (
         <GestureDetector gesture={gesture}>
-          <View style={styles.camera} testID="send-scan-camera">
+          <View
+            style={styles.camera}
+            testID="send-scan-camera"
+            accessible
+            accessibilityLabel="QR code viewfinder. Pinch to zoom, double-tap to toggle zoom."
+          >
             <CameraView
               style={styles.camera}
               facing="back"
@@ -82,7 +87,9 @@ const SendScanPane: React.FC<Props> = ({
               barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
               onBarcodeScanned={onBarcodeScanned}
             />
-            {zoom > 0 && (
+            {/* Hide the badge until the rounded value reads above 1.0× —
+                tiny zooms would otherwise show a misleading "1.0×". */}
+            {Math.round((1 + zoom * 4) * 10) >= 11 && (
               <View style={styles.zoomBadge} pointerEvents="none">
                 <Text style={styles.zoomBadgeText}>{(1 + zoom * 4).toFixed(1)}×</Text>
               </View>
