@@ -19,7 +19,7 @@ import {
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { parseBip21 } from '../utils/bip21';
@@ -51,6 +51,10 @@ import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
+import SendModeTabs, { type SendInputMode } from './SendModeTabs';
+import SendNfcPane from './SendNfcPane';
+import SendScanPane from './SendScanPane';
+import type { NfcTagContent } from '../services/nfcService';
 import { perfLog } from '../utils/perfLog';
 
 interface Props {
@@ -68,7 +72,7 @@ interface Props {
   zapEventId?: string;
 }
 
-type InputMode = 'scan' | 'paste';
+type InputMode = SendInputMode;
 type Step = 'main' | 'amount';
 
 let __sendSheetFirstVisibleLogged = false;
@@ -322,6 +326,32 @@ const SendSheet: React.FC<Props> = ({
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
     processInput(data);
+  };
+
+  // NFC mode: route whatever the tag held into the same pipeline as a
+  // scanned QR. Withdraw codes and Nostr profiles aren't payable from
+  // here, so say why instead of silently doing nothing.
+  const handleNfcContent = (content: NfcTagContent) => {
+    if (scanned) return;
+    switch (content.type) {
+      case 'lnurl-withdraw':
+        Alert.alert(
+          'This is a claim code',
+          'This tag holds a withdraw (claim) code, not a payment request. Use Receive to claim it.',
+        );
+        return;
+      case 'npub':
+        Alert.alert('Not a payment tag', 'This tag holds a Nostr profile, not a payment request.');
+        return;
+      case 'unknown':
+        Alert.alert(
+          'Unsupported tag',
+          "Couldn't find a Lightning invoice, address or LNURL on this tag.",
+        );
+        return;
+      default:
+        processInput(content.data);
+    }
   };
 
   const handlePaste = async () => {
@@ -860,57 +890,22 @@ const SendSheet: React.FC<Props> = ({
                 <Text style={styles.walletLabel}>From: {walletName}</Text>
               )}
 
-              {/* Mode tabs */}
-              {!scanned && (
-                <View style={styles.tabRow}>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
-                    onPress={() => setInputMode('scan')}
-                    accessibilityLabel="Scan tab"
-                    testID="send-tab-scan"
-                  >
-                    <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
-                      Scan
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
-                    onPress={() => setInputMode('paste')}
-                    accessibilityLabel="Input tab"
-                    testID="send-tab-input"
-                  >
-                    <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                      Input
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
+              {!scanned && <SendModeTabs mode={inputMode} onChange={setInputMode} />}
 
-              {/* Scanner or paste input */}
+              {/* Scanner, paste input, or NFC reader */}
               {!scanned ? (
-                inputMode === 'scan' ? (
-                  <View style={styles.cameraContainer}>
-                    {!permission.granted ? (
-                      <View style={styles.permissionContainer}>
-                        <Text style={styles.permissionText}>
-                          Camera access needed to scan QR codes
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.permissionButton}
-                          onPress={requestPermission}
-                        >
-                          <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <CameraView
-                        style={styles.camera}
-                        facing="back"
-                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                        onBarcodeScanned={handleBarCodeScanned}
-                      />
-                    )}
-                  </View>
+                inputMode === 'nfc' ? (
+                  <SendNfcPane
+                    active={visible && !scanned && inputMode === 'nfc'}
+                    onContent={handleNfcContent}
+                  />
+                ) : inputMode === 'scan' ? (
+                  <SendScanPane
+                    permissionGranted={permission.granted}
+                    onRequestPermission={requestPermission}
+                    onBarcodeScanned={handleBarCodeScanned}
+                  />
                 ) : (
                   <View style={styles.pasteSection}>
                     <BottomSheetTextInput

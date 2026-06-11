@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   BackHandler,
   ActivityIndicator,
   AppState,
@@ -28,9 +27,9 @@ import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
-import type { Palette } from '../styles/palettes';
+import { createNfcReadSheetStyles } from '../styles/NfcReadSheet.styles';
 import PrizeWalletPicker from './PrizeWalletPicker';
-import ScanRingSpinner from './ScanRingSpinner';
+import NfcScanIndicator from './NfcScanIndicator';
 import AddWalletWizard from './AddWalletWizard';
 
 interface Props {
@@ -53,7 +52,7 @@ type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'e
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createNfcReadSheetStyles(colors), [colors]);
   const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
   const { lastIncomingPayment } = useWalletLive();
   const [stage, setStage] = useState<SheetStage>('ready');
@@ -389,14 +388,9 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
 
           {stage === 'ready' && (
             <View style={styles.stateContainer}>
-              <View style={styles.iconContainer}>
-                <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
-                {lightningWallets.length > 0 && (
-                  // Armed and waiting for a tag — a thin ring at the faded-circle diameter spins around the NFC icon to read as "scanning".
-                  <View style={styles.scanRing} pointerEvents="none">
-                    <ScanRingSpinner size={100} color={colors.brandPink} strokeWidth={3} />
-                  </View>
-                )}
+              {/* Shared with SendSheet's NFC mode — ring spins only while armed. */}
+              <View style={styles.readyIndicator}>
+                <NfcScanIndicator spinning={lightningWallets.length > 0} />
               </View>
               <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
               <Text style={styles.description}>
@@ -524,138 +518,5 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      flex: 1,
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 40,
-    },
-    title: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 24,
-    },
-    stateContainer: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '100%',
-    },
-    iconContainer: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 20,
-    },
-    scanRing: {
-      ...StyleSheet.absoluteFillObject,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    successIcon: { backgroundColor: colors.greenLight },
-    sleepingIcon: { backgroundColor: colors.brandPinkLight },
-    // 'Zzz' label floats outside the top-right of the icon container,
-    // above the Piggy rather than over its body. Negative offsets push
-    // it past the circle's edge — the BottomSheetView clips overflow
-    // gracefully, so the Zzz sits visually atop the corner like a
-    // hand-drawn snore.
-    zzzBadge: {
-      position: 'absolute',
-      top: -6,
-      right: -8,
-      color: colors.brandPink,
-      fontSize: 24,
-      fontWeight: '800',
-      fontStyle: 'italic',
-      letterSpacing: -1,
-      transform: [{ rotate: '-10deg' }],
-    },
-    errorIcon: { backgroundColor: colors.redLight },
-    errorBadge: {
-      position: 'absolute',
-      bottom: 0,
-      right: 0,
-      backgroundColor: colors.surface,
-      borderRadius: 14,
-      padding: 1,
-    },
-    instruction: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    description: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-      paddingHorizontal: 16,
-      marginBottom: 16,
-    },
-    countdown: {
-      fontSize: 36,
-      fontWeight: '800',
-      color: colors.brandPink,
-      fontVariant: ['tabular-nums'],
-      marginBottom: 12,
-    },
-    primaryButton: {
-      paddingHorizontal: 48,
-      paddingVertical: 14,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    primaryButtonText: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    cancelButton: {
-      paddingHorizontal: 32,
-      paddingVertical: 12,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: colors.divider,
-    },
-    cancelButtonText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    errorButtons: {
-      flexDirection: 'row',
-      gap: 12,
-    },
-    retryButton: {
-      paddingHorizontal: 32,
-      paddingVertical: 12,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    retryButtonText: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.white,
-    },
-  });
 
 export default NfcReadSheet;
