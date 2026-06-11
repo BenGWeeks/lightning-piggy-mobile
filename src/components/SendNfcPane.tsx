@@ -30,13 +30,16 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Refs so the arm loop never goes stale against parent re-renders and
-  // the AppState effect can re-subscribe on `active` alone.
-  const activeRef = useRef(active);
+  // the AppState effect can re-subscribe on `active` alone. `activeRef`
+  // is owned by the arm/cleanup effect below (NOT synced from the prop
+  // here) so unmount cleanup can force it false — otherwise the delayed
+  // re-arm timer could re-enable reader-mode after the pane is gone.
+  const activeRef = useRef(false);
+  const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onContentRef = useRef(onContent);
   useEffect(() => {
-    activeRef.current = active;
     onContentRef.current = onContent;
-  }, [active, onContent]);
+  }, [onContent]);
 
   const arm = useCallback(async () => {
     setErrorMessage('');
@@ -52,7 +55,7 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
       onContentRef.current(content);
       // If the parent didn't advance (e.g. the tag was a claim code and
       // only raised an alert), quietly re-arm for another tap.
-      setTimeout(() => {
+      rearmTimerRef.current = setTimeout(() => {
         if (activeRef.current) void arm();
       }, 600);
     } catch (err) {
@@ -71,8 +74,19 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
 
   useEffect(() => {
     if (!active) return;
+    activeRef.current = true;
     void arm();
-    return () => cancelNfcOperation();
+    return () => {
+      // Force the gate false BEFORE cancelling so the pending re-arm
+      // timer and any in-flight scan promise no-op after close,
+      // mode-switch, or unmount (Copilot #838 r1).
+      activeRef.current = false;
+      if (rearmTimerRef.current) {
+        clearTimeout(rearmTimerRef.current);
+        rearmTimerRef.current = null;
+      }
+      cancelNfcOperation();
+    };
   }, [active, arm]);
 
   // Android pauses reader-mode when the app backgrounds and doesn't

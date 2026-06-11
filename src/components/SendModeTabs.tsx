@@ -32,6 +32,8 @@ const SendModeTabs: React.FC<Props> = ({ mode, onChange }) => {
           style={[styles.tab, mode === m && styles.tabActive]}
           onPress={() => onChange(m)}
           accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityState={{ selected: mode === m }}
           testID={testID}
         >
           <Icon
