@@ -145,6 +145,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          cache: npm
 
       # `eas build:list` (below) resolves the EAS project by EVALUATING
       # app.config.ts, whose `extra.eas.projectId` is the only place the id
@@ -276,6 +277,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
 
       # Required so `eas build:list` can evaluate app.config.ts (which holds
       # the only copy of extra.eas.projectId and imports expo/config). Missing
