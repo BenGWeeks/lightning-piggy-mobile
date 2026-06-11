@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { satsToFiatString } from '../services/fiatService';
-import { LnurlPayParams } from '../services/lnurlService';
+import type { LnurlPayParams } from '../services/lnurlService';
 import { lnurlFixedAmountSats } from '../utils/sendSheetInput';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
 
