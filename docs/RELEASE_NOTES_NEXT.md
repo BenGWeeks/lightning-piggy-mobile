@@ -12,6 +12,6 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ## What to test in the next release
 
-### Fixed
+### New
 
-- **Fixed-amount payment codes no longer ask for an amount.** Scanning or pasting an LNURL pay code whose minimum and maximum are the same (a fixed price) now fills the amount in automatically and shows it read-only — just tap Send.
+- **Pay by NFC from the Send sheet.** Send now has three modes — QR scan, paste, and NFC — switched with icon toggles. Pick the NFC waves, hold your phone against a Lightning payment tag (invoice, Lightning address or LNURL), and the payment details fill in just like scanning a QR.
