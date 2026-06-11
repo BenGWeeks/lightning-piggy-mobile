@@ -56,7 +56,6 @@ const SendScanPane: React.FC<Props> = ({
         applyZoom(zoomRef.current > 0 ? 0 : 0.5);
       });
     return Gesture.Simultaneous(pinch, doubleTap);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
