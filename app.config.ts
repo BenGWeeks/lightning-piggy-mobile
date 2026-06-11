@@ -40,9 +40,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'lightning-piggy-app',
   version: pkg.version,
   orientation: 'portrait',
-  // Per-variant app icon (PiggyBank glyph on brand colour): production gets
-  // the pink radial gradient; dev a flat blue and preview a flat purple, so
-  // the three installs stay instantly distinguishable on the home screen.
+  // Per-variant app icon (PiggyBank glyph on brand colour): radial gradients
+  // for all three — pink (production), blue (dev), purple (preview) — so the
+  // three installs stay instantly distinguishable on the home screen.
   icon: IS_DEV
     ? './assets/icon-dev.png'
     : IS_PREVIEW

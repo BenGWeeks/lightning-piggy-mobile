@@ -40,7 +40,10 @@ GRAD_DEV='#5AA0EA-#2862A8'      # blue   (dev)
 GRAD_PREVIEW='#A98BFA-#6D28D9'  # purple (preview)
 # ---------------------------------------------------------------------------
 
-TMP=$(mktemp -d)
+# Portable mktemp: GNU coreutils accepts `mktemp -d` with no template, but
+# BSD/macOS mktemp requires a template or `-t` (same pattern as
+# scripts/check-elf-alignment.sh).
+TMP=$(mktemp -d -t lp-app-icons.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 
 # Lucide PiggyBank v1.7.0 — body, eye, tail.
@@ -59,7 +62,7 @@ convert -background none "$TMP/pig.svg" -resize 2048x2048 -trim +repage "$TMP/pi
 convert -background none "$TMP/zap.svg" -resize 2048x2048 -trim +repage "$TMP/zap.png"
 convert -size "${MARK_BASE}x${MARK_BASE}" xc:none \
   \( "$TMP/pig.png" -resize "${MARK_BASE}x${MARK_BASE}" \) -gravity center -composite \
-  \( "$TMP/zap.png" -resize "${BOLT_SCALE}x${BOLT_SCALE}" \) -gravity center -geometry "+0${BOLT_NUDGE_Y}" -composite \
+  \( "$TMP/zap.png" -resize "${BOLT_SCALE}x${BOLT_SCALE}" \) -gravity center -geometry "+0$(printf '%+d' "$BOLT_NUDGE_Y")" -composite \
   "$TMP/mark.png"
 
 # Full icon: gradient background + centred mark.
