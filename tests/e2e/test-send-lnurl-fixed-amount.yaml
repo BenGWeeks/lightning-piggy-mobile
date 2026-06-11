@@ -1,0 +1,95 @@
+appId: com.lightningpiggy.app.dev
+name: Send — fixed-amount LNURL (min = max) skips the amount prompt
+---
+# Regression test for #833: an LNURL-pay whose server pins the amount
+# (minSendable === maxSendable) must NOT show the "Enter amount" picker.
+# The Send sheet pre-fills the only valid value and renders it read-only
+# (id: send-amount-fixed) with a "Fixed amount" caption.
+#
+# Fixture: the lnurl1 string below bech32-encodes a gist raw URL serving
+# static LUD-06 payRequest JSON with minSendable = maxSendable = 100000
+# msat (100 sats):
+#   https://gist.githubusercontent.com/BenGWeeks/dee66c68f929bc414489b9a39c47f58d/raw/pay.json
+#   {"tag":"payRequest","callback":"https://example.com/cb",
+#    "minSendable":100000,"maxSendable":100000,
+#    "metadata":"[[\"text/plain\",\"Birthday card: 100 sats\"]]","commentAllowed":0}
+# No payment is made — the test stops at the details card (the callback
+# host is example.com, so a send attempt would fail anyway).
+
+- launchApp
+
+# First bundle from a cold Metro can take a while.
+- waitForAnimationToEnd: { timeout: 10000 }
+
+# The app restores navigation state, so a previous session may have left
+# stacked screens (no tab bar) on top — pop back to the tabs first via
+# in-app "Go back" arrows, NOT hardware back (at the nav root hardware
+# back exits the app). Each round waits for the UI to mount (cold boot
+# shows only a spinner, which satisfies waitForAnimationToEnd), and the
+# whole round no-ops once the tab bar is reachable.
+- repeat:
+    times: 3
+    commands:
+      - runFlow:
+          when:
+            notVisible: { id: 'tab-home' }
+          commands:
+            # Generous: a restored conversation can freeze the JS thread
+            # for >30s while the DM inbox decrypts (#695).
+            - extendedWaitUntil:
+                visible: 'Go back'
+                timeout: 30000
+                optional: true
+            - runFlow:
+                when:
+                  visible: 'Go back'
+                commands:
+                  - tapOn: 'Go back'
+                  - waitForAnimationToEnd: { timeout: 2000 }
+# A payment-received BrandedAlert can be sitting on top after launch
+# (test Piggies receive real sats) — dismiss it before reaching for tabs.
+- runFlow:
+    when:
+      visible: { id: 'branded-alert-button-0' }
+    commands:
+      - tapOn: { id: 'branded-alert-button-0' }
+      - waitForAnimationToEnd: { timeout: 2000 }
+
+- extendedWaitUntil:
+    visible: { id: 'tab-home' }
+    timeout: 30000
+- tapOn: { id: 'tab-home' }
+- tapOn: { id: 'btn-send' }
+- waitForAnimationToEnd: { timeout: 4000 }
+
+# Paste the fixed-amount LNURL via the in-app clipboard button. Do NOT
+# use inputText here: Maestro's synthetic keystrokes race RN's controlled
+# TextInput and the 156-char string arrives scrambled (one wrong char =
+# bech32 checksum failure). Same workaround as test-add-wallet-via-paste.
+#
+# Prerequisite: seed the host clipboard, then focus the emulator window
+# once so it syncs to the device (run before `maestro test`):
+#   LNURL='lnurl1dp68gurn8ghj7emfwd6zuemfw3582cn4wdjhycm0de6x2mn59e3k7mf0gfjku36hv4jkkue0v3jk2d3kvvmrse3exgukyce5xy6rgwpevgukzveevv6rwe348pjz7unpwuhhqcte9e48xmmwq0efhw'
+#   qdbus6 org.kde.klipper /klipper org.kde.klipper.klipper.setClipboardContents "$LNURL" \
+#     || echo -n "$LNURL" | wl-copy   # or: xclip -selection clipboard
+#   xdotool windowactivate $(xdotool search --name "Android Emulator" | head -1)
+- tapOn: { id: 'send-tab-input' }
+# handlePaste calls processInput directly — no Go tap needed (and the
+# paste section unmounts as soon as the input is recognised).
+- tapOn: { id: 'send-paste-clipboard' }
+- waitForAnimationToEnd: { timeout: 1500 }
+
+# Resolution fetches the payRequest over the network, then the fixed
+# amount renders read-only — no picker, value pre-filled.
+- extendedWaitUntil:
+    visible: { id: 'send-amount-fixed' }
+    timeout: 15000
+- assertVisible: '100 sats'
+- assertVisible: 'Fixed amount'
+- assertNotVisible: { id: 'send-amount-picker' }
+
+# Send must already be enabled (the pre-fill satisfies canSend) — the
+# button is tappable without ever visiting AmountEntryScreen.
+- assertVisible:
+    text: 'Send'
+    enabled: true
