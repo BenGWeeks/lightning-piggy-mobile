@@ -34,6 +34,12 @@ const getAndroidPackage = () => {
   return 'com.lightningpiggy.app';
 };
 
+const getIconPath = () => {
+  if (IS_DEV) return './assets/icon-dev.png';
+  if (IS_PREVIEW) return './assets/icon-preview.png';
+  return './assets/icon.png';
+};
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
@@ -43,11 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Per-variant app icon (PiggyBank glyph on brand colour): radial gradients
   // for all three — pink (production), blue (dev), purple (preview) — so the
   // three installs stay instantly distinguishable on the home screen.
-  icon: IS_DEV
-    ? './assets/icon-dev.png'
-    : IS_PREVIEW
-      ? './assets/icon-preview.png'
-      : './assets/icon.png',
+  icon: getIconPath(),
   userInterfaceStyle: 'light',
   // Splash screen: the pig + brand wordmark on brand-pink. Same asset
   // IntroScreen uses so first-time users get a continuous pig → Home

@@ -29,6 +29,7 @@ SIZE=1024          # master icon size (square; the OS rounds the corners)
 GLYPH_SCALE=640    # mark size within the full icon
 FG_SCALE=545       # mark size for the Android adaptive foreground (safe zone)
 MONO=432           # Android themed/monochrome icon size
+MONO_MARK=260      # mark size within the monochrome canvas
 MARK_BASE=1280     # canvas the mark is composed on (pig fills it)
 STROKE=1.5         # pig outline stroke width (Lucide's native value)
 BOLT_SCALE=370     # bolt size on the MARK_BASE canvas
@@ -89,7 +90,7 @@ convert -size "${SIZE}x${SIZE}" xc:none \
 
 # Android themed/monochrome: mark on transparent (the system tints it).
 convert -size "${MONO}x${MONO}" xc:none \
-  \( "$TMP/mark.png" -resize 260x260 \) -gravity center -composite \
+  \( "$TMP/mark.png" -resize "${MONO_MARK}x${MONO_MARK}" \) -gravity center -composite \
   assets/android-icon-monochrome.png
 
 # Web favicon — derived from the production icon (browsers downscale it).
