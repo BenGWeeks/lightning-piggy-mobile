@@ -38,9 +38,25 @@ function emit(): void {
   for (const l of listeners) l();
 }
 
+// Cap on how many sent-message statuses we persist (#866). The store is one
+// AsyncStorage JSON blob per account; without a bound it grows for the life of
+// the install. A `Map` preserves insertion order, so the most-RECENT sends are
+// the tail — we keep the last `MAX_PERSISTED_STATUSES` and drop the oldest.
+// 500 covers far more than any thread renders at once while staying a small blob.
+export const MAX_PERSISTED_STATUSES = 500;
+
+// Snapshot the map for persistence, evicting the oldest entries past the cap.
+// Insertion order (Map semantics) is the recency key — no Date.now(), so it's
+// deterministic and test-stable. Returns a plain object for AsyncStorage.
+function statusesForPersist(): Record<string, DeliveryStatus> {
+  if (statuses.size <= MAX_PERSISTED_STATUSES) return Object.fromEntries(statuses);
+  const entries = [...statuses.entries()];
+  return Object.fromEntries(entries.slice(entries.length - MAX_PERSISTED_STATUSES));
+}
+
 function schedulePersist(): void {
   if (!persist) return;
-  persist(Object.fromEntries(statuses));
+  persist(statusesForPersist());
 }
 
 // Wire in the durable backing store (AsyncStorage in the app; a stub in tests).
@@ -49,10 +65,14 @@ export function setDmDeliveryPersist(fn: Persist | null): void {
   persist = fn;
 }
 
-// Seed the in-memory map from persisted state on cold start. Does NOT emit —
+// Seed the in-memory map from persisted state. Starts from a CLEAN map: on an
+// account switch the previous user's in-memory statuses MUST NOT survive into
+// the new user's map, or a later persist writes the combined set under the new
+// account's storage key (cross-account data mixing, #866). Does NOT emit —
 // callers seed before any subscriber mounts; it also won't re-persist what it
 // just read back.
 export function hydrateDmDeliveryStore(persisted: Record<string, DeliveryStatus>): void {
+  statuses.clear();
   for (const [eventId, status] of Object.entries(persisted)) {
     if (eventId) statuses.set(eventId, status);
   }
@@ -70,6 +90,13 @@ export function getDmDeliveryStatus(eventId: string | undefined): DeliveryStatus
 // re-render in a loop.
 export function getAllDmDeliveryStatuses(): Record<string, DeliveryStatus> {
   return snapshot;
+}
+
+// The capped view used for persistence (the teardown flush + debounced writes).
+// Keeps the in-memory snapshot complete for rendering while bounding what hits
+// AsyncStorage to the most-recent `MAX_PERSISTED_STATUSES` (#866).
+export function getPersistableDmDeliveryStatuses(): Record<string, DeliveryStatus> {
+  return statusesForPersist();
 }
 
 // Write/overwrite a status, notify subscribers, and persist. A settled status

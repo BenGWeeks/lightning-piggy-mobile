@@ -128,13 +128,25 @@ export async function publishWrapsTrackingRelays(
     }),
   );
 
+  // Total relays attempted — carried onto every snapshot as the tick's `total`
+  // so the EARLY snapshot (only the fast relay settled) reads as "1 of N", not
+  // "1 of 1" (which would paint a premature double-tick). The finalize below
+  // reconciles to the real per-relay breakdown once every relay settles; a
+  // relay promise that never settles is bounded by DM_PUBLISH_TIMEOUT_MS above,
+  // which records it as failed so the final `total` still equals this count.
+  const targetRelayCount = relays.length;
+
   // Background-finalize: once every relay has settled, hand the caller the
   // complete breakdown so a still-in-flight relay can settle the tick.
   if (onFinalized) {
     void Promise.all(fullSettlePromises).then(() =>
-      onFinalized(aggregateRelayResults(settles, meta)),
+      onFinalized(aggregateRelayResults(settles, meta, targetRelayCount)),
     );
   }
 
-  return { wrapsPublished: published, errors, delivery: aggregateRelayResults(settles, meta) };
+  return {
+    wrapsPublished: published,
+    errors,
+    delivery: aggregateRelayResults(settles, meta, targetRelayCount),
+  };
 }

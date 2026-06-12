@@ -59,8 +59,11 @@ describe('publishWrapsTrackingRelays — early-resolve + background settle (#857
 
     fast.resolve('ok');
     const early = await sendPromise;
-    // Early snapshot: only the fast relay landed → single tick (1 of 1 known).
-    expect(summariseDelivery(early.delivery)).toEqual({ ok: 1, total: 1 });
+    // Early snapshot: only the fast relay landed, but `total` is the ATTEMPTED
+    // relay count (2), so this reads "1 of 2" → single tick, NOT a premature
+    // double (which "1 of 1" would have painted while the slow relay is still
+    // in flight). This is the regression #866 guards against.
+    expect(summariseDelivery(early.delivery)).toEqual({ ok: 1, total: 2 });
 
     // Now the slow relay acks; the background finalize fires with BOTH relays.
     slow.resolve('ok');
@@ -68,6 +71,54 @@ describe('publishWrapsTrackingRelays — early-resolve + background settle (#857
     expect(finalized).not.toBeNull();
     expect(summariseDelivery(finalized as unknown as DeliveryStatus)).toEqual({ ok: 2, total: 2 });
     expect((finalized as unknown as DeliveryStatus).eventId).toBe('rumor-1');
+  });
+
+  it('does not paint a premature double-tick when one of many relays acks first', async () => {
+    // 1 fast ack, 3 relays still in flight. The early snapshot must report the
+    // FULL target count as `total` (4), so the tick is single ("1 of 4"), not a
+    // double — partial coverage must not masquerade as full delivery (#866).
+    const fast = deferred<string>();
+    const inFlight = () => new Promise<string>(() => {});
+    const pool: RelayPublisher = {
+      publish: () => [fast.promise, inFlight(), inFlight(), inFlight()],
+    };
+    const sendPromise = publishWrapsTrackingRelays(
+      [wrap('w1')],
+      ['wss://fast', 'wss://b', 'wss://c', 'wss://d'],
+      pool,
+    );
+    fast.resolve('ok');
+    const early = await sendPromise;
+    expect(summariseDelivery(early.delivery)).toEqual({ ok: 1, total: 4 });
+    // Only the fast relay has a known result; the other three are absent until
+    // they settle — but `total` already reflects all four attempted relays.
+    expect(early.delivery.relayResults).toEqual({ 'wss://fast': 'ok' });
+    expect(early.delivery.targetRelayCount).toBe(4);
+  });
+
+  it('reports total as the attempted count even when a relay never settles', async () => {
+    // fast acks, slow hangs forever and finalize never fires — the tick must
+    // stay "1 of 2" (single), never strand at a wrong "all relays" state.
+    const fast = deferred<string>();
+    const neverSettles = new Promise<string>(() => {});
+    const pool: RelayPublisher = { publish: () => [fast.promise, neverSettles] };
+    let finalized: DeliveryStatus | null = null;
+    const sendPromise = publishWrapsTrackingRelays(
+      [wrap('w1')],
+      ['wss://fast', 'wss://stuck'],
+      pool,
+      undefined,
+      (d) => {
+        finalized = d;
+      },
+    );
+    fast.resolve('ok');
+    const early = await sendPromise;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(summariseDelivery(early.delivery)).toEqual({ ok: 1, total: 2 });
+    // The stuck relay never settles, so the background finalize cannot fire —
+    // the early snapshot is already the correct (and final) single-tick state.
+    expect(finalized).toBeNull();
   });
 
   it('records an all-failed send (every relay rejects) with delivered=false', async () => {

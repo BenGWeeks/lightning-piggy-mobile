@@ -3,7 +3,7 @@ import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import {
   hydrateDmDeliveryStore,
   setDmDeliveryPersist,
-  getAllDmDeliveryStatuses,
+  getPersistableDmDeliveryStatuses,
 } from '../utils/dmDeliveryStore';
 
 // AsyncStorage key for the per-user eventId-keyed delivery store (#857). One
@@ -27,18 +27,26 @@ let writeTimer: ReturnType<typeof setTimeout> | null = null;
  */
 export async function bindDmDeliveryStorePersistence(user: string): Promise<() => void> {
   const key = dmDeliveryStoreKey(user);
+  // Always hydrate — even to an empty map — so binding a new account CLEARS the
+  // previous user's in-memory statuses. Skipping hydration when there's no blob
+  // would leave the prior account's data to be re-persisted under this key
+  // (cross-account mixing, #866). hydrateDmDeliveryStore clears before applying.
+  let loaded: Record<string, DeliveryStatus> = {};
   try {
     const raw = await AsyncStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, DeliveryStatus>;
-      if (parsed && typeof parsed === 'object') hydrateDmDeliveryStore(parsed);
+      if (parsed && typeof parsed === 'object') loaded = parsed;
     }
   } catch {
     // Unreadable blob — start empty; the next send re-persists.
   }
+  hydrateDmDeliveryStore(loaded);
 
   const flush = () => {
-    void AsyncStorage.setItem(key, JSON.stringify(getAllDmDeliveryStatuses())).catch(() => {});
+    void AsyncStorage.setItem(key, JSON.stringify(getPersistableDmDeliveryStatuses())).catch(
+      () => {},
+    );
   };
 
   setDmDeliveryPersist(() => {

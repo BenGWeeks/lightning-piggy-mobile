@@ -22,6 +22,13 @@ export interface DeliveryStatus {
   // count as "sent" today.
   delivered: boolean;
   relayResults: Record<string, RelayDeliveryResult>;
+  // How many relays the send ATTEMPTED — the full target set, not just the
+  // relays that have settled so far (#857). The early/optimistic snapshot only
+  // has settles for the fast relays, so `relayResults` undercounts; `total`
+  // must reflect the attempted count or a single fast ack reads as "all relays"
+  // (ok === total) and shows a premature double-tick. Undefined on legacy rows
+  // / pre-publish failures → callers fall back to the settled-relay count.
+  targetRelayCount?: number;
   // Optional event identity for the long-press detail sheet (#856). `eventId`
   // is the NIP-17 rumor id (the stable inner kind-14/15 event id, shared
   // across the recipient + self wraps); `kind` is the rumor kind (14 text,
@@ -98,6 +105,12 @@ export interface RelaySettle {
 export function aggregateRelayResults(
   settles: RelaySettle[],
   meta?: { eventId?: string; kind?: number },
+  // Number of relays the send attempted (the full target set). Carried onto the
+  // status as `targetRelayCount` so the early snapshot reports the true total
+  // even though only the fast relays have settled (#857). Omit for callers that
+  // don't track a target (pure folds in tests) — `total` then derives from the
+  // settled relays as before.
+  targetRelayCount?: number,
 ): DeliveryStatus {
   const relayResults: Record<string, RelayDeliveryResult> = {};
   for (const s of settles) {
@@ -110,14 +123,24 @@ export function aggregateRelayResults(
     }
   }
   const delivered = Object.values(relayResults).some((r) => r === 'ok');
-  return { delivered, relayResults, eventId: meta?.eventId, kind: meta?.kind };
+  return { delivered, relayResults, eventId: meta?.eventId, kind: meta?.kind, targetRelayCount };
 }
 
 /** Count of relays that accepted, and the total relays attempted. Drives the
- * breakdown copy ("Sent to 4 of 6 relays"). */
+ * breakdown copy ("Sent to 4 of 6 relays") and the single→double tick. `total`
+ * is the attempted relay count (`targetRelayCount`) when known, so an early
+ * snapshot with only the fast relay settled reads as "1 of N" (single tick) —
+ * NOT "1 of 1" (premature double). Falls back to the settled-relay count for
+ * legacy rows that predate `targetRelayCount`. Guards against a stale target
+ * undercounting by never reporting fewer relays than have actually settled. */
 export function summariseDelivery(status: DeliveryStatus): { ok: number; total: number } {
   const values = Object.values(status.relayResults);
-  return { ok: values.filter((r) => r === 'ok').length, total: values.length };
+  const settledTotal = values.length;
+  const total =
+    status.targetRelayCount !== undefined
+      ? Math.max(status.targetRelayCount, settledTotal)
+      : settledTotal;
+  return { ok: values.filter((r) => r === 'ok').length, total };
 }
 
 /** Strip the `wss://` / `ws://` scheme and trailing slash for a compact relay

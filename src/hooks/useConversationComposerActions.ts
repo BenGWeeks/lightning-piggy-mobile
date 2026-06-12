@@ -75,11 +75,14 @@ export function useConversationComposerActions(params: {
   // `local-` → the real eventId can't strip it: the store is keyed by the stable
   // rumor eventId, which is identical on the optimistic row and the echo.
   //
-  // We key the optimistic row's `id` to that same eventId, so when the echo
-  // (id === eventId) replaces it the row id is unchanged — the bubble keeps
-  // resolving its status from the store by the same key. A failed send keeps the
-  // bubble (red tick + Re-publish), and the draft is cleared on send either way
-  // (Ben-confirmed standard-messaging behaviour) — retry is via the bubble.
+  // The optimistic row's `id` is `local-${rumorId}` (a temporary row id), and
+  // the row carries the stable rumor id as `rumorId`. The echo is deduped by
+  // text+window in mergeConversationMessages (its id is the OUTER wrap id, not
+  // the rumor id — so it's NOT an id-equality swap), and the tick follows the
+  // message because the delivery store is keyed by `rumorId`, which both rows
+  // share. A failed send keeps the bubble (red tick + Re-publish), and the
+  // draft is cleared on send either way (Ben-confirmed standard-messaging
+  // behaviour) — retry is via the bubble.
   const sendText = useCallback(
     async (text: string): Promise<boolean> => {
       const createdAt = Math.floor(Date.now() / 1000);

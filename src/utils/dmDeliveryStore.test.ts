@@ -2,9 +2,11 @@ import {
   setDmDeliveryStatus,
   getDmDeliveryStatus,
   getAllDmDeliveryStatuses,
+  getPersistableDmDeliveryStatuses,
   subscribeDmDelivery,
   hydrateDmDeliveryStore,
   setDmDeliveryPersist,
+  MAX_PERSISTED_STATUSES,
   __resetDmDeliveryStore,
 } from './dmDeliveryStore';
 import { pendingDelivery, failedDelivery, type DeliveryStatus } from './dmDeliveryStatus';
@@ -70,6 +72,53 @@ describe('dmDeliveryStore — eventId-keyed delivery store (#857)', () => {
     expect(getDmDeliveryStatus('e4')?.delivered).toBe(true);
     // Hydration must not trigger a persist write (it just read it back).
     expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('clears the previous map on hydrate so accounts cannot mix (#866)', () => {
+    // Account A's send lands in the in-memory map.
+    setDmDeliveryStatus('accountA-event', delivered({ 'wss://a': 'ok' }));
+    expect(getDmDeliveryStatus('accountA-event')?.delivered).toBe(true);
+    // Switching to account B hydrates with B's blob — A's status must be GONE,
+    // or a later persist would write the combined set under B's storage key.
+    hydrateDmDeliveryStore({ 'accountB-event': delivered({ 'wss://b': 'ok' }) });
+    expect(getDmDeliveryStatus('accountA-event')).toBeUndefined();
+    expect(getDmDeliveryStatus('accountB-event')?.delivered).toBe(true);
+    expect(Object.keys(getAllDmDeliveryStatuses())).toEqual(['accountB-event']);
+  });
+
+  it('hydrating with an empty map fully clears in-memory statuses (#866)', () => {
+    setDmDeliveryStatus('stale', delivered({ 'wss://a': 'ok' }));
+    hydrateDmDeliveryStore({});
+    expect(getAllDmDeliveryStatuses()).toEqual({});
+  });
+
+  it('caps the persisted map at MAX_PERSISTED_STATUSES, keeping the most recent (#866)', () => {
+    const persist = jest.fn();
+    setDmDeliveryPersist(persist);
+    const total = MAX_PERSISTED_STATUSES + 50;
+    for (let i = 0; i < total; i++) {
+      setDmDeliveryStatus(`e${i}`, delivered({ 'wss://a': 'ok' }));
+    }
+    const persisted = getPersistableDmDeliveryStatuses();
+    const keys = Object.keys(persisted);
+    expect(keys).toHaveLength(MAX_PERSISTED_STATUSES);
+    // The oldest 50 are evicted; the newest are kept (insertion-order recency).
+    expect(persisted['e0']).toBeUndefined();
+    expect(persisted[`e${total - 1}`]).toBeDefined();
+    expect(persisted[`e${total - MAX_PERSISTED_STATUSES}`]).toBeDefined();
+    expect(persisted[`e${total - MAX_PERSISTED_STATUSES - 1}`]).toBeUndefined();
+    // The last debounced persist payload is also capped.
+    const lastPayload = persist.mock.calls[persist.mock.calls.length - 1][0];
+    expect(Object.keys(lastPayload)).toHaveLength(MAX_PERSISTED_STATUSES);
+  });
+
+  it('does not cap the in-memory snapshot used for rendering (#866)', () => {
+    // Only the persisted blob is bounded; the live snapshot keeps everything so
+    // an on-screen bubble older than the cap still resolves its tick.
+    for (let i = 0; i < MAX_PERSISTED_STATUSES + 10; i++) {
+      setDmDeliveryStatus(`r${i}`, delivered({ 'wss://a': 'ok' }));
+    }
+    expect(Object.keys(getAllDmDeliveryStatuses())).toHaveLength(MAX_PERSISTED_STATUSES + 10);
   });
 
   it('persists the full map on every settle so a cold restart can rehydrate', () => {
