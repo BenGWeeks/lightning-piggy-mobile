@@ -283,6 +283,7 @@ export function mergeConversationMessages(
     // this the user would see two bubbles for the same GIF/text: the
     // optimistic local- row persisted by ConversationScreen on send,
     // plus the NIP-17 self-wrap echo from the relay.
+    let inheritedDelivery: ConversationMessage['deliveryStatus'];
     if (!m.id.startsWith('local-')) {
       let bestKey: string | null = null;
       let bestDelta = Infinity;
@@ -297,9 +298,22 @@ export function mergeConversationMessages(
           bestKey = k;
         }
       }
-      if (bestKey !== null) map.delete(bestKey);
+      if (bestKey !== null) {
+        // Carry the per-relay delivery breakdown (#856) from the dropped
+        // optimistic row onto the real-id echo, so the sent bubble keeps its
+        // tick after the relay self-wrap replaces the local- row. The echo
+        // itself has no delivery info — only the send path that produced the
+        // local row does.
+        inheritedDelivery = map.get(bestKey)?.deliveryStatus;
+        map.delete(bestKey);
+      }
     }
-    map.set(m.id, m);
+    // A fresh echo with no delivery info must not clobber a delivery status we
+    // already attached to this same id on a prior merge (#856). Once the tick
+    // is on a real-id row, re-decrypting the same wrap on the next refresh
+    // re-supplies the row without delivery — keep the existing one.
+    const existingDelivery = inheritedDelivery ?? map.get(m.id)?.deliveryStatus;
+    map.set(m.id, existingDelivery ? { ...m, deliveryStatus: existingDelivery } : m);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   // Keep the newest DM_CONV_CAP messages; drop oldest.

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio, Check, Clock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
   createMessageBubbleStyles,
@@ -25,6 +25,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { summariseDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
@@ -105,7 +106,48 @@ interface Props {
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
+  // Per-relay delivery breakdown for a sent (fromMe) message (#856). Drives
+  // the footer tick; absent on received bubbles. Long-pressing the bubble
+  // calls `onShowDelivery` with this status so the parent can present the
+  // per-relay breakdown ("Sent to 4 of 6 relays").
+  deliveryStatus?: DeliveryStatus;
+  onShowDelivery?: (status: DeliveryStatus) => void;
 }
+
+/**
+ * Subtle delivery indicator for a sent DM (#856). One tick once ≥1 relay
+ * accepted (the existing send-success threshold); a faint clock while a status
+ * is being tracked but no relay has acked yet; an amber tick when delivery is
+ * partial (some relays rejected). NOT one glyph per relay — recipient relay
+ * lists run to 11; the per-relay detail lives behind a long-press.
+ */
+const DeliveryTick: React.FC<{
+  styles: Styles;
+  status: DeliveryStatus;
+  testID: string;
+}> = ({ styles, status, testID }) => {
+  const { ok, total } = summariseDelivery(status);
+  // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
+  // node Maestro can resolve — testIDs on lucide-react-native icons don't
+  // reliably surface in the accessibility tree.
+  if (!status.delivered) {
+    return (
+      <View testID={testID} accessibilityLabel="Message pending">
+        <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
+      </View>
+    );
+  }
+  const partial = total > 0 && ok < total;
+  const tintStyle = partial ? styles.deliveryTickPartial : styles.deliveryTickDelivered;
+  return (
+    <View
+      testID={testID}
+      accessibilityLabel={partial ? `Sent to ${ok} of ${total} relays` : 'Sent'}
+    >
+      <Check size={13} strokeWidth={2.5} color={StyleSheet.flatten(tintStyle).color as string} />
+    </View>
+  );
+};
 
 type Styles = MessageBubbleStyles;
 
@@ -186,6 +228,8 @@ const MessageBubble: React.FC<Props> = ({
   onOpenImageFullscreen,
   onToggleSecretMode,
   testIdPrefix,
+  deliveryStatus,
+  onShowDelivery,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
@@ -194,6 +238,24 @@ const MessageBubble: React.FC<Props> = ({
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // Footer for a sent text bubble: timestamp + delivery tick (#856). Only
+  // rendered on `fromMe` bubbles that carry a tracked status; received bubbles
+  // and untracked sends fall back to the bare timestamp. Long-press surfaces
+  // the per-relay breakdown via the parent.
+  const showDeliveryFooter = fromMe && !!deliveryStatus;
+  const DeliveryFooter = showDeliveryFooter ? (
+    <View style={styles.bubbleFooterRow}>
+      <Text style={[styles.bubbleFooterTime, fromMe && styles.bubbleFooterTimeMe]}>
+        {formatTime(createdAt)}
+      </Text>
+      <DeliveryTick
+        styles={styles}
+        status={deliveryStatus as DeliveryStatus}
+        testID="dm-bubble-delivery-tick"
+      />
+    </View>
+  ) : null;
 
   if (content.kind === 'gif') {
     return (
@@ -730,39 +792,62 @@ const MessageBubble: React.FC<Props> = ({
     return null;
   })();
 
-  return (
-    <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
-        {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
-          {hasLink(text)
-            ? linkifySegments(text).map((seg, i) =>
-                seg.url ? (
-                  <Text
-                    key={i}
-                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
-                    onPress={() => {
-                      // openURL rejects on a malformed URL / missing handler —
-                      // swallow so a bad link can't raise an unhandled rejection.
-                      void Linking.openURL(seg.url as string).catch(() => {});
-                    }}
-                    accessibilityRole="link"
-                    accessibilityLabel={`Open link ${seg.url}`}
-                    testID={`${testIdPrefix}-link-${id}-${i}`}
-                  >
-                    {seg.text}
-                  </Text>
-                ) : (
-                  seg.text
-                ),
-              )
-            : text}
-        </Text>
-        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
+  // Long-pressing a sent bubble with a tracked status opens the per-relay
+  // breakdown. Only sent bubbles carrying a status are long-pressable; others
+  // render the plain non-interactive bubble unchanged.
+  const bubbleBody = (
+    <>
+      {SenderLabel}
+      <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+        {hasLink(text)
+          ? linkifySegments(text).map((seg, i) =>
+              seg.url ? (
+                <Text
+                  key={i}
+                  style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                  onPress={() => {
+                    // openURL rejects on a malformed URL / missing handler —
+                    // swallow so a bad link can't raise an unhandled rejection.
+                    void Linking.openURL(seg.url as string).catch(() => {});
+                  }}
+                  accessibilityRole="link"
+                  accessibilityLabel={`Open link ${seg.url}`}
+                  testID={`${testIdPrefix}-link-${id}-${i}`}
+                >
+                  {seg.text}
+                </Text>
+              ) : (
+                seg.text
+              ),
+            )
+          : text}
+      </Text>
+      {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
+      {DeliveryFooter ?? (
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
         </Text>
-      </View>
+      )}
+    </>
+  );
+
+  return (
+    <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+      {showDeliveryFooter && onShowDelivery ? (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onLongPress={() => onShowDelivery(deliveryStatus as DeliveryStatus)}
+          accessibilityLabel="Sent message, long-press for delivery detail"
+          testID={`${testIdPrefix}-bubble-delivery-${id}`}
+          style={[styles.bubble, styles.bubbleMe]}
+        >
+          {bubbleBody}
+        </TouchableOpacity>
+      ) : (
+        <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+          {bubbleBody}
+        </View>
+      )}
     </View>
   );
 };

@@ -62,6 +62,35 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
+    // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
+    // Right-aligned to sit under the bubble tail, same edge as the bare time.
+    bubbleFooterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
+    },
+    // The time inside the footer row drops its own marginTop (the row owns it)
+    // and gains a small gap before the tick.
+    bubbleFooterTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      marginRight: 4,
+    },
+    bubbleFooterTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    // Subtle delivery tick. Tinted to stay legible on the pink sent bubble
+    // (white-ish) vs a partial state (amber). Faint while pending.
+    deliveryTickDelivered: {
+      color: 'rgba(255,255,255,0.9)',
+    },
+    deliveryTickPartial: {
+      color: colors.amber,
+    },
+    deliveryTickPending: {
+      color: 'rgba(255,255,255,0.5)',
+    },
     invoiceCard: {
       width: 240,
       paddingTop: 12,

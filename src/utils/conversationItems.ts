@@ -4,6 +4,7 @@ import type { TransactionDetailData } from '../components/TransactionDetailSheet
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
+import type { DeliveryStatus } from './dmDeliveryStatus';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -15,6 +16,8 @@ export type Item =
       fromMe: boolean;
       text: string;
       createdAt: number;
+      // Per-relay delivery breakdown for a sent (fromMe) message (#856).
+      deliveryStatus?: DeliveryStatus;
     }
   | {
       kind: 'zap';
@@ -62,6 +65,9 @@ export interface ConversationMessageInput {
   fromMe: boolean;
   text: string;
   createdAt: number;
+  // Per-relay delivery breakdown for a sent message (#856), attached by the
+  // composer's optimistic append. Carried through to the message Item.
+  deliveryStatus?: DeliveryStatus;
 }
 
 // Local-only formatter — only used for the dayHeader rule between
@@ -152,6 +158,7 @@ export function buildConversationItems(
       // inline-attachment artifact doesn't render as a tofu box (#764).
       text: sanitizeDisplayText(m.text),
       createdAt: m.createdAt,
+      deliveryStatus: m.deliveryStatus,
     };
   });
   // Descending order — index 0 is newest. The FlatList is `inverted`, so

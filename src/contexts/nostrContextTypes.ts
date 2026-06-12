@@ -1,3 +1,5 @@
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+
 /** Options accepted by `refreshDmInbox`. All fields optional so existing
  * callers continue to work without changes. `signal` lets a screen
  * cancel the refresh on unmount so the decrypt loop stops chewing the
@@ -39,4 +41,9 @@ export interface ConversationMessage {
   fromMe: boolean;
   text: string;
   createdAt: number;
+  // Per-relay delivery breakdown for a locally-sent message (#856). Persisted
+  // with the optimistic row so the tick survives a thread reload. Absent on
+  // received messages and on relay-echoed copies — only the local- send row
+  // the composer appends carries it.
+  deliveryStatus?: DeliveryStatus;
 }

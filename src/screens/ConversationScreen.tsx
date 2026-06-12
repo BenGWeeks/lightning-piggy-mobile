@@ -63,9 +63,11 @@ import { useConversationLiveLocation } from '../hooks/useConversationLiveLocatio
 import {
   type Item,
   type TimedItem,
+  type ConversationMessageInput,
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
+import { summariseDelivery, shortRelayLabel, type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -113,9 +115,7 @@ const ConversationScreen: React.FC = () => {
   const { wallets } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
-  const [messages, setMessages] = useState<
-    { id: string; fromMe: boolean; text: string; createdAt: number }[]
-  >([]);
+  const [messages, setMessages] = useState<ConversationMessageInput[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -375,6 +375,17 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
+  // Long-press a sent bubble → per-relay delivery breakdown (#856). Branded
+  // alert (theme-matched, Maestro-testable) lists which relays accepted.
+  const handleShowDelivery = useCallback((status: DeliveryStatus) => {
+    const { ok, total } = summariseDelivery(status);
+    const lines = Object.entries(status.relayResults)
+      .map(([url, res]) => `${res === 'ok' ? '✓' : '✗'} ${shortRelayLabel(url)}`)
+      .join('\n');
+    const heading = total === 0 ? 'No relay results' : `Sent to ${ok} of ${total} relays`;
+    Alert.alert(heading, lines || 'No per-relay detail recorded for this message.');
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -526,6 +537,7 @@ const ConversationScreen: React.FC = () => {
         myAvatarUri={profile?.picture ?? null}
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
+        onShowDelivery={handleShowDelivery}
       />
     ),
     [
@@ -535,6 +547,7 @@ const ConversationScreen: React.FC = () => {
       openSharedContact,
       handlePayInvoice,
       handleToggleSecretMode,
+      handleShowDelivery,
       liveLocationLatest,
       liveLocationBubbleStatus,
       liveLocationBubbleRemaining,

@@ -38,6 +38,9 @@ export interface ConversationMessageRowProps {
   myAvatarUri: BubbleProps['myAvatarUri'];
   peerAvatarUri: BubbleProps['peerAvatarUri'];
   onOpenMap: BubbleProps['onOpenMap'];
+  // Long-press a sent bubble → parent presents the per-relay delivery
+  // breakdown (#856). Passed straight through to MessageBubble.
+  onShowDelivery: BubbleProps['onShowDelivery'];
 }
 
 /**
@@ -68,6 +71,7 @@ function ConversationMessageRow({
   myAvatarUri,
   peerAvatarUri,
   onOpenMap,
+  onShowDelivery,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -160,6 +164,8 @@ function ConversationMessageRow({
       myAvatarUri={myAvatarUri}
       peerAvatarUri={peerAvatarUri}
       onOpenMap={onOpenMap}
+      deliveryStatus={item.kind === 'message' ? item.deliveryStatus : undefined}
+      onShowDelivery={onShowDelivery}
       testIdPrefix="conversation"
     />
   );
