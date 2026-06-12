@@ -183,9 +183,11 @@ export interface BtcMapPlace {
    */
   osm_url?: string | null;
   /**
-   * BTC Map's curated category list (e.g. `["cafe", "restaurant"]`).
-   * Comes back empty for many listings — BTC Map only populates this
-   * when their taxonomy team has classified the merchant.
+   * Curated category list (e.g. `["cafe", "restaurant"]`). The v4
+   * `/v4/places/search` endpoint no longer returns an explicit
+   * `categories` field, so `reshape` falls back to the single `icon`
+   * token (the v4 category/type indicator) — `["restaurant"]` etc.
+   * Null only when the place has neither categories nor an icon.
    */
   categories?: string[] | null;
   /**
@@ -354,9 +356,17 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
       : osmIdMatch
         ? `https://www.openstreetmap.org/${osmIdMatch[1].toLowerCase()}/${osmIdMatch[2]}`
         : null;
-  const categories = Array.isArray(raw['categories'])
+  // BTC Map's v4 `/v4/places/search` endpoint stopped returning `categories`
+  // (the field is absent on every record now) — verified live against the API.
+  // It does return a single `icon` token (`restaurant`, `cafe`, `diamond`…) as
+  // the v4 category/type indicator. Fall back to deriving categories from that
+  // icon when `categories` is missing/empty, so the Explore/Map/Places filter
+  // populates again (#860). Keep using `categories` verbatim if the API ever
+  // restores it — fall back, don't replace.
+  const explicitCategories = Array.isArray(raw['categories'])
     ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
-    : null;
+    : [];
+  const categories = explicitCategories.length > 0 ? explicitCategories : icon ? [icon] : null;
   // Curated top-level fields > OSM-prefixed tag fallbacks. BTC Map
   // ships these only when their team or the OSM tag has them populated;
   // an empty string is normalised to null so the UI can branch cleanly.
