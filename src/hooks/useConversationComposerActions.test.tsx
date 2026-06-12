@@ -127,6 +127,36 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     expect(mockAlert).not.toHaveBeenCalled();
   });
 
+  it('watchdog flips the bubble to failed if the send hangs (offline, never settles)', async () => {
+    jest.useFakeTimers();
+    try {
+      // Offline: the send never resolves (pool.publish promises hang). The
+      // watchdog must still flip the pending bubble to a red failed tick.
+      mockSendDirectMessage.mockImplementation(
+        (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
+          hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14 });
+          return new Promise<SendResult>(() => {}); // never settles
+        },
+      );
+
+      const { result } = setup();
+      act(() => {
+        void result.current.handleSend?.();
+      });
+      // Pending immediately.
+      expect(getDmDeliveryStatus(EVENT_ID)?.pending).toBe(true);
+      // After the watchdog window, the bubble settles to failed (not pending).
+      act(() => {
+        jest.advanceTimersByTime(13_000);
+      });
+      const status = getDmDeliveryStatus(EVENT_ID);
+      expect(status?.pending).toBeFalsy();
+      expect(status?.delivered).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('settles to the finalized breakdown when slow relays ack after the early resolve', async () => {
     const earlySingle: DeliveryStatus = {
       delivered: true,

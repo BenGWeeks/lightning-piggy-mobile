@@ -9,6 +9,12 @@ import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/d
 import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
 import { useComposerActions } from './useComposerActions';
 
+// Upper bound before the optimistic bubble's pending Clock flips to the red
+// failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
+// publish timeout + the publish-level DM_PUBLISH_TIMEOUT_MS (8s), with headroom
+// for a slow-but-real accept, so a genuine send still lands delivered.
+const SEND_SETTLE_WATCHDOG_MS = 12_000;
+
 /**
  * 1:1 ConversationScreen composer actions. A thin wrapper over the shared
  * `useComposerActions` (#235): it provides the 1:1 send strategy
@@ -78,43 +84,58 @@ export function useConversationComposerActions(params: {
     async (text: string): Promise<boolean> => {
       const createdAt = Math.floor(Date.now() / 1000);
       let eventId: string | null = null;
-      const result = await sendDirectMessage(pubkey, text, {
-        onRumorReady: ({ eventId: id, kind }) => {
-          eventId = id;
-          // Paint the pending bubble immediately. The ROW id stays `local-` so
-          // mergeConversationMessages' text+window dedup collapses it against
-          // the relay echo (whose id is the OUTER wrap id, not this rumor id).
-          // The delivery store is keyed by the rumor eventId via `rumorId`,
-          // which both this row and the echo carry — so the tick follows the
-          // message across the swap. Persisted so the bubble survives a reload.
-          const optimistic = {
-            id: `local-${id}`,
-            rumorId: id,
-            fromMe: true,
-            text,
-            createdAt,
-            wireKind: kind,
-          };
-          setMessages((prev) => [...prev, optimistic]);
-          void appendLocalDmMessage(pubkey, optimistic);
-          setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind }));
-        },
-        onDeliveryFinalized: (delivery) => {
-          // Slow relays settled — upgrade the tick (e.g. single → double).
-          if (eventId) setDmDeliveryStatus(eventId, delivery);
-        },
-      });
-      // Settle the bubble. `delivery` is present for any send that reached the
-      // publish stage; a hard pre-publish error (not logged in, signer
-      // cancelled) has none → mark failed so the bubble shows a red tick.
-      if (eventId) {
-        setDmDeliveryStatus(eventId, result.delivery ?? failedDelivery({ eventId }));
-      } else if (!result.success) {
-        // Never reached the rumor stage (e.g. not logged in) — no bubble was
-        // painted, so fall back to the alert.
-        Alert.alert('Send failed', result.error ?? 'Could not send message.');
+      // Watchdog: if the send hasn't settled the bubble within the window,
+      // flip the pending Clock to the red failed tick (#857). This is the
+      // authoritative settle guarantee — the underlying publish can hang in
+      // ways the publish-level timeout doesn't catch (a relay socket the OS
+      // never resolves OR rejects), and the bubble must never be stuck pending
+      // forever. A genuine late accept still overrides failed → delivered (the
+      // store allows that; it only blocks settled → pending).
+      const watchdog = setTimeout(() => {
+        if (eventId) setDmDeliveryStatus(eventId, failedDelivery({ eventId }));
+      }, SEND_SETTLE_WATCHDOG_MS);
+      try {
+        const result = await sendDirectMessage(pubkey, text, {
+          onRumorReady: ({ eventId: id, kind }) => {
+            eventId = id;
+            // Paint the pending bubble immediately. The ROW id stays `local-`
+            // so mergeConversationMessages' text+window dedup collapses it
+            // against the relay echo (whose id is the OUTER wrap id, not this
+            // rumor id). The delivery store is keyed by the rumor eventId via
+            // `rumorId`, which both this row and the echo carry — so the tick
+            // follows the message across the swap. Persisted so the bubble
+            // survives a reload.
+            const optimistic = {
+              id: `local-${id}`,
+              rumorId: id,
+              fromMe: true,
+              text,
+              createdAt,
+              wireKind: kind,
+            };
+            setMessages((prev) => [...prev, optimistic]);
+            void appendLocalDmMessage(pubkey, optimistic);
+            setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind }));
+          },
+          onDeliveryFinalized: (delivery) => {
+            // Slow relays settled — upgrade the tick (e.g. single → double).
+            if (eventId) setDmDeliveryStatus(eventId, delivery);
+          },
+        });
+        // Settle the bubble. `delivery` is present for any send that reached
+        // the publish stage; a hard pre-publish error (not logged in, signer
+        // cancelled) has none → mark failed so the bubble shows a red tick.
+        if (eventId) {
+          setDmDeliveryStatus(eventId, result.delivery ?? failedDelivery({ eventId }));
+        } else if (!result.success) {
+          // Never reached the rumor stage (e.g. not logged in) — no bubble was
+          // painted, so fall back to the alert.
+          Alert.alert('Send failed', result.error ?? 'Could not send message.');
+        }
+        return result.success;
+      } finally {
+        clearTimeout(watchdog);
       }
-      return result.success;
     },
     [pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
   );
