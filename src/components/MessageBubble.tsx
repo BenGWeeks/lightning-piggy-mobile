@@ -219,17 +219,28 @@ const BubbleFooter: React.FC<{
   resendText,
   onShowDelivery,
 }) => {
-  const time = <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
-  if (!fromMe || !deliveryStatus) return time;
+  if (!fromMe || !deliveryStatus) {
+    return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
+  }
+  const openDelivery = onShowDelivery
+    ? () => onShowDelivery(deliveryStatus, resendText)
+    : undefined;
   return (
     <TouchableOpacity
       style={styles.bubbleFooterRow}
       activeOpacity={onShowDelivery ? 0.6 : 1}
-      onLongPress={onShowDelivery ? () => onShowDelivery(deliveryStatus, resendText) : undefined}
-      accessibilityLabel="Delivery status, long-press for per-relay detail"
+      // Tap AND long-press both open the breakdown — tap is discoverable and
+      // reachable by screen readers (long-press alone isn't). (Copilot #858)
+      onPress={openDelivery}
+      onLongPress={openDelivery}
+      accessibilityRole="button"
+      accessibilityLabel="Delivery status"
+      accessibilityHint="Opens the per-relay delivery breakdown"
       testID={`dm-bubble-delivery-footer-${messageId}`}
     >
-      {time}
+      {/* Footer-row time zeroes the standalone bubbleTime top margin so the
+          tick sits level with the timestamp (Copilot #858). */}
+      <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
       <DeliveryTick
         styles={styles}
         status={deliveryStatus}

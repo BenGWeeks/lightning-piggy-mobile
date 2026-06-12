@@ -77,6 +77,9 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       fontSize: 10,
       color: colors.textSupplementary,
       marginRight: 4,
+      // Zero the standalone bubbleTime top margin so the tick sits level with
+      // the timestamp in the footer row (the row owns vertical spacing). (#858)
+      marginTop: 0,
     },
     bubbleFooterTimeMe: {
       color: 'rgba(255,255,255,0.85)',
