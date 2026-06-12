@@ -83,6 +83,27 @@ describe('publishWrapsTrackingRelays — early-resolve + background settle (#857
     expect(result.errors[0]).toContain('relay a down');
   });
 
+  it('settles to all-failed when relays never respond (offline) within the timeout', async () => {
+    // Offline: pool.publish promises never resolve OR reject. Without a timeout
+    // the send hangs and the bubble is stuck pending; with one it settles to a
+    // concrete all-failed result (red tick + Re-publish).
+    const neverSettles = new Promise<string>(() => {});
+    const pool: RelayPublisher = { publish: () => [neverSettles, neverSettles] };
+    const result = await publishWrapsTrackingRelays(
+      [wrap('w1')],
+      ['wss://a', 'wss://b'],
+      pool,
+      undefined,
+      undefined,
+      0, // immediate timeout
+    );
+    expect(result.wrapsPublished).toBe(0);
+    expect(result.delivery.delivered).toBe(false);
+    // Both relays recorded as failed → the bubble can show the red glyph.
+    expect(summariseDelivery(result.delivery)).toEqual({ ok: 0, total: 2 });
+    expect(result.errors[0]).toContain('timed out');
+  });
+
   it('carries the rumor eventId + kind onto the delivery status', async () => {
     const ok = deferred<string>();
     const pool: RelayPublisher = { publish: () => [ok.promise] };

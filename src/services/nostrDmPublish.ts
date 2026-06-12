@@ -45,6 +45,17 @@ export type OnDeliveryFinalized = (delivery: DeliveryStatus) => void;
  * `relays` — so a settle maps back to its relay URL by index. The pool is
  * injected so this module stays a leaf (no `nostrService` import cycle).
  */
+// Upper bound on how long a send waits for relays before settling to a result
+// (#857). Offline / unreachable relays leave `pool.publish` promises pending
+// forever (no socket → nothing to resolve OR reject), so without this cap the
+// send hangs and the optimistic bubble is stuck on its pending Clock with no
+// way to reach the red failed state. 8s is comfortably past nostr-tools' own
+// ~4.4s relay publish timeout for reachable relays, so a genuine slow-accept
+// still lands as delivered, while a dead network settles to failed.
+export const DM_PUBLISH_TIMEOUT_MS = 8_000;
+
+const TIMED_OUT = Symbol('timed-out');
+
 export async function publishWrapsTrackingRelays(
   wraps: VerifiedEvent[],
   relays: string[],
@@ -56,6 +67,9 @@ export async function publishWrapsTrackingRelays(
   // settled (#857). The send resolves early; this fires later so a slow relay
   // can upgrade the tick (e.g. single → double) without delaying the bubble.
   onFinalized?: OnDeliveryFinalized,
+  // Hard cap on the wait before settling — see DM_PUBLISH_TIMEOUT_MS. Injected
+  // so tests can drive it to 0.
+  timeoutMs: number = DM_PUBLISH_TIMEOUT_MS,
 ): Promise<DmSendResult> {
   const errors: string[] = [];
   let published = 0;
@@ -83,16 +97,33 @@ export async function publishWrapsTrackingRelays(
 
       // Decide this wrap's published/error status as soon as it's KNOWN: the
       // first accept wins immediately; `Promise.any` rejects (AggregateError)
-      // only once every relay has rejected — exactly the slow path we want.
+      // only once every relay has rejected. Race it against a timeout so a dead
+      // network (publish promises that never settle) can't hang the send.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      });
       try {
-        await Promise.any(perRelay);
-        published++;
+        const outcome = await Promise.race([Promise.any(perRelay), timeout]);
+        if (outcome === TIMED_OUT) {
+          // No relay accepted within the window. Record the relays that never
+          // settled as failed so the snapshot is a concrete all-failed result
+          // (red tick) rather than an empty one (which renders as pending).
+          for (const relay of relays) {
+            if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
+          }
+          errors.push('publish timed out — no relay responded');
+        } else {
+          published++;
+        }
       } catch (e) {
-        // Pull the first individual reason so the message is a concrete relay
-        // error, not the AggregateError "all promises were rejected" wrapper.
+        // `Promise.any` AggregateError — every relay rejected. Pull the first
+        // individual reason so the message is a concrete relay error.
         const agg = e as AggregateError;
         const firstReason = agg?.errors?.[0] as Error | undefined;
         errors.push(firstReason?.message ?? (e as Error)?.message ?? 'publish failed');
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }),
   );
