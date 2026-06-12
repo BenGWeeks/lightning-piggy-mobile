@@ -56,6 +56,26 @@ jest.mock('react-native-nfc-manager', () => ({
   },
 }));
 
+// op-sqlite is a native module Jest can't load (ESM entry + native
+// bindings). Provide a stub whose open() reports SQLCipher active so the
+// localDb plaintext guard passes; tests that exercise the DAL mock
+// `./localDb` / `./dmDb` themselves (per-file jest.mock wins over this
+// global one). Needed since #848 wired the encrypted DM store into
+// NostrContext, which many suites import transitively.
+jest.mock('@op-engineering/op-sqlite', () => ({
+  open: jest.fn(() => ({
+    execute: jest.fn((sql) =>
+      Promise.resolve({
+        rows: String(sql).includes('cipher_version') ? [{ cipher_version: 'jest-stub' }] : [],
+      }),
+    ),
+    transaction: jest.fn(async (fn) =>
+      fn({ execute: jest.fn(() => Promise.resolve({ rows: [] })) }),
+    ),
+    delete: jest.fn(),
+  })),
+}));
+
 // AsyncStorage's native module isn't linked in the Jest environment.
 // The package ships an in-memory mock for exactly this case — wire it
 // up here so any test that touches storage (e.g. sendThresholdService

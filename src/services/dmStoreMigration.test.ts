@@ -10,7 +10,7 @@ const makeDeps = (over: Partial<MigrationDeps> = {}) => {
       migrated = true;
       calls.push('setMigrated');
     }),
-    populateFromRelays: jest.fn(async () => {
+    populateEncryptedDb: jest.fn(async () => {
       calls.push('populate');
       return { completed: true };
     }),
@@ -35,7 +35,7 @@ describe('dmStoreMigration', () => {
     const { deps } = makeDeps({ isMigrated: jest.fn(async () => true) });
     const res = await migrateDmStore(deps);
     expect(res).toEqual({ ok: true, status: 'already-migrated' });
-    expect(deps.populateFromRelays).not.toHaveBeenCalled();
+    expect(deps.populateEncryptedDb).not.toHaveBeenCalled();
     expect(deps.deletePlaintextCaches).not.toHaveBeenCalled();
   });
 
@@ -48,7 +48,7 @@ describe('dmStoreMigration', () => {
 
   it('does NOT delete plaintext or set the flag when populate is incomplete', async () => {
     const { deps } = makeDeps({
-      populateFromRelays: jest.fn(async () => ({ completed: false })),
+      populateEncryptedDb: jest.fn(async () => ({ completed: false })),
     });
     const res = await migrateDmStore(deps);
     expect(res).toEqual({ ok: false, reason: 'populate-incomplete' });
@@ -72,7 +72,7 @@ describe('dmStoreMigration', () => {
     expect(h.migrated).toBe(true);
     const second = await migrateDmStore(h.deps);
     expect(second).toEqual({ ok: true, status: 'already-migrated' });
-    expect(h.deps.populateFromRelays).toHaveBeenCalledTimes(1); // not re-run
+    expect(h.deps.populateEncryptedDb).toHaveBeenCalledTimes(1); // not re-run
   });
 
   it('retries cleanly: a failed run leaves the flag unset so the next run proceeds', async () => {

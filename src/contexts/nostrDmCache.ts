@@ -1,30 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
-import { evictNip17CacheBytes, evictNip17CacheOverflow } from '../utils/nip17Cache';
 import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { ConversationMessage } from './nostrContextTypes';
 
-// AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
-// use the same cache shape (wrap-id → decrypted rumor entry); they're
-// kept under separate keys so cross-signer login on the same device
-// doesn't leak plaintext between identities. As of #288 the keys are
-// also per-account namespaced — each base is suffixed with `_${pubkey}`
-// via `perAccountKey()` at every read/write site.
+// Legacy keys for the plaintext NIP-17 wrap caches (#176/#687/#689 — RETIRED
+// in #848). Decrypted rumors now persist as rows in the encrypted SQLCipher
+// DB (services/dmDb); nothing writes these caches any more. The keys remain
+// so the one-time migration (dmStoreMigrationRunner) can import + delete an
+// existing install's cache, and so logout wipes can clean up stragglers.
+// Both signer paths share the entry shape; separate keys kept cross-signer
+// login on the same device from leaking plaintext between identities, and
+// since #288 each base is suffixed with `_${pubkey}` via `perAccountKey()`.
 export const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
 export const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
-// Count cap for the wrap plaintext cache. High because the cache is now
-// file-backed (no ~2 MB SQLite row limit), so the byte cap below is the
-// real binding limit — the count cap is just a sanity ceiling (#687).
-export const NIP17_CACHE_CAP = 50_000;
-// The wrap cache (wrap-id -> decrypted plaintext) is persisted to a FILE,
-// not an AsyncStorage row. AsyncStorage rows hit Android's ~2 MB SQLite
-// CursorWindow limit on READ; once the cache passed that it failed to
-// hydrate (and under the old 1.5 MB write cap a large inbox was mostly
-// evicted), so the dedup signal was lost and EVERY cold start re-decrypted
-// the whole inbox — a ~64-88 s JS-thread freeze (#687). Files have no
-// per-row read cap, so the cache holds the whole inbox and dedup hits.
-export const WRAP_CACHE_MAX_BYTES = 12_000_000;
 export const isWrapCacheKey = (key: string): boolean =>
   key.startsWith(AMBER_NIP17_CACHE_KEY_BASE) || key.startsWith(NSEC_NIP17_CACHE_KEY_BASE);
 // The key is already filesystem-safe (base + '_' + hex pubkey).
@@ -85,8 +74,8 @@ export async function writeNip17SkipSet(storageKey: string, set: Set<string>): P
   }
 }
 
-/** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
- * from followed senders — see refreshDmInbox's filter gate. */
+/** Entry shape of the retired plaintext wrap cache — kept for the one-time
+ * import into the encrypted DB (dmStoreMigrationRunner, #848). */
 export type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
@@ -104,50 +93,6 @@ export function safeParseRecord<T>(raw: string | null): Record<string, T> {
     // fall through — treat corrupted blob as empty
   }
   return {};
-}
-
-/** Persist a wrap-id cache back to its per-account file (expo-file-system,
- * #689 — no longer AsyncStorage; the old row blew the ~2 MB CursorWindow read
- * cap), enforcing the size cap in insertion order (oldest-inserted evicts
- * first). Combined with
- * the `touchNip17CacheEntry` helper called on every cache hit during
- * `refreshDmInbox`, this gives true LRU semantics: a re-touched entry
- * is delete+reinserted to the tail, so it survives the next eviction
- * sweep even if 5000 newer wraps arrive after it. Without the touch
- * this is FIFO-by-first-write — see #193 for why FIFO regresses to
- * pre-#176 behaviour for users with very active inboxes.
- *
- * Object keys in JS preserve insertion order for non-integer string
- * keys, and wrap ids are hex, so iteration order is stable across
- * `JSON.parse` / `JSON.stringify` round-trips — the on-disk LRU order
- * survives app restarts without any new persistence machinery.
- *
- * Returns the number of entries evicted so callers can include it in
- * a perf log line. Write failures are surfaced as a warn — a corrupted
- * storage subsystem would otherwise silently re-decrypt on every
- * refresh with no breadcrumb. */
-export async function writeNip17Cache(
-  storageKey: string,
-  cache: Record<string, Nip17CacheEntry>,
-): Promise<number> {
-  const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
-  // Byte cap — generous now the cache is file-backed (no ~2 MB SQLite
-  // CursorWindow read limit). The old 1.5 MB AsyncStorage cap evicted most
-  // of a large inbox, losing the dedup signal and re-decrypting it on every
-  // cold start (#687).
-  const evictedBytes = evictNip17CacheBytes(cache, WRAP_CACHE_MAX_BYTES);
-  try {
-    const f = new File(Paths.document, wrapCacheFileName(storageKey));
-    if (f.exists) f.delete();
-    f.create();
-    f.write(JSON.stringify(cache));
-    // Retire any legacy AsyncStorage row so the old (possibly unreadable /
-    // oversized) copy stops shadowing the file + eating the 2 MB budget.
-    AsyncStorage.removeItem(storageKey).catch(() => {});
-  } catch (err) {
-    console.warn(`[Nostr] NIP-17 cache file write failed (${storageKey}):`, err);
-  }
-  return evicted + evictedBytes;
 }
 
 /**

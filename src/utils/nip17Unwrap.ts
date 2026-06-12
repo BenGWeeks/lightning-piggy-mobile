@@ -206,7 +206,15 @@ export function partnerFromRumor(
     if (!pTag || !HEX64.test(pTag)) return null;
     return { partnerPubkey: pTag, fromMe: true };
   }
-  return { partnerPubkey: rumor.pubkey, fromMe: false };
+  // Incoming: the sender IS the partner. Validate + lowercase exactly like the
+  // fromMe branch above — without this, a rumor whose inner author field is
+  // malformed or mixed-case leaked a junk partner key into the 1:1 inbox,
+  // which npubEncode then threw on, surfacing as un-nameable raw-hex rows
+  // (`dcc…`, `dd2…`). HEX64 already gates the wrap/seal pubkeys on unwrap, so a
+  // bad rumor.pubkey here is genuine garbage — return null to skip it (#849).
+  const sender = rumor.pubkey.toLowerCase();
+  if (!HEX64.test(sender)) return null;
+  return { partnerPubkey: sender, fromMe: false };
 }
 
 /**
