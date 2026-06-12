@@ -327,3 +327,46 @@ export function mergeConversationMessages(
   }
   return result;
 }
+
+/**
+ * Carry `deliveryStatus` (#856) from the CURRENT in-memory messages onto a
+ * freshly-fetched list, so a sent bubble keeps its tick when a thread reload /
+ * live-sub echo replaces the optimistic row.
+ *
+ * Why this exists separately from `mergeConversationMessages`: the persisted
+ * conv-cache merge can miss the carry-over when the relay echo lands BEFORE
+ * the fire-and-forget `appendLocalDmMessage` write commits — at that moment
+ * the on-disk cache has no `local-` row to inherit from, so the echo overwrites
+ * with no tick. The in-memory state always holds the authoritative
+ * `deliveryStatus`, so reconciling against it closes that race.
+ *
+ * A `next` row inherits the status of (1) the same id in `prev`, or failing
+ * that (2) a `prev` row — typically the optimistic `local-` one — with the
+ * same `fromMe` + `text` within the echo window. `next` rows that already
+ * carry a status keep their own.
+ */
+export function reconcileDeliveryStatus(
+  prev: ConversationMessage[],
+  next: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map<string, ConversationMessage>();
+  for (const p of prev) byId.set(p.id, p);
+  return next.map((n) => {
+    if (n.deliveryStatus) return n;
+    const sameId = byId.get(n.id)?.deliveryStatus;
+    if (sameId) return { ...n, deliveryStatus: sameId };
+    // No id match — fall back to the local-echo pairing (fromMe + text +
+    // within window), which covers the optimistic `local-` → real-id handoff.
+    let best: ConversationMessage['deliveryStatus'];
+    let bestDelta = Infinity;
+    for (const p of prev) {
+      if (!p.deliveryStatus) continue;
+      if (p.fromMe !== n.fromMe || p.text !== n.text) continue;
+      const delta = Math.abs(p.createdAt - n.createdAt);
+      if (delta > LOCAL_DM_ECHO_WINDOW_SECS || delta >= bestDelta) continue;
+      bestDelta = delta;
+      best = p.deliveryStatus;
+    }
+    return best ? { ...n, deliveryStatus: best } : n;
+  });
+}

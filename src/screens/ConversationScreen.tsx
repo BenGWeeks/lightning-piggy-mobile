@@ -68,6 +68,7 @@ import {
   buildConversationItems,
 } from '../utils/conversationItems';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { reconcileDeliveryStatus } from '../contexts/nostrDmCache';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
@@ -237,7 +238,11 @@ const ConversationScreen: React.FC = () => {
         // on the *next* thread that inherits this instance. Check the
         // ref and bail.
         if (isMountedRef.current) {
-          setMessages(conv);
+          // Carry any delivery tick (#856) from the current in-memory rows
+          // onto the fetched list, so a just-sent bubble keeps its tick even
+          // when the relay echo lands before the optimistic row's async cache
+          // write commits (the on-disk merge would miss it in that race).
+          setMessages((prev) => reconcileDeliveryStatus(prev, conv));
         }
       } finally {
         if (isMountedRef.current) {
