@@ -5,7 +5,7 @@
  * Issue #271.
  */
 
-import { subjectFromRumor, textForRumor, type DecodedRumor } from './nip17Unwrap';
+import { subjectFromRumor, textForRumor, partnerFromRumor, type DecodedRumor } from './nip17Unwrap';
 
 const PK_A = 'a'.repeat(64);
 const PK_B = 'b'.repeat(64);
@@ -35,6 +35,50 @@ describe('subjectFromRumor (incoming kind-14)', () => {
 
   it('trims surrounding whitespace', () => {
     expect(subjectFromRumor(rumorWithTags([['subject', '  Pizza Friday  ']]))).toBe('Pizza Friday');
+  });
+});
+
+describe('partnerFromRumor (partner-pubkey extraction + validation, #849)', () => {
+  const ME = PK_A;
+  const rumor = (over: Partial<DecodedRumor>): DecodedRumor => ({
+    pubkey: PK_B,
+    created_at: 1,
+    kind: 14,
+    tags: [],
+    content: '',
+    ...over,
+  });
+
+  it('incoming: sender is the partner, lowercased', () => {
+    expect(partnerFromRumor(rumor({ pubkey: PK_B }), ME)).toEqual({
+      partnerPubkey: PK_B,
+      fromMe: false,
+    });
+  });
+
+  it('incoming: lowercases a mixed-case sender pubkey (was leaking as raw-hex)', () => {
+    const mixed = 'D'.repeat(64);
+    expect(partnerFromRumor(rumor({ pubkey: mixed }), ME)).toEqual({
+      partnerPubkey: 'd'.repeat(64),
+      fromMe: false,
+    });
+  });
+
+  it('incoming: returns null for a malformed sender pubkey (the dcc… junk fix)', () => {
+    expect(partnerFromRumor(rumor({ pubkey: 'dcc123' }), ME)).toBeNull();
+    expect(partnerFromRumor(rumor({ pubkey: 'z'.repeat(64) }), ME)).toBeNull();
+  });
+
+  it('fromMe: reads the p-tag partner, validated + lowercased', () => {
+    expect(partnerFromRumor(rumor({ pubkey: ME, tags: [['p', PK_B.toUpperCase()]] }), ME)).toEqual({
+      partnerPubkey: PK_B,
+      fromMe: true,
+    });
+  });
+
+  it('fromMe: returns null when the p-tag partner is missing or malformed', () => {
+    expect(partnerFromRumor(rumor({ pubkey: ME, tags: [] }), ME)).toBeNull();
+    expect(partnerFromRumor(rumor({ pubkey: ME, tags: [['p', 'nope']] }), ME)).toBeNull();
   });
 });
 
