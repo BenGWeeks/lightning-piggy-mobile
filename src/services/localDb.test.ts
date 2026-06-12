@@ -108,6 +108,34 @@ describe('localDb', () => {
     expect(await freshVerify()).toBe('4.6.0');
   });
 
+  it('self-heals an undecryptable DB (backup-restore wrong-key) by wiping and recreating', async () => {
+    // First attempt: SQLCipher wrong-key signature from the first PRAGMA.
+    let calls = 0;
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('file is not a database'));
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    const db = await freshGetLocalDb();
+    expect(db).toBe(mockDb);
+    // The heal wiped both halves: DB file deleted + keystore key cleared.
+    expect(mockDelete).toHaveBeenCalled();
+    const { clearLocalDbKey } = require('./localDbKey');
+    expect(clearLocalDbKey).toHaveBeenCalled();
+  });
+
+  it('does NOT heal a transient open error (locked) — rejects for a later retry', async () => {
+    mockOpen.mockImplementationOnce(() => {
+      throw new Error('locked');
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await expect(freshGetLocalDb()).rejects.toThrow('locked');
+  });
+
   it('refuses to open when SQLCipher is not active (empty cipher_version → plaintext guard)', async () => {
     mockExecute.mockImplementation((sql: string) =>
       sql.includes('cipher_version')

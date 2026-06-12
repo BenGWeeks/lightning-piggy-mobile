@@ -613,7 +613,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
           setDmInbox(filteredFinal);
 
-          // Persist merged list + new last-seen. Only kind-4 contributes
+          // Persist the FILTERED list + new last-seen — `merged` may hold
+          // non-followed senders' plaintext (B1 thread-open rows surface via
+          // loadInboxEntries), which must stay off plaintext AsyncStorage
+          // (Archie review W2 on #849; matches the live-sub invariant).
+          // Only kind-4 contributes
           // here — NIP-59 wraps have randomized timestamps (~2 days in
           // either direction of the real publish time) for plausible
           // deniability, so wrap.created_at can't be used as a
@@ -625,9 +629,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // the matching comment there); the cache dedupes wraps by id.
           const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           await Promise.all([
-            AsyncStorage.setItem(inboxCacheKey(refreshForPubkey), JSON.stringify(merged)).catch(
-              () => {},
-            ),
+            AsyncStorage.setItem(
+              inboxCacheKey(refreshForPubkey),
+              JSON.stringify(filteredFinal),
+            ).catch(() => {}),
             newLastSeen > (lastSeen ?? 0)
               ? AsyncStorage.setItem(inboxLastSeenKey(refreshForPubkey), String(newLastSeen)).catch(
                   () => {},

@@ -33,7 +33,43 @@ const SCHEMA: string[] = [
 
 let dbPromise: Promise<DB> | null = null;
 
+// W1 (#849 review): a backup-restored install carries the ciphertext DB file
+// but NOT the SQLCipher key (SecureStore is THIS_DEVICE_ONLY by design), so
+// every open fails with SQLCipher's wrong-key signature "file is not a
+// database" — forever, bricking every DM path. The store is a rebuildable
+// relay cache, so the recovery is: wipe file + key, recreate empty, let the
+// next refresh rebuild from relays. The heal triggers ONLY on that exact
+// signature — transient errors (e.g. locked) keep the existing
+// reject-and-retry-later semantics, and the SQLCipher-missing guard below is
+// never healed (wiping there would recreate the DB as plaintext on a
+// regressed build).
+const SQLCIPHER_MISSING = 'SQLCipher not active';
+const WRONG_KEY_SIGNATURE = /file is not a database/i;
+
 async function openLocalDb(): Promise<DB> {
+  try {
+    return await openLocalDbAttempt();
+  } catch (e) {
+    if (!WRONG_KEY_SIGNATURE.test(String((e as Error)?.message ?? e))) throw e;
+    if (__DEV__) {
+      console.warn(
+        `[localDb] open failed (${(e as Error)?.message ?? e}) — wiping undecryptable store and recreating (backup-restore self-heal)`,
+      );
+    }
+    // Direct wipe — NOT wipeLocalDmStore/clearLocalDb, which await dbPromise:
+    // we ARE dbPromise here, so that would self-deadlock. A bare (keyless)
+    // handle suffices to delete the file; pair it with the key wipe.
+    try {
+      open({ name: DB_NAME }).delete();
+    } catch (delErr) {
+      if (__DEV__) console.warn(`[localDb] heal delete failed: ${(delErr as Error)?.message}`);
+    }
+    await clearLocalDbKey();
+    return openLocalDbAttempt();
+  }
+}
+
+async function openLocalDbAttempt(): Promise<DB> {
   const encryptionKey = await getOrCreateLocalDbKey();
   const db = open({ name: DB_NAME, encryptionKey });
   // Fail loud if SQLCipher isn't actually compiled in: op-sqlite silently
@@ -44,7 +80,7 @@ async function openLocalDb(): Promise<DB> {
   const cipher = await db.execute('PRAGMA cipher_version;');
   if (!String(cipher.rows?.[0]?.cipher_version ?? '')) {
     throw new Error(
-      'SQLCipher not active — refusing to open a plaintext DB (cipher_version empty)',
+      `${SQLCIPHER_MISSING} — refusing to open a plaintext DB (cipher_version empty)`,
     );
   }
   await rebuildDmMessagesIfPreOwner(db);

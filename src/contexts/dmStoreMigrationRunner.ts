@@ -141,3 +141,10 @@ export function ensureDmStoreMigrated(pubkey: string): Promise<void> {
 export function forgetDmStoreMigration(pubkey: string): void {
   migrationRuns.delete(pubkey);
 }
+
+/** The in-flight migration for `pubkey`, if any — so a logout wipe can await
+ * it instead of racing it (a late upsert would resurrect just-wiped rows and
+ * re-set the just-removed flag; Archie review N4 on #849). */
+export function pendingDmStoreMigration(pubkey: string): Promise<void> | undefined {
+  return migrationRuns.get(pubkey);
+}

@@ -8,7 +8,7 @@ import {
   NSEC_NIP17_SKIP_KEY_BASE,
   wrapCacheFileName,
 } from './nostrDmCache';
-import { forgetDmStoreMigration } from './dmStoreMigrationRunner';
+import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
 
 /**
  * Per-account DM-store wipe, called from NostrContext's `wipeAccountCaches`
@@ -41,6 +41,9 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
       // best-effort — non-fatal
     }
   }
+  // Await any in-flight migration first — wiping under it would let a late
+  // upsert resurrect rows and re-set the migration flag after removal (N4).
+  await pendingDmStoreMigration(pubkey)?.catch(() => {});
   try {
     await deleteDmMessagesForOwner(pubkey);
   } catch (e) {
