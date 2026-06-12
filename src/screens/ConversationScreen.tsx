@@ -119,6 +119,13 @@ const ConversationScreen: React.FC = () => {
   const { startShare, stopShare } = useLiveLocation();
 
   const [messages, setMessages] = useState<ConversationMessageInput[]>([]);
+  // Mirror of `messages` for reads outside render (e.g. the delivery-tick
+  // reconcile in `load`, so persistence runs as a side-effect rather than
+  // inside a setMessages updater — Copilot #858).
+  const messagesRef = useRef<ConversationMessageInput[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -243,21 +250,22 @@ const ConversationScreen: React.FC = () => {
           // onto the fetched list, so a just-sent bubble keeps its tick even
           // when the relay echo lands before the optimistic row's async cache
           // write commits (the on-disk merge would miss it in that race).
-          setMessages((prev) => {
-            const reconciled = reconcileDeliveryStatus(prev, conv);
-            // Durably write the reconciled ticks back to the conv cache, keyed
-            // by the (now real-id) row id, so the tick survives a cold restart
-            // — fetchConversation persisted the echo rows WITHOUT delivery when
-            // it won the race against the optimistic local- write.
-            const statusById: Record<string, DeliveryStatus> = {};
-            for (const m of reconciled) {
-              if (m.deliveryStatus && !m.id.startsWith('local-')) {
-                statusById[m.id] = m.deliveryStatus;
-              }
+          // Computed against messagesRef (not inside the setMessages updater)
+          // so the AsyncStorage write is a plain side-effect — keeps the
+          // updater pure and StrictMode-safe (Copilot #858).
+          const reconciled = reconcileDeliveryStatus(messagesRef.current, conv);
+          // Durably write the reconciled ticks back to the conv cache, keyed
+          // by the (now real-id) row id, so the tick survives a cold restart
+          // — fetchConversation persisted the echo rows WITHOUT delivery when
+          // it won the race against the optimistic local- write.
+          const statusById: Record<string, DeliveryStatus> = {};
+          for (const m of reconciled) {
+            if (m.deliveryStatus && !m.id.startsWith('local-')) {
+              statusById[m.id] = m.deliveryStatus;
             }
-            void persistDeliveryStatuses(pubkey, statusById);
-            return reconciled;
-          });
+          }
+          void persistDeliveryStatuses(pubkey, statusById);
+          setMessages(reconciled);
         }
       } finally {
         if (isMountedRef.current) {
@@ -969,10 +977,18 @@ const ConversationScreen: React.FC = () => {
       <DeliveryDetailSheet
         status={deliveryDetail?.status ?? null}
         onClose={() => setDeliveryDetail(null)}
-        // Only offer Re-publish when there's a resendable payload — non-text
-        // bubbles (location / live-location marker) pass an empty string, so
-        // hide the button rather than make it a silent no-op (Copilot #858).
-        onResend={deliveryDetail?.text ? handleResendFromDetail : undefined}
+        // Only offer Re-publish when there's a resendable payload AND it's a
+        // text rumor (kind 14). Non-text bubbles (location / live-location)
+        // pass an empty string; kind-15 file messages (voice/image) carry an
+        // encoded URL but resendText would re-send them as plain kind-14 text,
+        // dropping the file tag set — so hide Re-publish there rather than
+        // silently corrupting the resend (Copilot #858). Full kind-15 resend
+        // is deferred to the #857 outbox.
+        onResend={
+          deliveryDetail?.text && deliveryDetail.status.kind === 14
+            ? handleResendFromDetail
+            : undefined
+        }
       />
     </View>
   );
