@@ -27,16 +27,18 @@ export function isColdStartRefresh(lastRefreshAt: number): boolean {
 
 /**
  * Whether to skip the refresh entirely because a previous one COMPLETED within
- * the freshness TTL. `force` callers (pull-to-refresh) always bypass it; the
+ * the freshness TTL. `bypassTtl` comes from `bypassesFreshnessTtl(opts)` —
+ * true for user-intent `force` AND the cold-start `backfill`; pass that, not
+ * `opts.force`, or the backfill suppression regression (#846) comes back. The
  * Messages-tab `useFocusEffect` uses the default path so tab-bouncing doesn't
  * re-fire expensive relay+decrypt work. `now` is injected for testability.
  */
 export function shouldSkipForFreshness(
   lastRefreshAt: number,
-  force: boolean,
+  bypassTtl: boolean,
   now: number,
 ): boolean {
-  if (force) return false;
+  if (bypassTtl) return false;
   if (lastRefreshAt <= 0) return false;
   return now - lastRefreshAt < DM_INBOX_REFRESH_TTL_MS;
 }
