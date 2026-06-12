@@ -41,12 +41,49 @@ describe('localDb', () => {
     );
   });
 
-  it('runs the schema (dm_messages table + conversation index) on open', async () => {
+  it('runs the schema (owner-scoped dm_messages table + index) on open', async () => {
     const { getLocalDb: freshGetLocalDb } = require('./localDb');
     await freshGetLocalDb();
     const ddl = mockExecute.mock.calls.map((c) => c[0]).join('\n');
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS dm_messages');
-    expect(ddl).toContain('idx_dm_conversation_created');
+    expect(ddl).toContain('PRIMARY KEY (owner, event_id)');
+    expect(ddl).toContain('idx_dm_owner_conversation_created');
+  });
+
+  it('drops a pre-owner (schema v1) dm_messages table so the v2 schema recreates it', async () => {
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      if (sql.includes('table_info')) {
+        // v1 shape: event_id PK, no owner column
+        return Promise.resolve({ rows: [{ name: 'event_id' }, { name: 'conversation' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await freshGetLocalDb();
+    const sqls = mockExecute.mock.calls.map((c) => c[0]);
+    const dropIdx = sqls.findIndex((s) => s.includes('DROP TABLE dm_messages'));
+    const createIdx = sqls.findIndex((s) => s.includes('CREATE TABLE IF NOT EXISTS dm_messages'));
+    expect(dropIdx).toBeGreaterThanOrEqual(0);
+    expect(dropIdx).toBeLessThan(createIdx); // rebuild, not drop-after-create
+  });
+
+  it('does NOT drop a dm_messages table that already has the owner column', async () => {
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      if (sql.includes('table_info')) {
+        return Promise.resolve({ rows: [{ name: 'owner' }, { name: 'event_id' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await freshGetLocalDb();
+    const sqls = mockExecute.mock.calls.map((c) => c[0]);
+    expect(sqls.some((s) => s.includes('DROP TABLE'))).toBe(false);
   });
 
   it('is single-flight — a second getLocalDb does not reopen', async () => {

@@ -9,7 +9,6 @@ import React, {
 } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
@@ -40,15 +39,15 @@ import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCac
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
-  AMBER_NIP17_SKIP_KEY_BASE,
-  NSEC_NIP17_SKIP_KEY_BASE,
-  wrapCacheFileName,
   AMBER_NIP17_ENABLED_KEY_LEGACY,
   DM_CONV_CACHE_PREFIX,
   DM_CONV_LAST_SEEN_PREFIX,
   inboxCacheKey,
   inboxLastSeenKey,
 } from './nostrDmCache';
+import { wipeDmStoresForAccount } from './dmAccountWipe';
+import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
+import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
@@ -1158,6 +1157,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
       perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
       perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      // DM-store migration flag (#848) — a future re-login re-runs the
+      // (then no-op) migration check instead of trusting a stale flag.
+      dmStoreMigratedKey(loggedOutPubkey),
       // Pre-existing per-pubkey caches (already namespaced before #288)
       inboxCacheKey(loggedOutPubkey),
       inboxLastSeenKey(loggedOutPubkey),
@@ -1181,32 +1183,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // them in place; they're orphaned safely once no remaining identity
     // is a member, and re-attached if the same identity signs back in.
     await AsyncStorage.multiRemove(toRemove);
-    // The NIP-17 wrap caches are file-backed now (#689), so the
-    // multiRemove above doesn't touch them — delete the files explicitly.
-    // Decrypted DM plaintext must not survive logout / account wipe
-    // (#689 review / #690).
-    if (loggedOutPubkey) {
-      // Includes the per-account skip-set files (#746 — they sit alongside the
-      // positive-cache files; if we wiped only the cache on logout, the
-      // skip-set would leak across account switches and silently suppress
-      // wraps for the next signed-in user).
-      for (const base of [
-        AMBER_NIP17_CACHE_KEY_BASE,
-        NSEC_NIP17_CACHE_KEY_BASE,
-        AMBER_NIP17_SKIP_KEY_BASE,
-        NSEC_NIP17_SKIP_KEY_BASE,
-      ]) {
-        try {
-          const f = new File(
-            Paths.document,
-            wrapCacheFileName(perAccountKey(base, loggedOutPubkey)),
-          );
-          if (f.exists) f.delete();
-        } catch {
-          // best-effort — non-fatal
-        }
-      }
-    }
+    // Decrypted DM plaintext must not survive logout / account wipe (#689
+    // review / #690): delete the file-backed wrap + skip-set caches and this
+    // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
+    await wipeDmStoresForAccount(loggedOutPubkey);
   }, []);
 
   const logout = useCallback(async () => {
@@ -1276,6 +1256,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // them, users can remove each row from the Nostr settings screen.
     setSignerType(null);
     setIsLoggedIn(false);
+
+    // Last identity gone — delete the encrypted DM DB file AND its keystore
+    // key (#690/#848). Per-identity sign-outs above only delete that owner's
+    // rows; with no identities left the whole store is wipeable.
+    await wipeLocalDmStore().catch(() => {});
 
     nostrService.cleanup();
   }, [

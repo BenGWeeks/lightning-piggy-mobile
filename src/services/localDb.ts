@@ -8,23 +8,27 @@ import { getOrCreateLocalDbKey, clearLocalDbKey } from './localDbKey';
 // One DB, indexed rows: DM messages (private) plus public cached events.
 const DB_NAME = 'lightningpiggy.db';
 
-// Schema v1. One row per event keyed by event_id (unique → dedupe), indexed
-// by (conversation, created_at) for paginated slice reads — the whole point
-// of moving off the single-blob cache that froze the Messages tab (#695).
-// Public cache tables (caches/events/places) land in a later slice; DMs first
-// since they cause the freeze and need the encryption.
+// Schema v2 (#848). One row per decrypted DM event, scoped by `owner` (the
+// signed-in account's pubkey): multi-account devices share one DB file, and a
+// kind-4 DM between two local accounts is the SAME event id seen by both — so
+// the primary key is (owner, event_id), not event_id alone. Indexed by
+// (owner, conversation, created_at) for paginated slice reads — the whole
+// point of moving off the single-blob cache that froze the Messages tab
+// (#695). Public cache tables (caches/events/places) land in a later slice.
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS dm_messages (
-     event_id     TEXT PRIMARY KEY,
+     owner        TEXT NOT NULL,
+     event_id     TEXT NOT NULL,
      conversation TEXT NOT NULL,
      created_at   INTEGER NOT NULL,
      sender       TEXT NOT NULL,
      content      TEXT NOT NULL,
      from_me      INTEGER NOT NULL DEFAULT 0,
-     wire_kind    INTEGER NOT NULL DEFAULT 14
+     wire_kind    INTEGER NOT NULL DEFAULT 14,
+     PRIMARY KEY (owner, event_id)
    );`,
-  `CREATE INDEX IF NOT EXISTS idx_dm_conversation_created
-     ON dm_messages (conversation, created_at DESC);`,
+  `CREATE INDEX IF NOT EXISTS idx_dm_owner_conversation_created
+     ON dm_messages (owner, conversation, created_at DESC);`,
 ];
 
 let dbPromise: Promise<DB> | null = null;
@@ -43,23 +47,21 @@ async function openLocalDb(): Promise<DB> {
       'SQLCipher not active — refusing to open a plaintext DB (cipher_version empty)',
     );
   }
+  await rebuildDmMessagesIfPreOwner(db);
   for (const stmt of SCHEMA) await db.execute(stmt);
-  await migrateDmMessagesColumns(db);
   return db;
 }
 
-// `CREATE TABLE IF NOT EXISTS` won't add columns to a dm_messages table created
-// by an earlier schema version (e.g. a dev build before from_me/wire_kind), so
-// add any missing ones explicitly. The table is a rebuildable relay cache, but
-// ALTER preserves rows already synced. Idempotent via the table_info check.
-async function migrateDmMessagesColumns(db: DB): Promise<void> {
+// Schema v1 (pre-#848) had no `owner` column and keyed rows by event_id alone.
+// SQLite can't ALTER a primary key, so a pre-owner table is dropped and
+// recreated by the SCHEMA pass. Safe because (a) the table is a rebuildable
+// relay cache and (b) the store was dormant before #848 (imported only by its
+// own tests), so pre-owner tables exist only on dev installs.
+async function rebuildDmMessagesIfPreOwner(db: DB): Promise<void> {
   const info = await db.execute('PRAGMA table_info(dm_messages);');
   const have = new Set((info.rows ?? []).map((c) => String(c.name)));
-  if (!have.has('from_me')) {
-    await db.execute('ALTER TABLE dm_messages ADD COLUMN from_me INTEGER NOT NULL DEFAULT 0;');
-  }
-  if (!have.has('wire_kind')) {
-    await db.execute('ALTER TABLE dm_messages ADD COLUMN wire_kind INTEGER NOT NULL DEFAULT 14;');
+  if (have.size > 0 && !have.has('owner')) {
+    await db.execute('DROP TABLE dm_messages;');
   }
 }
 
@@ -112,9 +114,10 @@ async function clearLocalDb(): Promise<void> {
 /**
  * Full wipe of the local DM store on logout / account-wipe: delete the
  * encrypted DB file AND its keystore key. A lone key or a lone ciphertext file
- * is useless, but leave neither behind (#690 / #710 H1). Wire this into the
- * logout path alongside the DM-store rewire (#709) that first writes real rows;
- * safe to call earlier — both halves are no-ops when nothing has been created.
+ * is useless, but leave neither behind (#690 / #710 H1). Wired into the
+ * last-identity logout path in NostrContext (#848); per-account sign-out of a
+ * non-final identity deletes only that owner's rows (dmDb). Safe to call when
+ * nothing was ever created — both halves are no-ops.
  */
 export async function wipeLocalDmStore(): Promise<void> {
   await clearLocalDb();
@@ -136,9 +139,9 @@ export async function verifyEncryptedDb(): Promise<string> {
   const cipher = String(res.rows?.[0]?.cipher_version ?? '');
   try {
     await db.execute(
-      `INSERT OR REPLACE INTO dm_messages (event_id, conversation, created_at, sender, content)
-       VALUES (?, ?, ?, ?, ?);`,
-      ['__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
+      `INSERT OR REPLACE INTO dm_messages (owner, event_id, conversation, created_at, sender, content)
+       VALUES (?, ?, ?, ?, ?, ?);`,
+      ['__smoke__', '__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
     );
     const back = await db.execute('SELECT content FROM dm_messages WHERE event_id = ?;', [
       '__smoke__',

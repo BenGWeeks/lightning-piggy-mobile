@@ -49,10 +49,13 @@ const DEFAULT_YIELD_EVERY = 25;
 const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /**
- * Ingest fetched wraps decrypt-once. Returns counts; the decrypted rows are
- * persisted to the encrypted DB (read them back via dmDb's indexed queries).
+ * Ingest fetched wraps decrypt-once for `owner` (the signed-in account's
+ * pubkey — the known-id gate is owner-scoped, #848). Returns counts; the
+ * decrypted rows are persisted to the encrypted DB (read them back via
+ * dmDb's indexed queries).
  */
 export async function ingestWraps<W extends IngestableWrap>(
+  owner: string,
   wraps: readonly W[],
   decrypt: WrapDecryptor<W>,
   options: IngestOptions = {},
@@ -62,7 +65,10 @@ export async function ingestWraps<W extends IngestableWrap>(
 
   // The decrypt-once gate: one indexed query tells us which wrap ids we've
   // already stored, so we never re-run the expensive unwrap for them.
-  const known = await selectKnownEventIds(wraps.map((w) => w.id));
+  const known = await selectKnownEventIds(
+    owner,
+    wraps.map((w) => w.id),
+  );
 
   const yieldEvery = options.yieldEvery ?? DEFAULT_YIELD_EVERY;
   const freshTotal = wraps.length - known.size;
