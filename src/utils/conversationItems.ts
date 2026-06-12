@@ -18,6 +18,8 @@ export type Item =
       createdAt: number;
       // Per-relay delivery breakdown for a sent (fromMe) message (#856).
       deliveryStatus?: DeliveryStatus;
+      // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
+      wireKind?: number;
     }
   | {
       kind: 'zap';
@@ -68,6 +70,8 @@ export interface ConversationMessageInput {
   // Per-relay delivery breakdown for a sent message (#856), attached by the
   // composer's optimistic append. Carried through to the message Item.
   deliveryStatus?: DeliveryStatus;
+  // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
+  wireKind?: number;
 }
 
 // Local-only formatter — only used for the dayHeader rule between
@@ -159,6 +163,7 @@ export function buildConversationItems(
       text: sanitizeDisplayText(m.text),
       createdAt: m.createdAt,
       deliveryStatus: m.deliveryStatus,
+      wireKind: m.wireKind,
     };
   });
   // Descending order — index 0 is newest. The FlatList is `inverted`, so

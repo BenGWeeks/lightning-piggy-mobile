@@ -59,6 +59,7 @@ import { extractSharedContact } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import {
   type Item,
@@ -404,18 +405,6 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
-  // Long-press a sent bubble → per-relay delivery breakdown (#856). A dedicated
-  // branded sheet (DeliveryDetailSheet) colours the ✓/✗ glyphs, surfaces the
-  // event metadata (rumor id + kind), and offers a Re-send. State holds both
-  // the status and the original text so Re-send can re-publish it.
-  const [deliveryDetail, setDeliveryDetail] = useState<{
-    status: DeliveryStatus;
-    text: string;
-  } | null>(null);
-  const handleShowDelivery = useCallback((status: DeliveryStatus, resendText: string) => {
-    setDeliveryDetail({ status, text: resendText });
-  }, []);
-
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -456,16 +445,16 @@ const ConversationScreen: React.FC = () => {
     setVoiceSheetOpen,
   });
 
-  // Re-publish the message behind the open delivery sheet (#856). Closes the
-  // sheet, then runs the full send path again so the re-publish gets its own
-  // bubble + fresh delivery tick. Handy when delivery was partial / a relay
-  // dropped the wrap. (#857 will add an automatic outbox; this is the manual
-  // escape hatch in the meantime.)
-  const handleResendFromDetail = useCallback(() => {
-    const text = deliveryDetail?.text;
-    setDeliveryDetail(null);
-    if (text) void resendText(text);
-  }, [deliveryDetail, resendText]);
+  // Tap a bubble → message-info sheet (#856), for sent + received. Logic lives
+  // in useMessageInfoSheet to keep the screen under the size cap. Declared
+  // after the composer hook because it needs its `resendText` for Re-publish.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -579,7 +568,7 @@ const ConversationScreen: React.FC = () => {
         myAvatarUri={profile?.picture ?? null}
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
-        onShowDelivery={handleShowDelivery}
+        onShowInfo={handleShowInfo}
       />
     ),
     [
@@ -589,7 +578,7 @@ const ConversationScreen: React.FC = () => {
       openSharedContact,
       handlePayInvoice,
       handleToggleSecretMode,
-      handleShowDelivery,
+      handleShowInfo,
       liveLocationLatest,
       liveLocationBubbleStatus,
       liveLocationBubbleRemaining,
@@ -975,20 +964,9 @@ const ConversationScreen: React.FC = () => {
         onDismiss={() => setSecretCelebrationVisible(false)}
       />
       <DeliveryDetailSheet
-        status={deliveryDetail?.status ?? null}
-        onClose={() => setDeliveryDetail(null)}
-        // Only offer Re-publish when there's a resendable payload AND it's a
-        // text rumor (kind 14). Non-text bubbles (location / live-location)
-        // pass an empty string; kind-15 file messages (voice/image) carry an
-        // encoded URL but resendText would re-send them as plain kind-14 text,
-        // dropping the file tag set — so hide Re-publish there rather than
-        // silently corrupting the resend (Copilot #858). Full kind-15 resend
-        // is deferred to the #857 outbox.
-        onResend={
-          deliveryDetail?.text && deliveryDetail.status.kind === 14
-            ? handleResendFromDetail
-            : undefined
-        }
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );

@@ -30,6 +30,34 @@ export interface DeliveryStatus {
   kind?: number;
 }
 
+// Everything the message-info sheet needs for ONE message — sent or received
+// (#856). For a sent message `deliveryStatus` carries the per-relay tick +
+// Re-publish payload; for a received message it's absent and we just show the
+// metadata (protocol / kind / id). `wireKind` distinguishes NIP-17
+// (gift-wrapped, kind 14/15) from legacy NIP-04 (kind 4).
+export interface MessageInfo {
+  direction: 'sent' | 'received';
+  eventId: string;
+  // The on-wire protocol: 4 = NIP-04, 14/15 = NIP-17 rumor kind.
+  wireKind?: number;
+  // Present only for sent messages — drives the relay breakdown + tick.
+  deliveryStatus?: DeliveryStatus;
+  // Raw text to hand Re-publish (sent kind-14 only); empty otherwise.
+  resendText?: string;
+}
+
+/** Human label for the wire protocol shown in the message-info sheet. */
+export function protocolLabel(wireKind: number | undefined): string {
+  if (wireKind === 4) return 'NIP-04 (legacy DM)';
+  if (wireKind === 14 || wireKind === 15) return 'NIP-17 (gift-wrapped)';
+  return 'Unknown';
+}
+
+/** Whether a message travelled as an encrypted NIP-17 gift wrap. */
+export function isGiftWrapped(wireKind: number | undefined): boolean {
+  return wireKind === 14 || wireKind === 15;
+}
+
 // One relay's settled publish outcomes across all of a send's wraps. The
 // recipient wrap and the self-copy wrap each publish to the same relay list,
 // so a relay can appear with one settle per wrap. We fold them: a relay is

@@ -176,6 +176,7 @@ export async function fetchConversationFor(
       fromMe: c.fromMe,
       text: c.text,
       createdAt: c.ev.created_at,
+      wireKind: 4, // these are kind-4 NIP-04 events
     };
   }
   for (const r of freshResults) {
@@ -185,6 +186,7 @@ export async function fetchConversationFor(
       fromMe: r.fromMe,
       text: r.text,
       createdAt: r.ev.created_at,
+      wireKind: 4,
     };
   }
   for (const m of orderedByIndex) if (m !== null) decrypted.push(m);
@@ -216,6 +218,7 @@ export async function fetchConversationFor(
         fromMe: r.fromMe,
         text: r.content,
         createdAt: r.createdAt,
+        wireKind: r.wireKind,
       });
     }
     skippedInboxFetch = await hasStoredWraps(pubkey);
@@ -269,7 +272,13 @@ export async function fetchConversationFor(
       // stored for later opens of their own threads.
       for (const e of r.entries) {
         if (e.partnerPubkey !== normalized) continue;
-        decrypted.push({ id: e.id, fromMe: e.fromMe, text: e.text, createdAt: e.createdAt });
+        decrypted.push({
+          id: e.id,
+          fromMe: e.fromMe,
+          text: e.text,
+          createdAt: e.createdAt,
+          wireKind: e.wireKind,
+        });
       }
     }
   }

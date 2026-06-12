@@ -1,10 +1,15 @@
 import React, { useMemo } from 'react';
 import { Modal, View, Text, Pressable, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Check, X, Send, Copy, RotateCw } from 'lucide-react-native';
+import { Check, X, Send, Inbox, Copy, RotateCw } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { Toast } from './BrandedToast';
-import { summariseDelivery, shortRelayLabel, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import {
+  summariseDelivery,
+  shortRelayLabel,
+  protocolLabel,
+  type MessageInfo,
+} from '../utils/dmDeliveryStatus';
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
 
 // Human label for a NIP-17 rumor kind shown in the metadata block.
@@ -19,41 +24,53 @@ function shortEventId(id: string): string {
 }
 
 /**
- * Per-relay delivery breakdown shown on long-pressing a sent DM bubble (#856).
- * Replaces the plain text alert so we can colour the ✓/✗ glyphs (green/red),
- * surface event metadata (rumor id + kind + status), and offer a Re-send.
- * Modal-based, same visual family as BrandedAlert.
+ * Message-info sheet shown on tapping a DM bubble (#856). For a SENT message it
+ * shows the per-relay delivery breakdown (coloured ✓/✗) + a Re-publish action;
+ * for a RECEIVED message it shows just the metadata (no relay breakdown, no
+ * Re-publish). Both show the protocol (NIP-17 gift-wrapped vs NIP-04), Kind,
+ * and a copyable Event ID. Modal-based, same visual family as BrandedAlert.
  */
 export default function DeliveryDetailSheet({
-  status,
+  info,
   onClose,
   onResend,
 }: {
-  status: DeliveryStatus | null;
+  info: MessageInfo | null;
   onClose: () => void;
-  // Re-publish the message behind this sheet (#856). Optional — when omitted
-  // the Re-send button is hidden.
+  // Re-publish the message (sent kind-14 text only). Optional — when omitted
+  // (received messages, non-text, kind-15) the button is hidden.
   onResend?: () => void;
 }): React.ReactElement | null {
   const colors = useThemeColors();
   const styles = useMemo(() => createDeliveryDetailSheetStyles(colors), [colors]);
 
-  if (!status) return null;
+  if (!info) return null;
 
-  const { ok, total } = summariseDelivery(status);
-  const title = total === 0 ? 'No relay results' : `Sent to ${ok} of ${total} relays`;
-  // Sort relays for a stable order — relayResults insertion order depends on
-  // async settle timing, which would otherwise reshuffle the list run-to-run
-  // (Copilot #858). `ok` rows first, then alphabetical by URL.
-  const relays = Object.entries(status.relayResults).sort(([ua, ra], [ub, rb]) =>
-    ra === rb ? ua.localeCompare(ub) : ra === 'ok' ? -1 : 1,
-  );
-  // Distinguish all three terminal states. `delivered` is false BOTH for
-  // "no results yet" and "every relay rejected", so key off the counts so the
-  // label matches the bubble's tick (Copilot #858): no results → Pending,
-  // 0 of N → Failed, some → Partially delivered, all → Delivered.
-  const statusLabel =
-    total === 0
+  const sent = info.direction === 'sent';
+  const status = info.deliveryStatus;
+  const { ok, total } = status ? summariseDelivery(status) : { ok: 0, total: 0 };
+
+  const title = sent
+    ? total === 0
+      ? 'Sent'
+      : `Sent to ${ok} of ${total} relays`
+    : 'Message received';
+
+  // Sorted relays (ok first, then by URL) so the order is stable run-to-run.
+  const relays = status
+    ? Object.entries(status.relayResults).sort(([ua, ra], [ub, rb]) =>
+        ra === rb ? ua.localeCompare(ub) : ra === 'ok' ? -1 : 1,
+      )
+    : [];
+
+  // A received message has no relay outcomes (we didn't publish it). A SENT
+  // message with no delivery data was sent before tracking existed (or its
+  // status wasn't persisted) — show "Not tracked", not "Received".
+  const statusLabel = !status
+    ? sent
+      ? 'Not tracked'
+      : 'Received'
+    : total === 0
       ? 'Pending'
       : ok === 0
         ? 'Failed'
@@ -62,14 +79,17 @@ export default function DeliveryDetailSheet({
           : 'Delivered';
 
   const copyEventId = () => {
-    if (!status.eventId) return;
-    void Clipboard.setStringAsync(status.eventId);
+    if (!info.eventId) return;
+    void Clipboard.setStringAsync(info.eventId);
     Toast.show({ type: 'success', text1: 'Event ID copied' });
   };
 
+  const HeaderIcon = sent ? Send : Inbox;
+  const showRelays = sent && relays.length > 0;
+
   return (
     <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.root} onPress={onClose} accessibilityLabel="Dismiss delivery detail">
+      <Pressable style={styles.root} onPress={onClose} accessibilityLabel="Dismiss message info">
         <View
           onStartShouldSetResponder={() => true}
           accessibilityRole="alert"
@@ -78,44 +98,50 @@ export default function DeliveryDetailSheet({
         >
           <View style={styles.header}>
             <View style={[styles.iconSlot, { backgroundColor: colors.brandPink }]}>
-              <Send size={26} color={colors.white} strokeWidth={2.5} />
+              <HeaderIcon size={26} color={colors.white} strokeWidth={2.5} />
             </View>
             <Text style={styles.title} testID="dm-delivery-detail-title">
               {title}
             </Text>
           </View>
 
-          <View style={styles.relayList}>
-            {relays.map(([url, res], i) => {
-              const isOk = res === 'ok';
-              return (
-                // Index-based testID — the relay URL (with `:` / `/`) makes a
-                // brittle Maestro selector; the URL stays the visible label.
-                <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
-                  {isOk ? (
-                    <Check size={16} color={colors.green} strokeWidth={3} />
-                  ) : (
-                    <X size={16} color={colors.red} strokeWidth={3} />
-                  )}
-                  <Text
-                    style={[styles.relayLabel, !isOk && styles.relayLabelFailed]}
-                    numberOfLines={1}
-                  >
-                    {shortRelayLabel(url)}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
+          {/* Per-relay breakdown — sent messages only (a received message
+              wasn't published by us, so there are no relay outcomes). */}
+          {showRelays ? (
+            <View style={styles.relayList}>
+              {relays.map(([url, res], i) => {
+                const isOk = res === 'ok';
+                return (
+                  <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
+                    {isOk ? (
+                      <Check size={16} color={colors.green} strokeWidth={3} />
+                    ) : (
+                      <X size={16} color={colors.red} strokeWidth={3} />
+                    )}
+                    <Text
+                      style={[styles.relayLabel, !isOk && styles.relayLabelFailed]}
+                      numberOfLines={1}
+                    >
+                      {shortRelayLabel(url)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
 
-          <View style={styles.divider} />
+          {showRelays ? <View style={styles.divider} /> : null}
 
           <View style={styles.metaBlock}>
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Kind</Text>
-              <Text style={styles.metaValue}>{kindLabel(status.kind)}</Text>
+              <Text style={styles.metaLabel}>Protocol</Text>
+              <Text style={styles.metaValue}>{protocolLabel(info.wireKind)}</Text>
             </View>
-            {status.eventId ? (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Kind</Text>
+              <Text style={styles.metaValue}>{kindLabel(info.wireKind)}</Text>
+            </View>
+            {info.eventId ? (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>Event ID</Text>
                 <TouchableOpacity
@@ -126,7 +152,7 @@ export default function DeliveryDetailSheet({
                   testID="dm-delivery-copy-event-id"
                 >
                   <Text style={[styles.metaValue, styles.metaValueMono]} numberOfLines={1}>
-                    {shortEventId(status.eventId)}
+                    {shortEventId(info.eventId)}
                   </Text>
                   <Copy size={13} color={colors.textSupplementary} />
                 </TouchableOpacity>

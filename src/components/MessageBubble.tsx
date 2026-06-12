@@ -116,12 +116,20 @@ interface Props {
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
   // Per-relay delivery breakdown for a sent (fromMe) message (#856). Drives
-  // the footer tick; absent on received bubbles. Long-pressing the footer
-  // calls `onShowDelivery` with this status (+ the raw sent text, so the
-  // breakdown sheet can offer a Re-send) so the parent can present the
-  // per-relay breakdown ("Sent to 4 of 6 relays").
+  // the footer tick; absent on received bubbles.
   deliveryStatus?: DeliveryStatus;
-  onShowDelivery?: (status: DeliveryStatus, resendText: string) => void;
+  // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
+  wireKind?: number;
+  // Tapping a bubble (sent OR received) opens the message-info sheet. The
+  // parent builds the MessageInfo from these fields; `resendText` is the raw
+  // payload for the sheet's Re-publish (sent text only). (#856)
+  onShowInfo?: (args: {
+    fromMe: boolean;
+    eventId: string;
+    wireKind?: number;
+    deliveryStatus?: DeliveryStatus;
+    resendText: string;
+  }) => void;
 }
 
 /**
@@ -199,53 +207,43 @@ type Styles = MessageBubbleStyles;
 const BubbleFooter: React.FC<{
   styles: Styles;
   // Per-message id so the footer/tick testIDs are unique within a thread that
-  // has many sent bubbles (Copilot #858) — Maestro can still match the bare
-  // prefix when it just wants "a" tick.
+  // has many bubbles (Copilot #858) — Maestro can still match the bare prefix.
   messageId: string;
   fromMe: boolean;
   createdAt: number;
   timeStyle: object | (object | undefined)[];
   deliveryStatus?: DeliveryStatus;
-  // Raw sent payload, handed to the breakdown sheet for Re-send.
-  resendText: string;
-  onShowDelivery?: (status: DeliveryStatus, resendText: string) => void;
-}> = ({
-  styles,
-  messageId,
-  fromMe,
-  createdAt,
-  timeStyle,
-  deliveryStatus,
-  resendText,
-  onShowDelivery,
-}) => {
-  if (!fromMe || !deliveryStatus) {
+  // Opens the message-info sheet (tap or long-press) for sent AND received.
+  onOpenInfo?: () => void;
+}> = ({ styles, messageId, fromMe, createdAt, timeStyle, deliveryStatus, onOpenInfo }) => {
+  const showTick = fromMe && !!deliveryStatus;
+  // No info handler and no tick → plain timestamp (e.g. a legacy row).
+  if (!onOpenInfo && !showTick) {
     return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
   }
-  const openDelivery = onShowDelivery
-    ? () => onShowDelivery(deliveryStatus, resendText)
-    : undefined;
   return (
     <TouchableOpacity
       style={styles.bubbleFooterRow}
-      activeOpacity={onShowDelivery ? 0.6 : 1}
-      // Tap AND long-press both open the breakdown — tap is discoverable and
+      activeOpacity={onOpenInfo ? 0.6 : 1}
+      // Tap AND long-press both open the info sheet — tap is discoverable and
       // reachable by screen readers (long-press alone isn't). (Copilot #858)
-      onPress={openDelivery}
-      onLongPress={openDelivery}
+      onPress={onOpenInfo}
+      onLongPress={onOpenInfo}
       accessibilityRole="button"
-      accessibilityLabel="Delivery status"
-      accessibilityHint="Opens the per-relay delivery breakdown"
+      accessibilityLabel={fromMe ? 'Delivery status' : 'Message info'}
+      accessibilityHint="Opens message details"
       testID={`dm-bubble-delivery-footer-${messageId}`}
     >
       {/* Footer-row time zeroes the standalone bubbleTime top margin so the
           tick sits level with the timestamp (Copilot #858). */}
       <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
-      <DeliveryTick
-        styles={styles}
-        status={deliveryStatus}
-        testID={`dm-bubble-delivery-tick-${messageId}`}
-      />
+      {showTick ? (
+        <DeliveryTick
+          styles={styles}
+          status={deliveryStatus as DeliveryStatus}
+          testID={`dm-bubble-delivery-tick-${messageId}`}
+        />
+      ) : null}
     </TouchableOpacity>
   );
 };
@@ -328,7 +326,8 @@ const MessageBubble: React.FC<Props> = ({
   onToggleSecretMode,
   testIdPrefix,
   deliveryStatus,
-  onShowDelivery,
+  wireKind,
+  onShowInfo,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
@@ -338,11 +337,25 @@ const MessageBubble: React.FC<Props> = ({
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
 
-  // Raw payload to hand the Re-send action (#856). For text bubbles it's the
+  // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
   // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
   // Other media (image/voice) ride on the `text` kind too, so this covers them.
   const resendPayload =
     content.kind === 'text' ? content.text : content.kind === 'gif' ? content.url : '';
+
+  // Opens the message-info sheet — for sent AND received bubbles (#856). The
+  // bubble's `id` is prefixed (`dm-<eventId>`); strip it so the sheet shows the
+  // bare event id. The rumor id (deliveryStatus.eventId) is preferred for sent.
+  const openInfo = onShowInfo
+    ? () =>
+        onShowInfo({
+          fromMe,
+          eventId: deliveryStatus?.eventId ?? id.replace(/^dm-/, ''),
+          wireKind,
+          deliveryStatus,
+          resendText: resendPayload,
+        })
+    : undefined;
 
   // Reusable footer (time + delivery tick) shared by every bubble variant so a
   // sent GIF / image / voice note / location / invoice all show the tick, not
@@ -355,8 +368,7 @@ const MessageBubble: React.FC<Props> = ({
       createdAt={createdAt}
       timeStyle={timeStyle}
       deliveryStatus={deliveryStatus}
-      resendText={resendPayload}
-      onShowDelivery={onShowDelivery}
+      onOpenInfo={openInfo}
     />
   );
 
