@@ -69,6 +69,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       alignItems: 'center',
       alignSelf: 'flex-end',
       marginTop: 4,
+      gap: 4,
     },
     // The time inside the footer row drops its own marginTop (the row owns it)
     // and gains a small gap before the tick.
@@ -80,16 +81,20 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     bubbleFooterTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
-    // Subtle delivery tick. Tinted to stay legible on the pink sent bubble
-    // (white-ish) vs a partial state (amber). Faint while pending.
+    // Delivery tick (#856, design approved 2026-06-12). WhatsApp-style
+    // single/double coverage in the payment-success green (shared with
+    // PaymentProgressOverlay so the token matches across both themes):
+    // single Check = delivered to ≥1 relay, double CheckCheck = all relays.
+    // Pending uses the faint supplementary grey; a failed send (0 relays)
+    // uses the error red.
     deliveryTickDelivered: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    deliveryTickPartial: {
-      color: colors.amber,
+      color: colors.green,
     },
     deliveryTickPending: {
-      color: 'rgba(255,255,255,0.5)',
+      color: colors.textSupplementary,
+    },
+    deliveryTickFailed: {
+      color: colors.red,
     },
     invoiceCard: {
       width: 240,

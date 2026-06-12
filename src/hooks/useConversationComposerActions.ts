@@ -157,5 +157,8 @@ export function useConversationComposerActions(params: {
     setVoiceSheetOpen,
   });
 
-  return { ...actions, appendOptimisticLocal };
+  // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish
+  // (#856). It runs the full send path (publish + optimistic row + tick), so a
+  // re-publish is indistinguishable from a fresh send and gets its own bubble.
+  return { ...actions, appendOptimisticLocal, resendText: sendText };
 }

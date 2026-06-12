@@ -1,7 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound, Radio, Check, Clock } from 'lucide-react-native';
+import {
+  Zap,
+  MapPin,
+  UserRound,
+  Radio,
+  Check,
+  CheckCheck,
+  Clock,
+  AlertCircle,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
   createMessageBubbleStyles,
@@ -107,19 +116,25 @@ interface Props {
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
   // Per-relay delivery breakdown for a sent (fromMe) message (#856). Drives
-  // the footer tick; absent on received bubbles. Long-pressing the bubble
-  // calls `onShowDelivery` with this status so the parent can present the
+  // the footer tick; absent on received bubbles. Long-pressing the footer
+  // calls `onShowDelivery` with this status (+ the raw sent text, so the
+  // breakdown sheet can offer a Re-send) so the parent can present the
   // per-relay breakdown ("Sent to 4 of 6 relays").
   deliveryStatus?: DeliveryStatus;
-  onShowDelivery?: (status: DeliveryStatus) => void;
+  onShowDelivery?: (status: DeliveryStatus, resendText: string) => void;
 }
 
 /**
- * Subtle delivery indicator for a sent DM (#856). One tick once ≥1 relay
- * accepted (the existing send-success threshold); a faint clock while a status
- * is being tracked but no relay has acked yet; an amber tick when delivery is
- * partial (some relays rejected). NOT one glyph per relay — recipient relay
- * lists run to 11; the per-relay detail lives behind a long-press.
+ * Delivery indicator for a sent DM (#856, design approved 2026-06-12).
+ * WhatsApp-style single/double coverage in the payment-success green:
+ *   - pending (no relay acked yet) → faint Clock
+ *   - delivered to ≥1 but not all target relays → single green Check
+ *   - delivered to ALL target relays → double green CheckCheck
+ *   - failed (every relay rejected) → red AlertCircle
+ * Single→double is computed from the per-relay `relayResults`; the exact
+ * "Sent to N of M relays" breakdown lives behind a long-press (recipient relay
+ * lists run to 11, so one glyph per relay would be noise). Retry/outbox for the
+ * failed state is #857 — this only renders the distinct visual.
  */
 const DeliveryTick: React.FC<{
   styles: Styles;
@@ -130,26 +145,82 @@ const DeliveryTick: React.FC<{
   // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
   // node Maestro can resolve — testIDs on lucide-react-native icons don't
   // reliably surface in the accessibility tree.
-  if (!status.delivered) {
+
+  // No relay outcomes captured yet → still publishing.
+  if (total === 0) {
     return (
       <View testID={testID} accessibilityLabel="Message pending">
         <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
       </View>
     );
   }
-  const partial = total > 0 && ok < total;
-  const tintStyle = partial ? styles.deliveryTickPartial : styles.deliveryTickDelivered;
+
+  // Every relay rejected → failed. Distinct visual only; retry is #857.
+  if (ok === 0) {
+    return (
+      <View testID={testID} accessibilityLabel="Send failed">
+        <AlertCircle
+          size={13}
+          color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
+        />
+      </View>
+    );
+  }
+
+  const green = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
+  // All target relays acked → double tick; otherwise ≥1 → single tick.
+  if (ok === total) {
+    return (
+      <View testID={testID} accessibilityLabel="Sent to all relays">
+        <CheckCheck size={14} strokeWidth={2.5} color={green} />
+      </View>
+    );
+  }
   return (
-    <View
-      testID={testID}
-      accessibilityLabel={partial ? `Sent to ${ok} of ${total} relays` : 'Sent'}
-    >
-      <Check size={13} strokeWidth={2.5} color={StyleSheet.flatten(tintStyle).color as string} />
+    <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
+      <Check size={13} strokeWidth={2.5} color={green} />
     </View>
   );
 };
 
 type Styles = MessageBubbleStyles;
+
+/**
+ * Shared time-row footer for every bubble variant (#856). Renders the
+ * timestamp and, on a sent (`fromMe`) bubble that carries a tracked
+ * `deliveryStatus`, the delivery tick beside it — long-pressable to open the
+ * per-relay breakdown. Received bubbles and untracked sends fall back to the
+ * bare timestamp, so this is a drop-in for each variant's old `<Text>` time.
+ *
+ * `timeStyle` is the variant's existing time text style (e.g. `gifTime`,
+ * `imageBubbleTime`, `bubbleTime`) so each card keeps its own ink/placement;
+ * only the tick is appended.
+ */
+const BubbleFooter: React.FC<{
+  styles: Styles;
+  fromMe: boolean;
+  createdAt: number;
+  timeStyle: object | (object | undefined)[];
+  deliveryStatus?: DeliveryStatus;
+  // Raw sent payload, handed to the breakdown sheet for Re-send.
+  resendText: string;
+  onShowDelivery?: (status: DeliveryStatus, resendText: string) => void;
+}> = ({ styles, fromMe, createdAt, timeStyle, deliveryStatus, resendText, onShowDelivery }) => {
+  const time = <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
+  if (!fromMe || !deliveryStatus) return time;
+  return (
+    <TouchableOpacity
+      style={styles.bubbleFooterRow}
+      activeOpacity={onShowDelivery ? 0.6 : 1}
+      onLongPress={onShowDelivery ? () => onShowDelivery(deliveryStatus, resendText) : undefined}
+      accessibilityLabel="Delivery status, long-press for per-relay detail"
+      testID="dm-bubble-delivery-footer"
+    >
+      {time}
+      <DeliveryTick styles={styles} status={deliveryStatus} testID="dm-bubble-delivery-tick" />
+    </TouchableOpacity>
+  );
+};
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
@@ -162,11 +233,13 @@ const ImageBubble: React.FC<{
   styles: Styles;
   image: ParsedImageMessage;
   fromMe: boolean;
-  createdAt: number;
   senderLabel: React.ReactNode;
   onOpenImageFullscreen?: (url: string) => void;
   testID: string;
-}> = ({ styles, image, fromMe, createdAt, senderLabel, onOpenImageFullscreen, testID }) => {
+  // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
+  // the tick like every other variant.
+  footer: React.ReactNode;
+}> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
@@ -194,9 +267,7 @@ const ImageBubble: React.FC<{
           accessibilityLabel="Shared image"
           onResolved={image.encrypted ? setDisplayUri : undefined}
         />
-        <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
-          {formatTime(createdAt)}
-        </Text>
+        {footer}
       </TouchableOpacity>
     </View>
   );
@@ -239,23 +310,26 @@ const MessageBubble: React.FC<Props> = ({
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
 
-  // Footer for a sent text bubble: timestamp + delivery tick (#856). Only
-  // rendered on `fromMe` bubbles that carry a tracked status; received bubbles
-  // and untracked sends fall back to the bare timestamp. Long-press surfaces
-  // the per-relay breakdown via the parent.
-  const showDeliveryFooter = fromMe && !!deliveryStatus;
-  const DeliveryFooter = showDeliveryFooter ? (
-    <View style={styles.bubbleFooterRow}>
-      <Text style={[styles.bubbleFooterTime, fromMe && styles.bubbleFooterTimeMe]}>
-        {formatTime(createdAt)}
-      </Text>
-      <DeliveryTick
-        styles={styles}
-        status={deliveryStatus as DeliveryStatus}
-        testID="dm-bubble-delivery-tick"
-      />
-    </View>
-  ) : null;
+  // Raw payload to hand the Re-send action (#856). For text bubbles it's the
+  // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
+  // Other media (image/voice) ride on the `text` kind too, so this covers them.
+  const resendPayload =
+    content.kind === 'text' ? content.text : content.kind === 'gif' ? content.url : '';
+
+  // Reusable footer (time + delivery tick) shared by every bubble variant so a
+  // sent GIF / image / voice note / location / invoice all show the tick, not
+  // just plain text (#856). Each variant passes its own time style.
+  const renderFooter = (timeStyle: object | (object | undefined)[]) => (
+    <BubbleFooter
+      styles={styles}
+      fromMe={fromMe}
+      createdAt={createdAt}
+      timeStyle={timeStyle}
+      deliveryStatus={deliveryStatus}
+      resendText={resendPayload}
+      onShowDelivery={onShowDelivery}
+    />
+  );
 
   if (content.kind === 'gif') {
     return (
@@ -277,7 +351,7 @@ const MessageBubble: React.FC<Props> = ({
             transition={150}
             accessibilityIgnoresInvertColors
           />
-          <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
+          {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
       </View>
     );
@@ -418,9 +492,7 @@ const MessageBubble: React.FC<Props> = ({
                 <Text style={styles.invoicePayText}>Stop sharing</Text>
               </TouchableOpacity>
             ) : null}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
       </View>
@@ -489,9 +561,7 @@ const MessageBubble: React.FC<Props> = ({
                 OpenStreetMap
               </Text>
             )}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
       </View>
@@ -511,10 +581,10 @@ const MessageBubble: React.FC<Props> = ({
         styles={styles}
         image={image}
         fromMe={fromMe}
-        createdAt={createdAt}
         senderLabel={SenderLabel}
         onOpenImageFullscreen={onOpenImageFullscreen}
         testID={`${testIdPrefix}-image-${id}`}
+        footer={renderFooter([styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe])}
       />
     );
   }
@@ -535,6 +605,11 @@ const MessageBubble: React.FC<Props> = ({
         createdAt={createdAt}
         senderName={senderName}
         testID={`${testIdPrefix}-voice-${id}`}
+        footer={
+          fromMe && deliveryStatus
+            ? renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])
+            : undefined
+        }
       />
     );
   }
@@ -568,9 +643,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -614,9 +687,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -682,9 +753,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -742,9 +811,7 @@ const MessageBubble: React.FC<Props> = ({
               ) : null}
             </View>
           </View>
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </TouchableOpacity>
       </View>
     );
@@ -773,9 +840,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -792,62 +857,37 @@ const MessageBubble: React.FC<Props> = ({
     return null;
   })();
 
-  // Long-pressing a sent bubble with a tracked status opens the per-relay
-  // breakdown. Only sent bubbles carrying a status are long-pressable; others
-  // render the plain non-interactive bubble unchanged.
-  const bubbleBody = (
-    <>
-      {SenderLabel}
-      <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
-        {hasLink(text)
-          ? linkifySegments(text).map((seg, i) =>
-              seg.url ? (
-                <Text
-                  key={i}
-                  style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
-                  onPress={() => {
-                    // openURL rejects on a malformed URL / missing handler —
-                    // swallow so a bad link can't raise an unhandled rejection.
-                    void Linking.openURL(seg.url as string).catch(() => {});
-                  }}
-                  accessibilityRole="link"
-                  accessibilityLabel={`Open link ${seg.url}`}
-                  testID={`${testIdPrefix}-link-${id}-${i}`}
-                >
-                  {seg.text}
-                </Text>
-              ) : (
-                seg.text
-              ),
-            )
-          : text}
-      </Text>
-      {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
-      {DeliveryFooter ?? (
-        <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-          {formatTime(createdAt)}
-        </Text>
-      )}
-    </>
-  );
-
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      {showDeliveryFooter && onShowDelivery ? (
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onLongPress={() => onShowDelivery(deliveryStatus as DeliveryStatus)}
-          accessibilityLabel="Sent message, long-press for delivery detail"
-          testID={`${testIdPrefix}-bubble-delivery-${id}`}
-          style={[styles.bubble, styles.bubbleMe]}
-        >
-          {bubbleBody}
-        </TouchableOpacity>
-      ) : (
-        <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
-          {bubbleBody}
-        </View>
-      )}
+      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+        {SenderLabel}
+        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+          {hasLink(text)
+            ? linkifySegments(text).map((seg, i) =>
+                seg.url ? (
+                  <Text
+                    key={i}
+                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                    onPress={() => {
+                      // openURL rejects on a malformed URL / missing handler —
+                      // swallow so a bad link can't raise an unhandled rejection.
+                      void Linking.openURL(seg.url as string).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Open link ${seg.url}`}
+                    testID={`${testIdPrefix}-link-${id}-${i}`}
+                  >
+                    {seg.text}
+                  </Text>
+                ) : (
+                  seg.text
+                ),
+              )
+            : text}
+        </Text>
+        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
+        {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+      </View>
     </View>
   );
 };

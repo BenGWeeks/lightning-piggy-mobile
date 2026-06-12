@@ -67,7 +67,8 @@ import {
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
-import { summariseDelivery, shortRelayLabel, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -375,15 +376,16 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
-  // Long-press a sent bubble → per-relay delivery breakdown (#856). Branded
-  // alert (theme-matched, Maestro-testable) lists which relays accepted.
-  const handleShowDelivery = useCallback((status: DeliveryStatus) => {
-    const { ok, total } = summariseDelivery(status);
-    const lines = Object.entries(status.relayResults)
-      .map(([url, res]) => `${res === 'ok' ? '✓' : '✗'} ${shortRelayLabel(url)}`)
-      .join('\n');
-    const heading = total === 0 ? 'No relay results' : `Sent to ${ok} of ${total} relays`;
-    Alert.alert(heading, lines || 'No per-relay detail recorded for this message.');
+  // Long-press a sent bubble → per-relay delivery breakdown (#856). A dedicated
+  // branded sheet (DeliveryDetailSheet) colours the ✓/✗ glyphs, surfaces the
+  // event metadata (rumor id + kind), and offers a Re-send. State holds both
+  // the status and the original text so Re-send can re-publish it.
+  const [deliveryDetail, setDeliveryDetail] = useState<{
+    status: DeliveryStatus;
+    text: string;
+  } | null>(null);
+  const handleShowDelivery = useCallback((status: DeliveryStatus, resendText: string) => {
+    setDeliveryDetail({ status, text: resendText });
   }, []);
 
   const handleRefresh = useCallback(async () => {
@@ -406,6 +408,7 @@ const ConversationScreen: React.FC = () => {
     sharingLocation,
     uploadingVoice,
     appendOptimisticLocal,
+    resendText,
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
@@ -424,6 +427,17 @@ const ConversationScreen: React.FC = () => {
     setGifPickerOpen,
     setVoiceSheetOpen,
   });
+
+  // Re-publish the message behind the open delivery sheet (#856). Closes the
+  // sheet, then runs the full send path again so the re-publish gets its own
+  // bubble + fresh delivery tick. Handy when delivery was partial / a relay
+  // dropped the wrap. (#857 will add an automatic outbox; this is the manual
+  // escape hatch in the meantime.)
+  const handleResendFromDetail = useCallback(() => {
+    const text = deliveryDetail?.text;
+    setDeliveryDetail(null);
+    if (text) void resendText(text);
+  }, [deliveryDetail, resendText]);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -931,6 +945,11 @@ const ConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        status={deliveryDetail?.status ?? null}
+        onClose={() => setDeliveryDetail(null)}
+        onResend={handleResendFromDetail}
       />
     </View>
   );

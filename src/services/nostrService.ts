@@ -1211,9 +1211,12 @@ export async function sendNip17ToManyWithNsec(input: {
     input.senderSecretKey,
     dedupedRecipients,
   );
+  // Rumor id (stable kind-14/15 inner-event id) + kind for the detail sheet.
+  const eventId = getEventHash({ ...input.rumor, pubkey: getPublicKey(input.senderSecretKey) });
   return publishWrapsTrackingRelays(
     wraps.map((w) => w as VerifiedEvent),
     input.relays,
+    { eventId, kind: input.rumor.kind },
   );
 }
 
@@ -1327,7 +1330,10 @@ export async function sendNip17ToManyWithSigner(input: {
 
   // Any signer-step errors collected above are merged with the publish
   // results so the caller still sees both failure classes.
-  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays);
+  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays, {
+    eventId: rumorWithId.id,
+    kind: input.rumor.kind,
+  });
   return {
     wrapsPublished: publishResult.wrapsPublished,
     errors: [...errors, ...publishResult.errors],

@@ -73,6 +73,21 @@ describe('aggregateRelayResults', () => {
     ];
     expect(aggregateRelayResults(settles).relayResults).toEqual({ 'wss://a': 'ok' });
   });
+
+  it('carries the optional event metadata (eventId + kind) onto the status', () => {
+    const status = aggregateRelayResults([{ relay: 'wss://a', ok: true }], {
+      eventId: 'abc123',
+      kind: 14,
+    });
+    expect(status.eventId).toBe('abc123');
+    expect(status.kind).toBe(14);
+  });
+
+  it('leaves event metadata undefined when no meta is supplied', () => {
+    const status = aggregateRelayResults([{ relay: 'wss://a', ok: true }]);
+    expect(status.eventId).toBeUndefined();
+    expect(status.kind).toBeUndefined();
+  });
 });
 
 describe('summariseDelivery', () => {

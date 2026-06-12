@@ -22,6 +22,12 @@ export interface DeliveryStatus {
   // count as "sent" today.
   delivered: boolean;
   relayResults: Record<string, RelayDeliveryResult>;
+  // Optional event identity for the long-press detail sheet (#856). `eventId`
+  // is the NIP-17 rumor id (the stable inner kind-14/15 event id, shared
+  // across the recipient + self wraps); `kind` is the rumor kind (14 text,
+  // 15 file). Best-effort — older persisted rows won't carry them.
+  eventId?: string;
+  kind?: number;
 }
 
 // One relay's settled publish outcomes across all of a send's wraps. The
@@ -40,9 +46,13 @@ export interface RelaySettle {
  * Pure + dependency-free so it's unit-testable in isolation (ok / partial /
  * all-fail). Each entry is one wrap's outcome at one relay; the same relay
  * may appear multiple times (once per wrap). A relay is `ok` if it accepted
- * at least one wrap.
+ * at least one wrap. `meta` carries optional event identity (rumor id + kind)
+ * for the detail sheet.
  */
-export function aggregateRelayResults(settles: RelaySettle[]): DeliveryStatus {
+export function aggregateRelayResults(
+  settles: RelaySettle[],
+  meta?: { eventId?: string; kind?: number },
+): DeliveryStatus {
   const relayResults: Record<string, RelayDeliveryResult> = {};
   for (const s of settles) {
     // Once a relay is `ok` (accepted some wrap) it stays `ok` — a later
@@ -54,7 +64,7 @@ export function aggregateRelayResults(settles: RelaySettle[]): DeliveryStatus {
     }
   }
   const delivered = Object.values(relayResults).some((r) => r === 'ok');
-  return { delivered, relayResults };
+  return { delivered, relayResults, eventId: meta?.eventId, kind: meta?.kind };
 }
 
 /** Count of relays that accepted, and the total relays attempted. Drives the

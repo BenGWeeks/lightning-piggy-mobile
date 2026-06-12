@@ -32,6 +32,9 @@ export interface DmSendResult {
 export async function publishWrapsTrackingRelays(
   wraps: VerifiedEvent[],
   relays: string[],
+  // Event identity (rumor id + kind) surfaced in the long-press detail sheet
+  // (#856). Carried straight onto the resulting DeliveryStatus.
+  meta?: { eventId?: string; kind?: number },
 ): Promise<DmSendResult> {
   const errors: string[] = [];
   let published = 0;
@@ -60,5 +63,5 @@ export async function publishWrapsTrackingRelays(
       }
     }),
   );
-  return { wrapsPublished: published, errors, delivery: aggregateRelayResults(settles) };
+  return { wrapsPublished: published, errors, delivery: aggregateRelayResults(settles, meta) };
 }
