@@ -13,9 +13,14 @@ import type { RefreshDmInboxOptions } from './nostrContextTypes';
  *  - deferred via `runAfterInteractions` so it never blocks the tab transition;
  *  - carrying the original `signal`, so a tab-blur cancels it (the in-flight
  *    relay subscription closes via querySyncAbortable);
- *  - with `force: true`, which fetches the full limit, skips the `since` floor
- *    (NIP-59 wrap timestamps are randomised), and — crucially — marks this pass
- *    a non-cold-start, so it can never recurse.
+ *  - with `backfill: true`, which bypasses only the freshness TTL (the capped
+ *    first pass just stamped the cursor) and fetches the full wrap limit, but
+ *    RESPECTS the #743 skip-set and the kind-4 `since` floor. It used to run
+ *    as `force: true`, inheriting pull-to-refresh's cache bypasses — which
+ *    re-decrypted the whole skip-set (~510 wraps) plus the full kind-4 backlog
+ *    (~212 events; the NIP-04 plaintext cache is memory-only) on EVERY cold
+ *    start: the 28-30 s circuit-1 freeze (#846). The first pass stamping the
+ *    cursor is also what marks this pass non-cold, so it can never recurse.
  *
  * `refreshRef` (rather than the callback directly) keeps the caller from having
  * to list refreshDmInbox as its own dependency.
@@ -35,7 +40,7 @@ export function scheduleColdStartBackfill(args: {
     // here avoids the wasted refreshDmInbox setup entirely.
     if (args.signal?.aborted) return;
     void args.refreshRef.current?.({
-      force: true,
+      backfill: true,
       includeNonFollows: args.includeNonFollows,
       signal: args.signal,
     });

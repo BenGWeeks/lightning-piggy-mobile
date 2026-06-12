@@ -1,4 +1,11 @@
-import { isColdStartRefresh, shouldSkipForFreshness, shouldStampCursor } from './dmRefreshGate';
+import {
+  isColdStartRefresh,
+  shouldSkipForFreshness,
+  shouldStampCursor,
+  bypassesFreshnessTtl,
+  shouldBypassSkipSet,
+  shouldDropK4Since,
+} from './dmRefreshGate';
 import { DM_INBOX_REFRESH_TTL_MS } from './nostrDmCache';
 
 describe('dmRefreshGate', () => {
@@ -44,6 +51,60 @@ describe('dmRefreshGate', () => {
       const last = 10_000;
       const now = last + DM_INBOX_REFRESH_TTL_MS + 1;
       expect(shouldSkipForFreshness(last, false, now)).toBe(false);
+    });
+  });
+
+  describe('bypassesFreshnessTtl', () => {
+    it('bypasses for a user force (pull-to-refresh)', () => {
+      expect(bypassesFreshnessTtl({ force: true })).toBe(true);
+    });
+
+    it('bypasses for the cold-start backfill — it fires right after the first pass stamps the cursor', () => {
+      expect(bypassesFreshnessTtl({ backfill: true })).toBe(true);
+    });
+
+    it('does not bypass a default focus refresh', () => {
+      expect(bypassesFreshnessTtl(undefined)).toBe(false);
+      expect(bypassesFreshnessTtl({})).toBe(false);
+      expect(bypassesFreshnessTtl({ includeNonFollows: true })).toBe(false);
+    });
+  });
+
+  describe('shouldBypassSkipSet (regression for #846)', () => {
+    it('bypasses for a user force so newly-followed contacts re-evaluate (#743)', () => {
+      expect(shouldBypassSkipSet({ force: true })).toBe(true);
+    });
+
+    it('bypasses when the follow gate is off (includeNonFollows, #744)', () => {
+      expect(shouldBypassSkipSet({ includeNonFollows: true })).toBe(true);
+    });
+
+    it('does NOT bypass for the cold-start backfill — the every-cold-start decrypt sweep (#846)', () => {
+      expect(shouldBypassSkipSet({ backfill: true })).toBe(false);
+    });
+
+    it('does not bypass a default refresh', () => {
+      expect(shouldBypassSkipSet(undefined)).toBe(false);
+      expect(shouldBypassSkipSet({})).toBe(false);
+    });
+  });
+
+  describe('shouldDropK4Since (regression for #846)', () => {
+    it('drops the floor for a non-cold user force (re-fetch older kind-4 after a follow toggle)', () => {
+      expect(shouldDropK4Since({ force: true }, false)).toBe(true);
+    });
+
+    it('keeps the floor on cold start even under force (#751)', () => {
+      expect(shouldDropK4Since({ force: true }, true)).toBe(false);
+    });
+
+    it('keeps the floor for the backfill — the NIP-04 plaintext cache is memory-only (#846)', () => {
+      expect(shouldDropK4Since({ backfill: true }, false)).toBe(false);
+    });
+
+    it('keeps the floor for default refreshes', () => {
+      expect(shouldDropK4Since(undefined, false)).toBe(false);
+      expect(shouldDropK4Since({}, true)).toBe(false);
     });
   });
 

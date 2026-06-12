@@ -47,7 +47,14 @@ import {
   mergeInboxEntries,
 } from './nostrDmCache';
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
-import { isColdStartRefresh, shouldSkipForFreshness, shouldStampCursor } from './dmRefreshGate';
+import {
+  isColdStartRefresh,
+  shouldSkipForFreshness,
+  shouldStampCursor,
+  bypassesFreshnessTtl,
+  shouldBypassSkipSet,
+  shouldDropK4Since,
+} from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
@@ -275,12 +282,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // multi-second freezes that coincide with this call. #554.
       const __perfBlockStart = performance.now();
       const signal = opts?.signal;
-      // When true, the negative-result skip-set is bypassed so wraps that
-      // were previously skipped (non-follows, group routes) get re-evaluated
-      // against the current follow set. Necessary because a user who follows
-      // a new contact should see their older wraps surface on the next
-      // pull-to-refresh, not remain silently skipped. (#743)
-      const forceRefresh = opts?.force === true;
       // Dev-only "Following only=off" bypass — read once at the top so
       // the closure captures a stable value across the async work below.
       // When true, all six follow-gate `continue`s in the decrypt loops
@@ -291,20 +292,18 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // load is MessagesScreen's on-mount focus refresh; the cold-start wrap
       // cap + #788 macro-task yield must apply to it). See dmRefreshGate.
       const isColdStart = isColdStartRefresh(dmInboxLastRefreshAt.current);
-      // Gate for negative-result skip-set lookups (#743). Bypass when:
-      //   force=true (pull-to-refresh) — newly-followed contacts' older
-      //     wraps must surface on the next explicit refresh.
-      //   includeNonFollows=true ("All (dev)" toggle) — the follow gate is
-      //     disabled, so wraps from non-followed senders that were already
-      //     added to the skip-set must now be re-evaluated and surfaced.
-      //     Without this, "Following only=off" would silently skip them.
-      //     (Copilot review finding on #744)
-      const bypassSkipSet = forceRefresh || includeNonFollows;
-      // Freshness TTL: skip the refresh entirely if the previous one
-      // COMPLETED within DM_INBOX_REFRESH_TTL_MS, unless the caller forces it
-      // (pull-to-refresh). Messages-tab `useFocusEffect` uses the default path
-      // so tab-bouncing doesn't retrigger relay+decrypt work. See dmRefreshGate.
-      if (shouldSkipForFreshness(dmInboxLastRefreshAt.current, forceRefresh, performance.now())) {
+      // Skip-set / TTL / kind-4 `since` policies are pure functions in
+      // dmRefreshGate — the cold-start backfill (#751) bypasses only the
+      // TTL; it must NOT inherit the #743 force-refresh cache bypasses
+      // (that was the every-cold-start decrypt sweep, #846).
+      const bypassSkipSet = shouldBypassSkipSet(opts);
+      if (
+        shouldSkipForFreshness(
+          dmInboxLastRefreshAt.current,
+          bypassesFreshnessTtl(opts),
+          performance.now(),
+        )
+      ) {
         return;
       }
       // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
@@ -398,8 +397,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             refreshForPubkey,
             readRelays,
             {
-              // Cold start keeps `since` for kind-4 even under force — the on-mount enforce-flip refresh is force but doesn't need the full kind-4 backlog (that was the ~11s cold remainder; #751). Non-cold force still drops it so a follow-toggle / pull-to-refresh re-fetches older kind-4. Wraps ignore `since` internally regardless (random NIP-59 ts).
-              ...(opts?.force && !isColdStart ? {} : { since: lastSeen }),
+              // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
+              ...(shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
               signal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
