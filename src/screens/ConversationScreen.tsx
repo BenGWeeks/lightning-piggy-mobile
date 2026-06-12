@@ -60,7 +60,7 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
-import { useDmDeliveryStatuses } from '../hooks/useDmDeliveryStatuses';
+import { useResolvedDmDeliveries } from '../hooks/useDmDeliveryStatuses';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import {
   type Item,
@@ -206,11 +206,13 @@ const ConversationScreen: React.FC = () => {
 
   // Resolve each sent bubble's delivery tick from the eventId-keyed store (#857)
   // and re-render as statuses settle. Keyed by the stable rumor eventId, so the
-  // local- → echo swap + the 10s re-fetch can't strip the tick.
-  const resolveDelivery = useDmDeliveryStatuses();
+  // local- → echo swap + the 10s re-fetch can't strip the tick. The hook
+  // subscribes to the store, so `resolvedMessages` is a fresh array on every
+  // settle — which is what flows the updated tick into `items` below.
+  const resolvedMessages = useResolvedDmDeliveries(messages);
   const items = useMemo<Item[]>(
-    () => buildConversationItems(resolveDelivery(messages), zapItems),
-    [resolveDelivery, messages, zapItems],
+    () => buildConversationItems(resolvedMessages, zapItems),
+    [resolvedMessages, zapItems],
   );
 
   // Mount/unmount tracker so the async `load()` below can bail when

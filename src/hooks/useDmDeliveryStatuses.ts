@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useCallback } from 'react';
+import { useSyncExternalStore, useMemo } from 'react';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import {
   getDmDeliveryStatus,
@@ -8,7 +8,7 @@ import {
 
 /**
  * Resolve each SENT message's delivery status from the eventId-keyed store
- * (#857), and re-render the conversation when any status settles.
+ * (#857), re-running whenever the store settles a status OR `messages` changes.
  *
  * The store is keyed by the stable rumor eventId, carried on each sent row as
  * `rumorId` — identical on the optimistic bubble and the relay echo (whose own
@@ -18,18 +18,21 @@ import {
  * is the fallback for legacy rows sent before the store existed (or restored
  * from the conv cache before the store rehydrates).
  *
- * `useSyncExternalStore` subscribes us to the store; the snapshot is the whole
- * status map (a stable object identity per change), so React bails out of
- * re-render when nothing changed.
+ * `useSyncExternalStore` subscribes us to the store and returns its snapshot
+ * (stable identity per change). Threading that snapshot through the `useMemo`
+ * deps is load-bearing: without it the resolve memo wouldn't re-run on a settle
+ * (only on a `messages` change), so the tick would be stuck on its first value.
  */
-export function useDmDeliveryStatuses(): (
+export function useResolvedDmDeliveries(
   messages: ConversationMessageInput[],
-) => ConversationMessageInput[] {
-  // Subscribe so the screen re-renders whenever a status is written. We read the
-  // whole map as the snapshot; the actual per-row resolution happens in `resolve`.
-  useSyncExternalStore(subscribeDmDelivery, getAllDmDeliveryStatuses, getAllDmDeliveryStatuses);
+): ConversationMessageInput[] {
+  const snapshot = useSyncExternalStore(
+    subscribeDmDelivery,
+    getAllDmDeliveryStatuses,
+    getAllDmDeliveryStatuses,
+  );
 
-  return useCallback((messages: ConversationMessageInput[]): ConversationMessageInput[] => {
+  return useMemo(() => {
     let changed = false;
     const resolved = messages.map((m) => {
       // Only sent messages carry a delivery tick. Received rows never appear in
@@ -43,5 +46,10 @@ export function useDmDeliveryStatuses(): (
       return { ...m, deliveryStatus: status };
     });
     return changed ? resolved : messages;
-  }, []);
+    // `snapshot` is intentionally in the deps: it changes identity on every
+    // store settle, which is what re-runs this resolve so a tick can update.
+    // The lint rule can't see it's load-bearing (it's read via the getter, not
+    // the variable), so silence the false positive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, snapshot]);
 }
