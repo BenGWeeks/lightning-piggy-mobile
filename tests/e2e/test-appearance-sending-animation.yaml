@@ -1,0 +1,113 @@
+appId: com.lightningpiggy.app.dev
+name: Appearance Sending-Animation Toggle Test
+---
+# Exercises the Bubbles/Lightning sending-animation toggle on the Appearance
+# screen:
+#   1. Establishes a known baseline by tapping "Bubbles" (the default) first,
+#      so the test doesn't depend on any persisted preference from a prior run.
+#   2. Tapping "Lightning" moves the check to the Lightning row immediately.
+#   3. Navigating away (Home) and back shows Lightning still selected — proves
+#      the preference is held across screens.
+#   4. Killing + relaunching the app preserves Lightning — proves the
+#      AsyncStorage persistence works.
+#   5. Reset to Bubbles so the test leaves the device in the default state.
+#
+# Selectors use testIDs only (no coordinates) per CLAUDE.md.
+# Run: maestro --device emulator-5554 test tests/e2e/test-appearance-sending-animation.yaml
+
+# Cold-launch so the test starts on Home regardless of where the app was left.
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- 1. Open drawer → Appearance, establish baseline at "Bubbles" ---
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Both options render.
+- assertVisible:
+    id: 'sending-animation-bubbles'
+- assertVisible:
+    id: 'sending-animation-lightning'
+
+# Tap Bubbles to establish a known baseline regardless of any persisted value.
+- tapOn:
+    id: 'sending-animation-bubbles'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'sending-animation-bubbles-check'
+- assertNotVisible:
+    id: 'sending-animation-lightning-check'
+
+# --- 2. Tap Lightning — selection moves immediately ---
+- tapOn:
+    id: 'sending-animation-lightning'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'sending-animation-lightning-check'
+- assertNotVisible:
+    id: 'sending-animation-bubbles-check'
+
+# --- 3. Navigate away (Home) and back — preference held ---
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'tab-home'
+
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'sending-animation-lightning-check'
+
+# --- 4. Kill + relaunch — preference persists across cold start ---
+- stopApp
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'sending-animation-lightning-check'
+
+# --- 5. Reset to Bubbles so the test leaves the device in default state ---
+- tapOn:
+    id: 'sending-animation-bubbles'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'sending-animation-bubbles-check'
+- assertNotVisible:
+    id: 'sending-animation-lightning-check'
