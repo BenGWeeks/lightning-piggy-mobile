@@ -1216,6 +1216,7 @@ export async function sendNip17ToManyWithNsec(input: {
   return publishWrapsTrackingRelays(
     wraps.map((w) => w as VerifiedEvent),
     input.relays,
+    pool,
     { eventId, kind: input.rumor.kind },
   );
 }
@@ -1330,7 +1331,7 @@ export async function sendNip17ToManyWithSigner(input: {
 
   // Any signer-step errors collected above are merged with the publish
   // results so the caller still sees both failure classes.
-  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays, {
+  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays, pool, {
     eventId: rumorWithId.id,
     kind: input.rumor.kind,
   });
