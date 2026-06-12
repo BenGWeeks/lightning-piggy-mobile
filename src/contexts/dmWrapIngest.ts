@@ -70,8 +70,10 @@ const isPermissionNotGranted = (error: unknown): boolean => {
  * Decrypt-once ingest of kind-1059 inbox wraps into the encrypted DM store.
  * Order of gates per wrap: DB known-id (inside ingestWraps) → skip-set →
  * decrypt → group-route → follow-gate. Group-routed and non-followed rumors
- * are added to the skip-set exactly as before (#743); an aborted run persists
- * neither rows nor skip-set changes, so it retries cleanly.
+ * are added to the skip-set exactly as before (#743). An aborted run PERSISTS
+ * the DM rows it already decrypted (idempotent + owner-keyed, so a cut-short
+ * post-login rebuild isn't wasted — F1/#849), but suppresses skip-set growth
+ * and emitted entries (partial session state #412 intentionally drops).
  */
 export async function ingestInboxWraps<W extends IngestableWrap>(
   params: InboxWrapIngestParams<W>,
@@ -176,9 +178,12 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
     sched.dispose();
   }
 
-  // Persist skip-set growth only for completed runs — an aborted run also
-  // skipped the row upsert (ingestWraps), so dropping its partial skip adds
-  // keeps "skip-set entry ⇒ decrypt was paid and stored nothing" true.
+  // Persist skip-set growth only for completed runs. The skip-set's invariant
+  // is "entry ⇒ decrypt was paid AND produced no stored row"; an aborted run
+  // only walked part of the wraps, so its partial skip-set is incomplete and
+  // could mask a not-yet-evaluated followed sender on the retry. (DM rows DO
+  // persist on abort — ingestWraps flushes them — but a stored row and a
+  // skip-set entry are mutually exclusive per wrap, so there's no conflict.)
   if (skipSetDirty && skipKey && !signal?.aborted) {
     await writeNip17SkipSet(skipKey, skipSet);
   }

@@ -99,9 +99,16 @@ export async function ingestWraps<W extends IngestableWrap>(
     }
   }
 
-  // Only count + report as ingested what we actually persist. An aborted run
-  // skips the upsert, so its partial decrypts don't show as stored.
-  if (fresh.length > 0 && !options.signal?.aborted) {
+  // Persist whatever we decrypted, even if the run was aborted mid-loop (F1,
+  // #849). A decrypted row is unconditionally valid — `upsertDmMessages` is
+  // idempotent and keyed `(owner, event_id)`, so there is no "partial" state to
+  // corrupt. Throwing the batch away on abort meant a 68 s post-login rebuild
+  // sweep, cut short by a tab blur, persisted NOTHING and re-decrypted the
+  // whole inbox on the next sweep — the 1:1 inbox stayed empty for minutes.
+  // Flushing here makes every decrypt decrypt-once regardless of abort. (Note:
+  // the skip-set and emitted UI entries stay abort-suppressed one layer up in
+  // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
+  if (fresh.length > 0) {
     await upsertDmMessages(fresh);
     result.ingested = fresh.length;
   }

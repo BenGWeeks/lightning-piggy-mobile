@@ -90,7 +90,12 @@ describe('dmIngest.ingestWraps', () => {
     expect(onProgress).toHaveBeenLastCalledWith(4, 5);
   });
 
-  it('stops early when the signal is aborted (no upsert of partial work after abort)', async () => {
+  it('stops decrypting when aborted but PERSISTS what it already decrypted (F1, #849)', async () => {
+    // Contract change: a decrypted row is idempotent + (owner, event_id)-keyed,
+    // so an aborted run must not throw away the decrypts it already paid for —
+    // otherwise a 68 s post-login rebuild sweep cut short by a tab blur stored
+    // nothing and the inbox stayed empty until a manual refocus. We still stop
+    // the (expensive) decrypt loop at the abort; we just flush the batch first.
     const decrypt = jest.fn(async (w: IngestableWrap) => rowFor(w.id));
     const signal = { aborted: false };
     // abort after the first decrypt
@@ -99,8 +104,10 @@ describe('dmIngest.ingestWraps', () => {
       return rowFor(w.id);
     });
     const res = await ingestWraps(OWNER, [wrap('a'), wrap('b'), wrap('c')], decrypt, { signal });
-    expect(decrypt).toHaveBeenCalledTimes(1);
-    expect(mockUpsert).not.toHaveBeenCalled(); // aborted → don't persist partial
-    expect(res.ingested).toBe(0);
+    expect(decrypt).toHaveBeenCalledTimes(1); // loop still stopped at the abort
+    // ...but the one row it decrypted before aborting IS persisted.
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['a']);
+    expect(res.ingested).toBe(1);
   });
 });

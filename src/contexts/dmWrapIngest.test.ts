@@ -4,7 +4,9 @@
  * persist decrypted rumors into the encrypted DM store. Covers the gate
  * ORDER (DB known-id → skip-set → decrypt → group-route → follow-gate),
  * the #743 skip-set semantics, Amber permission-denial draining, and the
- * abort contract (no rows / entries / skip-set writes from an aborted run).
+ * abort contract (F1/#849: decrypted DM rows ARE persisted even on abort
+ * since they're idempotent + owner-keyed; entries + skip-set writes stay
+ * abort-suppressed, as those are partial session state #412 drops).
  */
 
 const mockSelectKnown = jest.fn();
@@ -225,7 +227,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     const controller = new AbortController();
     const unwrap = jest.fn(async () => {
       controller.abort(); // abort mid-run, after the first decrypt started
-      return rumorFrom(BOB, { isGroup: true }); // would dirty the skip-set
+      return rumorFrom(BOB, { isGroup: true }); // group → routed, no DM row
     });
     const res = await ingestInboxWraps({
       owner: OWNER,
@@ -235,9 +237,39 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       skipKey: 'skip_key',
       signal: controller.signal,
     });
+    // Entries (UI merge) and skip-set growth stay abort-suppressed — those are
+    // partial session state #412 intentionally drops. The decrypt above was a
+    // group rumor (routed, no DM row), so there's nothing to persist either.
     expect(res.entries).toEqual([]);
     expect(res.stored).toBe(0);
-    expect(mockUpsert).not.toHaveBeenCalled(); // dmIngest skips upsert on abort
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(mockWriteSkipSet).not.toHaveBeenCalled();
+  });
+
+  it('an aborted run STILL persists the 1:1 rows it decrypted before aborting (F1, #849)', async () => {
+    // The F1 fix: a post-login cold rebuild aborted by a tab blur must not
+    // throw away the rows it already decrypted (idempotent, owner-keyed). The
+    // skip-set + emitted entries stay suppressed, but the durable DM rows land
+    // in the encrypted DB so the next sweep paints them instead of re-decrypting.
+    const controller = new AbortController();
+    const unwrap = jest.fn(async () => {
+      controller.abort(); // abort right after this real DM decrypt
+      return rumorFrom(ALICE); // followed 1:1 → produces a storable row
+    });
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('w1'), wrap('w2')],
+      unwrap,
+      passesFollowGate: () => true,
+      skipKey: 'skip_key',
+      signal: controller.signal,
+    });
+    // Decrypted-and-persisted survives the abort...
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['w1']);
+    expect(res.stored).toBe(1);
+    // ...while the UI-merge entries + skip-set growth stay abort-suppressed.
+    expect(res.entries).toEqual([]);
     expect(mockWriteSkipSet).not.toHaveBeenCalled();
   });
 });

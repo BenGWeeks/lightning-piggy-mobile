@@ -6,7 +6,12 @@ import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
 import { perAccountKey } from '../services/perAccountStorage';
-import { selectKnownEventIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import {
+  selectKnownEventIds,
+  upsertDmMessages,
+  hasStoredWraps,
+  type DmMessageRow,
+} from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
 import {
   nip04PlaintextCache,
@@ -328,6 +333,23 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // single-flighted per account; after the first call it costs one
           // Map lookup, so firing it on every refresh is safe.
           await ensureDmStoreMigrated(refreshForPubkey);
+
+          // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
+          // has an empty store: this sweep is the ONLY thing that will populate
+          // the 1:1 inbox. Honoring a tab-hop abort here (as #412 does for warm
+          // refreshes) stranded the user on an empty inbox for minutes — the
+          // decrypted sweep was discarded and only an unrelated later refocus
+          // committed one. So a genuine rebuild (first refresh of the session
+          // AND no NIP-17 rows yet for this owner) runs to completion: we swap
+          // the abort signal for `undefined` on the decrypt+commit path. A WARM
+          // refresh (store already populated) keeps the real signal, so #412's
+          // fast tab-hopper abort is fully intact.
+          const mustCompleteRebuild = isColdStart && !(await hasStoredWraps(refreshForPubkey));
+          const effectiveSignal = mustCompleteRebuild ? undefined : signal;
+          if (__DEV__ && mustCompleteRebuild) {
+            console.log('[Perf] refreshDmInbox: cold rebuild — running to completion (F1)');
+          }
+
           const readRelays = getReadRelays();
           const refreshStart = performance.now();
           let nip04CacheHits = 0;
@@ -391,11 +413,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             {
               // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
               ...(shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
-              signal,
+              signal: effectiveSignal,
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
           );
-          if (signal?.aborted) return;
+          if (effectiveSignal?.aborted) return;
           const entries: DmInboxEntry[] = [];
 
           // NIP-04 — partner pubkey is in the envelope, so we can apply
@@ -452,7 +474,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const k4Rows: DmMessageRow[] = [];
           // Slow pass — parallel decrypt of misses in yield-able chunks.
           for (let i = 0; i < k4ToDecrypt.length; i += DECRYPT_YIELD_EVERY) {
-            if (signal?.aborted) return;
+            // Stop decrypting on abort (releases the JS thread, #412) but BREAK
+            // rather than return: the k4Rows decrypted so far are idempotent
+            // and persist below, then the productive-abort commit paints them
+            // (F1, #849). A cold rebuild's effectiveSignal never aborts here.
+            if (effectiveSignal?.aborted) break;
             const batch = k4ToDecrypt.slice(i, i + DECRYPT_YIELD_EVERY);
             const batchResults = await Promise.all(
               batch.map(async (t) => {
@@ -486,10 +512,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             }
             if (i + DECRYPT_YIELD_EVERY < k4ToDecrypt.length) await yieldToEventLoop();
           }
-          if (signal?.aborted) return;
-          // Persist fresh NIP-04 decrypts so even a genuine backlog refetch
-          // (user pull-to-refresh drops the `since` floor, #743) is
-          // decrypt-once from now on — the RAM LRU dies with the session.
+          // Persist fresh NIP-04 decrypts BEFORE honoring any abort (F1, #849):
+          // a decrypted kind-4 row is idempotent + `(owner, event_id)`-keyed,
+          // so a sweep cut short by a tab blur must not throw away the decrypts
+          // it already paid for — otherwise the next sweep re-decrypts them and
+          // the inbox stays empty. The RAM LRU dies with the session, so the DB
+          // is the only durable decrypt-once memo. Even a genuine backlog
+          // refetch (user pull-to-refresh drops the `since` floor, #743) is
+          // decrypt-once from now on.
           if (k4Rows.length > 0) {
             await upsertDmMessages(k4Rows).catch((e) => {
               if (__DEV__) console.warn('[DmStore] kind-4 upsert failed:', e);
@@ -524,10 +554,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 skipKey: perAccountKey(NSEC_NIP17_SKIP_KEY_BASE, refreshForPubkey),
                 bypassSkipSet,
                 isColdStart,
-                signal,
+                signal: effectiveSignal,
                 onSkip,
               });
-              if (signal?.aborted) return;
+              // No early return on abort here: r.entries is already [] when
+              // aborted, but r.stored counts rows the ingest persisted before
+              // the abort (F1, #849), and we need it below to decide whether
+              // this aborted sweep was productive enough to paint from the DB.
               entries.push(...r.entries);
               nip17Hits = r.alreadyKnown;
               nip17SkipHits = r.skipHits;
@@ -549,11 +582,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               skipKey: perAccountKey(AMBER_NIP17_SKIP_KEY_BASE, refreshForPubkey),
               bypassSkipSet,
               isColdStart,
-              signal,
+              signal: effectiveSignal,
               stopOnPermissionDenied: true,
               onSkip,
             });
-            if (signal?.aborted) return;
+            // See the nsec branch: don't bail on abort, the counters (esp.
+            // r.stored) drive the productive-abort commit below (F1, #849).
             entries.push(...r.entries);
             nip17Hits = r.alreadyKnown;
             nip17SkipHits = r.skipHits;
@@ -565,11 +599,21 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
           // Identity-change guard: if the user logged out or switched signer
           // while we were mid-flight, don't leak these entries into a
-          // different session's state. Abort signal is treated the same way:
-          // if the navigating-away screen has signalled cancel, skip the
-          // commit so we don't pay the merge / persist cost.
+          // different session's state. This is a HARD return — never paint
+          // one session's plaintext into another.
           if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
-          if (signal?.aborted) return;
+
+          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal is
+          // undefined (never aborts), so this guard is false and we always
+          // commit — the rebuild paints the freshly-decrypted inbox.
+          // For a WARM refresh, effectiveSignal IS the real signal: a tab-hop
+          // that aborted before decrypting anything fresh skips the commit,
+          // exactly as #412 intends (no merge / persist cost, next focus
+          // retries). A warm abort that DID persist fresh rows (k4 or NIP-17)
+          // still falls through so those idempotent rows paint via
+          // loadInboxEntries below instead of being stranded until a refocus.
+          const persistedFreshRows = nip17Stored > 0 || k4Rows.length > 0;
+          if (effectiveSignal?.aborted && !persistedFreshRows) return;
 
           // Merge sources for the inbox (#848): the encrypted store's
           // indexed latest-per-conversation read (DB-known wraps / kind-4
@@ -639,7 +683,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 )
               : Promise.resolve(),
           ]);
-          refreshCompleted = true; // inbox committed — safe to stamp the cursor
+          // A cold rebuild (effectiveSignal undefined) that reached here
+          // finished its backlog → claim the full cursor stamp. A WARM
+          // productive-but-aborted sweep painted from the DB but did NOT finish
+          // the backlog → leave refreshCompleted false so it gets the short
+          // abort-TTL and the next focus tops up (F1, #849).
+          if (!effectiveSignal?.aborted) refreshCompleted = true;
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
