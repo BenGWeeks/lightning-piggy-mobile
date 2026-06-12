@@ -12,8 +12,9 @@ import {
 } from '../utils/dmDeliveryStatus';
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
 
-// Human label for a NIP-17 rumor kind shown in the metadata block.
+// Human label for a NIP-04/17 message kind shown in the metadata block.
 function kindLabel(kind: number | undefined): string {
+  if (kind === 4) return 'Direct message (kind 4)';
   if (kind === 14) return 'Direct message (kind 14)';
   if (kind === 15) return 'File message (kind 15)';
   return kind === undefined ? 'Unknown' : `Kind ${kind}`;

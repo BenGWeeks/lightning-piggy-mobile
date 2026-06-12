@@ -29,6 +29,23 @@ describe('useMessageInfoSheet', () => {
     expect(result.current.canResend).toBe(true);
   });
 
+  it('falls back to deliveryStatus.kind when the row has no wireKind yet', () => {
+    const resend = jest.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    act(() => {
+      result.current.showInfo({
+        fromMe: true,
+        eventId: 'abc',
+        // wireKind undefined (optimistic local- row), but the send result
+        // carries the rumor kind on deliveryStatus.
+        deliveryStatus: { ...delivery, kind: 14 },
+        resendText: 'hi',
+      });
+    });
+    expect(result.current.info?.wireKind).toBe(14);
+    expect(result.current.canResend).toBe(true);
+  });
+
   it('disables Re-publish for a received message', () => {
     const resend = jest.fn().mockResolvedValue(true);
     const { result } = renderHook(() => useMessageInfoSheet(resend));

@@ -28,11 +28,16 @@ export function useMessageInfoSheet(resendText: (text: string) => Promise<boolea
   } | null>(null);
 
   const showInfo = useCallback((args: ShowMessageInfoArgs) => {
+    // The optimistic local- sent row has no `wireKind` yet (it's known once
+    // decrypted/echoed), but the send result's `deliveryStatus.kind` carries
+    // the rumor kind — fall back to it so a just-sent bubble still shows the
+    // right protocol/kind instead of "Unknown" (Copilot #858).
+    const wireKind = args.wireKind ?? args.deliveryStatus?.kind;
     setMessageInfo({
       info: {
         direction: args.fromMe ? 'sent' : 'received',
         eventId: args.eventId,
-        wireKind: args.wireKind,
+        wireKind,
         deliveryStatus: args.deliveryStatus,
         resendText: args.resendText,
       },
