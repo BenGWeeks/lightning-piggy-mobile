@@ -15,7 +15,9 @@ import type { RefreshDmInboxOptions } from './nostrContextTypes';
  *    relay subscription closes via querySyncAbortable);
  *  - with `backfill: true`, which bypasses only the freshness TTL (the capped
  *    first pass just stamped the cursor) and fetches the full wrap limit, but
- *    RESPECTS the #743 skip-set and the kind-4 `since` floor. It used to run
+ *    does not itself bypass the #743 skip-set (when the dev follow gate is
+ *    off, `includeNonFollows` still bypasses it — by design, so non-followed
+ *    wraps aren't hidden) and RESPECTS the kind-4 `since` floor. It used to run
  *    as `force: true`, inheriting pull-to-refresh's cache bypasses — which
  *    re-decrypted the whole skip-set (~510 wraps) plus the full kind-4 backlog
  *    (~212 events; the NIP-04 plaintext cache is memory-only) on EVERY cold

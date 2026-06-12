@@ -294,7 +294,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const isColdStart = isColdStartRefresh(dmInboxLastRefreshAt.current);
       // Skip-set / TTL / kind-4 `since` policies are pure functions in
       // dmRefreshGate — the cold-start backfill (#751) bypasses only the
-      // TTL; it must NOT inherit the #743 force-refresh cache bypasses
+      // TTL; backfill itself must NOT inherit the #743 force-refresh cache
+      // bypasses (includeNonFollows still bypasses, see shouldBypassSkipSet)
       // (that was the every-cold-start decrypt sweep, #846).
       const bypassSkipSet = shouldBypassSkipSet(opts);
       if (

@@ -13,7 +13,9 @@ export interface RefreshDmInboxOptions {
   force?: boolean;
   /** Automated cold-start top-up pass (#751). Bypasses the freshness TTL
    * like `force` (it fires right after the capped first pass stamps the
-   * cursor), but — unlike `force` — RESPECTS the #743 skip-set and the
+   * cursor), but — unlike `force` — does not itself bypass the #743
+   * skip-set (`includeNonFollows`, the dev follow-gate-off path, still
+   * does — even during a backfill) and RESPECTS the
    * kind-4 `since` floor. A backfill is not a user-intent refresh, so it
    * must not re-pay decrypts the persisted caches already cover; running
    * it as `force` was the every-cold-start 28-30 s decrypt sweep (#846). */

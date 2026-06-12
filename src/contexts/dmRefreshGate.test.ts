@@ -83,6 +83,10 @@ describe('dmRefreshGate', () => {
       expect(shouldBypassSkipSet({ backfill: true })).toBe(false);
     });
 
+    it('still bypasses for backfill + includeNonFollows (dev follow gate off) — by design', () => {
+      expect(shouldBypassSkipSet({ backfill: true, includeNonFollows: true })).toBe(true);
+    });
+
     it('does not bypass a default refresh', () => {
       expect(shouldBypassSkipSet(undefined)).toBe(false);
       expect(shouldBypassSkipSet({})).toBe(false);

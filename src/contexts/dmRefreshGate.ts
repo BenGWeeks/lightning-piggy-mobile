@@ -59,7 +59,9 @@ export function bypassesFreshnessTtl(opts: RefreshDmInboxOptions | undefined): b
  * re-evaluated on the next pull-to-refresh) and `includeNonFollows` (the dev
  * "Following only=off" toggle disables the follow gate, so wraps skipped as
  * non-follows must be re-surfaced — Copilot finding on #744). The automated
- * cold-start backfill must NOT bypass: it used to run as `force`, which
+ * cold-start backfill does NOT bypass by itself (`includeNonFollows` still
+ * bypasses, even during a backfill — with the follow gate off, hiding
+ * non-followed wraps would be wrong): it used to run as `force`, which
  * re-paid the schnorr + NIP-44 decrypt for every persisted skip-set wrap
  * (group rumors + non-followed senders — ~510 measured) on EVERY cold start,
  * the bulk of the 28-30 s circuit-1 freeze (#846).
