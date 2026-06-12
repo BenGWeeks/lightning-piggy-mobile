@@ -42,12 +42,24 @@ export default function DeliveryDetailSheet({
 
   const { ok, total } = summariseDelivery(status);
   const title = total === 0 ? 'No relay results' : `Sent to ${ok} of ${total} relays`;
-  const relays = Object.entries(status.relayResults);
-  const statusLabel = status.delivered
-    ? ok < total
-      ? 'Partially delivered'
-      : 'Delivered'
-    : 'Pending';
+  // Sort relays for a stable order — relayResults insertion order depends on
+  // async settle timing, which would otherwise reshuffle the list run-to-run
+  // (Copilot #858). `ok` rows first, then alphabetical by URL.
+  const relays = Object.entries(status.relayResults).sort(([ua, ra], [ub, rb]) =>
+    ra === rb ? ua.localeCompare(ub) : ra === 'ok' ? -1 : 1,
+  );
+  // Distinguish all three terminal states. `delivered` is false BOTH for
+  // "no results yet" and "every relay rejected", so key off the counts so the
+  // label matches the bubble's tick (Copilot #858): no results → Pending,
+  // 0 of N → Failed, some → Partially delivered, all → Delivered.
+  const statusLabel =
+    total === 0
+      ? 'Pending'
+      : ok === 0
+        ? 'Failed'
+        : ok < total
+          ? 'Partially delivered'
+          : 'Delivered';
 
   const copyEventId = () => {
     if (!status.eventId) return;
@@ -74,10 +86,12 @@ export default function DeliveryDetailSheet({
           </View>
 
           <View style={styles.relayList}>
-            {relays.map(([url, res]) => {
+            {relays.map(([url, res], i) => {
               const isOk = res === 'ok';
               return (
-                <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${url}`}>
+                // Index-based testID — the relay URL (with `:` / `/`) makes a
+                // brittle Maestro selector; the URL stays the visible label.
+                <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
                   {isOk ? (
                     <Check size={16} color={colors.green} strokeWidth={3} />
                   ) : (

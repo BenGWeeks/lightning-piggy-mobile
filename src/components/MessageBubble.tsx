@@ -198,6 +198,10 @@ type Styles = MessageBubbleStyles;
  */
 const BubbleFooter: React.FC<{
   styles: Styles;
+  // Per-message id so the footer/tick testIDs are unique within a thread that
+  // has many sent bubbles (Copilot #858) — Maestro can still match the bare
+  // prefix when it just wants "a" tick.
+  messageId: string;
   fromMe: boolean;
   createdAt: number;
   timeStyle: object | (object | undefined)[];
@@ -205,7 +209,16 @@ const BubbleFooter: React.FC<{
   // Raw sent payload, handed to the breakdown sheet for Re-send.
   resendText: string;
   onShowDelivery?: (status: DeliveryStatus, resendText: string) => void;
-}> = ({ styles, fromMe, createdAt, timeStyle, deliveryStatus, resendText, onShowDelivery }) => {
+}> = ({
+  styles,
+  messageId,
+  fromMe,
+  createdAt,
+  timeStyle,
+  deliveryStatus,
+  resendText,
+  onShowDelivery,
+}) => {
   const time = <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
   if (!fromMe || !deliveryStatus) return time;
   return (
@@ -214,10 +227,14 @@ const BubbleFooter: React.FC<{
       activeOpacity={onShowDelivery ? 0.6 : 1}
       onLongPress={onShowDelivery ? () => onShowDelivery(deliveryStatus, resendText) : undefined}
       accessibilityLabel="Delivery status, long-press for per-relay detail"
-      testID="dm-bubble-delivery-footer"
+      testID={`dm-bubble-delivery-footer-${messageId}`}
     >
       {time}
-      <DeliveryTick styles={styles} status={deliveryStatus} testID="dm-bubble-delivery-tick" />
+      <DeliveryTick
+        styles={styles}
+        status={deliveryStatus}
+        testID={`dm-bubble-delivery-tick-${messageId}`}
+      />
     </TouchableOpacity>
   );
 };
@@ -322,6 +339,7 @@ const MessageBubble: React.FC<Props> = ({
   const renderFooter = (timeStyle: object | (object | undefined)[]) => (
     <BubbleFooter
       styles={styles}
+      messageId={id}
       fromMe={fromMe}
       createdAt={createdAt}
       timeStyle={timeStyle}

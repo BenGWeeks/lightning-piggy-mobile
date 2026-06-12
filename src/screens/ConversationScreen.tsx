@@ -954,7 +954,10 @@ const ConversationScreen: React.FC = () => {
       <DeliveryDetailSheet
         status={deliveryDetail?.status ?? null}
         onClose={() => setDeliveryDetail(null)}
-        onResend={handleResendFromDetail}
+        // Only offer Re-publish when there's a resendable payload — non-text
+        // bubbles (location / live-location marker) pass an empty string, so
+        // hide the button rather than make it a silent no-op (Copilot #858).
+        onResend={deliveryDetail?.text ? handleResendFromDetail : undefined}
       />
     </View>
   );
