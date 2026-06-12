@@ -1,12 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  StyleSheet,
-  ActivityIndicator,
-  View,
-  Platform,
-  useWindowDimensions,
-} from 'react-native';
+import { Linking, StyleSheet, ActivityIndicator, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NavigationContainer,
   NavigationState,
@@ -289,6 +283,12 @@ function ExploreStackNavigator() {
 
 function HomeTabs() {
   const { colors } = useTheme();
+  // Reserve the *actual* system-bar height. Edge-to-edge draws the tab
+  // bar behind the nav bar, so a hardcoded inset under-reserves on
+  // Android 3-button nav (~48dp) and overlaps. The inset grows for a
+  // gesture pill or a 3-button bar on every device, and carries iOS's
+  // home-indicator inset through the same hook.
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -305,8 +305,8 @@ function HomeTabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.divider,
-          height: Platform.OS === 'android' ? 80 : 70,
-          paddingBottom: Platform.OS === 'android' ? 20 : 10,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 6,
         },
         tabBarActiveTintColor: colors.brandPink,
