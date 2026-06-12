@@ -66,6 +66,7 @@ import {
   readCachedWithTtl,
 } from './nostrCacheKeys';
 import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
 export { notifyGroupMessage, subscribeGroupMessages, subscribeDmMessages } from './nostrEventBus';
@@ -165,6 +166,15 @@ interface NostrContextType {
    * drop the optimistic bubble until the relay round-trip completes.
    */
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  /**
+   * Durably persist delivery status (#856) onto cached conversation rows by
+   * id, so a sent bubble's tick survives a cold restart even when the relay
+   * echo won the cache-write race against the optimistic local- row.
+   */
+  persistDeliveryStatuses: (
+    otherPubkey: string,
+    statusById: Record<string, DeliveryStatus>,
+  ) => Promise<void>;
   /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
@@ -375,6 +385,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     fetchConversation,
     getCachedConversation,
     appendLocalDmMessage,
+    persistDeliveryStatuses,
     armLiveDmSub,
     amberNip44Permission,
     hydrateDmInboxFromCache,
@@ -1736,6 +1747,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     }),
@@ -1766,6 +1778,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     ],

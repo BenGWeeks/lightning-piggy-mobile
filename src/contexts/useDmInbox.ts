@@ -36,6 +36,7 @@ import {
 import { ingestInboxWraps } from './dmWrapIngest';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import {
   isColdStartRefresh,
   shouldSkipForFreshness,
@@ -79,6 +80,10 @@ export interface UseDmInboxResult {
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  persistDeliveryStatuses: (
+    otherPubkey: string,
+    statusById: Record<string, DeliveryStatus>,
+  ) => Promise<void>;
   armLiveDmSub: () => void;
   amberNip44Permission: 'unknown' | 'granted' | 'denied';
   hydrateDmInboxFromCache: (pk: string) => Promise<void>;
@@ -236,6 +241,61 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       });
       // `.catch` on the chain entry so a single failure doesn't poison
       // every subsequent append on this conversation.
+      appendLocalDmChains.set(
+        chainKey,
+        next.catch(() => {}),
+      );
+      await next;
+    },
+    [pubkey],
+  );
+
+  // Durably attach delivery status (#856) to persisted conv rows, keyed by row
+  // id. The optimistic `local-` row's tick is otherwise lost across a cold
+  // restart: when the relay echo replaces it, the on-disk merge can miss the
+  // carry-over (the local- write may not have committed before the echo's
+  // fetch read the cache), so the persisted real-id row has no tick. After the
+  // in-memory reconcile re-attaches the tick to the real-id row, this writes
+  // that back so the next cold start reads it. Shares the per-conversation
+  // chain lock so it can't race the append/echo writes.
+  const persistDeliveryStatuses = useCallback(
+    async (otherPubkey: string, statusById: Record<string, DeliveryStatus>): Promise<void> => {
+      if (!pubkey) return;
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      if (Object.keys(statusById).length === 0) return;
+      const chainKey = `${pubkey}:${normalized}`;
+      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          const key = convCacheKey(pubkey, normalized);
+          const raw = await AsyncStorage.getItem(key);
+          if (!raw) return;
+          const existing: ConversationMessage[] = (() => {
+            try {
+              const parsed = JSON.parse(raw);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })();
+          let changed = false;
+          const updated = existing.map((m) => {
+            const s = statusById[m.id];
+            // Only write when it actually adds/changes a tick — avoids a
+            // needless rewrite (and keeps an existing richer status if equal).
+            if (s && !m.deliveryStatus) {
+              changed = true;
+              return { ...m, deliveryStatus: s };
+            }
+            return m;
+          });
+          if (changed) await AsyncStorage.setItem(key, JSON.stringify(updated));
+        } catch {
+          // Non-fatal — the in-memory tick already shows; worst case the next
+          // send/echo cycle re-persists it.
+        }
+      });
       appendLocalDmChains.set(
         chainKey,
         next.catch(() => {}),
@@ -846,6 +906,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     fetchConversation,
     getCachedConversation,
     appendLocalDmMessage,
+    persistDeliveryStatuses,
     armLiveDmSub,
     amberNip44Permission,
     hydrateDmInboxFromCache,

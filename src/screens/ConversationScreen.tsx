@@ -102,6 +102,7 @@ const ConversationScreen: React.FC = () => {
     isLoggedIn,
     fetchConversation,
     getCachedConversation,
+    persistDeliveryStatuses,
     signerType,
     pubkey: myPubkey,
     relays,
@@ -242,7 +243,21 @@ const ConversationScreen: React.FC = () => {
           // onto the fetched list, so a just-sent bubble keeps its tick even
           // when the relay echo lands before the optimistic row's async cache
           // write commits (the on-disk merge would miss it in that race).
-          setMessages((prev) => reconcileDeliveryStatus(prev, conv));
+          setMessages((prev) => {
+            const reconciled = reconcileDeliveryStatus(prev, conv);
+            // Durably write the reconciled ticks back to the conv cache, keyed
+            // by the (now real-id) row id, so the tick survives a cold restart
+            // — fetchConversation persisted the echo rows WITHOUT delivery when
+            // it won the race against the optimistic local- write.
+            const statusById: Record<string, DeliveryStatus> = {};
+            for (const m of reconciled) {
+              if (m.deliveryStatus && !m.id.startsWith('local-')) {
+                statusById[m.id] = m.deliveryStatus;
+              }
+            }
+            void persistDeliveryStatuses(pubkey, statusById);
+            return reconciled;
+          });
         }
       } finally {
         if (isMountedRef.current) {
@@ -250,7 +265,7 @@ const ConversationScreen: React.FC = () => {
         }
       }
     },
-    [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
+    [isLoggedIn, fetchConversation, getCachedConversation, persistDeliveryStatuses, pubkey],
   );
 
   useEffect(() => {
