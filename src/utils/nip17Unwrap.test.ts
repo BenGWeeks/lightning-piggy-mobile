@@ -5,7 +5,16 @@
  * Issue #271.
  */
 
-import { subjectFromRumor, textForRumor, partnerFromRumor, type DecodedRumor } from './nip17Unwrap';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { wrapEvent } from 'nostr-tools/nip59';
+import * as nip44 from 'nostr-tools/nip44';
+import {
+  subjectFromRumor,
+  textForRumor,
+  partnerFromRumor,
+  unwrapWrapNsec,
+  type DecodedRumor,
+} from './nip17Unwrap';
 
 const PK_A = 'a'.repeat(64);
 const PK_B = 'b'.repeat(64);
@@ -132,5 +141,121 @@ describe('textForRumor (kind-15 → bubble text)', () => {
     expect(
       textForRumor({ pubkey: PK_A, created_at: 0, kind: 14, content: 'hi there', tags: [] }),
     ).toBe('hi there');
+  });
+});
+
+/**
+ * Security characterisation for the nsec decrypt path. Proves the guarantees
+ * after #802 (the redundant gift-wrap schnorr verify no longer gates
+ * decryption) and #830 (the path now binds `rumor.pubkey === seal.pubkey`):
+ *   - a wrap with an invalid signature still decrypts (verify is gone),
+ *   - a tampered ciphertext is still rejected by the NIP-44 MAC,
+ *   - a rumor claiming a different pubkey than its seal is rejected
+ *     (sender-spoofing blocked).
+ */
+describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
+  // Build a real NIP-17 gift wrap from `sender` to `recipient`.
+  function makeWrap(content: string) {
+    const senderSk = generateSecretKey();
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const senderPk = getPublicKey(senderSk);
+    const wrap = wrapEvent(
+      { kind: 14, content, tags: [['p', recipientPk]] },
+      senderSk,
+      recipientPk,
+    );
+    return { wrap, recipientSk, senderPk };
+  }
+
+  // Cast helper — `wrapEvent` returns a fully-typed VerifiedEvent; the
+  // unwrap function takes the looser RawGiftWrapEvent shape.
+  type WrapArg = Parameters<typeof unwrapWrapNsec>[0];
+
+  it('round-trips a kind-14 rumor (decrypt works without a sig verify)', () => {
+    const { wrap, recipientSk, senderPk } = makeWrap('hello piggy');
+    const rumor = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk);
+    expect(rumor).not.toBeNull();
+    expect(rumor?.content).toBe('hello piggy');
+    expect(rumor?.kind).toBe(14);
+    // For a well-formed wrap, rumor.pubkey == seal.pubkey == sender, so the
+    // #830 binding passes and the sender is surfaced as rumor.pubkey.
+    expect(rumor?.pubkey).toBe(senderPk);
+  });
+
+  it('STILL decrypts when the wrap signature is invalid (verify is gone, #802)', () => {
+    const { wrap, recipientSk } = makeWrap('sig should not matter');
+    // Corrupt the ephemeral-key signature. Pre-#802 this returned null
+    // ('wrap signature invalid'); now the sig is never consulted, so the
+    // NIP-44 layers decrypt regardless — that's the whole point.
+    (wrap as unknown as { sig: string }).sig = 'f'.repeat(128);
+    const rumor = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk);
+    expect(rumor?.content).toBe('sig should not matter');
+  });
+
+  it('still REJECTS a wrap whose ciphertext was tampered (MAC enforces integrity)', () => {
+    const { wrap, recipientSk } = makeWrap('tamper me');
+    // Flip one base64 char mid-payload → NIP-44 MAC mismatch → decrypt throws
+    // → unwrapWrapNsec skips (returns null). This is the guarantee that
+    // replaced the schnorr verify: integrity is preserved. The midpoint is
+    // always in-bounds (a valid NIP-44 payload is ≥132 chars).
+    const i = Math.floor(wrap.content.length / 2);
+    const swapped = wrap.content[i] === 'A' ? 'B' : 'A';
+    const tampered = wrap.content.slice(0, i) + swapped + wrap.content.slice(i + 1);
+    const onSkip = jest.fn();
+    const rumor = unwrapWrapNsec(
+      { ...wrap, content: tampered } as unknown as WrapArg,
+      recipientSk,
+      onSkip,
+    );
+    expect(rumor).toBeNull();
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it('REJECTS a wrap whose rumor.pubkey != seal.pubkey (sender spoofing, #830)', () => {
+    // Hand-craft a malicious wrap: the seal is sealed (and ECDH-authenticated)
+    // by the *attacker*, but the inner rumor claims it was sent by a different
+    // pubkey (the victim being impersonated). `wrapEvent` can't produce this —
+    // it always sets rumor.pubkey == seal sender — so we build the two NIP-44
+    // layers by hand.
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const attackerSk = generateSecretKey(); // the key that actually seals
+    const victimPk = 'd'.repeat(64); // the pubkey the rumor falsely claims
+
+    const rumor = {
+      pubkey: victimPk,
+      created_at: 1,
+      kind: 14,
+      content: 'transfer 1000 sats, trust me',
+      tags: [['p', recipientPk]],
+    };
+    const sealKey = nip44.v2.utils.getConversationKey(attackerSk, recipientPk);
+    const seal = finalizeEvent(
+      {
+        kind: 13,
+        content: nip44.v2.encrypt(JSON.stringify(rumor), sealKey),
+        created_at: 1,
+        tags: [],
+      },
+      attackerSk,
+    );
+    const ephemeralSk = generateSecretKey();
+    const wrapKey = nip44.v2.utils.getConversationKey(ephemeralSk, recipientPk);
+    const wrap = finalizeEvent(
+      {
+        kind: 1059,
+        content: nip44.v2.encrypt(JSON.stringify(seal), wrapKey),
+        created_at: 1,
+        tags: [['p', recipientPk]],
+      },
+      ephemeralSk,
+    );
+
+    const onSkip = jest.fn();
+    const out = unwrapWrapNsec(wrap as unknown as WrapArg, recipientSk, onSkip);
+    expect(out).toBeNull();
+    // Skipped specifically for the pubkey-binding mismatch, not a decrypt error.
+    expect(onSkip).toHaveBeenCalledWith(expect.stringContaining('!='), expect.any(String));
   });
 });
