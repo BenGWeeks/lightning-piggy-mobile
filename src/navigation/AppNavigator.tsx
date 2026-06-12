@@ -283,11 +283,7 @@ function ExploreStackNavigator() {
 
 function HomeTabs() {
   const { colors } = useTheme();
-  // Reserve the *actual* system-bar height. Edge-to-edge draws the tab
-  // bar behind the nav bar, so a hardcoded inset under-reserves on
-  // Android 3-button nav (~48dp) and overlaps. The inset grows for a
-  // gesture pill or a 3-button bar on every device, and carries iOS's
-  // home-indicator inset through the same hook.
+  // Reserve the real system-bar inset so the edge-to-edge tab bar clears gesture/3-button nav (see #862).
   const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
