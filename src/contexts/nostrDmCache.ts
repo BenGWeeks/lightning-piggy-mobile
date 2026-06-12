@@ -283,6 +283,7 @@ export function mergeConversationMessages(
     // this the user would see two bubbles for the same GIF/text: the
     // optimistic local- row persisted by ConversationScreen on send,
     // plus the NIP-17 self-wrap echo from the relay.
+    let inheritedDelivery: ConversationMessage['deliveryStatus'];
     if (!m.id.startsWith('local-')) {
       let bestKey: string | null = null;
       let bestDelta = Infinity;
@@ -297,9 +298,22 @@ export function mergeConversationMessages(
           bestKey = k;
         }
       }
-      if (bestKey !== null) map.delete(bestKey);
+      if (bestKey !== null) {
+        // Carry the per-relay delivery breakdown (#856) from the dropped
+        // optimistic row onto the real-id echo, so the sent bubble keeps its
+        // tick after the relay self-wrap replaces the local- row. The echo
+        // itself has no delivery info — only the send path that produced the
+        // local row does.
+        inheritedDelivery = map.get(bestKey)?.deliveryStatus;
+        map.delete(bestKey);
+      }
     }
-    map.set(m.id, m);
+    // A fresh echo with no delivery info must not clobber a delivery status we
+    // already attached to this same id on a prior merge (#856). Once the tick
+    // is on a real-id row, re-decrypting the same wrap on the next refresh
+    // re-supplies the row without delivery — keep the existing one.
+    const existingDelivery = inheritedDelivery ?? map.get(m.id)?.deliveryStatus;
+    map.set(m.id, existingDelivery ? { ...m, deliveryStatus: existingDelivery } : m);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   // Keep the newest DM_CONV_CAP messages; drop oldest.
@@ -312,4 +326,47 @@ export function mergeConversationMessages(
     result = result.slice(drop);
   }
   return result;
+}
+
+/**
+ * Carry `deliveryStatus` (#856) from the CURRENT in-memory messages onto a
+ * freshly-fetched list, so a sent bubble keeps its tick when a thread reload /
+ * live-sub echo replaces the optimistic row.
+ *
+ * Why this exists separately from `mergeConversationMessages`: the persisted
+ * conv-cache merge can miss the carry-over when the relay echo lands BEFORE
+ * the fire-and-forget `appendLocalDmMessage` write commits — at that moment
+ * the on-disk cache has no `local-` row to inherit from, so the echo overwrites
+ * with no tick. The in-memory state always holds the authoritative
+ * `deliveryStatus`, so reconciling against it closes that race.
+ *
+ * A `next` row inherits the status of (1) the same id in `prev`, or failing
+ * that (2) a `prev` row — typically the optimistic `local-` one — with the
+ * same `fromMe` + `text` within the echo window. `next` rows that already
+ * carry a status keep their own.
+ */
+export function reconcileDeliveryStatus(
+  prev: ConversationMessage[],
+  next: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map<string, ConversationMessage>();
+  for (const p of prev) byId.set(p.id, p);
+  return next.map((n) => {
+    if (n.deliveryStatus) return n;
+    const sameId = byId.get(n.id)?.deliveryStatus;
+    if (sameId) return { ...n, deliveryStatus: sameId };
+    // No id match — fall back to the local-echo pairing (fromMe + text +
+    // within window), which covers the optimistic `local-` → real-id handoff.
+    let best: ConversationMessage['deliveryStatus'];
+    let bestDelta = Infinity;
+    for (const p of prev) {
+      if (!p.deliveryStatus) continue;
+      if (p.fromMe !== n.fromMe || p.text !== n.text) continue;
+      const delta = Math.abs(p.createdAt - n.createdAt);
+      if (delta > LOCAL_DM_ECHO_WINDOW_SECS || delta >= bestDelta) continue;
+      bestDelta = delta;
+      best = p.deliveryStatus;
+    }
+    return best ? { ...n, deliveryStatus: best } : n;
+  });
 }

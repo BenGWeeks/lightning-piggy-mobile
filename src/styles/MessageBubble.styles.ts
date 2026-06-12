@@ -62,6 +62,43 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
+    // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
+    // Right-aligned to sit under the bubble tail, same edge as the bare time.
+    bubbleFooterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
+      gap: 4,
+    },
+    // The time inside the footer row drops its own marginTop (the row owns it)
+    // and gains a small gap before the tick.
+    bubbleFooterTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      marginRight: 4,
+      // Zero the standalone bubbleTime top margin so the tick sits level with
+      // the timestamp in the footer row (the row owns vertical spacing). (#858)
+      marginTop: 0,
+    },
+    bubbleFooterTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    // Delivery tick (#856, design approved 2026-06-12). WhatsApp-style
+    // single/double coverage in the payment-success green (shared with
+    // PaymentProgressOverlay so the token matches across both themes):
+    // single Check = delivered to ≥1 relay, double CheckCheck = all relays.
+    // Pending uses the faint supplementary grey; a failed send (0 relays)
+    // uses the error red.
+    deliveryTickDelivered: {
+      color: colors.green,
+    },
+    deliveryTickPending: {
+      color: colors.textSupplementary,
+    },
+    deliveryTickFailed: {
+      color: colors.red,
+    },
     invoiceCard: {
       width: 240,
       paddingTop: 12,

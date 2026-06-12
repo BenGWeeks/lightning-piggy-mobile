@@ -17,6 +17,9 @@ import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
+import { publishWrapsTrackingRelays, type DmSendResult } from './nostrDmPublish';
+
+export type { DmSendResult };
 
 // Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
 // the Hunt feature's NIP-GC subs) can share the single connection pool
@@ -1199,7 +1202,7 @@ export async function sendNip17ToManyWithNsec(input: {
   rumor: { kind: number; created_at: number; tags: string[][]; content: string };
   recipientPubkeys: string[];
   relays: string[];
-}): Promise<{ wrapsPublished: number; errors: string[] }> {
+}): Promise<DmSendResult> {
   trackRelays(input.relays);
   // Dedup recipients (sender is included by wrapManyEvents internally).
   const dedupedRecipients = Array.from(new Set(input.recipientPubkeys.map((p) => p.toLowerCase())));
@@ -1208,19 +1211,14 @@ export async function sendNip17ToManyWithNsec(input: {
     input.senderSecretKey,
     dedupedRecipients,
   );
-  const errors: string[] = [];
-  let published = 0;
-  await Promise.all(
-    wraps.map(async (wrap) => {
-      try {
-        await Promise.any(pool.publish(input.relays, wrap as VerifiedEvent));
-        published++;
-      } catch (e) {
-        errors.push((e as Error)?.message ?? 'publish failed');
-      }
-    }),
+  // Rumor id (stable kind-14/15 inner-event id) + kind for the detail sheet.
+  const eventId = getEventHash({ ...input.rumor, pubkey: getPublicKey(input.senderSecretKey) });
+  return publishWrapsTrackingRelays(
+    wraps.map((w) => w as VerifiedEvent),
+    input.relays,
+    pool,
+    { eventId, kind: input.rumor.kind },
   );
-  return { wrapsPublished: published, errors };
 }
 
 /**
@@ -1266,7 +1264,7 @@ export async function sendNip17ToManyWithSigner(input: {
     tags: string[][];
     content: string;
   }>;
-}): Promise<{ wrapsPublished: number; errors: string[] }> {
+}): Promise<DmSendResult> {
   trackRelays(input.relays);
 
   // Match nostr-tools' `wrapManyEvents` semantics: include the sender so
@@ -1331,18 +1329,17 @@ export async function sendNip17ToManyWithSigner(input: {
     }
   }
 
-  let published = 0;
-  await Promise.all(
-    signedWraps.map(async (wrap) => {
-      try {
-        await Promise.any(pool.publish(input.relays, wrap));
-        published++;
-      } catch (e) {
-        errors.push((e as Error)?.message ?? 'publish failed');
-      }
-    }),
-  );
-  return { wrapsPublished: published, errors };
+  // Any signer-step errors collected above are merged with the publish
+  // results so the caller still sees both failure classes.
+  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays, pool, {
+    eventId: rumorWithId.id,
+    kind: input.rumor.kind,
+  });
+  return {
+    wrapsPublished: publishResult.wrapsPublished,
+    errors: [...errors, ...publishResult.errors],
+    delivery: publishResult.delivery,
+  };
 }
 
 /**

@@ -6,6 +6,15 @@ import { NSEC_KEY } from './nostrAuthKeys';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { SignerType, RelayConfig } from '../types/nostr';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+
+// A successful send carries the per-relay delivery breakdown so the optimistic
+// bubble can show its tick and persist it (#856). Failed sends omit it.
+export interface SendResult {
+  success: boolean;
+  error?: string;
+  delivery?: DeliveryStatus;
+}
 
 /**
  * NIP-17 message-send hook (#235, #227). Holds the three outbound paths —
@@ -25,10 +34,7 @@ export interface UseMessageSendParams {
 
 export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMessageSendParams) {
   const sendDirectMessage = useCallback(
-    async (
-      recipientPubkey: string,
-      plaintext: string,
-    ): Promise<{ success: boolean; error?: string }> => {
+    async (recipientPubkey: string, plaintext: string): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -70,7 +76,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         if (signerType === 'amber') {
@@ -106,7 +112,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         return { success: false, error: 'Unsupported signer type' };
@@ -122,10 +128,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
   // already encrypted + uploaded; this gift-wraps the URL + AES key/nonce
   // to the recipient (and the sender's own inbox copy).
   const sendFileMessage = useCallback(
-    async (
-      recipientPubkey: string,
-      file: EncryptedUpload,
-    ): Promise<{ success: boolean; error?: string }> => {
+    async (recipientPubkey: string, file: EncryptedUpload): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -167,7 +170,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         if (signerType === 'amber') {
@@ -201,7 +204,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         return { success: false, error: 'Unsupported signer type' };

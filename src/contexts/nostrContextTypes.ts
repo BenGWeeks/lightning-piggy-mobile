@@ -1,3 +1,5 @@
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+
 /** Options accepted by `refreshDmInbox`. All fields optional so existing
  * callers continue to work without changes. `signal` lets a screen
  * cancel the refresh on unmount so the decrypt loop stops chewing the
@@ -39,4 +41,13 @@ export interface ConversationMessage {
   fromMe: boolean;
   text: string;
   createdAt: number;
+  // Per-relay delivery breakdown for a locally-sent message (#856). Persisted
+  // with the optimistic row so the tick survives a thread reload. Absent on
+  // received messages and on relay-echoed copies — only the local- send row
+  // the composer appends carries it.
+  deliveryStatus?: DeliveryStatus;
+  // Wire protocol the message travelled on, for the message-info sheet (#856):
+  // 4 = NIP-04 (legacy plaintext DM), 14/15 = NIP-17 rumor kind (gift-wrapped).
+  // Absent on the optimistic local- row (known once decrypted / echoed).
+  wireKind?: number;
 }

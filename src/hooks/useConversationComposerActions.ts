@@ -5,6 +5,7 @@ import { formatCoordsForDisplay, type SharedLocation } from '../services/locatio
 import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { ConversationMessageInput } from '../utils/conversationItems';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { useComposerActions } from './useComposerActions';
 
 /**
@@ -40,14 +41,18 @@ export function useConversationComposerActions(params: {
   const { sendDirectMessage, sendFileMessage, appendLocalDmMessage } = useNostr();
 
   // Optimistically append a locally-sent row; the relay echo dedups in
-  // mergeConversationMessages. Also persisted via appendLocalDmMessage.
+  // mergeConversationMessages. Also persisted via appendLocalDmMessage so the
+  // delivery tick (#856) survives a thread reload. The `deliveryStatus` rides
+  // on the same row — only the local- send copy carries it, never the relay
+  // echo, so the persisted tick is authoritative.
   const appendOptimisticLocal = useCallback(
-    (text: string) => {
+    (text: string, deliveryStatus?: DeliveryStatus) => {
       const optimistic = {
         id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         fromMe: true,
         text,
         createdAt: Math.floor(Date.now() / 1000),
+        deliveryStatus,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
@@ -62,7 +67,7 @@ export function useConversationComposerActions(params: {
         Alert.alert('Send failed', result.error ?? 'Could not send message.');
         return false;
       }
-      appendOptimisticLocal(text);
+      appendOptimisticLocal(text, result.delivery);
       return true;
     },
     [pubkey, sendDirectMessage, appendOptimisticLocal],
@@ -77,23 +82,23 @@ export function useConversationComposerActions(params: {
         return false;
       }
       // Optimistic bubble stores the same encoded URL so it renders right away.
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          fromMe: true,
-          text: encodeEncryptedFileUrl({
-            url: file.url,
-            mime: file.mime,
-            keyHex: file.keyHex,
-            nonceHex: file.nonceHex,
-          }),
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text: encodeEncryptedFileUrl({
+          url: file.url,
+          mime: file.mime,
+          keyHex: file.keyHex,
+          nonceHex: file.nonceHex,
+        }),
+        createdAt: Math.floor(Date.now() / 1000),
+        deliveryStatus: result.delivery,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendFileMessage, setMessages],
+    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage],
   );
 
   // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
@@ -152,5 +157,8 @@ export function useConversationComposerActions(params: {
     setVoiceSheetOpen,
   });
 
-  return { ...actions, appendOptimisticLocal };
+  // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish
+  // (#856). It runs the full send path (publish + optimistic row + tick), so a
+  // re-publish is indistinguishable from a fresh send and gets its own bubble.
+  return { ...actions, appendOptimisticLocal, resendText: sendText };
 }

@@ -33,7 +33,7 @@ import {
   deleteMnemonic,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
-import { useMessageSend } from './useMessageSend';
+import { useMessageSend, type SendResult } from './useMessageSend';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import {
@@ -66,6 +66,7 @@ import {
   readCachedWithTtl,
 } from './nostrCacheKeys';
 import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
 export { notifyGroupMessage, subscribeGroupMessages, subscribeDmMessages } from './nostrEventBus';
@@ -149,19 +150,13 @@ interface NostrContextType {
     lud16?: string;
     nip05?: string;
   }) => Promise<boolean>;
-  sendDirectMessage: (
-    recipientPubkey: string,
-    plaintext: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  sendDirectMessage: (recipientPubkey: string, plaintext: string) => Promise<SendResult>;
   /**
    * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
    * 1:1 recipient. The blob is already AES-encrypted + uploaded; this
    * gift-wraps the URL + decryption key. See #235.
    */
-  sendFileMessage: (
-    recipientPubkey: string,
-    file: EncryptedUpload,
-  ) => Promise<{ success: boolean; error?: string }>;
+  sendFileMessage: (recipientPubkey: string, file: EncryptedUpload) => Promise<SendResult>;
   /**
    * Persist an optimistic local- DM message to the per-conversation
    * cache so it survives navigating away + back before the NIP-17
@@ -171,6 +166,15 @@ interface NostrContextType {
    * drop the optimistic bubble until the relay round-trip completes.
    */
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  /**
+   * Durably persist delivery status (#856) onto cached conversation rows by
+   * id, so a sent bubble's tick survives a cold restart even when the relay
+   * echo won the cache-write race against the optimistic local- row.
+   */
+  persistDeliveryStatuses: (
+    otherPubkey: string,
+    statusById: Record<string, DeliveryStatus>,
+  ) => Promise<void>;
   /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
@@ -381,6 +385,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     fetchConversation,
     getCachedConversation,
     appendLocalDmMessage,
+    persistDeliveryStatuses,
     armLiveDmSub,
     amberNip44Permission,
     hydrateDmInboxFromCache,
@@ -1742,6 +1747,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     }),
@@ -1772,6 +1778,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     ],
