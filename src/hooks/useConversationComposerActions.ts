@@ -5,7 +5,8 @@ import { formatCoordsForDisplay, type SharedLocation } from '../services/locatio
 import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { ConversationMessageInput } from '../utils/conversationItems';
-import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/dmDeliveryStatus';
+import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
 import { useComposerActions } from './useComposerActions';
 
 /**
@@ -60,17 +61,52 @@ export function useConversationComposerActions(params: {
     [appendLocalDmMessage, pubkey, setMessages],
   );
 
+  // Optimistic send (#857). The bubble paints IMMEDIATELY with a pending Clock,
+  // then settles to its final tick when the publish resolves — green single (≥1
+  // relay) / double (all relays) / red failed (0 relays). Delivery status lives
+  // in an eventId-keyed store (dmDeliveryStore), NOT on the message row, so the
+  // ~10s relay-echo `fetchConversation` + `mergeConversationMessages` swapping
+  // `local-` → the real eventId can't strip it: the store is keyed by the stable
+  // rumor eventId, which is identical on the optimistic row and the echo.
+  //
+  // We key the optimistic row's `id` to that same eventId, so when the echo
+  // (id === eventId) replaces it the row id is unchanged — the bubble keeps
+  // resolving its status from the store by the same key. A failed send keeps the
+  // bubble (red tick + Re-publish), and the draft is cleared on send either way
+  // (Ben-confirmed standard-messaging behaviour) — retry is via the bubble.
   const sendText = useCallback(
     async (text: string): Promise<boolean> => {
-      const result = await sendDirectMessage(pubkey, text);
-      if (!result.success) {
+      const createdAt = Math.floor(Date.now() / 1000);
+      let eventId: string | null = null;
+      const result = await sendDirectMessage(pubkey, text, {
+        onRumorReady: ({ eventId: id, kind }) => {
+          eventId = id;
+          // Paint the pending bubble immediately, keyed by the stable eventId.
+          // Persisted (without status) so it survives a reload; the status
+          // itself lives in the store, written next.
+          const optimistic = { id, fromMe: true, text, createdAt, wireKind: kind };
+          setMessages((prev) => [...prev, optimistic]);
+          void appendLocalDmMessage(pubkey, optimistic);
+          setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind }));
+        },
+        onDeliveryFinalized: (delivery) => {
+          // Slow relays settled — upgrade the tick (e.g. single → double).
+          if (eventId) setDmDeliveryStatus(eventId, delivery);
+        },
+      });
+      // Settle the bubble. `delivery` is present for any send that reached the
+      // publish stage; a hard pre-publish error (not logged in, signer
+      // cancelled) has none → mark failed so the bubble shows a red tick.
+      if (eventId) {
+        setDmDeliveryStatus(eventId, result.delivery ?? failedDelivery({ eventId }));
+      } else if (!result.success) {
+        // Never reached the rumor stage (e.g. not logged in) — no bubble was
+        // painted, so fall back to the alert.
         Alert.alert('Send failed', result.error ?? 'Could not send message.');
-        return false;
       }
-      appendOptimisticLocal(text, result.delivery);
-      return true;
+      return result.success;
     },
-    [pubkey, sendDirectMessage, appendOptimisticLocal],
+    [pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
   );
 
   const sendFile = useCallback(

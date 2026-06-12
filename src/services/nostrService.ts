@@ -17,7 +17,8 @@ import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
-import { publishWrapsTrackingRelays, type DmSendResult } from './nostrDmPublish';
+import { publishWrapsTrackingRelays } from './nostrDmPublish';
+import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
 
 export type { DmSendResult };
 
@@ -1202,6 +1203,7 @@ export async function sendNip17ToManyWithNsec(input: {
   rumor: { kind: number; created_at: number; tags: string[][]; content: string };
   recipientPubkeys: string[];
   relays: string[];
+  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
 }): Promise<DmSendResult> {
   trackRelays(input.relays);
   // Dedup recipients (sender is included by wrapManyEvents internally).
@@ -1218,6 +1220,7 @@ export async function sendNip17ToManyWithNsec(input: {
     input.relays,
     pool,
     { eventId, kind: input.rumor.kind },
+    input.onDeliveryFinalized,
   );
 }
 
@@ -1264,6 +1267,7 @@ export async function sendNip17ToManyWithSigner(input: {
     tags: string[][];
     content: string;
   }>;
+  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
 }): Promise<DmSendResult> {
   trackRelays(input.relays);
 
@@ -1331,10 +1335,13 @@ export async function sendNip17ToManyWithSigner(input: {
 
   // Any signer-step errors collected above are merged with the publish
   // results so the caller still sees both failure classes.
-  const publishResult = await publishWrapsTrackingRelays(signedWraps, input.relays, pool, {
-    eventId: rumorWithId.id,
-    kind: input.rumor.kind,
-  });
+  const publishResult = await publishWrapsTrackingRelays(
+    signedWraps,
+    input.relays,
+    pool,
+    { eventId: rumorWithId.id, kind: input.rumor.kind },
+    input.onDeliveryFinalized,
+  );
   return {
     wrapsPublished: publishResult.wrapsPublished,
     errors: [...errors, ...publishResult.errors],

@@ -28,6 +28,24 @@ export interface DeliveryStatus {
   // 15 file). Best-effort — older persisted rows won't carry them.
   eventId?: string;
   kind?: number;
+  // True while the send is still in flight — no relay has settled yet (#857).
+  // Drives the faint pending Clock, distinguishing an optimistic bubble from an
+  // all-failed send (which also has zero `ok` relays, but renders the red
+  // AlertCircle). Cleared once the publish resolves.
+  pending?: boolean;
+}
+
+// Status for an optimistic bubble that's still publishing (#857): no relay has
+// settled yet, so the tick renders the faint pending Clock.
+export function pendingDelivery(meta?: { eventId?: string; kind?: number }): DeliveryStatus {
+  return { delivered: false, relayResults: {}, pending: true, ...meta };
+}
+
+// Status for a send that produced NO delivery at all — a hard error before the
+// publish stage (not logged in, signer cancelled, invalid key). The bubble
+// shows the red failed glyph; `relayResults` is empty because nothing landed.
+export function failedDelivery(meta?: { eventId?: string; kind?: number }): DeliveryStatus {
+  return { delivered: false, relayResults: {}, ...meta };
 }
 
 // Everything the message-info sheet needs for ONE message — sent or received

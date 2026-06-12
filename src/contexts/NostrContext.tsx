@@ -33,7 +33,7 @@ import {
   deleteMnemonic,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
-import { useMessageSend, type SendResult } from './useMessageSend';
+import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import {
@@ -150,7 +150,11 @@ interface NostrContextType {
     lud16?: string;
     nip05?: string;
   }) => Promise<boolean>;
-  sendDirectMessage: (recipientPubkey: string, plaintext: string) => Promise<SendResult>;
+  sendDirectMessage: (
+    recipientPubkey: string,
+    plaintext: string,
+    hooks?: SendHooks,
+  ) => Promise<SendResult>;
   /**
    * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
    * 1:1 recipient. The blob is already AES-encrypted + uploaded; this

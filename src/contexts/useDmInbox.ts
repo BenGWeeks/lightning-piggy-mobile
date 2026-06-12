@@ -48,6 +48,7 @@ import {
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
+import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -109,6 +110,23 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
+
+  // Hydrate + persist the eventId-keyed delivery store (#857) for the active
+  // account, so settled ticks survive a cold restart. Re-binds on account
+  // switch; the teardown flushes any pending write and detaches the hook.
+  useEffect(() => {
+    if (!pubkey) return;
+    let teardown: (() => void) | null = null;
+    let cancelled = false;
+    void bindDmDeliveryStorePersistence(pubkey).then((fn) => {
+      if (cancelled) fn();
+      else teardown = fn;
+    });
+    return () => {
+      cancelled = true;
+      teardown?.();
+    };
+  }, [pubkey]);
 
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
