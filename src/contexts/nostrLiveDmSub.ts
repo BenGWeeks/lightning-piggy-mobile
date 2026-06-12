@@ -9,6 +9,7 @@ import {
   unwrapWrapNsec,
   unwrapWrapViaNip44,
   textForRumor,
+  rumorEventId,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
@@ -435,6 +436,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       createdAt: rumor.created_at,
       text: wrapText,
       wireKind: rumor.kind,
+      // Inner rumor id (#857) — the delivery-store key for our own sent rows,
+      // stable across the optimistic bubble + this live echo.
+      rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
     };
 
     // Serialise store-upsert + inbox-blob write so concurrent live wraps don't race each other.

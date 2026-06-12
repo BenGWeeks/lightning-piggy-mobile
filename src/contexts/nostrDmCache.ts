@@ -284,6 +284,7 @@ export function mergeConversationMessages(
     // optimistic local- row persisted by ConversationScreen on send,
     // plus the NIP-17 self-wrap echo from the relay.
     let inheritedDelivery: ConversationMessage['deliveryStatus'];
+    let inheritedRumorId: string | undefined;
     if (!m.id.startsWith('local-')) {
       let bestKey: string | null = null;
       let bestDelta = Infinity;
@@ -299,21 +300,31 @@ export function mergeConversationMessages(
         }
       }
       if (bestKey !== null) {
-        // Carry the per-relay delivery breakdown (#856) from the dropped
-        // optimistic row onto the real-id echo, so the sent bubble keeps its
-        // tick after the relay self-wrap replaces the local- row. The echo
-        // itself has no delivery info — only the send path that produced the
-        // local row does.
+        // Carry the per-relay delivery breakdown (#856) AND the rumorId (#857)
+        // from the dropped optimistic row onto the real-id echo, so the sent
+        // bubble keeps its tick after the relay self-wrap replaces the local-
+        // row. The echo from a warm DB read has no rumorId of its own (the
+        // encrypted store doesn't persist it), so without this carry-over the
+        // store key would be lost and the tick stripped.
         inheritedDelivery = map.get(bestKey)?.deliveryStatus;
+        inheritedRumorId = map.get(bestKey)?.rumorId;
         map.delete(bestKey);
       }
     }
     // A fresh echo with no delivery info must not clobber a delivery status we
     // already attached to this same id on a prior merge (#856). Once the tick
     // is on a real-id row, re-decrypting the same wrap on the next refresh
-    // re-supplies the row without delivery — keep the existing one.
-    const existingDelivery = inheritedDelivery ?? map.get(m.id)?.deliveryStatus;
-    map.set(m.id, existingDelivery ? { ...m, deliveryStatus: existingDelivery } : m);
+    // re-supplies the row without delivery — keep the existing one. Same for
+    // rumorId (#857), which a fresh-decrypt echo DOES carry but a warm DB read
+    // does not — prefer whichever source has it.
+    const prevRow = map.get(m.id);
+    const deliveryStatus = m.deliveryStatus ?? inheritedDelivery ?? prevRow?.deliveryStatus;
+    const rumorId = m.rumorId ?? inheritedRumorId ?? prevRow?.rumorId;
+    const merged =
+      deliveryStatus !== m.deliveryStatus || rumorId !== m.rumorId
+        ? { ...m, deliveryStatus, rumorId }
+        : m;
+    map.set(m.id, merged);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   // Keep the newest DM_CONV_CAP messages; drop oldest.
@@ -352,21 +363,31 @@ export function reconcileDeliveryStatus(
   const byId = new Map<string, ConversationMessage>();
   for (const p of prev) byId.set(p.id, p);
   return next.map((n) => {
-    if (n.deliveryStatus) return n;
-    const sameId = byId.get(n.id)?.deliveryStatus;
-    if (sameId) return { ...n, deliveryStatus: sameId };
-    // No id match — fall back to the local-echo pairing (fromMe + text +
-    // within window), which covers the optimistic `local-` → real-id handoff.
-    let best: ConversationMessage['deliveryStatus'];
-    let bestDelta = Infinity;
-    for (const p of prev) {
-      if (!p.deliveryStatus) continue;
-      if (p.fromMe !== n.fromMe || p.text !== n.text) continue;
-      const delta = Math.abs(p.createdAt - n.createdAt);
-      if (delta > LOCAL_DM_ECHO_WINDOW_SECS || delta >= bestDelta) continue;
-      bestDelta = delta;
-      best = p.deliveryStatus;
+    // Inherit both the delivery status (#856) and the rumorId (#857, the
+    // delivery-store key) from the matching prev row — by id, else the
+    // local-echo pairing (fromMe + text + window) that covers the optimistic
+    // `local-` → real-id handoff. A warm-DB echo carries neither of its own.
+    let inheritedDelivery = n.deliveryStatus;
+    let inheritedRumorId = n.rumorId;
+    if (!inheritedDelivery || !inheritedRumorId) {
+      const sameId = byId.get(n.id);
+      let paired = sameId;
+      if (!paired || (!paired.deliveryStatus && !paired.rumorId)) {
+        let bestDelta = Infinity;
+        for (const p of prev) {
+          if (!p.deliveryStatus && !p.rumorId) continue;
+          if (p.fromMe !== n.fromMe || p.text !== n.text) continue;
+          const delta = Math.abs(p.createdAt - n.createdAt);
+          if (delta > LOCAL_DM_ECHO_WINDOW_SECS || delta >= bestDelta) continue;
+          bestDelta = delta;
+          paired = p;
+        }
+      }
+      inheritedDelivery = inheritedDelivery ?? paired?.deliveryStatus;
+      inheritedRumorId = inheritedRumorId ?? paired?.rumorId;
     }
-    return best ? { ...n, deliveryStatus: best } : n;
+    return inheritedDelivery !== n.deliveryStatus || inheritedRumorId !== n.rumorId
+      ? { ...n, deliveryStatus: inheritedDelivery, rumorId: inheritedRumorId }
+      : n;
   });
 }

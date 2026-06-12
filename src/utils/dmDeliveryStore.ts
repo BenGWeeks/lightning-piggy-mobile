@@ -24,6 +24,16 @@ const statuses = new Map<string, DeliveryStatus>();
 const listeners = new Set<Listener>();
 let persist: Persist | null = null;
 
+// Cached immutable snapshot for `useSyncExternalStore`. Its identity is STABLE
+// between writes — recomputed only when a write actually changes the map — so
+// the subscribing hook doesn't see a "new" snapshot every render (which would
+// loop infinitely). Invalidated to `null` on every mutation, then memoised.
+let snapshot: Record<string, DeliveryStatus> = {};
+
+function invalidateSnapshot(): void {
+  snapshot = Object.fromEntries(statuses);
+}
+
 function emit(): void {
   for (const l of listeners) l();
 }
@@ -46,6 +56,7 @@ export function hydrateDmDeliveryStore(persisted: Record<string, DeliveryStatus>
   for (const [eventId, status] of Object.entries(persisted)) {
     if (eventId) statuses.set(eventId, status);
   }
+  invalidateSnapshot();
 }
 
 // Read a status by eventId. `undefined` = never tracked (legacy / received).
@@ -54,9 +65,11 @@ export function getDmDeliveryStatus(eventId: string | undefined): DeliveryStatus
   return statuses.get(eventId);
 }
 
-// Snapshot of every tracked status — used to seed a render pass and by tests.
+// Stable snapshot of every tracked status — the `useSyncExternalStore`
+// getSnapshot. Identity only changes when the map changed, so subscribers don't
+// re-render in a loop.
 export function getAllDmDeliveryStatuses(): Record<string, DeliveryStatus> {
-  return Object.fromEntries(statuses);
+  return snapshot;
 }
 
 // Write/overwrite a status, notify subscribers, and persist. A settled status
@@ -66,7 +79,11 @@ export function setDmDeliveryStatus(eventId: string, status: DeliveryStatus): vo
   if (!eventId) return;
   const existing = statuses.get(eventId);
   if (existing && !existing.pending && status.pending) return;
+  // No-op if the status is referentially unchanged — avoids a needless emit +
+  // persist (and a needless new snapshot identity) when nothing moved.
+  if (existing === status) return;
   statuses.set(eventId, status);
+  invalidateSnapshot();
   emit();
   schedulePersist();
 }
@@ -85,4 +102,5 @@ export function __resetDmDeliveryStore(): void {
   statuses.clear();
   listeners.clear();
   persist = null;
+  invalidateSnapshot();
 }

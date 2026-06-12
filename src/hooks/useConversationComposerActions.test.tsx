@@ -80,11 +80,18 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       await result.current.handleSend?.();
     });
 
-    // Bubble appended optimistically (id === eventId) before the send resolved.
+    // Bubble appended optimistically before the send resolved. The row id is
+    // `local-` prefixed (so the echo dedups it), and it carries `rumorId` —
+    // the stable delivery-store key shared with the echo.
     expect(setMessages).toHaveBeenCalled();
     expect(mockAppendLocalDmMessage).toHaveBeenCalledWith(
       PUBKEY,
-      expect.objectContaining({ id: EVENT_ID, fromMe: true, wireKind: 14 }),
+      expect.objectContaining({
+        id: `local-${EVENT_ID}`,
+        rumorId: EVENT_ID,
+        fromMe: true,
+        wireKind: 14,
+      }),
     );
     expect(pendingSeenInStore).toBe(true);
     // Settled to delivered after the send resolved.

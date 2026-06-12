@@ -94,4 +94,20 @@ describe('dmDeliveryStore — eventId-keyed delivery store (#857)', () => {
     setDmDeliveryStatus('', delivered({ 'wss://a': 'ok' }));
     expect(getAllDmDeliveryStatuses()).toEqual({});
   });
+
+  it('keeps a STABLE snapshot identity between reads (no useSyncExternalStore loop)', () => {
+    // Regression: getSnapshot must return the same reference until the map
+    // actually changes, or useSyncExternalStore re-renders infinitely.
+    const status = delivered({ 'wss://a': 'ok' });
+    setDmDeliveryStatus('e6', status);
+    const snap1 = getAllDmDeliveryStatuses();
+    const snap2 = getAllDmDeliveryStatuses();
+    expect(snap1).toBe(snap2);
+    // A no-op write (same status reference) must not mint a new snapshot.
+    setDmDeliveryStatus('e6', status);
+    expect(getAllDmDeliveryStatuses()).toBe(snap1);
+    // A real change mints a fresh snapshot.
+    setDmDeliveryStatus('e6', delivered({ 'wss://a': 'ok', 'wss://b': 'ok' }));
+    expect(getAllDmDeliveryStatuses()).not.toBe(snap1);
+  });
 });

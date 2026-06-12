@@ -106,3 +106,41 @@ describe('reconcileDeliveryStatus — in-memory carry-over (#856)', () => {
     expect(out[0].deliveryStatus).toBeUndefined();
   });
 });
+
+describe('rumorId carry-over — the delivery-store key (#857)', () => {
+  // The optimistic local- row carries rumorId (the store key). A warm-DB echo
+  // does NOT (the encrypted store doesn't persist it), so merge + reconcile must
+  // copy it across or the bubble's tick would be stripped.
+  const localWithRumor = (text: string, at: number): ConversationMessage => ({
+    id: `local-${at}`,
+    rumorId: `rumor-${at}`,
+    fromMe: true,
+    text,
+    createdAt: at,
+    deliveryStatus: delivery,
+  });
+
+  it('merge carries rumorId from the dropped local- row onto the real-id echo', () => {
+    const cached = [localWithRumor('gm', 1000)];
+    const fresh = [echo('gm', 1001)]; // warm-DB echo: no rumorId of its own
+    const merged = mergeConversationMessages(cached, fresh, DM_CONV_CAP);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('real-1001');
+    expect(merged[0].rumorId).toBe('rumor-1000');
+  });
+
+  it('merge keeps a fresh echo’s own rumorId (fresh decrypt supplies it)', () => {
+    const cached: ConversationMessage[] = [];
+    const fresh: ConversationMessage[] = [{ ...echo('gm', 1001), rumorId: 'rumor-fresh' }];
+    const merged = mergeConversationMessages(cached, fresh, DM_CONV_CAP);
+    expect(merged[0].rumorId).toBe('rumor-fresh');
+  });
+
+  it('reconcile carries rumorId onto the real-id echo across the id swap', () => {
+    const prev = [localWithRumor('gm', 1000)];
+    const next = [echo('gm', 1001)];
+    const out = reconcileDeliveryStatus(prev, next);
+    expect(out[0].id).toBe('real-1001');
+    expect(out[0].rumorId).toBe('rumor-1000');
+  });
+});

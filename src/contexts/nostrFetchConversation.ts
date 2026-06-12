@@ -278,6 +278,7 @@ export async function fetchConversationFor(
           text: e.text,
           createdAt: e.createdAt,
           wireKind: e.wireKind,
+          rumorId: e.rumorId,
         });
       }
     }

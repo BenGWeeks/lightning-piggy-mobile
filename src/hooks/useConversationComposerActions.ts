@@ -81,10 +81,20 @@ export function useConversationComposerActions(params: {
       const result = await sendDirectMessage(pubkey, text, {
         onRumorReady: ({ eventId: id, kind }) => {
           eventId = id;
-          // Paint the pending bubble immediately, keyed by the stable eventId.
-          // Persisted (without status) so it survives a reload; the status
-          // itself lives in the store, written next.
-          const optimistic = { id, fromMe: true, text, createdAt, wireKind: kind };
+          // Paint the pending bubble immediately. The ROW id stays `local-` so
+          // mergeConversationMessages' text+window dedup collapses it against
+          // the relay echo (whose id is the OUTER wrap id, not this rumor id).
+          // The delivery store is keyed by the rumor eventId via `rumorId`,
+          // which both this row and the echo carry — so the tick follows the
+          // message across the swap. Persisted so the bubble survives a reload.
+          const optimistic = {
+            id: `local-${id}`,
+            rumorId: id,
+            fromMe: true,
+            text,
+            createdAt,
+            wireKind: kind,
+          };
           setMessages((prev) => [...prev, optimistic]);
           void appendLocalDmMessage(pubkey, optimistic);
           setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind }));
