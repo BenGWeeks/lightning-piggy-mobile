@@ -96,7 +96,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
               </View>
             </>
           ) : (
-            <Text style={styles.sectionHint}>No categories to filter by in this area yet.</Text>
+            <Text style={styles.sectionHint}>No categories to filter by yet.</Text>
           )}
         </ScrollView>
 
