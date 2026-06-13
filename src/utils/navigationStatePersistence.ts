@@ -47,8 +47,15 @@ interface NavStateLike {
   [key: string]: unknown;
 }
 
-const stripTransientParams = (params: unknown): unknown => {
-  if (!params || typeof params !== 'object') return params;
+// Strip transient bits from a route's `params`. Crucially this must recurse,
+// because React Navigation persists the *navigate-action payload* inside
+// `params` — not just the resolved `state` tree. A deep link / Friends-tab zap
+// dispatched via `navigate('Main', { screen: 'Explore', params: { state: {…} } })`
+// leaves the cache (or the `sendToAddress` invoice) sitting in `params.params`
+// and `params.state`, which RN re-applies on restore. The top-level `state`
+// tree alone looks clean, so a shallow strip (the original bug) misses it.
+const sanitizeParams = (params: unknown): unknown => {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
   const next = { ...(params as Record<string, unknown>) };
   let changed = false;
   for (const key of TRANSIENT_PARAM_KEYS) {
@@ -56,6 +63,28 @@ const stripTransientParams = (params: unknown): unknown => {
       delete next[key];
       changed = true;
     }
+  }
+  // Nested navigate payload: navigate('A', { screen: 'B', params: {…} }).
+  if (next.params && typeof next.params === 'object' && !Array.isArray(next.params)) {
+    const inner = sanitizeParams(next.params);
+    if (inner !== next.params) {
+      changed = true;
+      if (inner === undefined) delete next.params;
+      else next.params = inner;
+    }
+  }
+  // Embedded navigation state: navigate('A', { state: {…} }) — sanitize it as a
+  // full state so transient routes (HuntPiggyDetail/HuntFound) are popped here
+  // too, not just in the resolved tree.
+  if (
+    next.state &&
+    typeof next.state === 'object' &&
+    Array.isArray((next.state as NavStateLike).routes)
+  ) {
+    const cleaned = sanitizeNavigationState(next.state as unknown as NavigationState);
+    changed = true;
+    if (cleaned === undefined) delete next.state;
+    else next.state = cleaned as unknown;
   }
   if (!changed) return params;
   return Object.keys(next).length > 0 ? next : undefined;
@@ -75,7 +104,7 @@ export const sanitizeNavigationState = (
   const s = state as unknown as NavStateLike;
   const cleanedRoutes = s.routes.map((route) => ({
     ...route,
-    params: stripTransientParams(route.params),
+    params: sanitizeParams(route.params),
     state: route.state
       ? (sanitizeNavigationState(route.state as unknown as NavigationState) as
           | NavStateLike

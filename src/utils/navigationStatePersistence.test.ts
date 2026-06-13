@@ -232,6 +232,64 @@ describe('sanitizeNavigationState — replay guard (#886)', () => {
     expect(sanitizeNavigationState({} as unknown as NavigationState)).toEqual({});
   });
 
+  it('strips a deep-link payload nested in params.state / params.params (#886 real shape)', () => {
+    // Mirrors the actual persisted shape from a `navigate('Main', { screen:
+    // 'Explore', params: { state: {…HuntPiggyDetail…} } })` deep link: the
+    // resolved `state` tree looks clean, but the cache lives in the params
+    // navigate-payload, which RN re-applies on restore.
+    const state = {
+      index: 0,
+      routeNames: ['Main'],
+      routes: [
+        {
+          key: 'Main-1',
+          name: 'Main',
+          // resolved tree is already clean (cache not in state.routes)…
+          state: {
+            index: 0,
+            routeNames: ['Explore'],
+            routes: [{ key: 'Explore-1', name: 'Explore' }],
+          },
+          // …but the navigate-payload in params still carries it:
+          params: {
+            screen: 'Explore',
+            params: {
+              state: {
+                index: 2,
+                routes: [
+                  { name: 'ExploreHome' },
+                  { name: 'Hunt' },
+                  { name: 'HuntPiggyDetail', params: { coord: '37516:abc:allotment' } },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    } as unknown as NavigationState;
+    const out = sanitizeNavigationState(state) as any;
+    const payloadRoutes = out.routes[0].params.params.state.routes.map((r: any) => r.name);
+    expect(payloadRoutes).toEqual(['ExploreHome', 'Hunt']); // HuntPiggyDetail popped from the payload
+  });
+
+  it('strips sendToAddress from a nested params.params navigate payload', () => {
+    // navigate('Main', { screen: 'Home', params: { sendToAddress: '…' } })
+    const state = {
+      index: 0,
+      routeNames: ['Main'],
+      routes: [
+        {
+          key: 'Main-1',
+          name: 'Main',
+          params: { screen: 'Home', params: { sendToAddress: 'lnbc5u1pstale', keep: 'me' } },
+        },
+      ],
+    } as unknown as NavigationState;
+    const out = sanitizeNavigationState(state) as any;
+    expect(out.routes[0].params.params).toEqual({ keep: 'me' });
+    expect(out.routes[0].params.params).not.toHaveProperty('sendToAddress');
+  });
+
   it('collapses an empty-routes stack to undefined (no index -1 crash)', () => {
     // A malformed-but-JSON-valid blob with zero routes would otherwise yield
     // index = routes.length - 1 = -1 and crash NavigationContainer on mount.
