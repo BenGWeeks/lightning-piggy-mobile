@@ -27,6 +27,8 @@ import Animated, {
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useSendingAnimation } from '../contexts/SendingAnimationContext';
+import LightningOverlay from './LightningOverlay';
 import { lightPalette, type Palette } from '../styles/palettes';
 
 export type PaymentProgressState =
@@ -299,6 +301,9 @@ export default function PaymentProgressOverlay({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
+  // Which send animation the user picked in Appearance. Only affects the
+  // outgoing (send) particle layer; receive keeps its confetti burst.
+  const { preference: sendingAnimation } = useSendingAnimation();
 
   // Keep the overlay mounted across `hidden` so bubbles don't flash
   // when state flips back to sending mid-flow. We drive the Modal's
@@ -459,30 +464,37 @@ export default function PaymentProgressOverlay({
       <View style={styles.root}>
         {/* Particle layer renders BEHIND the card — later siblings stack
          *  above earlier ones in RN, so this block must come first.
-         *  Send = pink bubbles rising; Receive = radial confetti burst
-         *  from card centre, so pieces appear to launch out from behind
-         *  the card and fly past its edges. */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {isReceive
-            ? confettiSpecs.map((spec) => (
-                <Confetti
-                  key={spec.index}
-                  spec={spec}
-                  armed={confettiArmed}
-                  originX={width / 2}
-                  originY={height / 2}
-                />
-              ))
-            : bubbleSpecs.map((spec) => (
-                <Bubble
-                  key={spec.index}
-                  spec={spec}
-                  colorProgress={colorProgress}
-                  screenWidth={width}
-                  screenHeight={height}
-                />
-              ))}
-        </View>
+         *  Receive = radial confetti burst from card centre. Send respects
+         *  the Appearance "Sending animation" setting: bubbles (default) or
+         *  the procedural Skia lightning. Both send variants morph purple →
+         *  green on success via the same `colorProgress` driver. */}
+        {isReceive ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {confettiSpecs.map((spec) => (
+              <Confetti
+                key={spec.index}
+                spec={spec}
+                armed={confettiArmed}
+                originX={width / 2}
+                originY={height / 2}
+              />
+            ))}
+          </View>
+        ) : sendingAnimation === 'lightning' ? (
+          <LightningOverlay progress={colorProgress} width={width} height={height} />
+        ) : (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {bubbleSpecs.map((spec) => (
+              <Bubble
+                key={spec.index}
+                spec={spec}
+                colorProgress={colorProgress}
+                screenWidth={width}
+                screenHeight={height}
+              />
+            ))}
+          </View>
+        )}
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
           {showSpinner && (
