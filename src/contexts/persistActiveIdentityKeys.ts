@@ -1,6 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
 import type { StoredIdentity } from '../services/identitiesStore';
-import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
+import {
+  NSEC_KEY,
+  PUBKEY_KEY,
+  SIGNER_TYPE_KEY,
+  LEGACY_IDENTITY_SECURE_OPTIONS,
+} from './nostrAuthKeys';
 
 // Promote one registered identity into the legacy single-identity SecureStore
 // slots (`SIGNER_TYPE_KEY` + either `NSEC_KEY` or `PUBKEY_KEY`) so a hard
@@ -18,12 +23,16 @@ export async function persistActiveIdentityKeys(
   opts: { clearOtherSlot?: boolean } = {},
 ): Promise<void> {
   const clearOtherSlot = opts.clearOtherSlot === true;
-  await SecureStore.setItemAsync(SIGNER_TYPE_KEY, identity.signerType);
+  await SecureStore.setItemAsync(
+    SIGNER_TYPE_KEY,
+    identity.signerType,
+    LEGACY_IDENTITY_SECURE_OPTIONS,
+  );
   if (identity.signerType === 'nsec' && identity.nsec) {
-    await SecureStore.setItemAsync(NSEC_KEY, identity.nsec);
+    await SecureStore.setItemAsync(NSEC_KEY, identity.nsec, LEGACY_IDENTITY_SECURE_OPTIONS);
     if (clearOtherSlot) await SecureStore.deleteItemAsync(PUBKEY_KEY);
   } else if (identity.signerType === 'amber') {
-    await SecureStore.setItemAsync(PUBKEY_KEY, identity.pubkey);
+    await SecureStore.setItemAsync(PUBKEY_KEY, identity.pubkey, LEGACY_IDENTITY_SECURE_OPTIONS);
     if (clearOtherSlot) await SecureStore.deleteItemAsync(NSEC_KEY);
   }
 }

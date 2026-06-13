@@ -42,6 +42,7 @@ function makeDeps() {
       setPubkey: jest.fn((pk: string) => calls.push(`setPubkey:${pk.slice(0, 4)}`)),
       setSignerType: jest.fn((s: string) => calls.push(`setSignerType:${s}`)),
       setIsLoggedIn: jest.fn((v: boolean) => calls.push(`setIsLoggedIn:${v}`)),
+      setDmInbox: jest.fn((e: unknown[]) => calls.push(`setDmInbox:${e.length}`)),
       loadProfileFromCache: jest.fn(async (pk: string) => {
         calls.push(`loadProfileFromCache:${pk.slice(0, 4)}`);
         return true;
@@ -76,6 +77,25 @@ describe('promoteSuccessorIdentity', () => {
     // The drawer must never see the new pubkey alongside the old profile.
     expect(clearProfile).toBeLessThan(setPk);
     expect(clearContacts).toBeLessThan(setPk);
+  });
+
+  it('clears the stale DM inbox BEFORE hydrating, so an empty-cache successor shows no prior previews', async () => {
+    const { calls, deps } = makeDeps();
+    // hydrateDmInboxFromCache leaves the inbox untouched when the successor's
+    // cache is empty (the real non-empty-only guard) — so the explicit
+    // setDmInbox([]) is the only thing preventing the prior identity's
+    // previews from leaking into the new session.
+    await promoteSuccessorIdentity(SUCCESSOR, deps);
+
+    expect(deps.setDmInbox).toHaveBeenCalledWith([]);
+    const clearInbox = calls.indexOf('setDmInbox:0');
+    const setPk = calls.indexOf('setPubkey:bbbb');
+    const hydrate = calls.indexOf(`hydrateDmInboxFromCache:${SUCCESSOR.pubkey.slice(0, 4)}`);
+    expect(clearInbox).toBeGreaterThanOrEqual(0);
+    // Cleared before the successor becomes active AND before the (no-op for an
+    // empty cache) hydrate, mirroring switchIdentity's teardown ordering.
+    expect(clearInbox).toBeLessThan(setPk);
+    expect(clearInbox).toBeLessThan(hydrate);
   });
 
   it('hydrates the successor profile from cache so the drawer repaints', async () => {

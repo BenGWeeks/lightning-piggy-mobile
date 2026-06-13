@@ -1,6 +1,7 @@
 import { InteractionManager } from 'react-native';
 import type { StoredIdentity } from '../services/identitiesStore';
 import type { NostrProfile, NostrContact } from '../types/nostr';
+import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 
 // Side-effect bundle the logout-with-successor flow drives. Kept as an
@@ -12,6 +13,12 @@ export interface PromoteSuccessorDeps {
   setPubkey: (pk: string) => void;
   setSignerType: (s: StoredIdentity['signerType']) => void;
   setIsLoggedIn: (v: boolean) => void;
+  // Clears the signed-out identity's DM inbox before the successor hydrates.
+  // Without this, a successor with an EMPTY cached inbox keeps rendering the
+  // prior identity's previews, because hydrateDmInboxFromCache only calls
+  // setDmInbox when the merged cache is non-empty (useDmInbox.ts) — mirrors
+  // switchIdentity's setDmInbox([]) teardown.
+  setDmInbox: (entries: DmInboxEntry[]) => void;
   // Cache loaders — return value (boolean cache-hit / void) is ignored here.
   loadProfileFromCache: (pk: string) => Promise<unknown>;
   loadContactsFromCache: (pk: string) => Promise<unknown>;
@@ -37,6 +44,10 @@ export async function promoteSuccessorIdentity(
   await persistActiveIdentityKeys(successor);
   deps.setProfile(null);
   deps.setContacts([]);
+  // Clear the prior identity's inbox BEFORE promoting; the non-empty-only
+  // hydrate guard (useDmInbox.ts) means an empty-cache successor would
+  // otherwise inherit these stale previews.
+  deps.setDmInbox([]);
   deps.setPubkey(successor.pubkey);
   deps.setSignerType(successor.signerType);
   deps.setIsLoggedIn(true);

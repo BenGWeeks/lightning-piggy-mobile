@@ -1016,12 +1016,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
         setPubkey(pk);
 
-        // Store credentials in the legacy single-active-identity slots
-        // (still the canonical location every other consumer reads from)
-        // AND register the identity in the multi-account store so the
-        // switcher knows it exists (#288).
-        await SecureStore.setItemAsync(NSEC_KEY, trimmed);
-        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nsec');
+        // Store credentials in the legacy single-active-identity slots via the
+        // canonical writer (hardened, device-only keychain) AND register the
+        // identity in the multi-account store so the switcher knows it (#288).
+        await persistActiveIdentityKeys({ pubkey: pk, signerType: 'nsec', nsec: trimmed });
         const next = await upsertIdentity({
           pubkey: pk,
           signerType: 'nsec',
@@ -1083,8 +1081,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const pk = await amberService.requestPublicKey();
 
       setPubkey(pk);
-      await SecureStore.setItemAsync(PUBKEY_KEY, pk);
-      await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'amber');
+      await persistActiveIdentityKeys({ pubkey: pk, signerType: 'amber' });
       const next = await upsertIdentity({
         pubkey: pk,
         signerType: 'amber',
@@ -1252,6 +1249,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setPubkey,
           setSignerType,
           setIsLoggedIn,
+          setDmInbox,
           loadProfileFromCache,
           loadContactsFromCache,
           hydrateDmInboxFromCache,
@@ -1287,6 +1285,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadRelays,
     loadProfile,
     hydrateDmInboxFromCache,
+    setDmInbox,
     setAmberNip44Permission,
     knownWrapIdsRef,
   ]);
