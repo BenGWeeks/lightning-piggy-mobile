@@ -27,7 +27,8 @@ let persist: Persist | null = null;
 // Cached immutable snapshot for `useSyncExternalStore`. Its identity is STABLE
 // between writes — recomputed only when a write actually changes the map — so
 // the subscribing hook doesn't see a "new" snapshot every render (which would
-// loop infinitely). Invalidated to `null` on every mutation, then memoised.
+// loop infinitely). Rebuilt to a fresh object on every mutation (so its
+// identity changes), then handed out unchanged until the next write.
 let snapshot: Record<string, DeliveryStatus> = {};
 
 function invalidateSnapshot(): void {

@@ -117,13 +117,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   useEffect(() => {
     if (!pubkey) return;
     let teardown: (() => void) | null = null;
-    let cancelled = false;
-    void bindDmDeliveryStorePersistence(pubkey).then((fn) => {
-      if (cancelled) fn();
+    // AbortController crosses the async boundary (#866): aborting on cleanup
+    // tells an in-flight bind whose getItem hasn't resolved yet to no-op before
+    // it hydrates / installs its persist hook. Without this, a stale bind from
+    // the previous account could resolve late and clobber the new account's
+    // in-memory delivery statuses or detach its persist hook.
+    const controller = new AbortController();
+    void bindDmDeliveryStorePersistence(pubkey, { signal: controller.signal }).then((fn) => {
+      // If we were torn down while the bind was resolving, run its (inert or
+      // real) teardown immediately rather than retaining it.
+      if (controller.signal.aborted) fn();
       else teardown = fn;
     });
     return () => {
-      cancelled = true;
+      controller.abort();
       teardown?.();
     };
   }, [pubkey]);
