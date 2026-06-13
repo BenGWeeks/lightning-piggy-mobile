@@ -232,6 +232,13 @@ describe('sanitizeNavigationState — replay guard (#886)', () => {
     expect(sanitizeNavigationState({} as unknown as NavigationState)).toEqual({});
   });
 
+  it('collapses an empty-routes stack to undefined (no index -1 crash)', () => {
+    // A malformed-but-JSON-valid blob with zero routes would otherwise yield
+    // index = routes.length - 1 = -1 and crash NavigationContainer on mount.
+    const empty = { index: 0, routeNames: [], routes: [] } as unknown as NavigationState;
+    expect(sanitizeNavigationState(empty)).toBeUndefined();
+  });
+
   it('load() heals an already-persisted stale invoice (sanitize on read)', async () => {
     await AsyncStorage.setItem(
       NAV_STATE_KEY,

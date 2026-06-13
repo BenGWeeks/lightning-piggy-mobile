@@ -62,9 +62,12 @@ const stripTransientParams = (params: unknown): unknown => {
 };
 
 // Recursively remove one-shot params and pop transient deep-link routes so a
-// restored cold-start never replays a stale action. Pure + total: returns the
-// input unchanged when there's nothing to clean, and never produces an empty
-// `routes` array (which would throw at NavigationContainer mount).
+// restored cold-start never replays a stale action. Pure (never mutates its
+// input) and total: a malformed/leaf state with no `routes` array is returned
+// as-is; a valid state yields a NEW, cleaned object. An empty `routes` array
+// (only reachable from a malformed-but-JSON-valid blob) collapses to
+// `undefined` so the navigator falls through to its defaults instead of
+// mounting an index-out-of-range stack.
 export const sanitizeNavigationState = (
   state: NavigationState | undefined,
 ): NavigationState | undefined => {
@@ -83,10 +86,11 @@ export const sanitizeNavigationState = (
   // Never hand back an empty stack — if every route was transient, keep the
   // cleaned (param-stripped) routes rather than crash the navigator.
   const routes = kept.length > 0 ? kept : cleanedRoutes;
-  const index = Math.min(
-    typeof s.index === 'number' ? s.index : routes.length - 1,
-    routes.length - 1,
-  );
+  // A genuinely empty stack (malformed input) can't be restored — drop it so
+  // the navigator renders defaults instead of mounting with index -1.
+  if (routes.length === 0) return undefined;
+  const desired = typeof s.index === 'number' ? s.index : routes.length - 1;
+  const index = Math.max(0, Math.min(desired, routes.length - 1));
   return { ...s, routes, index } as unknown as NavigationState;
 };
 
