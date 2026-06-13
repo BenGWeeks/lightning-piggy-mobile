@@ -105,8 +105,9 @@ export function useSendSheetLnurl(opts: {
     return () => {
       cancelled = true;
     };
+    // onResolveError is caller-stabilised (useCallback); listing it avoids a stale-closure prefill without re-firing on keystrokes. Disable still covers the stable setters + per-render prefillFixedAmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanned, invoiceData, recipientName, activePubkey]);
+  }, [scanned, invoiceData, recipientName, activePubkey, onResolveError]);
 
   // Resolve a raw LNURL string when scanned/pasted. Unlike a lightning
   // address (always LNURL-pay), a bech32 `lnurl1…` / cleartext `lnurlp://`
@@ -161,6 +162,7 @@ export function useSendSheetLnurl(opts: {
     return () => {
       cancelled = true;
     };
+    // onResolveError is caller-stabilised (useCallback); listing it avoids a stale-closure prefill without re-firing on keystrokes. Disable still covers the stable setters + per-render prefillFixedAmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanned, invoiceData, isLnurl]);
+  }, [scanned, invoiceData, isLnurl, onResolveError]);
 }

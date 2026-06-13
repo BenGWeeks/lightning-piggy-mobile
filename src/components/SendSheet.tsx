@@ -226,12 +226,19 @@ const SendSheet: React.FC<Props> = ({
     };
   }, []);
 
+  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
+  const pasteTextRef = useRef(pasteText);
+  pasteTextRef.current = pasteText;
+  const invoiceDataRef = useRef(invoiceData);
+  invoiceDataRef.current = invoiceData;
+
   // Fix-in-place recovery (#871): return to the paste/input step with the bad
   // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
   // can be corrected without retyping the whole address. Unwinds the
-  // resolved/scanned state but keeps pasteText / activePubkey.
+  // resolved/scanned state but keeps pasteText / activePubkey. Reads the live
+  // submitted value via refs so the callback identity stays stable (see above).
   const handleEditAddress = useCallback(() => {
-    const prefill = editAddressPrefill(pasteText, invoiceData);
+    const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
     setInvoiceData(null);
     setDecoded(null);
     setScanned(false);
@@ -243,7 +250,7 @@ const SendSheet: React.FC<Props> = ({
     setStep('main');
     setInputMode('paste');
     setPasteText(prefill);
-  }, [pasteText, invoiceData]);
+  }, []);
 
   // Resolution failed (typo / unreachable): toast the friendly error, then
   // hand the user straight back to the editable address (#871).
