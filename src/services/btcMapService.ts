@@ -363,10 +363,19 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   // icon when `categories` is missing/empty, so the Explore/Map/Places filter
   // populates again (#860). Keep using `categories` verbatim if the API ever
   // restores it — fall back, don't replace.
+  // Normalize each token the same way other string fields are (trim + drop
+  // empty/whitespace-only) so blank tokens can't leak into `place.categories`
+  // and become blank filter chips / unstable `key={cat}` + testIDs downstream.
+  const normalizeTokens = (tokens: string[]): string[] =>
+    tokens.map((t) => t.trim()).filter((t) => t.length > 0);
   const explicitCategories = Array.isArray(raw['categories'])
-    ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
+    ? normalizeTokens(
+        (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string'),
+      )
     : [];
-  const categories = explicitCategories.length > 0 ? explicitCategories : icon ? [icon] : null;
+  const iconCategories = icon ? normalizeTokens([icon]) : [];
+  const derivedCategories = explicitCategories.length > 0 ? explicitCategories : iconCategories;
+  const categories = derivedCategories.length > 0 ? derivedCategories : null;
   // Curated top-level fields > OSM-prefixed tag fallbacks. BTC Map
   // ships these only when their team or the OSM tag has them populated;
   // an empty string is normalised to null so the UI can branch cleanly.
