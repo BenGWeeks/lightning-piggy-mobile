@@ -40,14 +40,27 @@ export interface FetchConversationParams {
   getReadRelays: () => string[];
   decryptNip04ViaSigner: (counterpartyPubkey: string, ciphertext: string) => Promise<string | null>;
   otherPubkey: string;
+  // Cancels the relay fetch + decrypt loop when the user navigates away (#868).
+  // Mirrors refreshDmInbox's opts.signal: the loop bails at its yield points so
+  // a back-press mid-fetch stops chewing the JS thread, and re-entering can
+  // abort-and-replace an in-flight fetch instead of stacking a second loop.
+  signal?: AbortSignal;
 }
 
 export async function fetchConversationFor(
   params: FetchConversationParams,
 ): Promise<ConversationMessage[]> {
-  const { pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner, otherPubkey } =
-    params;
+  const {
+    pubkey,
+    isLoggedIn,
+    signerType,
+    getReadRelays,
+    decryptNip04ViaSigner,
+    otherPubkey,
+    signal,
+  } = params;
   if (!pubkey || !isLoggedIn) return [];
+  if (signal?.aborted) return [];
   const normalized = otherPubkey.trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
 
@@ -131,6 +144,10 @@ export async function fetchConversationFor(
     ev: (typeof kind4Events)[0];
   } | null)[] = [];
   for (let i = 0; i < freshDecryptTargets.length; i += DECRYPT_YIELD_EVERY) {
+    // Bail between batches once the caller aborts (#868) — same yield-point
+    // cancellation refreshDmInbox/ingestInboxWraps already do. Stops a back-
+    // press mid-fetch from draining the rest of the decrypt loop.
+    if (signal?.aborted) break;
     const batch = freshDecryptTargets.slice(i, i + DECRYPT_YIELD_EVERY);
     const batchResults = await Promise.all(
       batch.map(async (t) => {
@@ -226,10 +243,14 @@ export async function fetchConversationFor(
     // Store unavailable — fall back to the relay path below.
     if (__DEV__) console.warn('[DmStore] thread slice read failed:', e);
   }
-  const inboxLastSeenForWraps = skippedInboxFetch
+  // Aborted mid-fetch (back-press during the kind-4 decrypt) — skip the
+  // inbox-wide wrap fetch entirely and return what the store already gave us
+  // (#868). The store rows above are already pushed into `decrypted`.
+  const skipWrapFetch = skippedInboxFetch || (signal?.aborted ?? false);
+  const inboxLastSeenForWraps = skipWrapFetch
     ? undefined
     : await loadLastSeen(inboxLastSeenKey(pubkey));
-  const { kind1059 } = skippedInboxFetch
+  const { kind1059 } = skipWrapFetch
     ? {
         kind1059: [] as Awaited<ReturnType<typeof nostrService.fetchInboxDmEvents>>['kind1059'],
       }
@@ -265,6 +286,7 @@ export async function fetchConversationFor(
         unwrap,
         passesFollowGate: () => true,
         onSkip,
+        signal,
       });
       nip17CacheHits += r.alreadyKnown;
       nip17FreshDecrypts += r.misses;
@@ -288,6 +310,15 @@ export async function fetchConversationFor(
   // from previous opens. Fresh takes precedence via `mergeConversationMessages`
   // Map semantics so re-ordered or edited events (rare) land right.
   const merged = mergeConversationMessages(cachedConv, decrypted, DM_CONV_CAP);
+
+  // Aborted mid-fetch (Copilot #869): the kind-4 decrypt loop bails between
+  // batches, so `decrypted` may omit events the abort skipped — but
+  // `kind4Events` still holds them all. Persisting `convLastSeen` from the full
+  // `kind4Events` set would advance the per-peer `since` cursor PAST those
+  // never-decrypted events, permanently skipping them on the next open. Return
+  // the store-backed `merged` (already painted) WITHOUT any cache/cursor write,
+  // so an aborted run has no durable side effects.
+  if (signal?.aborted) return merged;
 
   // Single-line perf summary — grep `[Perf] fetchConversation` out
   // of logcat to compare cold-store vs warm-store thread opens.

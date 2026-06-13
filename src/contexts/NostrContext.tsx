@@ -203,17 +203,20 @@ interface NostrContextType {
     name: string;
     memberPubkeys: string[];
   }) => Promise<{ success: boolean; error?: string }>;
-  fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  fetchConversation: (
+    otherPubkey: string,
+    opts?: { signal?: AbortSignal },
+  ) => Promise<ConversationMessage[]>;
   /**
-   * Read the persisted per-peer conversation cache synchronously-ish
-   * (AsyncStorage is actually async but single `getItem` is fast).
-   * Returns `[]` when no cache exists. Use this to paint a thread's
-   * cached messages instantly on mount, *before* awaiting the slower
-   * `fetchConversation` relay round-trip — Arcade's `db_only=true`
-   * pattern. The user sees the thread fill immediately, then a fresh
-   * merge replaces it once relay returns.
+   * Read-through (#868): the instant-paint set for a thread open — the union of
+   * the per-conversation cache and the SAME encrypted-store rows the Messages
+   * inbox preview is built from. Paint a thread from this on mount BEFORE the
+   * slower `fetchConversation` relay round-trip (Arcade's `db_only=true`
+   * pattern). Reading the store directly — not just the per-conversation cache
+   * blob — is what stops the thread lagging the inbox for a DM an inbox-wide
+   * refresh ingested (it writes the store, not the per-conv blob).
    */
-  getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
@@ -387,7 +390,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     dmInboxLoading,
     refreshDmInbox,
     fetchConversation,
-    getCachedConversation,
+    loadInitialConversation,
     appendLocalDmMessage,
     persistDeliveryStatuses,
     armLiveDmSub,
@@ -1749,7 +1752,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sendGroupMessage,
       publishGroupState,
       fetchConversation,
-      getCachedConversation,
+      loadInitialConversation,
       appendLocalDmMessage,
       persistDeliveryStatuses,
       amberNip44Permission,
@@ -1780,7 +1783,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sendGroupMessage,
       publishGroupState,
       fetchConversation,
-      getCachedConversation,
+      loadInitialConversation,
       appendLocalDmMessage,
       persistDeliveryStatuses,
       amberNip44Permission,
