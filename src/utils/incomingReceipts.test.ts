@@ -1,8 +1,10 @@
 import {
   pickNewReceipts,
+  pickNewerReceipt,
   settledIncomingHashes,
   isValidPaymentHash,
   shouldSeedBaseline,
+  type AnnouncedReceipt,
 } from './incomingReceipts';
 import type { WalletTransaction } from '../types/wallet';
 
@@ -73,6 +75,36 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
     expect(pickNewReceipts(txns, new Set([H1]))).toEqual([
       { paymentHash: H2, amountSats: 222, settledAt: 200 },
     ]);
+  });
+});
+
+describe('pickNewerReceipt (#859 — announce one, the most recent)', () => {
+  const r = (settledAt: number, walletId = 'w', paymentHash = H1): AnnouncedReceipt => ({
+    paymentHash,
+    amountSats: 1,
+    settledAt,
+    walletId,
+    walletLabel: walletId,
+  });
+
+  it('takes the candidate when there is no current winner yet', () => {
+    const cand = r(100);
+    expect(pickNewerReceipt(null, cand)).toBe(cand);
+  });
+
+  it('keeps the later-settled receipt when the candidate is older', () => {
+    const current = r(200, 'a');
+    expect(pickNewerReceipt(current, r(100, 'b'))).toBe(current);
+  });
+
+  it('switches to the candidate when it settled later', () => {
+    const candidate = r(300, 'b');
+    expect(pickNewerReceipt(r(200, 'a'), candidate)).toBe(candidate);
+  });
+
+  it('keeps the existing winner on an exact tie (stable, deterministic)', () => {
+    const current = r(150, 'a');
+    expect(pickNewerReceipt(current, r(150, 'b'))).toBe(current);
   });
 });
 

@@ -51,6 +51,7 @@ import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
+import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
 import SendModeTabs, { type SendInputMode } from './SendModeTabs';
@@ -682,7 +683,10 @@ const SendSheet: React.FC<Props> = ({
         // We also refetch a second time in case the first call raced.
         await refreshBalanceForWallet(walletId);
         const capturedWalletId = walletId;
-        (async () => {
+        // Defer the heavy tx-list refresh (JSON.stringify + zap resolver)
+        // off the interaction path so the success overlay's OK tap is
+        // serviced immediately rather than blocked behind it (#859, #828).
+        deferPostPaymentRefresh(async () => {
           try {
             await new Promise((r) => setTimeout(r, 600));
             await fetchTransactionsForWallet(capturedWalletId);
@@ -692,7 +696,7 @@ const SendSheet: React.FC<Props> = ({
             // Refresh failures are non-fatal — a manual pull-to-refresh
             // or the next natural refresh will pick the tx up.
           }
-        })();
+        });
       }
       if (signal.aborted) return;
       if (dismissedInFlightRef.current) return;

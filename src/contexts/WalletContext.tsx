@@ -20,8 +20,10 @@ import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard
 import { singleFlight } from '../utils/singleFlight';
 import {
   pickNewReceipts,
+  pickNewerReceipt,
   settledIncomingHashes,
   shouldSeedBaseline,
+  type AnnouncedReceipt,
 } from '../utils/incomingReceipts';
 import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -37,6 +39,7 @@ import {
   ZapCounterpartyInfo,
   walletLabel,
 } from '../types/wallet';
+import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
@@ -1872,9 +1875,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // refresh here would be a redundant list_transactions round-trip. Only the
     // expectPayment path needs it (the list may not yet include the settle).
     if (lastIncomingPayment.fromTxList) return;
-    fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
-      // Non-fatal: next organic refresh will pick the tx up.
-    });
+    const walletId = lastIncomingPayment.walletId;
+    // Defer past the interaction frame so the overlay's dismiss tap is serviced
+    // before this heavy refresh runs on the JS thread (#859, #828).
+    const handle = deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId));
+    return () => handle.cancel();
     // Intentionally only fire on `lastIncomingPayment` changes; the
     // callback identity is stable enough across renders that adding it
     // would double-fetch on unrelated renders.
@@ -1896,15 +1901,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         AsyncStorage.removeItem(`seenReceipts_${id}`).catch(() => {});
       }
 
+    const handles: { cancel: () => void }[] = [];
     for (const wallet of wallets) {
       const bal = wallet.balance;
       if (bal === null || bal === undefined) continue;
       const prev = baselines.get(wallet.id);
       baselines.set(wallet.id, bal);
       if (prev !== undefined && bal > prev) {
-        void fetchTransactionsForWallet(wallet.id).catch(() => {});
+        // A balance bump is when the receive overlay pops — defer the refresh
+        // off the interaction path so the dismiss tap stays responsive (#859).
+        const walletId = wallet.id;
+        handles.push(deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId)));
       }
     }
+    return () => handles.forEach((h) => h.cancel());
     // fetchTransactionsForWallet is a stable useCallback; omitting it from deps
     // avoids re-running on unrelated renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1939,13 +1949,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // setLastIncomingPayment is one state value — calling it in a loop would
     // batch and keep only the last, dropping the rest (#655 review). Pick the
     // newest by settled_at, deterministically, across all wallets.
-    let newest: {
-      walletId: string;
-      amountSats: number;
-      paymentHash: string;
-      settledAt: number;
-    } | null = null;
-    let newestLabel = '';
+    let newest: AnnouncedReceipt | null = null;
     for (const wallet of wallets) {
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
@@ -1958,10 +1962,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);
         changed = true;
-        if (!newest || receipt.settledAt > newest.settledAt) {
-          newest = { walletId: wallet.id, ...receipt };
-          newestLabel = walletLabel(wallet);
-        }
+        newest = pickNewerReceipt(newest, {
+          ...receipt,
+          walletId: wallet.id,
+          walletLabel: walletLabel(wallet),
+        });
       }
       // Persist the moment a new receipt is seen so a reload before the next
       // write can't re-announce it.
@@ -1970,7 +1975,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (newest) {
       if (__DEV__)
         console.log(
-          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newestLabel} (${newest.paymentHash.slice(0, 12)}…)`,
+          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newest.walletLabel} (${newest.paymentHash.slice(0, 12)}…)`,
         );
       setLastIncomingPayment({
         walletId: newest.walletId,
