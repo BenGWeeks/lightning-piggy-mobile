@@ -11,6 +11,12 @@ import {
   lnurlFixedAmountSats,
 } from '../utils/sendSheetInput';
 
+// Friendly, action-oriented copy for an unreachable / mistyped target. The
+// raw error (DNS failure, 404, JSON parse) is logged for debugging but not
+// shown — it's noise to a user who just fat-fingered an address (#871).
+const RESOLVE_FAIL_TITLE = "Couldn't reach this Lightning address";
+const RESOLVE_FAIL_BODY = 'Check it for typos and try again.';
+
 /**
  * Resolves a scanned/pasted payment target — a lightning address or a raw
  * LNURL string — into LNURL-pay params for the Send sheet. Extracted from
@@ -32,6 +38,11 @@ export function useSendSheetLnurl(opts: {
   setScanned: (v: boolean) => void;
   setIsLnurl: (v: boolean) => void;
   setSatsValue: (v: string) => void;
+  // Called when a target can't be resolved (typo / unreachable). The sheet
+  // surfaces a branded toast AND bounces back to the editable input with the
+  // bad value retained, so the user can fix it in place rather than hitting a
+  // silently-disabled Send (#871). Title/body are friendly, not the raw error.
+  onResolveError: (title: string, body: string) => void;
 }): void {
   const {
     scanned,
@@ -46,6 +57,7 @@ export function useSendSheetLnurl(opts: {
     setScanned,
     setIsLnurl,
     setSatsValue,
+    onResolveError,
   } = opts;
 
   // Fixed-amount LNURL (min === max): pre-fill the only valid value so the
@@ -79,8 +91,12 @@ export function useSendSheetLnurl(opts: {
         }
       } catch (error) {
         if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve address';
-          Alert.alert('Error', msg);
+          // Previously this only Alert.alert'd and left the sheet stuck on
+          // `Pay to <bad address>` with no amount control and a disabled Send —
+          // a silent dead-end (#871). Now we hand control back to the sheet so
+          // it can toast + return to the editable input with the value kept.
+          console.warn('[SendSheet] lightning-address resolution failed:', error);
+          onResolveError(RESOLVE_FAIL_TITLE, RESOLVE_FAIL_BODY);
         }
       } finally {
         if (!cancelled) setResolving(false);
@@ -89,8 +105,9 @@ export function useSendSheetLnurl(opts: {
     return () => {
       cancelled = true;
     };
+    // onResolveError is caller-stabilised (useCallback); listing it avoids a stale-closure prefill without re-firing on keystrokes. Disable still covers the stable setters + per-render prefillFixedAmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanned, invoiceData, recipientName, activePubkey]);
+  }, [scanned, invoiceData, recipientName, activePubkey, onResolveError]);
 
   // Resolve a raw LNURL string when scanned/pasted. Unlike a lightning
   // address (always LNURL-pay), a bech32 `lnurl1…` / cleartext `lnurlp://`
@@ -128,8 +145,10 @@ export function useSendSheetLnurl(opts: {
         }
       } catch (error) {
         if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve LNURL';
-          Alert.alert('Error', msg);
+          // Unreachable / malformed LNURL: bounce back to the input (which
+          // retains pasteText) and toast instead of a modal dead-end (#871).
+          console.warn('[SendSheet] LNURL resolution failed:', error);
+          onResolveError(RESOLVE_FAIL_TITLE, RESOLVE_FAIL_BODY);
           setLnurlParams(null);
           setInvoiceData(null);
           setDecoded(null);
@@ -143,6 +162,7 @@ export function useSendSheetLnurl(opts: {
     return () => {
       cancelled = true;
     };
+    // onResolveError is caller-stabilised (useCallback); listing it avoids a stale-closure prefill without re-firing on keystrokes. Disable still covers the stable setters + per-render prefillFixedAmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanned, invoiceData, isLnurl]);
+  }, [scanned, invoiceData, isLnurl, onResolveError]);
 }

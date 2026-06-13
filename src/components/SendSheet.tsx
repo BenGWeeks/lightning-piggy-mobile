@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
+import { Toast } from './BrandedToast';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -35,6 +36,7 @@ import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import {
   type DecodedInvoice,
   decodeInvoice,
+  editAddressPrefill,
   isLightningAddress,
   isValidInvoice,
   isLnurlString,
@@ -224,6 +226,42 @@ const SendSheet: React.FC<Props> = ({
     };
   }, []);
 
+  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
+  const pasteTextRef = useRef(pasteText);
+  pasteTextRef.current = pasteText;
+  const invoiceDataRef = useRef(invoiceData);
+  invoiceDataRef.current = invoiceData;
+
+  // Fix-in-place recovery (#871): return to the paste/input step with the bad
+  // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
+  // can be corrected without retyping the whole address. Unwinds the
+  // resolved/scanned state but keeps pasteText / activePubkey. Reads the live
+  // submitted value via refs so the callback identity stays stable (see above).
+  const handleEditAddress = useCallback(() => {
+    const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
+    setInvoiceData(null);
+    setDecoded(null);
+    setScanned(false);
+    setLnurlParams(null);
+    setResolving(false);
+    setSatsValue('');
+    setIsLnurl(false);
+    setIsOnchainAddress(false);
+    setStep('main');
+    setInputMode('paste');
+    setPasteText(prefill);
+  }, []);
+
+  // Resolution failed (typo / unreachable): toast the friendly error, then
+  // hand the user straight back to the editable address (#871).
+  const handleResolveError = useCallback(
+    (title: string, body: string) => {
+      Toast.show({ type: 'error', text1: title, text2: body });
+      handleEditAddress();
+    },
+    [handleEditAddress],
+  );
+
   // Resolve a scanned/pasted lightning address or raw LNURL into LNURL-pay
   // params (or report a withdraw claim code). Extracted to keep SendSheet
   // under the file-size cap — see useSendSheetLnurl.
@@ -240,6 +278,7 @@ const SendSheet: React.FC<Props> = ({
     setScanned,
     setIsLnurl,
     setSatsValue,
+    onResolveError: handleResolveError,
   });
 
   const processInput = (data: string) => {
@@ -1043,7 +1082,24 @@ const SendSheet: React.FC<Props> = ({
                     />
                   )}
 
-                  <TouchableOpacity onPress={handleReset}>
+                  {/* Edit-in-place: keep what was typed so a typo can be
+                      fixed without retyping (#871). Only meaningful for
+                      addresses / LNURL — a scanned bolt11 isn't hand-edited. */}
+                  {(isLightningAddress(invoiceData || '') || isLnurl) && (
+                    <TouchableOpacity
+                      onPress={handleEditAddress}
+                      accessibilityLabel="Edit address"
+                      testID="sendsheet-edit-address"
+                    >
+                      <Text style={styles.resetText}>Edit address</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    onPress={handleReset}
+                    accessibilityLabel="Scan or paste a different invoice"
+                    testID="sendsheet-reset"
+                  >
                     <Text style={styles.resetText}>Scan / paste different invoice</Text>
                   </TouchableOpacity>
                 </View>
