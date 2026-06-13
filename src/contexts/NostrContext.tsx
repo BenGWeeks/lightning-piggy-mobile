@@ -26,6 +26,7 @@ import {
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
+import { sanitizeContacts } from '../utils/contacts';
 import {
   setActivePubkeyForWalletStorage,
   deleteNwcUrl,
@@ -540,7 +541,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       if (contactsJson) {
         const tParse = Date.now();
-        const cached: NostrContact[] = JSON.parse(contactsJson);
+        // sanitizeContacts drops any junk pubkeys persisted before the
+        // ingest-time HEX64 gate landed, so a poisoned cache self-heals on
+        // the next read instead of rendering zero-prefixed rows (#855).
+        const cached: NostrContact[] = sanitizeContacts(JSON.parse(contactsJson));
         perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
         if (profilesJson) {
           const tProfilesParse = Date.now();
@@ -578,7 +582,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // are independent AsyncStorage round-trips, and the profile cache is
       // also used for merging into whichever contact list we end up with.
       const [
-        { value: cachedContacts, ageMs: contactsAgeMs },
+        { value: cachedContactsRaw, ageMs: contactsAgeMs },
         { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
       ] = await Promise.all([
         readCachedWithTtl<NostrContact[]>(
@@ -590,6 +594,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
         ),
       ]);
+      // Filter junk pubkeys out of the cached follow list on read so a cache
+      // poisoned before the ingest-time gate self-heals (#855).
+      const cachedContacts = cachedContactsRaw ? sanitizeContacts(cachedContactsRaw) : null;
       const cachedProfileMap = cachedProfileMapOrNull ?? {};
       const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
       const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
@@ -609,6 +616,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ).catch(() => {});
         });
       };
+
+      // Hydrate each contact's profile from the profile cache (avatar/name
+      // for the per-row zap gate) without re-fetching kind-0s.
+      const withCachedProfiles = (cs: NostrContact[]): NostrContact[] =>
+        cs.map((c) => ({ ...c, profile: cachedProfileMap[c.pubkey] ?? c.profile }));
 
       let fetchedContacts: NostrContact[];
       if (contactsCacheFresh && cachedContacts) {
@@ -643,14 +655,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 `[Nostr] fetchContactList background refresh: ${Date.now() - t0}ms, ${fresh.length} contacts`,
               );
             persistContacts(fresh);
-            startTransition(() =>
-              setContacts(
-                fresh.map((c) => ({
-                  ...c,
-                  profile: cachedProfileMap[c.pubkey] ?? c.profile,
-                })),
-              ),
-            );
+            startTransition(() => setContacts(withCachedProfiles(fresh)));
           })
           .catch(() => {
             /* silent — caller already painted from cache */
@@ -667,14 +672,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // once at sub close, after our await has resumed and our
             // own persistContacts has run, so we're safely "newer".
             persistContacts(newer);
-            startTransition(() =>
-              setContacts(
-                newer.map((c) => ({
-                  ...c,
-                  profile: cachedProfileMap[c.pubkey] ?? c.profile,
-                })),
-              ),
-            );
+            startTransition(() => setContacts(withCachedProfiles(newer)));
           },
         });
         if (fetched === null) {
@@ -696,14 +694,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
 
-      startTransition(() =>
-        setContacts(
-          fetchedContacts.map((c) => ({
-            ...c,
-            profile: cachedProfileMap[c.pubkey] ?? c.profile,
-          })),
-        ),
-      );
+      startTransition(() => setContacts(withCachedProfiles(fetchedContacts)));
 
       if (fetchedContacts.length === 0) return;
 

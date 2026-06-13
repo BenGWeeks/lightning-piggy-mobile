@@ -17,6 +17,7 @@ import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
+import { tagsToContacts } from '../utils/contacts';
 import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
 
@@ -331,17 +332,6 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     console.warn('Failed to fetch Nostr profile:', error);
     return null;
   }
-}
-
-function tagsToContacts(tags: string[][]): NostrContact[] {
-  return tags
-    .filter((tag) => tag[0] === 'p')
-    .map((tag) => ({
-      pubkey: tag[1],
-      relay: tag[2] || null,
-      petname: tag[3] || null,
-      profile: null,
-    }));
 }
 
 function tagsToRelayList(tags: string[][]): RelayConfig[] {
