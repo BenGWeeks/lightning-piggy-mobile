@@ -67,6 +67,23 @@ export function stripLightningPrefix(input: string): string {
   return s;
 }
 
+// Pick the value to pre-fill the paste/input box when the user taps "Edit
+// address" (or when a resolution failure bounces them back to the input). The
+// goal is fix-in-place: keep whatever the user actually typed so a one-char
+// typo can be corrected without retyping the whole address (#871). Prefer the
+// live paste-box text; fall back to the parsed payment target (e.g. when the
+// value arrived via scan/NFC/initialAddress and never passed through the box).
+// Returns '' when there is nothing to recover, so the box opens empty rather
+// than showing "null".
+export function editAddressPrefill(
+  pasteText: string | null | undefined,
+  invoiceData: string | null | undefined,
+): string {
+  const typed = (pasteText ?? '').trim();
+  if (typed) return typed;
+  return (invoiceData ?? '').trim();
+}
+
 // Raw LNURL strings the scanner/paste box can hand us: bech32 `lnurl1…`
 // (LUD-01/06) and the cleartext LUD-17 `lnurlp://` / `lnurlw://` /
 // `lnurl://` schemes, with or without a `lightning:` URI prefix. Direction

@@ -1,4 +1,5 @@
 import {
+  editAddressPrefill,
   isLnurlString,
   isLightningAddress,
   isValidInvoice,
@@ -56,6 +57,30 @@ describe('sendSheetInput detectors', () => {
       // scheme) must still decode/pay. After stripping, isValidInvoice agrees.
       expect(isValidInvoice('lightning:lnbc100n1p')).toBe(false); // prefix not stripped → rejected
       expect(isValidInvoice(stripLightningPrefix('lightning:lnbc100n1p'))).toBe(true);
+    });
+  });
+
+  describe('editAddressPrefill', () => {
+    it('prefers the live paste-box text so a typo is editable in place', () => {
+      // The dead-end the user hits: a mistyped address. "Edit address" must
+      // hand back exactly what they typed so they can fix the one bad char.
+      expect(editAddressPrefill('alice@exmaple.com', 'alice@exmaple.com')).toBe(
+        'alice@exmaple.com',
+      );
+    });
+    it('falls back to the parsed target when the box was never used (scan / NFC / initialAddress)', () => {
+      expect(editAddressPrefill('', 'bob@example.com')).toBe('bob@example.com');
+      expect(editAddressPrefill(null, 'bob@example.com')).toBe('bob@example.com');
+      expect(editAddressPrefill(undefined, 'lnbc100n1p')).toBe('lnbc100n1p');
+    });
+    it('trims surrounding whitespace from whichever source wins', () => {
+      expect(editAddressPrefill('  alice@example.com  ', null)).toBe('alice@example.com');
+      expect(editAddressPrefill('   ', '  bob@example.com ')).toBe('bob@example.com');
+    });
+    it('returns empty string when there is nothing to recover (never "null")', () => {
+      expect(editAddressPrefill('', '')).toBe('');
+      expect(editAddressPrefill(null, null)).toBe('');
+      expect(editAddressPrefill(undefined, undefined)).toBe('');
     });
   });
 
