@@ -8,8 +8,8 @@ export const SIGNER_TYPE_KEY = 'nostr_signer_type';
 // hold the nsec + persisted identity metadata. Matches the repo's existing
 // sensitive-write pattern (identitiesStore.ts, walletStorageService.ts):
 // AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY keeps the secret off iCloud/backup
-// migration. Used by persistActiveIdentityKeys AND the login flows that write
-// these keys directly.
+// migration. Applied in persistActiveIdentityKeys — the single writer every
+// login flow now routes legacy-slot writes through.
 export const LEGACY_IDENTITY_SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };

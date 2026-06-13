@@ -61,7 +61,9 @@ export async function promoteSuccessorIdentity(
       const readRelays = await deps.loadRelays(successor.pubkey);
       await deps.loadProfile(successor.pubkey, readRelays);
     } catch (e) {
-      if (__DEV__) console.warn('[Nostr] post-logout successor refresh failed:', e);
+      // Log unconditionally — this background convergence failing in production
+      // is exactly the stale-profile/relay symptom we'd need to trace.
+      console.warn('[Nostr] post-logout successor refresh failed:', e);
     }
   });
 }
