@@ -124,8 +124,12 @@ function BoltLayer({ index, paths, clock, haloColor }: BoltLayerProps) {
 
   const haloOpacity = useDerivedValue(() => opacity.value * 0.6);
 
+  // Opacity is applied per-Path, not on the Group: a Group opacity would
+  // multiply with each child's own opacity (halo would become opacity^2 * 0.6),
+  // dimming the glow and distorting the strike/afterglow curve. Core rides the
+  // raw curve; halo rides the 0.6-scaled curve. (#867)
   return (
-    <Group opacity={opacity}>
+    <Group>
       <Path
         path={path}
         style="stroke"
@@ -144,6 +148,7 @@ function BoltLayer({ index, paths, clock, haloColor }: BoltLayerProps) {
         strokeCap="round"
         strokeJoin="round"
         color={CORE}
+        opacity={opacity}
       />
     </Group>
   );
