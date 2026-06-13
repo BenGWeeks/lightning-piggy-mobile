@@ -41,6 +41,15 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/lightning-cat.png'),
     backgroundImageStyle: 'lightning-cat',
   },
+  bitpopart: {
+    id: 'bitpopart',
+    name: 'Bitpopart',
+    gradientColors: ['#D81B8C', '#3A1E6E'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFE600',
+    backgroundImage: require('../../assets/images/bitpopart.png'),
+    backgroundImageStyle: 'bitpopart',
+  },
   'lightning-cow': {
     id: 'lightning-cow',
     name: 'Lightning Cow',
