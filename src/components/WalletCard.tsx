@@ -109,14 +109,14 @@ const CardContent: React.FC<{
           <Image
             source={theme.backgroundImage}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
+            resizeMode={theme.backgroundImageResizeMode ?? 'contain'}
           />
         </Grayscale>
       ) : theme.backgroundImage ? (
         <Image
           source={theme.backgroundImage}
           style={getCardBgStyle(theme.backgroundImageStyle, false)}
-          resizeMode="contain"
+          resizeMode={theme.backgroundImageResizeMode ?? 'contain'}
         />
       ) : null}
 
