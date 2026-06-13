@@ -48,7 +48,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   bitpopart: {
     id: 'bitpopart',
-    name: 'Bitpopart',
+    name: 'BitPopArt',
     gradientColors: ['#D81B8C', '#3A1E6E'],
     textColor: '#FFFFFF',
     accentColor: '#FFE600',
