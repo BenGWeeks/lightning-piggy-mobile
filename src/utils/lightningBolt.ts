@@ -134,7 +134,16 @@ export function generateBolt(
   rng: () => number,
   options: BoltOptions = {},
 ): BoltBranch[] {
-  const opts = { ...DEFAULTS, ...options };
+  // Apply defaults with `??` so a caller passing an explicit `undefined`
+  // (e.g. `{ detail: maybeUndefined }`) doesn't clobber the default and yield
+  // NaN downstream (spread would let undefined win).
+  const opts: Required<BoltOptions> = {
+    detail: options.detail ?? DEFAULTS.detail,
+    displacement: options.displacement ?? DEFAULTS.displacement,
+    forkProbability: options.forkProbability ?? DEFAULTS.forkProbability,
+    forkLengthRatio: options.forkLengthRatio ?? DEFAULTS.forkLengthRatio,
+    maxForkDepth: options.maxForkDepth ?? DEFAULTS.maxForkDepth,
+  };
   const length = Math.hypot(end.x - start.x, end.y - start.y);
   const amplitude = length * opts.displacement;
   const forks: BoltBranch[] = [];

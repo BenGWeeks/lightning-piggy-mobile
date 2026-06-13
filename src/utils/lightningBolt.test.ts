@@ -47,6 +47,23 @@ describe('generateBolt', () => {
     expect(branches[0].points).toEqual([START, END]);
   });
 
+  it('explicit undefined options fall back to defaults (no NaN clobber)', () => {
+    // A caller spreading optionals can pass `undefined`; `??` defaults must win
+    // so geometry matches the no-options default rather than producing NaN.
+    const withUndefined = generateBolt(START, END, seededRng(9), {
+      detail: undefined,
+      displacement: undefined,
+      forkProbability: undefined,
+      maxForkDepth: undefined,
+    });
+    const withDefaults = generateBolt(START, END, seededRng(9));
+    expect(withUndefined).toEqual(withDefaults);
+    const everyPointFinite = withUndefined.every((b) =>
+      b.points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+    );
+    expect(everyPointFinite).toBe(true);
+  });
+
   it('is deterministic for a given seed — same rng → identical geometry', () => {
     const a = generateBolt(START, END, seededRng(42));
     const b = generateBolt(START, END, seededRng(42));

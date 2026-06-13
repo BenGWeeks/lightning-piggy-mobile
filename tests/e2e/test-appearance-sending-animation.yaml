@@ -3,14 +3,15 @@ name: Appearance Sending-Animation Toggle Test
 ---
 # Exercises the Bubbles/Lightning sending-animation toggle on the Appearance
 # screen:
-#   1. Establishes a known baseline by tapping "Bubbles" (the default) first,
-#      so the test doesn't depend on any persisted preference from a prior run.
+#   1. Establishes a known baseline by tapping "Bubbles" first, so the test
+#      doesn't depend on any persisted preference from a prior run. (Lightning
+#      is the app default; Bubbles is the explicit non-default we toggle from.)
 #   2. Tapping "Lightning" moves the check to the Lightning row immediately.
 #   3. Navigating away (Home) and back shows Lightning still selected — proves
 #      the preference is held across screens.
 #   4. Killing + relaunching the app preserves Lightning — proves the
 #      AsyncStorage persistence works.
-#   5. Reset to Bubbles so the test leaves the device in the default state.
+#   5. Reset to Bubbles at the end so the test leaves a deterministic state.
 #
 # Selectors use testIDs only (no coordinates) per CLAUDE.md.
 # Run: maestro --device emulator-5554 test tests/e2e/test-appearance-sending-animation.yaml
