@@ -30,7 +30,11 @@ export function tagsToContacts(tags: string[][]): NostrContact[] {
  * from the Friends list on the next load rather than lingering forever in
  * AsyncStorage.
  */
-export function sanitizeContacts(contacts: NostrContact[]): NostrContact[] {
+export function sanitizeContacts(contacts: unknown): NostrContact[] {
+  // A corrupt AsyncStorage blob can JSON.parse to a non-array (or null);
+  // treat anything that isn't an array as "no contacts" rather than
+  // throwing and aborting hydration.
+  if (!Array.isArray(contacts)) return [];
   const seen = new Set<string>();
   const out: NostrContact[] = [];
   for (const c of contacts) {

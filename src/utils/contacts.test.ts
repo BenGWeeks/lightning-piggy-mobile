@@ -58,4 +58,13 @@ describe('sanitizeContacts', () => {
   it('returns an empty array when everything is junk', () => {
     expect(sanitizeContacts([contact(ZERO_JUNK), contact('')])).toEqual([]);
   });
+
+  it('returns an empty array for non-array input (corrupt cache)', () => {
+    // JSON.parse of a corrupt blob can yield null / object / string —
+    // sanitizeContacts must coerce, not throw (Copilot #874).
+    expect(sanitizeContacts(null)).toEqual([]);
+    expect(sanitizeContacts(undefined)).toEqual([]);
+    expect(sanitizeContacts({ pubkey: A })).toEqual([]);
+    expect(sanitizeContacts('not-an-array')).toEqual([]);
+  });
 });
