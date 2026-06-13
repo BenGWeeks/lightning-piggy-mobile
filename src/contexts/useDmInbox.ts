@@ -47,6 +47,7 @@ import {
   shouldDropK4Since,
 } from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
+import { createLiveSubFollowGateBuffer, type DeferredFollowGateEntry } from './liveSubFollowGate';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
@@ -861,8 +862,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // reconnected. Reading via ref keeps the gate fresh per event
   // without thrashing the subscription on every contacts update.
   const followPubkeysRef = useRef(followPubkeys);
+
+  // Follow-gate deferral (#851 F2). The buffer holds fresh inbound the live
+  // sub dropped while the post-switch follows list was still hydrating; the
+  // sub registers its replay function here. When `followPubkeys` updates we
+  // re-test the buffer and replay (surface + notify) any partner that now
+  // passes the gate. Buffer + replay are owned across sub re-opens via refs
+  // and reset on viewer change alongside `knownWrapIdsRef`.
+  const followGateBufferRef = useRef(createLiveSubFollowGateBuffer());
+  const deferredReplayRef = useRef<((item: DeferredFollowGateEntry) => void) | null>(null);
+
   useEffect(() => {
     followPubkeysRef.current = followPubkeys;
+    const replay = deferredReplayRef.current;
+    if (replay) followGateBufferRef.current.reevaluate(followPubkeys, replay);
   }, [followPubkeys]);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
@@ -950,6 +963,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       followPubkeysRef,
       setDmInbox,
       setAmberNip44Permission,
+      followGateBuffer: followGateBufferRef.current,
+      setDeferredReplay: (fn) => {
+        deferredReplayRef.current = fn;
+      },
     });
   }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 

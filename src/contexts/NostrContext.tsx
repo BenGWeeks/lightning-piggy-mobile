@@ -34,6 +34,8 @@ import {
   deleteMnemonic,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
+import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
+import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
 import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
@@ -1005,12 +1007,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
         setPubkey(pk);
 
-        // Store credentials in the legacy single-active-identity slots
-        // (still the canonical location every other consumer reads from)
-        // AND register the identity in the multi-account store so the
-        // switcher knows it exists (#288).
-        await SecureStore.setItemAsync(NSEC_KEY, trimmed);
-        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nsec');
+        // Store credentials in the legacy single-active-identity slots via the
+        // canonical writer (hardened, device-only keychain) AND register the
+        // identity in the multi-account store so the switcher knows it (#288).
+        await persistActiveIdentityKeys({ pubkey: pk, signerType: 'nsec', nsec: trimmed });
         const next = await upsertIdentity({
           pubkey: pk,
           signerType: 'nsec',
@@ -1072,8 +1072,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const pk = await amberService.requestPublicKey();
 
       setPubkey(pk);
-      await SecureStore.setItemAsync(PUBKEY_KEY, pk);
-      await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'amber');
+      await persistActiveIdentityKeys({ pubkey: pk, signerType: 'amber' });
       const next = await upsertIdentity({
         pubkey: pk,
         signerType: 'amber',
@@ -1232,19 +1231,22 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // and immediately see Middle Piggy's caches).
       const successor = nextIdentities.find((i) => i.pubkey === nextActive);
       if (successor) {
-        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, successor.signerType);
-        if (successor.signerType === 'nsec' && successor.nsec) {
-          await SecureStore.setItemAsync(NSEC_KEY, successor.nsec);
-        } else if (successor.signerType === 'amber') {
-          await SecureStore.setItemAsync(PUBKEY_KEY, successor.pubkey);
-        }
-        setPubkey(successor.pubkey);
-        setSignerType(successor.signerType);
-        setIsLoggedIn(true);
-        // Eagerly hydrate the new identity's caches; the next focus tick
-        // will refresh from relays.
-        await loadContactsFromCache(successor.pubkey);
-        await hydrateDmInboxFromCache(successor.pubkey);
+        // Promote the successor (clear stale identity → set successor →
+        // hydrate caches → deferred relay refresh). The teardown-before-set
+        // ordering is what fixes the #851 F4 stale-drawer bug; see the helper.
+        await promoteSuccessorIdentity(successor, {
+          setProfile,
+          setContacts,
+          setPubkey,
+          setSignerType,
+          setIsLoggedIn,
+          setDmInbox,
+          loadProfileFromCache,
+          loadContactsFromCache,
+          hydrateDmInboxFromCache,
+          loadRelays,
+          loadProfile,
+        });
         return;
       }
     }
@@ -1270,7 +1272,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     pubkey,
     wipeAccountCaches,
     loadContactsFromCache,
+    loadProfileFromCache,
+    loadRelays,
+    loadProfile,
     hydrateDmInboxFromCache,
+    setDmInbox,
     setAmberNip44Permission,
     knownWrapIdsRef,
   ]);
@@ -1314,16 +1320,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setNip65Relays([]);
       setDmInbox([]);
 
-      // Promote the target identity to "active" everywhere.
-      await SecureStore.setItemAsync(SIGNER_TYPE_KEY, target.signerType);
-      if (target.signerType === 'nsec' && target.nsec) {
-        await SecureStore.setItemAsync(NSEC_KEY, target.nsec);
-        // Clear the legacy amber pubkey slot — we're an nsec identity now.
-        await SecureStore.deleteItemAsync(PUBKEY_KEY);
-      } else if (target.signerType === 'amber') {
-        await SecureStore.setItemAsync(PUBKEY_KEY, target.pubkey);
-        await SecureStore.deleteItemAsync(NSEC_KEY);
-      }
+      // Promote the target identity to "active" everywhere — write the legacy
+      // single-identity SecureStore slots and clear the other signer's stale
+      // slot (we changed signer kind).
+      await persistActiveIdentityKeys(target, { clearOtherSlot: true });
       const updated = await setActiveIdentity(target.pubkey);
       setIdentities(updated.identities);
       setPubkey(target.pubkey);

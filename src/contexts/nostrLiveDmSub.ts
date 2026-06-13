@@ -21,6 +21,7 @@ import { fireMessageNotification } from '../services/notificationService';
 import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
+import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
 import {
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
@@ -57,6 +58,12 @@ export interface LiveDmSubscriptionParams {
   followPubkeysRef: React.MutableRefObject<Set<string>>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
+  // Follow-gate deferral buffer (#851 F2). Fresh inbound dropped while the
+  // post-switch follows list is still hydrating is buffered here; the hook
+  // calls `replayDeferredFollowGate` (registered via `setDeferredReplay`)
+  // when follows update, re-surfacing + re-notifying entries that now pass.
+  followGateBuffer: LiveSubFollowGateBuffer;
+  setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
 }
 
 /**
@@ -77,6 +84,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     followPubkeysRef,
     setDmInbox,
     setAmberNip44Permission,
+    followGateBuffer,
+    setDeferredReplay,
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
@@ -136,6 +145,29 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       pendingFlushTimer = setTimeout(flushPendingInbox, PENDING_FLUSH_MS);
     }
   };
+
+  // Replay the surface + notify side-effects of a fresh inbound that was
+  // deferred by the follow-gate during the post-switch hydration window
+  // (#851 F2). Called by the hook (via the registered ref) once follows
+  // hydrate and the buffered partner is confirmed followed — so we re-run
+  // the SAME surface path the original drop skipped. Persistence is left to
+  // the next refreshDmInbox (the drop was never skip-set-persisted), so this
+  // only recovers the live inbox update + the one-shot OS notification.
+  const replayDeferredFollowGate = (item: DeferredFollowGateEntry): void => {
+    if (cancelled) return;
+    queueInboxEntry(item.entry);
+    notifyDmMessage(item.partnerPubkey);
+    if (item.notify) {
+      void fireMessageNotification({
+        kind: 'dm',
+        threadId: item.partnerPubkey,
+        title: item.notify.title,
+        body: item.notify.body,
+        data: { conversationPubkey: item.partnerPubkey },
+      });
+    }
+  };
+  setDeferredReplay(replayDeferredFollowGate);
 
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
     // Earliest-possible short-circuit for NIP-17 wraps we already
@@ -222,6 +254,23 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           console.log(
             `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
           );
+        // Defer fresh inbound for replay once follows hydrate (#851 F2). Only
+        // genuinely-fresh arrivals carry a notification; older backlog stays
+        // silent. Persistence is intentionally skipped — see replay helper.
+        if (isFreshArrival(ev.created_at)) {
+          followGateBuffer.defer({
+            partnerPubkey,
+            entry: {
+              id: ev.id,
+              partnerPubkey,
+              fromMe,
+              createdAt: ev.created_at,
+              text: plaintext,
+              wireKind: 4,
+            },
+            notify: { title: 'New message', body: plaintext },
+          });
+        }
         return;
       }
 
@@ -415,6 +464,24 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.log(
           `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
         );
+      // Defer fresh inbound for replay once follows hydrate (#851 F2). Skip my
+      // own echoes and historical backlog (silent); persistence is left to the
+      // next refreshDmInbox — see replayDeferredFollowGate.
+      if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
+        const deferredText = textForRumor(rumor);
+        followGateBuffer.defer({
+          partnerPubkey: partnership.partnerPubkey,
+          entry: {
+            id: wrap.id,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: deferredText,
+            wireKind: rumor.kind,
+          },
+          notify: { title: 'New message', body: rumor.content },
+        });
+      }
       return;
     }
 
@@ -574,6 +641,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   return () => {
     cancelled = true;
     flushPendingInbox();
+    // Drop the follow-gate deferral buffer + unregister the replay hook
+    // atomically with sub teardown (#851 F2). A wipe / account switch tears
+    // the sub down, so buffered just-wiped wraps can never be replayed into
+    // the next identity's inbox.
+    setDeferredReplay(null);
+    followGateBuffer.clear();
     if (unsubscribe) unsubscribe();
   };
 }
