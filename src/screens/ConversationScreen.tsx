@@ -24,12 +24,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import {
-  useNostr,
-  useNostrContacts,
-  useNostrDmInbox,
-  subscribeDmMessages,
-} from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import SendSheet from '../components/SendSheet';
@@ -65,12 +60,10 @@ import { useConversationLiveLocation } from '../hooks/useConversationLiveLocatio
 import {
   type Item,
   type TimedItem,
-  type ConversationMessageInput,
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
-import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
-import { reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
@@ -103,7 +96,7 @@ const ConversationScreen: React.FC = () => {
   const {
     isLoggedIn,
     fetchConversation,
-    getCachedConversation,
+    loadInitialConversation,
     persistDeliveryStatuses,
     signerType,
     pubkey: myPubkey,
@@ -120,16 +113,15 @@ const ConversationScreen: React.FC = () => {
   const { wallets } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
-  const [messages, setMessages] = useState<ConversationMessageInput[]>([]);
-  // Mirror of `messages` for reads outside render (e.g. the delivery-tick
-  // reconcile in `load`, so persistence runs as a side-effect rather than
-  // inside a setMessages updater — Copilot #858).
-  const messagesRef = useRef<ConversationMessageInput[]>([]);
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // Thread data lifecycle — read-through paint, background relay top-up,
+  // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
+  const { messages, setMessages, loading, refreshing, handleRefresh } = useConversationLoader({
+    pubkey,
+    isLoggedIn,
+    fetchConversation,
+    loadInitialConversation,
+    persistDeliveryStatuses,
+  });
   const [draft, setDraft] = useState('');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
@@ -214,95 +206,6 @@ const ConversationScreen: React.FC = () => {
     () => buildConversationItems(resolvedMessages, zapItems),
     [resolvedMessages, zapItems],
   );
-
-  // Mount/unmount tracker so the async `load()` below can bail when
-  // the user navigates back mid-fetch. Without this, every back-press
-  // during the 6-12 s cold fetchConversation still runs the full
-  // decrypt + persist chain on the unmounted component, wasting JS
-  // thread time that could have been responding to input.
-  // Declared BEFORE `load` because `load`'s body closes over it.
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  const load = useCallback(
-    async (showSpinner: boolean) => {
-      if (!isLoggedIn) {
-        setLoading(false);
-        return;
-      }
-      // Paint cached messages instantly if we have any — user sees a
-      // populated thread within one frame instead of "Loading…" for
-      // the 6-8 s relay round-trip. Arcade `db_only=true` pattern.
-      // Only show the spinner if the cache was empty (true cold open).
-      const cached = await getCachedConversation(pubkey);
-      if (isMountedRef.current && cached.length > 0) {
-        setMessages(cached);
-        setLoading(false);
-      } else if (isMountedRef.current && showSpinner) {
-        setLoading(true);
-      }
-      try {
-        const conv = await fetchConversation(pubkey);
-        // If the user navigated away while the fetch was in flight,
-        // don't fire state updates — those would either trigger a
-        // re-render on an unmounted component (React warning) or land
-        // on the *next* thread that inherits this instance. Check the
-        // ref and bail.
-        if (isMountedRef.current) {
-          // Carry any delivery tick (#856) from the current in-memory rows
-          // onto the fetched list, so a just-sent bubble keeps its tick even
-          // when the relay echo lands before the optimistic row's async cache
-          // write commits (the on-disk merge would miss it in that race).
-          // Computed against messagesRef (not inside the setMessages updater)
-          // so the AsyncStorage write is a plain side-effect — keeps the
-          // updater pure and StrictMode-safe (Copilot #858).
-          const reconciled = reconcileDeliveryStatus(messagesRef.current, conv);
-          // Durably write the reconciled ticks back to the conv cache, keyed
-          // by the (now real-id) row id, so the tick survives a cold restart
-          // — fetchConversation persisted the echo rows WITHOUT delivery when
-          // it won the race against the optimistic local- write.
-          const statusById: Record<string, DeliveryStatus> = {};
-          for (const m of reconciled) {
-            if (m.deliveryStatus && !m.id.startsWith('local-')) {
-              statusById[m.id] = m.deliveryStatus;
-            }
-          }
-          void persistDeliveryStatuses(pubkey, statusById);
-          setMessages(reconciled);
-        }
-      } finally {
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
-      }
-    },
-    [isLoggedIn, fetchConversation, getCachedConversation, persistDeliveryStatuses, pubkey],
-  );
-
-  useEffect(() => {
-    load(true);
-  }, [load]);
-
-  // Live updates: NostrContext fires `subscribeDmMessages` after a
-  // kind-1059 wrap arrives via the long-lived relay sub and decrypts
-  // to a 1:1 rumor for this thread's peer (#349). Re-fetching the
-  // conversation is cheap because the new wrap is now in the
-  // persistent NIP-17 cache, so fetchConversation short-circuits the
-  // relay round-trip and the thread re-renders within one tick.
-  useEffect(() => {
-    if (!pubkey) return;
-    const target = pubkey.toLowerCase();
-    const unsubscribe = subscribeDmMessages((partnerPubkey) => {
-      if (partnerPubkey !== target) return;
-      load(false);
-    });
-    return unsubscribe;
-  }, [pubkey, load]);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -411,15 +314,6 @@ const ConversationScreen: React.FC = () => {
     },
     [presentContactSheet],
   );
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await load(false);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [load]);
 
   // Append an optimistic local- message to BOTH React state (instant
   // paint) AND the per-conversation cache on disk (survives back-then-

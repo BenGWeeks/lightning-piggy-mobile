@@ -10,6 +10,7 @@ import {
   selectKnownEventIds,
   upsertDmMessages,
   hasStoredWraps,
+  getConversationMessages,
   type DmMessageRow,
 } from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
@@ -47,6 +48,7 @@ import {
 } from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
+import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 
@@ -78,8 +80,15 @@ export interface UseDmInboxResult {
   dmInbox: DmInboxEntry[];
   dmInboxLoading: boolean;
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
-  fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  fetchConversation: (
+    otherPubkey: string,
+    opts?: { signal?: AbortSignal },
+  ) => Promise<ConversationMessage[]>;
   getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  // Read-through (#868): the instant-paint set for a thread open — the union of
+  // the per-conversation cache and the SAME encrypted-store rows the inbox
+  // preview is built from. Guarantees the thread is never behind the preview.
+  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   persistDeliveryStatuses: (
     otherPubkey: string,
@@ -334,7 +343,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // hook threads in the identity + relay + NIP-04 decrypt dependencies it
   // closes over; the body is unchanged.
   const fetchConversation = useCallback(
-    (otherPubkey: string): Promise<ConversationMessage[]> =>
+    (otherPubkey: string, opts?: { signal?: AbortSignal }): Promise<ConversationMessage[]> =>
       fetchConversationFor({
         pubkey,
         isLoggedIn,
@@ -342,8 +351,28 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         getReadRelays,
         decryptNip04ViaSigner,
         otherPubkey,
+        signal: opts?.signal,
       }),
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
+  );
+
+  // Read-through (#868): paint the thread from the union of the per-conversation
+  // cache and the encrypted store BEFORE the relay fetch resolves, so a DM the
+  // inbox already ingested shows immediately and the thread is never behind the
+  // preview. Reads the SAME rows the inbox list is built from (getInboxLatest /
+  // getConversationMessages both read dm_messages), so they can't disagree.
+  const loadInitialConversation = useCallback(
+    (otherPubkey: string): Promise<ConversationMessage[]> =>
+      loadInitialConversationFor(otherPubkey, {
+        getCachedConversation,
+        getStoredRows: (peer) => {
+          if (!pubkey) return Promise.resolve([] as DmMessageRow[]);
+          const normalized = peer.trim().toLowerCase();
+          if (!/^[0-9a-f]{64}$/.test(normalized)) return Promise.resolve([] as DmMessageRow[]);
+          return getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
+        },
+      }),
+    [pubkey, getCachedConversation],
   );
 
   // Stable self-reference so the cold-start backfill can re-invoke
@@ -930,6 +959,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     refreshDmInbox,
     fetchConversation,
     getCachedConversation,
+    loadInitialConversation,
     appendLocalDmMessage,
     persistDeliveryStatuses,
     armLiveDmSub,
