@@ -11,9 +11,10 @@ export interface CardThemeConfig {
   // Tighter than `string`: must be one of the registered cards/* style
   // names so a typo doesn't silently fall back to the default style.
   backgroundImageStyle?: CardTheme;
-  // Defaults to 'contain' (line-art mascots sit as a corner decoration over
-  // the gradient). Full-bleed photo backgrounds set 'cover' so the art fills
-  // the whole card with no gradient gap at the edges.
+  // Defaults to 'contain' (line-art mascots sit as a corner decoration
+  // over the gradient). Full-bleed photo backgrounds set 'stretch' (or
+  // 'cover') so the art fills the whole card with no gradient gap at the
+  // edges.
   backgroundImageResizeMode?: ImageResizeMode;
 }
 
@@ -53,7 +54,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#FFE600',
     backgroundImage: require('../../assets/images/bitpopart.png'),
     backgroundImageStyle: 'bitpopart',
-    backgroundImageResizeMode: 'cover',
+    backgroundImageResizeMode: 'stretch',
   },
   'lightning-cow': {
     id: 'lightning-cow',
