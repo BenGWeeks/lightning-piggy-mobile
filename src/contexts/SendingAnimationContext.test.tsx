@@ -34,38 +34,38 @@ describe('SendingAnimationProvider', () => {
     jest.clearAllMocks();
   });
 
-  it('defaults to bubbles when nothing is stored', async () => {
+  it('defaults to lightning when nothing is stored', async () => {
     const { result } = renderHook(() => useSendingAnimation(), { wrapper });
     expect(result.current.preference).toBe(DEFAULT_SENDING_ANIMATION);
-    expect(result.current.preference).toBe('bubbles');
+    expect(result.current.preference).toBe('lightning');
   });
 
-  it('hydrates a stored lightning preference on mount', async () => {
-    await AsyncStorage.setItem(SENDING_ANIMATION_STORAGE_KEY, 'lightning');
+  it('hydrates a stored bubbles preference on mount (overrides the default)', async () => {
+    await AsyncStorage.setItem(SENDING_ANIMATION_STORAGE_KEY, 'bubbles');
     const { result } = renderHook(() => useSendingAnimation(), { wrapper });
-    await waitFor(() => expect(result.current.preference).toBe('lightning'));
+    await waitFor(() => expect(result.current.preference).toBe('bubbles'));
   });
 
-  it('falls back to bubbles when the stored value is invalid', async () => {
+  it('falls back to the lightning default when the stored value is invalid', async () => {
     await AsyncStorage.setItem(SENDING_ANIMATION_STORAGE_KEY, 'rainbows');
     const { result } = renderHook(() => useSendingAnimation(), { wrapper });
     // Give the hydration effect a tick; the invalid value must be ignored.
     await act(async () => {
       await Promise.resolve();
     });
-    expect(result.current.preference).toBe('bubbles');
+    expect(result.current.preference).toBe('lightning');
   });
 
   it('persists a new preference to AsyncStorage and updates in memory', async () => {
     const { result } = renderHook(() => useSendingAnimation(), { wrapper });
-    expect(result.current.preference).toBe('bubbles');
+    expect(result.current.preference).toBe('lightning');
 
     await act(async () => {
-      result.current.setPreference('lightning');
+      result.current.setPreference('bubbles');
     });
 
-    expect(result.current.preference).toBe('lightning');
-    await expect(AsyncStorage.getItem(SENDING_ANIMATION_STORAGE_KEY)).resolves.toBe('lightning');
+    expect(result.current.preference).toBe('bubbles');
+    await expect(AsyncStorage.getItem(SENDING_ANIMATION_STORAGE_KEY)).resolves.toBe('bubbles');
   });
 
   it('keeps the in-memory change even if the write rejects (best-effort)', async () => {
@@ -73,10 +73,10 @@ describe('SendingAnimationProvider', () => {
     const { result } = renderHook(() => useSendingAnimation(), { wrapper });
 
     await act(async () => {
-      result.current.setPreference('lightning');
+      result.current.setPreference('bubbles');
     });
 
-    expect(result.current.preference).toBe('lightning');
+    expect(result.current.preference).toBe('bubbles');
     spy.mockRestore();
   });
 

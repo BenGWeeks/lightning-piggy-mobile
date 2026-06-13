@@ -7,7 +7,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type SendingAnimationPreference = 'bubbles' | 'lightning';
 
 export const SENDING_ANIMATION_STORAGE_KEY = 'app_sending_animation_preference';
-export const DEFAULT_SENDING_ANIMATION: SendingAnimationPreference = 'bubbles';
+// Lightning is the default sending animation; users can switch back to bubbles
+// on the Appearance screen. A fresh install (or a read failure) lands here.
+export const DEFAULT_SENDING_ANIMATION: SendingAnimationPreference = 'lightning';
 
 // Single source of truth for what counts as a valid stored value — reused by
 // the hydration guard and exercised directly in tests.
@@ -27,7 +29,7 @@ export const SendingAnimationProvider: React.FC<{ children: React.ReactNode }> =
     useState<SendingAnimationPreference>(DEFAULT_SENDING_ANIMATION);
 
   // Load the persisted preference on mount. Anything unrecognised (or a read
-  // failure) leaves us on the 'bubbles' default — the current behaviour.
+  // failure) leaves us on the lightning default.
   useEffect(() => {
     let mounted = true;
     AsyncStorage.getItem(SENDING_ANIMATION_STORAGE_KEY)
