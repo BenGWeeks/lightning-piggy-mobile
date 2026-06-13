@@ -6,22 +6,27 @@ import { deferPostPaymentRefresh, type InteractionScheduler } from './deferPostP
 // the core guarantee of #859 / #828 (the overlay dismiss is never gated
 // behind the refresh).
 function makeFakeScheduler() {
-  const tasks: (() => void)[] = [];
+  // Model real InteractionManager semantics: cancel() removes the task from
+  // the queue so a later "interactions settled" tick (runQueued) does NOT run
+  // it. This lets the cancel test verify the contract behaviourally, not just
+  // that cancel was forwarded (Copilot review on #875).
+  const tasks = new Set<() => void>();
   let cancelled = 0;
   const scheduler: InteractionScheduler = {
     runAfterInteractions(task: () => void) {
-      tasks.push(task);
+      tasks.add(task);
       return {
         cancel() {
           cancelled += 1;
+          tasks.delete(task);
         },
       };
     },
   };
   return {
     scheduler,
-    runQueued: () => tasks.forEach((t) => t()),
-    pendingCount: () => tasks.length,
+    runQueued: () => [...tasks].forEach((t) => t()),
+    pendingCount: () => tasks.size,
     cancelledCount: () => cancelled,
   };
 }
@@ -55,7 +60,14 @@ describe('deferPostPaymentRefresh', () => {
     const handle = deferPostPaymentRefresh(refresh, fake.scheduler);
     handle.cancel();
 
+    // cancel was forwarded to the scheduler handle...
     expect(fake.cancelledCount()).toBe(1);
+    expect(fake.pendingCount()).toBe(0);
+
+    // ...and crucially, a later "interactions settled" tick does NOT run the
+    // cancelled refresh — the contract effect cleanup relies on.
+    fake.runQueued();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it('swallows a synchronous throw from the refresh so the UI cannot crash', () => {
