@@ -1,0 +1,135 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Boltz reverse swap via Transfer — Lightning → on-chain, 25k sats
+---
+# REAL-MONEY TEST. Drives the *TransferSheet* reverse-swap path
+# (Home → Transfer, Lightning source → on-chain destination).
+#
+# This complements `test-swap-reverse-25k.yaml`, which exercises the
+# *SendSheet* path (Send → paste BIP-21). Both paths reach
+# boltzService.createReverseSwap and broadcast a claim tx, but they
+# are wired up independently in the codebase — the TransferSheet
+# path persists the swap to SecureStore via swapRecoveryService and
+# shows the Boltz logo, while the SendSheet path historically did
+# not (see #481). Running both flows protects the contract from
+# drifting.
+#
+# Costs:
+#   - Boltz service fee: ~0.5-1.5 %
+#   - Miner fee for the claim tx: ~150-500 sats
+#   - Total burn: ~300-900 sats per run
+#
+# NOT FOR CI. Run manually:
+#
+#   maestro test .maestro/payments/flow-087-swap-reverse-via-transfer-25k.yaml
+#
+# Preconditions:
+#   - AVD signed in as Big Piggy
+#   - Big Piggy NWC Lightning wallet ≥ 26k spendable sats (25k swap
+#     + ~250-1k buffer for the swap fee)
+#   - Big Piggy on-chain wallet exists (destination)
+
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Source = Big Piggy NWC Lightning.
+- tapOn:
+    id: 'transfer-source-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: '.*Big Piggy.*lightning.*'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Destination = Big Piggy on-chain.
+- tapOn:
+    id: 'transfer-dest-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: '.*Big Piggy on-chain.*'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'transfer-amount-picker'
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+
+# Wait for Boltz min/max to populate.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
+
+# 25,000 sats — the Boltz reverse-swap minimum.
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-5' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- assertVisible: '25,000'
+
+- tapOn:
+    id: 'amount-entry-confirm'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Confirm we reached the execute view. TransferSheet renders the
+# fee estimate (with Boltz logo to the left) just above this
+# button. The Boltz logo itself is an image with no text content,
+# so we assert on the rendered fee text as a positional proxy.
+- assertVisible:
+    text: 'Estimated fee:.*'
+- assertVisible:
+    id: 'transfer-execute'
+
+- takeScreenshot: pre-execute-reverse-via-transfer
+
+- tapOn:
+    id: 'transfer-execute'
+
+# Reverse swap timeline:
+#   1. Boltz API: create swap → ~1-3 s
+#   2. App: pay the bolt11 over NWC → ~5-30 s
+#   3. Boltz: broadcast the on-chain HTLC → ~10-60 s
+#   4. App: build + broadcast the script-path claim tx → ~5-15 s
+#   5. App: settle in destination on-chain wallet → ~10-30 s
+#
+# TransferSheet doesn't use PaymentProgressOverlay — completion
+# surfaces via toasts plus an in-sheet status line. The earliest
+# success marker on a happy path is the "Lightning payment sent"
+# toast that fires after the LN invoice settles at Boltz; the
+# follow-up "Swap complete" toast fires after the on-chain claim
+# broadcasts. Match either so the test passes as soon as we have
+# committed evidence the swap will land.
+#
+# Total realistic timeout: 4 minutes.
+- extendedWaitUntil:
+    visible:
+      text: 'Lightning payment sent|Swap complete'
+    timeout: 240000
+
+- takeScreenshot: post-execute-reverse-via-transfer
+
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
