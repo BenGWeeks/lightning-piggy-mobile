@@ -50,4 +50,8 @@ export interface ConversationMessage {
   // 4 = NIP-04 (legacy plaintext DM), 14/15 = NIP-17 rumor kind (gift-wrapped).
   // Absent on the optimistic local- row (known once decrypted / echoed).
   wireKind?: number;
+  // NIP-17 inner-rumor event id (#857). Stable across the optimistic row and
+  // the relay echo (which has a DIFFERENT `id` — the outer wrap id), so it keys
+  // the delivery-status store. Set on our own sent rows only.
+  rumorId?: string;
 }

@@ -158,6 +158,12 @@ export interface DmInboxEntry {
   createdAt: number;
   text: string;
   wireKind: number;
+  /** NIP-17 rumor (inner kind-14/15) event id — stable across the recipient +
+   * self wraps and identical to what the sender computed at send time. Keys the
+   * delivery-status store so a sent bubble's tick survives the local- → echo id
+   * swap (#857). `id` above is the OUTER wrap id (random per ephemeral key), so
+   * it can't serve as that key. Absent for legacy / received rows. */
+  rumorId?: string;
 }
 
 import * as nip19 from 'nostr-tools/nip19';

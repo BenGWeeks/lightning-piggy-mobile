@@ -154,16 +154,19 @@ const DeliveryTick: React.FC<{
   // node Maestro can resolve — testIDs on lucide-react-native icons don't
   // reliably surface in the accessibility tree.
 
-  // No relay outcomes captured yet → still publishing.
-  if (total === 0) {
+  // Still in flight — the optimistic bubble before any relay has settled (#857).
+  // Keyed off the explicit `pending` flag, not `total === 0`, so a settled
+  // all-failed send (zero relays accepted) renders the red glyph below instead.
+  if (status.pending) {
     return (
-      <View testID={testID} accessibilityLabel="Message pending">
+      <View testID={testID} accessibilityLabel="Message sending">
         <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
       </View>
     );
   }
 
-  // Every relay rejected → failed. Distinct visual only; retry is #857.
+  // No relay accepted (every relay rejected, or a hard pre-publish error) →
+  // failed. The bubble's tap opens the info sheet with a Re-publish action.
   if (ok === 0) {
     return (
       <View testID={testID} accessibilityLabel="Send failed">

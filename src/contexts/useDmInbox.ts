@@ -48,6 +48,7 @@ import {
 import { startLiveDmSubscription } from './nostrLiveDmSub';
 import { fetchConversationFor } from './nostrFetchConversation';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
+import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -109,6 +110,30 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
+
+  // Hydrate + persist the eventId-keyed delivery store (#857) for the active
+  // account, so settled ticks survive a cold restart. Re-binds on account
+  // switch; the teardown flushes any pending write and detaches the hook.
+  useEffect(() => {
+    if (!pubkey) return;
+    let teardown: (() => void) | null = null;
+    // AbortController crosses the async boundary (#866): aborting on cleanup
+    // tells an in-flight bind whose getItem hasn't resolved yet to no-op before
+    // it hydrates / installs its persist hook. Without this, a stale bind from
+    // the previous account could resolve late and clobber the new account's
+    // in-memory delivery statuses or detach its persist hook.
+    const controller = new AbortController();
+    void bindDmDeliveryStorePersistence(pubkey, { signal: controller.signal }).then((fn) => {
+      // If we were torn down while the bind was resolving, run its (inert or
+      // real) teardown immediately rather than retaining it.
+      if (controller.signal.aborted) fn();
+      else teardown = fn;
+    });
+    return () => {
+      controller.abort();
+      teardown?.();
+    };
+  }, [pubkey]);
 
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so

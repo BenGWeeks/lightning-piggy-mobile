@@ -99,6 +99,49 @@ describe('summariseDelivery', () => {
     ]);
     expect(summariseDelivery(status)).toEqual({ ok: 2, total: 3 });
   });
+
+  it('uses the attempted relay count as total when only the fast relay settled', () => {
+    // Early snapshot: 1 ack recorded, but the send targeted 5 relays. `total`
+    // must be 5 so the tick reads "1 of 5" (single), not "1 of 1" (premature
+    // double). This is the #866 fix at the pure-function level.
+    const status = aggregateRelayResults([{ relay: 'wss://fast', ok: true }], undefined, 5);
+    expect(summariseDelivery(status)).toEqual({ ok: 1, total: 5 });
+  });
+
+  it('reads ok === total (double tick) only once every target relay acked', () => {
+    const status = aggregateRelayResults(
+      [
+        { relay: 'wss://a', ok: true },
+        { relay: 'wss://b', ok: true },
+      ],
+      undefined,
+      2,
+    );
+    expect(summariseDelivery(status)).toEqual({ ok: 2, total: 2 });
+  });
+
+  it('never reports fewer relays than have settled if the target undercounts', () => {
+    // Defensive: a stale/wrong target smaller than the settled set must not hide
+    // relays — total floors at the number actually settled.
+    const status = aggregateRelayResults(
+      [
+        { relay: 'wss://a', ok: true },
+        { relay: 'wss://b', ok: true },
+        { relay: 'wss://c', ok: false },
+      ],
+      undefined,
+      1,
+    );
+    expect(summariseDelivery(status)).toEqual({ ok: 2, total: 3 });
+  });
+
+  it('falls back to the settled-relay count when no target is supplied (legacy rows)', () => {
+    const status = aggregateRelayResults([
+      { relay: 'wss://a', ok: true },
+      { relay: 'wss://b', ok: false },
+    ]);
+    expect(summariseDelivery(status)).toEqual({ ok: 1, total: 2 });
+  });
 });
 
 describe('shortRelayLabel', () => {

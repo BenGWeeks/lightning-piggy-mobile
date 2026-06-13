@@ -72,6 +72,9 @@ export interface ConversationMessageInput {
   deliveryStatus?: DeliveryStatus;
   // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
   wireKind?: number;
+  // NIP-17 inner-rumor id (#857) — the delivery-store key; stable across the
+  // optimistic row and its relay echo. Set on sent rows only.
+  rumorId?: string;
 }
 
 // Local-only formatter — only used for the dayHeader rule between

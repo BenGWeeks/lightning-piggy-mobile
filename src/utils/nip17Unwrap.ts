@@ -1,4 +1,5 @@
 import * as nip44 from 'nostr-tools/nip44';
+import { getEventHash } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 
@@ -275,6 +276,18 @@ export function partnerFromRumor(
  * about LP's kind-30200 group-state event, the `subject` is the only
  * source of truth for the conversation's name.
  */
+/**
+ * Stable NIP-17 rumor event id (#857) — the hash of the unwrapped inner event.
+ * Identical to what the SENDER computed at send time (same rumor fields), and
+ * the same across the recipient + self wraps, so it keys the delivery-status
+ * store: a sent bubble's tick keyed by this survives the optimistic local- →
+ * relay-echo row swap. NOT the outer wrap id (which is random per ephemeral
+ * key). A `DecodedRumor` is an UnsignedEvent for hashing purposes.
+ */
+export function rumorEventId(rumor: DecodedRumor): string {
+  return getEventHash(rumor);
+}
+
 export function subjectFromRumor(rumor: DecodedRumor): string | null {
   for (const t of rumor.tags) {
     if (t[0] !== 'subject') continue;

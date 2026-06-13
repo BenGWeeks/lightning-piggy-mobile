@@ -1,5 +1,10 @@
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { partnerFromRumor, textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  partnerFromRumor,
+  textForRumor,
+  rumorEventId,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -152,6 +157,10 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           return null;
         }
         const text = textForRumor(rumor);
+        // Inner rumor id (#857) — the delivery-store key, stable across wraps
+        // and matching the sender's send-time eventId. Computed only for our own
+        // sent rows (fromMe); a received row never carries a delivery tick.
+        const rumorId = partnership.fromMe ? rumorEventId(rumor) : undefined;
         entries.push({
           id: wrap.id,
           partnerPubkey: partnership.partnerPubkey,
@@ -159,6 +168,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           createdAt: rumor.created_at,
           text,
           wireKind: rumor.kind,
+          rumorId,
         });
         return {
           owner,

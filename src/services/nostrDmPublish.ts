@@ -22,6 +22,13 @@ export interface DmSendResult {
   delivery: DeliveryStatus;
 }
 
+// Fires with the FINAL per-relay breakdown once every relay has settled (or hit
+// nostr-tools' publish timeout). The send itself resolves early — as soon as
+// each wrap has a known outcome — so the optimistic bubble isn't blocked on a
+// slow relay; this later call lets the tick upgrade from "fast relays only" to
+// the complete single→double picture (#857).
+export type OnDeliveryFinalized = (delivery: DeliveryStatus) => void;
+
 /**
  * Publish a batch of gift-wraps to a relay set, capturing each relay's
  * per-wrap accept/reject (`Promise.allSettled` over the per-relay promises
@@ -38,6 +45,17 @@ export interface DmSendResult {
  * `relays` — so a settle maps back to its relay URL by index. The pool is
  * injected so this module stays a leaf (no `nostrService` import cycle).
  */
+// Upper bound on how long a send waits for relays before settling to a result
+// (#857). Offline / unreachable relays leave `pool.publish` promises pending
+// forever (no socket → nothing to resolve OR reject), so without this cap the
+// send hangs and the optimistic bubble is stuck on its pending Clock with no
+// way to reach the red failed state. 8s is comfortably past nostr-tools' own
+// ~4.4s relay publish timeout for reachable relays, so a genuine slow-accept
+// still lands as delivered, while a dead network settles to failed.
+export const DM_PUBLISH_TIMEOUT_MS = 8_000;
+
+const TIMED_OUT = Symbol('timed-out');
+
 export async function publishWrapsTrackingRelays(
   wraps: VerifiedEvent[],
   relays: string[],
@@ -45,33 +63,90 @@ export async function publishWrapsTrackingRelays(
   // Event identity (rumor id + kind) surfaced in the long-press detail sheet
   // (#856). Carried straight onto the resulting DeliveryStatus.
   meta?: { eventId?: string; kind?: number },
+  // Optional: called once with the COMPLETE breakdown after every relay has
+  // settled (#857). The send resolves early; this fires later so a slow relay
+  // can upgrade the tick (e.g. single → double) without delaying the bubble.
+  onFinalized?: OnDeliveryFinalized,
+  // Hard cap on the wait before settling — see DM_PUBLISH_TIMEOUT_MS. Injected
+  // so tests can drive it to 0.
+  timeoutMs: number = DM_PUBLISH_TIMEOUT_MS,
 ): Promise<DmSendResult> {
   const errors: string[] = [];
   let published = 0;
+  // Settles seen so far, shared across the early-resolve and background phases.
+  // A relay that accepts ANY wrap is `ok`; aggregateRelayResults folds repeats.
   const settles: RelaySettle[] = [];
+  // Per-wrap promises that complete only once EVERY relay for that wrap has
+  // settled — awaited in the background for the final breakdown.
+  const fullSettlePromises: Promise<void>[] = [];
+
   await Promise.all(
     wraps.map(async (wrap) => {
       const perRelay = pool.publish(relays, wrap);
-      const results = await Promise.allSettled(perRelay);
-      let anyOk = false;
-      results.forEach((res, i) => {
+      // Record each relay's outcome into the shared `settles` as soon as it
+      // resolves/rejects, so the early snapshot reflects whatever has landed.
+      const tagged = perRelay.map((p, i) => {
         const relay = relays[i];
-        const ok = res.status === 'fulfilled';
-        if (ok) anyOk = true;
-        settles.push({ relay, ok });
+        return p.then(
+          () => settles.push({ relay, ok: true }),
+          () => settles.push({ relay, ok: false }),
+        );
       });
-      // A wrap counts as published once ≥1 relay accepts it (same threshold as
-      // the old `Promise.any`). When every relay rejects, surface the first
-      // relay's concrete error message rather than an AggregateError wrapper.
-      if (anyOk) {
-        published++;
-      } else {
-        const firstReject = results.find((r) => r.status === 'rejected') as
-          | PromiseRejectedResult
-          | undefined;
-        errors.push((firstReject?.reason as Error)?.message ?? 'publish failed');
+      // Whole-wrap settle (background) — feeds the final snapshot only.
+      fullSettlePromises.push(Promise.allSettled(tagged).then(() => undefined));
+
+      // Decide this wrap's published/error status as soon as it's KNOWN: the
+      // first accept wins immediately; `Promise.any` rejects (AggregateError)
+      // only once every relay has rejected. Race it against a timeout so a dead
+      // network (publish promises that never settle) can't hang the send.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      });
+      try {
+        const outcome = await Promise.race([Promise.any(perRelay), timeout]);
+        if (outcome === TIMED_OUT) {
+          // No relay accepted within the window. Record the relays that never
+          // settled as failed so the snapshot is a concrete all-failed result
+          // (red tick) rather than an empty one (which renders as pending).
+          for (const relay of relays) {
+            if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
+          }
+          errors.push('publish timed out — no relay responded');
+        } else {
+          published++;
+        }
+      } catch (e) {
+        // `Promise.any` AggregateError — every relay rejected. Pull the first
+        // individual reason so the message is a concrete relay error.
+        const agg = e as AggregateError;
+        const firstReason = agg?.errors?.[0] as Error | undefined;
+        errors.push(firstReason?.message ?? (e as Error)?.message ?? 'publish failed');
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }),
   );
-  return { wrapsPublished: published, errors, delivery: aggregateRelayResults(settles, meta) };
+
+  // Total relays attempted — carried onto every snapshot as the tick's `total`
+  // so the EARLY snapshot (only the fast relay settled) reads as "1 of N", not
+  // "1 of 1" (which would paint a premature double-tick). The finalize below
+  // reconciles to the real per-relay breakdown once every relay settles; a
+  // relay promise that never settles is bounded by DM_PUBLISH_TIMEOUT_MS above,
+  // which records it as failed so the final `total` still equals this count.
+  const targetRelayCount = relays.length;
+
+  // Background-finalize: once every relay has settled, hand the caller the
+  // complete breakdown so a still-in-flight relay can settle the tick.
+  if (onFinalized) {
+    void Promise.all(fullSettlePromises).then(() =>
+      onFinalized(aggregateRelayResults(settles, meta, targetRelayCount)),
+    );
+  }
+
+  return {
+    wrapsPublished: published,
+    errors,
+    delivery: aggregateRelayResults(settles, meta, targetRelayCount),
+  };
 }
