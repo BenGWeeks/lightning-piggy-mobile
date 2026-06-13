@@ -19,6 +19,81 @@ interface PersistedNavState {
   savedAt: number;
 }
 
+// One-shot action params that make a screen DO something on mount — e.g.
+// HomeScreen opens the Send sheet whenever `sendToAddress` is present (set
+// by a Friends-tab zap). If these survive a cold start they replay every
+// launch: a stale invoice keeps re-opening the Send sheet pre-filled to pay
+// (#886). Stripped from every route before the state is persisted/restored.
+const TRANSIENT_PARAM_KEYS = [
+  'sendToAddress',
+  'sendToPicture',
+  'sendToPubkey',
+  'sendToName',
+  'openComposer',
+];
+
+// One-shot destination routes reached via a deep link / NFC tap / share — a
+// geo-cache (Piglet) detail page or an LNURL-withdraw claim flow. Restoring
+// straight back into one on launch replays a stale action (the app reopens
+// the last cache every time). Popped on restore so we land on the parent
+// stack (ExploreHome / Hunt) instead of the transient leaf.
+const TRANSIENT_ROUTE_NAMES = ['HuntPiggyDetail', 'HuntFound'];
+
+// Structural view of a NavigationState used by the sanitizer — React
+// Navigation's own type is deeply generic; we only touch these fields.
+interface NavStateLike {
+  index?: number;
+  routes: { name: string; params?: unknown; state?: NavStateLike }[];
+  [key: string]: unknown;
+}
+
+const stripTransientParams = (params: unknown): unknown => {
+  if (!params || typeof params !== 'object') return params;
+  const next = { ...(params as Record<string, unknown>) };
+  let changed = false;
+  for (const key of TRANSIENT_PARAM_KEYS) {
+    if (key in next) {
+      delete next[key];
+      changed = true;
+    }
+  }
+  if (!changed) return params;
+  return Object.keys(next).length > 0 ? next : undefined;
+};
+
+// Recursively remove one-shot params and pop transient deep-link routes so a
+// restored cold-start never replays a stale action. Pure (never mutates its
+// input) and total: a malformed/leaf state with no `routes` array is returned
+// as-is; a valid state yields a NEW, cleaned object. An empty `routes` array
+// (only reachable from a malformed-but-JSON-valid blob) collapses to
+// `undefined` so the navigator falls through to its defaults instead of
+// mounting an index-out-of-range stack.
+export const sanitizeNavigationState = (
+  state: NavigationState | undefined,
+): NavigationState | undefined => {
+  if (!state || !Array.isArray((state as unknown as NavStateLike).routes)) return state;
+  const s = state as unknown as NavStateLike;
+  const cleanedRoutes = s.routes.map((route) => ({
+    ...route,
+    params: stripTransientParams(route.params),
+    state: route.state
+      ? (sanitizeNavigationState(route.state as unknown as NavigationState) as
+          | NavStateLike
+          | undefined)
+      : route.state,
+  }));
+  const kept = cleanedRoutes.filter((route) => !TRANSIENT_ROUTE_NAMES.includes(route.name));
+  // Never hand back an empty stack — if every route was transient, keep the
+  // cleaned (param-stripped) routes rather than crash the navigator.
+  const routes = kept.length > 0 ? kept : cleanedRoutes;
+  // A genuinely empty stack (malformed input) can't be restored — drop it so
+  // the navigator renders defaults instead of mounting with index -1.
+  if (routes.length === 0) return undefined;
+  const desired = typeof s.index === 'number' ? s.index : routes.length - 1;
+  const index = Math.max(0, Math.min(desired, routes.length - 1));
+  return { ...s, routes, index } as unknown as NavigationState;
+};
+
 // Minimal NavigationState shape check — enough to keep us from handing
 // NavigationContainer a malformed blob that crashes on mount. We don't
 // recurse into nested route state; React Navigation rebuilds nested
@@ -63,7 +138,10 @@ export const loadPersistedNavigationState = async (): Promise<NavigationState | 
     const parsed: unknown = JSON.parse(raw);
     if (!isPersistedNavState(parsed)) return undefined;
     if (parsed.version !== SCHEMA_VERSION) return undefined;
-    return parsed.state;
+    // Sanitize on READ as well as write: devices that persisted a stale
+    // action (a pre-filled Send invoice, a deep-linked cache page) BEFORE
+    // this fix shipped self-heal on the next launch instead of replaying it.
+    return sanitizeNavigationState(parsed.state);
   } catch {
     // Corrupt JSON, AsyncStorage unavailable, schema mismatch — treat
     // as "no saved state" and let the navigator render defaults.
@@ -77,7 +155,13 @@ export const loadPersistedNavigationState = async (): Promise<NavigationState | 
 export const persistNavigationState = async (state: NavigationState | undefined): Promise<void> => {
   if (!state) return;
   try {
-    const payload: PersistedNavState = { version: SCHEMA_VERSION, state, savedAt: Date.now() };
+    const clean = sanitizeNavigationState(state);
+    if (!clean) return;
+    const payload: PersistedNavState = {
+      version: SCHEMA_VERSION,
+      state: clean,
+      savedAt: Date.now(),
+    };
     await AsyncStorage.setItem(NAV_STATE_KEY, JSON.stringify(payload));
   } catch {
     // Swallow.
