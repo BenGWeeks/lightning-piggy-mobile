@@ -177,7 +177,10 @@ const SendSheet: React.FC<Props> = ({
       setDecoded(null);
       setScanned(false);
       setSending(false);
-      setInputMode(initialAddress ? 'paste' : 'scan');
+      // Default to the paste tab unless the camera is actually usable — opening
+      // on a scanner that can't start (permission unresolved/denied) is a
+      // dead-end; the user can still switch to Scan, which prompts for access.
+      setInputMode(initialAddress || !permission?.granted ? 'paste' : 'scan');
       setPasteText(initialAddress || '');
       setSatsValue('');
       setStep('main');
@@ -817,7 +820,13 @@ const SendSheet: React.FC<Props> = ({
     [],
   );
 
-  if (!visible || !permission) return null;
+  // Open the sheet whenever it's asked to be visible. Do NOT gate on the
+  // camera-permission hook: `useCameraPermissions()` can stay `null` (e.g. the
+  // hook hasn't resolved, or returns null on some devices even when the OS
+  // permission is granted), and gating here made the whole sheet render null so
+  // `.present()` no-op'd and Send silently never opened. Only the scanner tab
+  // needs the permission, and it handles a missing one with its own prompt.
+  if (!visible) return null;
 
   // On-chain sends from a hot on-chain wallet go direct; otherwise they
   // hop through a Boltz reverse swap whose server-reported min/max must
@@ -945,7 +954,7 @@ const SendSheet: React.FC<Props> = ({
                   />
                 ) : inputMode === 'scan' ? (
                   <SendScanPane
-                    permissionGranted={permission.granted}
+                    permissionGranted={!!permission?.granted}
                     onRequestPermission={requestPermission}
                     onBarcodeScanned={handleBarCodeScanned}
                   />
