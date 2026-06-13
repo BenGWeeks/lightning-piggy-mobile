@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -65,16 +65,8 @@ const MessagesScreen: React.FC = () => {
   const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const {
-    isLoggedIn,
-    profile,
-    refreshProfile,
-    dmInbox,
-    refreshDmInbox,
-    armLiveDmSub,
-    fetchProfilesForPubkeys,
-    pubkey,
-  } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, fetchProfilesForPubkeys, pubkey } = useNostr();
+  const { dmInbox, refreshDmInbox, armLiveDmSub } = useNostrDmInbox();
   const { contacts, refreshContacts } = useNostrContacts();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();

@@ -49,10 +49,13 @@ const DEFAULT_YIELD_EVERY = 25;
 const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /**
- * Ingest fetched wraps decrypt-once. Returns counts; the decrypted rows are
- * persisted to the encrypted DB (read them back via dmDb's indexed queries).
+ * Ingest fetched wraps decrypt-once for `owner` (the signed-in account's
+ * pubkey — the known-id gate is owner-scoped, #848). Returns counts; the
+ * decrypted rows are persisted to the encrypted DB (read them back via
+ * dmDb's indexed queries).
  */
 export async function ingestWraps<W extends IngestableWrap>(
+  owner: string,
   wraps: readonly W[],
   decrypt: WrapDecryptor<W>,
   options: IngestOptions = {},
@@ -62,7 +65,10 @@ export async function ingestWraps<W extends IngestableWrap>(
 
   // The decrypt-once gate: one indexed query tells us which wrap ids we've
   // already stored, so we never re-run the expensive unwrap for them.
-  const known = await selectKnownEventIds(wraps.map((w) => w.id));
+  const known = await selectKnownEventIds(
+    owner,
+    wraps.map((w) => w.id),
+  );
 
   const yieldEvery = options.yieldEvery ?? DEFAULT_YIELD_EVERY;
   const freshTotal = wraps.length - known.size;
@@ -93,9 +99,16 @@ export async function ingestWraps<W extends IngestableWrap>(
     }
   }
 
-  // Only count + report as ingested what we actually persist. An aborted run
-  // skips the upsert, so its partial decrypts don't show as stored.
-  if (fresh.length > 0 && !options.signal?.aborted) {
+  // Persist whatever we decrypted, even if the run was aborted mid-loop (F1,
+  // #849). A decrypted row is unconditionally valid — `upsertDmMessages` is
+  // idempotent and keyed `(owner, event_id)`, so there is no "partial" state to
+  // corrupt. Throwing the batch away on abort meant a 68 s post-login rebuild
+  // sweep, cut short by a tab blur, persisted NOTHING and re-decrypted the
+  // whole inbox on the next sweep — the 1:1 inbox stayed empty for minutes.
+  // Flushing here makes every decrypt decrypt-once regardless of abort. (Note:
+  // the skip-set and emitted UI entries stay abort-suppressed one layer up in
+  // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
+  if (fresh.length > 0) {
     await upsertDmMessages(fresh);
     result.ingested = fresh.length;
   }

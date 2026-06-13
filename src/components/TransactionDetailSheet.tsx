@@ -11,7 +11,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
@@ -131,7 +131,8 @@ const TransactionDetailSheet: React.FC<Props> = ({
       </View>
     </TouchableOpacity>
   );
-  const { btcPrice, currency, activeWallet } = useWallet();
+  const { currency, activeWallet } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
   const { contacts } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);

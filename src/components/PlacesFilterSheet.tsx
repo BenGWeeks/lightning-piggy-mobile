@@ -96,9 +96,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
               </View>
             </>
           ) : (
-            <Text style={styles.sectionHint}>
-              No categories available yet — merchants are still loading.
-            </Text>
+            <Text style={styles.sectionHint}>No categories to filter by yet.</Text>
           )}
         </ScrollView>
 

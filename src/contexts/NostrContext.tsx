@@ -9,7 +9,6 @@ import React, {
 } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
@@ -34,22 +33,23 @@ import {
   deleteMnemonic,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
-import { useMessageSend } from './useMessageSend';
+import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
-  AMBER_NIP17_SKIP_KEY_BASE,
-  NSEC_NIP17_SKIP_KEY_BASE,
-  wrapCacheFileName,
   AMBER_NIP17_ENABLED_KEY_LEGACY,
   DM_CONV_CACHE_PREFIX,
   DM_CONV_LAST_SEEN_PREFIX,
   inboxCacheKey,
   inboxLastSeenKey,
 } from './nostrDmCache';
+import { wipeDmStoresForAccount } from './dmAccountWipe';
+import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
+import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
+import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import {
@@ -66,10 +66,15 @@ import {
   readCachedWithTtl,
 } from './nostrCacheKeys';
 import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
 export { notifyGroupMessage, subscribeGroupMessages, subscribeDmMessages } from './nostrEventBus';
 export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+// DM-inbox sibling context (#806) lives in its own module; re-export the
+// consumer hook so the public surface stays at `NostrContext` like
+// `useNostr` / `useNostrContacts`.
+export { useNostrDmInbox } from './DmInboxContext';
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -148,16 +153,14 @@ interface NostrContextType {
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+    hooks?: SendHooks,
+  ) => Promise<SendResult>;
   /**
    * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
    * 1:1 recipient. The blob is already AES-encrypted + uploaded; this
    * gift-wraps the URL + decryption key. See #235.
    */
-  sendFileMessage: (
-    recipientPubkey: string,
-    file: EncryptedUpload,
-  ) => Promise<{ success: boolean; error?: string }>;
+  sendFileMessage: (recipientPubkey: string, file: EncryptedUpload) => Promise<SendResult>;
   /**
    * Persist an optimistic local- DM message to the per-conversation
    * cache so it survives navigating away + back before the NIP-17
@@ -167,6 +170,15 @@ interface NostrContextType {
    * drop the optimistic bubble until the relay round-trip completes.
    */
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  /**
+   * Durably persist delivery status (#856) onto cached conversation rows by
+   * id, so a sent bubble's tick survives a cold restart even when the relay
+   * echo won the cache-write race against the optimistic local- row.
+   */
+  persistDeliveryStatuses: (
+    otherPubkey: string,
+    statusById: Record<string, DeliveryStatus>,
+  ) => Promise<void>;
   /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
@@ -202,33 +214,6 @@ interface NostrContextType {
    * merge replaces it once relay returns.
    */
   getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
-  dmInbox: DmInboxEntry[];
-  dmInboxLoading: boolean;
-  /**
-   * Refresh the NIP-04 + NIP-17 DM inbox from read relays.
-   *
-   * Default (no arg / `force: false`): honours a 30s TTL — calls
-   * within that window are no-ops. Safe to call from
-   * `useFocusEffect` on the Messages tab without racking up relay
-   * round-trips on every tab bounce.
-   *
-   * `force: true`: bypass the TTL and hit relays. Reserved for
-   * explicit user-initiated refreshes (pull-to-refresh).
-   *
-   * `signal`: optional AbortSignal for cancelling the in-flight
-   * refresh. Checked between batches in the decrypt loops so a
-   * navigation-away can stop the JS-thread churn (#286). Aborting
-   * is best-effort — a refresh that's mid-batch will finish that
-   * batch (≤ DECRYPT_YIELD_EVERY items) before bailing out.
-   */
-  refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
-  /**
-   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
-   * DM-receiving screen (Messages tab, ConversationScreen) via
-   * useFocusEffect — first call opens the sub, subsequent are no-ops.
-   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
-   */
-  armLiveDmSub: () => void;
   /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
@@ -404,6 +389,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     fetchConversation,
     getCachedConversation,
     appendLocalDmMessage,
+    persistDeliveryStatuses,
     armLiveDmSub,
     amberNip44Permission,
     hydrateDmInboxFromCache,
@@ -1180,6 +1166,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
       perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
       perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      // DM-store migration flag (#848) — a future re-login re-runs the
+      // (then no-op) migration check instead of trusting a stale flag.
+      dmStoreMigratedKey(loggedOutPubkey),
       // Pre-existing per-pubkey caches (already namespaced before #288)
       inboxCacheKey(loggedOutPubkey),
       inboxLastSeenKey(loggedOutPubkey),
@@ -1203,32 +1192,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // them in place; they're orphaned safely once no remaining identity
     // is a member, and re-attached if the same identity signs back in.
     await AsyncStorage.multiRemove(toRemove);
-    // The NIP-17 wrap caches are file-backed now (#689), so the
-    // multiRemove above doesn't touch them — delete the files explicitly.
-    // Decrypted DM plaintext must not survive logout / account wipe
-    // (#689 review / #690).
-    if (loggedOutPubkey) {
-      // Includes the per-account skip-set files (#746 — they sit alongside the
-      // positive-cache files; if we wiped only the cache on logout, the
-      // skip-set would leak across account switches and silently suppress
-      // wraps for the next signed-in user).
-      for (const base of [
-        AMBER_NIP17_CACHE_KEY_BASE,
-        NSEC_NIP17_CACHE_KEY_BASE,
-        AMBER_NIP17_SKIP_KEY_BASE,
-        NSEC_NIP17_SKIP_KEY_BASE,
-      ]) {
-        try {
-          const f = new File(
-            Paths.document,
-            wrapCacheFileName(perAccountKey(base, loggedOutPubkey)),
-          );
-          if (f.exists) f.delete();
-        } catch {
-          // best-effort — non-fatal
-        }
-      }
-    }
+    // Decrypted DM plaintext must not survive logout / account wipe (#689
+    // review / #690): delete the file-backed wrap + skip-set caches and this
+    // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
+    await wipeDmStoresForAccount(loggedOutPubkey);
   }, []);
 
   const logout = useCallback(async () => {
@@ -1298,6 +1265,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // them, users can remove each row from the Nostr settings screen.
     setSignerType(null);
     setIsLoggedIn(false);
+
+    // Last identity gone — delete the encrypted DM DB file AND its keystore
+    // key (#690/#848). Per-identity sign-outs above only delete that owner's
+    // rows; with no identities left the whole store is wipeable.
+    await wipeLocalDmStore().catch(() => {});
 
     nostrService.cleanup();
   }, [
@@ -1779,10 +1751,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
-      dmInbox,
-      dmInboxLoading,
-      refreshDmInbox,
-      armLiveDmSub,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     }),
@@ -1813,10 +1782,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchConversation,
       getCachedConversation,
       appendLocalDmMessage,
-      dmInbox,
-      dmInboxLoading,
-      refreshDmInbox,
-      armLiveDmSub,
+      persistDeliveryStatuses,
       amberNip44Permission,
       signEvent,
     ],
@@ -1829,10 +1795,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [contacts, refreshContacts, followContact, unfollowContact, addContact],
   );
 
+  // Sibling value carrying the hot DM-inbox slice (#806). Memoised separately
+  // so a decrypted message rebuilds only this — not `contextValue` above — and
+  // only `useNostrDmInbox()` consumers re-render on inbox churn.
+  const dmInboxValue = useMemo(
+    () => ({ dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub }),
+    [dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub],
+  );
+
   return (
     <NostrContext.Provider value={contextValue}>
       <NostrContactsContext.Provider value={contactsValue}>
-        {children}
+        <DmInboxContext.Provider value={dmInboxValue}>{children}</DmInboxContext.Provider>
       </NostrContactsContext.Provider>
     </NostrContext.Provider>
   );

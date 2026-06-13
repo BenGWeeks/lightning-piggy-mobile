@@ -4,8 +4,31 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
+import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { SignerType, RelayConfig } from '../types/nostr';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+
+// A send carries the per-relay delivery breakdown so the optimistic bubble can
+// show its tick and persist it (#856). `success` means ≥1 relay accepted ≥1
+// wrap — it drives whether the composer clears the draft. `delivery` is present
+// for any send that reached the publish stage (delivered / partial / all-failed
+// alike), so the optimistic bubble can settle to its final tick; only a hard
+// pre-publish error (not logged in, signer cancelled) omits it (#857).
+export interface SendResult {
+  success: boolean;
+  error?: string;
+  delivery?: DeliveryStatus;
+}
+
+// Early/late hooks for the optimistic-send flow (#857). `onRumorReady` fires
+// synchronously once the stable rumor eventId is known (before publishing), so
+// the caller can paint the pending bubble keyed by it. `onDeliveryFinalized`
+// fires later with the COMPLETE per-relay breakdown after all relays settle.
+export interface SendHooks {
+  onRumorReady?: (meta: { eventId: string; kind: number }) => void;
+  onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
+}
 
 /**
  * NIP-17 message-send hook (#235, #227). Holds the three outbound paths —
@@ -25,10 +48,7 @@ export interface UseMessageSendParams {
 
 export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMessageSendParams) {
   const sendDirectMessage = useCallback(
-    async (
-      recipientPubkey: string,
-      plaintext: string,
-    ): Promise<{ success: boolean; error?: string }> => {
+    async (recipientPubkey: string, plaintext: string, hooks?: SendHooks): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -48,6 +68,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           recipientPubkey: normalizedRecipientPubkey,
           content: plaintext,
         });
+        // Stable rumor id — identical on the relay echo — keys the delivery
+        // store so the optimistic bubble can be painted before publishing and
+        // settled after, surviving the local- → echo id swap (#857).
+        const eventId = directMessageRumorEventId(rumor);
+        hooks?.onRumorReady?.({ eventId, kind: rumor.kind });
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
@@ -58,19 +83,18 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          // Partial send — at least one wrap (recipient delivery and/or sender's own inbox copy) failed to publish. Surface as non-fatal failure so the composer keeps its draft and the user can retry, mirroring sendGroupMessage's pattern.
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
-            };
-          }
-          return { success: true };
+          // Always return the per-relay delivery so the bubble can settle to its
+          // final tick (delivered / partial / all-failed). `success` = ≥1 relay
+          // accepted ≥1 wrap; drives whether the composer clears the draft. A
+          // partial/failed send keeps the draft AND leaves the bubble for the
+          // user to Re-publish — no more silent drop (#857).
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
         }
 
         if (signerType === 'amber') {
@@ -80,6 +104,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -95,18 +120,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
-          }
-          // Same partial-send handling as the nsec path. Amber's per-recipient sequential signing means a cancelled prompt or a failed seal mid-loop leaves earlier wraps published but later ones unsent — surface that to the user instead of silent success.
-          if (result.errors.length > 0) {
-            const intended = result.wrapsPublished + result.errors.length;
-            return {
-              success: false,
-              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
-            };
-          }
-          return { success: true };
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
         }
 
         return { success: false, error: 'Unsupported signer type' };
@@ -122,10 +140,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
   // already encrypted + uploaded; this gift-wraps the URL + AES key/nonce
   // to the recipient (and the sender's own inbox copy).
   const sendFileMessage = useCallback(
-    async (
-      recipientPubkey: string,
-      file: EncryptedUpload,
-    ): Promise<{ success: boolean; error?: string }> => {
+    async (recipientPubkey: string, file: EncryptedUpload): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -167,7 +182,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         if (signerType === 'amber') {
@@ -201,7 +216,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
-          return { success: true };
+          return { success: true, delivery: result.delivery };
         }
 
         return { success: false, error: 'Unsupported signer type' };

@@ -26,63 +26,6 @@ export const createSendSheetStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.textHeader,
     },
-    tabRow: {
-      flexDirection: 'row',
-      backgroundColor: colors.divider,
-      borderRadius: 10,
-      padding: 3,
-    },
-    tab: {
-      paddingHorizontal: 24,
-      paddingVertical: 8,
-      borderRadius: 8,
-    },
-    tabActive: {
-      backgroundColor: colors.surface,
-    },
-    tabText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    tabTextActive: {
-      color: colors.brandPink,
-    },
-    cameraContainer: {
-      width: 240,
-      height: 240,
-      borderRadius: 24,
-      backgroundColor: colors.surface,
-      overflow: 'hidden',
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: colors.background,
-    },
-    camera: {
-      width: '100%',
-      height: '100%',
-    },
-    permissionContainer: {
-      padding: 20,
-      alignItems: 'center',
-      gap: 12,
-    },
-    permissionText: {
-      color: colors.textBody,
-      fontSize: 14,
-      textAlign: 'center',
-    },
-    permissionButton: {
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 20,
-      paddingVertical: 10,
-      borderRadius: 8,
-    },
-    permissionButtonText: {
-      color: colors.white,
-      fontWeight: '700',
-    },
     pasteSection: {
       width: '100%',
       gap: 12,
@@ -397,3 +340,5 @@ export const createSendSheetStyles = (colors: Palette) =>
       color: colors.textSupplementary,
     },
   });
+
+export type SendSheetStyles = ReturnType<typeof createSendSheetStyles>;

@@ -27,15 +27,16 @@ export function rowsToInboxEntries(rows: readonly DmMessageRow[]): DmInboxEntry[
   return rows.map(rowToInboxEntry);
 }
 
-/** The inbox list: latest message per conversation, newest-first. */
-export async function loadInboxEntries(): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getInboxLatest());
+/** The inbox list: latest message per conversation for `owner`, newest-first. */
+export async function loadInboxEntries(owner: string): Promise<DmInboxEntry[]> {
+  return rowsToInboxEntries(await getInboxLatest(owner));
 }
 
 /** One conversation's messages, newest-first, paginated (load-older via opts). */
 export async function loadConversationEntries(
+  owner: string,
   partnerPubkey: string,
   opts?: { limit?: number; beforeCreatedAt?: number },
 ): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getConversationMessages(partnerPubkey, opts));
+  return rowsToInboxEntries(await getConversationMessages(owner, partnerPubkey, opts));
 }

@@ -129,8 +129,7 @@ const AboutScreen: React.FC = () => {
   // memory; Stop & Share dumps a .cpuprofile + opens the OS share sheet
   // so the dev can save it to Files / airdrop it / drag-drop into Chrome
   // DevTools' Performance panel for the JS-thread flame graph. See
-  // docs/PERFORMANCE.adoc + .claude/agents/stevie.md for context. (#611
-  // component 1.)
+  // docs/PERFORMANCE.adoc for context. (#611 component 1.)
   const profilerAvailable = __DEV__ || (process.env.EXPO_PUBLIC_KEEP_PERF_LOGS ?? '') === '1';
   const [profilerRecording, setProfilerRecording] = useState(false);
   const [profilerBusy, setProfilerBusy] = useState(false);

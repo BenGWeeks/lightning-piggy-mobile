@@ -1,7 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
+import {
+  Zap,
+  MapPin,
+  UserRound,
+  Radio,
+  Check,
+  CheckCheck,
+  Clock,
+  AlertCircle,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
   createMessageBubbleStyles,
@@ -25,6 +34,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { summariseDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
@@ -105,9 +115,141 @@ interface Props {
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
+  // Per-relay delivery breakdown for a sent (fromMe) message (#856). Drives
+  // the footer tick; absent on received bubbles.
+  deliveryStatus?: DeliveryStatus;
+  // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
+  wireKind?: number;
+  // Tapping a bubble (sent OR received) opens the message-info sheet. The
+  // parent builds the MessageInfo from these fields; `resendText` is the raw
+  // payload for the sheet's Re-publish (sent text only). (#856)
+  onShowInfo?: (args: {
+    fromMe: boolean;
+    eventId: string;
+    wireKind?: number;
+    deliveryStatus?: DeliveryStatus;
+    resendText: string;
+  }) => void;
 }
 
+/**
+ * Delivery indicator for a sent DM (#856, design approved 2026-06-12).
+ * WhatsApp-style single/double coverage in the payment-success green:
+ *   - pending (no relay acked yet) → faint Clock
+ *   - delivered to ≥1 but not all target relays → single green Check
+ *   - delivered to ALL target relays → double green CheckCheck
+ *   - failed (every relay rejected) → red AlertCircle
+ * Single→double is computed from the per-relay `relayResults`; the exact
+ * "Sent to N of M relays" breakdown lives behind a long-press (recipient relay
+ * lists run to 11, so one glyph per relay would be noise). Retry/outbox for the
+ * failed state is #857 — this only renders the distinct visual.
+ */
+const DeliveryTick: React.FC<{
+  styles: Styles;
+  status: DeliveryStatus;
+  testID: string;
+}> = ({ styles, status, testID }) => {
+  const { ok, total } = summariseDelivery(status);
+  // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
+  // node Maestro can resolve — testIDs on lucide-react-native icons don't
+  // reliably surface in the accessibility tree.
+
+  // Still in flight — the optimistic bubble before any relay has settled (#857).
+  // Keyed off the explicit `pending` flag, not `total === 0`, so a settled
+  // all-failed send (zero relays accepted) renders the red glyph below instead.
+  if (status.pending) {
+    return (
+      <View testID={testID} accessibilityLabel="Message sending">
+        <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
+      </View>
+    );
+  }
+
+  // No relay accepted (every relay rejected, or a hard pre-publish error) →
+  // failed. The bubble's tap opens the info sheet with a Re-publish action.
+  if (ok === 0) {
+    return (
+      <View testID={testID} accessibilityLabel="Send failed">
+        <AlertCircle
+          size={13}
+          color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
+        />
+      </View>
+    );
+  }
+
+  const green = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
+  // All target relays acked → double tick; otherwise ≥1 → single tick.
+  if (ok === total) {
+    return (
+      <View testID={testID} accessibilityLabel="Sent to all relays">
+        <CheckCheck size={14} strokeWidth={2.5} color={green} />
+      </View>
+    );
+  }
+  return (
+    <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
+      <Check size={13} strokeWidth={2.5} color={green} />
+    </View>
+  );
+};
+
 type Styles = MessageBubbleStyles;
+
+/**
+ * Shared time-row footer for every bubble variant (#856). Renders the
+ * timestamp and, on a sent (`fromMe`) bubble that carries a tracked
+ * `deliveryStatus`, the delivery tick beside it — long-pressable to open the
+ * per-relay breakdown. Received bubbles and untracked sends fall back to the
+ * bare timestamp, so this is a drop-in for each variant's old `<Text>` time.
+ *
+ * `timeStyle` is the variant's existing time text style (e.g. `gifTime`,
+ * `imageBubbleTime`, `bubbleTime`) so each card keeps its own ink/placement;
+ * only the tick is appended.
+ */
+const BubbleFooter: React.FC<{
+  styles: Styles;
+  // Per-message id so the footer/tick testIDs are unique within a thread that
+  // has many bubbles (Copilot #858) — Maestro can still match the bare prefix.
+  messageId: string;
+  fromMe: boolean;
+  createdAt: number;
+  timeStyle: object | (object | undefined)[];
+  deliveryStatus?: DeliveryStatus;
+  // Opens the message-info sheet (tap or long-press) for sent AND received.
+  onOpenInfo?: () => void;
+}> = ({ styles, messageId, fromMe, createdAt, timeStyle, deliveryStatus, onOpenInfo }) => {
+  const showTick = fromMe && !!deliveryStatus;
+  // No info handler and no tick → plain timestamp (e.g. a legacy row).
+  if (!onOpenInfo && !showTick) {
+    return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
+  }
+  return (
+    <TouchableOpacity
+      style={styles.bubbleFooterRow}
+      activeOpacity={onOpenInfo ? 0.6 : 1}
+      // Tap AND long-press both open the info sheet — tap is discoverable and
+      // reachable by screen readers (long-press alone isn't). (Copilot #858)
+      onPress={onOpenInfo}
+      onLongPress={onOpenInfo}
+      accessibilityRole="button"
+      accessibilityLabel={fromMe ? 'Delivery status' : 'Message info'}
+      accessibilityHint="Opens message details"
+      testID={`dm-bubble-delivery-footer-${messageId}`}
+    >
+      {/* Footer-row time zeroes the standalone bubbleTime top margin so the
+          tick sits level with the timestamp (Copilot #858). */}
+      <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
+      {showTick ? (
+        <DeliveryTick
+          styles={styles}
+          status={deliveryStatus as DeliveryStatus}
+          testID={`dm-bubble-delivery-tick-${messageId}`}
+        />
+      ) : null}
+    </TouchableOpacity>
+  );
+};
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
@@ -120,11 +262,13 @@ const ImageBubble: React.FC<{
   styles: Styles;
   image: ParsedImageMessage;
   fromMe: boolean;
-  createdAt: number;
   senderLabel: React.ReactNode;
   onOpenImageFullscreen?: (url: string) => void;
   testID: string;
-}> = ({ styles, image, fromMe, createdAt, senderLabel, onOpenImageFullscreen, testID }) => {
+  // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
+  // the tick like every other variant.
+  footer: React.ReactNode;
+}> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
@@ -152,9 +296,7 @@ const ImageBubble: React.FC<{
           accessibilityLabel="Shared image"
           onResolved={image.encrypted ? setDisplayUri : undefined}
         />
-        <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
-          {formatTime(createdAt)}
-        </Text>
+        {footer}
       </TouchableOpacity>
     </View>
   );
@@ -186,6 +328,9 @@ const MessageBubble: React.FC<Props> = ({
   onOpenImageFullscreen,
   onToggleSecretMode,
   testIdPrefix,
+  deliveryStatus,
+  wireKind,
+  onShowInfo,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
@@ -194,6 +339,41 @@ const MessageBubble: React.FC<Props> = ({
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
+  // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
+  // Other media (image/voice) ride on the `text` kind too, so this covers them.
+  const resendPayload =
+    content.kind === 'text' ? content.text : content.kind === 'gif' ? content.url : '';
+
+  // Opens the message-info sheet — for sent AND received bubbles (#856). The
+  // bubble's `id` is prefixed (`dm-<eventId>`); strip it so the sheet shows the
+  // bare event id. The rumor id (deliveryStatus.eventId) is preferred for sent.
+  const openInfo = onShowInfo
+    ? () =>
+        onShowInfo({
+          fromMe,
+          eventId: deliveryStatus?.eventId ?? id.replace(/^dm-/, ''),
+          wireKind,
+          deliveryStatus,
+          resendText: resendPayload,
+        })
+    : undefined;
+
+  // Reusable footer (time + delivery tick) shared by every bubble variant so a
+  // sent GIF / image / voice note / location / invoice all show the tick, not
+  // just plain text (#856). Each variant passes its own time style.
+  const renderFooter = (timeStyle: object | (object | undefined)[]) => (
+    <BubbleFooter
+      styles={styles}
+      messageId={id}
+      fromMe={fromMe}
+      createdAt={createdAt}
+      timeStyle={timeStyle}
+      deliveryStatus={deliveryStatus}
+      onOpenInfo={openInfo}
+    />
+  );
 
   if (content.kind === 'gif') {
     return (
@@ -215,7 +395,7 @@ const MessageBubble: React.FC<Props> = ({
             transition={150}
             accessibilityIgnoresInvertColors
           />
-          <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
+          {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
       </View>
     );
@@ -356,9 +536,7 @@ const MessageBubble: React.FC<Props> = ({
                 <Text style={styles.invoicePayText}>Stop sharing</Text>
               </TouchableOpacity>
             ) : null}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
       </View>
@@ -427,9 +605,7 @@ const MessageBubble: React.FC<Props> = ({
                 OpenStreetMap
               </Text>
             )}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
       </View>
@@ -449,10 +625,10 @@ const MessageBubble: React.FC<Props> = ({
         styles={styles}
         image={image}
         fromMe={fromMe}
-        createdAt={createdAt}
         senderLabel={SenderLabel}
         onOpenImageFullscreen={onOpenImageFullscreen}
         testID={`${testIdPrefix}-image-${id}`}
+        footer={renderFooter([styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe])}
       />
     );
   }
@@ -473,6 +649,11 @@ const MessageBubble: React.FC<Props> = ({
         createdAt={createdAt}
         senderName={senderName}
         testID={`${testIdPrefix}-voice-${id}`}
+        footer={
+          fromMe && deliveryStatus
+            ? renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])
+            : undefined
+        }
       />
     );
   }
@@ -506,9 +687,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -552,9 +731,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -620,9 +797,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -680,9 +855,7 @@ const MessageBubble: React.FC<Props> = ({
               ) : null}
             </View>
           </View>
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </TouchableOpacity>
       </View>
     );
@@ -711,9 +884,7 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -759,9 +930,7 @@ const MessageBubble: React.FC<Props> = ({
             : text}
         </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
-        <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-          {formatTime(createdAt)}
-        </Text>
+        {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
       </View>
     </View>
   );

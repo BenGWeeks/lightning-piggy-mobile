@@ -22,7 +22,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { buildBip21 } from '../utils/bip21';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { walletLabel } from '../types/wallet';
@@ -77,12 +77,11 @@ const ReceiveSheet: React.FC<Props> = ({
     activeWalletId,
     activeWallet,
     wallets,
-    btcPrice,
     currency,
     getReceiveAddress,
     expectPayment,
-    lastIncomingPayment,
   } = useWallet();
+  const { btcPrice, lastIncomingPayment } = useWalletLive();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('address');

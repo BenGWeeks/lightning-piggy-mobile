@@ -12,6 +12,6 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ## What to test in the next release
 
-### Fixed
+### New
 
-- **Zap (⚡) buttons work again.** On the Friends list the zap button now appears for any contact who has a Lightning address and sends sats when tapped. On a contact's profile the zap button is **always shown** — and if you can't zap yet (no wallet connected, or that person hasn't published a Lightning address) tapping it now tells you **why** instead of doing nothing.
+- **Pay by NFC from the Send sheet.** Send now has three modes — QR scan, paste, and NFC — switched with icon toggles. Pick the NFC waves, hold your phone against a Lightning payment tag (invoice, Lightning address or LNURL), and the payment details fill in just like scanning a QR.

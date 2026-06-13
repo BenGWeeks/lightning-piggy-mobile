@@ -24,7 +24,12 @@ import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts, subscribeDmMessages } from '../contexts/NostrContext';
+import {
+  useNostr,
+  useNostrContacts,
+  useNostrDmInbox,
+  subscribeDmMessages,
+} from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import SendSheet from '../components/SendSheet';
@@ -54,13 +59,19 @@ import { extractSharedContact } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
+import { useResolvedDmDeliveries } from '../hooks/useDmDeliveryStatuses';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import {
   type Item,
   type TimedItem,
+  type ConversationMessageInput,
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -93,12 +104,13 @@ const ConversationScreen: React.FC = () => {
     isLoggedIn,
     fetchConversation,
     getCachedConversation,
+    persistDeliveryStatuses,
     signerType,
     pubkey: myPubkey,
     relays,
     profile,
-    armLiveDmSub,
   } = useNostr();
+  const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
@@ -108,9 +120,14 @@ const ConversationScreen: React.FC = () => {
   const { wallets } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
-  const [messages, setMessages] = useState<
-    { id: string; fromMe: boolean; text: string; createdAt: number }[]
-  >([]);
+  const [messages, setMessages] = useState<ConversationMessageInput[]>([]);
+  // Mirror of `messages` for reads outside render (e.g. the delivery-tick
+  // reconcile in `load`, so persistence runs as a side-effect rather than
+  // inside a setMessages updater — Copilot #858).
+  const messagesRef = useRef<ConversationMessageInput[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -187,9 +204,15 @@ const ConversationScreen: React.FC = () => {
 
   const zapItems = useMemo<TimedItem[]>(() => buildZapItems(wallets, pubkey), [wallets, pubkey]);
 
+  // Resolve each sent bubble's delivery tick from the eventId-keyed store (#857)
+  // and re-render as statuses settle. Keyed by the stable rumor eventId, so the
+  // local- → echo swap + the 10s re-fetch can't strip the tick. The hook
+  // subscribes to the store, so `resolvedMessages` is a fresh array on every
+  // settle — which is what flows the updated tick into `items` below.
+  const resolvedMessages = useResolvedDmDeliveries(messages);
   const items = useMemo<Item[]>(
-    () => buildConversationItems(messages, zapItems),
-    [messages, zapItems],
+    () => buildConversationItems(resolvedMessages, zapItems),
+    [resolvedMessages, zapItems],
   );
 
   // Mount/unmount tracker so the async `load()` below can bail when
@@ -231,7 +254,26 @@ const ConversationScreen: React.FC = () => {
         // on the *next* thread that inherits this instance. Check the
         // ref and bail.
         if (isMountedRef.current) {
-          setMessages(conv);
+          // Carry any delivery tick (#856) from the current in-memory rows
+          // onto the fetched list, so a just-sent bubble keeps its tick even
+          // when the relay echo lands before the optimistic row's async cache
+          // write commits (the on-disk merge would miss it in that race).
+          // Computed against messagesRef (not inside the setMessages updater)
+          // so the AsyncStorage write is a plain side-effect — keeps the
+          // updater pure and StrictMode-safe (Copilot #858).
+          const reconciled = reconcileDeliveryStatus(messagesRef.current, conv);
+          // Durably write the reconciled ticks back to the conv cache, keyed
+          // by the (now real-id) row id, so the tick survives a cold restart
+          // — fetchConversation persisted the echo rows WITHOUT delivery when
+          // it won the race against the optimistic local- write.
+          const statusById: Record<string, DeliveryStatus> = {};
+          for (const m of reconciled) {
+            if (m.deliveryStatus && !m.id.startsWith('local-')) {
+              statusById[m.id] = m.deliveryStatus;
+            }
+          }
+          void persistDeliveryStatuses(pubkey, statusById);
+          setMessages(reconciled);
         }
       } finally {
         if (isMountedRef.current) {
@@ -239,7 +281,7 @@ const ConversationScreen: React.FC = () => {
         }
       }
     },
-    [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
+    [isLoggedIn, fetchConversation, getCachedConversation, persistDeliveryStatuses, pubkey],
   );
 
   useEffect(() => {
@@ -390,6 +432,7 @@ const ConversationScreen: React.FC = () => {
     sharingLocation,
     uploadingVoice,
     appendOptimisticLocal,
+    resendText,
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
@@ -408,6 +451,17 @@ const ConversationScreen: React.FC = () => {
     setGifPickerOpen,
     setVoiceSheetOpen,
   });
+
+  // Tap a bubble → message-info sheet (#856), for sent + received. Logic lives
+  // in useMessageInfoSheet to keep the screen under the size cap. Declared
+  // after the composer hook because it needs its `resendText` for Re-publish.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -521,6 +575,7 @@ const ConversationScreen: React.FC = () => {
         myAvatarUri={profile?.picture ?? null}
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
+        onShowInfo={handleShowInfo}
       />
     ),
     [
@@ -530,6 +585,7 @@ const ConversationScreen: React.FC = () => {
       openSharedContact,
       handlePayInvoice,
       handleToggleSecretMode,
+      handleShowInfo,
       liveLocationLatest,
       liveLocationBubbleStatus,
       liveLocationBubbleRemaining,
@@ -913,6 +969,11 @@ const ConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );

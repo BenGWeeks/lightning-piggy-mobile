@@ -62,6 +62,39 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
+    // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
+    // Right-aligned to sit under the bubble tail, same edge as the bare time.
+    bubbleFooterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
+      gap: 4,
+    },
+    // The time inside the footer row drops its own marginTop (the row owns it)
+    // and gains a small gap before the tick. It carries no colour of its own so
+    // the composed timeStyle wins — bubbleTimeMe (white) on a sent pink bubble,
+    // bubbleTime (supplementary grey) on a received surface bubble. (#864)
+    bubbleFooterTime: {
+      fontSize: 10,
+      marginRight: 4,
+      // Zero the standalone bubbleTime top margin so the tick sits level with
+      // the timestamp in the footer row (the row owns vertical spacing). (#858)
+      marginTop: 0,
+    },
+    // Delivery tick (#856). Ticks only ever render on a sent (pink) bubble, so
+    // they use white for contrast — green read poorly on the brand pink (#864).
+    // Glyph alone carries the meaning: single Check = delivered to ≥1 relay,
+    // double CheckCheck = all relays, Clock = pending, AlertCircle = failed.
+    deliveryTickDelivered: {
+      color: colors.white,
+    },
+    deliveryTickPending: {
+      color: 'rgba(255,255,255,0.7)',
+    },
+    deliveryTickFailed: {
+      color: colors.red,
+    },
     invoiceCard: {
       width: 240,
       paddingTop: 12,

@@ -9,6 +9,7 @@ import {
   Animated,
   PanResponder,
   Dimensions,
+  InteractionManager,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -42,11 +43,13 @@ import {
   btcMapVerifyUrl,
   daysSinceVerified,
   fetchPlacesInBbox,
+  peekCachedPlacesSync,
   formatAddress,
   isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
@@ -93,7 +96,19 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   // kind-20069 ping subscriptions go quiet when a detail sheet/screen
   // covers the map or we navigate away (no background battery cost).
   const isFocused = useIsFocused();
-  const friends = useFriendsLiveLocations({ enabled: isFocused });
+  // Defer enabling the live-location subscription until the tab transition
+  // settles (#824) — its backlog replay otherwise lands as a second setState
+  // burst that competes with the navigation animation. Disables on blur.
+  const [friendsEnabled, setFriendsEnabled] = useState(false);
+  useEffect(() => {
+    if (!isFocused) {
+      setFriendsEnabled(false);
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => setFriendsEnabled(true));
+    return () => task.cancel();
+  }, [isFocused]);
+  const friends = useFriendsLiveLocations({ enabled: friendsEnabled });
   const friendMarkers = useMemo(
     () => friends.map((f) => ({ key: f.pubkey, lat: f.lat, lon: f.lon, avatarUri: f.avatarUri })),
     [friends],
@@ -133,8 +148,18 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   // around without re-centring the map (the camera stays anchored to
   // the user's initial pos so panning behaviour isn't fighting GPS).
   const { pos: livePos } = useUserLocation();
-  const [places, setPlaces] = useState<BtcMapPlace[]>([]);
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
+  // Seed synchronously from the warm BTC Map cache (#823) so the map paints
+  // pins on the first frame instead of a blank map until the viewport fetch
+  // returns — matches ExploreHomeScreen/PlacesScreen. The bbox fetch below
+  // then refreshes them (stale-while-revalidate).
+  const [places, setPlaces] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
+  // Coalesced (#824): a relay backlog flushed on (re)focus commits as ONE
+  // setState per flush window instead of one Map-clone + render per event —
+  // the per-event burst that froze the tab transition. `shouldReplace` keeps
+  // the newest entry per coord (same rule the inline merges used).
+  const caches = useCoalescedMap<ParsedCache>({
+    shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+  });
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
   const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -238,13 +263,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         const prefixes = geohashNeighbours(myTile);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
-          setCaches((prev) => {
-            const existing = prev.get(cache.coord);
-            if (existing && existing.createdAt >= cache.createdAt) return prev;
-            const next = new Map(prev);
-            next.set(cache.coord, cache);
-            return next;
-          });
+          caches.enqueue(cache.coord, cache);
         });
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -253,6 +272,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
       cachesCloserRef.current?.();
+      caches.flush();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -274,14 +294,11 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
       .then((mine) => {
         if (cancelled || mine.length === 0) return;
-        setCaches((prev) => {
-          const next = new Map(prev);
-          for (const c of mine) {
-            const existing = next.get(c.coord);
-            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
-          }
-          return next;
-        });
+        for (const c of mine) caches.enqueue(c.coord, c);
+        // One-shot fetch — flush now so the author's own pins commit on this
+        // frame instead of waiting on the coalesce debounce (~100ms) when the
+        // batch is under the flush threshold (Copilot review on #825).
+        caches.flush();
       })
       .catch(() => {
         // Best-effort — the nearby subscription will fill the gap if the
@@ -290,6 +307,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caches.enqueue is stable; one-shot per (signedInPubkey, userRelays)
   }, [signedInPubkey, userRelays]);
 
   // Distinct categories across the currently-loaded places — fed into
@@ -300,6 +318,18 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
     return [...seen].sort();
   }, [places]);
+
+  // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
+  // filtering `caches.map.values()` twice every render (Copilot review on #825).
+  const cacheCounts = useMemo(() => {
+    let piglets = 0;
+    let others = 0;
+    for (const c of caches.map.values()) {
+      if (c.isLpPiggy) piglets++;
+      else others++;
+    }
+    return { piglets, others };
+  }, [caches.map]);
 
   // Filtered arrays for LibreMiniMap. Same predicates the WebView path
   // used to send across the bridge — now plain memoised derived state.
@@ -333,13 +363,13 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     // serving them, so the client filters them out. The Geo-caches list
     // (HuntScreen) already does this; the map must too, else an expired Piglet
     // lingers on the map after it's gone from the list (#762).
-    return [...caches.values()].filter(
+    return [...caches.map.values()].filter(
       (c) =>
         (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
         isTrusted(c.hiderPubkey) &&
         (c.expiresAt === null || c.expiresAt > nowSec),
     );
-  }, [caches, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
+  }, [caches.map, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -462,10 +492,8 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         ) : (
           <Text style={styles.footerText}>
             {places.length} merchants
-            {caches.size > 0
-              ? ` · ${[...caches.values()].filter((c) => c.isLpPiggy).length} Piglets · ${
-                  [...caches.values()].filter((c) => !c.isLpPiggy).length
-                } caches`
+            {caches.map.size > 0
+              ? ` · ${cacheCounts.piglets} Piglets · ${cacheCounts.others} caches`
               : ''}
           </Text>
         )}
@@ -511,7 +539,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
           untrustedCacheCount={
             // Caches that would render if the WoT filter were "All".
             // Computed each render; cheap because `caches` is small.
-            [...caches.values()].filter(
+            [...caches.map.values()].filter(
               (c) =>
                 (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && !isTrusted(c.hiderPubkey),
             ).length

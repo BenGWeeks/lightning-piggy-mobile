@@ -18,6 +18,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
@@ -202,28 +203,25 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [allCaches, pubkey]);
 
-  // Found by me — kind 7516 authored by me. Sub deps are author-only;
-  // cache enrichment happens at render via `cacheByCoord`. Anything
-  // that rebuilds `cacheByCoord` (relay echo, by-author refresh, pull-
-  // to-refresh) used to restart this sub and `new Map()`-wipe the
-  // section between renders — visible as a "Found" row that flashed
-  // off and back on. See the FoundEntry comment above.
-  const [myFinds, setMyFinds] = useState<Map<string, FoundEntry>>(new Map());
+  // Found by me — kind 7516 authored by me. CoalescedMap batches the
+  // per-event `new Map(prev)` clones that otherwise cause O(N²) overhead
+  // when the relay backfills 50+ found logs in a burst.
+  const myFinds = useCoalescedMap<FoundEntry>({
+    shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+  });
   useEffect(() => {
     if (!pubkey) return undefined;
-    setMyFinds(new Map());
+    myFinds.reset();
     const close = subscribeFoundLogsByAuthors([pubkey], (e) => {
       const entry = parseFoundEvent(e);
-      setMyFinds((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(entry.coord);
-        // Keep the most recent claim per cache so re-finds don't
-        // duplicate rows. created_at is unix-seconds.
-        if (!existing || entry.createdAt > existing.createdAt) next.set(entry.coord, entry);
-        return next;
-      });
+      myFinds.enqueue(entry.coord, entry);
     });
-    return () => close();
+    return () => {
+      close();
+      myFinds.flush();
+    };
+    // myFinds.reset / enqueue / flush are stable callbacks (useCallback).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
 
   // Friends' finds — kind 7516 authored by anyone in the trust set,
@@ -235,28 +233,36 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     return Array.from(trustSet).filter((p) => p.toLowerCase() !== lower);
   }, [trustSet, pubkey]);
 
-  const [friendFinds, setFriendFinds] = useState<Map<string, FoundEntry>>(new Map());
+  // Friends' finds — batched with CoalescedMap so a burst of kind 7516
+  // events doesn't clone the friend-finds Map N times. Keyed by event id
+  // (never replaced) so the key space is unbounded — and the subscription
+  // sets no `limit` of its own, so this cap is what bounds growth: it stops
+  // relay history over a long session from ballooning the Map (and the
+  // sort-then-slice-50 in `friendList`). 200 keeps a comfortable buffer above
+  // the 50 shown.
+  const friendFinds = useCoalescedMap<FoundEntry>({
+    // Keyed by event id per the social-feed convention — never replace.
+    shouldReplace: () => false,
+    maxSize: 200,
+  });
   useEffect(() => {
-    setFriendFinds(new Map());
+    friendFinds.reset();
     if (trustedAuthors.length === 0) return undefined;
     const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
       const entry = parseFoundEvent(e);
-      setFriendFinds((prev) => {
-        // Key on event id — multiple friends finding the same cache
-        // should each get a row. (My-finds dedupes per-cache; here we
-        // want the social signal.)
-        if (prev.has(entry.id)) return prev;
-        const next = new Map(prev);
-        next.set(entry.id, entry);
-        return next;
-      });
+      friendFinds.enqueue(entry.id, entry);
     });
-    return () => close();
+    return () => {
+      close();
+      friendFinds.flush();
+    };
+    // friendFinds.reset / enqueue / flush are stable callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trustedAuthors]);
 
   const foundList = useMemo(
-    () => [...myFinds.values()].sort((a, b) => b.createdAt - a.createdAt),
-    [myFinds],
+    () => [...myFinds.map.values()].sort((a, b) => b.createdAt - a.createdAt),
+    [myFinds.map],
   );
   // Drop find-logs whose cache event hasn't reached local storage —
   // showing "Cache no longer on relays" for every one looks broken to
@@ -267,11 +273,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // having to restart the find-log subscription.
   const friendList = useMemo(
     () =>
-      [...friendFinds.values()]
+      [...friendFinds.map.values()]
         .filter((e) => cacheByCoord.has(e.coord))
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 50),
-    [friendFinds, cacheByCoord],
+    [friendFinds.map, cacheByCoord],
   );
 
   const sections: { title: string; data: SectionRow[] }[] = useMemo(

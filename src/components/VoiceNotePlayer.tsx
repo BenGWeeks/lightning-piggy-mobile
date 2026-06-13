@@ -89,6 +89,9 @@ interface Props {
   nonceHex?: string;
   mime?: string;
   testID?: string;
+  /** Optional time + delivery-tick footer (#856). When supplied it replaces
+   *  the bare timestamp so a sent voice note shows its delivery tick. */
+  footer?: React.ReactNode;
 }
 
 const VoiceNotePlayer: React.FC<Props> = ({
@@ -101,6 +104,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   nonceHex,
   mime,
   testID,
+  footer,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -264,9 +268,11 @@ const VoiceNotePlayer: React.FC<Props> = ({
           </View>
           <Text style={[styles.duration, { color: fg }]}>{failed ? '--:--' : timeLabel}</Text>
         </View>
-        <Text style={[styles.time, fromMe ? styles.timeMe : styles.timeThem]}>
-          {formatTime(createdAt)}
-        </Text>
+        {footer ?? (
+          <Text style={[styles.time, fromMe ? styles.timeMe : styles.timeThem]}>
+            {formatTime(createdAt)}
+          </Text>
+        )}
       </View>
     </View>
   );

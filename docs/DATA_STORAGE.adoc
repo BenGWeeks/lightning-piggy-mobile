@@ -45,10 +45,21 @@ changing how anything is stored.
 
 | `expo-file-system`
   (app document dir, `Paths.document`)
-| NIP-17 wrap plaintext cache, per-account (`<key>.json`, #689); BTC Map
-  places cache (`btcmap-last-result.json`)
-| The wrap cache holds *decrypted DM plaintext* (sensitive); places are public
-| App sandbox + OS FBE. *Not* app-level encrypted.
+| NIP-17 skip-set files, per-account (wrap *ids* only — no plaintext, #743);
+  BTC Map places cache (`btcmap-last-result.json`). The per-account wrap
+  *plaintext* cache (`<key>.json`, #689) is *retired* — #848 migrates it into
+  the encrypted DB and deletes it (verified).
+| Skip-set = public nonces; places are public
+| App sandbox + OS FBE. *Not* app-level encrypted (nothing here needs it).
+
+| `op-sqlite` + SQLCipher
+  (`lightningpiggy.db`, #695/#848)
+| Decrypted DM rows (`dm_messages`: NIP-17 rumors *and* NIP-04 plaintexts),
+  one row per event, keyed `(owner, event_id)`, indexed
+  `(owner, conversation, created_at)`
+| *Decrypted DM plaintext* — the most sensitive bulk data on the device
+| *Whole-file SQLCipher encryption*, key in the OS keystore (#697). Signal's
+  model — see <<keys>>.
 |===
 
 == Gotcha: the 2 MB AsyncStorage row limit
@@ -74,6 +85,13 @@ is the case for <<target>>.
 
 [[target]]
 == Target architecture (#695): indexed, encrypted SQLite
+
+NOTE: *Status:* the DM slice of this architecture is *live* as of #848 —
+`dm_messages` is wired into the inbox refresh, the live DM subscription and
+thread opens (ingest via `dmWrapIngest`/`dmIngest`, reads via `dmDb`'s indexed
+queries), with a one-time verified migration off the plaintext wrap-cache file
+(`dmStoreMigrationRunner`). Transactions/swaps and the public cache tables
+remain future slices.
 
 The blob/file caches don't scale (whole-blob parse, no indexes, the 2 MB trap).
 The target — matching how 0xchat / Damus persist Nostr data — is a single
@@ -251,19 +269,30 @@ Logout / account wipe deletes the **Keystore** secrets and the **Encrypted DB**
 **Plain cache** survive: they're either non-identifying settings or public data
 that isn't yours to wipe.
 
-=== Migration (old store → new): re-fetch, don't import
+=== Migration (old store → new): import the decrypt memo, then delete
 
-The encrypted DB is populated from the *canonical sources*, not by importing the
-old caches. Relays are already the source of truth for messages — the old wrap
-cache only memoized decryption — so we re-fetch wraps and decrypt-once into the
-DB, then *delete* the old plaintext caches (closing the at-rest gap, #690). The
-old blob/file caches are never read as a migration source.
+Relays remain the *canonical source* for messages. But the old wrap-cache file
+was never independent data — it was purely a *memo of decryptions* this app
+already performed on relay-fetched wraps. So the one-time migration (#848,
+`dmStoreMigrationRunner`) imports that memo as rows, then deletes the
+plaintext file with verification (closing the at-rest gap, #690; ordering
+enforced by `dmStoreMigration`: populate → delete → verify → flag).
+
+Why import rather than the originally-planned "re-fetch and re-decrypt"?
+Re-decrypting the whole inbox on migration day is exactly the cold-start
+decrypt sweep #846/#847 eliminated (~25 ms × hundreds of wraps on the JS
+thread). The memo preserves decrypt-once across the migration at the cost of
+one file read + one DB transaction. Anything the memo didn't cover is
+re-fetched from relays and decrypted once by the normal ingest path — so the
+worst case (corrupt/missing cache) degrades to the re-fetch plan, never to
+data loss.
 
 [mermaid]
 ....
 flowchart LR
-    R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once"| DB[("Encrypted DB")]
+    R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once<br/>(steady state)"| DB[("Encrypted DB")]
     W["Wallet backend<br/>(NWC / on-chain)"] -->|"sync"| DB
     BM["BTC Map API"] -->|"refresh"| PC["Plain places cache"]
-    OLD["Old plaintext caches<br/>(wrap cache, AsyncStorage blobs)"] -.->|"deleted, not imported"| X["discarded"]
+    OLD["Old plaintext wrap cache<br/>(decrypt memo, #689)"] -->|"one-time import (#848)"| DB
+    OLD -.->|"then deleted, verified"| X["discarded"]
 ....
