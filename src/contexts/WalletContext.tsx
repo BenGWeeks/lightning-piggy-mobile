@@ -41,6 +41,8 @@ import {
   walletLabel,
 } from '../types/wallet';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
+import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
@@ -331,7 +333,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
-    setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+    // No-op bail-out (unchanged poll → same `wallets` identity) lives in mergeWalletUpdate.
+    setWallets((prev) => mergeWalletUpdate(prev, walletId, updates));
     // Persist fresh balance to disk so the next cold start can hydrate
     // it instantly (vs paying ~9 s BDK.Wallet.create + Electrum.sync to
     // re-derive it). Fire-and-forget; failure mode is "next boot shows
@@ -1133,9 +1136,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // transactions that haven't been resolved yet. `force` (set by
         // an explicit pull-to-refresh) bypasses the fingerprint skip so
         // the resolver always does a full pass — see resolveZapSenders.
-        resolveZapSendersRef
-          .current?.(walletId, { force: opts?.force })
-          .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        // Deferred one macrotask so the resolver's `mergeResolverResults`
+        // re-render burst can't land in the same event-loop tick as the
+        // `updateWalletInState` commit above — that tick is where the
+        // incoming-payment overlay's dismiss tap was getting queued (#828).
+        setTimeout(() => {
+          resolveZapSendersRef
+            .current?.(walletId, { force: opts?.force })
+            ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        }, 0);
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
@@ -1197,29 +1206,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       };
 
-      const userPubkey = nostrService.getCurrentUserPubkey();
-      // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
-      // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
-      // Self-hosted LNbits typically tags receipts with the server's pubkey,
-      // not the user's.
-      const recipients: string[] = [];
-      if (userPubkey) recipients.push(userPubkey);
-      const lud16s = new Set<string>();
-      const currentWallet = walletsRef.current.find((w) => w.id === walletId);
-      if (currentWallet?.lightningAddress) lud16s.add(currentWallet.lightningAddress);
-      for (const lud16 of lud16s) {
-        const pk = await resolveLud16ToNostrPubkey(lud16);
-        if (pk) recipients.push(pk);
-      }
-      if (recipients.length === 0) {
-        releaseController();
-        return;
-      }
-      if (signal.aborted) {
-        releaseController();
-        return;
-      }
-
       // Snapshot the pending list via a setter so we always read the latest
       // transactions without having to thread a ref through this callback.
       // We deliberately don't require `bolt11` — cached transactions from
@@ -1279,6 +1265,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
         releaseController();
       };
+
+      // Recipient pubkeys for the `#p` filter — resolved AFTER the pending/
+      // fingerprint short-circuits so the common no-op balance tick never pays
+      // the resolveLud16ToNostrPubkey round-trip. userPubkey reused below.
+      const userPubkey = nostrService.getCurrentUserPubkey();
+      const recipients = await collectZapRecipientPubkeys(
+        userPubkey,
+        walletsRef.current.find((w) => w.id === walletId)?.lightningAddress,
+        resolveLud16ToNostrPubkey,
+      );
+      if (recipients.length === 0 || signal.aborted) {
+        releaseController();
+        return;
+      }
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');

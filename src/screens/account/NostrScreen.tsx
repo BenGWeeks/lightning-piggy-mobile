@@ -14,6 +14,7 @@ import * as amberService from '../../services/amberService';
 import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
 import { validateRelayUrl } from '../../services/nostrRelayStorage';
 import { useNostr } from '../../contexts/NostrContext';
+import { useNostrDmInbox } from '../../contexts/DmInboxContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
 
@@ -41,15 +42,9 @@ const NostrScreen: React.FC = () => {
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const {
-    profile,
-    signerType,
-    amberNip44Permission,
-    relays,
-    userRelays,
-    addUserRelay,
-    removeUserRelay,
-  } = useNostr();
+  const { profile, signerType, relays, userRelays, addUserRelay, removeUserRelay } = useNostr();
+  // From the hot DM slice, not `useNostr()` — see DmInboxContext for why.
+  const { amberNip44Permission } = useNostrDmInbox();
   const [connStatus, setConnStatus] = useState<Map<string, boolean>>(new Map());
   const [newRelayInput, setNewRelayInput] = useState('');
   const [addRelayError, setAddRelayError] = useState<string | null>(null);
