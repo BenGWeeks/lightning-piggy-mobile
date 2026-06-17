@@ -1143,7 +1143,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setTimeout(() => {
           resolveZapSendersRef
             .current?.(walletId, { force: opts?.force })
-            .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+            ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
         }, 0);
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
