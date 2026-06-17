@@ -75,6 +75,11 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
       refundPublicKey: swap.refundPublicKey,
       swapTree: swap.swapTree,
     }),
+    // Harden the recovery secrets (preimage + claim privkey) the same way
+    // the repo guards wallet credentials — device-only, never eligible for
+    // iCloud/device-migration backup (walletStorageService). Read-time access
+    // is unaffected, so swapRecoveryService still reads this on next launch.
+    { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
   );
   await swapRecoveryService.registerPendingSwap(swap.id);
 
