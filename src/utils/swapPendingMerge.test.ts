@@ -47,4 +47,32 @@ describe('preserveOptimisticSwapRows (#896)', () => {
       preserveOptimisticSwapRows([], [opt({ description: 'Pending', swapType: 'submarine' })], NOW),
     ).toHaveLength(1);
   });
+
+  it('keeps concurrent same-direction placeholders when one real leg appears', () => {
+    // Two same-direction swaps started before either settles; the first settled
+    // leg must NOT drop BOTH placeholders — we can't tell which it belongs to,
+    // so keep them and let the 1h age-out clear the straggler.
+    const fresh: WalletTransaction[] = [
+      { type: 'outgoing', amount: 30000, swapId: 'sw1', settled_at: NOW },
+    ];
+    const existing = [
+      opt({ type: 'outgoing', created_at: NOW - 30 }),
+      opt({ type: 'outgoing', created_at: NOW - 20 }),
+    ];
+    expect(preserveOptimisticSwapRows(fresh, existing, NOW)).toHaveLength(2);
+  });
+
+  it('supersedes exactly by swapId when placeholders carry one', () => {
+    // swapId-tagged placeholders: only the matching one drops, even concurrently.
+    const fresh: WalletTransaction[] = [
+      { type: 'outgoing', amount: 30000, swapId: 'sw1', settled_at: NOW },
+    ];
+    const existing = [
+      opt({ type: 'outgoing', swapId: 'sw1' }),
+      opt({ type: 'outgoing', swapId: 'sw2' }),
+    ];
+    const kept = preserveOptimisticSwapRows(fresh, existing, NOW);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].swapId).toBe('sw2');
+  });
 });

@@ -806,10 +806,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (swapError) {
             const msg = swapError instanceof Error ? swapError.message : '';
             console.warn('[Transfer] Background submarine swap failed:', msg);
-            // #894: ONLY the app's own wait-timeout is "still settling" — every
-            // Boltz FAIL_STATUS (incl transaction.refunded) routes to the
-            // refund/failure path, never "still settling".
-            if (msg.includes('Timeout waiting for swap') || msg.includes('Timeout polling swap')) {
+            // #894: ONLY an explicit Boltz FAIL_STATUS is terminal → refund path.
+            // Timeouts AND transient/network errors (e.g. "Boltz status check
+            // failed: 500", fetch failures) are ambiguous — the swap may still
+            // settle — so show "still settling", never a false "Swap Failed".
+            if (boltzService.isExplicitSwapFailure(swapError)) {
+              await promptSubmarineRefund(swap, sourceId, msg);
+            } else {
               Toast.show({
                 type: 'info',
                 text1: 'Swap still settling',
@@ -817,8 +820,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 position: 'top',
                 visibilityTime: 12000,
               });
-            } else {
-              await promptSubmarineRefund(swap, sourceId, msg);
             }
           }
         })();

@@ -12,7 +12,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 
@@ -233,24 +233,34 @@ const SWAP_META_CAP = 1000; // two keys (on-chain + LN) per swap; well above lif
 const SWAP_META_KEY = 'boltz_swap_meta_v1';
 const swapMetaByKey = new Map<string, SwapMeta>();
 let swapMetaLoaded = false;
+let swapMetaLoadPromise: Promise<void> | null = null;
 
-async function loadSwapMeta(): Promise<void> {
-  if (swapMetaLoaded) return;
-  try {
-    const raw = await SecureStore.getItemAsync(SWAP_META_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw) as [string, SwapMeta][];
-      for (const [k, v] of arr) swapMetaByKey.set(k, v);
-      while (swapMetaByKey.size > SWAP_META_CAP) {
-        const oldest = swapMetaByKey.keys().next().value;
-        if (oldest === undefined) break;
-        swapMetaByKey.delete(oldest);
+// Single-flight: the module-load kickoff and any awaiting recordSwapMeta() share
+// one in-progress load, so two concurrent reads can't race — a later-finishing
+// load re-inserting evicted "oldest" entries would make LRU eviction
+// nondeterministic (and could evict freshly recorded keys).
+function loadSwapMeta(): Promise<void> {
+  if (swapMetaLoaded) return Promise.resolve();
+  if (swapMetaLoadPromise) return swapMetaLoadPromise;
+  swapMetaLoadPromise = (async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(SWAP_META_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw) as [string, SwapMeta][];
+        for (const [k, v] of arr) swapMetaByKey.set(k, v);
+        while (swapMetaByKey.size > SWAP_META_CAP) {
+          const oldest = swapMetaByKey.keys().next().value;
+          if (oldest === undefined) break;
+          swapMetaByKey.delete(oldest);
+        }
       }
+      swapMetaLoaded = true;
+    } catch (e) {
+      console.warn('[SwapRecovery] Failed to load swap meta:', e);
+      swapMetaLoadPromise = null; // allow a retry on the next call after failure
     }
-    swapMetaLoaded = true;
-  } catch (e) {
-    console.warn('[SwapRecovery] Failed to load swap meta:', e);
-  }
+  })();
+  return swapMetaLoadPromise;
 }
 loadSwapMeta();
 
@@ -320,18 +330,9 @@ export async function recordSubmarineSwapLegs(
   swapId: string,
 ): Promise<void> {
   await recordSwapMeta(lockupTxId, swapId, 'submarine');
-  let lnPaymentHash: string | undefined;
-  if (invoice) {
-    try {
-      const decoded = bolt11Decode(invoice);
-      const phSection = decoded.sections?.find(
-        (s: { name: string }) => s.name === 'payment_hash',
-      ) as { value?: string } | undefined;
-      lnPaymentHash = phSection?.value;
-    } catch (e) {
-      console.warn('[SwapRecovery] could not decode submarine invoice for payment hash:', e);
-    }
-  }
+  // Reuse the shared BOLT11 helper (consistent decode + error handling) rather
+  // than re-implementing payment_hash extraction here.
+  const lnPaymentHash = invoice ? (paymentHashFromBolt11(invoice) ?? undefined) : undefined;
   await recordSwapMeta(lnPaymentHash, swapId, 'submarine');
 }
 
