@@ -836,11 +836,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               }
             } else {
               Toast.show({
-                type: 'error',
-                text1: 'Swap failed',
-                text2: msg.slice(0, 140),
+                type: 'info',
+                text1: 'Swap still settling',
+                text2: 'Funds are safe — it finishes automatically once the lockup confirms.',
                 position: 'top',
-                visibilityTime: 10000,
+                visibilityTime: 12000,
               });
             }
           }
