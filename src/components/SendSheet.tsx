@@ -45,8 +45,7 @@ import {
 import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
-import * as swapRecoveryService from '../services/swapRecoveryService';
-import * as SecureStore from 'expo-secure-store';
+import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSend';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
@@ -470,88 +469,19 @@ const SendSheet: React.FC<Props> = ({
           // Direct on-chain send from hot wallet
           await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
         } else {
-          // Boltz reverse swap: Lightning → on-chain.
-          //
-          // Persist the swap secrets to SecureStore *before* paying the LN
-          // invoice — `swapRecoveryService` reads these on the next launch
-          // and retries the claim if anything below throws or the app is
-          // killed mid-flow. Without persistence the random preimage and
-          // claim privkey live in JS memory only, and a failed/aborted
-          // claim leaves the on-chain HTLC permanently unspendable. See
-          // issue #481 — the same pattern TransferSheet has had since
-          // its initial Boltz integration.
-          const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await SecureStore.setItemAsync(
-            `boltz_swap_${swap.id}`,
-            JSON.stringify({
-              id: swap.id,
-              preimage: swap.preimage,
-              claimPrivateKey: swap.claimPrivateKey,
-              lockupAddress: swap.lockupAddress,
-              destinationAddress: invoiceData,
-              refundPublicKey: swap.refundPublicKey,
-              swapTree: swap.swapTree,
-            }),
-          );
-          await swapRecoveryService.registerPendingSwap(swap.id);
-          // Once payInvoiceForWallet resolves the sats have irreversibly left
-          // the wallet (LN committed). Track that so the catch below can tell
-          // a genuine pre-commit failure apart from a slow on-chain
-          // settlement that is NOT a payment failure (#891).
-          let lnCommitted = false;
-          try {
-            await payInvoiceForWallet(walletId!, swap.invoice, {
-              signal,
-              onReplyTimeout: handleReplyTimeout,
-            });
-            lnCommitted = true;
-            // Give Boltz the same generous lockup window TransferSheet uses
-            // (15 min, not 2). On-chain lockups routinely take longer than a
-            // couple of minutes, and the old 120 s timeout was the direct
-            // trigger for the false "Payment failed" in #891.
-            const lockup = await boltzService.waitForLockup(swap.id, 900000);
-            const claimTxId = await boltzService.claimSwap(swap, lockup, invoiceData);
-            // Success → drop the recovery record and record the claim so
-            // TransactionList can badge this row 'done' and the detail
-            // sheet can show the broadcast claim txid.
-            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-            await swapRecoveryService.unregisterPendingSwap(swap.id);
-            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
-          } catch (e) {
-            // Leave the persisted record in place so swapRecoveryService can
-            // retry on the next launch. The bare error from claimSwap /
-            // waitForLockup can be opaque ("unknown Error", numeric Electrum
-            // codes); PaymentProgressOverlay surfaces this as the failure
-            // subtitle. Wrap with a "Boltz swap failed:" prefix EXCEPT for
-            // ReplyTimeoutError — that one needs to keep its `name` so the
-            // outer isReplyTimeoutError() branch can route it to the
-            // "Still in flight" overlay state instead of "Payment failed".
-            const detail = e instanceof Error ? e.message || e.toString() : String(e);
-            console.warn(
-              `[Boltz] Swap ${swap.id} failed mid-flight, persisted for recovery:`,
-              detail,
-            );
-            if (isReplyTimeoutError(e)) {
-              throw e;
-            }
-            // A user-initiated cancel still routes through the outer
-            // AbortError handler (silent close), not the pending path below.
-            if ((e as Error)?.name === 'AbortError' || signal.aborted) {
-              throw e;
-            }
-            // LN already committed → a slow/failed lockup or claim is a
-            // *pending* on-chain settlement, not a payment failure. The sats
-            // have left, swapRecoveryService will finish the claim on the next
-            // launch, and showing "Payment failed" here would invite a retry
-            // and a double-send. Surface "Still in flight" instead (#891).
-            if (lnCommitted) {
-              if (dismissedInFlightRef.current) return;
-              setProgressError(undefined);
-              setProgressState('in-flight-extended');
-              return;
-            }
-            throw new Error(`Boltz swap failed: ${detail}`);
-          }
+          // Boltz reverse swap: Lightning → on-chain. The orchestration
+          // (persist-before-pay for crash recovery, pay, lockup, claim) and
+          // its #891 error contract live in reverseSwapSend — the catch
+          // below maps SwapSettlingError / ReplyTimeoutError to the
+          // "Still in flight" overlay instead of "Payment failed".
+          await executeReverseSwap({
+            walletId: walletId!,
+            destinationAddress: invoiceData,
+            amountSats: currentSats,
+            signal,
+            payInvoice: payInvoiceForWallet,
+            onReplyTimeout: handleReplyTimeout,
+          });
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
@@ -737,7 +667,10 @@ const SendSheet: React.FC<Props> = ({
       if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
       }
-      if (isReplyTimeoutError(error)) {
+      // Reply-timeout (ambiguous pay outcome) and a post-commit reverse-swap
+      // settling error both mean "the money may have moved; it'll settle" —
+      // surface "Still in flight", never "Payment failed" (#891).
+      if (isReplyTimeoutError(error) || isSwapSettlingError(error)) {
         if (dismissedInFlightRef.current) return;
         setProgressError(undefined);
         setProgressState('in-flight-extended');
