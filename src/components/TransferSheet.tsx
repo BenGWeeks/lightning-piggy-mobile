@@ -737,7 +737,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // the user can dismiss when they're ready. The background task runs
         // independently and will surface completion via toasts.
         setProgressMsg(
-          'Swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next.\n\n' +
+          'Boltz swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
@@ -827,7 +827,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
         setProgressMsg(
-          'Swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next.\n\n' +
+          'Boltz swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );

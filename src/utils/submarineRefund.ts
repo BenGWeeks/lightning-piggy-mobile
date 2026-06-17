@@ -44,7 +44,7 @@ export async function promptSubmarineRefund(
   }
   Alert.alert(
     'Swap Failed — Refund Available',
-    `The swap failed (${reason}). The refund can only be broadcast once block ${swap.timeoutBlockHeight} is reached — tap Refund to queue it; it settles at that block.`,
+    `The swap failed (${reason}). Your on-chain funds become refundable at block ${swap.timeoutBlockHeight}. Tap Refund to broadcast the refund now — if that block hasn't been reached yet it will be rejected, so try again once it has.`,
     [
       {
         text: 'Refund',

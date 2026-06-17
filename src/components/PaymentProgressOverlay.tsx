@@ -54,6 +54,11 @@ interface Props {
    * the `sending` state. Used to abort long-running NWC payments when
    * the relay is unreachable (see #175). */
   onCancel?: () => void;
+  /** When the in-flight payment is a Boltz swap (e.g. Lightning → on-chain
+   * via a reverse swap), the `in-flight-extended` state names it as a swap
+   * and explains swaps take longer — instead of the generic copy used for a
+   * plain Lightning send that's slow to confirm. */
+  inFlightIsSwap?: boolean;
 }
 
 const BUBBLE_COUNT = 140;
@@ -297,6 +302,7 @@ export default function PaymentProgressOverlay({
   errorMessage,
   onDismiss,
   onCancel,
+  inFlightIsSwap = false,
 }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -436,9 +442,15 @@ export default function PaymentProgressOverlay({
     title = 'Payment failed';
     subtitle = humanizedError.message;
   } else if (state === 'in-flight-extended') {
-    title = 'Still in flight';
-    subtitle =
-      'This is taking longer than usual to settle. The result will appear in your transactions once it does.';
+    if (inFlightIsSwap) {
+      title = 'Boltz swap in progress';
+      subtitle =
+        'Swaps take a little longer to settle. Safe to close — it finishes in the background and appears in your transactions.';
+    } else {
+      title = 'Still in flight';
+      subtitle =
+        'This is taking longer than usual to settle. The result will appear in your transactions once it does.';
+    }
   }
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour

@@ -128,6 +128,10 @@ const SendSheet: React.FC<Props> = ({
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
+  // Whether the in-flight send is a Boltz reverse swap (Lightning → on-chain).
+  // Drives the swap-aware "Boltz swap in progress" overlay copy vs the generic
+  // "Still in flight" used for a plain Lightning send that's slow to confirm.
+  const [inFlightIsSwap, setInFlightIsSwap] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Per-send AbortController so the Cancel button on PaymentProgressOverlay
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
@@ -454,6 +458,7 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     setProgressError(undefined);
     setProgressState('sending');
+    setInFlightIsSwap(false);
     dismissedInFlightRef.current = false;
     try {
       if (isOnchainAddress) {
@@ -473,7 +478,9 @@ const SendSheet: React.FC<Props> = ({
           // (persist-before-pay for crash recovery, pay, lockup, claim) and
           // its #891 error contract live in reverseSwapSend — the catch
           // below maps SwapSettlingError / ReplyTimeoutError to the
-          // "Still in flight" overlay instead of "Payment failed".
+          // swap-aware "Boltz swap in progress" overlay instead of "Payment
+          // failed".
+          setInFlightIsSwap(true);
           await executeReverseSwap({
             walletId: walletId!,
             destinationAddress: invoiceData,
@@ -1122,6 +1129,7 @@ const SendSheet: React.FC<Props> = ({
         errorMessage={progressError}
         onDismiss={handleOverlayDismiss}
         onCancel={handleCancelPayment}
+        inFlightIsSwap={inFlightIsSwap}
       />
     </>
   );
