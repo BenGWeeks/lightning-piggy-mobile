@@ -1,0 +1,9 @@
+appId: com.lightningpiggy.app.dev
+---
+# Navigate to WalletsScreen for render-count measurement
+- tapOn:
+    id: "profile-icon"
+- waitForAnimationToEnd
+- tapOn:
+    id: "drawer-row-wallets"
+- waitForAnimationToEnd
