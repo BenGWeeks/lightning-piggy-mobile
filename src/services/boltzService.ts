@@ -791,6 +791,21 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
 }
 
 /**
+ * True only for an EXPLICIT Boltz fail status thrown by `waitForLockup` /
+ * `waitForSubmarineSwapComplete` (`Swap failed with status: <FAIL_STATUS>`) —
+ * i.e. a TERMINAL failure that warrants the refund path.
+ *
+ * Timeouts (`Timeout waiting for swap …` / `Timeout polling swap …`) and
+ * transient/network errors (`Boltz status check failed: 500`, fetch failures)
+ * are AMBIGUOUS — the swap may still settle — and must NOT be treated as
+ * failures (#894).
+ */
+export function isExplicitSwapFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.startsWith('Swap failed with status: ');
+}
+
+/**
  * Poll submarine swap status until Boltz has paid the Lightning invoice.
  */
 export async function waitForSubmarineSwapComplete(

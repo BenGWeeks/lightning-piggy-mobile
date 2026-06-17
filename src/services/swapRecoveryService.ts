@@ -12,6 +12,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 
@@ -213,6 +214,134 @@ export async function recordClaimedFromPreimage(
   claimTxId: string | null,
 ): Promise<void> {
   return recordClaimedPaymentHash(paymentHashFromPreimage(preimageHex), claimTxId);
+}
+
+// ─── Swap ↔ transaction correlation (#895) ──────────────────────────────────
+// Once a swap settles, the wallet returns the underlying on-chain / Lightning
+// transactions as generic Sent/Received — they carry no swap context, so the
+// list can't badge them as a Boltz swap. We bridge that here: when the app
+// learns a key (an on-chain txid it broadcast, or the LN payment hash) belongs
+// to a swap, we record it. The tx mappers then tag the matching settled tx
+// with swapId/swapType so getTxCategory() lights up the existing Boltz UI.
+// EXACT-match only (txid / paymentHash) — never fuzzy amount/time matching.
+export type SwapKind = 'reverse' | 'submarine';
+interface SwapMeta {
+  swapId: string;
+  swapType: SwapKind;
+}
+const SWAP_META_CAP = 1000; // two keys (on-chain + LN) per swap; well above lifetime use
+const SWAP_META_KEY = 'boltz_swap_meta_v1';
+const swapMetaByKey = new Map<string, SwapMeta>();
+let swapMetaLoaded = false;
+let swapMetaLoadPromise: Promise<void> | null = null;
+
+// Single-flight: the module-load kickoff and any awaiting recordSwapMeta() share
+// one in-progress load, so two concurrent reads can't race — a later-finishing
+// load re-inserting evicted "oldest" entries would make LRU eviction
+// nondeterministic (and could evict freshly recorded keys).
+function loadSwapMeta(): Promise<void> {
+  if (swapMetaLoaded) return Promise.resolve();
+  if (swapMetaLoadPromise) return swapMetaLoadPromise;
+  swapMetaLoadPromise = (async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(SWAP_META_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw) as [string, SwapMeta][];
+        for (const [k, v] of arr) swapMetaByKey.set(k, v);
+        while (swapMetaByKey.size > SWAP_META_CAP) {
+          const oldest = swapMetaByKey.keys().next().value;
+          if (oldest === undefined) break;
+          swapMetaByKey.delete(oldest);
+        }
+      }
+      swapMetaLoaded = true;
+    } catch (e) {
+      console.warn('[SwapRecovery] Failed to load swap meta:', e);
+      swapMetaLoadPromise = null; // allow a retry on the next call after failure
+    }
+  })();
+  return swapMetaLoadPromise;
+}
+loadSwapMeta();
+
+/** Resolves once the persisted swap-meta map has finished loading. Callers that
+ *  map transactions (getSwapMeta is read synchronously) should await this first
+ *  so a fresh launch doesn't render swap legs untagged before the meta loads,
+ *  then cache them untagged (#895 / #898 — Copilot review). */
+export function ensureSwapMetaLoaded(): Promise<void> {
+  return loadSwapMeta();
+}
+
+/** Tag a transaction key (lowercased on-chain txid OR LN payment hash) as
+ *  belonging to a swap, so the tx list can badge it as a Boltz swap (#895).
+ *  No-op on empty keys. Fire-and-forget persistence. */
+export async function recordSwapMeta(
+  key: string | null | undefined,
+  swapId: string,
+  swapType: SwapKind,
+): Promise<void> {
+  if (!key) return;
+  await loadSwapMeta();
+  const k = key.toLowerCase();
+  swapMetaByKey.delete(k);
+  swapMetaByKey.set(k, { swapId, swapType });
+  while (swapMetaByKey.size > SWAP_META_CAP) {
+    const oldest = swapMetaByKey.keys().next().value;
+    if (oldest === undefined) break;
+    swapMetaByKey.delete(oldest);
+  }
+  persistSwapMeta();
+}
+
+// Serialize persistence so two rapid recordSwapMeta calls (a swap records its
+// on-chain + LN legs back-to-back) can't race and land out of order, dropping
+// the later entry from disk — the bug that left a recovered reverse-swap claim
+// untagged on the next launch (#895). Each queued write snapshots the CURRENT
+// map, so even a late-scheduled write persists the freshest state.
+let swapMetaPersistQueue: Promise<void> = Promise.resolve();
+function persistSwapMeta(): void {
+  swapMetaPersistQueue = swapMetaPersistQueue
+    .catch(() => undefined)
+    .then(() =>
+      SecureStore.setItemAsync(SWAP_META_KEY, JSON.stringify(Array.from(swapMetaByKey.entries()))),
+    )
+    .then(() => undefined)
+    .catch((e) => console.warn('[SwapRecovery] Failed to save swap meta:', e));
+}
+
+/** Look up swap metadata for an on-chain txid or LN payment hash. Returns
+ *  undefined when the key isn't a known swap leg. */
+export function getSwapMeta(key: string | null | undefined): SwapMeta | undefined {
+  if (!key) return undefined;
+  return swapMetaByKey.get(key.toLowerCase());
+}
+
+/** Record both legs of a REVERSE swap (LN → on-chain): the outgoing LN
+ *  payment (hash = sha256(preimage)) and the on-chain claim tx we broadcast.
+ *  Call after a successful claim (live send or recovery) so both settled
+ *  legs badge as a Boltz swap (#895). */
+export async function recordReverseSwapLegs(
+  preimageHex: string,
+  claimTxId: string | null | undefined,
+  swapId: string,
+): Promise<void> {
+  await recordSwapMeta(paymentHashFromPreimage(preimageHex), swapId, 'reverse');
+  if (claimTxId) await recordSwapMeta(claimTxId, swapId, 'reverse');
+}
+
+/** Record both legs of a SUBMARINE swap (on-chain → LN): the on-chain lockup
+ *  tx we broadcast and the incoming LN payment hash (decoded from the invoice
+ *  Boltz pays). (#895) */
+export async function recordSubmarineSwapLegs(
+  lockupTxId: string | null | undefined,
+  invoice: string | null | undefined,
+  swapId: string,
+): Promise<void> {
+  await recordSwapMeta(lockupTxId, swapId, 'submarine');
+  // Reuse the shared BOLT11 helper (consistent decode + error handling) rather
+  // than re-implementing payment_hash extraction here.
+  const lnPaymentHash = invoice ? (paymentHashFromBolt11(invoice) ?? undefined) : undefined;
+  await recordSwapMeta(lnPaymentHash, swapId, 'submarine');
 }
 
 /**
@@ -486,6 +615,9 @@ async function recoverSwap(swapId: string): Promise<void> {
     }
     console.log(`[SwapRecovery] Swap ${swapId} claimed successfully (claim tx ${claimTxId})`);
     if (paymentHash) recordClaimedPaymentHash(paymentHash, claimTxId);
+    // Tag both legs so the settled LN send + on-chain claim badge as a swap (#895).
+    if (paymentHash) recordSwapMeta(paymentHash, swapId, 'reverse');
+    if (claimTxId) recordSwapMeta(claimTxId, swapId, 'reverse');
     Toast.show({
       type: 'success',
       text1: 'Swap recovered',

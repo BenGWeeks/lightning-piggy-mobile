@@ -665,13 +665,15 @@ export async function payInvoice(
             );
             return { preimage: lookup.preimage };
           }
-          // No usable preimage. Either the lookup says unpaid/pending,
-          // or it's paid but the backend omitted preimage (LNbits has
-          // been seen to do this). Both are real-failure surfaces for
-          // pay_invoice; the caller re-throws and the swap is treated
-          // as unpaid until the next recovery pass.
+          // No usable preimage — BUT the lookup's paid=false is NOT a
+          // reliable "definitely failed" signal here. LNbits has been seen
+          // to report unpaid inside the same ~2500 ms window the payment
+          // actually settles (verified live in #891: the LN balance
+          // dropped 25k while this very branch logged paid=false). Treat
+          // this as status-UNKNOWN, not a failure — the throw below routes
+          // it to the "still in flight / check before retry" UX.
           console.warn(
-            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — treating as failure (paymentHash=${paymentHash.slice(0, 8)})`,
+            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — payment status UNKNOWN (paymentHash=${paymentHash.slice(0, 8)})`,
           );
         } catch (lookupErr) {
           // lookup itself threw — most ambiguous case. We don't know if
@@ -692,6 +694,17 @@ export async function payInvoice(
           `[NWC] pay_invoice "${msg}" + could not extract paymentHash from bolt11 — payment status unknown`,
         );
       }
+      // We hit the ambiguous Alby-SDK "unknown Error"/INTERNAL wrap and
+      // could NOT positively confirm the payment settled. The outcome is
+      // genuinely UNKNOWN — the lookup's paid=false above is unreliable in
+      // this window (#891). Surfacing it as a hard failure invites a
+      // double-pay (the user retries) and, for a Boltz reverse swap, the
+      // sats may already be locked up with recovery pending. Throw a
+      // ReplyTimeoutError so callers route to the "still in flight / check
+      // before retry" UX instead of "Payment failed" (#891, mirrors #648).
+      throw createReplyTimeoutError(
+        'Wallet returned an ambiguous response; the payment may have gone through. Check your balance before retrying.',
+      );
     }
     throw error;
   }

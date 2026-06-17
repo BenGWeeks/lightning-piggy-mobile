@@ -26,6 +26,7 @@ import {
   type AnnouncedReceipt,
 } from '../utils/incomingReceipts';
 import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
+import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -1093,6 +1094,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!wallet) return;
 
       try {
+        // Load swap-meta before mapping so swap legs tag on the first fetch
+        // after launch (getSwapMeta is sync), not a refresh later (#895/#898).
+        await swapRecoveryService.ensureSwapMetaLoaded();
         let txs: WalletTransaction[];
         if (wallet.walletType === 'onchain') {
           // Single sync for both balance + transactions (avoids double Electrum sync)
@@ -1100,15 +1104,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (result.balance !== null) {
             updateWalletInState(walletId, { balance: result.balance });
           }
-          txs = result.transactions.map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.confirmed ? (tx.type === 'incoming' ? 'Received' : 'Sent') : 'Pending',
-            settled_at: tx.timestamp,
-            created_at: tx.timestamp,
-            blockHeight: tx.blockHeight,
-            txid: tx.txid,
-          }));
+          // mapOnchainTransactions tags Boltz swap legs by txid (#895) and
+          // preserves optimistic swap placeholder rows across the refresh (#896).
+          const existingOnchain =
+            walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
+          txs = mapOnchainTransactions(result.transactions, existingOnchain);
         } else {
           const raw = await nwcService.listTransactions(walletId);
           // Carries forward resolved zap-counterparties + optimistic rows the

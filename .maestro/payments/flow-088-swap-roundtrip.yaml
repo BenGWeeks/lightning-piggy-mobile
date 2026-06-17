@@ -13,19 +13,20 @@ name: Boltz roundtrip — Lightning → on-chain → Lightning (sweep-back)
 # without bleeding Big Piggy's balance over multiple iterations.
 #
 # NOT FOR CI. Total runtime can hit 8 minutes (4 each direction
-# in the worst case). Manual run:
+# in the worst case). Manual run (self-contained — leg 1 now types the
+# BIP-21 from MAESTRO_ADDR_BIG, no clipboard seeding):
 #
 #   source .env
-#   echo -n "bitcoin:${MAESTRO_ADDR_BIG}?amount=0.00025" | xclip -selection clipboard
-#   maestro test .maestro/payments/flow-088-swap-roundtrip.yaml
+#   maestro test -e MAESTRO_ADDR_BIG="$MAESTRO_ADDR_BIG" \
+#     .maestro/payments/flow-088-swap-roundtrip.yaml
 #
 # Preconditions are the union of both legs:
 #   - AVD signed in as Big Piggy
 #   - ≥30k sats spendable on Lightning (covers leg 1's 25k + fees)
 #   - Big Piggy on-chain wallet imported (so leg 2 has somewhere to
 #     pull from)
-#   - Clipboard seeded with the BIP-21 for leg 1 (the submarine
-#     leg drives TransferSheet, no clipboard needed)
+#   - MAESTRO_ADDR_BIG passed via -e (leg 1 types it into the send
+#     input; the submarine leg drives TransferSheet, no address needed)
 
 # Leg 1: Lightning → on-chain (reverse swap, 25k sats)
 - runFlow:

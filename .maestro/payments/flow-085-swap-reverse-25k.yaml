@@ -17,18 +17,18 @@ name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
 # NOT FOR CI. Filename intentionally lacks a CI-friendly marker;
 # `.maestro/reporting/run-all.sh` should skip funds-spending tests via a
 # pattern like `! -name 'test-swap-reverse-25k.yaml'`. Run manually
-# when validating the Boltz happy-path:
+# when validating the Boltz happy-path (self-contained — no clipboard
+# seeding needed; the BIP-21 is typed straight into the send input):
 #
 #   source .env
-#   echo -n "bitcoin:${MAESTRO_ADDR_BIG}?amount=0.00025" | xclip -selection clipboard
-#   maestro test .maestro/payments/flow-085-swap-reverse-25k.yaml
+#   maestro test -e MAESTRO_ADDR_BIG="$MAESTRO_ADDR_BIG" \
+#     .maestro/payments/flow-085-swap-reverse-25k.yaml
 #
 # Preconditions:
 #   - AVD signed in as Big Piggy (≥30k sats Lightning balance to cover
 #     the 25k swap + Boltz/miner fees + one bolt11 retry buffer)
 #   - Active wallet is Big Piggy's NWC (the swap-test designate)
-#   - MAESTRO_ADDR_BIG set in .env, clipboard pre-seeded with the
-#     bitcoin:<addr>?amount=0.00025 BIP-21
+#   - MAESTRO_ADDR_BIG passed via -e (its own on-chain receive address)
 #   - Network reachable to relay.boltz.exchange (Boltz API)
 
 - launchApp:
@@ -53,10 +53,20 @@ name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
 - waitForAnimationToEnd:
     timeout: 1500
 
+# Type the BIP-21 directly into the input (self-contained — no reliance
+# on a pre-seeded device clipboard, which doesn't sync from the host on
+# an emulator). The `amount=0.00025` BTC = 25,000 sats clears the Boltz
+# 25k minimum.
 - tapOn:
-    id: 'send-paste-clipboard'
+    id: 'send-paste-input'
+- tapOn:
+    id: 'send-paste-input'
+- eraseText:
+    charactersToErase: 200
+- inputText: 'bitcoin:${MAESTRO_ADDR_BIG}?amount=0.00025'
+- pressKey: back
 - waitForAnimationToEnd:
-    timeout: 1500
+    timeout: 1000
 
 - tapOn:
     id: 'send-paste-go'
@@ -70,12 +80,18 @@ name: Boltz reverse swap — full happy path, 25k sats Lightning → on-chain
 
 - takeScreenshot: pre-send-25k
 
-# Tap Send. The button has no testID at the time of writing — title
-# 'Send' at index 0 is the modal title, the button is index 1. (See
-# SendSheet.tsx:1040; future fix: add a testID.)
+# Tap Send (testID added since the original flow).
 - tapOn:
-    text: 'Send'
-    index: 1
+    id: 'sendsheet-send-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# A 25k send is over the "large send" confirm threshold, so a
+# BrandedAlert appears first — confirm it to fire the swap. Optional so
+# the flow still works if the threshold is raised above 25k later.
+- tapOn:
+    text: 'Confirm'
+    optional: true
 
 # PaymentProgressOverlay walks through:
 #   1. Creating swap (Boltz API call) → ~1-3 s

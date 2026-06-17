@@ -22,6 +22,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import { promptSubmarineRefund } from '../utils/submarineRefund';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -554,6 +555,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       description: swapLabel,
       created_at: now,
       settled_at: null,
+      // Flag so the tx-list merge keeps this row across a pull-to-refresh
+      // until the real swap leg settles (#896).
+      optimistic: true,
     });
     // Skip pending-tx for cross-profile destinations — that wallet
     // belongs to a different profile and isn't in the active wallets
@@ -565,6 +569,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         description: swapLabel,
         created_at: now,
         settled_at: null,
+        optimistic: true,
       });
     }
 
@@ -732,7 +737,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // the user can dismiss when they're ready. The background task runs
         // independently and will surface completion via toasts.
         setProgressMsg(
-          'Swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next.\n\n' +
+          'Boltz swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
@@ -765,7 +770,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
-        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        const lockupTxId = await onchainService.sendTransaction(
+          sourceId,
+          swap.address,
+          swap.expectedAmount,
+        );
+        // Tag both legs so the settled on-chain lockup + LN receive badge as a
+        // Boltz swap rather than generic Sent/Received (#895).
+        await swapRecoveryService.recordSubmarineSwapLegs(lockupTxId, invoice, swap.id);
         const submarineAmount = swap.expectedAmount;
         // Same closure-capture pattern as the reverse-swap branch.
         const destIsCrossProfileSubmarine = isCrossProfile;
@@ -794,53 +806,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (swapError) {
             const msg = swapError instanceof Error ? swapError.message : '';
             console.warn('[Transfer] Background submarine swap failed:', msg);
-            if (
-              msg.includes('swap.expired') ||
-              msg.includes('invoice.failedToPay') ||
-              msg.includes('transaction.lockupFailed')
-            ) {
-              const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
-              if (lockup) {
-                const destAddr = await onchainService.getNextReceiveAddress(sourceId);
-                Alert.alert(
-                  'Swap Failed — Refund Available',
-                  `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
-                  [
-                    {
-                      text: 'Refund Now',
-                      onPress: async () => {
-                        try {
-                          await boltzService.refundSwap(swap, lockup, destAddr);
-                          await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
-                          Toast.show({
-                            type: 'success',
-                            text1: 'Refund sent',
-                            text2: 'Your refund transaction has been broadcast.',
-                            position: 'top',
-                            visibilityTime: 8000,
-                          });
-                        } catch (refundErr) {
-                          Toast.show({
-                            type: 'error',
-                            text1: 'Refund failed',
-                            text2: refundErr instanceof Error ? refundErr.message : 'Refund failed',
-                            position: 'top',
-                            visibilityTime: 10000,
-                          });
-                        }
-                      },
-                    },
-                    { text: 'Later', style: 'cancel' },
-                  ],
-                );
-              }
+            // #894: ONLY an explicit Boltz FAIL_STATUS is terminal → refund path.
+            // Timeouts AND transient/network errors (e.g. "Boltz status check
+            // failed: 500", fetch failures) are ambiguous — the swap may still
+            // settle — so show "still settling", never a false "Swap Failed".
+            if (boltzService.isExplicitSwapFailure(swapError)) {
+              await promptSubmarineRefund(swap, sourceId, msg);
             } else {
               Toast.show({
-                type: 'error',
-                text1: 'Swap failed',
-                text2: msg.slice(0, 140),
+                type: 'info',
+                text1: 'Swap still settling',
+                text2: 'Funds are safe — it finishes automatically once the lockup confirms.',
                 position: 'top',
-                visibilityTime: 10000,
+                visibilityTime: 12000,
               });
             }
           }
@@ -849,7 +827,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
         setProgressMsg(
-          'Swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next.\n\n' +
+          'Boltz swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
