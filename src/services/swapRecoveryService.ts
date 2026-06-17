@@ -272,10 +272,23 @@ export async function recordSwapMeta(
     if (oldest === undefined) break;
     swapMetaByKey.delete(oldest);
   }
-  SecureStore.setItemAsync(
-    SWAP_META_KEY,
-    JSON.stringify(Array.from(swapMetaByKey.entries())),
-  ).catch((e) => console.warn('[SwapRecovery] Failed to save swap meta:', e));
+  persistSwapMeta();
+}
+
+// Serialize persistence so two rapid recordSwapMeta calls (a swap records its
+// on-chain + LN legs back-to-back) can't race and land out of order, dropping
+// the later entry from disk — the bug that left a recovered reverse-swap claim
+// untagged on the next launch (#895). Each queued write snapshots the CURRENT
+// map, so even a late-scheduled write persists the freshest state.
+let swapMetaPersistQueue: Promise<void> = Promise.resolve();
+function persistSwapMeta(): void {
+  swapMetaPersistQueue = swapMetaPersistQueue
+    .catch(() => undefined)
+    .then(() =>
+      SecureStore.setItemAsync(SWAP_META_KEY, JSON.stringify(Array.from(swapMetaByKey.entries()))),
+    )
+    .then(() => undefined)
+    .catch((e) => console.warn('[SwapRecovery] Failed to save swap meta:', e));
 }
 
 /** Look up swap metadata for an on-chain txid or LN payment hash. Returns

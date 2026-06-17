@@ -438,7 +438,7 @@ export default function PaymentProgressOverlay({
   } else if (state === 'in-flight-extended') {
     title = 'Still in flight';
     subtitle =
-      'Lightning payments via bridge nodes can take 1–2 min. The result will appear in your transactions once the network settles.';
+      'This is taking longer than usual to settle. The result will appear in your transactions once it does.';
   }
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
