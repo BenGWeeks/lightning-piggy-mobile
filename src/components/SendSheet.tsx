@@ -494,12 +494,22 @@ const SendSheet: React.FC<Props> = ({
             }),
           );
           await swapRecoveryService.registerPendingSwap(swap.id);
+          // Once payInvoiceForWallet resolves the sats have irreversibly left
+          // the wallet (LN committed). Track that so the catch below can tell
+          // a genuine pre-commit failure apart from a slow on-chain
+          // settlement that is NOT a payment failure (#891).
+          let lnCommitted = false;
           try {
             await payInvoiceForWallet(walletId!, swap.invoice, {
               signal,
               onReplyTimeout: handleReplyTimeout,
             });
-            const lockup = await boltzService.waitForLockup(swap.id, 120000);
+            lnCommitted = true;
+            // Give Boltz the same generous lockup window TransferSheet uses
+            // (15 min, not 2). On-chain lockups routinely take longer than a
+            // couple of minutes, and the old 120 s timeout was the direct
+            // trigger for the false "Payment failed" in #891.
+            const lockup = await boltzService.waitForLockup(swap.id, 900000);
             const claimTxId = await boltzService.claimSwap(swap, lockup, invoiceData);
             // Success → drop the recovery record and record the claim so
             // TransactionList can badge this row 'done' and the detail
@@ -523,6 +533,22 @@ const SendSheet: React.FC<Props> = ({
             );
             if (isReplyTimeoutError(e)) {
               throw e;
+            }
+            // A user-initiated cancel still routes through the outer
+            // AbortError handler (silent close), not the pending path below.
+            if ((e as Error)?.name === 'AbortError' || signal.aborted) {
+              throw e;
+            }
+            // LN already committed → a slow/failed lockup or claim is a
+            // *pending* on-chain settlement, not a payment failure. The sats
+            // have left, swapRecoveryService will finish the claim on the next
+            // launch, and showing "Payment failed" here would invite a retry
+            // and a double-send. Surface "Still in flight" instead (#891).
+            if (lnCommitted) {
+              if (dismissedInFlightRef.current) return;
+              setProgressError(undefined);
+              setProgressState('in-flight-extended');
+              return;
             }
             throw new Error(`Boltz swap failed: ${detail}`);
           }
