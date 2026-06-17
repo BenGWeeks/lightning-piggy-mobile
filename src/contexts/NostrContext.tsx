@@ -220,15 +220,6 @@ interface NostrContextType {
    * refresh ingested (it writes the store, not the per-conv blob).
    */
   loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
-  /**
-   * Tri-state for the NIP-17 silent-decrypt fast path.
-   *  - 'unknown': haven't tried yet in this session
-   *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
-   *  - 'denied':  a decrypt rejected with PERMISSION_NOT_GRANTED → Account
-   *              should surface a one-tap grant button rather than flood the
-   *              signer with dialogs on subsequent refreshes
-   */
-  amberNip44Permission: 'unknown' | 'granted' | 'denied';
   signEvent: (event: {
     kind: number;
     created_at: number;
@@ -270,6 +261,23 @@ const NostrContactsContext = createContext<NostrContactsContextType | undefined>
 // JS engine started executing our code" — the upstream of every other
 // [Perf] line in this file.
 perfLog('NostrContext module-eval');
+
+/**
+ * Shallow field-equality for own-profile updates. Every `loadProfile` /
+ * `loadProfileFromCache` call builds a *fresh* object (JSON.parse / relay
+ * fetch), and Home/Friends call `refreshProfile()` on every tab focus — so
+ * without this guard each focus minted a new `profile` identity, rebuilt the
+ * main context value, and re-rendered every `useNostr()` consumer even when
+ * nothing changed. Profile fields are all primitives, so shallow compare is
+ * exact.
+ */
+const sameProfile = (a: NostrProfile | null, b: NostrProfile): boolean => {
+  if (!a) return false;
+  const ka = Object.keys(a) as (keyof NostrProfile)[];
+  const kb = Object.keys(b) as (keyof NostrProfile)[];
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.is(a[k], b[k]));
+};
 
 let __nostrProviderFirstRenderLogged = false;
 let __nostrProviderLoggedInLogged = false;
@@ -430,14 +438,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
       );
       if (!opts?.force && cached && ageMs < CACHE_MAX_AGE_MS) {
-        setProfile(cached);
+        setProfile((prev) => (sameProfile(prev, cached) ? prev : cached));
         if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
         return;
       }
       const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
       if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
       if (fetchedProfile) {
-        setProfile(fetchedProfile);
+        setProfile((prev) => (sameProfile(prev, fetchedProfile) ? prev : fetchedProfile));
         InteractionManager.runAfterInteractions(() => {
           AsyncStorage.setItem(
             perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
@@ -477,7 +485,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
       if (!raw) return false;
       const cached = JSON.parse(raw) as NostrProfile;
-      setProfile(cached);
+      setProfile((prev) => (sameProfile(prev, cached) ? prev : cached));
       return true;
     } catch (error) {
       console.warn('Failed to load profile cache:', error);
@@ -1746,7 +1754,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       loadInitialConversation,
       appendLocalDmMessage,
       persistDeliveryStatuses,
-      amberNip44Permission,
       signEvent,
     }),
     [
@@ -1777,7 +1784,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       loadInitialConversation,
       appendLocalDmMessage,
       persistDeliveryStatuses,
-      amberNip44Permission,
       signEvent,
     ],
   );
@@ -1792,9 +1798,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Sibling value carrying the hot DM-inbox slice (#806). Memoised separately
   // so a decrypted message rebuilds only this — not `contextValue` above — and
   // only `useNostrDmInbox()` consumers re-render on inbox churn.
+  // `amberNip44Permission` lives here (not in the main value) because it is
+  // DM-subsystem state flipped by every Amber inbox drain — in the main value
+  // each flip re-rendered all ~40 `useNostr()` consumers for a field only the
+  // account screen reads.
   const dmInboxValue = useMemo(
-    () => ({ dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub }),
-    [dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub],
+    () => ({ dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub, amberNip44Permission }),
+    [dmInbox, dmInboxLoading, refreshDmInbox, armLiveDmSub, amberNip44Permission],
   );
 
   return (

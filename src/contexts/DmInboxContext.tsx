@@ -43,6 +43,20 @@ export interface DmInboxContextType {
    * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
    */
   armLiveDmSub: () => void;
+  /**
+   * Tri-state for the NIP-17 silent-decrypt fast path.
+   *  - 'unknown': haven't tried yet in this session
+   *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
+   *  - 'denied':  a decrypt rejected with PERMISSION_NOT_GRANTED → Account
+   *              should surface a one-tap grant button rather than flood the
+   *              signer with dialogs on subsequent refreshes
+   *
+   * Lives on this hot slice (not the stable `useNostr()` value) because the
+   * Amber DM loop flips it on every inbox drain — in the main context value
+   * that re-rendered all ~40 `useNostr()` consumers per refresh for a field
+   * only the account screen reads.
+   */
+  amberNip44Permission: 'unknown' | 'granted' | 'denied';
 }
 
 export const DmInboxContext = createContext<DmInboxContextType | undefined>(undefined);
