@@ -22,6 +22,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import { promptSubmarineRefund } from '../utils/submarineRefund';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -794,47 +795,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (swapError) {
             const msg = swapError instanceof Error ? swapError.message : '';
             console.warn('[Transfer] Background submarine swap failed:', msg);
-            if (
-              msg.includes('swap.expired') ||
-              msg.includes('invoice.failedToPay') ||
-              msg.includes('transaction.lockupFailed')
-            ) {
-              const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
-              if (lockup) {
-                const destAddr = await onchainService.getNextReceiveAddress(sourceId);
-                Alert.alert(
-                  'Swap Failed — Refund Available',
-                  `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
-                  [
-                    {
-                      text: 'Refund Now',
-                      onPress: async () => {
-                        try {
-                          await boltzService.refundSwap(swap, lockup, destAddr);
-                          await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
-                          Toast.show({
-                            type: 'success',
-                            text1: 'Refund sent',
-                            text2: 'Your refund transaction has been broadcast.',
-                            position: 'top',
-                            visibilityTime: 8000,
-                          });
-                        } catch (refundErr) {
-                          Toast.show({
-                            type: 'error',
-                            text1: 'Refund failed',
-                            text2: refundErr instanceof Error ? refundErr.message : 'Refund failed',
-                            position: 'top',
-                            visibilityTime: 10000,
-                          });
-                        }
-                      },
-                    },
-                    { text: 'Later', style: 'cancel' },
-                  ],
-                );
-              }
-            } else {
+            // #894: ONLY the app's own wait-timeout is "still settling" — every
+            // Boltz FAIL_STATUS (incl transaction.refunded) routes to the
+            // refund/failure path, never "still settling".
+            if (msg.includes('Timeout waiting for swap') || msg.includes('Timeout polling swap')) {
               Toast.show({
                 type: 'info',
                 text1: 'Swap still settling',
@@ -842,6 +806,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 position: 'top',
                 visibilityTime: 12000,
               });
+            } else {
+              await promptSubmarineRefund(swap, sourceId, msg);
             }
           }
         })();
