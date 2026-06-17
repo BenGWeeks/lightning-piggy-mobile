@@ -75,4 +75,23 @@ describe('preserveOptimisticSwapRows (#896)', () => {
     expect(kept).toHaveLength(1);
     expect(kept[0].swapId).toBe('sw2');
   });
+
+  it('keeps a new placeholder when only a HISTORICAL same-type swap is in the list', () => {
+    // A swapId-tagged tx already present in `existing` (a prior swap) must NOT
+    // supersede a brand-new placeholder whose own leg hasn't settled (#895 edge,
+    // Copilot review).
+    const historical: WalletTransaction = {
+      type: 'incoming',
+      amount: 99,
+      swapId: 'old',
+      settled_at: NOW - 9999,
+    };
+    const kept = preserveOptimisticSwapRows(
+      [historical],
+      [historical, opt({ type: 'incoming' })],
+      NOW,
+    );
+    expect(kept).toHaveLength(1);
+    expect(kept[0].swapId).toBeUndefined();
+  });
 });

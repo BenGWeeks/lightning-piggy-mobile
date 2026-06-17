@@ -264,6 +264,14 @@ function loadSwapMeta(): Promise<void> {
 }
 loadSwapMeta();
 
+/** Resolves once the persisted swap-meta map has finished loading. Callers that
+ *  map transactions (getSwapMeta is read synchronously) should await this first
+ *  so a fresh launch doesn't render swap legs untagged before the meta loads,
+ *  then cache them untagged (#895 / #898 — Copilot review). */
+export function ensureSwapMetaLoaded(): Promise<void> {
+  return loadSwapMeta();
+}
+
 /** Tag a transaction key (lowercased on-chain txid OR LN payment hash) as
  *  belonging to a swap, so the tx list can badge it as a Boltz swap (#895).
  *  No-op on empty keys. Fire-and-forget persistence. */

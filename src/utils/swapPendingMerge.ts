@@ -40,8 +40,16 @@ export function preserveOptimisticSwapRows(
 
   // Exact, per-swap supersession: fresh real legs tagged with the same swapId.
   const freshSwapIds = new Set(fresh.map((t) => t.swapId).filter((id): id is string => id != null));
-  // Direction-level supersession: which types have a fresh swapId-tagged leg…
-  const freshSwapTypes = new Set(fresh.filter((t) => t.swapId).map((t) => t.type));
+  // Direction-level supersession: which types have a NEWLY-appeared swapId-tagged
+  // leg this refresh. Keyed on "new" (swapId absent from `existing`) so a
+  // *historical* same-type swap can't drop a brand-new placeholder whose own
+  // real leg hasn't settled yet (Copilot review).
+  const existingSwapIds = new Set(
+    existing.map((t) => t.swapId).filter((id): id is string => id != null),
+  );
+  const newlySettledTypes = new Set(
+    fresh.filter((t) => t.swapId != null && !existingSwapIds.has(t.swapId)).map((t) => t.type),
+  );
   // …but only safe when we hold exactly one optimistic row of that type.
   const optimisticCountByType = new Map<WalletTransaction['type'], number>();
   for (const t of optimistic) {
@@ -56,7 +64,7 @@ export function preserveOptimisticSwapRows(
     // its type — with multiple concurrent same-direction swaps we can't tell
     // which the fresh leg belongs to, so keep them and let the 1h age-out clear
     // any straggler (#896).
-    if (freshSwapTypes.has(t.type) && optimisticCountByType.get(t.type) === 1) return false;
+    if (newlySettledTypes.has(t.type) && optimisticCountByType.get(t.type) === 1) return false;
     return true;
   });
 }
