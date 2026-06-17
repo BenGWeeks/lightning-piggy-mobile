@@ -16,6 +16,7 @@ jest.mock('../services/swapRecoveryService', () => ({
   registerPendingSwap: jest.fn(async () => undefined),
   unregisterPendingSwap: jest.fn(async () => undefined),
   recordClaimedFromPreimage: jest.fn(async () => undefined),
+  recordReverseSwapLegs: jest.fn(async () => undefined),
 }));
 jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(async () => undefined),

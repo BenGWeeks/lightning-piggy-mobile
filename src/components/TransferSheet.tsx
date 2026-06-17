@@ -555,6 +555,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       description: swapLabel,
       created_at: now,
       settled_at: null,
+      // Flag so the tx-list merge keeps this row across a pull-to-refresh
+      // until the real swap leg settles (#896).
+      optimistic: true,
     });
     // Skip pending-tx for cross-profile destinations — that wallet
     // belongs to a different profile and isn't in the active wallets
@@ -566,6 +569,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         description: swapLabel,
         created_at: now,
         settled_at: null,
+        optimistic: true,
       });
     }
 
@@ -766,7 +770,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
-        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        const lockupTxId = await onchainService.sendTransaction(
+          sourceId,
+          swap.address,
+          swap.expectedAmount,
+        );
+        // Tag both legs so the settled on-chain lockup + LN receive badge as a
+        // Boltz swap rather than generic Sent/Received (#895).
+        await swapRecoveryService.recordSubmarineSwapLegs(lockupTxId, invoice, swap.id);
         const submarineAmount = swap.expectedAmount;
         // Same closure-capture pattern as the reverse-swap branch.
         const destIsCrossProfileSubmarine = isCrossProfile;

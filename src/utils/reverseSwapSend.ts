@@ -103,6 +103,8 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
     await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
     await swapRecoveryService.unregisterPendingSwap(swap.id);
     await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
+    // Tag both legs so the settled LN send + on-chain claim badge as a swap (#895).
+    await swapRecoveryService.recordReverseSwapLegs(swap.preimage, claimTxId, swap.id);
   } catch (e) {
     // Leave the persisted record in place so swapRecoveryService can retry
     // on the next launch.
