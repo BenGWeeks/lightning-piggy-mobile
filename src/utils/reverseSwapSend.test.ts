@@ -101,13 +101,31 @@ describe('executeReverseSwap — #891 error contract', () => {
     expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
   });
 
-  it('rethrows AbortError on user cancel', async () => {
+  it('rethrows AbortError on a PRE-commit user cancel', async () => {
     const payInvoice = jest.fn(async () => {
       throw named('AbortError', 'cancelled');
     });
     await expect(executeReverseSwap(params({ payInvoice }))).rejects.toMatchObject({
       name: 'AbortError',
     });
+  });
+
+  it('a POST-commit cancel surfaces as SwapSettlingError, never a silent abort', async () => {
+    // The LN payment commits, THEN the user cancels while we await the lockup.
+    // A silent AbortError here would reintroduce the #891 double-send risk, so
+    // the committed state must win (Copilot review).
+    const ctrl = new AbortController();
+    (boltzService.waitForLockup as jest.Mock).mockImplementation(async () => {
+      ctrl.abort();
+      throw named('AbortError', 'cancelled');
+    });
+    let err: unknown;
+    try {
+      await executeReverseSwap(params({ signal: ctrl.signal }));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(SwapSettlingError);
   });
 
   it('throws "Boltz swap failed" on a genuine pre-commit failure', async () => {

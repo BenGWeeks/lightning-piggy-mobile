@@ -113,12 +113,14 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
     // ReplyTimeoutError keeps its name so the caller routes it to the
     // "still in flight" overlay (ambiguous pay outcome, #891).
     if (isReplyTimeoutError(e)) throw e;
-    // User-initiated cancel → caller's AbortError handler (silent close).
-    if ((e as Error)?.name === 'AbortError' || signal.aborted) throw e;
-    // LN already committed → a slow/failed lockup or claim is a pending
-    // on-chain settlement, not a failure. Recovery finishes the claim on
-    // next launch; "Payment failed" here would invite a double-send.
+    // Once the LN payment has committed, NEVER swallow the error silently —
+    // even a user cancel during lockup/claim must surface as "still settling",
+    // or we reintroduce the #891 double-send risk. So this check comes BEFORE
+    // the abort/cancel handling (Copilot review). Recovery finishes the claim
+    // on the next launch.
     if (lnCommitted) throw new SwapSettlingError(detail);
+    // Pre-commit user cancel → caller's AbortError handler (silent close).
+    if ((e as Error)?.name === 'AbortError' || signal.aborted) throw e;
     throw new Error(`Boltz swap failed: ${detail}`);
   }
 }

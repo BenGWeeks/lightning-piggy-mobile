@@ -18,10 +18,21 @@ export async function promptSubmarineRefund(
   sourceWalletId: string,
   reason: string,
 ): Promise<void> {
-  const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
-  if (!lockup) {
-    // Terminal failure with nothing left to refund (e.g. already refunded
-    // on-chain). Report it so the user isn't left without feedback.
+  // Look up the on-chain lockup + a refund destination. Guarded because this
+  // runs inside TransferSheet's detached background task — an unhandled reject
+  // here (e.g. a missing/corrupt BDK wallet) would otherwise surface as an
+  // unhandled promise rejection rather than a user-visible failure.
+  let lockup: Awaited<ReturnType<typeof boltzService.getSubmarineSwapLockup>> | null = null;
+  let destAddr: string | undefined;
+  try {
+    lockup = await boltzService.getSubmarineSwapLockup(swap.id);
+    if (lockup) destAddr = await onchainService.getNextReceiveAddress(sourceWalletId);
+  } catch (e) {
+    console.warn('[Transfer] submarine refund lookup failed:', e);
+  }
+  if (!lockup || !destAddr) {
+    // Nothing recoverable (already refunded on-chain) or the lookup failed —
+    // report the failure so the user isn't left without feedback.
     Toast.show({
       type: 'error',
       text1: 'Swap failed',
@@ -31,13 +42,12 @@ export async function promptSubmarineRefund(
     });
     return;
   }
-  const destAddr = await onchainService.getNextReceiveAddress(sourceWalletId);
   Alert.alert(
     'Swap Failed — Refund Available',
-    `The swap failed (${reason}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
+    `The swap failed (${reason}). The refund can only be broadcast once block ${swap.timeoutBlockHeight} is reached — tap Refund to queue it; it settles at that block.`,
     [
       {
-        text: 'Refund Now',
+        text: 'Refund',
         onPress: async () => {
           try {
             await boltzService.refundSwap(swap, lockup, destAddr);
