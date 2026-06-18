@@ -49,6 +49,7 @@ import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSen
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
@@ -745,6 +746,13 @@ const SendSheet: React.FC<Props> = ({
     const shouldCloseParent = prevState === 'success' || prevState === 'in-flight-extended';
     if (prevState === 'in-flight-extended') {
       dismissedInFlightRef.current = true;
+      // "Continue in background" on an in-flight swap: kick a recovery pass so
+      // the claim is retried now rather than waiting for the next app launch.
+      // Safe no-op (single-flight guarded) if the lockup isn't claimable yet —
+      // pull-to-refresh / next foreground will retry.
+      swapRecoveryService.recoverPendingSwaps().catch((e) => {
+        console.warn('[Send] continue-in-background swap recovery failed:', e);
+      });
     }
     setProgressState('hidden');
     setProgressError(undefined);
