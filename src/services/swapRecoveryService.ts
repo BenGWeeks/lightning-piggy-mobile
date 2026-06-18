@@ -440,10 +440,13 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
 }
 
 /**
- * Attempt to recover all pending reverse swaps on app startup.
+ * Attempt to finish all pending reverse swaps. Fires from several triggers —
+ * app startup, pull-to-refresh, and the in-flight overlay's "Continue in
+ * background" dismiss — so a swap parked mid-session doesn't wait for a
+ * restart (see the single-flight guard below for why overlap is safe).
  * For each persisted swap:
  *  - Query Boltz API for current status
- *  - If transaction.mempool/confirmed, build and broadcast claim tx
+ *  - If transaction.mempool/confirmed, build and broadcast the claim tx
  *  - If already claimed or expired, clean up
  */
 // Single-flight guard: recovery now fires from several triggers (startup,

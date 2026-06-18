@@ -750,7 +750,9 @@ const SendSheet: React.FC<Props> = ({
       // the claim is retried now rather than waiting for the next app launch.
       // Safe no-op (single-flight guarded) if the lockup isn't claimable yet —
       // pull-to-refresh / next foreground will retry.
-      swapRecoveryService.recoverPendingSwaps().catch(() => {});
+      swapRecoveryService.recoverPendingSwaps().catch((e) => {
+        console.warn('[Send] continue-in-background swap recovery failed:', e);
+      });
     }
     setProgressState('hidden');
     setProgressError(undefined);

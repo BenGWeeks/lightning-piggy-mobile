@@ -184,22 +184,10 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     };
   }, []);
 
-  /** Resolves the icon-corner badge for a row:
-   *   - 'attention' for any Boltz row whose paymentHash is currently in
-   *     swapRecoveryService's attention set;
-   *   - 'pending' for in-flight Boltz rows (so the lifecycle reads
-   *     clock → tick / warning instead of bare → tick);
-   *   - 'done' for settled INCOMING Boltz rows that aren't in the
-   *     attention set — on incoming swaps LN-settled implies the swap
-   *     is complete (Boltz received on-chain before paying our invoice);
-   *   - 'done' for settled OUTGOING Boltz rows whose claim has been
-   *     recorded in swapRecoveryService's claimed-hash cache (i.e. we've
-   *     observed the on-chain claim broadcast / Boltz reported terminal
-   *     success). Settled outgoing rows without a recorded claim stay
-   *     unbadged — the LN leg can settle before the claim broadcasts,
-   *     and a green tick on a stuck swap would be misleading;
-   *   - undefined (no badge) for vanilla Lightning rows and the
-   *     settled-but-claim-not-recorded outgoing case above. */
+  /** Maps a row's live swap-recovery flags (Boltz row? in the attention set?
+   *  claim recorded?) onto the icon badge. The badge rules — including why a
+   *  recorded claim shows 'done' even when `settled_at` is missing (the #891
+   *  ambiguous-pay case) — live in `swapIconState`. */
   const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined =>
     swapIconState(tx, {
       isBoltz: swapRecoveryService.isBoltzTransaction(tx),
