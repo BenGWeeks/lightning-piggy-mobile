@@ -446,7 +446,22 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
  *  - If transaction.mempool/confirmed, build and broadcast claim tx
  *  - If already claimed or expired, clean up
  */
-export async function recoverPendingSwaps(): Promise<void> {
+// Single-flight guard: recovery now fires from several triggers (startup,
+// app-foreground, pull-to-refresh, "Continue in background", the detail
+// sheet). Without this, two overlapping passes could both try to claim the
+// same swap and double-broadcast. Concurrent callers share the in-flight
+// promise; a fresh pass only starts once the previous one settles.
+let recoveryInFlight: Promise<void> | null = null;
+
+export function recoverPendingSwaps(): Promise<void> {
+  if (recoveryInFlight) return recoveryInFlight;
+  recoveryInFlight = runRecoveryPass().finally(() => {
+    recoveryInFlight = null;
+  });
+  return recoveryInFlight;
+}
+
+async function runRecoveryPass(): Promise<void> {
   // Wipe the attention set at the start of every pass so it always reflects
   // the current persisted swap state and not stale entries from prior runs.
   // Without this, payment hashes for swaps that have since been removed

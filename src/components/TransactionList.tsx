@@ -16,6 +16,7 @@ import TransactionDetailSheet, {
 } from './TransactionDetailSheet';
 import SendSheet from './SendSheet';
 import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
+import { swapIconState } from '../utils/swapIconState';
 import { getTxCategory } from '../utils/txCategory';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -199,17 +200,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
    *     and a green tick on a stuck swap would be misleading;
    *   - undefined (no badge) for vanilla Lightning rows and the
    *     settled-but-claim-not-recorded outgoing case above. */
-  const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined => {
-    if (!swapRecoveryService.isBoltzTransaction(tx)) return undefined;
-    if (tx.paymentHash && swapRecoveryService.getAttentionPaymentHashes().has(tx.paymentHash))
-      return 'attention';
-    const settled = Boolean(tx.settled_at || tx.blockHeight);
-    if (!settled) return 'pending';
-    if (tx.type === 'incoming') return 'done';
-    return tx.paymentHash && swapRecoveryService.hasClaimedPaymentHash(tx.paymentHash)
-      ? 'done'
-      : undefined;
-  };
+  const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined =>
+    swapIconState(tx, {
+      isBoltz: swapRecoveryService.isBoltzTransaction(tx),
+      inAttention: Boolean(
+        tx.paymentHash && swapRecoveryService.getAttentionPaymentHashes().has(tx.paymentHash),
+      ),
+      claimed: Boolean(tx.paymentHash && swapRecoveryService.hasClaimedPaymentHash(tx.paymentHash)),
+    });
 
   // Counterparty preview — opened from TransactionDetailSheet → "view
   // profile". A quick-peek bottom sheet first; "View full profile"

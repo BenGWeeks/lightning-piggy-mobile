@@ -29,6 +29,7 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/ic
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
 import { perfLog } from '../utils/perfLog';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
@@ -206,6 +207,13 @@ const HomeScreen: React.FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
+    // Also retry any pending Boltz swap claims — recovery otherwise only runs
+    // at app startup, so a swap parked mid-session (e.g. an ambiguous pay that
+    // resolved later) would stay unclaimed until a full restart. Fire-and-
+    // forget; the single-flight guard dedupes against a startup pass.
+    swapRecoveryService.recoverPendingSwaps().catch((e) => {
+      console.warn('[Home] pull-to-refresh swap recovery failed:', e);
+    });
     // Explicit pull-to-refresh — force a full zap-resolver pass.
     await fetchData({ force: true });
     setRefreshing(false);
