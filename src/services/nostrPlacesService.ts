@@ -2,6 +2,7 @@ import type { VerifiedEvent } from 'nostr-tools';
 import { rot13 } from '../utils/rot13';
 import { encodeGeohash } from '../utils/geohash';
 import type { HiddenPiggy } from './piggyStorageService';
+import { LP_CLIENT_TAG } from './nostrService';
 
 /**
  * NIP-GC publish + subscribe layer. Wraps the existing SimplePool from
@@ -51,6 +52,7 @@ export const buildCacheListing = (
   }
   const g9 = piggy.geohash ?? encodeGeohash(piggy.lat, piggy.lon, 9);
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     ['d', piggy.id],
     ['name', piggy.name ?? piggy.lnurlDescription?.slice(0, 60) ?? 'Hunt Piggy'],
   ];
@@ -134,7 +136,7 @@ export const buildFoundLog = (
   content: string,
   opts: { imageUrl?: string; sats?: number } = {},
 ): { kind: number; created_at: number; tags: string[][]; content: string } => {
-  const tags: string[][] = [['a', cacheCoord]];
+  const tags: string[][] = [[...LP_CLIENT_TAG], ['a', cacheCoord]];
   if (opts.imageUrl) tags.push(['image', opts.imageUrl]);
   if (typeof opts.sats === 'number' && opts.sats > 0) {
     tags.push(['amount', String(opts.sats)]);
@@ -154,6 +156,7 @@ export const buildComment = (
   type: 'dnf' | 'maintenance' | 'archived' | 'note' = 'note',
 ): { kind: number; created_at: number; tags: string[][]; content: string } => {
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     // Root pointers (uppercase per NIP-22).
     ['A', cacheCoord],
     ['K', String(GC_LISTING_KIND)],
