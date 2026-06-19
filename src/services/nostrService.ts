@@ -180,6 +180,21 @@ const PROFILE_RELAYS = [
   'wss://nos.lol',
 ];
 
+// NIP-89 client tag stamped onto the PUBLIC events Lightning Piggy publishes,
+// so that anything LP signs is attributable to the app and filterable by
+// client. See https://github.com/nostr-protocol/nips/blob/master/89.md
+//
+// Bare two-element form for now. Once an LP application-handler event
+// (kind 31990) is published, this can be upgraded to the full
+// ['client', name, '31990:<pubkey>:<d>', '<relay-hint>'] coordinate so a
+// reader can resolve the handler (name, icon, supported kinds) from the tag.
+//
+// Deliberately NOT added to the kind-14 DM / group-chat rumors: those are
+// sealed into NIP-17 gift wraps, and a client tag inside the seal would leak
+// client metadata. Public events only — spread a fresh copy at each use site
+// (`[...LP_CLIENT_TAG]`) so no event aliases the shared array.
+export const LP_CLIENT_TAG = ['client', 'Lightning Piggy'] as const;
+
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);
   if (decoded.type !== 'nsec') {
@@ -795,6 +810,7 @@ export function createZapRequestEvent(
   zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     ['p', recipientPubkey],
     ['amount', amountMsats.toString()],
     ['relays', ...relays],
@@ -828,7 +844,7 @@ export function createContactListEvent(
   return {
     kind: 3,
     created_at: Math.floor(Date.now() / 1000),
-    tags,
+    tags: [[...LP_CLIENT_TAG], ...tags],
     content: '',
   };
 }
@@ -850,7 +866,7 @@ export function createProfileEvent(profileData: {
   return {
     kind: 0,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [],
+    tags: [[...LP_CLIENT_TAG]],
     content: JSON.stringify(cleaned),
   };
 }
@@ -1138,6 +1154,7 @@ export function createGroupStateEvent(input: GroupStateEventInput): {
   content: string;
 } {
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     ['d', input.groupId],
     ['name', input.name],
   ];
