@@ -37,7 +37,7 @@ export const hiddenPiggyToParsedCache = (piggy: HiddenPiggy, pubkey: string): Pa
   uses: piggy.usesHint ?? null,
   payoutSats:
     typeof piggy.maxWithdrawableMsat === 'number'
-      ? Math.floor(piggy.maxWithdrawableMsat / 1000) || null
+      ? Math.max(0, Math.floor(piggy.maxWithdrawableMsat / 1000)) || null
       : null,
   createdAt: Math.floor(piggy.createdAt / 1000),
   expiresAt: piggy.expiresAt ?? null,
@@ -60,6 +60,12 @@ export interface HiddenRow {
  * draft twin (so once a draft is published the badge flips to the normal
  * expiry view and there's no duplicate row). Drafts are the local records
  * whose coord has no published entry. Sorted newest-first by `createdAt`.
+ *
+ * The dedupe key is the **lowercased** coord: the `<pubkey>` segment is hex,
+ * which is case-insensitive, so a relay-sourced cache (whose pubkey may come
+ * back upper-cased) and the local draft twin (built from the local pubkey
+ * string) must compare equal regardless of casing — otherwise both survive
+ * as a duplicate row.
  */
 export const mergeHiddenWithDrafts = (
   publishedCaches: ParsedCache[],
@@ -71,13 +77,13 @@ export const mergeHiddenWithDrafts = (
   // Published / relay-sourced caches authored by me — these win on dedupe.
   for (const cache of publishedCaches) {
     if (cache.hiderPubkey.toLowerCase() !== lower) continue;
-    rows.set(cache.coord, { cache, isDraft: false });
+    rows.set(cache.coord.toLowerCase(), { cache, isDraft: false });
   }
   // Local records that have no published twin become draft rows.
   for (const piggy of localPiggies) {
     const draft = hiddenPiggyToParsedCache(piggy, pubkey);
-    if (rows.has(draft.coord)) continue;
-    rows.set(draft.coord, { cache: draft, isDraft: true });
+    if (rows.has(draft.coord.toLowerCase())) continue;
+    rows.set(draft.coord.toLowerCase(), { cache: draft, isDraft: true });
   }
   return [...rows.values()].sort((a, b) => b.cache.createdAt - a.cache.createdAt);
 };

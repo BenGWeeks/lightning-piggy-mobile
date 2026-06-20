@@ -57,6 +57,12 @@ describe('hiddenPiggyToParsedCache', () => {
     expect(hiddenPiggyToParsedCache(makePiggy({}), PUBKEY).payoutSats).toBeNull();
   });
 
+  it('clamps a malformed negative maxWithdrawableMsat to a non-negative payout', () => {
+    expect(
+      hiddenPiggyToParsedCache(makePiggy({ maxWithdrawableMsat: -5_000 }), PUBKEY).payoutSats,
+    ).toBeNull();
+  });
+
   it('treats a record with an LNURL bearer as an LP Piggy', () => {
     expect(hiddenPiggyToParsedCache(makePiggy({ lnurlw: 'LNURL1' }), PUBKEY).isLpPiggy).toBe(true);
   });
@@ -94,6 +100,23 @@ describe('mergeHiddenWithDrafts', () => {
     const piggy = makePiggy({ id: 'shared', name: 'Local draft name' });
     const published = makeCache({
       coord: `${GC_LISTING_KIND}:${PUBKEY}:shared`,
+      d: 'shared',
+      name: 'Published name',
+    });
+    const rows = mergeHiddenWithDrafts([published], [piggy], PUBKEY);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isDraft).toBe(false);
+    expect(rows[0].cache.name).toBe('Published name');
+  });
+
+  it('dedupes published-vs-draft even when published coord/pubkey casing differs', () => {
+    // Relay-sourced caches can come back with an upper-cased hex pubkey in
+    // both `coord` and `hiderPubkey`; the local draft twin is built from the
+    // lower-case local pubkey. They must still dedupe to a single row.
+    const piggy = makePiggy({ id: 'shared', name: 'Local draft name' });
+    const published = makeCache({
+      coord: `${GC_LISTING_KIND}:${PUBKEY.toUpperCase()}:shared`,
+      hiderPubkey: PUBKEY.toUpperCase(),
       d: 'shared',
       name: 'Published name',
     });
