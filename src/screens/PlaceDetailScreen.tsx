@@ -10,6 +10,7 @@ import {
   Share,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import {
   Accessibility,
   ChevronLeft,
@@ -145,9 +146,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         try {
           const perm = await Location.requestForegroundPermissionsAsync();
           if (perm.status === 'granted') {
-            const fix = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.High,
-            });
+            // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+            const fix = await getOneShotPosition();
             if (!cancelled) {
               setPos({ lat: fix.coords.latitude, lon: fix.coords.longitude });
             }

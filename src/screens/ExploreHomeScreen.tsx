@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   CalendarDays,
@@ -172,9 +173,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         // Non-fatal — fall through to getCurrentPositionAsync.
       }
       try {
-        const current = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
+        // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+        const current = await getOneShotPosition();
         if (!cancelled) {
           setPos({
             lat: current.coords.latitude,

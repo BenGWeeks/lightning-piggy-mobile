@@ -13,6 +13,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import {
   CalendarDays,
   ChevronLeft,
@@ -179,9 +180,8 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           setLoading(false);
           return;
         }
-        const liveFix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
+        // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+        const liveFix = await getOneShotPosition();
         // Focus was lost while we awaited location — bail before opening a
         // sub the cleanup already ran past.
         if (cancelled()) return;

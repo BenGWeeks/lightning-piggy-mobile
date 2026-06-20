@@ -12,6 +12,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import {
   ChevronLeft,
   Clock,
@@ -206,9 +207,8 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         accuracy = livePos.accuracy;
       } else {
         try {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
+          // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+          const pos = await getOneShotPosition();
           if (cancelled) return;
           lat = pos.coords.latitude;
           lon = pos.coords.longitude;

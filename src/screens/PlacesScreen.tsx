@@ -12,6 +12,7 @@ import {
   Image,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import {
   ChevronLeft,
   ChevronRight,
@@ -102,9 +103,8 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         setLoading(false);
         return;
       }
-      const fix = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+      const fix = await getOneShotPosition();
       const lat = fix.coords.latitude;
       const lon = fix.coords.longitude;
       setPos({ lat, lon });

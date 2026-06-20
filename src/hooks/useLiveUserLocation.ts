@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { oneShotPositionOptions } from '../services/aospLocation';
 
 /**
  * Live user-location subscription for map views.
@@ -155,7 +156,11 @@ export function useLiveUserLocation(
       // already bit us in `locationService.ts`) silently block the
       // live subscription forever — so the dot would freeze on the
       // last-known fix and never update.
-      Location.getCurrentPositionAsync({ accuracy })
+      // `oneShotPositionOptions` adds `mayShowUserSettingsDialog: false` so
+      // the one-shot fix never hits the Play `SettingsClient` path that
+      // rejects with "unsatisfied device settings" on de-Googled devices.
+      // See src/services/aospLocation.ts.
+      Location.getCurrentPositionAsync(oneShotPositionOptions(accuracy))
         .then((fresh) => {
           if (cancelled) return;
           applyIfNewer(fresh);

@@ -16,6 +16,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 // SAF + base64 helpers live on the legacy expo-file-system module. The
 // new class API (File/Paths) doesn't expose StorageAccessFramework yet,
 // so we mix the two: class API for the cache copy, legacy for the SAF
@@ -822,9 +823,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         ]);
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
+      const { latitude: lat, longitude: lon } = (await getOneShotPosition()).coords;
       setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) });
     } catch (e) {
       Alert.alert('Could not get location', (e as Error).message, [{ text: 'OK' }]);

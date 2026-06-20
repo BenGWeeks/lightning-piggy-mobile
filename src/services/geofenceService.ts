@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import { getOneShotPosition } from './aospLocation';
 import { acceptsLightning, fetchPlacesInBbox, type Bbox, type BtcMapPlace } from './btcMapService';
 import { isWithinQuietHours, loadNearbySettings } from './nearbySettingsService';
 import { haversineMetres } from '../utils/geohash';
@@ -108,9 +109,9 @@ export const isGeofencingActive = async (): Promise<boolean> => {
 export const enableGeofencing = async (): Promise<number | null> => {
   ensureTaskDefined();
 
-  const pos = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
-  });
+  // getOneShotPosition passes `mayShowUserSettingsDialog: false` so this
+  // works on de-Googled / no-Play-Services devices — see aospLocation.ts.
+  const pos = await getOneShotPosition();
   const bbox: Bbox = {
     minLon: pos.coords.longitude - FETCH_HALF_DEGREES,
     minLat: pos.coords.latitude - FETCH_HALF_DEGREES,

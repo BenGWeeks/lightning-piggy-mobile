@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { getOneShotPosition } from './aospLocation';
 
 export interface SharedLocation {
   lat: number;
@@ -83,7 +84,12 @@ async function tryGetCurrent(): Promise<Location.LocationObject | null> {
     // which actively demands GPS. Balanced prefers the network provider, which
     // is unavailable on emulators configured with GPS only — so Balanced throws
     // ERR_CURRENT_LOCATION_IS_UNAVAILABLE on empty cache even when GPS has a fix.
-    return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    //
+    // `getOneShotPosition` also passes `mayShowUserSettingsDialog: false`, so
+    // this never hits the Play `SettingsClient` path that fails with
+    // "unsatisfied device settings" on de-Googled / no-Play-Services devices
+    // (GrapheneOS, bare AOSP emulator). See src/services/aospLocation.ts.
+    return await getOneShotPosition();
   } catch {
     return null;
   }

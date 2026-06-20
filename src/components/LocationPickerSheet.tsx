@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { getOneShotPosition } from '../services/aospLocation';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -174,7 +175,8 @@ const LocationPickerSheet: React.FC<Props> = ({
       .then((perm) => {
         if (cancelled) return;
         if (perm.status !== 'granted') return; // last-known/UK paths take over
-        return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        // No-Play-Services-safe one-shot fix (see aospLocation.ts).
+        return getOneShotPosition();
       })
       .then((pos) => {
         if (!pos || cancelled) return;
