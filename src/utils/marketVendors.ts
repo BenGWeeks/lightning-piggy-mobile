@@ -28,9 +28,11 @@ export function vendorSlug(name: string): string {
  * group the original (curated) order is preserved — `Array.prototype.sort`
  * is stable in modern engines (Hermes included), so equal-key items keep
  * their relative order. Returns a new array; never mutates the input.
+ * Partitions rather than sorts, so the within-group order is preserved
+ * regardless of the engine's `Array.prototype.sort` stability.
  */
 export function featuredFirst(vendors: MarketVendor[]): MarketVendor[] {
-  return [...vendors].sort((a, b) => Number(b.featured) - Number(a.featured));
+  return [...vendors.filter((v) => v.featured), ...vendors.filter((v) => !v.featured)];
 }
 
 const SHOP_TYPE_LABEL: Record<MarketShopType, string> = {

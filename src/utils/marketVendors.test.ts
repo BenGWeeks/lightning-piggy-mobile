@@ -138,4 +138,11 @@ describe('MARKET_VENDORS directory', () => {
       if (v.banner) expect(v.banner).toMatch(/^https:\/\//);
     }
   });
+
+  it('every vendor has non-empty absolute https url + logo (per the data contract)', () => {
+    for (const v of MARKET_VENDORS) {
+      expect(v.url).toMatch(/^https:\/\/.+/);
+      expect(v.logo).toMatch(/^https:\/\/.+/);
+    }
+  });
 });
