@@ -84,9 +84,12 @@ export function useCoalescedMap<V>(options?: {
   maxSizeRef.current = options?.maxSize;
 
   const [map, setMap] = useState<Map<string, V>>(() => {
+    // Copy the seed before capping: a caller's `initial()` may return a Map
+    // that's also referenced elsewhere (e.g. a shared cache), and capping
+    // mutates in place — we must never evict entries out of external state.
     // Cap the seed too, so a caller seeding via `initial` over the cap isn't
     // left oversized until the first flush (Copilot review).
-    const seed = options?.initial?.() ?? new Map();
+    const seed = new Map<string, V>(options?.initial?.());
     capOldest(seed, options?.maxSize);
     return seed;
   });

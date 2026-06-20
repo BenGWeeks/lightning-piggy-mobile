@@ -88,10 +88,7 @@ interface ContactRowProps {
 
 const ContactRow = React.memo(
   ({ item, hasWallets, onContactPress, onZapPress, navigation }: ContactRowProps) => {
-    const handlePress = React.useCallback(
-      () => onContactPress(item),
-      [onContactPress, item],
-    );
+    const handlePress = React.useCallback(() => onContactPress(item), [onContactPress, item]);
     const handleZap = React.useCallback(() => onZapPress(item), [onZapPress, item]);
     const handleMessage = React.useMemo(() => {
       const pubkey = item.pubkey;
@@ -125,7 +122,15 @@ const ContactRow = React.memo(
     );
   },
   (prev, next) =>
-    prev.item.id === next.item.id && prev.hasWallets === next.hasWallets,
+    prev.hasWallets === next.hasWallets &&
+    prev.item.id === next.item.id &&
+    // Re-render when any field this row renders changes for the same id,
+    // otherwise a contact whose name/picture/address updates goes stale.
+    prev.item.name === next.item.name &&
+    prev.item.picture === next.item.picture &&
+    prev.item.lightningAddress === next.item.lightningAddress &&
+    prev.item.hasLightningAddress === next.item.hasLightningAddress &&
+    prev.item.pubkey === next.item.pubkey,
 );
 
 const FriendsScreen: React.FC = () => {

@@ -162,4 +162,24 @@ describe('useCoalescedMap', () => {
     expect(result.current.map.has('a')).toBe(false);
     expect([...result.current.map.keys()]).toEqual(['b', 'c']);
   });
+
+  it('does not mutate the caller-provided seed Map when capping (Copilot review)', () => {
+    // A caller's initial() may return a Map that's also referenced elsewhere
+    // (e.g. a shared cache). Capping must operate on a copy, never evict from
+    // external state.
+    const shared = new Map([
+      ['a', 1],
+      ['b', 2],
+      ['c', 3],
+    ]);
+    const { result } = renderHook(() =>
+      useCoalescedMap<number>({ maxSize: 2, initial: () => shared }),
+    );
+    // The hook's committed Map is capped...
+    expect(result.current.map.size).toBe(2);
+    expect(result.current.map.has('a')).toBe(false);
+    // ...but the caller's original Map is left intact.
+    expect(shared.size).toBe(3);
+    expect(shared.has('a')).toBe(true);
+  });
 });

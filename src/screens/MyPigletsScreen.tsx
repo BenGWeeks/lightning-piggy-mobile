@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -81,6 +81,22 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { pubkey, signEvent, relays } = useNostr();
   const { trustSet } = useTrustGraph();
+
+  // True only during a real screen unmount. Set in a layout-effect cleanup,
+  // which React runs AFTER all passive (`useEffect`) cleanups — so when the
+  // find-log subscription effects below tear down on unmount this is already
+  // true, and we skip their final `flush()` (which would otherwise `setMap`
+  // on an unmounting component). On a pubkey/trustedAuthors change (not an
+  // unmount) it stays false, so we still flush the burst's tail. The
+  // CoalescedMap's own `isUnmountedRef` is set in a passive cleanup that, by
+  // React's reverse-order rule, runs too late to guard these flushes.
+  const isUnmountingRef = useRef(false);
+  useLayoutEffect(
+    () => () => {
+      isUnmountingRef.current = true;
+    },
+    [],
+  );
 
   // Local-only `HiddenPiggy` records (LNURL bearer + original expiry
   // window). Needed by the Republish action — relays don't carry the
@@ -218,7 +234,9 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     });
     return () => {
       close();
-      myFinds.flush();
+      // Skip the tail flush on a full unmount (it would setMap while
+      // unmounting); still flush when the effect re-runs on a pubkey change.
+      if (!isUnmountingRef.current) myFinds.flush();
     };
     // myFinds.reset / enqueue / flush are stable callbacks (useCallback).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -254,7 +272,10 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     });
     return () => {
       close();
-      friendFinds.flush();
+      // Skip the tail flush on a full unmount (it would setMap while
+      // unmounting); still flush when the effect re-runs on a trustedAuthors
+      // change.
+      if (!isUnmountingRef.current) friendFinds.flush();
     };
     // friendFinds.reset / enqueue / flush are stable callbacks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
