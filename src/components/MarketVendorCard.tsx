@@ -57,7 +57,6 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
           style={styles.logo}
           resizeMode="cover"
           onError={() => setLogoFailed(true)}
-          accessibilityLabel={`${vendor.name} logo`}
         />
       ) : (
         <View style={styles.logoFallback}>
@@ -78,7 +77,6 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
       resizeMode="cover"
       blurRadius={18}
       onError={() => setLogoFailed(true)}
-      accessibilityLabel={`${vendor.name} banner`}
     />
   ) : (
     <LinearGradient
@@ -100,7 +98,6 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
           style={styles.bannerImage}
           resizeMode="cover"
           onError={() => setBannerFailed(true)}
-          accessibilityLabel={`${vendor.name} banner`}
         />
       ) : (
         fallbackBackdrop
@@ -115,7 +112,10 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
     </View>
   );
 
-  const ShopIcon = vendor.shopType === 'physical' ? Store : Globe;
+  // Globe only for online-only vendors; anything with a physical presence
+  // (`physical` or `both`) gets the Store icon so it matches the label
+  // ("Online & Physical" no longer shows a Globe).
+  const ShopIcon = vendor.shopType === 'online' ? Globe : Store;
   const shopType = (
     <View style={styles.shopTypeRow}>
       <ShopIcon size={12} color={colors.textSupplementary} strokeWidth={2} />

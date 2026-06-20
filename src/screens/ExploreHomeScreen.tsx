@@ -1014,7 +1014,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           items={marketVendors}
           onSeeAll={onSeeAllMarket}
           seeAllTestId="explore-card-market"
-          keyExtractor={(v) => v.name}
+          keyExtractor={(v) => v.url}
           renderItem={(vendor) => (
             <MarketVendorCard
               vendor={vendor}
