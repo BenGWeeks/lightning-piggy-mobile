@@ -1,5 +1,5 @@
+import { LP_CLIENT_TAG } from './nip89ClientTag';
 import {
-  LP_CLIENT_TAG,
   createContactListEvent,
   createProfileEvent,
   createZapRequestEvent,

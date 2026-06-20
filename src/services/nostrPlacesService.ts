@@ -2,7 +2,7 @@ import type { VerifiedEvent } from 'nostr-tools';
 import { rot13 } from '../utils/rot13';
 import { encodeGeohash } from '../utils/geohash';
 import type { HiddenPiggy } from './piggyStorageService';
-import { LP_CLIENT_TAG } from './nostrService';
+import { LP_CLIENT_TAG } from './nip89ClientTag';
 
 /**
  * NIP-GC publish + subscribe layer. Wraps the existing SimplePool from

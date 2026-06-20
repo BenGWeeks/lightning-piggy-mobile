@@ -20,8 +20,11 @@ import { slimDisplayProfile } from '../utils/profileSanitize';
 import { tagsToContacts } from '../utils/contacts';
 import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
+import { LP_CLIENT_TAG } from './nip89ClientTag';
 
 export type { DmSendResult };
+// Re-exported for back-compat: the canonical home is ./nip89ClientTag.
+export { LP_CLIENT_TAG };
 
 // Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
 // the Hunt feature's NIP-GC subs) can share the single connection pool
@@ -179,21 +182,6 @@ const PROFILE_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
 ];
-
-// NIP-89 client tag stamped onto the PUBLIC events Lightning Piggy publishes,
-// so that anything LP signs is attributable to the app and filterable by
-// client. See https://github.com/nostr-protocol/nips/blob/master/89.md
-//
-// Bare two-element form for now. Once an LP application-handler event
-// (kind 31990) is published, this can be upgraded to the full
-// ['client', name, '31990:<pubkey>:<d>', '<relay-hint>'] coordinate so a
-// reader can resolve the handler (name, icon, supported kinds) from the tag.
-//
-// Deliberately NOT added to the kind-14 DM / group-chat rumors: those are
-// sealed into NIP-17 gift wraps, and a client tag inside the seal would leak
-// client metadata. Public events only — spread a fresh copy at each use site
-// (`[...LP_CLIENT_TAG]`) so no event aliases the shared array.
-export const LP_CLIENT_TAG = ['client', 'Lightning Piggy'] as const;
 
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);
@@ -1153,11 +1141,7 @@ export function createGroupStateEvent(input: GroupStateEventInput): {
   tags: string[][];
   content: string;
 } {
-  const tags: string[][] = [
-    [...LP_CLIENT_TAG],
-    ['d', input.groupId],
-    ['name', input.name],
-  ];
+  const tags: string[][] = [[...LP_CLIENT_TAG], ['d', input.groupId], ['name', input.name]];
   for (const pk of input.memberPubkeys) {
     tags.push(['p', pk]);
   }
