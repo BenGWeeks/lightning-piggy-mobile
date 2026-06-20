@@ -60,15 +60,26 @@ export const CacheMapMarker: React.FC<CacheMapMarkerProps> = ({
   const styles = useMemo(() => createCacheMapMarkerStyles(colors), [colors]);
   const prize = hasPrize({ isLpPiggy, payoutSats });
 
+  const label = isLpPiggy ? 'Lightning Piggy cache marker' : 'NIP-GC cache marker';
+
+  // Only present the pin as an activatable "button" when there's actually an
+  // onPress to fire — a button role with no action misleads screen readers
+  // (VoiceOver/TalkBack announce a control that can't be activated). With no
+  // onPress the pin is a non-interactive `image` instead, and the `activate`
+  // accessibility action is wired straight to onPress.
+  const interactive = onPress != null;
+
   return (
-    <Marker key={id} id={`cache-${id}`} lngLat={[lng, lat]} onPress={onPress}>
+    <Marker id={`cache-${id}`} lngLat={[lng, lat]} onPress={onPress}>
       <View style={styles.wrap}>
         <View
           style={[styles.pin, isLpPiggy ? styles.pinPiglet : styles.pinCache, markerDimStyle]}
           testID={`cache-marker-${id}`}
           accessible
-          accessibilityRole="button"
-          accessibilityLabel={isLpPiggy ? 'Lightning Piggy cache marker' : 'NIP-GC cache marker'}
+          accessibilityRole={interactive ? 'button' : 'image'}
+          accessibilityLabel={label}
+          accessibilityActions={interactive ? [{ name: 'activate' }] : undefined}
+          onAccessibilityAction={interactive ? () => onPress?.() : undefined}
         >
           {isLpPiggy ? (
             <PiggyBank size={glyphSize} color="#fff" strokeWidth={2.5} />
