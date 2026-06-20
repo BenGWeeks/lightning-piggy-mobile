@@ -1,5 +1,5 @@
 /**
- * featuredPlaces — shared "featured-first, capped at 3" ordering for the
+ * featuredPlaces — shared "featured-first, capped" ordering for the
  * Bitcoin-accepting places surfaces.
  *
  * Both the Explore "Places near you" rail (`ExploreHomeScreen`) and the full
@@ -9,7 +9,8 @@
  * order the caller already chose (typically nearest-first by distance).
  *
  * Keeping this here (rather than inlining a `.sort()` on each screen) means:
- *   - the 3-featured cap is defined in exactly one place, and
+ *   - the featured cap (default {@link MAX_FEATURED_PLACES}) is defined in
+ *     exactly one place, and
  *   - the ordering is a pure function that can be unit-tested without a
  *     renderer or GPS fix.
  *
@@ -31,14 +32,15 @@ export const MAX_FEATURED_PLACES = 3;
  *     already sorted the way they want the "normal" remainder to read (e.g. by
  *     distance). The featured block is taken in that same input order, so the
  *     nearest featured places win the (up to) `maxFeatured` slots.
- *   - A featured place that doesn't make the top-3 cap falls back into the
- *     remainder at its natural position — it is never dropped, just no longer
- *     pinned.
+ *   - A featured place that doesn't make the `maxFeatured` cap falls back into
+ *     the remainder at its natural position — it is never dropped, just no
+ *     longer pinned.
  *   - No item is ever duplicated: each input item appears exactly once.
  *
  * @param items     rows to order
  * @param isFeatured predicate identifying a featured row
- * @param maxFeatured cap on pinned featured rows (defaults to 3)
+ * @param maxFeatured cap on pinned featured rows (defaults to
+ *                   {@link MAX_FEATURED_PLACES})
  */
 export function orderFeaturedFirst<T>(
   items: readonly T[],
