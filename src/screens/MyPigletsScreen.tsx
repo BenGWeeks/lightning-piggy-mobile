@@ -575,10 +575,10 @@ const Row: React.FC<RowProps> = ({
         {isDraft ? (
           <View
             style={styles.draftBadge}
-            testID={`${testID}-draft-badge`}
-            accessibilityLabel="Draft — saved locally, not published"
+            testID={`${testID}-private-badge`}
+            accessibilityLabel="Private — saved on this device, found by tapping its tag (not published)"
           >
-            <Text style={styles.draftBadgeText}>Draft</Text>
+            <Text style={styles.draftBadgeText}>Private</Text>
           </View>
         ) : cache?.expiresAt != null ? (
           <ExpiryBadge
