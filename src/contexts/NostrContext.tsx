@@ -686,13 +686,22 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           },
         });
         if (fetched === null) {
-          // Relay timeout with no cached fallback — paint empty for
-          // now and do NOT persist (so we don't poison the cache with
-          // a network blip).
-          fetchedContacts = [];
+          // Relay timeout. A forced refresh (pull-to-refresh) still has the
+          // last-known follows in `cachedContacts` — fall back to them rather
+          // than wiping the visible list on a transient network blip, which
+          // left the Friends tab reading "No contacts found" after a second
+          // pull-to-refresh that happened to time out. Only paint empty when
+          // there's genuinely nothing cached. Either way the cache
+          // + timestamp stay untouched (don't poison the cache on a blip).
+          fetchedContacts = cachedContacts ?? [];
           if (__DEV__)
             console.log(
-              `[Nostr] fetchContactList: timed out, ${Date.now() - t0}ms, painting empty (cache untouched)`,
+              `[Nostr] fetchContactList: timed out, ${Date.now() - t0}ms, ` +
+                `${
+                  cachedContacts
+                    ? `keeping ${cachedContacts.length} cached contacts`
+                    : 'painting empty'
+                } (cache untouched)`,
             );
         } else {
           fetchedContacts = fetched;
