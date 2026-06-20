@@ -70,7 +70,7 @@ import {
   haversineMetres,
 } from '../utils/geohash';
 import { isFutureEvent } from '../utils/futureEvent';
-import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { isHiddenInProd, visibleCaches, visibleEvents } from '../utils/exploreContentFilter';
 import { usePersistCaches, usePersistEvents } from '../hooks/useExplorePlacesPersist';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -472,12 +472,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, []);
 
-  // Stable array projections of the caches/events Maps so React.memo on
-  // the consuming LibreMiniMap can short-circuit re-renders. Without
-  // these the parent's `[...caches.values()]` literal returns a fresh
-  // array reference every render and defeats the memo entirely.
-  const cachesArr = useMemo(() => [...caches.values()], [caches]);
-  const eventsArr = useMemo(() => [...events.values()], [events]);
+  // Stable array projections of the caches/events Maps so React.memo on the
+  // consuming LibreMiniMap can short-circuit re-renders (a fresh
+  // `[...caches.values()]` literal each render would defeat the memo). These
+  // feed the Explore hub mini-map, so they apply the SAME prod test-account
+  // hide (+ future-only for events) as the rails — cold-start items hydrated
+  // from AsyncStorage bypass the ingestion callback, so a hidden Piggy cache
+  // or past event would otherwise paint as a map marker (#917).
+  const cachesArr = useMemo(
+    () => visibleCaches([...caches.values()], (c) => c.hiderPubkey),
+    [caches],
+  );
+  const eventsArr = useMemo(
+    () =>
+      visibleEvents([...events.values()], (e) => e.organiserPubkey, Math.floor(Date.now() / 1000)),
+    [events],
+  );
 
   // Hydrate last-known caches + events from AsyncStorage so the rails
   // render instantly on cold start while the live relay subs backfill.

@@ -43,7 +43,7 @@ import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/nostrPlacesStorage';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { isFutureEvent } from '../utils/futureEvent';
-import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -98,7 +98,20 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   }, [setEvents]);
   useEffect(() => {
     if (events.size === 0) return;
-    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
+    const t = setTimeout(() => {
+      // Shed prod-hidden (test-account) AND past events before persisting so
+      // prod caches self-heal — stale Piggy/past entries seeded from earlier
+      // versions age out of storage instead of being re-saved forever and
+      // consuming MAX_ENTRIES slots. `stripHiddenForPersist` is a no-op in
+      // dev/preview; the future-only pass always applies (a past event is
+      // useless to re-show on any build). Mirrors ExploreHomeScreen (#917).
+      const nowSec = Math.floor(Date.now() / 1000);
+      const persistable = stripHiddenForPersist(
+        [...events.values()],
+        (e) => e.organiserPubkey,
+      ).filter((e) => isFutureEvent(e, nowSec));
+      saveEvents(persistable);
+    }, 1500);
     return () => clearTimeout(t);
   }, [events]);
   const [loading, setLoading] = useState(true);

@@ -7,7 +7,12 @@ jest.mock('expo-application', () => ({
   },
 }));
 
-import { isHiddenInProd, stripHiddenForPersist } from './exploreContentFilter';
+import {
+  isHiddenInProd,
+  stripHiddenForPersist,
+  visibleCaches,
+  visibleEvents,
+} from './exploreContentFilter';
 
 let mockApplicationId: string | null = null;
 
@@ -69,5 +74,85 @@ describe('stripHiddenForPersist', () => {
     mockApplicationId = 'com.lightningpiggy.app.dev';
     const out = stripHiddenForPersist(items, getPubkey);
     expect(out).not.toBe(items);
+  });
+});
+
+describe('visibleCaches (rail + mini-map)', () => {
+  interface Cache {
+    id: string;
+    pubkey: string;
+  }
+  const caches: Cache[] = [
+    { id: 'piggy', pubkey: BIG_PIGGY },
+    { id: 'real', pubkey: REAL_USER },
+  ];
+  const getPubkey = (c: Cache) => c.pubkey;
+
+  afterEach(() => {
+    mockApplicationId = null;
+  });
+
+  it('hides prod test-account Piglets so the mini-map matches the rail', () => {
+    mockApplicationId = 'com.lightningpiggy.app';
+    expect(visibleCaches(caches, getPubkey).map((c) => c.id)).toEqual(['real']);
+  });
+
+  it('shows everything in dev / preview', () => {
+    mockApplicationId = 'com.lightningpiggy.app.dev';
+    expect(visibleCaches(caches, getPubkey).map((c) => c.id)).toEqual(['piggy', 'real']);
+  });
+});
+
+describe('visibleEvents (rail + mini-map)', () => {
+  const NOW = 1_000_000_000;
+  interface Event {
+    id: string;
+    pubkey: string;
+    startsAt: number | null;
+    endsAt: number | null;
+  }
+  const futureReal: Event = {
+    id: 'future-real',
+    pubkey: REAL_USER,
+    startsAt: NOW + 3600,
+    endsAt: null,
+  };
+  const pastReal: Event = {
+    id: 'past-real',
+    pubkey: REAL_USER,
+    startsAt: NOW - 3600,
+    endsAt: null,
+  };
+  const futurePiggy: Event = {
+    id: 'future-piggy',
+    pubkey: BIG_PIGGY,
+    startsAt: NOW + 3600,
+    endsAt: null,
+  };
+  const getPubkey = (e: Event) => e.pubkey;
+
+  afterEach(() => {
+    mockApplicationId = null;
+  });
+
+  it('drops PAST events on every build', () => {
+    mockApplicationId = 'com.lightningpiggy.app.dev';
+    expect(visibleEvents([futureReal, pastReal], getPubkey, NOW).map((e) => e.id)).toEqual([
+      'future-real',
+    ]);
+  });
+
+  it('drops future PIGGY events in production but keeps real future events', () => {
+    mockApplicationId = 'com.lightningpiggy.app';
+    expect(
+      visibleEvents([futureReal, futurePiggy, pastReal], getPubkey, NOW).map((e) => e.id),
+    ).toEqual(['future-real']);
+  });
+
+  it('keeps future Piggy events in dev / preview (only past dropped)', () => {
+    mockApplicationId = 'com.lightningpiggy.app.dev';
+    expect(
+      visibleEvents([futureReal, futurePiggy, pastReal], getPubkey, NOW).map((e) => e.id),
+    ).toEqual(['future-real', 'future-piggy']);
   });
 });

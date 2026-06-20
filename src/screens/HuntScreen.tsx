@@ -41,6 +41,7 @@ import {
   haversineMetres,
 } from '../utils/geohash';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -148,7 +149,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Write-through (debounced) so the next cold start has fresh data.
   useEffect(() => {
     if (caches.size === 0) return;
-    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
+    const t = setTimeout(
+      // Strip prod-hidden (test-account) Piglets before persisting so prod
+      // caches self-heal — stale Piggy entries age out of storage instead
+      // of being re-saved forever (matches ExploreHomeScreen) (#917).
+      () => saveCaches(stripHiddenForPersist([...caches.values()], (c) => c.hiderPubkey)),
+      1500,
+    );
     return () => clearTimeout(t);
   }, [caches]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,7 +248,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       // re-filters instantly with no re-subscribe or relay round-trip.
       // Per-event work is just the coalescing enqueue (staleness drop +
       // newest-wins live in the hook's `shouldReplace`).
-      const closer = subscribeNearbyCaches(prefixes, (c) => enqueueCache(c.coord, c));
+      const closer = subscribeNearbyCaches(prefixes, (c) => {
+        // Drop test-account Piglets in production at ingestion so they never
+        // enter the Map (and so can't reach the rail, mini-map, or persist).
+        // No-op in dev/preview. Mirrors ExploreHomeScreen's discover guard (#917).
+        if (isHiddenInProd(c.hiderPubkey)) return;
+        enqueueCache(c.coord, c);
+      });
       // Drop the spinner after a beat — relays stream continuously, no EOSE wait.
       const settleTimer = setTimeout(() => setLoading(false), 1500);
       return () => {
@@ -285,6 +298,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     // Web-of-trust filter — drop caches from hiders outside the active
     // tier's trust graph. `isTrusted` short-circuits to true for 'all'.
     items = items.filter(({ cache }) => isTrusted(cache.hiderPubkey));
+    // Re-apply the prod test-account hide at render — cold-start caches
+    // hydrated from AsyncStorage bypass the ingestion guard above, so a
+    // stale Piggy entry could otherwise still paint here. No-op in
+    // dev/preview (mirrors ExploreHomeScreen's sortedCaches) (#917).
+    items = items.filter(({ cache }) => !isHiddenInProd(cache.hiderPubkey));
     return items;
   }, [caches, pos, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
 
