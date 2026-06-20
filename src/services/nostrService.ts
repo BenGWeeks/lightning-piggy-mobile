@@ -1134,6 +1134,9 @@ export interface GroupStateEventInput {
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
  * for signing + publishing — same pattern as createDirectMessageRumor.
+ *
+ * Tags: the NIP-89 `client` tag (LP_CLIENT_TAG, this is a public event),
+ * then `d` (groupId), `name`, and one `p` per member.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
