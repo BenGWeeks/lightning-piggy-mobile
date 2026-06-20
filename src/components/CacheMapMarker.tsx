@@ -25,7 +25,11 @@ import { hasPrize } from '../utils/cachePrize';
  * for Maestro assertions.
  */
 export interface CacheMapMarkerProps {
-  /** Stable marker id; also seeds the MapLibre marker key/id (`cache-<id>`). */
+  /**
+   * Stable per-cache id. Used for the React list key, the MapLibre marker's
+   * own `id` prop (`cache-<id>`) and the pin's Maestro `testID`
+   * (`cache-marker-<id>`).
+   */
   id: string;
   lat: number;
   lng: number;
@@ -59,7 +63,13 @@ export const CacheMapMarker: React.FC<CacheMapMarkerProps> = ({
   return (
     <Marker key={id} id={`cache-${id}`} lngLat={[lng, lat]} onPress={onPress}>
       <View style={styles.wrap}>
-        <View style={[styles.pin, isLpPiggy ? styles.pinPiglet : styles.pinCache, markerDimStyle]}>
+        <View
+          style={[styles.pin, isLpPiggy ? styles.pinPiglet : styles.pinCache, markerDimStyle]}
+          testID={`cache-marker-${id}`}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={isLpPiggy ? 'Lightning Piggy cache marker' : 'NIP-GC cache marker'}
+        >
           {isLpPiggy ? (
             <PiggyBank size={glyphSize} color="#fff" strokeWidth={2.5} />
           ) : (

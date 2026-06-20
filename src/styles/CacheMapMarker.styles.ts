@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
+import { createMapPinChassis } from './mapPinChassis';
 
 // Presentation for the shared cache map marker (CacheMapMarker) — the pin
 // chassis shared by every map surface plus the top-right prize bolt badge.
@@ -15,22 +16,9 @@ export const createCacheMapMarkerStyles = (colors: Palette) =>
       position: 'relative',
     },
     // Shared pin chassis — circular white-bordered chip carrying the
-    // category Lucide glyph. Mirrors LibreMiniMap's `pin` exactly so the
-    // marker reads identically across the map surfaces.
-    pin: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1.5,
-      borderColor: colors.white,
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 2,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 2,
-    },
+    // category Lucide glyph. Spreads the shared `createMapPinChassis` so the
+    // marker stays byte-identical to LibreMiniMap's own pins by construction.
+    pin: createMapPinChassis(colors),
     pinPiglet: { backgroundColor: colors.brandPink },
     pinCache: { backgroundColor: colors.cachePurple },
     // Yellow lightning prize badge, top-right of the pin. A small
