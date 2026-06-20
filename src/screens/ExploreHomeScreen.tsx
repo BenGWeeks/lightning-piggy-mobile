@@ -5,8 +5,8 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  StyleSheet,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
@@ -30,6 +30,9 @@ import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
+import MarketVendorCard from '../components/MarketVendorCard';
+import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
+import { featuredFirst } from '../utils/marketVendors';
 import {
   getProgress,
   LearnProgress,
@@ -74,6 +77,7 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
+import { createExploreHomeRailStyles } from '../styles/ExploreHomeRail.styles';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 
@@ -98,7 +102,7 @@ interface Props {
 const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createExploreHomeScreenStyles(colors), [colors]);
-  const localStyles = useMemo(() => createLocalStyles(colors), [colors]);
+  const localStyles = useMemo(() => createExploreHomeRailStyles(colors), [colors]);
   const { radius: maxDistanceMetres } = useNearbyRadius();
 
   // Perf marker — same hook scripts/perf-startup.sh consumes.
@@ -242,6 +246,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onSeeAllPlaces = useCallback(() => navigation.navigate('Places'), [navigation]);
   const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
   const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const onSeeAllMarket = useCallback(() => navigation.navigate('Market'), [navigation]);
+  // Rail card tap opens the vendor's external shop (Market has no per-vendor
+  // detail screen — the URL *is* the destination, same as MarketScreen).
+  const openMarketVendor = useCallback((vendor: MarketVendor) => {
+    Linking.openURL(vendor.url).catch(() => {});
+  }, []);
   const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
@@ -867,6 +877,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return items.slice(0, 50);
   }, [events, posLat, posLon, maxDistanceMetres]);
 
+  // Market vendors are a static, curated list (no location/relay dep) —
+  // just featured-first, then capped to a small rail teaser. The full set
+  // lives behind "See all → Market". See src/data/marketVendors.ts.
+  const marketVendors = useMemo(() => featuredFirst(MARKET_VENDORS).slice(0, 8), []);
+
   return (
     <View style={styles.container}>
       <View style={styles.headerBackground}>
@@ -1043,6 +1058,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             />
           )}
         />
+
+        <ContentRail<MarketVendor>
+          title="Market"
+          caption="Buy a Lightning Piggy — Bitcoin-accepting vendors"
+          items={marketVendors}
+          onSeeAll={onSeeAllMarket}
+          seeAllTestId="explore-card-market"
+          keyExtractor={(v) => v.name}
+          renderItem={(vendor) => (
+            <MarketVendorCard
+              vendor={vendor}
+              variant="rail"
+              onPress={() => openMarketVendor(vendor)}
+            />
+          )}
+        />
       </ScrollView>
       {/* Map legend bottom sheet — shared by LibreMiniMap (no inline
           sheet) and used here so the (i) button has somewhere to go. The
@@ -1095,7 +1126,7 @@ const PlaceCard: React.FC<{
   distance: number;
   onPress: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createLocalStyles>;
+  styles: ReturnType<typeof createExploreHomeRailStyles>;
 }> = ({ place, distance, onPress, colors, styles }) => {
   const lightning = acceptsLightning(place);
   const lud16 = lightningAddressOf(place);
@@ -1140,7 +1171,7 @@ const CacheCard: React.FC<{
   distance: number;
   onPress: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createLocalStyles>;
+  styles: ReturnType<typeof createExploreHomeRailStyles>;
 }> = ({ cache, distance, onPress, colors, styles }) => (
   <TouchableOpacity style={styles.card} onPress={onPress} testID={`cache-card-${cache.d}`}>
     <View style={styles.cardThumbWrap}>
@@ -1189,7 +1220,7 @@ const EventCard: React.FC<{
   distance: number;
   onPress: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createLocalStyles>;
+  styles: ReturnType<typeof createExploreHomeRailStyles>;
 }> = ({ event, distance, onPress, colors, styles }) => {
   const day = event.startsAt
     ? new Date(event.startsAt * 1000).toLocaleString(undefined, {
@@ -1228,7 +1259,7 @@ const LessonCard: React.FC<{
   progress: LearnProgress;
   onPress: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createLocalStyles>;
+  styles: ReturnType<typeof createExploreHomeRailStyles>;
 }> = ({ course, progress, onPress, colors, styles }) => {
   const completed = getCourseCompletedCount(
     progress,
@@ -1256,91 +1287,6 @@ const LessonCard: React.FC<{
     </TouchableOpacity>
   );
 };
-
-// -----------------------------------------------------------------------------
-// styles local to the rails / cards / hub-specific bits
-// -----------------------------------------------------------------------------
-
-const createLocalStyles = (colors: Palette) =>
-  StyleSheet.create({
-    scrollContent: {
-      // 16dp gap between the brand header and the mini-map — kept in
-      // sync with PlacesScreen + HuntScreen so the three Explore-stack
-      // screens have an identical header-to-map rhythm.
-      paddingTop: 16,
-      paddingBottom: 32,
-    },
-    card: {
-      width: 160,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 12,
-      gap: 4,
-      // Position relative so the absolute Featured badge anchors to it.
-      position: 'relative',
-    },
-    cardFeaturedBadge: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 3,
-      backgroundColor: colors.zapYellow,
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 999,
-    },
-    cardFeaturedText: {
-      fontSize: 10,
-      fontWeight: '800',
-      color: colors.textHeader,
-    },
-    cardIcon: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 6,
-    },
-    cardThumb: {
-      width: '100%',
-      height: 80,
-      borderRadius: 8,
-      marginBottom: 6,
-      backgroundColor: colors.divider,
-    },
-    cardThumbPlaceholder: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    // Relative wrapper so the payout badge anchors to the thumb's corner.
-    cardThumbWrap: { position: 'relative' },
-    cardIconLightning: { backgroundColor: colors.brandPink },
-    cardIconOnchain: { backgroundColor: '#F5A623' },
-    cardIconStandard: { backgroundColor: '#7A5CFF' },
-    cardIconEvent: { backgroundColor: '#5b3aff' },
-    cardTitle: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    cardSub: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      fontWeight: '600',
-    },
-    cardSubSmall: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-    },
-    emptyText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      lineHeight: 19,
-    },
-  });
 
 // React.Profiler wrapper — see HomeScreen for the rationale (#560).
 // Explore is the screen Ben saw the 24-57 s freezes on; this surfaces
