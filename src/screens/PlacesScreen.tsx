@@ -19,7 +19,6 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
-  Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -36,6 +35,7 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
+import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
@@ -133,28 +133,23 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
     reload();
   }, [reload]);
 
+  // Plain nearest-first list. Featured pinning is intentionally NOT applied
+  // here — it must run on the *visible* (filtered/searched/bbox-limited) set
+  // so the (up to) three featured slots are always filled from what the user
+  // can actually see, not from rows that a later filter removes. This array
+  // feeds the mini-map + empty-state checks, neither of which cares about the
+  // featured ordering, only the distance sort and the count.
   const sortedPlaces = useMemo(() => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
-    return (
-      places
-        .map((place) => ({
-          place,
-          distance: haversineMetres(
-            { lat: pos.lat, lon: pos.lon },
-            { lat: place.lat, lon: place.lon },
-          ),
-        }))
-        // Boosted listings surface first (BTC Map's paid-feature
-        // mechanism); within the same boost bucket we still sort by
-        // distance. Every boosted row carries a "Featured" pill so the
-        // user can see why it's at the top.
-        .sort((a, b) => {
-          const ab = isBoosted(a.place) ? 1 : 0;
-          const bb = isBoosted(b.place) ? 1 : 0;
-          if (ab !== bb) return bb - ab;
-          return a.distance - b.distance;
-        })
-    );
+    return places
+      .map((place) => ({
+        place,
+        distance: haversineMetres(
+          { lat: pos.lat, lon: pos.lon },
+          { lat: place.lat, lon: place.lon },
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance);
   }, [places, pos]);
 
   // Selected category filters — empty = show every category (default).
@@ -194,23 +189,36 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         (place.categories ?? []).some((c) => selectedCategories.has(c)),
       );
     }
-    if (!q) return items;
-    return items.filter(({ place }) => {
-      const hay = [
-        place.tags.name ?? '',
-        place.tags['addr:street'] ?? '',
-        place.tags['addr:city'] ?? '',
-        place.tags['addr:postcode'] ?? '',
-        // Free-text search now also matches the curated category names
-        // and the OSM cuisine tag, so "italian" / "cafe" / "bicycle"
-        // resolve listings even when the user doesn't tap a chip.
-        ...(place.categories ?? []),
-        place.tags['cuisine'] ?? '',
-      ]
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
+    if (q) {
+      items = items.filter(({ place }) => {
+        const hay = [
+          place.tags.name ?? '',
+          place.tags['addr:street'] ?? '',
+          place.tags['addr:city'] ?? '',
+          place.tags['addr:postcode'] ?? '',
+          // Free-text search now also matches the curated category names
+          // and the OSM cuisine tag, so "italian" / "cafe" / "bicycle"
+          // resolve listings even when the user doesn't tap a chip.
+          ...(place.categories ?? []),
+          place.tags['cuisine'] ?? '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    // Pin up to 3 boosted ("Featured") listings to the top of the VISIBLE
+    // list, as the final step after every filter/search/bbox cut. Applying
+    // it here (rather than on the unfiltered `sortedPlaces`) guarantees the
+    // featured slots are filled from rows the user can actually see: if a
+    // featured place is filtered out, the next nearest featured among the
+    // visible set is promoted instead of being stranded in distance order.
+    // The (up to) three nearest visible featured win the slots; everything
+    // else, including any 4th+ featured listing, continues in distance order.
+    // Each pinned row carries a "Featured" pill so the user can see why it's
+    // at the top. Shared with the Explore "Places near you" rail via
+    // `orderFeaturedFirst` so the cap lives in one place.
+    return orderFeaturedFirst(items, (item) => isBoosted(item.place));
   }, [sortedPlaces, searchQuery, selectedCategories, mapBbox]);
 
   return (

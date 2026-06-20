@@ -27,6 +27,7 @@ import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { perfPageReady } from '../utils/perfLog';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
@@ -770,22 +771,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         return m.distance <= cap;
       });
     }
-    return (
-      items
-        // Boosted merchants surface first on the rail (BTC Map's
-        // paid-feature mechanism); within the same boost-bucket we still
-        // sort by distance so the closest boosted / closest non-boosted
-        // sit at the front of each half. Honest visual: each boosted
-        // card gets a "Featured" badge so the user knows why it's
-        // prominent.
-        .sort((a, b) => {
-          const ab = isBoosted(a.place) ? 1 : 0;
-          const bb = isBoosted(b.place) ? 1 : 0;
-          if (ab !== bb) return bb - ab;
-          return a.distance - b.distance;
-        })
-        .slice(0, 12)
-    );
+    const byDistance = items.sort((a, b) => a.distance - b.distance);
+    // Pin up to 3 boosted ("Featured") merchants to the front of the rail
+    // even if a non-featured place is closer (BTC Map's paid-feature
+    // mechanism); the rest follow in distance order. Each pinned card gets
+    // a "Featured" badge so the user knows why it's prominent. Shared with
+    // the full Places list via `orderFeaturedFirst` so the 3-featured cap
+    // lives in one place.
+    return orderFeaturedFirst(byDistance, (item) => isBoosted(item.place)).slice(0, 12);
   }, [merchants, posLat, posLon, maxDistanceMetres]);
 
   // Distinct merchant categories for the legend. Memoised so the
