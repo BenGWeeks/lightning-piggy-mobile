@@ -22,15 +22,15 @@
 export const MAX_FEATURED_PLACES = 3;
 
 /**
- * Returns a new array with up to {@link MAX_FEATURED_PLACES} featured items
- * pinned to the front, followed by every remaining item in its original
- * relative order.
+ * Returns a new array with up to `maxFeatured` featured items (defaulting to
+ * {@link MAX_FEATURED_PLACES}) pinned to the front, followed by every remaining
+ * item in its original relative order.
  *
  * Notes:
  *   - Input order is preserved within each group, so callers should pass items
  *     already sorted the way they want the "normal" remainder to read (e.g. by
  *     distance). The featured block is taken in that same input order, so the
- *     nearest featured places win the (up to) three slots.
+ *     nearest featured places win the (up to) `maxFeatured` slots.
  *   - A featured place that doesn't make the top-3 cap falls back into the
  *     remainder at its natural position — it is never dropped, just no longer
  *     pinned.
