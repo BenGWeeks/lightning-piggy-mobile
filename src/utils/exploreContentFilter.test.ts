@@ -7,7 +7,7 @@ jest.mock('expo-application', () => ({
   },
 }));
 
-import { isHiddenInProd } from './exploreContentFilter';
+import { isHiddenInProd, stripHiddenForPersist } from './exploreContentFilter';
 
 let mockApplicationId: string | null = null;
 
@@ -37,5 +37,37 @@ describe('isHiddenInProd', () => {
   it('never hides a real user, even in production', () => {
     mockApplicationId = 'com.lightningpiggy.app';
     expect(isHiddenInProd(REAL_USER)).toBe(false);
+  });
+});
+
+describe('stripHiddenForPersist', () => {
+  interface Item {
+    id: string;
+    pubkey: string;
+  }
+  const items: Item[] = [
+    { id: 'piggy', pubkey: BIG_PIGGY },
+    { id: 'real', pubkey: REAL_USER },
+  ];
+  const getPubkey = (i: Item) => i.pubkey;
+
+  afterEach(() => {
+    mockApplicationId = null;
+  });
+
+  it('drops prod test-account items so the cache self-heals in production', () => {
+    mockApplicationId = 'com.lightningpiggy.app';
+    expect(stripHiddenForPersist(items, getPubkey).map((i) => i.id)).toEqual(['real']);
+  });
+
+  it('persists everything (incl. Piggies) in dev / preview', () => {
+    mockApplicationId = 'com.lightningpiggy.app.dev';
+    expect(stripHiddenForPersist(items, getPubkey).map((i) => i.id)).toEqual(['piggy', 'real']);
+  });
+
+  it('returns a fresh array (never mutates the input)', () => {
+    mockApplicationId = 'com.lightningpiggy.app.dev';
+    const out = stripHiddenForPersist(items, getPubkey);
+    expect(out).not.toBe(items);
   });
 });

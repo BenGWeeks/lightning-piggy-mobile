@@ -57,6 +57,14 @@ describe('isFutureEvent', () => {
         true,
       );
     });
+
+    it('drops an all-day event at the exact midnight rollover (now === start + DAY)', () => {
+      // Visible through 23:59:59 of its day, but NOT at the next day's
+      // 00:00:00 — the boundary uses a strict `>` comparison.
+      const start = todayMidnight;
+      expect(isFutureEvent({ startsAt: start, endsAt: null }, start + DAY - 1)).toBe(true);
+      expect(isFutureEvent({ startsAt: start, endsAt: null }, start + DAY)).toBe(false);
+    });
   });
 });
 

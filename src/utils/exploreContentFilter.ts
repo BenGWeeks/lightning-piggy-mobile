@@ -20,3 +20,18 @@ import { isHiddenInProdPubkey } from './testAccounts';
  */
 export const isHiddenInProd = (pubkey: string): boolean =>
   isProductionBuild() && isHiddenInProdPubkey(pubkey);
+
+/**
+ * Strip prod-hidden (test-account) items from a list before it's persisted
+ * to the Explore cache, so prod caches self-heal: stale Piggy entries left
+ * over from earlier versions age out of storage instead of being re-saved
+ * forever and crowding out real content. In dev/preview `isHiddenInProd` is
+ * always false, so the list passes through untouched.
+ *
+ * @param items     the list about to be persisted
+ * @param getPubkey projects an item → its author hex pubkey
+ */
+export const stripHiddenForPersist = <T>(
+  items: readonly T[],
+  getPubkey: (item: T) => string,
+): T[] => items.filter((item) => !isHiddenInProd(getPubkey(item)));

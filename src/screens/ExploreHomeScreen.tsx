@@ -61,8 +61,6 @@ import {
   loadCachedEvents,
   peekCachedCachesSync,
   peekCachedEventsSync,
-  saveCaches,
-  saveEvents,
 } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
@@ -73,6 +71,7 @@ import {
 } from '../utils/geohash';
 import { isFutureEvent } from '../utils/futureEvent';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { usePersistCaches, usePersistEvents } from '../hooks/useExplorePlacesPersist';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
@@ -576,19 +575,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedInPubkey, refreshKey, readRelayKey]);
 
-  // Write-through to AsyncStorage whenever the in-memory state grows
-  // so the next cold start has fresh content to hydrate from. Debounced
-  // via a slow useEffect — we don't need to persist on every event.
-  useEffect(() => {
-    if (caches.size === 0) return;
-    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
-    return () => clearTimeout(t);
-  }, [caches]);
-  useEffect(() => {
-    if (events.size === 0) return;
-    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
-    return () => clearTimeout(t);
-  }, [events]);
+  // Write-through to AsyncStorage (debounced) so the next cold start hydrates
+  // fresh content; both hooks self-heal prod caches (drop stale test items).
+  usePersistCaches(caches);
+  usePersistEvents(events);
   // Counts of events arriving from pubkeys outside the trust set.
   // Surfaced as "N hidden — from outside your trust graph" so users
   // know the filter is doing something.

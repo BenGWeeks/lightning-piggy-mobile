@@ -19,7 +19,9 @@ export interface EventTiming {
 // `start` pinned to midnight. A start that lands exactly on a day boundary
 // is treated as all-day: it stays "not past" until the END of that day, so
 // an all-day event happening *today* still shows up all day rather than
-// disappearing at 00:00. 24h in seconds.
+// disappearing at 00:00. It vanishes exactly at the NEXT day's midnight
+// (visible through 23:59:59 of its day, but not at `start + 1 day`). 24h in
+// seconds.
 const ONE_DAY_SECONDS = 24 * 60 * 60;
 
 /**
@@ -33,8 +35,9 @@ const ONE_DAY_SECONDS = 24 * 60 * 60;
  *     yesterday but ends tomorrow is still happening, so it's shown).
  *   - Has only a `start`:
  *       · all-day (start on a midnight boundary) → future until the end of
- *         the start day (`start + 1 day >= now`), so a today all-day event
- *         survives the whole day.
+ *         the start day (`start + 1 day > now`), so a today all-day event
+ *         survives the whole day but disappears exactly at the next day's
+ *         midnight (`now === start + 1 day` is past).
  *       · timed → future iff `start >= now`. (No grace window — past is
  *         past. The old code's 1h grace let "17 May" style events linger.)
  *
@@ -54,7 +57,7 @@ export const isFutureEvent = (event: EventTiming, nowSeconds: number): boolean =
   const start = startsAt as number;
   const isAllDay = start % ONE_DAY_SECONDS === 0;
   if (isAllDay) {
-    return start + ONE_DAY_SECONDS >= nowSeconds;
+    return start + ONE_DAY_SECONDS > nowSeconds;
   }
   return start >= nowSeconds;
 };
