@@ -17,5 +17,9 @@
 // Deliberately NOT added to the kind-14 DM / group-chat rumors: those are
 // sealed into NIP-17 gift wraps, and a client tag inside the seal would leak
 // client metadata. Public events only — spread a fresh copy at each use site
-// (`[...LP_CLIENT_TAG]`) so no event aliases the shared array.
-export const LP_CLIENT_TAG = ['client', 'Lightning Piggy'] as const;
+// (`[...LP_CLIENT_TAG]`) so no event aliases the shared array. Frozen so the
+// shared template can't be mutated in place.
+export const LP_CLIENT_TAG = Object.freeze(['client', 'Lightning Piggy']) as readonly [
+  'client',
+  'Lightning Piggy',
+];

@@ -17,6 +17,9 @@ import type { HiddenPiggy } from './piggyStorageService';
 const CLIENT_TAG = ['client', 'Lightning Piggy'];
 const PK = 'a'.repeat(64);
 const PK2 = 'b'.repeat(64);
+const RELAY = 'wss://relay.example.com';
+// Realistic NIP-01 coordinate: <kind>:<64-hex-pubkey>:<d>.
+const CACHE_COORD = `37516:${PK}:d1`;
 
 describe('NIP-89 client tag', () => {
   it('is the bare two-element form', () => {
@@ -34,7 +37,7 @@ describe('NIP-89 client tag', () => {
     });
 
     it('kind 9734 — zap request', () => {
-      expect(createZapRequestEvent(PK, PK2, 1000, [], '').tags).toContainEqual(CLIENT_TAG);
+      expect(createZapRequestEvent(PK, PK2, 1000, [RELAY], '').tags).toContainEqual(CLIENT_TAG);
     });
 
     it('kind 30200 — group state', () => {
@@ -48,11 +51,11 @@ describe('NIP-89 client tag', () => {
     });
 
     it('kind 7516 — found log', () => {
-      expect(buildFoundLog('37516:abc:d1', 'found it').tags).toContainEqual(CLIENT_TAG);
+      expect(buildFoundLog(CACHE_COORD, 'found it').tags).toContainEqual(CLIENT_TAG);
     });
 
     it('kind 1111 — NIP-22 comment', () => {
-      expect(buildComment('37516:abc:d1', PK, 'note', 'note').tags).toContainEqual(CLIENT_TAG);
+      expect(buildComment(CACHE_COORD, PK, 'note', 'note').tags).toContainEqual(CLIENT_TAG);
     });
   });
 
