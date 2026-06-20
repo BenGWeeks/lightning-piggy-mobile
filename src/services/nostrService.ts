@@ -20,8 +20,11 @@ import { slimDisplayProfile } from '../utils/profileSanitize';
 import { tagsToContacts } from '../utils/contacts';
 import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
+import { LP_CLIENT_TAG } from './nip89ClientTag';
 
 export type { DmSendResult };
+// Re-exported for back-compat: the canonical home is ./nip89ClientTag.
+export { LP_CLIENT_TAG };
 
 // Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
 // the Hunt feature's NIP-GC subs) can share the single connection pool
@@ -795,6 +798,7 @@ export function createZapRequestEvent(
   zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     ['p', recipientPubkey],
     ['amount', amountMsats.toString()],
     ['relays', ...relays],
@@ -828,7 +832,7 @@ export function createContactListEvent(
   return {
     kind: 3,
     created_at: Math.floor(Date.now() / 1000),
-    tags,
+    tags: [[...LP_CLIENT_TAG], ...tags],
     content: '',
   };
 }
@@ -850,7 +854,7 @@ export function createProfileEvent(profileData: {
   return {
     kind: 0,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [],
+    tags: [[...LP_CLIENT_TAG]],
     content: JSON.stringify(cleaned),
   };
 }
@@ -1130,6 +1134,9 @@ export interface GroupStateEventInput {
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
  * for signing + publishing — same pattern as createDirectMessageRumor.
+ *
+ * Tags: the NIP-89 `client` tag (LP_CLIENT_TAG, this is a public event),
+ * then `d` (groupId), `name`, and one `p` per member.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
@@ -1137,10 +1144,7 @@ export function createGroupStateEvent(input: GroupStateEventInput): {
   tags: string[][];
   content: string;
 } {
-  const tags: string[][] = [
-    ['d', input.groupId],
-    ['name', input.name],
-  ];
+  const tags: string[][] = [[...LP_CLIENT_TAG], ['d', input.groupId], ['name', input.name]];
   for (const pk of input.memberPubkeys) {
     tags.push(['p', pk]);
   }
