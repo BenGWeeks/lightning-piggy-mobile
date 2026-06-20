@@ -13,8 +13,9 @@ export function vendorSlug(name: string): string {
   return (
     name
       .normalize('NFKD')
-      // Drop combining marks left behind by NFKD (é -> e).
-      .replace(/[̀-ͯ]/g, '')
+      // Drop combining marks left behind by NFKD (é -> e). U+0300–U+036F
+      // is the Unicode "Combining Diacritical Marks" block.
+      .replace(/[\u0300-\u036F]/gu, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')

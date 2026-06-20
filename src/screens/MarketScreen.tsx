@@ -18,9 +18,10 @@ interface Props {
  * Tapping a vendor opens its shop URL in the system browser.
  *
  * Data is the hardcoded {@link MARKET_VENDORS} directory, ported from the
- * website's `vendors.json`. A future live Nostr feed (NIP-15 kind 30018 +
- * NIP-99 kind 30402 — see the seam documented in `data/marketVendors.ts`)
- * could supplement or replace it without touching this screen.
+ * website's `vendors.json`. A future live Nostr feed (NIP-15 stalls kind
+ * 30017 + products kind 30018, plus NIP-99 classifieds kind 30402 — see the
+ * seam documented in `data/marketVendors.ts`) could supplement or replace
+ * it without touching this screen.
  */
 const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();

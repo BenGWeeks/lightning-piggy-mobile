@@ -57,9 +57,9 @@ export interface MarketVendor {
 
 /**
  * Pluggable source of Market vendors. The hardcoded list satisfies this
- * synchronously today; a future live Nostr loader (NIP-15 30018 +
- * NIP-99 30402 — see file header) would implement the async variant and
- * merge with the hardcoded curated set.
+ * synchronously today; a future live Nostr loader (NIP-15 stalls 30017 +
+ * products 30018, plus NIP-99 classifieds 30402 — see file header) would
+ * implement the async variant and merge with the hardcoded curated set.
  */
 export interface MarketVendorSource {
   getVendors(): MarketVendor[] | Promise<MarketVendor[]>;
