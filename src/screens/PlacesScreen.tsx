@@ -90,6 +90,15 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   // "No places nearby" empty state so it can't show while a fetch is
   // still in flight (or before one has run).
   const [fetchSettled, setFetchSettled] = useState(false);
+  // True only while a *user-initiated* pull-to-refresh is in flight.
+  // The background revalidate on mount must NOT show the spinner (that
+  // would compete with the cold-start blocking spinner / would spin on
+  // every warm visit). Separating this from `loading` lets a warm pull
+  // show the RefreshControl spinner while the cached list stays painted
+  // (no empty-flash), which `loading` alone can't express — on a warm
+  // visit `loading` is seeded false and `reload` deliberately keeps it
+  // false so the list isn't blanked.
+  const [refreshing, setRefreshing] = useState(false);
   // Live user-position for the dot on the embedded mini-map — refreshes
   // as the user walks around without re-running the nearby-places fetch
   // (that fires once from `pos` above).
@@ -115,7 +124,11 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         setError(
           'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
         );
+        setFetchSettled(true);
         setLoading(false);
+        // Clear the pull-to-refresh spinner on the permission-denied early
+        // return too, otherwise a user pull would spin forever.
+        setRefreshing(false);
         return;
       }
       const fix = await Location.getCurrentPositionAsync({
@@ -143,8 +156,20 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
     } finally {
       setFetchSettled(true);
       setLoading(false);
+      // Always clear the pull-to-refresh spinner once the fetch settles.
+      // Harmless on the background/mount path (it was never set there).
+      setRefreshing(false);
     }
   }, [applyFetched, places.length, seedFromCacheAsync, setLoading]);
+
+  // User-initiated pull-to-refresh: show the RefreshControl spinner while
+  // the cached list stays on-screen, then revalidate. Distinct from the
+  // silent on-mount revalidate so a warm refresh visibly responds without
+  // reintroducing the empty-flash (#910).
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void reload();
+  }, [reload]);
 
   useEffect(() => {
     reload();
@@ -289,8 +314,8 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={loading && places.length > 0}
-            onRefresh={reload}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             tintColor={colors.brandPink}
             colors={[colors.brandPink]}
           />
