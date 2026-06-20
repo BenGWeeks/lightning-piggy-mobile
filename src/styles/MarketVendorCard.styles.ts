@@ -109,13 +109,31 @@ export const createMarketVendorCardStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       lineHeight: 17,
     },
+    // Footer holding the Bitcoin-accepted badge and (when the vendor is on
+    // Nostr) the message/zap affordance, pushed to opposite ends.
+    footerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 2,
+    },
+    // Small round "reach them on Nostr" button (message/zap in-app). Neutral
+    // surface-contrast background with a brand-purple glyph so it reads as a
+    // secondary action next to the pink ⚡ badge, in both light and dark.
+    nostrButton: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+    },
     // ⚡ Bitcoin-accepted affordance — every vendor in this directory takes
     // Bitcoin, so the badge is unconditional and reassures at a glance.
     btcRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      marginTop: 2,
     },
     btcText: {
       fontSize: 11,

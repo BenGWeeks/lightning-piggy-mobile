@@ -1,6 +1,7 @@
 // Pure shaping helpers for Market vendors. Kept out of the data module and
 // the screens so they're independently unit-testable (coverage scope:
 // src/utils). No React, no I/O.
+import * as nip19 from 'nostr-tools/nip19';
 import type { MarketShopType, MarketVendor } from '../data/marketVendors';
 
 /**
@@ -51,4 +52,35 @@ export function shopTypeLabel(shopType: MarketShopType): string {
 export function vendorLocationLine(vendor: MarketVendor): string {
   if (vendor.shippingRegions.length === 0) return vendor.country;
   return `${vendor.country} · Ships to ${vendor.shippingRegions.join(', ')}`;
+}
+
+/**
+ * Extract the vendor's Nostr pubkey (hex) from its `nostrUrl`, or `null`
+ * when the vendor has no Nostr identity / the URL isn't a recognisable
+ * npub link. `nostrUrl` is an njump.me web link
+ * (`https://njump.me/npub1…`), so we pull the last path segment and decode
+ * it. Returns hex so callers can navigate straight to the in-app contact
+ * profile (where Message / Zap live) instead of opening the web link.
+ *
+ * Pure + total: never throws — a malformed or non-npub value yields `null`
+ * so the caller can fall back to opening the shop URL.
+ */
+export function vendorNostrPubkey(vendor: MarketVendor): string | null {
+  const raw = vendor.nostrUrl.trim();
+  if (!raw) return null;
+  // Last non-empty path segment (drops a trailing slash); also tolerates a
+  // bare `npub1…` value with no URL wrapper.
+  const segment = raw.split('/').filter(Boolean).pop();
+  if (!segment || !segment.startsWith('npub1')) return null;
+  try {
+    const decoded = nip19.decode(segment);
+    return decoded.type === 'npub' ? decoded.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the vendor exposes a usable Nostr identity we can open in-app. */
+export function vendorHasNostr(vendor: MarketVendor): boolean {
+  return vendorNostrPubkey(vendor) !== null;
 }

@@ -1,15 +1,26 @@
 import React, { useCallback, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, FlatList, Linking } from 'react-native';
+import { CompositeNavigationProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ChevronLeft } from 'lucide-react-native';
 import MarketVendorCard from '../components/MarketVendorCard';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
 import { featuredFirst, vendorSlug } from '../utils/marketVendors';
-import { ExploreNavigation } from '../navigation/types';
+import { openVendorNostrProfile } from '../utils/marketVendorNav';
+import { ExploreNavigation, RootStackParamList } from '../navigation/types';
+
+// Composite nav — the per-vendor "reach on Nostr" action opens the
+// ContactProfile route, which lives on the root stack (not the Explore
+// stack this screen is mounted in). The composite type exposes both.
+type MarketNavigation = CompositeNavigationProp<
+  ExploreNavigation,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 interface Props {
-  navigation: ExploreNavigation;
+  navigation: MarketNavigation;
 }
 
 /**
@@ -36,6 +47,16 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       // Swallow — a malformed/unsupported URL shouldn't crash the screen.
     });
   }, []);
+
+  // Reach the vendor on Nostr (message / zap) in-app. Only wired for vendors
+  // with an npub; openVendorNostrProfile returns false otherwise (the card
+  // hides the affordance for those, so this stays a no-op there).
+  const openVendorNostr = useCallback(
+    (vendor: MarketVendor) => {
+      openVendorNostrProfile(navigation, vendor);
+    },
+    [navigation],
+  );
 
   return (
     <View style={styles.container} testID="market-screen">
@@ -67,7 +88,12 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
-          <MarketVendorCard vendor={item} variant="list" onPress={() => openVendor(item)} />
+          <MarketVendorCard
+            vendor={item}
+            variant="list"
+            onPress={() => openVendor(item)}
+            onNostr={() => openVendorNostr(item)}
+          />
         )}
       />
     </View>

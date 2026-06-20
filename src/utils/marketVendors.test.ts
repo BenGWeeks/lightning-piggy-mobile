@@ -1,5 +1,12 @@
-import { featuredFirst, shopTypeLabel, vendorLocationLine, vendorSlug } from './marketVendors';
-import type { MarketVendor } from '../data/marketVendors';
+import {
+  featuredFirst,
+  shopTypeLabel,
+  vendorHasNostr,
+  vendorLocationLine,
+  vendorNostrPubkey,
+  vendorSlug,
+} from './marketVendors';
+import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
 
 const make = (over: Partial<MarketVendor>): MarketVendor => ({
   name: 'Test Vendor',
@@ -69,5 +76,66 @@ describe('vendorLocationLine', () => {
         make({ country: 'El Salvador', shippingRegions: [], shopType: 'physical' }),
       ),
     ).toBe('El Salvador');
+  });
+});
+
+describe('vendorNostrPubkey', () => {
+  // Robotechy's npub → hex (verified against nostr-tools nip19.decode).
+  const robotechyHex = '211f325b5396968ac0c79b7c0a030d768206d32ac61f93f143de112b859bd46f';
+
+  it('decodes an njump.me npub link to its hex pubkey', () => {
+    const vendor = make({
+      nostrUrl: 'https://njump.me/npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5',
+    });
+    expect(vendorNostrPubkey(vendor)).toBe(robotechyHex);
+  });
+
+  it('tolerates a trailing slash and a bare npub', () => {
+    expect(
+      vendorNostrPubkey(
+        make({
+          nostrUrl:
+            'https://njump.me/npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5/',
+        }),
+      ),
+    ).toBe(robotechyHex);
+    expect(
+      vendorNostrPubkey(
+        make({ nostrUrl: 'npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5' }),
+      ),
+    ).toBe(robotechyHex);
+  });
+
+  it('returns null for an empty or non-npub nostrUrl', () => {
+    expect(vendorNostrPubkey(make({ nostrUrl: '' }))).toBeNull();
+    expect(vendorNostrPubkey(make({ nostrUrl: 'https://example.com/profile' }))).toBeNull();
+    expect(vendorNostrPubkey(make({ nostrUrl: 'https://njump.me/npub1notvalid' }))).toBeNull();
+  });
+});
+
+describe('vendorHasNostr', () => {
+  it('is true only when an npub decodes', () => {
+    expect(
+      vendorHasNostr(
+        make({
+          nostrUrl:
+            'https://njump.me/npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5',
+        }),
+      ),
+    ).toBe(true);
+    expect(vendorHasNostr(make({ nostrUrl: '' }))).toBe(false);
+  });
+});
+
+describe('MARKET_VENDORS directory', () => {
+  it('exposes a Nostr identity for exactly the three npub vendors', () => {
+    const onNostr = MARKET_VENDORS.filter(vendorHasNostr).map((v) => v.name);
+    expect(onNostr.sort()).toEqual(['BitcoinStuffStore', 'Robotechy', 'SatoshiStore.io'].sort());
+  });
+
+  it('only ever uses https banner URLs (no dead-host fallbacks baked in)', () => {
+    for (const v of MARKET_VENDORS) {
+      if (v.banner) expect(v.banner).toMatch(/^https:\/\//);
+    }
   });
 });

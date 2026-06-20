@@ -1,15 +1,27 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Globe, Store, Zap } from 'lucide-react-native';
+import { Globe, MessageCircle, Store, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketVendorCardStyles } from '../styles/MarketVendorCard.styles';
 import type { MarketVendor } from '../data/marketVendors';
-import { shopTypeLabel, vendorLocationLine, vendorSlug } from '../utils/marketVendors';
+import {
+  shopTypeLabel,
+  vendorLocationLine,
+  vendorHasNostr,
+  vendorSlug,
+} from '../utils/marketVendors';
 
 interface Props {
   vendor: MarketVendor;
   onPress: () => void;
+  /**
+   * Tapped when the user wants to reach the vendor on Nostr (message / zap
+   * them in-app). Only rendered when the vendor has a Nostr identity
+   * (`vendorHasNostr`); omit it (or leave the vendor npub-less) to hide the
+   * affordance. Vendors without an npub keep website-only behaviour.
+   */
+  onNostr?: () => void;
   /**
    * `rail` — fixed-width vertical card for the Explore horizontal rail.
    * `list` — full-width horizontal row for the Market screen list.
@@ -34,7 +46,7 @@ interface Props {
  * Mirrors the website's `VendorCard.astro` field layout so the two stay
  * recognisably the same product.
  */
-const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
+const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, onNostr, variant }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketVendorCardStyles(colors), [colors]);
   // Track logo load failure so a 404 / dead host falls back to the
@@ -132,6 +144,25 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
     </View>
   );
 
+  // Nostr affordance — only for vendors with an npub AND a handler wired.
+  // Opens the vendor's in-app contact profile (where Message / Zap live)
+  // instead of their website. `stopPropagation`-style guard: the button
+  // sits inside the card's TouchableOpacity, so its own onPress fires the
+  // Nostr action without also triggering the card's "open shop" press.
+  const showNostr = !!onNostr && vendorHasNostr(vendor);
+  const nostrButton = showNostr ? (
+    <TouchableOpacity
+      style={styles.nostrButton}
+      onPress={onNostr}
+      accessibilityLabel={`Message or zap ${vendor.name} on Nostr`}
+      testID={`market-vendor-card-${slug}-nostr`}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      activeOpacity={0.7}
+    >
+      <MessageCircle size={16} color={colors.brandPurple} strokeWidth={2.25} />
+    </TouchableOpacity>
+  ) : null;
+
   if (variant === 'rail') {
     return (
       <TouchableOpacity
@@ -153,7 +184,10 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
           <Text style={styles.description} numberOfLines={2}>
             {vendor.description}
           </Text>
-          {btcAffordance}
+          <View style={styles.footerRow}>
+            {btcAffordance}
+            {nostrButton}
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -179,7 +213,10 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
         <Text style={styles.description} numberOfLines={3}>
           {vendor.description}
         </Text>
-        {btcAffordance}
+        <View style={styles.footerRow}>
+          {btcAffordance}
+          {nostrButton}
+        </View>
       </View>
       {vendor.featured ? (
         <View style={styles.featuredBadge} testID={`market-vendor-card-${slug}-featured`}>

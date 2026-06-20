@@ -79,10 +79,21 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import { createExploreHomeRailStyles } from '../styles/ExploreHomeRail.styles';
 import type { Palette } from '../styles/palettes';
-import { ExploreNavigation } from '../navigation/types';
+import { ExploreNavigation, RootStackParamList } from '../navigation/types';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { openVendorNostrProfile } from '../utils/marketVendorNav';
+
+// Composite nav — Market cards' "reach on Nostr" action opens the
+// root-stack ContactProfile route, which the Explore-stack nav alone
+// can't target. (See marketVendorNav.)
+type ExploreHomeNavigation = CompositeNavigationProp<
+  ExploreNavigation,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 interface Props {
-  navigation: ExploreNavigation;
+  navigation: ExploreHomeNavigation;
 }
 
 /**
@@ -252,6 +263,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const openMarketVendor = useCallback((vendor: MarketVendor) => {
     Linking.openURL(vendor.url).catch(() => {});
   }, []);
+  // Vendors with an npub get a "reach on Nostr" affordance that opens their
+  // in-app contact profile (Message / Zap) instead of the website.
+  const openMarketVendorNostr = useCallback(
+    (vendor: MarketVendor) => {
+      openVendorNostrProfile(navigation, vendor);
+    },
+    [navigation],
+  );
   const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
@@ -1020,6 +1039,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               vendor={vendor}
               variant="rail"
               onPress={() => openMarketVendor(vendor)}
+              onNostr={() => openMarketVendorNostr(vendor)}
             />
           )}
         />

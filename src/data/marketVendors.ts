@@ -52,13 +52,16 @@ export interface MarketVendor {
    * so it reads like the other Explore carousels (Lessons / Places /
    * Geo-caches), which all lead with a cover image.
    *
-   * Resolved at AUTHOR time, not runtime: each value was sourced by
-   * fetching the vendor's own website and reading its Open Graph image
-   * (`<meta property="og:image">`). Baking the resolved URL in keeps the
-   * directory HARDCODED — the app never scrapes vendor sites at runtime.
-   * Left `undefined` for Nostr-only / site-relative LP vendors or where no
-   * usable og:image was found; the card then renders a branded fallback
-   * banner (blurred logo backdrop / Lightning Piggy gradient).
+   * Resolved at AUTHOR time, not runtime. For vendors with an npub the
+   * value is the `banner` field of their Nostr kind-0 (metadata) profile,
+   * fetched once and baked in here (so the directory stays HARDCODED — the
+   * app never queries relays for this). For vendors without an npub (or
+   * whose kind-0 banner points at a dead host), it falls back to the
+   * vendor site's Open Graph image (`<meta property="og:image">`), also
+   * resolved at author time. Left `undefined` when neither is usable; the
+   * card then renders a branded fallback banner (blurred logo backdrop /
+   * Lightning Piggy gradient). HARD CONSTRAINT: banners must be text-free —
+   * the card already shows the name + logo.
    */
   banner?: string;
   /** Optional njump.me / Nostr profile link. Empty string when unset. */
@@ -104,6 +107,12 @@ export const MARKET_VENDORS: MarketVendor[] = [
     description:
       '3D printing Bitcoin store with cases for Bitcoin Seed Signers and other accessories.',
     url: 'https://robotechy.com',
+    // `logo` is the vendor's Nostr kind-0 `picture` (RobotechyShop, resolved
+    // 2026-06-20) — a clean "R" monogram. Their kind-0 `banner`
+    // (m.primal.net/JdnT.jpg) is a wordmark cover with "ROBOTECHY BITCOIN
+    // STORE" baked in, which would violate the text-free banner rule, so
+    // `banner` is left unset and the card renders the branded fallback
+    // (blurred logo backdrop) instead.
     logo: 'https://m.primal.net/JdnO.jpg',
     nostrUrl: 'https://njump.me/npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5',
     xUrl: 'https://x.com/IsaacWeeks',
@@ -128,10 +137,13 @@ export const MARKET_VENDORS: MarketVendor[] = [
     shopType: 'online',
     description: 'Wonderful merch, piggies incoming.',
     url: 'https://satoshistore.io/collections/lightning-piggy',
+    // This vendor's Nostr kind-0 `picture` + `banner` both point at
+    // void.cat, which is now defunct (DNS no longer resolves), so the logo
+    // falls back to the working avatar (unavatar). Their shop og:image is a
+    // t-shirt photo with "LIGHTNING PIGGY" / "SATOSHISTORE.IO" printed on
+    // it (text — not allowed in a banner), so `banner` is left unset and
+    // the card renders the text-free branded fallback instead.
     logo: 'https://unavatar.io/twitter/satoshistoreio',
-    // og:image of the Lightning Piggy collection page (resolved 2026-06-20).
-    banner:
-      'https://satoshistore.io/cdn/shop/collections/unisex-staple-t-shirt-black-product-details-679a2ac2c5d17_1200x1200.jpg?v=1738157933',
     nostrUrl: 'https://njump.me/npub1eclyv67suswsx5q0guyds43uzaj0ymkgvkr5chmuwsxsj9229zms8tankk',
     xUrl: 'https://x.com/satoshistoreio',
     featured: false,
@@ -143,8 +155,12 @@ export const MARKET_VENDORS: MarketVendor[] = [
     shopType: 'both',
     description: 'Bitcoin merchandise, miners, and gadgets\nfor the true Bitcoiner',
     url: 'https://www.bitcoinstuffstore.com/product/lightning-piggy/',
+    // Their Nostr kind-0 `picture` is a personal portrait of the owner and
+    // the kind-0 `banner` is a "Bitcoin Stuff Store" wordmark (text — not
+    // allowed in a banner), so neither is used: the logo stays the store's
+    // brand mark and the banner is the text-free Lightning Piggy product
+    // photo (the product page's og:image), resolved 2026-06-20.
     logo: `${LIGHTNING_PIGGY_SITE_ORIGIN}/images/logos/bitcoinstuffstore.png`,
-    // og:image of the Lightning Piggy product page (resolved 2026-06-20).
     banner: 'https://www.bitcoinstuffstore.com/wp-content/uploads/2024/07/Lightningpiggy.webp',
     nostrUrl: 'https://njump.me/npub135q6dvnjah9023xszmjs2wvd4gqhn2trku52wt2lv8cl4hc8ltjsk0w4sq',
     xUrl: 'https://twitter.com/ZijlstraMario',
