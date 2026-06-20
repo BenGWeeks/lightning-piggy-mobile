@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { hasPrize } from '../utils/cachePrize';
 
 interface Props {
   /** Whether the cache is a Lightning Piggy (carries the NIP-32 LP label). */
@@ -35,7 +36,7 @@ interface Props {
  */
 export const LpPayoutBadge: React.FC<Props> = ({ isLpPiggy, payoutSats, offset }) => {
   const colors = useThemeColors();
-  if (!isLpPiggy || payoutSats == null) return null;
+  if (!hasPrize({ isLpPiggy, payoutSats })) return null;
   return (
     <View
       style={[styles.badge, { backgroundColor: colors.surface }, offset]}

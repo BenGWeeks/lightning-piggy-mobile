@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Marker } from '@maplibre/maplibre-react-native';
 import { PiggyBank, MapPin, Zap } from 'lucide-react-native';
@@ -51,7 +51,9 @@ export const CacheMapMarker: React.FC<CacheMapMarkerProps> = ({
   markerDimStyle,
 }) => {
   const colors = useThemeColors();
-  const styles = createCacheMapMarkerStyles(colors);
+  // Memoise so re-renders of a map carrying many markers don't each redo
+  // StyleSheet.create — mirrors LibreMiniMap's own style memoisation.
+  const styles = useMemo(() => createCacheMapMarkerStyles(colors), [colors]);
   const prize = hasPrize({ isLpPiggy, payoutSats });
 
   return (

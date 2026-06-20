@@ -8,7 +8,9 @@ import type { Palette } from './palettes';
 export const createCacheMapMarkerStyles = (colors: Palette) =>
   StyleSheet.create({
     // Wrapper so the absolutely-positioned prize bolt anchors to the pin.
-    // It adds no size of its own — the pin keeps the shared 22 px chassis.
+    // It adds no size of its own — it just wraps the pin (whose size the
+    // caller may override via markerDimStyle, e.g. MapScreen's
+    // uniformMarkerSize) plus the overhanging bolt.
     wrap: {
       position: 'relative',
     },
