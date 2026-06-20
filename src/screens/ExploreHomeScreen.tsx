@@ -1008,6 +1008,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
 
+        <ContentRail<MarketVendor>
+          title="Market"
+          caption="Buy a Lightning Piggy — Bitcoin-accepting vendors"
+          items={marketVendors}
+          onSeeAll={onSeeAllMarket}
+          seeAllTestId="explore-card-market"
+          keyExtractor={(v) => v.name}
+          renderItem={(vendor) => (
+            <MarketVendorCard
+              vendor={vendor}
+              variant="rail"
+              onPress={() => openMarketVendor(vendor)}
+            />
+          )}
+        />
+
         <ContentRail<{ event: ParsedEvent; distance: number }>
           title="Events near you"
           caption={
@@ -1055,22 +1071,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               onPress={() => navigation.navigate('CourseDetail', { courseId: course.id })}
               colors={colors}
               styles={localStyles}
-            />
-          )}
-        />
-
-        <ContentRail<MarketVendor>
-          title="Market"
-          caption="Buy a Lightning Piggy — Bitcoin-accepting vendors"
-          items={marketVendors}
-          onSeeAll={onSeeAllMarket}
-          seeAllTestId="explore-card-market"
-          keyExtractor={(v) => v.name}
-          renderItem={(vendor) => (
-            <MarketVendorCard
-              vendor={vendor}
-              variant="rail"
-              onPress={() => openMarketVendor(vendor)}
             />
           )}
         />

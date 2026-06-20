@@ -9,18 +9,46 @@ import type { Palette } from './palettes';
 export const createMarketVendorCardStyles = (colors: Palette) =>
   StyleSheet.create({
     // ----- rail (vertical, fixed width) ------------------------------------
+    // Leads with a full-bleed cover banner (logo overlaid) so the card
+    // reads like the sibling Explore rails (Lessons / Places / Geo-caches),
+    // which all open with a cover image. `overflow: hidden` clips the
+    // banner to the card's rounded top corners.
     railCard: {
       width: 200,
       backgroundColor: colors.surface,
       borderRadius: 12,
-      padding: 12,
-      gap: 6,
+      overflow: 'hidden',
       position: 'relative',
     },
-    railLogoRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
+    railBody: {
+      padding: 12,
+      paddingTop: 22, // room for the logo that overhangs the banner
+      gap: 6,
+    },
+    // ----- banner (rail cover) ---------------------------------------------
+    // Mirrors the other rails' `cardThumb` cover treatment (full-width
+    // image leading the card), sized for the 200dp-wide Market rail card.
+    bannerWrap: {
+      width: '100%',
+      height: 88,
+      backgroundColor: colors.background,
+      position: 'relative',
+    },
+    bannerImage: {
+      width: '100%',
+      height: '100%',
+    },
+    // Crisp logo overlaid on the banner, overhanging its bottom edge so it
+    // reads as a vendor avatar over the cover (parity with the maintainer's
+    // ask to keep the logo as well as the banner).
+    bannerLogo: {
+      position: 'absolute',
+      left: 12,
+      bottom: -10,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.surface,
+      backgroundColor: colors.surface,
     },
 
     // ----- list (horizontal row) -------------------------------------------

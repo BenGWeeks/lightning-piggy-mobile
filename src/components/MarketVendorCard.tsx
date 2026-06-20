@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Globe, Store, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketVendorCardStyles } from '../styles/MarketVendorCard.styles';
@@ -18,10 +19,17 @@ interface Props {
 
 /**
  * Reusable Market vendor card, shared by the Explore "Market" rail and the
- * full Market screen. Shows the vendor's logo (with a monogram fallback
- * when missing or broken), name, country + shop type, a short description,
- * and an unconditional "⚡ Bitcoin accepted" affordance (every vendor in
- * this curated directory takes Bitcoin).
+ * full Market screen. Shows a cover/banner image (so it reads like the
+ * other Explore carousels — Lessons / Places / Geo-caches, which all lead
+ * with a cover) with the vendor's logo overlaid, the name, country + shop
+ * type, a short description, and an unconditional "⚡ Bitcoin accepted"
+ * affordance (every vendor in this curated directory takes Bitcoin).
+ *
+ * Banner resolution (rail variant): vendors with a `banner` URL (baked in
+ * at author time from their site's og:image — see `marketVendors.ts`) show
+ * it; otherwise the card falls back to a tasteful branded banner — the
+ * logo blurred as a backdrop, or a Lightning Piggy pink gradient when even
+ * the logo is missing. The crisp logo always sits on top either way.
  *
  * Mirrors the website's `VendorCard.astro` field layout so the two stay
  * recognisably the same product.
@@ -33,13 +41,17 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
   // monogram tile instead of a blank box (parity with the website's
   // onerror handler).
   const [logoFailed, setLogoFailed] = useState(false);
+  // Track banner load failure independently so a dead og:image host falls
+  // back to the branded banner rather than a blank box.
+  const [bannerFailed, setBannerFailed] = useState(false);
 
   const slug = vendorSlug(vendor.name);
-  const showLogo = vendor.logo.length > 0 && !logoFailed;
+  const hasLogo = vendor.logo.length > 0 && !logoFailed;
+  const hasBanner = !!vendor.banner && !bannerFailed;
 
   const logo = (
     <View style={styles.logoWrap}>
-      {showLogo ? (
+      {hasLogo ? (
         <Image
           source={{ uri: vendor.logo }}
           style={styles.logo}
@@ -52,6 +64,54 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
           <Text style={styles.logoFallbackText}>{vendor.name.charAt(0).toUpperCase()}</Text>
         </View>
       )}
+    </View>
+  );
+
+  // Branded fallback backdrop used when the vendor has no usable og:image
+  // banner: the logo blurred to fill the banner, or — if there's no logo
+  // either — a Lightning Piggy pink→purple gradient. The crisp `logo`
+  // overlay (rendered by the caller) always sits on top.
+  const fallbackBackdrop = hasLogo ? (
+    <Image
+      source={{ uri: vendor.logo }}
+      style={styles.bannerImage}
+      resizeMode="cover"
+      blurRadius={18}
+      onError={() => setLogoFailed(true)}
+      accessibilityLabel={`${vendor.name} banner`}
+    />
+  ) : (
+    <LinearGradient
+      colors={[colors.brandPink, colors.brandPurple]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.bannerImage}
+    />
+  );
+
+  // Full-bleed banner header (rail variant): real og:image cover when we
+  // have one, branded fallback otherwise. The logo + featured badge are
+  // overlaid so the card leads with a cover image like its sibling rails.
+  const banner = (
+    <View style={styles.bannerWrap}>
+      {hasBanner ? (
+        <Image
+          source={{ uri: vendor.banner }}
+          style={styles.bannerImage}
+          resizeMode="cover"
+          onError={() => setBannerFailed(true)}
+          accessibilityLabel={`${vendor.name} banner`}
+        />
+      ) : (
+        fallbackBackdrop
+      )}
+      <View style={styles.bannerLogo}>{logo}</View>
+      {vendor.featured ? (
+        <View style={styles.featuredBadge} testID={`market-vendor-card-${slug}-featured`}>
+          <Zap size={9} color={colors.zapYellowInk} strokeWidth={2.5} fill={colors.zapYellowInk} />
+          <Text style={styles.featuredText}>Featured</Text>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -72,13 +132,6 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
     </View>
   );
 
-  const featuredBadge = vendor.featured ? (
-    <View style={styles.featuredBadge} testID={`market-vendor-card-${slug}-featured`}>
-      <Zap size={9} color={colors.zapYellowInk} strokeWidth={2.5} fill={colors.zapYellowInk} />
-      <Text style={styles.featuredText}>Featured</Text>
-    </View>
-  ) : null;
-
   if (variant === 'rail') {
     return (
       <TouchableOpacity
@@ -88,19 +141,20 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
         testID={`market-vendor-card-${slug}`}
         activeOpacity={0.8}
       >
-        {featuredBadge}
-        <View style={styles.railLogoRow}>{logo}</View>
-        <Text style={styles.name} numberOfLines={1}>
-          {vendor.name}
-        </Text>
-        <Text style={styles.meta} numberOfLines={1}>
-          {vendor.country}
-        </Text>
-        {shopType}
-        <Text style={styles.description} numberOfLines={2}>
-          {vendor.description}
-        </Text>
-        {btcAffordance}
+        {banner}
+        <View style={styles.railBody}>
+          <Text style={styles.name} numberOfLines={1}>
+            {vendor.name}
+          </Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            {vendor.country}
+          </Text>
+          {shopType}
+          <Text style={styles.description} numberOfLines={2}>
+            {vendor.description}
+          </Text>
+          {btcAffordance}
+        </View>
       </TouchableOpacity>
     );
   }
@@ -127,7 +181,12 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, variant }) => {
         </Text>
         {btcAffordance}
       </View>
-      {featuredBadge}
+      {vendor.featured ? (
+        <View style={styles.featuredBadge} testID={`market-vendor-card-${slug}-featured`}>
+          <Zap size={9} color={colors.zapYellowInk} strokeWidth={2.5} fill={colors.zapYellowInk} />
+          <Text style={styles.featuredText}>Featured</Text>
+        </View>
+      ) : null}
     </TouchableOpacity>
   );
 };
