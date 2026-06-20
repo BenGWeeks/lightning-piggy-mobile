@@ -7,7 +7,7 @@ import {
   shouldShowEmptyState,
   shouldStartLoading,
 } from './placesCache';
-import type { BtcMapPlace } from '../services/btcMapService';
+import type { BtcMapPlace, FetchPlacesResult } from '../services/btcMapService';
 
 const makePlace = (id: number): BtcMapPlace => ({
   id,
@@ -96,19 +96,50 @@ describe('placesCache pure helpers', () => {
   });
 
   describe('reconcileFetchedPlaces', () => {
-    it('replaces the shown list with a non-empty fetch (authoritative)', () => {
+    const result = (over: Partial<FetchPlacesResult>): FetchPlacesResult => ({
+      ok: true,
+      places: [],
+      ...over,
+    });
+
+    it('replaces the shown list with a non-empty authoritative fetch', () => {
       const shown = [makePlace(1)];
       const fetched = [makePlace(2), makePlace(3)];
-      expect(reconcileFetchedPlaces(shown, fetched)).toBe(fetched);
+      expect(reconcileFetchedPlaces(shown, result({ ok: true, places: fetched }))).toBe(fetched);
     });
 
-    it('keeps the cached list when the fetch came back empty (offline blip)', () => {
+    it('clears the list when an authoritative fetch returns genuinely empty', () => {
+      // Moving to an area with no merchants must blank the previous
+      // area's list so the screen can reach its honest empty state —
+      // an `ok: true` empty is "0 places here", not a transient blip.
       const shown = [makePlace(1)];
-      expect(reconcileFetchedPlaces(shown, [])).toBe(shown);
+      expect(reconcileFetchedPlaces(shown, result({ ok: true, places: [] }))).toEqual([]);
     });
 
-    it('accepts a genuinely-empty fetch when nothing was shown', () => {
-      expect(reconcileFetchedPlaces([], [])).toEqual([]);
+    it('keeps the cached list when the fetch failed (offline/error fallback)', () => {
+      // `ok: false` means the request blipped and `places` is the stale
+      // cache fallback — never blank an existing list on that.
+      const shown = [makePlace(1)];
+      expect(reconcileFetchedPlaces(shown, result({ ok: false, places: [] }))).toBe(shown);
+    });
+
+    it('keeps the cached list when a failed fetch returns its stale fallback', () => {
+      const shown = [makePlace(1)];
+      const stale = [makePlace(1)];
+      // Even if the failed fetch carries a (stale) fallback array, the
+      // already-shown list wins so the view never flickers.
+      expect(reconcileFetchedPlaces(shown, result({ ok: false, places: stale }))).toBe(shown);
+    });
+
+    it('accepts an authoritative empty when nothing was shown', () => {
+      expect(reconcileFetchedPlaces([], result({ ok: true, places: [] }))).toEqual([]);
+    });
+
+    it('uses a failed fetch fallback when nothing was shown yet', () => {
+      // Cold start, no list yet: a failed fetch's cache fallback is still
+      // better than empty, so surface it.
+      const fallback = [makePlace(9)];
+      expect(reconcileFetchedPlaces([], result({ ok: false, places: fallback }))).toBe(fallback);
     });
   });
 });

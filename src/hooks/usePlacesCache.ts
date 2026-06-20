@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   type BtcMapPlace,
+  type FetchPlacesResult,
   getCachedPlaces,
   peekCachedAnchorSync,
   peekCachedFetchedAtSync,
@@ -27,9 +28,10 @@ import {
  *      initialisers so the very first render already has the last-known
  *      places + anchor position. No `useEffect → setState` round-trip.
  *   2. **Background revalidate** — the screen still fires its live
- *      `fetchPlacesInBbox` on mount; `applyFetched` reconciles the result
- *      against what's shown (a successful fetch replaces the cache; an
- *      empty/offline blip keeps the cached list rather than blanking it).
+ *      `fetchPlacesInBboxResult` on mount; `applyFetched` reconciles the
+ *      result against what's shown. An authoritative fetch replaces the
+ *      cache even when empty (a genuinely empty area clears the list); an
+ *      offline/error blip keeps the cached list rather than blanking it.
  *   3. **Async warm-up fallback** — `seedFromCacheAsync` covers the cold
  *      start where disk hydration hasn't populated the mirror yet: it
  *      awaits `getCachedPlaces()` and seeds only if we're still empty.
@@ -48,9 +50,10 @@ export interface UsePlacesCacheResult {
   /** True only when there is genuinely nothing cached to paint. */
   loading: boolean;
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
-  /** Reconcile a freshly-fetched set into the shown list (cache-first:
-   * never blank an existing list on an empty/offline fetch). */
-  applyFetched: (fetched: BtcMapPlace[]) => void;
+  /** Reconcile a freshly-fetched result into the shown list (cache-first:
+   * an authoritative empty clears the list, but an offline/error fetch
+   * never blanks an existing list). */
+  applyFetched: (fetched: FetchPlacesResult) => void;
   /** Cold-start fallback — await the disk-hydrated cache and seed the
    * list if it's still empty. Safe to call before the live fetch. */
   seedFromCacheAsync: () => Promise<void>;
@@ -69,7 +72,7 @@ export const usePlacesCache = (): UsePlacesCacheResult => {
   const [seededPos] = useState<{ lat: number; lon: number } | null>(() => peekCachedAnchorSync());
   const [loading, setLoading] = useState<boolean>(() => shouldStartLoading(readSnapshot()));
 
-  const applyFetched = useCallback((fetched: BtcMapPlace[]) => {
+  const applyFetched = useCallback((fetched: FetchPlacesResult) => {
     setPlaces((prev) => reconcileFetchedPlaces(prev, fetched));
   }, []);
 

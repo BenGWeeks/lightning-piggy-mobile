@@ -18,7 +18,7 @@
  * Explore hub already use (`peekCachedCachesSync` / `peekCachedPlacesSync`).
  */
 
-import type { BtcMapPlace } from '../services/btcMapService';
+import type { BtcMapPlace, FetchPlacesResult } from '../services/btcMapService';
 
 /**
  * Default staleness window for a cached Places snapshot. Matches the BTC
@@ -90,17 +90,26 @@ export const shouldShowEmptyState = (args: {
 }): boolean => args.cachedCount === 0 && args.fetchSettled && args.fetchedCount === 0;
 
 /**
- * Reconcile a freshly-fetched set against the currently-shown one.
- * Cache-first rule: a successful fetch is authoritative and replaces the
- * shown set — UNLESS it came back empty while we already have something
- * cached to show (transient/offline blip), in which case we keep the
- * existing list rather than blanking it. Returns the array the screen
- * should render.
+ * Reconcile a freshly-fetched result against the currently-shown set.
+ *
+ * Cache-first rule, keyed off the fetch's authoritativeness (`ok`):
+ *   - **Authoritative (`ok: true`)** — the search endpoint responded, so
+ *     its result replaces the shown set even when empty. Moving to an
+ *     area with genuinely no merchants clears the list (the screen can
+ *     then legitimately reach its empty state) rather than stranding the
+ *     previous area's stale merchants.
+ *   - **Non-authoritative (`ok: false`)** — the fetch failed/aborted and
+ *     `places` is a stale cache fallback. We keep whatever's already
+ *     shown rather than blanking it on a transient/offline blip. (If
+ *     nothing is shown yet, the fallback is still better than empty.)
+ *
+ * Returns the array the screen should render.
  */
 export const reconcileFetchedPlaces = (
   shown: BtcMapPlace[],
-  fetched: BtcMapPlace[],
+  fetched: FetchPlacesResult,
 ): BtcMapPlace[] => {
-  if (fetched.length === 0 && shown.length > 0) return shown;
-  return fetched;
+  // A failed fetch never blanks an existing list — keep the cached view.
+  if (!fetched.ok && shown.length > 0) return shown;
+  return fetched.places;
 };

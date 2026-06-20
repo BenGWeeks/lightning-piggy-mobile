@@ -29,7 +29,7 @@ import {
   type BtcMapPlace,
   acceptsLightning,
   acceptsOnchain,
-  fetchPlacesInBbox,
+  fetchPlacesInBboxResult,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -130,13 +130,13 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
       // is an O(28k) in-memory walk, so a wider window costs nothing.
       // Earlier ±0.5° (~55 km) capped the on-screen list at ~38 km no
       // matter how far the user zoomed out — felt like a load bug.
-      const list = await fetchPlacesInBbox({
+      const result = await fetchPlacesInBboxResult({
         minLon: lon - 2,
         minLat: lat - 2,
         maxLon: lon + 2,
         maxLat: lat + 2,
       });
-      applyFetched(list);
+      applyFetched(result);
       lastReloadRef.current = Date.now();
     } catch (e) {
       setError((e as Error).message);

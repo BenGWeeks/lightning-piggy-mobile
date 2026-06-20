@@ -580,16 +580,37 @@ export const peekCachedAnchorSync = (): { lat: number; lon: number } | null => l
 export const peekCachedFetchedAtSync = (): number | null => lastFetchedAtMs;
 
 /**
- * Fetch merchants for a viewport. Converts the caller's `bbox` to a
- * centre + radius and hits BTC Map's `/v4/places/search` endpoint —
- * the one their docs recommend calling "every time user moves the
- * map". ~16 KB / ~0.2 s for a 50 km radius.
+ * Outcome of a viewport fetch that distinguishes a *genuine* result from
+ * a fallback-to-cache. `fetchPlacesInBbox` collapses errors into the last
+ * cached array, so its return value alone can't tell "0 places in this
+ * area" (authoritative empty) from "the network blipped" (stale cache).
+ * Cache-first callers (the Places screen's reconciliation) need that
+ * distinction so a real empty area can legitimately clear the list while
+ * a transient failure keeps whatever was on screen.
+ *
+ *   - `ok: true`  — the search endpoint responded; `places` is its
+ *     authoritative result (which may legitimately be `[]`).
+ *   - `ok: false` — the fetch failed/aborted; `places` is the stale
+ *     fallback (in-memory mirror or hydrated disk cache, possibly `[]`).
+ */
+export interface FetchPlacesResult {
+  ok: boolean;
+  places: BtcMapPlace[];
+}
+
+/**
+ * Fetch merchants for a viewport, returning a {@link FetchPlacesResult}
+ * that distinguishes an authoritative response (`ok: true`, even when
+ * empty) from an offline/error fallback to cache (`ok: false`). Converts
+ * the caller's `bbox` to a centre + radius and hits BTC Map's
+ * `/v4/places/search` endpoint — the one their docs recommend calling
+ * "every time user moves the map". ~16 KB / ~0.2 s for a 50 km radius.
  *
  * The result is cached in memory (`lastResult`) and persisted to disk.
  * On a network failure we fall back to whatever's cached so the rail
  * isn't empty offline. Callers should still debounce map-pan / zoom.
  */
-export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
+export const fetchPlacesInBboxResult = async (bbox: Bbox): Promise<FetchPlacesResult> => {
   evictLegacyCache();
   const { lat, lon, radiusKm } = bboxToSearch(bbox);
   const controller = new AbortController();
@@ -614,16 +635,31 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
     lastAnchor = { lat, lon };
     lastFetchedAtMs = Date.now();
     persistLastResult(places, lastAnchor, lastFetchedAtMs);
-    return places;
+    // Authoritative — an empty `places` here means "no merchants in this
+    // viewport", not "the request failed".
+    return { ok: true, places };
   } catch {
     // Offline / timeout / server error — fall back to the last cached
-    // result (in memory, or hydrated from disk on a cold start).
+    // result (in memory, or hydrated from disk on a cold start). Flagged
+    // `ok: false` so cache-first callers keep the shown list rather than
+    // treating the fallback as an authoritative empty.
     if (lastResult.length === 0) await hydrateLastResult();
-    return lastResult;
+    return { ok: false, places: lastResult };
   } finally {
     clearTimeout(timer);
   }
 };
+
+/**
+ * Fetch merchants for a viewport, returning just the place array. Thin
+ * wrapper over {@link fetchPlacesInBboxResult} that drops the `ok` flag —
+ * on a network failure the array is the last cached result, so callers
+ * that don't need to distinguish empty-vs-error (Map, Explore rail,
+ * geofence) stay unchanged. Cache-first callers should prefer
+ * {@link fetchPlacesInBboxResult} so a genuine empty area can clear.
+ */
+export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> =>
+  (await fetchPlacesInBboxResult(bbox)).places;
 
 // Single-radius shot at `/v4/places/search`. Returns null on a network
 // failure so the caller can decide whether to widen, retry, or fall
