@@ -1,0 +1,106 @@
+import React, { useCallback, useMemo } from 'react';
+import { View, Text, Image, TouchableOpacity, FlatList, Linking } from 'react-native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ChevronLeft } from 'lucide-react-native';
+import MarketVendorCard from '../components/MarketVendorCard';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
+import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
+import { featuredFirst } from '../utils/marketVendors';
+import { openVendorNostrProfile } from '../utils/marketVendorNav';
+import { ExploreNavigation, RootStackParamList } from '../navigation/types';
+
+// Composite nav — the per-vendor "reach on Nostr" action opens the
+// ContactProfile route, which lives on the root stack (not the Explore
+// stack this screen is mounted in). The composite type exposes both.
+type MarketNavigation = CompositeNavigationProp<
+  ExploreNavigation,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
+interface Props {
+  navigation: MarketNavigation;
+}
+
+/**
+ * Full "Market" screen — the "See all →" destination from the Explore
+ * hub's Market rail. Lists every Lightning Piggy vendor (featured first).
+ * Tapping a vendor opens its shop URL in the system browser.
+ *
+ * Data is the hardcoded {@link MARKET_VENDORS} directory, ported from the
+ * website's `vendors.json`. A future live Nostr feed (NIP-15 stalls kind
+ * 30017 + products kind 30018, plus NIP-99 classifieds kind 30402 — see the
+ * seam documented in `data/marketVendors.ts`) could supplement or replace
+ * it without touching this screen.
+ */
+const MarketScreen: React.FC<Props> = ({ navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
+
+  const vendors = useMemo(() => featuredFirst(MARKET_VENDORS), []);
+
+  const openVendor = useCallback((vendor: MarketVendor) => {
+    // External shop link — open in the system browser. nostrUrl is an
+    // njump.me web link too, so url is always the right primary target.
+    Linking.openURL(vendor.url).catch(() => {
+      // Swallow — a malformed/unsupported URL shouldn't crash the screen.
+    });
+  }, []);
+
+  // Reach the vendor on Nostr (message / zap) in-app. Only wired for vendors
+  // with an npub; openVendorNostrProfile returns false otherwise (the card
+  // hides the affordance for those, so this stays a no-op there).
+  const openVendorNostr = useCallback(
+    (vendor: MarketVendor) => {
+      openVendorNostrProfile(navigation, vendor);
+    },
+    [navigation],
+  );
+
+  return (
+    <View style={styles.container} testID="market-screen">
+      <View style={styles.header}>
+        <Image
+          source={require('../../assets/images/learn-header-bg.png')}
+          style={styles.headerImage}
+          resizeMode="cover"
+        />
+        <View style={styles.headerOverlay} />
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Back to Explore"
+            testID="market-back-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Market</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <Text style={styles.headerTagline}>Buy a Lightning Piggy &amp; Bitcoin merch</Text>
+      </View>
+
+      <FlatList
+        data={vendors}
+        // Key on the unique, stable `url` (matching the Explore rail) rather
+        // than the name-derived slug, which can change and isn't guaranteed
+        // collision-free after normalization.
+        keyExtractor={(v) => v.url}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item }) => (
+          <MarketVendorCard
+            vendor={item}
+            variant="list"
+            onPress={() => openVendor(item)}
+            onNostr={() => openVendorNostr(item)}
+          />
+        )}
+      />
+    </View>
+  );
+};
+
+export default MarketScreen;

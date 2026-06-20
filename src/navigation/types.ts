@@ -108,6 +108,9 @@ export type ExploreStackParamList = {
     | undefined;
   Places: undefined;
   PlaceDetail: { placeId: number };
+  // Market — Lightning Piggy vendor directory ("See all" from the Explore
+  // Market rail). Static list today (see src/data/marketVendors.ts).
+  Market: undefined;
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces
