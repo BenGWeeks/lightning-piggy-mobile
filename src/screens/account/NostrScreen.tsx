@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import { X as XIcon } from 'lucide-react-native';
@@ -12,11 +12,12 @@ import {
 } from '../../services/walletStorageService';
 import * as amberService from '../../services/amberService';
 import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
+import { GC_RELAYS } from '../../services/geocacheRelays';
 import { validateRelayUrl } from '../../services/nostrRelayStorage';
 import { useNostr } from '../../contexts/NostrContext';
 import { useNostrDmInbox } from '../../contexts/DmInboxContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
-import type { Palette } from '../../styles/palettes';
+import { createNostrScreenStyles } from '../../styles/NostrScreen.styles';
 
 type RelayRow = {
   url: string;
@@ -41,7 +42,7 @@ type RelayRow = {
 const NostrScreen: React.FC = () => {
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createNostrScreenStyles(colors), [colors]);
   const { profile, signerType, relays, userRelays, addUserRelay, removeUserRelay } = useNostr();
   // From the hot DM slice, not `useNostr()` — see DmInboxContext for why.
   const { amberNip44Permission } = useNostrDmInbox();
@@ -84,6 +85,17 @@ const NostrScreen: React.FC = () => {
       };
     });
   }, [relays, userRelays, connStatus]);
+
+  // Geo-cache (NIP-GC kind-37516) relay set — surfaced as its own
+  // sub-section, distinct from the generic relay list above. These are the
+  // relays mobile treasures publish to and read from (#907): the nos.lol /
+  // Damus backbone plus the two relays treasures.to uses for read +
+  // NIP-50 search (ditto.pub, dreamith.to). The set is baked in and always
+  // unioned into every NIP-GC publish/read, so it's shown read-only here.
+  const gcRelayRows = useMemo(
+    () => GC_RELAYS.map((url) => ({ url, connected: connStatus.get(url) === true })),
+    [connStatus],
+  );
 
   const handleAddRelay = useCallback(async () => {
     const result = validateRelayUrl(newRelayInput);
@@ -228,6 +240,34 @@ const NostrScreen: React.FC = () => {
         they&apos;re saved on this device and used for the next subscription / publish.
       </Text>
 
+      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>Geo-cache relays</Text>
+      <View style={styles.relayList} testID="gc-relay-list">
+        {gcRelayRows.map((r) => (
+          <View key={r.url} style={styles.relayRow}>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: r.connected ? colors.green : colors.red },
+              ]}
+              accessibilityLabel={r.connected ? 'Connected' : 'Disconnected'}
+            />
+            <View style={styles.relayMain}>
+              <Text style={styles.relayUrl} numberOfLines={1} ellipsizeMode="middle">
+                {r.url}
+              </Text>
+              <Text style={styles.relaySource}>geo-cache</Text>
+            </View>
+            <Text style={styles.relayMode}>read/write</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={sharedAccountStyles.fieldHint}>
+        Dedicated relays for Piglets and other geo-caches (NIP-GC). These mirror what the
+        treasures.to web app reads and searches, so your Piglets stay discoverable on the web.
+        They&apos;re always used for geo-cache publishing and reading, in addition to any relays you
+        add above.
+      </Text>
+
       <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
         Image Server (Blossom)
       </Text>
@@ -281,77 +321,5 @@ const NostrScreen: React.FC = () => {
     </AccountScreenLayout>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    relayList: {
-      backgroundColor: 'rgba(255,255,255,0.1)',
-      borderRadius: 10,
-      paddingVertical: 4,
-    },
-    relayRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      gap: 10,
-    },
-    statusDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      borderWidth: 1,
-      borderColor: colors.white,
-    },
-    relayMain: {
-      flex: 1,
-    },
-    relayUrl: {
-      color: colors.white,
-      fontSize: 13,
-    },
-    relaySource: {
-      color: colors.white,
-      fontSize: 10,
-      opacity: 0.6,
-      marginTop: 1,
-    },
-    relayMode: {
-      color: colors.white,
-      fontSize: 11,
-      opacity: 0.7,
-      fontWeight: '500',
-    },
-    removeButton: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: 'rgba(255,255,255,0.15)',
-    },
-    addRelayRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginTop: 12,
-    },
-    addRelayInput: {
-      flex: 1,
-    },
-    addRelayButton: {
-      backgroundColor: colors.surface,
-      paddingHorizontal: 16,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    addRelayButtonText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-  });
 
 export default NostrScreen;
