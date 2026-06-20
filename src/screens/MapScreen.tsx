@@ -51,6 +51,7 @@ import {
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -263,6 +264,9 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         const prefixes = geohashNeighbours(myTile);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
+          // Hide the project's own test-account ("Piggy") Piglets on the
+          // map in the production app; dev/preview keep them for Maestro.
+          if (isHiddenInProd(cache.hiderPubkey)) return;
           caches.enqueue(cache.coord, cache);
         });
       } catch (e) {
@@ -365,6 +369,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     // lingers on the map after it's gone from the list (#762).
     return [...caches.map.values()].filter(
       (c) =>
+        !isHiddenInProd(c.hiderPubkey) &&
         (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
         isTrusted(c.hiderPubkey) &&
         (c.expiresAt === null || c.expiresAt > nowSec),
