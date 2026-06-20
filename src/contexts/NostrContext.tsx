@@ -686,14 +686,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           },
         });
         if (fetched === null) {
-          // Relay timeout: on a forced refresh fall back to the last-known
-          // follows (`cachedContacts`) rather than wiping the list on a blip
-          // (the "No contacts found" pull-to-refresh bug). Cache untouched.
+          // Forced-refresh timeout: keep the last-known follows from cache
+          // rather than wiping the list on a transient blip (the "No contacts
+          // found" pull-to-refresh bug). Empty only when nothing is cached.
           fetchedContacts = cachedContacts ?? [];
-          if (__DEV__)
-            console.log(
-              `[Nostr] fetchContactList: timed out ${Date.now() - t0}ms, ${cachedContacts ? `kept ${cachedContacts.length} cached` : 'empty'} (cache untouched)`,
-            );
         } else {
           fetchedContacts = fetched;
           if (__DEV__)
