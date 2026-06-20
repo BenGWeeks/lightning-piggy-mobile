@@ -88,4 +88,20 @@ describe('orderFeaturedFirst', () => {
     const input = [row('f1', true, 10), row('p1', false, 5), row('p2', false, 50)];
     expect(ids(orderFeaturedFirst(input, isFeatured))).toEqual(['f1', 'p1', 'p2']);
   });
+
+  it('floors a non-integer cap instead of rounding up (2.5 pins 2, not 3)', () => {
+    const input = [
+      row('f1', true, 10),
+      row('f2', true, 20),
+      row('f3', true, 30),
+      row('p1', false, 5),
+    ];
+    // 2.5 must pin exactly 2 featured; the 3rd featured falls into the remainder.
+    expect(ids(orderFeaturedFirst(input, isFeatured, 2.5))).toEqual(['f1', 'f2', 'f3', 'p1']);
+  });
+
+  it('treats a negative cap as zero (pins nothing)', () => {
+    const input = [row('f1', true, 10), row('p1', false, 5)];
+    expect(ids(orderFeaturedFirst(input, isFeatured, -1))).toEqual(['f1', 'p1']);
+  });
 });

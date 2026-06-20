@@ -49,11 +49,15 @@ export function orderFeaturedFirst<T>(
 ): T[] {
   if (items.length === 0) return [];
 
+  // Clamp to a non-negative integer so a non-integer cap (e.g. 2.5 would
+  // otherwise pin 3) or a negative cap can't produce surprising counts.
+  const cap = Math.max(0, Math.floor(maxFeatured));
+
   const pinned: T[] = [];
   const rest: T[] = [];
 
   for (const item of items) {
-    if (isFeatured(item) && pinned.length < maxFeatured) {
+    if (isFeatured(item) && pinned.length < cap) {
       pinned.push(item);
     } else {
       // Either not featured, or featured-but-over-cap: keep it in the
