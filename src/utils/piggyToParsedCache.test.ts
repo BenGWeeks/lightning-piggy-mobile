@@ -96,6 +96,25 @@ describe('mergeHiddenWithDrafts', () => {
     expect(rows[0].cache.d).toBe('draft1');
   });
 
+  it('does NOT surface a published local record as a draft on cold start (empty cache)', () => {
+    // Cold start: peekCachedCachesSync() is empty until AsyncStorage hydrates,
+    // but a previously-published Piggy is still in SecureStore (kept for
+    // republish) with isPublic === true. It must NOT flash as a Draft row —
+    // draft-ness is intrinsic (isPublic === false), not "absent from cache".
+    const published = makePiggy({ id: 'live', isPublic: true });
+    const rows = mergeHiddenWithDrafts([], [published], PUBKEY);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('only the isPublic===false record becomes a draft when both are local-only', () => {
+    const draft = makePiggy({ id: 'draft', isPublic: false });
+    const live = makePiggy({ id: 'live', isPublic: true });
+    const rows = mergeHiddenWithDrafts([], [draft, live], PUBKEY);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cache.d).toBe('draft');
+    expect(rows[0].isDraft).toBe(true);
+  });
+
   it('lets a published cache win over its local draft twin (dedupe by coord)', () => {
     const piggy = makePiggy({ id: 'shared', name: 'Local draft name' });
     const published = makeCache({

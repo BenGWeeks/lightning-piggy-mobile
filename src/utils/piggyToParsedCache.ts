@@ -56,10 +56,19 @@ export interface HiddenRow {
  * Build the Hidden section's rows as the union of relay/cache-sourced
  * caches authored by the user and local draft `HiddenPiggy` records.
  *
+ * Only local records with `isPublic === false` are eligible to become draft
+ * rows. A published Piggy (`isPublic === true`) lives in SecureStore too —
+ * it's kept for republish/cross-device edits — but it is NOT a draft. On cold
+ * start `peekCachedCachesSync()` can be empty until AsyncStorage hydrate
+ * completes, so if we treated "absent from the published list" as "draft" a
+ * genuinely-published Piggy would briefly flash a "Draft" pill and route to
+ * the local-edit path until the relay mirror populates (#909 follow-up).
+ * Gating on `isPublic === false` makes draft-ness intrinsic to the record,
+ * not a side effect of cache hydration timing.
+ *
  * Deduped by coord: a published `ParsedCache` always wins over its local
  * draft twin (so once a draft is published the badge flips to the normal
- * expiry view and there's no duplicate row). Drafts are the local records
- * whose coord has no published entry. Sorted newest-first by `createdAt`.
+ * expiry view and there's no duplicate row). Sorted newest-first by `createdAt`.
  *
  * The dedupe key is the **lowercased** coord: the `<pubkey>` segment is hex,
  * which is case-insensitive, so a relay-sourced cache (whose pubkey may come
@@ -79,8 +88,13 @@ export const mergeHiddenWithDrafts = (
     if (cache.hiderPubkey.toLowerCase() !== lower) continue;
     rows.set(cache.coord.toLowerCase(), { cache, isDraft: false });
   }
-  // Local records that have no published twin become draft rows.
+  // Only genuinely-unpublished local records (Public toggle off) become draft
+  // rows. Published piggies kept in SecureStore for republish are NOT drafts —
+  // gating on `isPublic === false` (rather than "absent from publishedCaches")
+  // prevents a published-but-not-yet-cached Piggy from flashing a Draft pill on
+  // cold start before the relay mirror hydrates.
   for (const piggy of localPiggies) {
+    if (piggy.isPublic !== false) continue;
     const draft = hiddenPiggyToParsedCache(piggy, pubkey);
     if (rows.has(draft.coord.toLowerCase())) continue;
     rows.set(draft.coord.toLowerCase(), { cache: draft, isDraft: true });
