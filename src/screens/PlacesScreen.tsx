@@ -393,6 +393,15 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                   refresh later — the OSM merchant list updates daily.
                 </Text>
               </View>
+            ) : !pos && places.length > 0 ? (
+              // Legacy cache (disk blob predates the v1 anchor envelope): we
+              // have cached places but no anchor yet, so the distance-sorted
+              // list is empty until GPS resolves. Show a locating placeholder
+              // rather than a blank header (Copilot #915).
+              <View style={styles.center} testID="places-locating">
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.subtle}>Getting your location to sort nearby places…</Text>
+              </View>
             ) : null}
           </>
         }
