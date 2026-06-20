@@ -1,6 +1,7 @@
 // Navigation glue for Market vendor cards. Kept out of the screens so the
-// (over-cap) ExploreHomeScreen and the MarketScreen can share one tested
-// entry point instead of each duplicating the npub → ContactProfile dance.
+// (over-cap) ExploreHomeScreen and the MarketScreen can share one entry
+// point instead of each duplicating the npub → ContactProfile dance. Its
+// routing decision is unit-tested in `marketVendorNav.test.ts`.
 //
 // Not a pure util (it calls `navigation.navigate`), but it has no React and
 // no relay I/O — it just decodes the baked-in npub and routes to the

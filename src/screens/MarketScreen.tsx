@@ -7,7 +7,7 @@ import MarketVendorCard from '../components/MarketVendorCard';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
-import { featuredFirst, vendorSlug } from '../utils/marketVendors';
+import { featuredFirst } from '../utils/marketVendors';
 import { openVendorNostrProfile } from '../utils/marketVendorNav';
 import { ExploreNavigation, RootStackParamList } from '../navigation/types';
 
@@ -84,7 +84,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
       <FlatList
         data={vendors}
-        keyExtractor={(v) => vendorSlug(v.name)}
+        // Key on the unique, stable `url` (matching the Explore rail) rather
+        // than the name-derived slug, which can change and isn't guaranteed
+        // collision-free after normalization.
+        keyExtractor={(v) => v.url}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (

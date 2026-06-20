@@ -146,14 +146,18 @@ const MarketVendorCard: React.FC<Props> = ({ vendor, onPress, onNostr, variant }
 
   // Nostr affordance — only for vendors with an npub AND a handler wired.
   // Opens the vendor's in-app contact profile (where Message / Zap live)
-  // instead of their website. `stopPropagation`-style guard: the button
-  // sits inside the card's TouchableOpacity, so its own onPress fires the
-  // Nostr action without also triggering the card's "open shop" press.
+  // instead of their website. The button sits inside the card's outer
+  // TouchableOpacity, so its onPress calls `e.stopPropagation()` (matching
+  // the nested-touchable pattern in TransactionDetailSheet) to fire the
+  // Nostr action WITHOUT also triggering the card's "open shop" press.
   const showNostr = !!onNostr && vendorHasNostr(vendor);
   const nostrButton = showNostr ? (
     <TouchableOpacity
       style={styles.nostrButton}
-      onPress={onNostr}
+      onPress={(e) => {
+        e.stopPropagation();
+        onNostr?.();
+      }}
       accessibilityLabel={`Message or zap ${vendor.name} on Nostr`}
       testID={`market-vendor-card-${slug}-nostr`}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
