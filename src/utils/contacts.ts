@@ -45,3 +45,24 @@ export function sanitizeContacts(contacts: unknown): NostrContact[] {
   }
   return out;
 }
+
+/**
+ * Decide which contacts a FORCED contacts refresh (pull-to-refresh) should
+ * paint once the relay fetch resolves.
+ *
+ * `fetched === null` means the network couldn't produce a kind-3 contact list
+ * (relay timeout / transient blip). In that case keep the last-known cached
+ * follows rather than wiping the visible list — the bug that left the Friends
+ * tab reading "No contacts found" after a second pull-to-refresh that happened
+ * to time out (#908). Paint empty only when there is genuinely nothing cached.
+ *
+ * A non-null `fetched` (including an empty array — a user who follows nobody)
+ * is authoritative and replaces whatever was cached.
+ */
+export function resolveForcedRefreshContacts(
+  fetched: NostrContact[] | null,
+  cached: NostrContact[] | null,
+): NostrContact[] {
+  if (fetched !== null) return fetched;
+  return cached ?? [];
+}

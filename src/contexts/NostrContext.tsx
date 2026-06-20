@@ -26,7 +26,7 @@ import {
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
-import { sanitizeContacts } from '../utils/contacts';
+import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
 import {
   setActivePubkeyForWalletStorage,
   deleteNwcUrl,
@@ -685,17 +685,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             startTransition(() => setContacts(withCachedProfiles(newer)));
           },
         });
-        if (fetched === null) {
-          // Relay timeout with no cached fallback — paint empty for
-          // now and do NOT persist (so we don't poison the cache with
-          // a network blip).
-          fetchedContacts = [];
-          if (__DEV__)
-            console.log(
-              `[Nostr] fetchContactList: timed out, ${Date.now() - t0}ms, painting empty (cache untouched)`,
-            );
-        } else {
-          fetchedContacts = fetched;
+        // A null fetch (relay timeout) keeps the cached follows rather than
+        // wiping the list on a blip; a non-null result is authoritative and
+        // is persisted. See resolveForcedRefreshContacts (#908).
+        fetchedContacts = resolveForcedRefreshContacts(fetched, cachedContacts);
+        if (fetched !== null) {
           if (__DEV__)
             console.log(
               `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
