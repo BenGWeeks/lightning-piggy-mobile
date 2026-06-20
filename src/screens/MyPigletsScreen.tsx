@@ -22,6 +22,7 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
+import { mergeHiddenWithDrafts, type HiddenRow } from '../utils/piggyToParsedCache';
 import { republishPiggy } from '../services/republishPiggyService';
 import { ExploreNavigation } from '../navigation/types';
 import type { Palette } from '../styles/palettes';
@@ -72,7 +73,7 @@ const parseFoundEvent = (e: VerifiedEvent): FoundEntry => {
 // Section row variants — `kind` discriminates which list it came from
 // so the renderer can pick the right meta line + icon.
 type SectionRow =
-  | { kind: 'hidden'; cache: ParsedCache }
+  | { kind: 'hidden'; cache: ParsedCache; isDraft: boolean }
   | { kind: 'found'; entry: FoundEntry }
   | { kind: 'friend-found'; entry: FoundEntry };
 
@@ -193,15 +194,17 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     return m;
   }, [allCaches]);
 
-  // Hidden — caches authored by me. Local-only; the listing was already
-  // persisted by the same NIP-GC subscriber the Geo-caches page uses.
-  const hidden = useMemo(() => {
+  // Hidden — the UNION of (a) relay/cache-sourced caches authored by me
+  // and (b) local-only draft `HiddenPiggy` records that were saved with
+  // the Public toggle off and so never got a published `ParsedCache`
+  // twin. Deduped by coord (a published cache wins over its draft), so a
+  // draft surfaces immediately and stops duplicating once published
+  // (#909). Without the draft union, an unpublished Piglet is invisible
+  // and looks lost even though it's safe in SecureStore.
+  const hidden = useMemo<HiddenRow[]>(() => {
     if (!pubkey) return [];
-    const lower = pubkey.toLowerCase();
-    return allCaches
-      .filter((c) => c.hiderPubkey.toLowerCase() === lower)
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }, [allCaches, pubkey]);
+    return mergeHiddenWithDrafts(allCaches, [...piggiesById.values()], pubkey);
+  }, [allCaches, piggiesById, pubkey]);
 
   // Found by me — kind 7516 authored by me. CoalescedMap batches the
   // per-event `new Map(prev)` clones that otherwise cause O(N²) overhead
@@ -284,7 +287,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     () => [
       {
         title: `Hidden${hidden.length > 0 ? ` · ${hidden.length}` : ''}`,
-        data: hidden.map((c) => ({ kind: 'hidden' as const, cache: c })),
+        data: hidden.map((r) => ({ kind: 'hidden' as const, cache: r.cache, isDraft: r.isDraft })),
       },
       {
         title: `Found${foundList.length > 0 ? ` · ${foundList.length}` : ''}`,
@@ -302,6 +305,15 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     if (!coord) return;
     if (!parseCacheCoord(coord)) return;
     navigation.navigate('HuntPiggyDetail', { coord });
+  };
+
+  // Drafts have no relay event, so the public detail screen has nothing
+  // to fetch. Open the Hide-a-Piglet wizard in edit mode instead — it
+  // hydrates from the local HiddenPiggy via `loadPiggies` (#909). The
+  // cache `d` equals the local record id.
+  const openDraftForEdit = (d: string) => {
+    if (!d) return;
+    navigation.navigate('HuntCreate', { piggyId: d });
   };
 
   // Republish an expired Piglet — refresh the NIP-40 expiration tag
@@ -443,9 +455,14 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                 meta={`Piglet · D${item.cache.difficulty ?? '?'} / T${item.cache.terrain ?? '?'}`}
                 colors={colors}
                 styles={styles}
-                onPress={() => openCacheByCoord(item.cache.coord)}
+                onPress={() =>
+                  item.isDraft ? openDraftForEdit(item.cache.d) : openCacheByCoord(item.cache.coord)
+                }
                 testID={`my-piglets-hidden-${item.cache.d}`}
-                onRepublish={() => handleRepublish(item.cache)}
+                isDraft={item.isDraft}
+                // Drafts aren't on relays yet, so there's nothing to
+                // republish — only published rows get the republish wiring.
+                onRepublish={item.isDraft ? undefined : () => handleRepublish(item.cache)}
                 republishing={republishingCoord === item.cache.coord}
               />
             );
@@ -504,6 +521,9 @@ interface RowProps {
   // to a tap-to-republish handler. Friend / find rows omit it.
   onRepublish?: () => void;
   republishing?: boolean;
+  // True for a local-only draft (saved with Public off, not on relays).
+  // Shows a "Draft" pill in place of the expiry badge (#909).
+  isDraft?: boolean;
 }
 
 const Row: React.FC<RowProps> = ({
@@ -515,6 +535,7 @@ const Row: React.FC<RowProps> = ({
   testID,
   onRepublish,
   republishing,
+  isDraft,
 }) => (
   <TouchableOpacity
     style={styles.row}
@@ -551,7 +572,15 @@ const Row: React.FC<RowProps> = ({
             searches anymore; subtle "N d" caption while still active.
             When `onRepublish` is supplied the Expired state becomes
             tappable and re-emits the listing with a fresh window. */}
-        {cache?.expiresAt != null ? (
+        {isDraft ? (
+          <View
+            style={styles.draftBadge}
+            testID={`${testID}-draft-badge`}
+            accessibilityLabel="Draft — saved locally, not published"
+          >
+            <Text style={styles.draftBadgeText}>Draft</Text>
+          </View>
+        ) : cache?.expiresAt != null ? (
           <ExpiryBadge
             expiresAt={cache.expiresAt}
             styles={styles}
@@ -725,6 +754,21 @@ const createStyles = (colors: Palette) =>
     },
     expiryBadgeExpired: { backgroundColor: colors.red },
     expiryBadgeWarn: { backgroundColor: colors.zapYellow },
+    // "Draft" pill for local-only Piglets that were saved with Public off
+    // and haven't been published to relays yet (#909). Neutral grey so it
+    // reads as informational, not a warning/error like the expiry pills.
+    draftBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      backgroundColor: colors.textSupplementary,
+    },
+    draftBadgeText: {
+      color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.2,
+    },
     expiryBadgeText: {
       color: colors.white,
       fontSize: 10,
