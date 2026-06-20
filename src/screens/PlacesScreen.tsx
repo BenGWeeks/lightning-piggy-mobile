@@ -30,11 +30,12 @@ import {
   acceptsLightning,
   acceptsOnchain,
   fetchPlacesInBbox,
-  getCachedPlaces,
   formatAddress,
   isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
+import { usePlacesCache } from '../hooks/usePlacesCache';
+import { shouldShowEmptyState } from '../utils/placesCache';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
@@ -71,11 +72,24 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
     minLon: number;
     maxLon: number;
   } | null>(null);
-  const [places, setPlaces] = useState<BtcMapPlace[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Cache-first hydration: seeds `places` + the loading flag synchronously
+  // off the in-memory mirror so a warm visit paints the last-known list
+  // immediately instead of flashing "No places nearby" (#910). The screen
+  // still revalidates on mount via `reload` below — `applyFetched`
+  // reconciles the fresh set in (cache-first: an empty/offline blip keeps
+  // the existing list rather than blanking it).
+  const { places, seededPos, loading, setLoading, applyFetched, seedFromCacheAsync } =
+    usePlacesCache();
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  // Seed `pos` from the cached anchor so the distance-sorted list renders
+  // before GPS resolves (otherwise `sortedPlaces` is empty until a fix
+  // lands — the original cause of the empty flash).
+  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(seededPos);
+  // True once a fetch attempt has settled this session — gates the
+  // "No places nearby" empty state so it can't show while a fetch is
+  // still in flight (or before one has run).
+  const [fetchSettled, setFetchSettled] = useState(false);
   // Live user-position for the dot on the embedded mini-map — refreshes
   // as the user walks around without re-running the nearby-places fetch
   // (that fires once from `pos` above).
@@ -84,16 +98,18 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const lastReloadRef = useRef<number>(0);
 
   const reload = useCallback(async () => {
-    setLoading(true);
+    // Only show the blocking spinner when there's nothing cached to paint.
+    // A warm visit keeps the list on-screen and refreshes quietly behind
+    // the pull-to-refresh control.
+    setLoading((wasLoading) => wasLoading || places.length === 0);
     setError(null);
     try {
       // Stale-while-revalidate: paint the last cached result instantly so
       // the list isn't a blank spinner while GPS + the live search resolve.
-      getCachedPlaces()
-        .then((cached) => {
-          if (cached.length > 0) setPlaces((prev) => (prev.length > 0 ? prev : cached));
-        })
-        .catch(() => {});
+      // (The sync seed above already covers the warm path; this awaits the
+      // disk-hydrated cache for the cold-start case where the mirror is
+      // still empty.)
+      void seedFromCacheAsync();
       const perm = await Location.requestForegroundPermissionsAsync();
       if (perm.status !== 'granted') {
         setError(
@@ -120,18 +136,22 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         maxLon: lon + 2,
         maxLat: lat + 2,
       });
-      setPlaces(list);
+      applyFetched(list);
       lastReloadRef.current = Date.now();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      setFetchSettled(true);
       setLoading(false);
     }
-  }, []);
+  }, [applyFetched, places.length, seedFromCacheAsync, setLoading]);
 
   useEffect(() => {
     reload();
-  }, [reload]);
+    // Run once on mount — `reload` is stable enough for the SWR refresh and
+    // re-running it on every identity change would re-fetch needlessly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sortedPlaces = useMemo(() => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
@@ -156,6 +176,17 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         })
     );
   }, [places, pos]);
+
+  // Cache-first empty-state gate: only honest once a fetch has settled AND
+  // both the cached list and the fetched list are empty — never flash
+  // "No places nearby" while a cache exists or a fetch is still in flight
+  // (#910). Keyed off `places` (the source list) rather than `sortedPlaces`
+  // so it stays true even before GPS seeds `pos`.
+  const showEmptyState = shouldShowEmptyState({
+    cachedCount: places.length,
+    fetchedCount: places.length,
+    fetchSettled,
+  });
 
   // Selected category filters — empty = show every category (default).
   // Categories are surfaced in the filter bottom-sheet; selected names
@@ -328,7 +359,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                   <Text style={styles.retryButtonText}>Retry</Text>
                 </TouchableOpacity>
               </View>
-            ) : sortedPlaces.length === 0 ? (
+            ) : showEmptyState ? (
               <View style={styles.center} testID="places-empty-state">
                 <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
                 <Text style={styles.emptyTitle}>No places nearby</Text>

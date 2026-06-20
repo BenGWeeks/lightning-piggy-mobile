@@ -571,6 +571,14 @@ export const peekCachedPlacesSync = (): BtcMapPlace[] => lastResult;
 // persist) or when the cached blob predates the v1 envelope shape.
 export const peekCachedAnchorSync = (): { lat: number; lon: number } | null => lastAnchor;
 
+// Unix-ms timestamp of the last successful fetch, read off the in-memory
+// mirror. Lets a cache-first screen decide whether its synchronously-
+// seeded snapshot is stale (and so worth a visible background refresh)
+// without an async round-trip. Null until a fetch has succeeded this
+// session or the persisted envelope (which may predate the field) has
+// hydrated.
+export const peekCachedFetchedAtSync = (): number | null => lastFetchedAtMs;
+
 /**
  * Fetch merchants for a viewport. Converts the caller's `bbox` to a
  * centre + radius and hits BTC Map's `/v4/places/search` endpoint —

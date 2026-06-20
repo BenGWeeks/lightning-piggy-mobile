@@ -1,0 +1,114 @@
+import {
+  PLACES_CACHE_TTL_MS,
+  type PlacesCacheSnapshot,
+  hasCachedPlaces,
+  isSnapshotStale,
+  reconcileFetchedPlaces,
+  shouldShowEmptyState,
+  shouldStartLoading,
+} from './placesCache';
+import type { BtcMapPlace } from '../services/btcMapService';
+
+const makePlace = (id: number): BtcMapPlace => ({
+  id,
+  lat: 51.5,
+  lon: -0.1,
+  tags: { name: `Place ${id}` },
+});
+
+const snapshot = (over: Partial<PlacesCacheSnapshot> = {}): PlacesCacheSnapshot => ({
+  places: [],
+  anchor: null,
+  ...over,
+});
+
+describe('placesCache pure helpers', () => {
+  describe('hasCachedPlaces / shouldStartLoading', () => {
+    it('reports no cached places + starts loading when the mirror is empty', () => {
+      const snap = snapshot({ places: [] });
+      expect(hasCachedPlaces(snap)).toBe(false);
+      expect(shouldStartLoading(snap)).toBe(true);
+    });
+
+    it('reports cached places + skips the loading spinner when warm', () => {
+      const snap = snapshot({ places: [makePlace(1)] });
+      expect(hasCachedPlaces(snap)).toBe(true);
+      // The crux of the fix: a warm cache must NOT start in the loading
+      // state, so the list paints immediately instead of a spinner/empty.
+      expect(shouldStartLoading(snap)).toBe(false);
+    });
+  });
+
+  describe('isSnapshotStale', () => {
+    const now = 1_000_000_000_000;
+
+    it('treats a legacy envelope without a timestamp as stale', () => {
+      expect(isSnapshotStale(snapshot({ fetchedAtMs: undefined }), now)).toBe(true);
+      expect(isSnapshotStale(snapshot({ fetchedAtMs: null }), now)).toBe(true);
+    });
+
+    it('treats a snapshot older than the TTL as stale', () => {
+      const old = now - PLACES_CACHE_TTL_MS - 1;
+      expect(isSnapshotStale(snapshot({ fetchedAtMs: old }), now)).toBe(true);
+    });
+
+    it('treats a snapshot exactly at the TTL boundary as stale', () => {
+      const boundary = now - PLACES_CACHE_TTL_MS;
+      expect(isSnapshotStale(snapshot({ fetchedAtMs: boundary }), now)).toBe(true);
+    });
+
+    it('treats a recent snapshot as fresh', () => {
+      const recent = now - 1_000;
+      expect(isSnapshotStale(snapshot({ fetchedAtMs: recent }), now)).toBe(false);
+    });
+
+    it('honours a custom TTL', () => {
+      const fetchedAtMs = now - 5_000;
+      expect(isSnapshotStale(snapshot({ fetchedAtMs }), now, 10_000)).toBe(false);
+      expect(isSnapshotStale(snapshot({ fetchedAtMs }), now, 1_000)).toBe(true);
+    });
+  });
+
+  describe('shouldShowEmptyState', () => {
+    it('never shows empty while a cache exists', () => {
+      expect(shouldShowEmptyState({ cachedCount: 3, fetchedCount: 0, fetchSettled: true })).toBe(
+        false,
+      );
+    });
+
+    it('never shows empty while a fetch is still in flight', () => {
+      expect(shouldShowEmptyState({ cachedCount: 0, fetchedCount: 0, fetchSettled: false })).toBe(
+        false,
+      );
+    });
+
+    it('shows empty only when settled with nothing cached and nothing fetched', () => {
+      expect(shouldShowEmptyState({ cachedCount: 0, fetchedCount: 0, fetchSettled: true })).toBe(
+        true,
+      );
+    });
+
+    it('does not show empty when a settled fetch returned results', () => {
+      expect(shouldShowEmptyState({ cachedCount: 0, fetchedCount: 5, fetchSettled: true })).toBe(
+        false,
+      );
+    });
+  });
+
+  describe('reconcileFetchedPlaces', () => {
+    it('replaces the shown list with a non-empty fetch (authoritative)', () => {
+      const shown = [makePlace(1)];
+      const fetched = [makePlace(2), makePlace(3)];
+      expect(reconcileFetchedPlaces(shown, fetched)).toBe(fetched);
+    });
+
+    it('keeps the cached list when the fetch came back empty (offline blip)', () => {
+      const shown = [makePlace(1)];
+      expect(reconcileFetchedPlaces(shown, [])).toBe(shown);
+    });
+
+    it('accepts a genuinely-empty fetch when nothing was shown', () => {
+      expect(reconcileFetchedPlaces([], [])).toEqual([]);
+    });
+  });
+});
