@@ -19,7 +19,6 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
-  Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -36,6 +35,7 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
+import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
@@ -135,26 +135,23 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedPlaces = useMemo(() => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
-    return (
-      places
-        .map((place) => ({
-          place,
-          distance: haversineMetres(
-            { lat: pos.lat, lon: pos.lon },
-            { lat: place.lat, lon: place.lon },
-          ),
-        }))
-        // Boosted listings surface first (BTC Map's paid-feature
-        // mechanism); within the same boost bucket we still sort by
-        // distance. Every boosted row carries a "Featured" pill so the
-        // user can see why it's at the top.
-        .sort((a, b) => {
-          const ab = isBoosted(a.place) ? 1 : 0;
-          const bb = isBoosted(b.place) ? 1 : 0;
-          if (ab !== bb) return bb - ab;
-          return a.distance - b.distance;
-        })
-    );
+    const byDistance = places
+      .map((place) => ({
+        place,
+        distance: haversineMetres(
+          { lat: pos.lat, lon: pos.lon },
+          { lat: place.lat, lon: place.lon },
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance);
+    // Pin up to 3 boosted ("Featured") listings to the top even if a
+    // non-featured place is closer — BTC Map's paid-feature mechanism.
+    // The (up to) three nearest featured win the slots; everything else,
+    // including any 4th+ featured listing, continues in distance order.
+    // Each pinned row carries a "Featured" pill so the user can see why
+    // it's at the top. Shared with the Explore "Places near you" rail via
+    // `orderFeaturedFirst` so the cap lives in one place.
+    return orderFeaturedFirst(byDistance, (item) => isBoosted(item.place));
   }, [places, pos]);
 
   // Selected category filters — empty = show every category (default).
