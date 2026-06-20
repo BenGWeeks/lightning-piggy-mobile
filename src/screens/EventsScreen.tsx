@@ -42,6 +42,8 @@ import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/nostrPlacesStorage';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { isFutureEvent } from '../utils/futureEvent';
+import { isHiddenInProd } from '../utils/exploreContentFilter';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -195,11 +197,13 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         // precision 3..9, so 3-char prefix is enough to catch them.
         const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
         const closer = subscribeNearbyEvents(prefixes, (e) => {
-          // De-dupe by coord — replaceable events; only keep the
-          // newest revision and skip past events.
-          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) {
-            return;
-          }
+          // Hide the project's own test-account ("Piggy") events in the
+          // production app; dev/preview keep them for Maestro.
+          if (isHiddenInProd(e.organiserPubkey)) return;
+          // Skip events that have already finished (end, or start when no
+          // end / all-day). De-dupe by coord — replaceable events; only
+          // keep the newest revision.
+          if (!isFutureEvent(e, Math.floor(Date.now() / 1000))) return;
           // WoT filter — see `trustGraphService` for the threat model.
           // `isTrusted` is tier-aware post-#535 (returns true for 'all').
           if (!isTrustedRef.current(e.organiserPubkey)) {
@@ -269,14 +273,22 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     // by the user (sortBy = 'date' | 'distance'); the other key is the
     // tiebreaker so a 0-distance pair never randomly flips order between
     // renders.
-    const items = [...events.values()].map((event) => {
-      const center = event.geohash ? decodeGeohash(event.geohash) : null;
-      const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      return { event, distance };
-    });
+    // Re-apply the future-only filter at render time, not just at
+    // ingestion: events hydrated from the AsyncStorage mirror on cold
+    // start bypass the subscription callback, so a cached past event
+    // (e.g. last month's meetup) would otherwise paint until the live
+    // sub refreshes. `nowSec` is captured once per memo pass.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const items = [...events.values()]
+      .filter((event) => isFutureEvent(event, nowSec) && !isHiddenInProd(event.organiserPubkey))
+      .map((event) => {
+        const center = event.geohash ? decodeGeohash(event.geohash) : null;
+        const distance =
+          pos && center
+            ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        return { event, distance };
+      });
     items.sort((a, b) => {
       const startA = a.event.startsAt ?? Number.MAX_SAFE_INTEGER;
       const startB = b.event.startsAt ?? Number.MAX_SAFE_INTEGER;

@@ -71,6 +71,8 @@ import {
   geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
+import { isFutureEvent } from '../utils/futureEvent';
+import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
@@ -666,6 +668,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     subsCloserRef.current.push(
       subscribeNearbyCaches(cachePrefixes, (c) => {
         if (cancelled) return;
+        // Hide test-account ("Piggy") Piglets in prod (kept in dev/preview).
+        if (isHiddenInProd(c.hiderPubkey)) return;
         // WoT filter: silently drop caches from pubkeys outside the
         // trust graph (an unverified cache could be a phishing LNURL
         // or, worse, a physical lure). Surfaced as a count instead so
@@ -692,8 +696,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     subsCloserRef.current.push(
       subscribeNearbyEvents(eventPrefixes, (e) => {
         if (cancelled) return;
-        // Skip events that already started > 1h ago.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+        // Hide test-account ("Piggy") events in prod; skip finished events.
+        if (isHiddenInProd(e.organiserPubkey)) return;
+        if (!isFutureEvent(e, Math.floor(Date.now() / 1000))) return;
         if (!isTrustedRef.current(e.organiserPubkey)) {
           setUntrustedEventCount((n) => n + 1);
           return;
@@ -794,15 +799,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    let items = [...caches.values()].map((cache) => {
-      const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-      const distance =
-        haveFix && center
-          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
-      return { cache, distance, isOwn };
-    });
+    // Re-apply the prod test-account filter at render — cold-start caches
+    // hydrated from AsyncStorage bypass the ingestion callback.
+    let items = [...caches.values()]
+      .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
+      .map((cache) => {
+        const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+        return { cache, distance, isOwn };
+      });
     // Trace own-listing trajectory so a missing-own-cache regression
     // can be diagnosed from logcat alone (#73 follow-up).
     const ownItems = items.filter((c) => c.isOwn);
@@ -840,14 +849,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedEvents = useMemo(() => {
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    let items = [...events.values()].map((event) => {
-      const center = event.geohash ? decodeGeohash(event.geohash) : null;
-      const distance =
-        haveFix && center
-          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      return { event, distance };
-    });
+    // Re-apply future-only + prod test-account filters at render — a cached
+    // PAST event hydrated from AsyncStorage bypasses the ingestion callback.
+    const nowSec = Math.floor(Date.now() / 1000);
+    let items = [...events.values()]
+      .filter((event) => isFutureEvent(event, nowSec) && !isHiddenInProd(event.organiserPubkey))
+      .map((event) => {
+        const center = event.geohash ? decodeGeohash(event.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        return { event, distance };
+      });
     // Keep events with no `g` tag (distance = ∞) — most NIP-52 publishers
     // (OrangePillApp etc.) don't include one, so dropping them would leave
     // the rail mostly empty even when legitimate Bitcoin meetups exist.
