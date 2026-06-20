@@ -42,7 +42,14 @@ describe('testAccounts (HIDDEN_IN_PROD_PUBKEYS)', () => {
     ).toBe(false);
   });
 
-  it('is case-sensitive (defensive — wire pubkeys are always lowercase)', () => {
-    expect(isHiddenInProdPubkey(PIGGIES.BIG.toUpperCase())).toBe(false);
+  it('matches case-insensitively (consistent with how pubkeys are normalized elsewhere)', () => {
+    // Wire pubkeys are normally lowercase, but an upstream decode or relay
+    // could hand us upper / mixed case — it must still be recognized as
+    // hidden so test-account content can't bypass the prod-hide.
+    expect(isHiddenInProdPubkey(PIGGIES.BIG.toUpperCase())).toBe(true);
+
+    const mixedCase =
+      PIGGIES.LITTLE.slice(0, 32).toUpperCase() + PIGGIES.LITTLE.slice(32).toLowerCase();
+    expect(isHiddenInProdPubkey(mixedCase)).toBe(true);
   });
 });

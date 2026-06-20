@@ -34,4 +34,11 @@ export const isHiddenInProd = (pubkey: string): boolean =>
 export const stripHiddenForPersist = <T>(
   items: readonly T[],
   getPubkey: (item: T) => string,
-): T[] => items.filter((item) => !isHiddenInProd(getPubkey(item)));
+): T[] => {
+  // The build variant is constant for the process, so resolve the prod gate
+  // ONCE here rather than calling `isProductionBuild()` (a native-module
+  // read) per item inside the loop — relevant when persisting large cache /
+  // event lists. In dev/preview this short-circuits to a pass-through.
+  if (!isProductionBuild()) return [...items];
+  return items.filter((item) => !isHiddenInProdPubkey(getPubkey(item)));
+};

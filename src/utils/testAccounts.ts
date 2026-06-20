@@ -37,12 +37,18 @@ const HIDDEN_IN_PROD_PUBKEYS: ReadonlySet<string> = new Set([
  * hidden in production builds? O(1) Set membership — safe to call per
  * event on the relay-ingestion hot path.
  *
+ * Case-insensitive: the input is lower-cased before lookup (the Set is
+ * already canonical lowercase hex), matching how pubkeys are treated
+ * elsewhere in the codebase. A mixed/upper-case pubkey — which an upstream
+ * decode or relay could hand us — therefore can't slip past the prod-hide.
+ *
  * Pure / build-agnostic: this only answers "is it a test account?" — the
  * PRODUCTION gate lives in the caller (combine with `isProductionBuild()`
  * via `hideTestContentInProd`). That separation keeps this list trivially
  * unit-testable without mocking the native build environment.
  */
-export const isHiddenInProdPubkey = (pubkey: string): boolean => HIDDEN_IN_PROD_PUBKEYS.has(pubkey);
+export const isHiddenInProdPubkey = (pubkey: string): boolean =>
+  HIDDEN_IN_PROD_PUBKEYS.has(pubkey.toLowerCase());
 
 // Test-only access to the underlying Set so tests can assert membership /
 // count without exposing a mutable surface to production callers. Mirrors
