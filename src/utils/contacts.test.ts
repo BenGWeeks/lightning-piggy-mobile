@@ -1,4 +1,4 @@
-import { sanitizeContacts } from './contacts';
+import { sanitizeContacts, resolveForcedRefreshContacts } from './contacts';
 import type { NostrContact } from '../types/nostr';
 
 const A = 'a'.repeat(64);
@@ -66,5 +66,31 @@ describe('sanitizeContacts', () => {
     expect(sanitizeContacts(undefined)).toEqual([]);
     expect(sanitizeContacts({ pubkey: A })).toEqual([]);
     expect(sanitizeContacts('not-an-array')).toEqual([]);
+  });
+});
+
+describe('resolveForcedRefreshContacts', () => {
+  const cached = [contact(A), contact(B)];
+
+  it('keeps the cached follows when the forced fetch times out (null) — the #908 bug', () => {
+    // The regression: a forced pull-to-refresh whose relay fetch returns null
+    // must NOT wipe the visible list to "No contacts found".
+    expect(resolveForcedRefreshContacts(null, cached)).toBe(cached);
+  });
+
+  it('paints empty on a null fetch only when nothing is cached', () => {
+    expect(resolveForcedRefreshContacts(null, null)).toEqual([]);
+    expect(resolveForcedRefreshContacts(null, [])).toEqual([]);
+  });
+
+  it('uses a non-null fetch as authoritative, replacing the cache', () => {
+    const fresh = [contact(MIXED)];
+    expect(resolveForcedRefreshContacts(fresh, cached)).toBe(fresh);
+  });
+
+  it('treats an empty (but non-null) fetch as authoritative — a user who follows nobody', () => {
+    // Distinct from the timeout case: [] means "confirmed zero follows", so it
+    // legitimately clears the list rather than falling back to the cache.
+    expect(resolveForcedRefreshContacts([], cached)).toEqual([]);
   });
 });
