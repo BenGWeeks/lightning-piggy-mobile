@@ -4,6 +4,7 @@ import {
   acceptsOnchain,
   daysSinceVerified,
   fetchPlacesInBbox,
+  fetchPlacesInBboxResult,
   formatAddress,
   lightningAddressOf,
   peekCachedAnchorSync,
@@ -192,6 +193,36 @@ describe('fetchPlacesInBbox (search endpoint)', () => {
 
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
     await expect(fetchPlacesInBbox(bbox)).resolves.toEqual([]);
+  });
+
+  describe('fetchPlacesInBboxResult (empty-vs-error distinction)', () => {
+    const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
+
+    it('flags a successful response ok:true even when it returns no places', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+      // A genuine "no merchants in this viewport" — authoritative empty.
+      await expect(fetchPlacesInBboxResult(bbox)).resolves.toEqual({ ok: true, places: [] });
+    });
+
+    it('flags a failed fetch ok:false and falls back to the cached set', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      // Warm the cache with a successful fetch first.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 7, lat: 0.5, lon: 0.5, 'osm:name': 'Cached' }],
+      });
+      const warm = await fetchPlacesInBboxResult(bbox);
+      expect(warm.ok).toBe(true);
+      expect(warm.places).toHaveLength(1);
+
+      // Now the network blips — ok:false with the stale fallback.
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+      const blip = await fetchPlacesInBboxResult(bbox);
+      expect(blip.ok).toBe(false);
+      expect(blip.places).toEqual(warm.places);
+    });
   });
 
   // Category-filter regression coverage (#860). The v4 search endpoint
