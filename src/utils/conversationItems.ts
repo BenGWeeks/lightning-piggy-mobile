@@ -5,6 +5,7 @@ import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
+import { parseStoredOrder, type ParsedOrderEvent } from './orderEvents';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -49,6 +50,15 @@ export type Item =
       id: string;
       fromMe: boolean;
       url: string;
+      createdAt: number;
+    }
+  | {
+      // Marketplace order / receipt card (#market) — a kind-16/17 event a
+      // Nostr market addressed to the buyer, rendered as a distinct card.
+      kind: 'order';
+      id: string;
+      fromMe: boolean;
+      order: ParsedOrderEvent;
       createdAt: number;
     }
   | {
@@ -126,6 +136,21 @@ export function buildConversationItems(
   zapItems: TimedItem[],
 ): Item[] {
   const msgItems: TimedItem[] = messages.map((m) => {
+    // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
+    // render them as an order card rather than a chat bubble (#market).
+    if (m.wireKind === 16 || m.wireKind === 17) {
+      const order = parseStoredOrder(m.text);
+      if (order) {
+        return {
+          kind: 'order',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          order,
+          createdAt: m.createdAt,
+        };
+      }
+      // Fall through to plain text if the row didn't round-trip as an order.
+    }
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo detection in one place.

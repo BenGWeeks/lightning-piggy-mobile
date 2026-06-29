@@ -14,6 +14,12 @@ import {
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
 import { selectDmWrapIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import {
+  parseOrderEvent,
+  serializeOrder,
+  orderPreviewText,
+  orderPreviewFromContent,
+} from '../utils/orderEvents';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -357,6 +363,93 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       return;
     }
 
+    // Marketplace order / receipt (kind-16 / kind-17) — PLAINTEXT events a
+    // Plebeian/Gamma-style market addresses to the buyer via a `#p` tag (#market).
+    // No decryption: `parseOrderEvent` both classifies the event and rejects
+    // NIP-18 reposts that share kind 16. These bypass the follow-gate — the
+    // user transacted with the market even though they don't "follow" it — and
+    // are stored with `wireKind` 16/17 so the conversation renderer shows an
+    // order card and the inbox derives a readable preview.
+    if (ev.kind === 16 || ev.kind === 17) {
+      const order = parseOrderEvent(ev);
+      if (!order) {
+        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} not-an-order`);
+        return;
+      }
+      const fromMe = ev.pubkey === viewerPubkey;
+      const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+      const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+      if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
+        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} no-partner`);
+        return;
+      }
+      const serialized = serializeOrder(order);
+      const preview = orderPreviewText(order);
+      const orderRow: DmMessageRow = {
+        owner: viewerPubkey,
+        eventId: ev.id,
+        conversation: partnerPubkey,
+        createdAt: ev.created_at,
+        sender: fromMe ? viewerPubkey : partnerPubkey,
+        content: serialized,
+        fromMe,
+        wireKind: ev.kind,
+      };
+      const orderInboxEntry: DmInboxEntry = {
+        id: ev.id,
+        partnerPubkey,
+        fromMe,
+        createdAt: ev.created_at,
+        text: preview,
+        wireKind: ev.kind,
+      };
+      writeChain = writeChain
+        .then(async () => {
+          if (cancelled) return;
+          await upsertDmMessages([orderRow]).catch((e) => {
+            if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
+          });
+          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
+          const cachedInbox: DmInboxEntry[] = inboxRaw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(inboxRaw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
+          if (cancelled) return;
+          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+            () => {},
+          );
+        })
+        .catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
+        });
+      await writeChain;
+      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+      queueInboxEntry(orderInboxEntry);
+      notifyDmMessage(partnerPubkey);
+      if (!fromMe && isFreshArrival(ev.created_at)) {
+        void fireMessageNotification({
+          kind: 'dm',
+          threadId: partnerPubkey,
+          title: 'Marketplace update',
+          body: preview,
+          data: { conversationPubkey: partnerPubkey },
+        });
+      }
+      if (__DEV__)
+        console.log(
+          `[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} surfaced (order=${order.orderId.slice(0, 8)}, partner=${partnerPubkey.slice(0, 8)})`,
+        );
+      return;
+    }
+
     // NIP-17 (kind-1059) — existing gift-wrap unwrap path. Local alias preserves original variable name without renaming through the body below.
     const wrap = ev;
 
@@ -501,7 +594,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       partnerPubkey: partnership.partnerPubkey,
       fromMe: partnership.fromMe,
       createdAt: rumor.created_at,
-      text: wrapText,
+      // For an order/receipt rumor (kind 16/17) `wrapText` is order JSON;
+      // surface a readable preview. Plain DM rumors pass through unchanged.
+      text: orderPreviewFromContent(wrapText, rumor.kind),
       wireKind: rumor.kind,
       // Inner rumor id (#857) — the delivery-store key for our own sent rows,
       // stable across the optimistic bubble + this live echo.

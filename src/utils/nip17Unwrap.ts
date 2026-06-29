@@ -2,6 +2,7 @@ import * as nip44 from 'nostr-tools/nip44';
 import { getEventHash } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
+import { parseOrderEvent, serializeOrder } from './orderEvents';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -371,6 +372,14 @@ export function fileMetaFromRumor(rumor: DecodedRumor): ConversationFileMeta | u
  * identically.
  */
 export function textForRumor(rumor: DecodedRumor): string {
+  // Marketplace order / receipt rumor (kind 16/17) — should markets ever
+  // gift-wrap these (they're plaintext today), store the canonical order JSON
+  // so the conversation renderer shows the same order card the plaintext path
+  // produces (#market future-proofing).
+  if (rumor.kind === 16 || rumor.kind === 17) {
+    const order = parseOrderEvent(rumor);
+    if (order) return serializeOrder(order);
+  }
   const meta = fileMetaFromRumor(rumor);
   // Only fold a kind-15 file into the `#lpe=…` URL — which embeds the
   // decryption key + nonce in the message text — when it's a payload we can
@@ -406,7 +415,19 @@ export function classifyRumor(
 ):
   | { type: 'dm'; partnerPubkey: string; fromMe: boolean }
   | { type: 'group'; otherParticipants: Set<string>; fromMe: boolean }
+  | { type: 'order'; partnerPubkey: string; fromMe: boolean }
   | null {
+  // Marketplace order / receipt (kind 16/17). Surfaced as its own variant so an
+  // unwrapped order is routed to the order-card rendering rather than treated as
+  // a chat DM — the partner is the market (sender), or the `p` recipient when we
+  // sent it (#market future-proofing). Callers that only act on 'group' (e.g.
+  // group routing) safely fall through to the 1:1 store path, which keys the
+  // order card off `wireKind`.
+  if (rumor.kind === 16 || rumor.kind === 17) {
+    const partnership = partnerFromRumor(rumor, viewerPubkey);
+    if (!partnership) return null;
+    return { type: 'order', partnerPubkey: partnership.partnerPubkey, fromMe: partnership.fromMe };
+  }
   const me = viewerPubkey.toLowerCase();
   const all = participantsFromRumor(rumor);
   if (all.size === 0) return null;
