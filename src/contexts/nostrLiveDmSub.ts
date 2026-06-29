@@ -403,6 +403,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         text: preview,
         wireKind: ev.kind,
       };
+      // Anti-spam gate for the OS notification (Copilot #927). Orders bypass
+      // the follow-gate for STORAGE (a buyer transacted with the market even
+      // though they don't follow it), but the events are PLAINTEXT and addressed
+      // by `#p`, so any sender can craft an order-shaped kind-16/17 to the
+      // viewer. To avoid OS-level notification spam, only raise a push when the
+      // market is already trusted: followed, OR an existing conversation in the
+      // inbox cache. Unknown senders are still stored + surfaced in-app silently.
+      // (Follow-up: record markets the user actively ordered from — e.g. via the
+      // Explore Market checkout — into a trust set so a first legitimate order
+      // notifies too.) `partnerKnown` is read from the inbox BEFORE this event
+      // merges in, so the very first order from a stranger can't self-qualify.
+      const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
+      let partnerKnown = partnerFollowed;
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
@@ -420,6 +433,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
                 }
               })()
             : [];
+          if (cachedInbox.some((e) => e.partnerPubkey === partnerPubkey)) partnerKnown = true;
           const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
           if (cancelled) return;
           await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
@@ -434,7 +448,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
       queueInboxEntry(orderInboxEntry);
       notifyDmMessage(partnerPubkey);
-      if (!fromMe && isFreshArrival(ev.created_at)) {
+      if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
         void fireMessageNotification({
           kind: 'dm',
           threadId: partnerPubkey,
