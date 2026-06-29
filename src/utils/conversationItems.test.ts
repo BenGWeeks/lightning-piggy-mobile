@@ -151,6 +151,63 @@ describe('buildZapItems', () => {
   });
 });
 
+describe('buildConversationItems — unsupported message-kind fallback', () => {
+  it('maps a message whose wireKind we do not render to an `unsupported` item', () => {
+    const messages: ConversationMessageInput[] = [
+      // kind 30023 (long-form article) is not a renderable DM kind.
+      {
+        id: '1',
+        fromMe: false,
+        text: 'whatever the raw body is',
+        createdAt: DAY2,
+        wireKind: 30023,
+      },
+    ];
+    const items = buildConversationItems(messages, []).filter((i) => i.kind !== 'dayHeader');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'unsupported',
+      id: 'dm-1',
+      fromMe: false,
+      rawKind: 30023,
+      createdAt: DAY2,
+    });
+  });
+
+  it('does NOT mark plain text (no wireKind) as unsupported', () => {
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: 'hi', createdAt: DAY2 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('message');
+  });
+
+  it('does NOT mark renderable wire kinds (4/14/15) as unsupported', () => {
+    for (const wireKind of [4, 14, 15]) {
+      const items = buildConversationItems(
+        [{ id: '1', fromMe: false, text: 'hi', createdAt: DAY2, wireKind }],
+        [],
+      ).filter((i) => i.kind !== 'dayHeader');
+      expect(items[0].kind).toBe('message');
+    }
+  });
+
+  it('renders a valid kind-16 order as an order card, not unsupported', () => {
+    const orderJson = JSON.stringify({
+      kind: 16,
+      orderId: 'abc-123',
+      type: 'order',
+      items: [],
+      message: '',
+    });
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: orderJson, createdAt: DAY2, wireKind: 16 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('order');
+  });
+});
+
 describe('formatDayHeader', () => {
   // Build an epoch (seconds) at NOON on the calendar day `offsetDays` from
   // today. Calendar arithmetic via setDate + noon means a DST ±1h shift can't

@@ -62,6 +62,17 @@ export type Item =
       createdAt: number;
     }
   | {
+      // Generic fallback for a stored message whose wireKind the app doesn't
+      // render (an inner Nostr event of an unhandled kind — now or in future).
+      // Rendered as a muted placeholder bubble instead of a blank one (#market
+      // follow-up). `rawKind` is the numeric Nostr kind.
+      kind: 'unsupported';
+      id: string;
+      fromMe: boolean;
+      rawKind: number;
+      createdAt: number;
+    }
+  | {
       kind: 'dayHeader';
       id: string;
       label: string;
@@ -129,6 +140,14 @@ export function buildZapItems(wallets: WalletState[], pubkey: string): TimedItem
   return out;
 }
 
+// Wire kinds the conversation can actually render: 4 (NIP-04 DM), 14 (NIP-17
+// DM text), 15 (NIP-17 file → image/voice/link), 16/17 (marketplace order /
+// receipt cards). A stored message whose wireKind isn't one of these is an
+// inner event of a kind we don't display — surfaced as the `unsupported`
+// placeholder rather than a blank bubble. Plain text rows carry no wireKind
+// (`undefined`), so they never hit the fallback.
+const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17]);
+
 // Merge classified DM messages with wallet zap rows, sort newest-first, and
 // interleave "Today / Yesterday / <date>" dividers between day groups.
 export function buildConversationItems(
@@ -150,6 +169,20 @@ export function buildConversationItems(
         };
       }
       // Fall through to plain text if the row didn't round-trip as an order.
+    }
+    // Generic, future-proof fallback: a stored message whose wireKind we don't
+    // render (an inner Nostr event of an unhandled kind) becomes a muted
+    // placeholder rather than a blank text bubble. Only fires for a defined
+    // wireKind outside the renderable set — plain rows (no wireKind) and the
+    // 4/14/15/16/17 kinds handled above/below are unaffected.
+    if (m.wireKind !== undefined && !RENDERABLE_WIRE_KINDS.has(m.wireKind)) {
+      return {
+        kind: 'unsupported',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        rawKind: m.wireKind,
+        createdAt: m.createdAt,
+      };
     }
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
