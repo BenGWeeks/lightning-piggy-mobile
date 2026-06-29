@@ -80,6 +80,8 @@ const KIND16_TYPE: Record<string, OrderEventType> = {
   '4': 'shipping',
 };
 
+const ORDER_TYPES = new Set<OrderEventType>(['order', 'payment', 'status', 'shipping', 'receipt']);
+
 /**
  * Parse a kind-16/17 event into a normalised order, or return null when it
  * isn't a marketplace order event (wrong kind, a NIP-18 repost, or missing the
@@ -103,6 +105,10 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
 
   let type: OrderEventType;
   if (ev.kind === 17) {
+    // kind 17 is also used by NIP-25 (reactions to websites), so an `order`
+    // tag alone is too weak — require the market receipt subject so unrelated
+    // kind-17 events aren't misclassified as receipts, stored, and notified.
+    if (tagValue(ev.tags, 'subject') !== 'order-receipt') return null;
     type = 'receipt';
   } else {
     const typeVal = tagValue(ev.tags, 'type');
@@ -168,7 +174,10 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
     if (!parsed || typeof parsed !== 'object') return null;
     const o = parsed as Record<string, unknown>;
     if ((o.kind !== 16 && o.kind !== 17) || typeof o.orderId !== 'string') return null;
-    if (typeof o.type !== 'string') return null;
+    // Validate `type` against the known literals — a corrupt / off-schema row
+    // with an unexpected `type` would otherwise make `orderCardHeader` return
+    // undefined and crash the card renderer reading `header.label`.
+    if (typeof o.type !== 'string' || !ORDER_TYPES.has(o.type as OrderEventType)) return null;
     return {
       kind: o.kind as number,
       type: o.type as OrderEventType,
@@ -176,10 +185,19 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       amountSats: typeof o.amountSats === 'number' ? o.amountSats : undefined,
       status: typeof o.status === 'string' ? o.status : undefined,
       tracking: typeof o.tracking === 'string' ? o.tracking : undefined,
+      // Keep only well-formed items and coerce a missing/invalid quantity to 1
+      // so a corrupt row can't render NaN totals downstream.
       items: Array.isArray(o.items)
-        ? (o.items as unknown[]).filter(
-            (i): i is OrderItemRef => !!i && typeof (i as OrderItemRef).ref === 'string',
-          )
+        ? (o.items as unknown[]).flatMap((i) => {
+            if (!i || typeof (i as OrderItemRef).ref !== 'string') return [];
+            const q = (i as OrderItemRef).quantity;
+            return [
+              {
+                ref: (i as OrderItemRef).ref,
+                quantity: typeof q === 'number' && Number.isFinite(q) ? q : 1,
+              },
+            ];
+          })
         : [],
       shipping: typeof o.shipping === 'string' ? o.shipping : undefined,
       payment: o.payment && typeof o.payment === 'object' ? (o.payment as OrderPayment) : undefined,

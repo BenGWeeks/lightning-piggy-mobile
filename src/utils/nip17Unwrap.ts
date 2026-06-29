@@ -417,16 +417,23 @@ export function classifyRumor(
   | { type: 'group'; otherParticipants: Set<string>; fromMe: boolean }
   | { type: 'order'; partnerPubkey: string; fromMe: boolean }
   | null {
-  // Marketplace order / receipt (kind 16/17). Surfaced as its own variant so an
-  // unwrapped order is routed to the order-card rendering rather than treated as
-  // a chat DM — the partner is the market (sender), or the `p` recipient when we
-  // sent it (#market future-proofing). Callers that only act on 'group' (e.g.
-  // group routing) safely fall through to the 1:1 store path, which keys the
-  // order card off `wireKind`.
-  if (rumor.kind === 16 || rumor.kind === 17) {
+  // Marketplace order / receipt (kind 16/17) that actually parses as an order.
+  // Surfaced as its own variant so an unwrapped order routes to the order-card
+  // rendering rather than a chat DM — the partner is the market (sender), or the
+  // `p` recipient when we sent it (#market future-proofing). Only genuine orders
+  // take this branch: a kind-16 NIP-18 repost (or other kind-16/17 use) is not
+  // an order, so it falls through to the normal dm/group classification below.
+  // Callers that only act on 'group' (e.g. group routing) safely fall through to
+  // the 1:1 store path, which keys the order card off `wireKind`.
+  if ((rumor.kind === 16 || rumor.kind === 17) && parseOrderEvent(rumor)) {
     const partnership = partnerFromRumor(rumor, viewerPubkey);
-    if (!partnership) return null;
-    return { type: 'order', partnerPubkey: partnership.partnerPubkey, fromMe: partnership.fromMe };
+    if (partnership) {
+      return {
+        type: 'order',
+        partnerPubkey: partnership.partnerPubkey,
+        fromMe: partnership.fromMe,
+      };
+    }
   }
   const me = viewerPubkey.toLowerCase();
   const all = participantsFromRumor(rumor);

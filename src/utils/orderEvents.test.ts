@@ -152,6 +152,20 @@ describe('parseOrderEvent', () => {
     expect(parseOrderEvent({ kind: 1, content: 'note', tags: [] })).toBeNull();
   });
 
+  it('rejects a kind-17 without the order-receipt subject (e.g. a NIP-25 website reaction)', () => {
+    expect(parseOrderEvent({ kind: 17, content: '+', tags: [['order', 'c6c790ca']] })).toBeNull();
+    expect(
+      parseOrderEvent({
+        kind: 17,
+        content: '',
+        tags: [
+          ['order', 'c6c790ca'],
+          ['subject', 'something-else'],
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it('ignores a non-numeric amount', () => {
     const o = parseOrderEvent({
       kind: 16,
@@ -199,6 +213,20 @@ describe('serialize / parseStoredOrder round-trip', () => {
   it('returns null for non-order JSON', () => {
     expect(parseStoredOrder('hello world')).toBeNull();
     expect(parseStoredOrder('{"foo":1}')).toBeNull();
+  });
+
+  it('rejects a stored row with an off-schema type', () => {
+    expect(parseStoredOrder('{"kind":16,"orderId":"x","type":"bogus"}')).toBeNull();
+  });
+
+  it('coerces a missing/invalid item quantity to 1', () => {
+    const restored = parseStoredOrder(
+      '{"kind":16,"orderId":"x","type":"order","items":[{"ref":"a"},{"ref":"b","quantity":"7"}]}',
+    );
+    expect(restored!.items).toEqual([
+      { ref: 'a', quantity: 1 },
+      { ref: 'b', quantity: 1 },
+    ]);
   });
 });
 
