@@ -575,7 +575,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // own echoes and historical backlog (silent); persistence is left to the
       // next refreshDmInbox — see replayDeferredFollowGate.
       if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
-        const deferredText = textForRumor(rumor);
+        // For an order/receipt rumor (kind 16/17) `textForRumor` returns order
+        // JSON; surface a readable preview so a raw blob never leaks into the
+        // conversation list when the sender isn't followed (mirrors the
+        // non-deferred path below). Plain DM rumors pass through unchanged.
+        const deferredText = orderPreviewFromContent(textForRumor(rumor), rumor.kind);
         followGateBuffer.defer({
           partnerPubkey: partnership.partnerPubkey,
           entry: {
