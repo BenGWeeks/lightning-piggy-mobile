@@ -168,7 +168,17 @@ export function buildConversationItems(
           createdAt: m.createdAt,
         };
       }
-      // Fall through to plain text if the row didn't round-trip as an order.
+      // Unparseable order/receipt row (corrupt, or a non-order payload sharing
+      // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
+      // placeholder rather than leaking the raw JSON blob into the thread
+      // (mirrors `orderPreviewFromContent` in the inbox preview).
+      return {
+        kind: 'unsupported',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        rawKind: m.wireKind,
+        createdAt: m.createdAt,
+      };
     }
     // Generic, future-proof fallback: a stored message whose wireKind we don't
     // render (an inner Nostr event of an unhandled kind) becomes a muted

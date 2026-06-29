@@ -206,6 +206,17 @@ describe('buildConversationItems — unsupported message-kind fallback', () => {
     ).filter((i) => i.kind !== 'dayHeader');
     expect(items[0].kind).toBe('order');
   });
+
+  it('maps an unparseable kind-16/17 row to `unsupported`, never a raw JSON bubble', () => {
+    // A non-order payload sharing the kind (e.g. a NIP-18 repost) or a corrupt row.
+    const notAnOrder = JSON.stringify({ kind: 1, id: 'abc', content: 'gm' });
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: notAnOrder, createdAt: DAY2, wireKind: 16 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('unsupported');
+    expect(items[0].kind).not.toBe('message'); // never a raw text bubble
+  });
 });
 
 describe('formatDayHeader', () => {
