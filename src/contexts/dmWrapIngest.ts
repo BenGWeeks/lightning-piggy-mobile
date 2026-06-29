@@ -5,6 +5,7 @@ import {
   rumorEventId,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
+import { orderPreviewFromContent } from '../utils/orderEvents';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -157,6 +158,12 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           return null;
         }
         const text = textForRumor(rumor);
+        // For an order/receipt rumor (kind 16/17) `textForRumor` returns order
+        // JSON; the in-memory inbox preview must show a readable summary, never
+        // the raw blob (mirrors the live-sub path). The stored row keeps the raw
+        // order JSON below so the thread renderer + dmInbox projection re-derive
+        // from it. Plain DM rumors pass through unchanged.
+        const preview = orderPreviewFromContent(text, rumor.kind);
         // Inner rumor id (#857) — the delivery-store key, stable across wraps
         // and matching the sender's send-time eventId. Computed only for our own
         // sent rows (fromMe); a received row never carries a delivery tick.
@@ -166,7 +173,7 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           partnerPubkey: partnership.partnerPubkey,
           fromMe: partnership.fromMe,
           createdAt: rumor.created_at,
-          text,
+          text: preview,
           wireKind: rumor.kind,
           rumorId,
         });
