@@ -252,6 +252,12 @@ describe('orderPreviewFromContent', () => {
   it('passes plain text through for non-order rows', () => {
     expect(orderPreviewFromContent('hello', 14)).toBe('hello');
   });
+  it('never leaks raw JSON for an unparseable kind-16/17 row (corrupt / repost payload)', () => {
+    // A NIP-18 repost shares kind 16 but isn't an order, so parseStoredOrder rejects it.
+    const out = orderPreviewFromContent('{"kind":1,"id":"abc","content":"gm"}', 16);
+    expect(out).not.toContain('{');
+    expect(out).toBe('🛍️ Marketplace message');
+  });
 });
 
 describe('helpers', () => {

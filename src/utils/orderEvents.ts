@@ -248,5 +248,9 @@ export function orderPreviewText(order: ParsedOrderEvent): string {
 export function orderPreviewFromContent(content: string, wireKind: number): string {
   if (wireKind !== 16 && wireKind !== 17) return content;
   const order = parseStoredOrder(content);
-  return order ? orderPreviewText(order) : content;
+  if (order) return orderPreviewText(order);
+  // Unparseable kind-16/17 content — a corrupted/legacy row, or a non-order
+  // payload sharing the kind (e.g. a NIP-18 repost JSON). Never surface the
+  // raw blob; a neutral marketplace label keeps the list readable.
+  return '🛍️ Marketplace message';
 }
