@@ -249,6 +249,28 @@ export function shortOrderId(orderId: string): string {
   return orderId.replace(/-/g, '').slice(0, 8);
 }
 
+// A bolt11 invoice's human-readable prefix: `ln` + a network id (mainnet `bc`,
+// testnet `tb`, signet `tbs`, regtest `bcrt`, simnet `sb`) followed by the
+// amount/`1`-separator digit. We match this rather than re-decoding bech32 so
+// the parser stays dependency-light (it's imported by the hot decrypt loop).
+const BOLT11_PREFIX = /^ln(bc|tbs?|bcrt|sb)[0-9]/i;
+
+/**
+ * The bolt11 invoice a buyer can pay from a kind-16 **type-2 "Payment"**
+ * request, or `null` when this order carries nothing payable.
+ *
+ * Only a payment *request* is payable: a kind-17 receipt is already settled,
+ * and an order-placed / status / shipping update carries no invoice. The
+ * `payment` value must look like a bolt11 — a Lightning *address* or other
+ * method-specific value isn't a one-tap-payable invoice, so it's rejected.
+ */
+export function payableBolt11(order: ParsedOrderEvent): string | null {
+  if (order.kind !== 16 || order.type !== 'payment') return null;
+  const value = order.payment?.value?.trim();
+  if (!value || !BOLT11_PREFIX.test(value)) return null;
+  return value;
+}
+
 /** One-line inbox preview, e.g. "🛒 Order Placed · 21 sats". */
 export function orderPreviewText(order: ParsedOrderEvent): string {
   const { emoji, label } = orderCardHeader(order.type);

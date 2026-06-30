@@ -44,6 +44,10 @@ import {
   mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
+// __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
+// __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs
+// in a release build.
+import { seedDevOrderConversation } from '../utils/devSeedOrders';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 import type { NostrProfile } from '../types/nostr';
@@ -627,6 +631,22 @@ const MessagesScreen: React.FC = () => {
     setPickerVisible(true);
   }, []);
 
+  // __DEV__-only: seed a marketplace payment-request + receipt conversation and
+  // open it, so Maestro / manual QA can exercise the order-card Pay / QR
+  // affordance without a live market relay. Tree-shaken out of release builds
+  // (the helper is a no-op outside __DEV__ and this branch is __DEV__-gated).
+  const handleSeedDevOrder = useCallback(async () => {
+    if (!__DEV__ || !pubkey) return;
+    const seeded = await seedDevOrderConversation(pubkey);
+    if (!seeded) return;
+    navigation.navigate('Conversation', {
+      pubkey: seeded.pubkey,
+      name: seeded.name,
+      picture: null,
+      lightningAddress: null,
+    });
+  }, [navigation, pubkey]);
+
   const handlePickerSelect = useCallback(
     (friend: PickedFriend) => {
       setPickerVisible(false);
@@ -792,6 +812,20 @@ const MessagesScreen: React.FC = () => {
               testID={`messages-zaps-toggle-${showZapCounterparties ? 'on' : 'off'}`}
               accessibilityElementsHidden
             />
+            {__DEV__ && (
+              // Dev-only fixture launcher for the marketplace order cards. Never
+              // present in release builds (see handleSeedDevOrder).
+              <TouchableOpacity
+                style={styles.filterChipInteractive}
+                onPress={handleSeedDevOrder}
+                accessibilityLabel="Seed a dev marketplace order conversation"
+                accessibilityRole="button"
+                testID="messages-dev-seed-order"
+              >
+                <Zap size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Dev order</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         {!isLoggedIn ? (

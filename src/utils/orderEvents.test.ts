@@ -7,7 +7,9 @@ import {
   orderPreviewFromContent,
   orderCardHeader,
   shortOrderId,
+  payableBolt11,
   type OrderEventInput,
+  type ParsedOrderEvent,
 } from './orderEvents';
 
 // Realistic Gamma/Plebeian-market events, verified live on relays.
@@ -304,5 +306,59 @@ describe('helpers', () => {
   });
   it('shortOrderId strips dashes and truncates', () => {
     expect(shortOrderId('c6c790ca-1234-4abc')).toBe('c6c790ca');
+  });
+});
+
+describe('payableBolt11', () => {
+  const base: ParsedOrderEvent = {
+    kind: 16,
+    type: 'payment',
+    orderId: 'c6c790ca',
+    items: [],
+    message: '',
+    payment: { method: 'lightning', value: 'lnbc210n1pexample' },
+  };
+
+  it('returns the bolt11 for a kind-16 type-2 payment request', () => {
+    expect(payableBolt11(base)).toBe('lnbc210n1pexample');
+  });
+
+  it('accepts testnet / signet / regtest invoice prefixes', () => {
+    for (const v of ['lntb210n1pxx', 'lntbs210n1pxx', 'lnbcrt210n1pxx']) {
+      expect(payableBolt11({ ...base, payment: { method: 'lightning', value: v } })).toBe(v);
+    }
+  });
+
+  it('trims surrounding whitespace before matching', () => {
+    expect(
+      payableBolt11({ ...base, payment: { method: 'lightning', value: '  lnbc1xyz  ' } }),
+    ).toBe('lnbc1xyz');
+  });
+
+  it('rejects a Lightning address (not a bolt11)', () => {
+    expect(
+      payableBolt11({ ...base, payment: { method: 'lightning', value: 'shop@getalby.com' } }),
+    ).toBeNull();
+  });
+
+  it('rejects a kind-17 receipt (already settled)', () => {
+    const receipt: ParsedOrderEvent = {
+      ...base,
+      kind: 17,
+      type: 'receipt',
+      payment: { method: 'lightning', value: 'lnbc1xyz', preimage: 'ab'.repeat(32) },
+    };
+    expect(payableBolt11(receipt)).toBeNull();
+  });
+
+  it('rejects non-payment order types (placed / status / shipping)', () => {
+    for (const type of ['order', 'status', 'shipping'] as const) {
+      expect(payableBolt11({ ...base, type })).toBeNull();
+    }
+  });
+
+  it('returns null when there is no payment value', () => {
+    expect(payableBolt11({ ...base, payment: undefined })).toBeNull();
+    expect(payableBolt11({ ...base, payment: { method: 'lightning', value: '' } })).toBeNull();
   });
 });
