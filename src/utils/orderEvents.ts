@@ -126,9 +126,10 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
   const items: OrderItemRef[] = [];
   for (const t of ev.tags) {
     if (t[0] !== 'item' || typeof t[1] !== 'string') continue;
-    const qtyRaw = t[2];
-    const quantity = qtyRaw !== undefined && /^\d+$/.test(qtyRaw) ? Number(qtyRaw) : 1;
-    items.push({ ref: t[1], quantity });
+    // Trim + require a string (mirrors `amount`), then keep a positive integer.
+    const qtyRaw = typeof t[2] === 'string' ? t[2].trim() : undefined;
+    const qtyNum = qtyRaw !== undefined && /^\d+$/.test(qtyRaw) ? Number(qtyRaw) : 1;
+    items.push({ ref: t[1], quantity: qtyNum > 0 ? qtyNum : 1 });
   }
 
   let payment: OrderPayment | undefined;
@@ -167,6 +168,21 @@ export function serializeOrder(order: ParsedOrderEvent): string {
   return JSON.stringify(order);
 }
 
+const isFiniteNonNegInt = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= 0;
+const isFinitePosInt = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n > 0;
+
+/** Validate a stored `payment` object — drop it unless method + value are strings. */
+function parseStoredPayment(raw: unknown): OrderPayment | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.method !== 'string' || typeof p.value !== 'string') return undefined;
+  const payment: OrderPayment = { method: p.method, value: p.value };
+  if (typeof p.preimage === 'string' && p.preimage.length > 0) payment.preimage = p.preimage;
+  return payment;
+}
+
 /** Inverse of `serializeOrder`; returns null if `content` isn't a stored order. */
 export function parseStoredOrder(content: string): ParsedOrderEvent | null {
   try {
@@ -182,7 +198,9 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       kind: o.kind as number,
       type: o.type as OrderEventType,
       orderId: o.orderId,
-      amountSats: typeof o.amountSats === 'number' ? o.amountSats : undefined,
+      // Only a finite, non-negative integer — never NaN/Infinity/negative/float
+      // (which would surface as "NaN sats" etc. for a corrupt row).
+      amountSats: isFiniteNonNegInt(o.amountSats) ? o.amountSats : undefined,
       status: typeof o.status === 'string' ? o.status : undefined,
       tracking: typeof o.tracking === 'string' ? o.tracking : undefined,
       // Keep only well-formed items and coerce a missing/invalid quantity to 1
@@ -194,13 +212,15 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
             return [
               {
                 ref: (i as OrderItemRef).ref,
-                quantity: typeof q === 'number' && Number.isFinite(q) ? q : 1,
+                // Clamp to a positive integer — 0/negative/fractional would make
+                // totals and pluralization misleading.
+                quantity: isFinitePosInt(q) ? q : 1,
               },
             ];
           })
         : [],
       shipping: typeof o.shipping === 'string' ? o.shipping : undefined,
-      payment: o.payment && typeof o.payment === 'object' ? (o.payment as OrderPayment) : undefined,
+      payment: parseStoredPayment(o.payment),
       message: typeof o.message === 'string' ? o.message : '',
     };
   } catch {

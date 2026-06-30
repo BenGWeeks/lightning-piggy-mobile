@@ -54,6 +54,25 @@ import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
  * reading them through the bundle keeps the gate + dedup behaviour
  * byte-for-byte identical.
  */
+
+/**
+ * Parse the persisted inbox cache, dropping malformed entries. A corrupt cache
+ * (null entries, non-objects, or a missing `partnerPubkey`) must not crash the
+ * later `.some(...)` / `mergeInboxEntries` and break live order/DM ingest.
+ */
+function parseCachedInboxEntries(raw: string | null): DmInboxEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e) => e && typeof e === 'object' && typeof e.partnerPubkey === 'string',
+    ) as DmInboxEntry[];
+  } catch {
+    return [];
+  }
+}
+
 export interface LiveDmSubscriptionParams {
   viewerPubkey: string;
   activeSigner: SignerType;
@@ -310,16 +329,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             if (__DEV__) console.warn('[DmStore] live kind-4 upsert failed:', e);
           });
           const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = inboxRaw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(inboxRaw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
+          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
           const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
           // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
           if (cancelled) return;
@@ -423,16 +433,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
           });
           const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = inboxRaw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(inboxRaw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
+          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
           if (cachedInbox.some((e) => e.partnerPubkey === partnerPubkey)) partnerKnown = true;
           const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
           if (cancelled) return;
@@ -636,16 +637,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         // Re-check after each await: logout may have wiped these stores while we were writing. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
         if (cancelled) return;
         const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-        const cachedInbox: DmInboxEntry[] = inboxRaw
-          ? (() => {
-              try {
-                const parsed = JSON.parse(inboxRaw);
-                return Array.isArray(parsed) ? parsed : [];
-              } catch {
-                return [];
-              }
-            })()
-          : [];
+        const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
         const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
         if (cancelled) return;
         await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(

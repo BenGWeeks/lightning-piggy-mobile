@@ -154,7 +154,7 @@ describe('textForRumor (kind-15 → bubble text)', () => {
  *   - a rumor claiming a different pubkey than its seal is rejected
  *     (sender-spoofing blocked).
  */
-describe('classifyRumor — kind-16/17 order classification (Copilot #3)', () => {
+describe('classifyRumor — kind-16/17 order classification', () => {
   // Viewer is PK_B; the market (PK_A) addresses the order to them via `#p`.
   const orderRumor = (over: Partial<DecodedRumor> = {}): DecodedRumor => ({
     pubkey: PK_A,

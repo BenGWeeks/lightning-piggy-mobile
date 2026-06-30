@@ -228,6 +228,43 @@ describe('serialize / parseStoredOrder round-trip', () => {
       { ref: 'b', quantity: 1 },
     ]);
   });
+
+  it('rejects non-finite / negative / fractional amountSats', () => {
+    // 1e999 parses to Infinity; NaN isn't valid JSON so can't be embedded here.
+    for (const bad of ['null', '1e999', '-5', '1.5']) {
+      const restored = parseStoredOrder(
+        `{"kind":16,"orderId":"x","type":"order","amountSats":${bad}}`,
+      );
+      expect(restored!.amountSats).toBeUndefined();
+    }
+    expect(
+      parseStoredOrder('{"kind":16,"orderId":"x","type":"order","amountSats":21}')!.amountSats,
+    ).toBe(21);
+  });
+
+  it('clamps 0 / negative / fractional item quantity to 1', () => {
+    const restored = parseStoredOrder(
+      '{"kind":16,"orderId":"x","type":"order","items":[{"ref":"a","quantity":0},{"ref":"b","quantity":-3},{"ref":"c","quantity":2.5}]}',
+    );
+    expect(restored!.items).toEqual([
+      { ref: 'a', quantity: 1 },
+      { ref: 'b', quantity: 1 },
+      { ref: 'c', quantity: 1 },
+    ]);
+  });
+
+  it('drops an off-schema payment (non-string method/value)', () => {
+    expect(
+      parseStoredOrder(
+        '{"kind":16,"orderId":"x","type":"order","payment":{"method":1,"value":true}}',
+      )!.payment,
+    ).toBeUndefined();
+    expect(
+      parseStoredOrder(
+        '{"kind":16,"orderId":"x","type":"order","payment":{"method":"lightning","value":"lnbc1"}}',
+      )!.payment,
+    ).toEqual({ method: 'lightning', value: 'lnbc1' });
+  });
 });
 
 describe('orderPreviewText', () => {
