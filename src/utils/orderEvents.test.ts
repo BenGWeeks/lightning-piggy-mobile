@@ -310,26 +310,31 @@ describe('helpers', () => {
 });
 
 describe('payableBolt11', () => {
+  // A bech32 data part comfortably over the {50,} floor the parser shares with
+  // INVOICE_REGEX (a real bolt11 is far longer). Uses only valid bech32 chars.
+  const DATA = '210n1p' + 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'.repeat(2);
+  const BC = `lnbc${DATA}`;
+
   const base: ParsedOrderEvent = {
     kind: 16,
     type: 'payment',
     orderId: 'c6c790ca',
     items: [],
     message: '',
-    payment: { method: 'lightning', value: 'lnbc210n1pexample' },
+    payment: { method: 'lightning', value: BC },
   };
 
   it('returns the bolt11 for a kind-16 type-2 payment request', () => {
-    expect(payableBolt11(base)).toBe('lnbc210n1pexample');
+    expect(payableBolt11(base)).toBe(BC);
   });
 
   it('accepts every HRP extractInvoice does (bc / tb / ts / bs, + regtest/signet)', () => {
     for (const v of [
-      'lntb210n1pxx',
-      'lntbs210n1pxx',
-      'lnbcrt210n1pxx',
-      'lnts210n1pxx',
-      'lnbs210n1pxx',
+      `lntb${DATA}`,
+      `lntbs${DATA}`,
+      `lnbcrt${DATA}`,
+      `lnts${DATA}`,
+      `lnbs${DATA}`,
     ]) {
       expect(payableBolt11({ ...base, payment: { method: 'lightning', value: v } })).toBe(v);
     }
@@ -337,14 +342,20 @@ describe('payableBolt11', () => {
 
   it('strips an optional lightning: URI prefix (matches extractInvoice)', () => {
     expect(
-      payableBolt11({ ...base, payment: { method: 'lightning', value: 'lightning:lnbc210n1pxx' } }),
-    ).toBe('lnbc210n1pxx');
+      payableBolt11({ ...base, payment: { method: 'lightning', value: `lightning:${BC}` } }),
+    ).toBe(BC);
   });
 
   it('trims surrounding whitespace before matching', () => {
+    expect(payableBolt11({ ...base, payment: { method: 'lightning', value: `  ${BC}  ` } })).toBe(
+      BC,
+    );
+  });
+
+  it('rejects a too-short bolt11-shaped value (below the {50,} floor)', () => {
     expect(
-      payableBolt11({ ...base, payment: { method: 'lightning', value: '  lnbc1xyz  ' } }),
-    ).toBe('lnbc1xyz');
+      payableBolt11({ ...base, payment: { method: 'lightning', value: 'lnbc1xyz' } }),
+    ).toBeNull();
   });
 
   it('rejects a Lightning address (not a bolt11)', () => {
@@ -354,15 +365,11 @@ describe('payableBolt11', () => {
   });
 
   it('rejects a non-Lightning payment method even when the value looks like a bolt11', () => {
-    expect(
-      payableBolt11({ ...base, payment: { method: 'onchain', value: 'lnbc210n1pxx' } }),
-    ).toBeNull();
+    expect(payableBolt11({ ...base, payment: { method: 'onchain', value: BC } })).toBeNull();
   });
 
   it('accepts the Lightning method case-insensitively', () => {
-    expect(
-      payableBolt11({ ...base, payment: { method: 'Lightning', value: 'lnbc210n1pxx' } }),
-    ).toBe('lnbc210n1pxx');
+    expect(payableBolt11({ ...base, payment: { method: 'Lightning', value: BC } })).toBe(BC);
   });
 
   it('rejects a kind-17 receipt (already settled)', () => {
@@ -370,7 +377,7 @@ describe('payableBolt11', () => {
       ...base,
       kind: 17,
       type: 'receipt',
-      payment: { method: 'lightning', value: 'lnbc1xyz', preimage: 'ab'.repeat(32) },
+      payment: { method: 'lightning', value: BC, preimage: 'ab'.repeat(32) },
     };
     expect(payableBolt11(receipt)).toBeNull();
   });

@@ -252,11 +252,12 @@ export function shortOrderId(orderId: string): string {
 // Match (and normalise) a bolt11 invoice, kept in sync with `INVOICE_REGEX` in
 // src/utils/messageContent.ts so the order card accepts exactly what the rest of
 // the app parses: an optional `lightning:` URI prefix, then `ln` + a network
-// HRP (`bc`/`tb`/`ts`/`bs`) + bech32 data. Group 1 is the bare bolt11 (prefix
-// stripped). We mirror the regex rather than importing `extractInvoice` (which
-// pulls in a bolt11 decoder) so this parser stays dependency-light for the hot
-// decrypt loop.
-const BOLT11_RE = /^(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]+)$/i;
+// HRP (`bc`/`tb`/`ts`/`bs`) + at least 50 bech32-data chars. The `{50,}` floor
+// matches INVOICE_REGEX and rejects too-short "lnbc…"-shaped values (a real
+// bolt11 is far longer). Group 1 is the bare bolt11 (prefix stripped). We mirror
+// the regex rather than importing `extractInvoice` (which pulls in a bolt11
+// decoder) so this parser stays dependency-light for the hot decrypt loop.
+const BOLT11_RE = /^(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})$/i;
 
 /**
  * The bolt11 invoice a buyer can pay from a kind-16 **type-2 "Payment"**
