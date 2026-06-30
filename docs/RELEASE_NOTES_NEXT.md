@@ -14,5 +14,5 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **See shop orders right in your chats.** When a merchant sends you a Lightning order or receipt over an encrypted message, it now appears as a clear order card — item count, total in sats, and status — instead of raw text.
-- **Pay an order in a tap.** Order cards now have a Pay button and a QR code, so you can pay the Lightning invoice for your order straight from the conversation, or scan it with another wallet.
+- **Shop orders show as cards in your chats.** An order or receipt from a merchant now shows items, total in sats, and status — not raw text.
+- **Pay an order in a tap.** Order cards have a Pay button and a QR code to pay the invoice from the chat, or scan it with another wallet.
