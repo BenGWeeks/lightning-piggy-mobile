@@ -1,13 +1,20 @@
 /**
  * useCacheNotifications — foreground live subscription that fires an OS
- * notification when a kind-1111 find-log is published against one of the
- * viewer's geo-caches (#740).
+ * notification when fresh activity lands on one of the viewer's published
+ * geo-caches (#740, #760).
+ *
+ * Two event surfaces are watched against the viewer's own cache coords:
+ *   - kind-1111 NIP-22 comments (`#A` root pointer) — #740
+ *   - kind-7516 NIP-GC found-logs (`#a` cache pointer) — #760
+ * A found-log additionally fans out on the in-app event bus
+ * (`notifyFoundLog`) so an open HuntPiggyDetail can refresh in-place;
+ * comments stay notification-only (no in-app live surface yet).
  *
  * Mirrors the shape of `useDmInbox`'s live sub (the one that opens the
  * kind-4 + kind-1059 stream and fires `fireMessageNotification` per
- * fresh event), but for the public find-log surface. There is no
+ * fresh event), but for the public cache-activity surface. There is no
  * decryption, no follow gate, and no inbox state to mutate — the hook
- * exists purely to listen and ping.
+ * exists purely to listen, ping, and broadcast.
  *
  * "My cache coordinates" is sourced from `fetchCachesByAuthor` and
  * re-fetched on a session timer (every minute) and on every AppState →
@@ -30,10 +37,14 @@
 import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import type { VerifiedEvent } from 'nostr-tools';
-import { subscribeCacheCommentsForCoords } from '../services/cacheNotifySubscription';
+import {
+  subscribeCacheCommentsForCoords,
+  subscribeCacheFoundLogsForCoords,
+} from '../services/cacheNotifySubscription';
 import { fireCacheNotification } from '../services/notificationService';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
 import { parseCacheCoord } from '../services/nostrPlacesService';
+import { notifyFoundLog } from './nostrEventBus';
 
 // Tolerate sender/receiver clock drift — matches the DM live sub.
 const NOTIFY_SKEW_SEC = 120;
@@ -88,7 +99,8 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     if (readRelays.length === 0) return;
 
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
+    let unsubscribeComments: (() => void) | null = null;
+    let unsubscribeFoundLogs: (() => void) | null = null;
     // Coord set the sub is currently armed with. Compared against each
     // refetch to skip tear-down + re-arm when nothing changed.
     let currentCoords: string[] = [];
@@ -97,27 +109,32 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     const seen = new Set<string>();
     const subOpenedAtSec = Math.floor(Date.now() / 1000);
 
-    const handle = (ev: VerifiedEvent): void => {
+    // Shared per-event handler. `coordTagKey` is `A` (uppercase NIP-22 root
+    // pointer, for kind-1111 comments) or `a` (lowercase NIP-GC cache
+    // pointer, for kind-7516 found-logs) — read whichever tag the matching
+    // filter armed. `broadcast` fans a fresh found-log out on the in-app
+    // event bus so an open HuntPiggyDetail refreshes without polling;
+    // comments pass `false` (no in-app live surface yet).
+    const handle = (ev: VerifiedEvent, coordTagKey: 'A' | 'a', broadcast: boolean): void => {
       if (cancelled) return;
       if (seen.has(ev.id)) return;
       seen.add(ev.id);
       // Bounded dedup — drop oldest ~25% under sustained pressure (same
-      // pattern as the DM live sub's `seen` Set).
+      // pattern as the DM live sub's `seen` Set). Shared across both kinds;
+      // event ids are globally unique so a comment and a found-log never
+      // collide.
       if (seen.size > SEEN_CAP) {
         const drop = Math.floor(SEEN_CAP / 4);
         const it = seen.values();
         for (let i = 0; i < drop; i++) seen.delete(it.next().value!);
       }
-      // Never self-ping — the hider commenting on their own cache is a
-      // maintenance note, not a find we want to surface as a notification.
+      // Never self-ping — the owner logging a find / maintenance note on
+      // their own cache is not activity we want to surface as a notification.
       if (ev.pubkey === pubkey) return;
       // Freshness gate — silent on backlog the relay replays on sub open.
       if (ev.created_at < subOpenedAtSec - NOTIFY_SKEW_SEC) return;
 
-      // The cache coord rides on the `A` (uppercase) NIP-22 root pointer.
-      // `buildComment` in nostrPlacesService writes both `A` and `a`; we
-      // read `A` because that's what the filter matched on.
-      const coordTag = ev.tags.find((t) => t[0] === 'A')?.[1];
+      const coordTag = ev.tags.find((t) => t[0] === coordTagKey)?.[1];
       if (!coordTag) return;
       const parsed = parseCacheCoord(coordTag);
       if (!parsed) return;
@@ -135,6 +152,8 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
         title: 'New find on your cache',
         body: 'Open Lightning Piggy to view',
       });
+
+      if (broadcast) notifyFoundLog(coordTag, ev.id);
     };
 
     /**
@@ -161,16 +180,26 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
           coords.length === currentCoords.length && coords.every((c) => currentCoords.includes(c));
         if (sameSet) return;
         currentCoords = coords;
-        if (unsubscribe) {
-          unsubscribe();
-          unsubscribe = null;
+        if (unsubscribeComments) {
+          unsubscribeComments();
+          unsubscribeComments = null;
+        }
+        if (unsubscribeFoundLogs) {
+          unsubscribeFoundLogs();
+          unsubscribeFoundLogs = null;
         }
         if (coords.length === 0) return;
-        unsubscribe = subscribeCacheCommentsForCoords({
+        unsubscribeComments = subscribeCacheCommentsForCoords({
           viewerPubkey: pubkey,
           relays: readRelays,
           cacheCoords: coords,
-          onEvent: handle,
+          onEvent: (ev) => handle(ev, 'A', false),
+        });
+        unsubscribeFoundLogs = subscribeCacheFoundLogsForCoords({
+          viewerPubkey: pubkey,
+          relays: readRelays,
+          cacheCoords: coords,
+          onEvent: (ev) => handle(ev, 'a', true),
         });
       } catch {
         // Non-fatal — leave the previous sub (if any) in place; the next
@@ -191,7 +220,8 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       cancelled = true;
       clearInterval(interval);
       appStateSub.remove();
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeComments) unsubscribeComments();
+      if (unsubscribeFoundLogs) unsubscribeFoundLogs();
     };
   }, [pubkey, getReadRelays]);
 }
