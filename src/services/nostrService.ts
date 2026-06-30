@@ -1015,13 +1015,16 @@ export async function fetchInboxDmEvents(
   }
   const __t0 = performance.now();
   try {
-    // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
+    // maxWait: per-relay EOSE timeout closes the sub, so the cold-start
     // inbox fetch genuinely terminates — unlike withTimeout which only raced the
     // Promise and left the underlying subscribeEose sub running for up to ~60 s.
+    // 8 s (was 15 s): a slow/unresponsive relay shouldn't hold the inbox
+    // spinner for a quarter-minute that reads as a freeze. The live sub keeps
+    // delivering after this resolves, and pull-to-refresh re-runs the query.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 15000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 15000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 8000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 8000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 8000, signal: options.signal }),
     ]);
     // [Perf] Cold-start freeze attribution (#751). querySync ingests every
     // returned event synchronously (JSON.parse + validateEvent + matchFilters)
