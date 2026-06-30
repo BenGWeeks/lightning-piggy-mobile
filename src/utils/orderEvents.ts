@@ -1,0 +1,276 @@
+// Marketplace order / receipt events (#market). Plebeian / Gamma-style Nostr
+// markets address transactional updates to a buyer as PLAINTEXT events tagged
+// with the recipient's pubkey (`["p", <buyer>]`):
+//
+//   - kind 16, `["type","1"]`  → Order placed
+//   - kind 16, `["type","2"]`  → Payment (invoice to pay)
+//   - kind 16, `["type","3"]`  → Order status update (`["status", …]`)
+//   - kind 16, `["type","4"]`  → Shipping update (`["status", …]`, opt `["tracking", …]`)
+//   - kind 17                  → Payment receipt (`["subject","order-receipt"]`)
+//
+// Every order event carries an `["order", <uuid>]` tag plus, for kind 16, a
+// `["type","1".."4"]` tag. NIP-18 generic reposts ALSO use kind 16 but never
+// carry that pair (they have `["alt","Generic repost"]`, a `["k", …]` repost-
+// target tag, or JSON-of-another-event content), so `parseOrderEvent` rejects
+// anything that doesn't match the order shape — that's how we tell a market
+// order apart from a repost on the same kind.
+//
+// Dependency-light on purpose: `nip17Unwrap` (a hot decrypt-loop module) and
+// the conversation renderer both import it, so it must not pull in a heavy
+// graph or create an import cycle.
+
+export type OrderEventType = 'order' | 'payment' | 'status' | 'shipping' | 'receipt';
+
+/** A product line on an order: its `a`-coordinate ref + quantity. */
+export interface OrderItemRef {
+  /** Product coordinate, e.g. "30402:<sellerPubkey>:<dTag>". */
+  ref: string;
+  quantity: number;
+}
+
+/** Lightning payment detail off a `["payment","lightning",<addr|invoice>,<preimage?>]` tag. */
+export interface OrderPayment {
+  method: string;
+  /** A bolt11 invoice, lightning address, or other method-specific value. */
+  value: string;
+  /** Present on a kind-17 receipt: the payment preimage (proof of payment). */
+  preimage?: string;
+}
+
+/** A parsed marketplace order/receipt event, normalised across kinds 16 & 17. */
+export interface ParsedOrderEvent {
+  /** Source event kind — 16 (order lifecycle) or 17 (payment receipt). */
+  kind: number;
+  type: OrderEventType;
+  /** The `order` tag value — the order UUID this event belongs to. */
+  orderId: string;
+  /** `amount` tag parsed as sats, when present and numeric. */
+  amountSats?: number;
+  /** `status` tag (e.g. "confirmed", "shipped"). */
+  status?: string;
+  /** `tracking` tag on a shipping update. */
+  tracking?: string;
+  /** Product lines from `item` tags. */
+  items: OrderItemRef[];
+  /** `shipping` tag value (a shipping-option coordinate), when present. */
+  shipping?: string;
+  /** Lightning payment detail (kind-16 type-2 request, or kind-17 receipt). */
+  payment?: OrderPayment;
+  /** The event's free-text content. */
+  message: string;
+}
+
+/** Minimal event shape the parser needs — works for a raw event OR an unwrapped rumor. */
+export interface OrderEventInput {
+  kind: number;
+  tags: string[][];
+  content: string;
+}
+
+const firstTag = (tags: string[][], name: string): string[] | undefined =>
+  tags.find((t) => t[0] === name);
+
+const tagValue = (tags: string[][], name: string): string | undefined => firstTag(tags, name)?.[1];
+
+/** kind-16 `type` tag value → our semantic type. */
+const KIND16_TYPE: Record<string, OrderEventType> = {
+  '1': 'order',
+  '2': 'payment',
+  '3': 'status',
+  '4': 'shipping',
+};
+
+const ORDER_TYPES = new Set<OrderEventType>(['order', 'payment', 'status', 'shipping', 'receipt']);
+
+/**
+ * Parse a kind-16/17 event into a normalised order, or return null when it
+ * isn't a marketplace order event (wrong kind, a NIP-18 repost, or missing the
+ * order shape). The `order` tag is mandatory; kind 16 additionally requires a
+ * `type` tag of 1..4 — exactly the pair a Gamma order carries and a repost
+ * never does.
+ */
+export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
+  if (ev.kind !== 16 && ev.kind !== 17) return null;
+  if (!Array.isArray(ev.tags)) return null;
+
+  // NIP-18 generic-repost guard: reposts ride on kind 16 but advertise
+  // themselves via an `alt` repost note or a `k` repost-target-kind tag. Bail
+  // before we mistake one for an order.
+  const alt = tagValue(ev.tags, 'alt');
+  if (alt && /repost/i.test(alt)) return null;
+  if (firstTag(ev.tags, 'k')) return null;
+
+  const orderId = tagValue(ev.tags, 'order');
+  if (!orderId) return null;
+
+  let type: OrderEventType;
+  if (ev.kind === 17) {
+    // kind 17 is also used by NIP-25 (reactions to websites), so an `order`
+    // tag alone is too weak — require the market receipt subject so unrelated
+    // kind-17 events aren't misclassified as receipts, stored, and notified.
+    if (tagValue(ev.tags, 'subject') !== 'order-receipt') return null;
+    type = 'receipt';
+  } else {
+    const typeVal = tagValue(ev.tags, 'type');
+    const mapped = typeVal ? KIND16_TYPE[typeVal] : undefined;
+    if (!mapped) return null; // kind-16 without a 1..4 type tag isn't an order
+    type = mapped;
+  }
+
+  const amountRaw = tagValue(ev.tags, 'amount');
+  const amountSats =
+    amountRaw !== undefined && /^\d+$/.test(amountRaw.trim())
+      ? Number(amountRaw.trim())
+      : undefined;
+
+  const items: OrderItemRef[] = [];
+  for (const t of ev.tags) {
+    if (t[0] !== 'item' || typeof t[1] !== 'string') continue;
+    // Trim + require a string (mirrors `amount`), then keep a positive integer.
+    const qtyRaw = typeof t[2] === 'string' ? t[2].trim() : undefined;
+    const qtyNum = qtyRaw !== undefined && /^\d+$/.test(qtyRaw) ? Number(qtyRaw) : 1;
+    items.push({ ref: t[1], quantity: qtyNum > 0 ? qtyNum : 1 });
+  }
+
+  let payment: OrderPayment | undefined;
+  const payTag = firstTag(ev.tags, 'payment');
+  if (payTag && typeof payTag[1] === 'string' && typeof payTag[2] === 'string') {
+    payment = { method: payTag[1], value: payTag[2] };
+    if (typeof payTag[3] === 'string' && payTag[3].length > 0) payment.preimage = payTag[3];
+  }
+
+  return {
+    kind: ev.kind,
+    type,
+    orderId,
+    amountSats,
+    status: tagValue(ev.tags, 'status'),
+    tracking: tagValue(ev.tags, 'tracking'),
+    items,
+    shipping: tagValue(ev.tags, 'shipping'),
+    payment,
+    message: typeof ev.content === 'string' ? ev.content : '',
+  };
+}
+
+/** True when the event is a marketplace order/receipt (vs a repost / unrelated). */
+export function isOrderEvent(ev: OrderEventInput): boolean {
+  return parseOrderEvent(ev) !== null;
+}
+
+/**
+ * Canonical storage form. A parsed order is persisted as its JSON in the DM
+ * row's `content`, so the conversation renderer can rebuild the full card and
+ * the inbox can derive a preview. (The DM store schema is a flat row — there's
+ * no extra column to split structured fields into.)
+ */
+export function serializeOrder(order: ParsedOrderEvent): string {
+  return JSON.stringify(order);
+}
+
+const isFiniteNonNegInt = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= 0;
+const isFinitePosInt = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n > 0;
+
+/** Validate a stored `payment` object — drop it unless method + value are strings. */
+function parseStoredPayment(raw: unknown): OrderPayment | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.method !== 'string' || typeof p.value !== 'string') return undefined;
+  const payment: OrderPayment = { method: p.method, value: p.value };
+  if (typeof p.preimage === 'string' && p.preimage.length > 0) payment.preimage = p.preimage;
+  return payment;
+}
+
+/** Inverse of `serializeOrder`; returns null if `content` isn't a stored order. */
+export function parseStoredOrder(content: string): ParsedOrderEvent | null {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const o = parsed as Record<string, unknown>;
+    if ((o.kind !== 16 && o.kind !== 17) || typeof o.orderId !== 'string') return null;
+    // Validate `type` against the known literals — a corrupt / off-schema row
+    // with an unexpected `type` would otherwise make `orderCardHeader` return
+    // undefined and crash the card renderer reading `header.label`.
+    if (typeof o.type !== 'string' || !ORDER_TYPES.has(o.type as OrderEventType)) return null;
+    return {
+      kind: o.kind as number,
+      type: o.type as OrderEventType,
+      orderId: o.orderId,
+      // Only a finite, non-negative integer — never NaN/Infinity/negative/float
+      // (which would surface as "NaN sats" etc. for a corrupt row).
+      amountSats: isFiniteNonNegInt(o.amountSats) ? o.amountSats : undefined,
+      status: typeof o.status === 'string' ? o.status : undefined,
+      tracking: typeof o.tracking === 'string' ? o.tracking : undefined,
+      // Keep only well-formed items and coerce a missing/invalid quantity to 1
+      // so a corrupt row can't render NaN totals downstream.
+      items: Array.isArray(o.items)
+        ? (o.items as unknown[]).flatMap((i) => {
+            if (!i || typeof (i as OrderItemRef).ref !== 'string') return [];
+            const q = (i as OrderItemRef).quantity;
+            return [
+              {
+                ref: (i as OrderItemRef).ref,
+                // Clamp to a positive integer — 0/negative/fractional would make
+                // totals and pluralization misleading.
+                quantity: isFinitePosInt(q) ? q : 1,
+              },
+            ];
+          })
+        : [],
+      shipping: typeof o.shipping === 'string' ? o.shipping : undefined,
+      payment: parseStoredPayment(o.payment),
+      message: typeof o.message === 'string' ? o.message : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Emoji + human label for an order card header. */
+export function orderCardHeader(type: OrderEventType): { emoji: string; label: string } {
+  switch (type) {
+    case 'order':
+      return { emoji: '🛒', label: 'Order Placed' };
+    case 'payment':
+      return { emoji: '💳', label: 'Payment' };
+    case 'status':
+      return { emoji: '📋', label: 'Order Status Update' };
+    case 'shipping':
+      return { emoji: '🚚', label: 'Shipping Update' };
+    case 'receipt':
+      return { emoji: '🧾', label: 'Payment Receipt' };
+  }
+}
+
+/** First 8 chars of the order UUID — the user-facing short id. */
+export function shortOrderId(orderId: string): string {
+  return orderId.replace(/-/g, '').slice(0, 8);
+}
+
+/** One-line inbox preview, e.g. "🛒 Order Placed · 21 sats". */
+export function orderPreviewText(order: ParsedOrderEvent): string {
+  const { emoji, label } = orderCardHeader(order.type);
+  const parts: string[] = [`${emoji} ${label}`];
+  if (order.type === 'status' && order.status) parts.push(order.status);
+  else if (order.type === 'shipping' && order.status) parts.push(order.status);
+  else if (order.amountSats !== undefined) parts.push(`${order.amountSats.toLocaleString()} sats`);
+  return parts.join(' · ');
+}
+
+/**
+ * Inbox-preview text for a stored DM row. For an order/receipt row the stored
+ * `content` is order JSON, so derive a readable summary; everything else passes
+ * through unchanged. Shared by every store→inbox projection so a raw order JSON
+ * blob never leaks into a conversation-list preview.
+ */
+export function orderPreviewFromContent(content: string, wireKind: number): string {
+  if (wireKind !== 16 && wireKind !== 17) return content;
+  const order = parseStoredOrder(content);
+  if (order) return orderPreviewText(order);
+  // Unparseable kind-16/17 content — a corrupted/legacy row, or a non-order
+  // payload sharing the kind (e.g. a NIP-18 repost JSON). Never surface the
+  // raw blob; a neutral marketplace label keeps the list readable.
+  return '🛍️ Marketplace message';
+}

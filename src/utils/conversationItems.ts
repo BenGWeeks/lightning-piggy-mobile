@@ -5,6 +5,7 @@ import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
+import { parseStoredOrder, type ParsedOrderEvent } from './orderEvents';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -49,6 +50,26 @@ export type Item =
       id: string;
       fromMe: boolean;
       url: string;
+      createdAt: number;
+    }
+  | {
+      // Marketplace order / receipt card (#market) — a kind-16/17 event a
+      // Nostr market addressed to the buyer, rendered as a distinct card.
+      kind: 'order';
+      id: string;
+      fromMe: boolean;
+      order: ParsedOrderEvent;
+      createdAt: number;
+    }
+  | {
+      // Generic fallback for a stored message whose wireKind the app doesn't
+      // render (an inner Nostr event of an unhandled kind — now or in future).
+      // Rendered as a muted placeholder bubble instead of a blank one (#market
+      // follow-up). `rawKind` is the numeric Nostr kind.
+      kind: 'unsupported';
+      id: string;
+      fromMe: boolean;
+      rawKind: number;
       createdAt: number;
     }
   | {
@@ -119,6 +140,14 @@ export function buildZapItems(wallets: WalletState[], pubkey: string): TimedItem
   return out;
 }
 
+// Wire kinds the conversation can actually render: 4 (NIP-04 DM), 14 (NIP-17
+// DM text), 15 (NIP-17 file → image/voice/link), 16/17 (marketplace order /
+// receipt cards). A stored message whose wireKind isn't one of these is an
+// inner event of a kind we don't display — surfaced as the `unsupported`
+// placeholder rather than a blank bubble. Plain text rows carry no wireKind
+// (`undefined`), so they never hit the fallback.
+const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17]);
+
 // Merge classified DM messages with wallet zap rows, sort newest-first, and
 // interleave "Today / Yesterday / <date>" dividers between day groups.
 export function buildConversationItems(
@@ -126,6 +155,45 @@ export function buildConversationItems(
   zapItems: TimedItem[],
 ): Item[] {
   const msgItems: TimedItem[] = messages.map((m) => {
+    // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
+    // render them as an order card rather than a chat bubble (#market).
+    if (m.wireKind === 16 || m.wireKind === 17) {
+      const order = parseStoredOrder(m.text);
+      if (order) {
+        return {
+          kind: 'order',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          order,
+          createdAt: m.createdAt,
+        };
+      }
+      // Unparseable order/receipt row (corrupt, or a non-order payload sharing
+      // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
+      // placeholder rather than leaking the raw JSON blob into the thread
+      // (mirrors `orderPreviewFromContent` in the inbox preview).
+      return {
+        kind: 'unsupported',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        rawKind: m.wireKind,
+        createdAt: m.createdAt,
+      };
+    }
+    // Generic, future-proof fallback: a stored message whose wireKind we don't
+    // render (an inner Nostr event of an unhandled kind) becomes a muted
+    // placeholder rather than a blank text bubble. Only fires for a defined
+    // wireKind outside the renderable set — plain rows (no wireKind) and the
+    // 4/14/15/16/17 kinds handled above/below are unaffected.
+    if (m.wireKind !== undefined && !RENDERABLE_WIRE_KINDS.has(m.wireKind)) {
+      return {
+        kind: 'unsupported',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        rawKind: m.wireKind,
+        createdAt: m.createdAt,
+      };
+    }
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
     // — keeps gif / geo detection in one place.

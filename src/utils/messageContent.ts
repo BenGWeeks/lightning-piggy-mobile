@@ -256,7 +256,13 @@ export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
   | { kind: 'location'; location: SharedLocation }
-  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker };
+  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker }
+  // Generic, future-proof fallback for an inner Nostr event whose kind the app
+  // doesn't render (now or in future). `rawKind` is the numeric Nostr kind so
+  // the bubble can say "Unsupported message type (kind N)" instead of leaving a
+  // blank bubble. Produced by the normalizer (buildConversationItems) when a
+  // stored message's wireKind isn't one we know how to display.
+  | { kind: 'unsupported'; rawKind: number };
 
 export function classifyMessageContent(text: string): BubbleContent {
   const gifUrl = extractGifUrl(text);

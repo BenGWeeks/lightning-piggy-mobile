@@ -406,6 +406,21 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     imageBubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
+    // Muted placeholder bubble for an unrenderable inner event kind. Subdued
+    // surface + dashed border + italic supplementary text so it reads as a
+    // system/placeholder note rather than a real chat bubble.
+    unsupportedBubble: {
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderStyle: 'dashed',
+      borderColor: colors.divider,
+    },
+    unsupportedText: {
+      fontSize: 13,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+      lineHeight: 18,
+    },
   });
 
 export type MessageBubbleStyles = ReturnType<typeof createMessageBubbleStyles>;
