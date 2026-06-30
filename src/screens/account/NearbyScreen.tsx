@@ -267,7 +267,8 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
     },
     chipTextSelected: {
-      color: colors.brandPink,
+      // Selected chip — purple accent (selected/active state convention).
+      color: colors.accentSecondary,
     },
     privacyHint: {
       marginTop: 24,

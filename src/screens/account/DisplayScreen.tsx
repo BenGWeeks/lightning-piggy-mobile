@@ -51,7 +51,7 @@ const DisplayScreen: React.FC = () => {
             {item.name}
           </Text>
         </View>
-        {active ? <Check size={20} color={colors.brandPink} /> : null}
+        {active ? <Check size={20} color={colors.accentSecondary} /> : null}
       </TouchableOpacity>
     );
   };
@@ -135,7 +135,9 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 16,
     },
     rowActive: {
-      backgroundColor: colors.brandPinkLight,
+      // Selected-row highlight — purple tint (matches the selected/active
+      // state convention used across Settings).
+      backgroundColor: colors.accentSecondaryLight,
     },
     symbolBadge: {
       width: 36,
