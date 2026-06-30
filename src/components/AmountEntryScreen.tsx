@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createAmountEntryStyles } from '../styles/AmountEntryScreen.styles';
@@ -59,6 +60,12 @@ const AmountEntryScreen: React.FC<Props> = ({
   onBack,
 }) => {
   const colors = useThemeColors();
+  // Pad the bottom by the safe-area inset so the keypad's bottom row (the
+  // "0" key + backspace) clears the system navigation bar. Under 3-button
+  // nav the bar is tall enough to draw over the last keypad row otherwise
+  // (the home button lands on "0"); gesture nav's thin indicator was fine
+  // either way. (#941)
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createAmountEntryStyles(colors), [colors]);
   const { currency } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -250,7 +257,7 @@ const AmountEntryScreen: React.FC<Props> = ({
   ];
 
   return (
-    <View style={styles.container} testID="amount-entry-screen">
+    <View style={[styles.container, { paddingBottom: insets.bottom }]} testID="amount-entry-screen">
       <View style={styles.headerRow}>
         {onBack ? (
           <TouchableOpacity
