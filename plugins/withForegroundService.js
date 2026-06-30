@@ -44,25 +44,26 @@ const { withAndroidManifest } = require('expo/config-plugins');
  *     notifications. Driven by the "Background message notifications"
  *     toggle in Account → Security (default OFF).
  *
- * What is STILL INTENTIONALLY deferred to a follow-up PR (the native glue
- * this config plugin cannot supply without a Kotlin compile):
+ * Where the native glue now lives (it HAS landed — #279):
  *
- *   - The actual Java/Kotlin `Service` class (`NostrRelayService.kt`) and
- *     its `<service>` registration, plus the headless-JS host that calls
- *     `backgroundDmService.runBackgroundDmWatch()` from the service. We
- *     deliberately do NOT push a `<service>` entry here yet: registering a
- *     `<service android:name=".NostrRelayService">` whose class doesn't
- *     compile breaks the prebuild. The permissions below are independently
- *     meaningful (they show in the install prompt and gate the next
- *     iteration), so they land now; the `<service>` add ships with the
- *     Kotlin code. The ready-to-use shape is in the TODO block below.
- *   - A `BootReceiver` to re-launch the service after reboot (uses the
- *     RECEIVE_BOOT_COMPLETED permission added above).
+ *   - The Kotlin foreground `Service` (`BackgroundDmService`, a
+ *     HeadlessJsTaskService that hosts the `BackgroundDmTask` headless JS
+ *     task calling `backgroundDmService.runBackgroundDmWatch()`), its JS↔native
+ *     start/stop bridge (`BackgroundDmModule`), and the reboot `BootReceiver`
+ *     all live in the local Expo module `modules/background-dm-service`.
+ *   - Crucially, the `<service android:foregroundServiceType="dataSync">` and
+ *     the `<receiver>` for BOOT_COMPLETED are declared in THAT module's own
+ *     AndroidManifest.xml — NOT injected here. The classes they name live in
+ *     the same module, so they compile together and the manifest can never
+ *     point at a missing class (the exact prebuild hazard this plugin
+ *     previously side-stepped by deferring the `<service>` add). The module
+ *     manifest is merged into the app manifest at build time.
  *
- * Until that native host lands, the TS watch only persists while the app's
- * JS context is alive — it already improves the foreground experience and
- * becomes a true background watch the moment the native service keeps the
- * context running.
+ * So this plugin's job is now narrowly the PERMISSIONS — they're declared
+ * here because they're app-wide (they surface in the install prompt) and a
+ * couple of them (POST_NOTIFICATIONS, RECEIVE_BOOT_COMPLETED) are requested /
+ * used from JS, not just by the module. The `<service>`/`<receiver>` wiring is
+ * the module's responsibility.
  *
  * Idempotent across `npx expo prebuild` runs — checks for existing
  * permission entries before pushing.
@@ -94,33 +95,12 @@ module.exports = function withForegroundService(config) {
       }
     }
 
-    // TODO(native foreground service, #279): once the Kotlin Service class
-    // + headless-JS host land (the host calls
-    // backgroundDmService.runBackgroundDmWatch()), add the <service> entry
-    // here. Do NOT enable this block before the class compiles — a manifest
-    // <service> pointing at a missing class breaks the prebuild. Ready shape:
-    //
-    //   const application = manifest.application?.[0];
-    //   if (application) {
-    //     application.service = application.service ?? [];
-    //     const has = application.service.some(
-    //       (s) => s.$?.['android:name'] === '.NostrRelayService',
-    //     );
-    //     if (!has) {
-    //       application.service.push({
-    //         $: {
-    //           'android:name': '.NostrRelayService',
-    //           'android:exported': 'false',
-    //           'android:foregroundServiceType': 'dataSync',
-    //         },
-    //       });
-    //     }
-    //   }
-    //
-    // The same follow-up should add the BootReceiver:
-    //
-    //   application.receiver = application.receiver ?? [];
-    //   ...register .BootReceiver with android.intent.action.BOOT_COMPLETED.
+    // The <service android:foregroundServiceType="dataSync"> and the reboot
+    // <receiver> are declared by the local Expo module's own manifest
+    // (modules/background-dm-service/android/src/main/AndroidManifest.xml),
+    // which merges into the app manifest at build time. They live there — not
+    // injected here — so the manifest entries and the Kotlin classes they name
+    // compile together and can never drift into a missing-class prebuild break.
 
     return config;
   });

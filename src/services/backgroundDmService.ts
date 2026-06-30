@@ -32,22 +32,24 @@
  * `Platform.OS === 'android'` and no-ops elsewhere.
  *
  * ───────────────────────────────────────────────────────────────────────
- * NATIVE GLUE STILL REQUIRED (the one piece this TS layer cannot supply).
+ * NATIVE GLUE (the piece that makes this a true background watch).
  * ───────────────────────────────────────────────────────────────────────
- * A real Android foreground service that keeps the JS engine + WebSocket
- * alive while the app is backgrounded needs a native `Service` class +
- * headless-JS host, which can't be added without a native rebuild (and is
- * out of scope for a pure-TS change). The manifest `<service>` + permissions
- * are declared in `plugins/withForegroundService.js`. Until the native
- * Service + headless-JS bridge lands and calls `runBackgroundDmWatch()` from
- * its headless task, this layer:
- *   - persists the user's enable/disable preference,
- *   - posts / dismisses the persistent foreground status chip, and
- *   - runs the live subscription + signer-aware notifications for as long
- *     as the JS context is alive (i.e. it already upgrades the foreground
- *     experience, and becomes a true background watch the moment the native
- *     host keeps the context alive).
- * See `// TODO(native foreground service)` below and the plugin file.
+ * Keeping the JS engine + WebSocket alive while the app is backgrounded needs
+ * a native foreground `Service`. That lives in the local Expo module
+ * `modules/background-dm-service`: `BackgroundDmService` (a
+ * HeadlessJsTaskService) hosts the `BackgroundDmTask` headless JS task — see
+ * `src/services/backgroundDmHeadlessTask.ts` — which calls
+ * `runBackgroundDmWatch()` in a headless context, so the subscription survives
+ * the app being backgrounded or swiped away. `BackgroundDmModule` is the
+ * start/stop bridge this file calls; `BootReceiver` re-arms after a reboot.
+ * Permissions are declared in `plugins/withForegroundService.js`; the
+ * `<service>`/`<receiver>` in the module's own manifest.
+ *
+ * When that native module ISN'T present in the build (Expo Go, or a dev client
+ * predating the native rebuild), this layer degrades gracefully: it persists
+ * the preference, posts/dismisses the chip, and runs the subscription inline
+ * for as long as the foreground JS context is alive — already an upgrade over
+ * the ~15-min detect-and-ping, just not Doze-immune.
  */
 import { Platform } from 'react-native';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
@@ -67,6 +69,11 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
+import {
+  startForegroundService,
+  stopForegroundService,
+  isBackgroundDmServiceAvailable,
+} from '../../modules/background-dm-service';
 
 // NIP-59 randomises a gift wrap's `created_at` up to ~2 days into the PAST,
 // so a genuinely-new wrap can arrive with an already-old timestamp. We only
@@ -209,10 +216,11 @@ function buildDecryptor(
  * watch was armed, false when there's nothing to watch (no identity, no read
  * relays, or not Android).
  *
- * This is the function the native foreground-service headless task should
- * call once the native glue lands; today it's also driven directly by
- * `startBackgroundDmWatch` so the experience already works for as long as the
- * JS context is alive.
+ * This is the function the native foreground-service headless task
+ * (`BackgroundDmTask`, see backgroundDmHeadlessTask.ts) calls to arm the
+ * watch in its headless context. When the native module is absent it's driven
+ * directly by `startBackgroundDmWatch` instead, so the experience still works
+ * for as long as the foreground JS context is alive.
  */
 export async function runBackgroundDmWatch(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
@@ -273,11 +281,14 @@ function stopBackgroundDmWatchSubscription(): void {
  * granted). Does NOT persist the preference — the toggle handler owns that
  * via `setBackgroundDmEnabled`.
  *
- * TODO(native foreground service): once the Kotlin `Service` + headless-JS
- * host land (see plugins/withForegroundService.js), start/stop that native
- * service HERE so the JS context (and this subscription) survives the app
- * being backgrounded. Until then the chip + subscription only persist while
- * the app's JS context is alive.
+ * Starts the native foreground service (modules/background-dm-service) when
+ * it's present in the build, so the JS context — and this subscription —
+ * survives the app being backgrounded or swiped away. The service hosts a
+ * headless JS task that calls `runBackgroundDmWatch()` itself, so we don't
+ * arm the subscription a SECOND time here when the native service is taking
+ * over; we only fall back to running it inline when the native module is
+ * absent (e.g. Expo Go, or a dev client predating the native build), where
+ * the chip + subscription persist only while the app's JS context is alive.
  */
 export async function startBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
@@ -285,7 +296,14 @@ export async function startBackgroundDmWatch(): Promise<void> {
     title: 'Lightning Piggy is watching for messages',
     body: 'Tap to open. This keeps your messages arriving in the background.',
   });
-  await runBackgroundDmWatch();
+  if (isBackgroundDmServiceAvailable()) {
+    // Native service owns the watch: it spins up a headless JS context and
+    // runs the BackgroundDmTask (→ runBackgroundDmWatch) there. Arming it here
+    // too would open a duplicate subscription in the foreground context.
+    await startForegroundService();
+  } else {
+    await runBackgroundDmWatch();
+  }
 }
 
 /**
@@ -294,6 +312,11 @@ export async function startBackgroundDmWatch(): Promise<void> {
  */
 export async function stopBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  // Stop the native service first: this tears down the headless JS context
+  // (and the subscription running inside it). Then close any inline
+  // subscription this foreground context owns (the fallback path) and dismiss
+  // the chip.
+  await stopForegroundService();
   stopBackgroundDmWatchSubscription();
   await dismissForegroundServiceNotification();
 }
