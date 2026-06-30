@@ -14,4 +14,5 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Pay by NFC from the Send sheet.** Send now has three modes — QR scan, paste, and NFC — switched with icon toggles. Pick the NFC waves, hold your phone against a Lightning payment tag (invoice, Lightning address or LNURL), and the payment details fill in just like scanning a QR.
+- **See shop orders right in your chats.** When a merchant sends you a Lightning order or receipt over an encrypted message, it now appears as a clear order card — item count, total in sats, and status — instead of raw text.
+- **Pay an order in a tap.** Order cards now have a Pay button and a QR code, so you can pay the Lightning invoice for your order straight from the conversation, or scan it with another wallet.
