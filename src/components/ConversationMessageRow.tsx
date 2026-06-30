@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
+import OrderPaymentActions from './OrderPaymentActions';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
@@ -167,6 +168,17 @@ function ConversationMessageRow({
           {item.order.message ? (
             <Text style={styles.orderCardMessage}>{item.order.message}</Text>
           ) : null}
+          {/* Pay / QR affordance — a Pay button + QR + copy on a kind-16 type-2
+              payment request, or a "Paid ✓" badge on a kind-17 receipt (#925
+              follow-up). Renders nothing for other order types. */}
+          <OrderPaymentActions
+            order={item.order}
+            fromMe={item.fromMe}
+            isInvoicePaid={isInvoicePaid}
+            onPayInvoice={onPayInvoice}
+            testIdPrefix="conversation"
+            id={item.id}
+          />
           <Text style={styles.bubbleTime}>{formatTime(item.createdAt)}</Text>
         </View>
       </View>
