@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-nativ
 import { Search, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
+import { vendorSlug } from '../utils/marketVendors';
 
 interface Props {
   /** Immediate search text (the screen debounces it before filtering). */
@@ -122,7 +123,11 @@ const MarketFilterBar: React.FC<Props> = ({
               label={loc}
               selected={selectedLocation === loc}
               onPress={() => onSelectLocation(selectedLocation === loc ? null : loc)}
-              testID={`market-filter-location-${loc}`}
+              // Slugify the country so the testID has no spaces (e.g.
+              // "United Kingdom" -> "united-kingdom"), keeping Maestro
+              // selectors stable — matching the codebase's filter-chip
+              // convention (per Copilot review on #948).
+              testID={`market-filter-location-${vendorSlug(loc)}`}
               styles={styles}
             />
           ))}
