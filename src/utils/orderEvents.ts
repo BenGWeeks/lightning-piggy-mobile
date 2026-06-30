@@ -261,12 +261,16 @@ const BOLT11_PREFIX = /^ln(bc|tbs?|bcrt|sb)[0-9]/i;
  *
  * Only a payment *request* is payable: a kind-17 receipt is already settled,
  * and an order-placed / status / shipping update carries no invoice. The
- * `payment` value must look like a bolt11 — a Lightning *address* or other
- * method-specific value isn't a one-tap-payable invoice, so it's rejected.
+ * payment must use the `lightning` method AND its value must look like a
+ * bolt11 — a Lightning *address* or a non-Lightning method (whose value might
+ * coincidentally resemble a bolt11) isn't a one-tap-payable invoice here, so
+ * both are rejected.
  */
 export function payableBolt11(order: ParsedOrderEvent): string | null {
   if (order.kind !== 16 || order.type !== 'payment') return null;
-  const value = order.payment?.value?.trim();
+  const payment = order.payment;
+  if (!payment || payment.method.toLowerCase() !== 'lightning') return null;
+  const value = payment.value.trim();
   if (!value || !BOLT11_PREFIX.test(value)) return null;
   return value;
 }

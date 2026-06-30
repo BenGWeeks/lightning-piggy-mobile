@@ -341,6 +341,18 @@ describe('payableBolt11', () => {
     ).toBeNull();
   });
 
+  it('rejects a non-Lightning payment method even when the value looks like a bolt11', () => {
+    expect(
+      payableBolt11({ ...base, payment: { method: 'onchain', value: 'lnbc210n1pxx' } }),
+    ).toBeNull();
+  });
+
+  it('accepts the Lightning method case-insensitively', () => {
+    expect(
+      payableBolt11({ ...base, payment: { method: 'Lightning', value: 'lnbc210n1pxx' } }),
+    ).toBe('lnbc210n1pxx');
+  });
+
   it('rejects a kind-17 receipt (already settled)', () => {
     const receipt: ParsedOrderEvent = {
       ...base,

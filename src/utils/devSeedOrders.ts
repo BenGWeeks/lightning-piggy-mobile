@@ -7,9 +7,11 @@
 // writes two canonical order rows straight into the local DM store for a fixed
 // Piggy partner, so opening that conversation renders one of each card.
 //
-// GUARDED: every export is a no-op unless `__DEV__`. It is imported only behind
-// a `__DEV__` branch in MessagesScreen, so it is tree-shaken out of release
-// builds entirely and can never seed a production install.
+// GUARDED: `seedDevOrderConversation` is a no-op (returns null) unless
+// `__DEV__`, and its only caller is a `__DEV__`-gated button in MessagesScreen
+// that never renders in a release build. So even though the module is statically
+// imported (and may remain in the bundle), it can never seed a production
+// install at runtime.
 
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import { serializeOrder, type ParsedOrderEvent } from './orderEvents';

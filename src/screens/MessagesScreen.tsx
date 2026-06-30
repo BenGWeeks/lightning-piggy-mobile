@@ -45,8 +45,8 @@ import {
   type ConversationSummary,
 } from '../utils/conversationSummaries';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
-// __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs
-// in a release build.
+// __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
+// runtime in a release build (the module may still be present in the bundle).
 import { seedDevOrderConversation } from '../utils/devSeedOrders';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
@@ -633,8 +633,8 @@ const MessagesScreen: React.FC = () => {
 
   // __DEV__-only: seed a marketplace payment-request + receipt conversation and
   // open it, so Maestro / manual QA can exercise the order-card Pay / QR
-  // affordance without a live market relay. Tree-shaken out of release builds
-  // (the helper is a no-op outside __DEV__ and this branch is __DEV__-gated).
+  // affordance without a live market relay. This branch is __DEV__-gated and the
+  // helper is a no-op outside __DEV__, so it never runs in a release build.
   const handleSeedDevOrder = useCallback(async () => {
     if (!__DEV__ || !pubkey) return;
     const seeded = await seedDevOrderConversation(pubkey);
