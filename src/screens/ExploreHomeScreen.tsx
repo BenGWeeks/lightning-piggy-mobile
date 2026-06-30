@@ -1022,6 +1022,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             <MarketProductCard
               product={product}
               sellerName={sellerOf(product)?.name ?? product.sellerName}
+              vendor={sellerOf(product)}
               variant="rail"
               onPress={() => openMarketProduct(product)}
               testID={`market-product-card-${product.id}`}

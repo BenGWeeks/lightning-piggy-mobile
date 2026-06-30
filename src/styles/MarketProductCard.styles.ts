@@ -70,7 +70,15 @@ export const createMarketProductCardStyles = (colors: Palette) =>
       fontWeight: '800',
       color: colors.brandPink,
     },
+    // Seller line — optional merchant avatar followed by "from <shop>".
+    sellerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 2,
+    },
     seller: {
+      flex: 1,
       fontSize: 11,
       fontWeight: '600',
       color: colors.textSupplementary,

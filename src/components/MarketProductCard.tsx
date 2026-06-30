@@ -3,13 +3,19 @@ import { View, Text, Image, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
+import VendorAvatar from './VendorAvatar';
 import type { MarketProduct } from '../data/marketProducts';
+import type { MarketVendor } from '../data/marketVendors';
 
 interface Props {
   product: MarketProduct;
   /** Display name of the seller/shop the product comes from (resolved by
    * the caller from the vendor directory; falls back to `sellerName`). */
   sellerName: string;
+  /** The resolved seller, when known — drives the merchant avatar (its Nostr
+   * kind-0 picture, with the curated logo as fallback). Omitted when the
+   * caller can't resolve the vendor; the row then shows just the name. */
+  vendor?: MarketVendor;
   /** Tapped to open the product / "Buy" link. */
   onPress: () => void;
   /**
@@ -27,7 +33,14 @@ interface Props {
  * price in sats, and the seller/shop it comes from — mirroring the product
  * grid on lightningpiggy.com/market/.
  */
-const MarketProductCard: React.FC<Props> = ({ product, sellerName, onPress, variant, testID }) => {
+const MarketProductCard: React.FC<Props> = ({
+  product,
+  sellerName,
+  vendor,
+  onPress,
+  variant,
+  testID,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketProductCardStyles(colors), [colors]);
   // Fall back to a branded placeholder tile if the image 404s / dead host.
@@ -78,9 +91,18 @@ const MarketProductCard: React.FC<Props> = ({ product, sellerName, onPress, vari
             {product.priceSats.toLocaleString()} sats
           </Text>
         </View>
-        <Text style={styles.seller} numberOfLines={1}>
-          from {sellerName}
-        </Text>
+        <View style={styles.sellerRow}>
+          {vendor ? (
+            <VendorAvatar
+              vendor={vendor}
+              size={20}
+              testID={testID ? `${testID}-vendor-avatar` : undefined}
+            />
+          ) : null}
+          <Text style={styles.seller} numberOfLines={1}>
+            from {sellerName}
+          </Text>
+        </View>
         {variant === 'list' ? (
           <Text style={styles.description} numberOfLines={2}>
             {product.description}

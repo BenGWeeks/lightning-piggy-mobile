@@ -3,8 +3,10 @@ import { View, Text, Image, TouchableOpacity, FlatList, Linking } from 'react-na
 import { ChevronLeft } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
+import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst, vendorNostrPubkey } from '../utils/marketVendors';
@@ -14,6 +16,13 @@ import {
   productsForMode,
   type MarketMode,
 } from '../utils/marketMode';
+import {
+  distinctCurrencies,
+  distinctLocations,
+  filterMarketProducts,
+  isMarketFilterActive,
+  type MarketFilter,
+} from '../utils/marketFilters';
 import { ExploreNavigation } from '../navigation/types';
 
 interface Props {
@@ -50,10 +59,42 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
 
-  const products = useMemo(() => {
+  // Search + location + currency filters. The query is debounced so re-filtering
+  // stays off the per-keystroke path; location/currency apply immediately.
+  const [query, setQuery] = useState('');
+  const [location, setLocation] = useState<string | null>(null);
+  const [currency, setCurrency] = useState<string | null>(null);
+  const debouncedQuery = useDebouncedValue(query, 250);
+
+  // Mode-scoped catalogue (preferred sellers / WoT friends), featured-first.
+  // This is the set the filter options and the filtered list both derive from.
+  const baseProducts = useMemo(() => {
     const scoped = productsForMode(mode, MARKET_PRODUCTS, trustSet, sellerPubkeyOf);
     return featuredFirst(scoped);
   }, [mode, trustSet]);
+
+  // Filter option lists sourced from the data actually loaded (not hardcoded).
+  const locations = useMemo(() => distinctLocations(baseProducts, sellerOf), [baseProducts]);
+  const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
+
+  const filter = useMemo<MarketFilter>(
+    () => ({ query: debouncedQuery, location, currency }),
+    [debouncedQuery, location, currency],
+  );
+  // `active` tracks the live (un-debounced) query so the Clear pill appears as
+  // soon as the user types.
+  const filterActive = isMarketFilterActive({ query, location, currency });
+
+  const products = useMemo(
+    () => filterMarketProducts(baseProducts, filter, sellerOf),
+    [baseProducts, filter],
+  );
+
+  const clearFilters = useCallback(() => {
+    setQuery('');
+    setLocation(null);
+    setCurrency(null);
+  }, []);
 
   const openProduct = useCallback((product: MarketProduct) => {
     Linking.openURL(product.url).catch(() => {
@@ -61,8 +102,9 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, []);
 
-  const emptyCopy =
-    mode === 'wotFriends'
+  const emptyCopy = filterActive
+    ? 'No products match your search or filters.'
+    : mode === 'wotFriends'
       ? 'None of your Nostr friends are selling Lightning Piggy products yet.'
       : 'No products available right now.';
 
@@ -95,11 +137,26 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.modeCaption}>Showing: {marketModeOption(mode).label}</Text>
       </View>
 
+      <MarketFilterBar
+        query={query}
+        onChangeQuery={setQuery}
+        locations={locations}
+        selectedLocation={location}
+        onSelectLocation={setLocation}
+        currencies={currencies}
+        selectedCurrency={currency}
+        onSelectCurrency={setCurrency}
+        active={filterActive}
+        onClear={clearFilters}
+      />
+
       <FlatList
         data={products}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         ListEmptyComponent={
           <View style={styles.emptyWrap} testID="market-empty">
             <Text style={styles.emptyText}>{emptyCopy}</Text>
@@ -109,6 +166,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           <MarketProductCard
             product={item}
             sellerName={sellerOf(item)?.name ?? item.sellerName}
+            vendor={sellerOf(item)}
             variant="list"
             onPress={() => openProduct(item)}
             testID={`market-product-card-${item.id}`}
