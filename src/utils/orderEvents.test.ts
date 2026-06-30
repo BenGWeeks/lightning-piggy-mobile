@@ -323,8 +323,14 @@ describe('payableBolt11', () => {
     expect(payableBolt11(base)).toBe('lnbc210n1pexample');
   });
 
-  it('accepts testnet / signet / regtest invoice prefixes', () => {
-    for (const v of ['lntb210n1pxx', 'lntbs210n1pxx', 'lnbcrt210n1pxx']) {
+  it('accepts every HRP extractInvoice does (bc / tb / ts / bs, + regtest/signet)', () => {
+    for (const v of [
+      'lntb210n1pxx',
+      'lntbs210n1pxx',
+      'lnbcrt210n1pxx',
+      'lnts210n1pxx',
+      'lnbs210n1pxx',
+    ]) {
       expect(payableBolt11({ ...base, payment: { method: 'lightning', value: v } })).toBe(v);
     }
   });
