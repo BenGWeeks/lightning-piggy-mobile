@@ -87,20 +87,29 @@ export function useConversationComposerActions(params: {
     async (text: string): Promise<boolean> => {
       const createdAt = Math.floor(Date.now() / 1000);
       let eventId: string | null = null;
+      // Target relays for THIS send, captured from onRumorReady. Carried onto the
+      // pending + watchdog-failed statuses so the message-info sheet lists the
+      // relays the send was attempted against even before any settles (or if it
+      // hangs and never settles) — without this a pending/hung send showed an
+      // empty relay breakdown (the missing-relays bug).
+      let targetRelays: string[] = [];
       // Watchdog: if the send hasn't settled the bubble within the window,
       // flip the pending Clock to the red failed tick (#857). This is the
       // authoritative settle guarantee — the underlying publish can hang in
       // ways the publish-level timeout doesn't catch (a relay socket the OS
       // never resolves OR rejects), and the bubble must never be stuck pending
       // forever. A genuine late accept still overrides failed → delivered (the
-      // store allows that; it only blocks settled → pending).
+      // store allows that; it only blocks settled → pending). Seeds the failed
+      // status with the target relays so the sheet still lists them as failed.
       const watchdog = setTimeout(() => {
-        if (eventId) setDmDeliveryStatus(eventId, failedDelivery({ eventId }));
+        if (eventId)
+          setDmDeliveryStatus(eventId, failedDelivery({ eventId, relays: targetRelays }));
       }, SEND_SETTLE_WATCHDOG_MS);
       try {
         const result = await sendDirectMessage(pubkey, text, {
-          onRumorReady: ({ eventId: id, kind }) => {
+          onRumorReady: ({ eventId: id, kind, relays }) => {
             eventId = id;
+            targetRelays = relays;
             // Paint the pending bubble immediately. The ROW id stays `local-`
             // so mergeConversationMessages' text+window dedup collapses it
             // against the relay echo (whose id is the OUTER wrap id, not this
@@ -118,7 +127,7 @@ export function useConversationComposerActions(params: {
             };
             setMessages((prev) => [...prev, optimistic]);
             void appendLocalDmMessage(pubkey, optimistic);
-            setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind }));
+            setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind, relays }));
           },
           onDeliveryFinalized: (delivery) => {
             // Slow relays settled — upgrade the tick (e.g. single → double).
@@ -129,7 +138,10 @@ export function useConversationComposerActions(params: {
         // the publish stage; a hard pre-publish error (not logged in, signer
         // cancelled) has none → mark failed so the bubble shows a red tick.
         if (eventId) {
-          setDmDeliveryStatus(eventId, result.delivery ?? failedDelivery({ eventId }));
+          setDmDeliveryStatus(
+            eventId,
+            result.delivery ?? failedDelivery({ eventId, relays: targetRelays }),
+          );
         } else if (!result.success) {
           // Never reached the rumor stage (e.g. not logged in) — no bubble was
           // painted, so fall back to the alert.

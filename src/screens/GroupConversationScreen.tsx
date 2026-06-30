@@ -38,6 +38,8 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
@@ -243,6 +245,7 @@ const GroupConversationScreen: React.FC = () => {
     handleShareContactPicked,
     handleSendInvoiceToGroup,
     handleSendVoiceNote,
+    resendText,
   } = useGroupComposerActions({
     group,
     draft,
@@ -254,6 +257,17 @@ const GroupConversationScreen: React.FC = () => {
     setContactPickerOpen,
     setVoiceSheetOpen,
   });
+
+  // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
+  // Group sends aren't per-relay tracked (no delivery store), so the sheet
+  // shows the protocol/kind/event-id metadata + a Re-publish for sent text.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
   // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
@@ -400,6 +414,11 @@ const GroupConversationScreen: React.FC = () => {
           onOpenGifFullscreen={setFullscreenGifUrl}
           onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
+          // Group DMs are NIP-17 gift-wrapped kind-14 — the info sheet reads the
+          // protocol/kind off this. Group sends aren't per-relay tracked, so no
+          // deliveryStatus (the sheet shows "Not tracked").
+          wireKind={14}
+          onShowInfo={handleShowInfo}
           testIdPrefix="group-conversation"
         />
       );
@@ -412,6 +431,7 @@ const GroupConversationScreen: React.FC = () => {
       openSharedContact,
       openLocation,
       isInvoicePaid,
+      handleShowInfo,
     ],
   );
 
@@ -743,6 +763,11 @@ const GroupConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );

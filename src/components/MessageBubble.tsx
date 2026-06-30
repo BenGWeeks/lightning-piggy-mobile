@@ -10,6 +10,7 @@ import {
   CheckCheck,
   Clock,
   AlertCircle,
+  ShieldCheck,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
@@ -218,7 +219,20 @@ const BubbleFooter: React.FC<{
   deliveryStatus?: DeliveryStatus;
   // Opens the message-info sheet (tap or long-press) for sent AND received.
   onOpenInfo?: () => void;
-}> = ({ styles, messageId, fromMe, createdAt, timeStyle, deliveryStatus, onOpenInfo }) => {
+  // Tint for the info-affordance shield (#856 discoverability). White on a
+  // coloured (sent) bubble, supplementary grey on a surface (received) one — so
+  // it reads on either background.
+  infoTint: string;
+}> = ({
+  styles,
+  messageId,
+  fromMe,
+  createdAt,
+  timeStyle,
+  deliveryStatus,
+  onOpenInfo,
+  infoTint,
+}) => {
   const showTick = fromMe && !!deliveryStatus;
   // No info handler and no tick → plain timestamp (e.g. a legacy row).
   if (!onOpenInfo && !showTick) {
@@ -237,6 +251,15 @@ const BubbleFooter: React.FC<{
       accessibilityHint="Opens message details"
       testID={`dm-bubble-delivery-footer-${messageId}`}
     >
+      {/* A small shield next to the time signals the bubble is tappable for
+          encryption + delivery details — previously only the bare time showed,
+          so the affordance wasn't discoverable (#856 follow-up). Rendered for
+          any bubble that has an info handler, on both sent + received. */}
+      {onOpenInfo ? (
+        <View testID={`dm-bubble-info-icon-${messageId}`} accessibilityElementsHidden>
+          <ShieldCheck size={12} color={infoTint} strokeWidth={2.25} />
+        </View>
+      ) : null}
       {/* Footer-row time zeroes the standalone bubbleTime top margin so the
           tick sits level with the timestamp (Copilot #858). */}
       <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
@@ -340,6 +363,11 @@ const MessageBubble: React.FC<Props> = ({
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
 
+  // Legacy NIP-04 (kind 4) messages are coloured purple so the user can tell
+  // them apart from the encrypted NIP-17 (kind 14/15) pink ones at a glance
+  // (#856 follow-up). Plain text only — NIP-04 never carries gift-wrapped media.
+  const isNip04 = wireKind === 4;
+
   // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
   // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
   // Other media (image/voice) ride on the `text` kind too, so this covers them.
@@ -360,6 +388,10 @@ const MessageBubble: React.FC<Props> = ({
         })
     : undefined;
 
+  // Shield-affordance tint: white on a coloured (sent) bubble, supplementary
+  // grey on a surface (received) one — readable on either background (#856).
+  const infoTint = fromMe ? colors.white : colors.textSupplementary;
+
   // Reusable footer (time + delivery tick) shared by every bubble variant so a
   // sent GIF / image / voice note / location / invoice all show the tick, not
   // just plain text (#856). Each variant passes its own time style.
@@ -372,6 +404,7 @@ const MessageBubble: React.FC<Props> = ({
       timeStyle={timeStyle}
       deliveryStatus={deliveryStatus}
       onOpenInfo={openInfo}
+      infoTint={infoTint}
     />
   );
 
@@ -926,7 +959,17 @@ const MessageBubble: React.FC<Props> = ({
 
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+      <View
+        style={[
+          styles.bubble,
+          fromMe ? styles.bubbleMe : styles.bubbleThem,
+          // NIP-04 (kind 4): purple sent bubble (vs pink NIP-17); a purple
+          // left-edge on the received surface bubble so legacy DMs are
+          // distinguishable on both sides (#856 follow-up).
+          isNip04 && (fromMe ? styles.bubbleMeNip04 : styles.bubbleThemNip04),
+        ]}
+        testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : undefined}
+      >
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
           {hasLink(text)

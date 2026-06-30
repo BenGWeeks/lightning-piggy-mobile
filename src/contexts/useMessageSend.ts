@@ -23,10 +23,13 @@ export interface SendResult {
 
 // Early/late hooks for the optimistic-send flow (#857). `onRumorReady` fires
 // synchronously once the stable rumor eventId is known (before publishing), so
-// the caller can paint the pending bubble keyed by it. `onDeliveryFinalized`
-// fires later with the COMPLETE per-relay breakdown after all relays settle.
+// the caller can paint the pending bubble keyed by it. It also carries the
+// `relays` the send is going out to, so the pending/failed status can seed its
+// relay breakdown for the info sheet even before any relay settles (so a still-
+// pending or hung send still lists its relays). `onDeliveryFinalized` fires
+// later with the COMPLETE per-relay breakdown after all relays settle.
 export interface SendHooks {
-  onRumorReady?: (meta: { eventId: string; kind: number }) => void;
+  onRumorReady?: (meta: { eventId: string; kind: number; relays: string[] }) => void;
   onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
 }
 
@@ -72,7 +75,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         // store so the optimistic bubble can be painted before publishing and
         // settled after, surviving the local- → echo id swap (#857).
         const eventId = directMessageRumorEventId(rumor);
-        hooks?.onRumorReady?.({ eventId, kind: rumor.kind });
+        hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);

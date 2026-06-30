@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Modal, View, Text, Pressable, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Check, X, Send, Inbox, Copy, RotateCw } from 'lucide-react-native';
+import { Check, X, Send, Inbox, Copy, RotateCw, Clock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { Toast } from './BrandedToast';
 import {
@@ -50,11 +50,18 @@ export default function DeliveryDetailSheet({
   const sent = info.direction === 'sent';
   const status = info.deliveryStatus;
   const { ok, total } = status ? summariseDelivery(status) : { ok: 0, total: 0 };
+  // In flight: seeded relays read as `failed` (ok 0 of N), but the send hasn't
+  // settled, so the title says "Sending…" rather than "Sent to 0 of N relays".
+  const sending = !!status?.pending;
 
   const title = sent
-    ? total === 0
-      ? 'Sent'
-      : `Sent to ${ok} of ${total} relays`
+    ? sending
+      ? total > 0
+        ? `Sending to ${total} relays…`
+        : 'Sending…'
+      : total === 0
+        ? 'Sent'
+        : `Sent to ${ok} of ${total} relays`
     : 'Message received';
 
   // Sorted relays (ok first, then by URL) so the order is stable run-to-run.
@@ -71,13 +78,15 @@ export default function DeliveryDetailSheet({
     ? sent
       ? 'Not tracked'
       : 'Received'
-    : total === 0
-      ? 'Pending'
-      : ok === 0
-        ? 'Failed'
-        : ok < total
-          ? 'Partially delivered'
-          : 'Delivered';
+    : status.pending
+      ? 'Sending'
+      : total === 0
+        ? 'Pending'
+        : ok === 0
+          ? 'Failed'
+          : ok < total
+            ? 'Partially delivered'
+            : 'Delivered';
 
   const copyEventId = () => {
     if (!info.eventId) return;
@@ -87,6 +96,10 @@ export default function DeliveryDetailSheet({
 
   const HeaderIcon = sent ? Send : Inbox;
   const showRelays = sent && relays.length > 0;
+  // While the send is still in flight, the seeded relays are all `failed`
+  // placeholders — render them with a neutral pending Clock (not a red ✗) so an
+  // in-flight send reads as "publishing to these relays", not "all failed".
+  const pending = !!status?.pending;
 
   return (
     <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
@@ -116,11 +129,13 @@ export default function DeliveryDetailSheet({
                   <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
                     {isOk ? (
                       <Check size={16} color={colors.green} strokeWidth={3} />
+                    ) : pending ? (
+                      <Clock size={16} color={colors.textSupplementary} strokeWidth={2.5} />
                     ) : (
                       <X size={16} color={colors.red} strokeWidth={3} />
                     )}
                     <Text
-                      style={[styles.relayLabel, !isOk && styles.relayLabelFailed]}
+                      style={[styles.relayLabel, !isOk && !pending && styles.relayLabelFailed]}
                       numberOfLines={1}
                     >
                       {shortRelayLabel(url)}
