@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Clock, Search, X, Zap } from 'lucide-react-native';
@@ -717,6 +718,7 @@ const MessagesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      <BrandGradientBackground />
       <TabBackgroundImage style={styles.bgImage} />
       <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
