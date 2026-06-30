@@ -8,6 +8,7 @@ import {
   orderCardHeader,
   shortOrderId,
   payableBolt11,
+  bolt11FromText,
   type OrderEventInput,
   type ParsedOrderEvent,
 } from './orderEvents';
@@ -391,5 +392,37 @@ describe('payableBolt11', () => {
   it('returns null when there is no payment value', () => {
     expect(payableBolt11({ ...base, payment: undefined })).toBeNull();
     expect(payableBolt11({ ...base, payment: { method: 'lightning', value: '' } })).toBeNull();
+  });
+
+  it('lowercases the returned invoice so it compares equal to a chat-note copy', () => {
+    const upper = BC.toUpperCase();
+    expect(payableBolt11({ ...base, payment: { method: 'lightning', value: upper } })).toBe(BC);
+  });
+});
+
+describe('bolt11FromText', () => {
+  // Same over-the-floor bech32 data part used by the payableBolt11 suite.
+  const DATA = '210n1p' + 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'.repeat(2);
+  const BC = `lnbc${DATA}`;
+
+  it('extracts a bolt11 embedded in a human-readable chat-note line', () => {
+    expect(bolt11FromText(`Please pay your order: ${BC} — thanks!`)).toBe(BC);
+  });
+
+  it('strips a lightning: URI prefix', () => {
+    expect(bolt11FromText(`Pay: lightning:${BC}`)).toBe(BC);
+  });
+
+  it('lowercases so it compares equal to a payableBolt11 result', () => {
+    expect(bolt11FromText(`PAY ${BC.toUpperCase()} NOW`)).toBe(BC);
+  });
+
+  it('returns null for text with no invoice and for empty text', () => {
+    expect(bolt11FromText('just a normal message, no invoice here')).toBeNull();
+    expect(bolt11FromText('')).toBeNull();
+  });
+
+  it('ignores a too-short lnbc-shaped token (below the {50,} floor)', () => {
+    expect(bolt11FromText('here is lnbc1short for you')).toBeNull();
   });
 });

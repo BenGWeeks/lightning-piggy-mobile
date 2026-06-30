@@ -276,7 +276,30 @@ export function payableBolt11(order: ParsedOrderEvent): string | null {
   const payment = order.payment;
   if (!payment || payment.method.toLowerCase() !== 'lightning') return null;
   const match = payment.value.trim().match(BOLT11_RE);
-  return match ? match[1] : null;
+  return match ? match[1].toLowerCase() : null;
+}
+
+// Non-anchored sibling of `BOLT11_RE`: pulls the FIRST bolt11 out of free-text
+// content (vs `BOLT11_RE`, which requires the whole string to be one invoice).
+// Kept in lock-step with `INVOICE_REGEX` in src/utils/messageContent.ts — same
+// `\b`-delimited shape — so the dedup below recognises exactly the invoice the
+// rest of the app parses. Dependency-light on purpose (no bolt11 decoder).
+const BOLT11_IN_TEXT_RE = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+
+/**
+ * The first bolt11 invoice embedded in a free-text chat message, lowercased
+ * (bech32 is case-insensitive; canonical form is lower) with any `lightning:`
+ * prefix stripped, or `null` when the text carries none.
+ *
+ * Used to correlate a kind-14 "order invoice" chat-note fallback with the
+ * kind-16 order card that carries the SAME invoice (`payableBolt11`), so the
+ * redundant note can be suppressed. Both sides normalise to lowercase here so
+ * the comparison is exact regardless of how either client cased the invoice.
+ */
+export function bolt11FromText(text: string): string | null {
+  if (!text) return null;
+  const match = text.match(BOLT11_IN_TEXT_RE);
+  return match ? match[1].toLowerCase() : null;
 }
 
 /** One-line inbox preview, e.g. "🛒 Order Placed · 21 sats". */
