@@ -45,9 +45,34 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
+    // Mode-selector bar sitting just under the header — the chip row plus a
+    // small caption naming the active mode.
+    modeBar: {
+      paddingTop: 10,
+      paddingBottom: 4,
+      gap: 2,
+      backgroundColor: colors.background,
+    },
+    modeCaption: {
+      paddingHorizontal: 16,
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
     listContent: {
       padding: 16,
       gap: 12,
       paddingBottom: 32,
+    },
+    emptyWrap: {
+      paddingVertical: 48,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      lineHeight: 19,
     },
   });

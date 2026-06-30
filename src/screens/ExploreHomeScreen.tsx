@@ -30,8 +30,8 @@ import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { perfPageReady } from '../utils/perfLog';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
-import MarketVendorCard from '../components/MarketVendorCard';
-import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
+import MarketProductCard from '../components/MarketProductCard';
+import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
 import {
   getProgress,
@@ -79,21 +79,10 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import { createExploreHomeRailStyles } from '../styles/ExploreHomeRail.styles';
 import type { Palette } from '../styles/palettes';
-import { ExploreNavigation, RootStackParamList } from '../navigation/types';
-import type { CompositeNavigationProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { openVendorNostrProfile } from '../utils/marketVendorNav';
-
-// Composite nav — Market cards' "reach on Nostr" action opens the
-// root-stack ContactProfile route, which the Explore-stack nav alone
-// can't target. (See marketVendorNav.)
-type ExploreHomeNavigation = CompositeNavigationProp<
-  ExploreNavigation,
-  NativeStackNavigationProp<RootStackParamList>
->;
+import { ExploreNavigation } from '../navigation/types';
 
 interface Props {
-  navigation: ExploreHomeNavigation;
+  navigation: ExploreNavigation;
 }
 
 /**
@@ -258,19 +247,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
   const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
   const onSeeAllMarket = useCallback(() => navigation.navigate('Market'), [navigation]);
-  // Rail card tap opens the vendor's external shop (Market has no per-vendor
-  // detail screen — the URL *is* the destination, same as MarketScreen).
-  const openMarketVendor = useCallback((vendor: MarketVendor) => {
-    Linking.openURL(vendor.url).catch(() => {});
+  // Product card tap opens the product's external "Buy" link (Market has no
+  // per-product detail screen — the URL *is* the destination, same as on
+  // MarketScreen).
+  const openMarketProduct = useCallback((product: MarketProduct) => {
+    Linking.openURL(product.url).catch(() => {});
   }, []);
-  // Vendors with an npub get a "reach on Nostr" affordance that opens their
-  // in-app contact profile (Message / Zap) instead of the website.
-  const openMarketVendorNostr = useCallback(
-    (vendor: MarketVendor) => {
-      openVendorNostrProfile(navigation, vendor);
-    },
-    [navigation],
-  );
   const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
@@ -896,10 +878,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return items.slice(0, 50);
   }, [events, posLat, posLon, maxDistanceMetres]);
 
-  // Market vendors are a static, curated list (no location/relay dep) —
-  // just featured-first, then capped to a small rail teaser. The full set
-  // lives behind "See all → Market". See src/data/marketVendors.ts.
-  const marketVendors = useMemo(() => featuredFirst(MARKET_VENDORS).slice(0, 8), []);
+  // Market products are a static, curated catalogue (no location/relay dep)
+  // sourced from Lightning Piggy preferred sellers — the rail shows a
+  // featured-first teaser; the full list (with the mode selector to widen to
+  // web-of-trust friends) lives behind "See all → Market".
+  // See src/data/marketProducts.ts.
+  const marketProducts = useMemo(() => featuredFirst(MARKET_PRODUCTS).slice(0, 8), []);
 
   return (
     <View style={styles.container}>
@@ -1027,19 +1011,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
 
-        <ContentRail<MarketVendor>
+        <ContentRail<MarketProduct>
           title="Market"
-          caption="Buy a Lightning Piggy — Bitcoin-accepting vendors"
-          items={marketVendors}
+          caption="Buy a Lightning Piggy — from preferred sellers"
+          items={marketProducts}
           onSeeAll={onSeeAllMarket}
           seeAllTestId="explore-card-market"
-          keyExtractor={(v) => v.url}
-          renderItem={(vendor) => (
-            <MarketVendorCard
-              vendor={vendor}
+          keyExtractor={(p) => p.id}
+          renderItem={(product) => (
+            <MarketProductCard
+              product={product}
+              sellerName={sellerOf(product)?.name ?? product.sellerName}
               variant="rail"
-              onPress={() => openMarketVendor(vendor)}
-              onNostr={() => openMarketVendorNostr(vendor)}
+              onPress={() => openMarketProduct(product)}
+              testID={`market-product-card-${product.id}`}
             />
           )}
         />

@@ -24,15 +24,14 @@ export function vendorSlug(name: string): string {
 }
 
 /**
- * Featured-first ordering. Featured vendors move to the front; within each
- * group the original (curated) order is preserved — `Array.prototype.sort`
- * is stable in modern engines (Hermes included), so equal-key items keep
- * their relative order. Returns a new array; never mutates the input.
- * Partitions rather than sorts, so the within-group order is preserved
- * regardless of the engine's `Array.prototype.sort` stability.
+ * Featured-first ordering for any `{ featured }` item (vendors or products).
+ * Featured entries move to the front; within each group the original
+ * (curated) order is preserved. Returns a new array; never mutates the
+ * input. Partitions rather than sorts, so the within-group order is
+ * preserved regardless of the engine's `Array.prototype.sort` stability.
  */
-export function featuredFirst(vendors: MarketVendor[]): MarketVendor[] {
-  return [...vendors.filter((v) => v.featured), ...vendors.filter((v) => !v.featured)];
+export function featuredFirst<T extends { featured: boolean }>(items: T[]): T[] {
+  return [...items.filter((v) => v.featured), ...items.filter((v) => !v.featured)];
 }
 
 const SHOP_TYPE_LABEL: Record<MarketShopType, string> = {

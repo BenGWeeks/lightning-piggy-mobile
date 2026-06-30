@@ -1,62 +1,70 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, FlatList, Linking } from 'react-native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ChevronLeft } from 'lucide-react-native';
-import MarketVendorCard from '../components/MarketVendorCard';
+import MarketProductCard from '../components/MarketProductCard';
+import MarketModeSelector from '../components/MarketModeSelector';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
-import { MARKET_VENDORS, type MarketVendor } from '../data/marketVendors';
-import { featuredFirst } from '../utils/marketVendors';
-import { openVendorNostrProfile } from '../utils/marketVendorNav';
-import { ExploreNavigation, RootStackParamList } from '../navigation/types';
-
-// Composite nav — the per-vendor "reach on Nostr" action opens the
-// ContactProfile route, which lives on the root stack (not the Explore
-// stack this screen is mounted in). The composite type exposes both.
-type MarketNavigation = CompositeNavigationProp<
-  ExploreNavigation,
-  NativeStackNavigationProp<RootStackParamList>
->;
+import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
+import { featuredFirst, vendorNostrPubkey } from '../utils/marketVendors';
+import {
+  DEFAULT_MARKET_MODE,
+  marketModeOption,
+  productsForMode,
+  type MarketMode,
+} from '../utils/marketMode';
+import { ExploreNavigation } from '../navigation/types';
 
 interface Props {
-  navigation: MarketNavigation;
+  navigation: ExploreNavigation;
 }
 
+// Resolve a product's seller Nostr pubkey (hex) from the vendor directory,
+// used to filter by the user's web-of-trust follow set. Null when the seller
+// has no Nostr identity (so it can never match a WoT mode).
+const sellerPubkeyOf = (product: MarketProduct): string | null => {
+  const vendor = sellerOf(product);
+  return vendor ? vendorNostrPubkey(vendor) : null;
+};
+
 /**
- * Full "Market" screen — the "See all →" destination from the Explore
- * hub's Market rail. Lists every Lightning Piggy vendor (featured first).
- * Tapping a vendor opens its shop URL in the system browser.
+ * Full "Market" screen — the "See all →" destination from the Explore hub's
+ * Market rail. Lists individual PRODUCTS (image, title, price in sats, the
+ * seller they come from), mirroring lightningpiggy.com/market/.
  *
- * Data is the hardcoded {@link MARKET_VENDORS} directory, ported from the
- * website's `vendors.json`. A future live Nostr feed (NIP-15 stalls kind
- * 30017 + products kind 30018, plus NIP-99 classifieds kind 30402 — see the
- * seam documented in `data/marketVendors.ts`) could supplement or replace
- * it without touching this screen.
+ * A marketplace-mode selector at the top chooses which sellers products are
+ * sourced from: Lightning Piggy preferred sellers (default), or the user's
+ * Nostr web-of-trust friends. Friends-of-friends / all tiers are present but
+ * disabled (coming soon). Tapping a product opens its shop URL.
+ *
+ * Data is the hardcoded {@link MARKET_PRODUCTS} catalogue, ported from the
+ * website. A future live Nostr feed (NIP-15 products kind 30018 + NIP-99
+ * classifieds kind 30402 — see the seam in `data/marketProducts.ts`) could
+ * supplement or replace it without touching this screen.
  */
 const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
+  const { trustSet } = useTrustGraph();
 
-  const vendors = useMemo(() => featuredFirst(MARKET_VENDORS), []);
+  const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
 
-  const openVendor = useCallback((vendor: MarketVendor) => {
-    // External shop link — open in the system browser. nostrUrl is an
-    // njump.me web link too, so url is always the right primary target.
-    Linking.openURL(vendor.url).catch(() => {
+  const products = useMemo(() => {
+    const scoped = productsForMode(mode, MARKET_PRODUCTS, trustSet, sellerPubkeyOf);
+    return featuredFirst(scoped);
+  }, [mode, trustSet]);
+
+  const openProduct = useCallback((product: MarketProduct) => {
+    Linking.openURL(product.url).catch(() => {
       // Swallow — a malformed/unsupported URL shouldn't crash the screen.
     });
   }, []);
 
-  // Reach the vendor on Nostr (message / zap) in-app. Only wired for vendors
-  // with an npub; openVendorNostrProfile returns false otherwise (the card
-  // hides the affordance for those, so this stays a no-op there).
-  const openVendorNostr = useCallback(
-    (vendor: MarketVendor) => {
-      openVendorNostrProfile(navigation, vendor);
-    },
-    [navigation],
-  );
+  const emptyCopy =
+    mode === 'wotFriends'
+      ? 'None of your Nostr friends are selling Lightning Piggy products yet.'
+      : 'No products available right now.';
 
   return (
     <View style={styles.container} testID="market-screen">
@@ -82,20 +90,28 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>Buy a Lightning Piggy &amp; Bitcoin merch</Text>
       </View>
 
+      <View style={styles.modeBar}>
+        <MarketModeSelector value={mode} onChange={setMode} />
+        <Text style={styles.modeCaption}>Showing: {marketModeOption(mode).label}</Text>
+      </View>
+
       <FlatList
-        data={vendors}
-        // Key on the unique, stable `url` (matching the Explore rail) rather
-        // than the name-derived slug, which can change and isn't guaranteed
-        // collision-free after normalization.
-        keyExtractor={(v) => v.url}
+        data={products}
+        keyExtractor={(p) => p.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyWrap} testID="market-empty">
+            <Text style={styles.emptyText}>{emptyCopy}</Text>
+          </View>
+        }
         renderItem={({ item }) => (
-          <MarketVendorCard
-            vendor={item}
+          <MarketProductCard
+            product={item}
+            sellerName={sellerOf(item)?.name ?? item.sellerName}
             variant="list"
-            onPress={() => openVendor(item)}
-            onNostr={() => openVendorNostr(item)}
+            onPress={() => openProduct(item)}
+            testID={`market-product-card-${item.id}`}
           />
         )}
       />
