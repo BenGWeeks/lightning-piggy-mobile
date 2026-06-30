@@ -90,6 +90,11 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     [baseProducts, filter],
   );
 
+  // Reset the three FILTER axes (search + location + currency). The
+  // marketplace MODE (Preferred Sellers / WoT: Friends) is a separate
+  // top-level selector above the filter bar, not a filter, so it is left
+  // unchanged by design — "Clear filters" shouldn't yank the user out of the
+  // WoT view they deliberately chose (Copilot review on #948).
   const clearFilters = useCallback(() => {
     setQuery('');
     setLocation(null);
