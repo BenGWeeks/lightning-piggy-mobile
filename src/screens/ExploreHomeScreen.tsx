@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
@@ -882,7 +883,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.headerImage}
           resizeMode="cover"
         />
-        <View style={styles.headerOverlay} />
+        <BrandGradientBackground style={styles.headerOverlay} />
         <TabHeader title="Explore" icon={<Compass size={20} color={colors.brandPink} />} />
         <View style={styles.headerExtras}>
           <Text style={styles.tagline}>Find your way around Bitcoin</Text>
