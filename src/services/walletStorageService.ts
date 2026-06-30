@@ -242,6 +242,18 @@ export async function deleteMnemonic(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
 }
 
+// Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
+// receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
+// no balance or transaction residue behind — a privacy concern on shared
+// devices. Best-effort: an absent key is a multiRemove no-op.
+export async function deleteWalletCaches(walletId: string): Promise<void> {
+  await AsyncStorage.multiRemove([
+    `balance_${walletId}`,
+    `txs_${walletId}`,
+    `seenReceipts_${walletId}`,
+  ]).catch(() => {});
+}
+
 // --- Electrum / block-explorer server ---
 
 export async function getElectrumServer(): Promise<string> {

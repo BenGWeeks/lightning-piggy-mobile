@@ -51,6 +51,7 @@ import {
 import { wipeDmStoresForAccount } from './dmAccountWipe';
 import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
 import { wipeLocalDmStore } from '../services/localDb';
+import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
@@ -1181,16 +1182,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     for (const k of allKeys) {
       if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
     }
-    // group_messages_${groupId} is keyed by the random group id (not
-    // pubkey), so we can't selectively remove "this identity's groups"
-    // — they're shared across whichever identities are members. Leave
-    // them in place; they're orphaned safely once no remaining identity
-    // is a member, and re-attached if the same identity signs back in.
+    // group_messages_* holds decrypted group-chat plaintext keyed by random
+    // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
+    // content must not survive logout / account wipe, so remove every blob.
+    for (const k of allKeys) {
+      if (k.startsWith('group_messages_')) toRemove.push(k);
+    }
     await AsyncStorage.multiRemove(toRemove);
     // Decrypted DM plaintext must not survive logout / account wipe (#689
     // review / #690): delete the file-backed wrap + skip-set caches and this
     // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
     await wipeDmStoresForAccount(loggedOutPubkey);
+    // Nostr places cache is device-global and not pubkey-namespaced, yet holds
+    // this identity's own by-author Piglets — wipe it on logout / switch so
+    // pins don't leak across accounts (the next live sub repopulates it).
+    await clearNostrPlacesCache();
   }, []);
 
   const logout = useCallback(async () => {

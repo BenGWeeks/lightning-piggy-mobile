@@ -997,8 +997,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       const currentList = await walletStorage.getWalletList();
-      const updated = currentList.filter((w) => w.id !== walletId);
-      await walletStorage.saveWalletList(updated);
+      await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
+      await walletStorage.deleteWalletCaches(walletId);
 
       setWallets((prev) => {
         const remaining = prev.filter((w) => w.id !== walletId);
