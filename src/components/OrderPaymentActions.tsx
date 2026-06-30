@@ -161,8 +161,9 @@ function OrderPaymentActions({
               accessibilityLabel="Lightning invoice QR code"
               testID={`${testIdPrefix}-order-qr-${id}`}
             >
-              {/* Uppercased for QR efficiency: bolt11 is all-lowercase, and an
-                  all-uppercase payload uses the compact alphanumeric QR mode. */}
+              {/* Normalise to all-uppercase for QR efficiency: a bolt11 is
+                  single-case (typically lowercase), and an all-uppercase payload
+                  encodes in the compact alphanumeric QR mode. */}
               <QRCode
                 value={bolt11.toUpperCase()}
                 size={200}

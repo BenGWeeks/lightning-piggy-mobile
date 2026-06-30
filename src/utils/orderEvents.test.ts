@@ -329,6 +329,12 @@ describe('payableBolt11', () => {
     }
   });
 
+  it('strips an optional lightning: URI prefix (matches extractInvoice)', () => {
+    expect(
+      payableBolt11({ ...base, payment: { method: 'lightning', value: 'lightning:lnbc210n1pxx' } }),
+    ).toBe('lnbc210n1pxx');
+  });
+
   it('trims surrounding whitespace before matching', () => {
     expect(
       payableBolt11({ ...base, payment: { method: 'lightning', value: '  lnbc1xyz  ' } }),

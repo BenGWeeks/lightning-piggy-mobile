@@ -249,11 +249,14 @@ export function shortOrderId(orderId: string): string {
   return orderId.replace(/-/g, '').slice(0, 8);
 }
 
-// A bolt11 invoice's human-readable prefix: `ln` + a network id (mainnet `bc`,
-// testnet `tb`, signet `tbs`, regtest `bcrt`, simnet `sb`) followed by the
-// amount/`1`-separator digit. We match this rather than re-decoding bech32 so
-// the parser stays dependency-light (it's imported by the hot decrypt loop).
-const BOLT11_PREFIX = /^ln(bc|tbs?|bcrt|sb)[0-9]/i;
+// Match (and normalise) a bolt11 invoice, kept in sync with `INVOICE_REGEX` in
+// src/utils/messageContent.ts so the order card accepts exactly what the rest of
+// the app parses: an optional `lightning:` URI prefix, then `ln` + a network
+// HRP (`bc`/`tb`/`ts`/`bs`) + bech32 data. Group 1 is the bare bolt11 (prefix
+// stripped). We mirror the regex rather than importing `extractInvoice` (which
+// pulls in a bolt11 decoder) so this parser stays dependency-light for the hot
+// decrypt loop.
+const BOLT11_RE = /^(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]+)$/i;
 
 /**
  * The bolt11 invoice a buyer can pay from a kind-16 **type-2 "Payment"**
@@ -261,18 +264,18 @@ const BOLT11_PREFIX = /^ln(bc|tbs?|bcrt|sb)[0-9]/i;
  *
  * Only a payment *request* is payable: a kind-17 receipt is already settled,
  * and an order-placed / status / shipping update carries no invoice. The
- * payment must use the `lightning` method AND its value must look like a
- * bolt11 — a Lightning *address* or a non-Lightning method (whose value might
- * coincidentally resemble a bolt11) isn't a one-tap-payable invoice here, so
- * both are rejected.
+ * payment must use the `lightning` method AND its value must be a bolt11
+ * (optionally `lightning:`-prefixed) — a Lightning *address* or a non-Lightning
+ * method (whose value might coincidentally resemble a bolt11) isn't a
+ * one-tap-payable invoice here, so both are rejected. The returned value has any
+ * `lightning:` prefix stripped, ready to pay / QR-encode.
  */
 export function payableBolt11(order: ParsedOrderEvent): string | null {
   if (order.kind !== 16 || order.type !== 'payment') return null;
   const payment = order.payment;
   if (!payment || payment.method.toLowerCase() !== 'lightning') return null;
-  const value = payment.value.trim();
-  if (!value || !BOLT11_PREFIX.test(value)) return null;
-  return value;
+  const match = payment.value.trim().match(BOLT11_RE);
+  return match ? match[1] : null;
 }
 
 /** One-line inbox preview, e.g. "🛒 Order Placed · 21 sats". */
