@@ -12,9 +12,11 @@
  *    (so we can decide to fire a notification while the UI isn't mounted)
  *    is done by `expo-background-task` — WorkManager on Android,
  *    BGTaskScheduler on iOS (see src/services/backgroundTask.ts) — both
- *    FCM-free. A realtime Android foreground-service socket (manifest
- *    perms scaffolded in plugins/withForegroundService.js) is an optional
- *    future upgrade.
+ *    FCM-free. On Android there is ALSO an opt-in realtime path: a
+ *    persistent foreground service holding a live relay socket
+ *    (src/services/backgroundDmService.ts; manifest perms in
+ *    plugins/withForegroundService.js) that posts content notifications
+ *    the moment a message arrives — still local-only, no FCM.
  *
  * 2. Permission is requested once, from the foreground, at app launch via
  *    `requestNotificationPermission()`. Fire paths only ever *check*
@@ -45,6 +47,18 @@ import * as Notifications from 'expo-notifications';
 // orphans the user's per-channel mute state in system Settings.
 const CHANNEL_MESSAGES = 'messages';
 const CHANNEL_PAYMENTS = 'payments';
+// Low-importance channel for the persistent "watching for messages"
+// foreground-service notification (#279 realtime upgrade). LOW so it
+// never buzzes or pops a banner — it's the ongoing status chip Android
+// requires a foreground service to display, not an alert. Kept on its
+// own channel so the user can mute the chip independently of real
+// message / payment alerts.
+export const CHANNEL_BACKGROUND_SERVICE = 'background-service';
+
+// Fixed notification id for the foreground-service ongoing chip. Stable
+// so the background DM service can update (sender-name churn) or dismiss
+// the same single notification rather than stacking duplicates.
+export const FOREGROUND_SERVICE_NOTIFICATION_ID = 'lp-bg-dm-foreground';
 
 // Persisted user preferences for notification behaviour. Defaults are
 // privacy-preserving (lock-screen body content OFF) per constraint #4
@@ -161,6 +175,16 @@ async function initialiseInternal(): Promise<void> {
       importance: Notifications.AndroidImportance.HIGH,
       description: 'Incoming Lightning, on-chain payments, and zaps',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
+    // Importance LOW = no sound, no heads-up banner. This is the channel
+    // the persistent foreground-service chip rides on (#279 realtime
+    // upgrade): Android requires a foreground service to show an ongoing
+    // notification, but it should be a silent status chip, not an alert.
+    await Notifications.setNotificationChannelAsync(CHANNEL_BACKGROUND_SERVICE, {
+      name: 'Background message watch',
+      importance: Notifications.AndroidImportance.LOW,
+      description: 'The persistent status shown while Lightning Piggy watches for messages',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
 }
@@ -443,6 +467,68 @@ export async function firePaymentNotification(opts: {
     body,
     data: opts.walletId ? { walletId: opts.walletId } : undefined,
   });
+}
+
+/**
+ * Post (or refresh) the persistent foreground-service status chip (#279
+ * realtime upgrade). This is the ongoing "Lightning Piggy is watching for
+ * messages" notification Android requires a foreground service to display.
+ * Always uses a fixed identifier so repeated calls update the SAME entry
+ * rather than stacking. `sticky: true` + the LOW-importance channel make it
+ * a silent, non-dismissable status chip.
+ *
+ * Returns the notification id on success, or null if we couldn't post (no
+ * permission yet, or expo-notifications threw). Android-only by intent — on
+ * iOS there's no foreground service, so the background DM service never
+ * calls this (see backgroundDmService.ts).
+ */
+export async function showForegroundServiceNotification(opts: {
+  title: string;
+  body: string;
+}): Promise<string | null> {
+  try {
+    const granted = await hasNotificationPermission();
+    if (!granted) return null;
+    await Notifications.scheduleNotificationAsync({
+      identifier: FOREGROUND_SERVICE_NOTIFICATION_ID,
+      content: {
+        title: opts.title,
+        body: opts.body,
+        // The chip is informational only — no routing payload needed beyond
+        // the discriminator so a tap still opens the app.
+        data: { kind: 'background-service' },
+        // `sticky` (Android `ongoing`) keeps the user from swiping it away
+        // while the service runs — matching Amethyst's persistent chip.
+        sticky: true,
+      },
+      trigger:
+        Platform.OS === 'android'
+          ? {
+              type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+              seconds: 1,
+              channelId: CHANNEL_BACKGROUND_SERVICE,
+            }
+          : null,
+    });
+    return FOREGROUND_SERVICE_NOTIFICATION_ID;
+  } catch (err) {
+    if (__DEV__)
+      console.warn('[notificationService] showForegroundServiceNotification failed:', err);
+    return null;
+  }
+}
+
+/** Dismiss the persistent foreground-service status chip. Idempotent. */
+export async function dismissForegroundServiceNotification(): Promise<void> {
+  try {
+    await Notifications.dismissNotificationAsync(FOREGROUND_SERVICE_NOTIFICATION_ID);
+    // Also cancel a pending (not-yet-fired) schedule, since the 1 s
+    // TIME_INTERVAL trigger above means a just-posted chip may still be
+    // queued rather than displayed when the user toggles off fast.
+    await Notifications.cancelScheduledNotificationAsync(FOREGROUND_SERVICE_NOTIFICATION_ID);
+  } catch {
+    // best-effort
+  }
 }
 
 /**

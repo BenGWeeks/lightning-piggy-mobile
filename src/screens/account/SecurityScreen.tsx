@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
-import { Check, ShieldCheck, Link2, BellRing } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Switch,
+  Platform,
+} from 'react-native';
+import { Check, ShieldCheck, Link2, BellRing, Radio } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -14,7 +22,13 @@ import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/lin
 import {
   getLockScreenContentEnabled,
   setLockScreenContentEnabled,
+  requestNotificationPermission,
 } from '../../services/notificationService';
+import {
+  loadBackgroundDmEnabled,
+  setBackgroundDmEnabled,
+} from '../../services/backgroundDmPreference';
+import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 const PRESETS: { value: number | null; label: string; sublabel: string }[] = [
@@ -38,6 +52,9 @@ const SecurityScreen: React.FC = () => {
   const [customDraft, setCustomDraft] = useState<string>('');
   const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
+  // Background DM watch is Android-only (iOS can't hold a background socket).
+  const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
+  const isAndroid = Platform.OS === 'android';
 
   useEffect(() => {
     getSendThreshold().then((t) => {
@@ -48,7 +65,8 @@ const SecurityScreen: React.FC = () => {
     });
     getLinkPreviewEnabled().then(setLinkPreviewOn);
     getLockScreenContentEnabled().then(setLockScreenContentOn);
-  }, []);
+    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
+  }, [isAndroid]);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
@@ -58,6 +76,26 @@ const SecurityScreen: React.FC = () => {
   const handleToggleLockScreenContent = async (next: boolean) => {
     setLockScreenContentOn(next);
     await setLockScreenContentEnabled(next);
+  };
+
+  const handleToggleBackgroundDm = async (next: boolean) => {
+    if (next) {
+      // Turning ON needs notification permission for the persistent chip +
+      // per-message alerts. If the user denies, leave the toggle off rather
+      // than running a watch that can never surface anything.
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        setBackgroundDmOn(false);
+        return;
+      }
+      setBackgroundDmOn(true);
+      await setBackgroundDmEnabled(true);
+      await startBackgroundDmWatch();
+    } else {
+      setBackgroundDmOn(false);
+      await setBackgroundDmEnabled(false);
+      await stopBackgroundDmWatch();
+    }
   };
 
   const handlePickPreset = async (value: number | null) => {
@@ -177,6 +215,34 @@ const SecurityScreen: React.FC = () => {
           trackColor={{ false: colors.divider, true: colors.brandPink }}
         />
       </View>
+
+      {isAndroid && (
+        <>
+          <View style={[styles.headerRow, styles.sectionGap]}>
+            <Radio size={22} color={colors.brandPink} />
+            <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
+              Background message notifications
+            </Text>
+          </View>
+          <Text style={sharedAccountStyles.fieldHint}>
+            When ON, Lightning Piggy keeps watching for new messages even when the app is closed, so
+            you're notified the moment one arrives — no Google services or push server involved.
+            This shows a permanent "watching for messages" notification you can't swipe away, and
+            uses extra battery because it holds a live connection to your relays. Turn OFF to rely
+            on periodic checks instead. Default: OFF.
+          </Text>
+          <View style={styles.toggleRow}>
+            <Text style={styles.optionLabel}>Watch for messages in the background</Text>
+            <Switch
+              value={backgroundDmOn}
+              onValueChange={handleToggleBackgroundDm}
+              accessibilityLabel="Watch for messages in the background"
+              testID="security-background-dm-toggle"
+              trackColor={{ false: colors.divider, true: colors.brandPink }}
+            />
+          </View>
+        </>
+      )}
     </AccountScreenLayout>
   );
 };

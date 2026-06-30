@@ -35,18 +35,34 @@ const { withAndroidManifest } = require('expo/config-plugins');
  *   5. `<uses-permission android:name="android.permission.WAKE_LOCK"/>`
  *      — partial wake lock during socket-recovery windows.
  *
- * What is INTENTIONALLY deferred to a follow-up PR:
+ * What the TS layer now adds on top (the realtime-DM upgrade, #279):
  *
- *   - The actual Java/Kotlin `Service` class (`NostrRelayService.java`)
- *     and its `<service>` registration. Adding the `<service>` entry
- *     without a class behind it would break the prebuild — the
- *     manifest references a class that doesn't compile. So we land
- *     the *permissions* now (which are independently meaningful: they
- *     show up in the install prompt for the user and force the next
- *     iteration to confirm them) and leave the `<service>` add to the
- *     PR that ships the actual Kotlin code.
+ *   - `src/services/backgroundDmService.ts` — the control + worker layer
+ *     for the persistent watch: it posts the foreground status chip,
+ *     opens the live kind-1059 relay subscription, decrypts (nsec) or
+ *     posts contentless (Amber/NIP-46), and fires signer-aware local
+ *     notifications. Driven by the "Background message notifications"
+ *     toggle in Account → Security (default OFF).
+ *
+ * What is STILL INTENTIONALLY deferred to a follow-up PR (the native glue
+ * this config plugin cannot supply without a Kotlin compile):
+ *
+ *   - The actual Java/Kotlin `Service` class (`NostrRelayService.kt`) and
+ *     its `<service>` registration, plus the headless-JS host that calls
+ *     `backgroundDmService.runBackgroundDmWatch()` from the service. We
+ *     deliberately do NOT push a `<service>` entry here yet: registering a
+ *     `<service android:name=".NostrRelayService">` whose class doesn't
+ *     compile breaks the prebuild. The permissions below are independently
+ *     meaningful (they show in the install prompt and gate the next
+ *     iteration), so they land now; the `<service>` add ships with the
+ *     Kotlin code. The ready-to-use shape is in the TODO block below.
  *   - A `BootReceiver` to re-launch the service after reboot (uses the
  *     RECEIVE_BOOT_COMPLETED permission added above).
+ *
+ * Until that native host lands, the TS watch only persists while the app's
+ * JS context is alive — it already improves the foreground experience and
+ * becomes a true background watch the moment the native service keeps the
+ * context running.
  *
  * Idempotent across `npx expo prebuild` runs — checks for existing
  * permission entries before pushing.
@@ -78,8 +94,11 @@ module.exports = function withForegroundService(config) {
       }
     }
 
-    // TODO(#279 follow-up): once the Kotlin Service class lands, add
-    // its <service> entry here — example shape:
+    // TODO(native foreground service, #279): once the Kotlin Service class
+    // + headless-JS host land (the host calls
+    // backgroundDmService.runBackgroundDmWatch()), add the <service> entry
+    // here. Do NOT enable this block before the class compiles — a manifest
+    // <service> pointing at a missing class breaks the prebuild. Ready shape:
     //
     //   const application = manifest.application?.[0];
     //   if (application) {
