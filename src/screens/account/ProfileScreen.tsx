@@ -204,10 +204,12 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 2,
-      borderColor: colors.brandPink,
+      // Secondary action — purple accent (matches the outlined secondary
+      // buttons across Settings) so it sits below the primary brand pink.
+      borderColor: colors.accentSecondary,
     },
     editProfileButtonText: {
-      color: colors.brandPink,
+      color: colors.accentSecondary,
       fontSize: 14,
       fontWeight: '600',
     },

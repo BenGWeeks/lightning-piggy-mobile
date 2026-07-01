@@ -216,4 +216,54 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
     expect(buffer.size).toBe(0);
   });
+
+  it('an order wrap from a not-yet-followed partner buffers a friendly preview, not raw JSON (#market)', async () => {
+    // Regression for the follow-gate deferred path leaking order JSON into the
+    // conversation-list preview: the deferred entry must run the order content
+    // through `orderPreviewFromContent` (as the non-deferred path does), not
+    // surface the raw `textForRumor` blob. A market the user transacted with
+    // (a kind-16 order) is virtually never in their follow set, so this path
+    // is the common case for marketplace previews.
+    const followPubkeysRef = { current: new Set<string>() };
+    const buffer = createLiveSubFollowGateBuffer();
+
+    startLiveDmSubscription(makeParams({ followPubkeysRef, followGateBuffer: buffer }));
+    await flush();
+
+    const now = Math.floor(Date.now() / 1000);
+    // textForRumor is mocked to return rumor.content, so feed it canonical
+    // order JSON (what the real textForRumor emits for a kind-16 order).
+    const orderJson = JSON.stringify({
+      kind: 16,
+      type: 'order',
+      orderId: 'abc-12345678',
+      amountSats: 21,
+    });
+    capturedOnEvent!({
+      id: 'order-wrap',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'x',
+      rumor: {
+        kind: 16,
+        created_at: now,
+        content: orderJson,
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    });
+    await flush();
+    expect(buffer.size).toBe(1);
+
+    // Capture the buffered entry on replay and assert its preview is the
+    // human-readable summary, never the raw order-JSON blob.
+    let surfaced: { text?: string } | null = null;
+    buffer.reevaluate(new Set([ALICE]), (item: unknown) => {
+      surfaced = (item as { entry: { text?: string } }).entry;
+    });
+    expect(surfaced).toBeTruthy();
+    expect(surfaced!.text).toMatch(/^🛒 Order Placed/);
+    expect(surfaced!.text).not.toContain('{');
+  });
 });

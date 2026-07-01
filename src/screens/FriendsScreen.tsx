@@ -185,9 +185,15 @@ const FriendsScreen: React.FC = () => {
   // returns. Cheap (AsyncStorage read + a bit of Contacts API merge).
   useFocusEffect(
     useCallback(() => {
-      fetchPhoneContacts()
-        .then(setPhoneContacts)
-        .catch(() => {});
+      // Deferred like refreshProfile above: the Contacts API merge competes
+      // with the tab-transition animation for JS-thread time, so let the
+      // transition + first paint finish before it runs.
+      const handle = InteractionManager.runAfterInteractions(() => {
+        fetchPhoneContacts()
+          .then(setPhoneContacts)
+          .catch(() => {});
+      });
+      return () => handle.cancel();
     }, []),
   );
 

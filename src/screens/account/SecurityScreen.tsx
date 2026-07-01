@@ -78,7 +78,7 @@ const SecurityScreen: React.FC = () => {
   return (
     <AccountScreenLayout title="Security">
       <View style={styles.headerRow}>
-        <ShieldCheck size={22} color={colors.brandPink} />
+        <ShieldCheck size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           Confirm large sends
         </Text>
@@ -105,7 +105,7 @@ const SecurityScreen: React.FC = () => {
                 <Text style={styles.optionLabel}>{opt.label}</Text>
                 <Text style={styles.optionSublabel}>{opt.sublabel}</Text>
               </View>
-              {selected && <Check size={18} color={colors.brandPink} />}
+              {selected && <Check size={18} color={colors.accentSecondary} />}
             </TouchableOpacity>
           );
         })}
@@ -128,12 +128,12 @@ const SecurityScreen: React.FC = () => {
               <Text style={styles.customSatsLabel}>sats</Text>
             </View>
           </View>
-          {customActive && <Check size={18} color={colors.brandPink} />}
+          {customActive && <Check size={18} color={colors.accentSecondary} />}
         </View>
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <Link2 size={22} color={colors.brandPink} />
+        <Link2 size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           Link previews in messages
         </Text>
@@ -151,12 +151,12 @@ const SecurityScreen: React.FC = () => {
           onValueChange={handleToggleLinkPreview}
           accessibilityLabel="Show link previews in messages"
           testID="security-link-preview-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
         />
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <BellRing size={22} color={colors.brandPink} />
+        <BellRing size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           Notification content
         </Text>
@@ -174,7 +174,7 @@ const SecurityScreen: React.FC = () => {
           onValueChange={handleToggleLockScreenContent}
           accessibilityLabel="Show message and payment details in notifications"
           testID="security-lockscreen-content-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
         />
       </View>
     </AccountScreenLayout>
@@ -211,8 +211,10 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     optionRowSelected: {
-      borderColor: colors.brandPink,
-      backgroundColor: colors.brandPinkLight,
+      // Selected radio row — purple accent + tint, matching the selected/
+      // active state convention across Settings.
+      borderColor: colors.accentSecondary,
+      backgroundColor: colors.accentSecondaryLight,
     },
     optionTextBlock: {
       flex: 1,

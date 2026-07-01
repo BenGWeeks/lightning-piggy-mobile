@@ -113,6 +113,33 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     });
   });
 
+  it('emits a friendly order preview for a kind-16 row but stores the raw order JSON (#market)', async () => {
+    // The cold-start / refreshDmInbox path that builds the conversation list:
+    // the in-memory inbox entry must show a readable summary, never the raw
+    // order-JSON blob (textForRumor returns order JSON for kind 16/17). The
+    // stored row keeps the raw JSON so the thread renderer + dmInbox projection
+    // re-derive from it.
+    const orderJson = JSON.stringify({
+      kind: 16,
+      type: 'order',
+      orderId: 'abc-12345678',
+      amountSats: 21,
+    });
+    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: 16, content: orderJson }));
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('o1')],
+      unwrap,
+      passesFollowGate: () => true,
+      skipKey: 'skip_key',
+    });
+    expect(res.entries[0].text).toBe('🛒 Order Placed · 21 sats');
+    expect(res.entries[0].text).not.toContain('{');
+    const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
+    expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
+    expect(rows[0].wireKind).toBe(16);
+  });
+
   it('skips decrypt for DB-known wraps (decrypt-once) and reports them', async () => {
     mockSelectKnown.mockResolvedValue(new Set(['w1']));
     const unwrap = jest.fn(async () => rumorFrom(ALICE));

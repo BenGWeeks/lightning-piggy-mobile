@@ -12,6 +12,7 @@ import {
   subjectFromRumor,
   textForRumor,
   partnerFromRumor,
+  classifyRumor,
   unwrapWrapNsec,
   type DecodedRumor,
 } from './nip17Unwrap';
@@ -153,6 +154,72 @@ describe('textForRumor (kind-15 → bubble text)', () => {
  *   - a rumor claiming a different pubkey than its seal is rejected
  *     (sender-spoofing blocked).
  */
+describe('classifyRumor — kind-16/17 order classification', () => {
+  // Viewer is PK_B; the market (PK_A) addresses the order to them via `#p`.
+  const orderRumor = (over: Partial<DecodedRumor> = {}): DecodedRumor => ({
+    pubkey: PK_A,
+    created_at: 1,
+    kind: 16,
+    tags: [
+      ['p', PK_B],
+      ['order', 'c6c790ca-1234'],
+      ['type', '1'],
+    ],
+    content: '',
+    ...over,
+  });
+
+  it('classifies a genuine kind-16 marketplace order as an order', () => {
+    const cls = classifyRumor(orderRumor(), PK_B);
+    expect(cls).toEqual({ type: 'order', partnerPubkey: PK_A, fromMe: false });
+  });
+
+  it('classifies a genuine kind-17 receipt as an order', () => {
+    const cls = classifyRumor(
+      orderRumor({
+        kind: 17,
+        tags: [
+          ['p', PK_B],
+          ['order', 'c6c790ca-1234'],
+          ['subject', 'order-receipt'],
+        ],
+      }),
+      PK_B,
+    );
+    expect(cls).toEqual({ type: 'order', partnerPubkey: PK_A, fromMe: false });
+  });
+
+  it('does NOT classify a kind-16 NIP-18 repost as an order — falls through to dm', () => {
+    // A repost carries a `k` repost-target tag, so parseOrderEvent rejects it;
+    // classifyRumor must then fall through to the normal dm/group path.
+    const cls = classifyRumor(
+      orderRumor({
+        tags: [
+          ['p', PK_B],
+          ['k', '1'],
+        ],
+      }),
+      PK_B,
+    );
+    expect(cls).toEqual({ type: 'dm', partnerPubkey: PK_A, fromMe: false });
+  });
+
+  it('does NOT classify a kind-17 without the order-receipt subject as an order', () => {
+    const cls = classifyRumor(
+      orderRumor({
+        kind: 17,
+        tags: [
+          ['p', PK_B],
+          ['order', 'c6c790ca-1234'],
+        ],
+      }),
+      PK_B,
+    );
+    // No subject=order-receipt → not an order; falls through to dm.
+    expect(cls).toEqual({ type: 'dm', partnerPubkey: PK_A, fromMe: false });
+  });
+});
+
 describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
   // Build a real NIP-17 gift wrap from `sender` to `recipient`.
   function makeWrap(content: string) {

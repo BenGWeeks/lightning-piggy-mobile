@@ -8,8 +8,9 @@ import { pool, trackRelays, DM_INBOX_LIMIT, type RawInboxDmEvent } from './nostr
 const DM_LIVE_SUB_MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 /**
- * Long-lived kind-4 (NIP-04) + kind-1059 (NIP-17 gift wrap) inbox
- * subscription for the current viewer (#349). Returns a cleanup function.
+ * Long-lived kind-4 (NIP-04) + kind-1059 (NIP-17 gift wrap) + kind-16/17
+ * (plaintext marketplace order/receipt) inbox subscription for the current
+ * viewer (#349). Returns a cleanup function.
  *
  * Extracted from nostrService (#703 — keep that over-cap file from growing);
  * behaviour is unchanged. The `onEose` callback (added for #279) fires once
@@ -49,7 +50,10 @@ export function subscribeInboxDmsForViewer(input: {
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
     input.onEvent(ev);
   };
-  // Fire `onEose` exactly once, after both filters have reached EOSE.
+  // Fire `onEose` exactly once, after the kind-4 and kind-1059 filters have
+  // both reached EOSE. The kind-16/17 order filter is not gated on for EOSE —
+  // it's an additive low-volume stream and the cold-start notification
+  // suppression only depends on the DM filters settling.
   let k4Eosed = false;
   let wrapsEosed = false;
   const maybeEose = (): void => {
@@ -97,8 +101,23 @@ export function subscribeInboxDmsForViewer(input: {
       },
     },
   );
+  // Marketplace order / receipt events (kinds 16 & 17) addressed to the viewer
+  // via a `#p` tag. These are PLAINTEXT today (not gift-wrapped), carry the
+  // buyer's pubkey in `#p`, and have real `created_at`s — so we bound the
+  // backlog with the same 7-day lookback floor as kind-4. Non-order kind-16
+  // events (NIP-18 reposts) are filtered out downstream by `parseOrderEvent`.
+  const subOrders = pool.subscribeMany(
+    input.relays,
+    {
+      kinds: [16, 17],
+      '#p': [input.viewerPubkey],
+      since: lookbackFloor,
+      limit: DM_INBOX_LIMIT,
+    } as Filter,
+    { onevent },
+  );
   return () => {
-    for (const s of [subK4, subWraps]) {
+    for (const s of [subK4, subWraps, subOrders]) {
       try {
         s.close();
       } catch {

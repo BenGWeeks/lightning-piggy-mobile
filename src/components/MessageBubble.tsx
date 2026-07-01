@@ -612,6 +612,29 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
+  // Generic, future-proof fallback for an inner event kind the app doesn't
+  // render (#market follow-up). Instead of a blank bubble, show a small muted/
+  // italic placeholder naming the raw Nostr kind. Side-aligned like a normal
+  // bubble so the sender context (fromMe) is preserved, but visually subdued so
+  // it reads as "nothing to do here" rather than a real message.
+  if (content.kind === 'unsupported') {
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View
+          style={[styles.bubble, styles.unsupportedBubble]}
+          accessibilityLabel={`Unsupported message type, kind ${content.rawKind}`}
+          testID={`${testIdPrefix}-unsupported-${id}`}
+        >
+          {SenderLabel}
+          <Text style={styles.unsupportedText}>
+            Unsupported message type (kind {content.rawKind})
+          </Text>
+          {renderFooter([styles.bubbleTime])}
+        </View>
+      </View>
+    );
+  }
+
   // content.kind === 'text' — fall through to per-text-format detection.
   const text = content.text;
 

@@ -13,6 +13,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
+import BrandGradientBackground from '../../components/BrandGradientBackground';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
 import type { AccountDrawerNavigation } from '../../navigation/types';
@@ -66,6 +67,7 @@ const AccountScreenLayout: React.FC<Props> = ({
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <BrandGradientBackground />
       <Image
         source={require('../../../assets/images/nostrich.png')}
         style={styles.bgImage}

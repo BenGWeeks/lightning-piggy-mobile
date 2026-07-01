@@ -118,7 +118,7 @@ const WalletsScreen: React.FC = () => {
           accessibilityLabel="Add wallet"
           testID="add-wallet-button"
         >
-          <Plus size={18} color={colors.brandPink} />
+          <Plus size={18} color={colors.accentSecondary} />
           <Text style={styles.addWalletText}>Add Wallet</Text>
         </TouchableOpacity>
       </View>
@@ -171,10 +171,12 @@ const createStyles = (colors: Palette) =>
       borderRadius: 10,
       backgroundColor: colors.surface,
       borderWidth: 2,
-      borderColor: colors.brandPink,
+      // Secondary action — purple accent, consistent with the other outlined
+      // secondary buttons (Edit Profile, Send Feedback).
+      borderColor: colors.accentSecondary,
     },
     addWalletText: {
-      color: colors.brandPink,
+      color: colors.accentSecondary,
       fontSize: 14,
       fontWeight: '600',
     },

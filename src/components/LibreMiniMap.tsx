@@ -33,6 +33,7 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
+import { CacheMapMarker } from './CacheMapMarker';
 
 // `useIsFocused()` throws "Couldn't find a navigation object" when the
 // component renders OUTSIDE a navigator — e.g. inside a Gorhom
@@ -372,7 +373,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
       caches
         .map((c) =>
           c.geohash
-            ? { ...decodeGeohash(c.geohash), id: c.coord, name: c.name, isLpPiggy: c.isLpPiggy }
+            ? {
+                ...decodeGeohash(c.geohash),
+                id: c.coord,
+                name: c.name,
+                isLpPiggy: c.isLpPiggy,
+                payoutSats: c.payoutSats,
+              }
             : null,
         )
         .filter((c): c is NonNullable<typeof c> => c !== null),
@@ -517,22 +524,17 @@ const LibreMiniMapInner: React.FC<Props> = ({
         {cachePoints.map((c) => {
           const original = cacheByCoord.get(c.id);
           return (
-            <Marker
+            <CacheMapMarker
               key={c.id}
-              id={`cache-${c.id}`}
-              lngLat={[c.lng, c.lat]}
+              id={c.id}
+              lat={c.lat}
+              lng={c.lng}
+              isLpPiggy={c.isLpPiggy}
+              payoutSats={c.payoutSats}
+              glyphSize={pinGlyphSize}
+              markerDimStyle={markerDim}
               onPress={onSelectCache && original ? () => onSelectCache(original) : undefined}
-            >
-              <View
-                style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache, markerDim]}
-              >
-                {c.isLpPiggy ? (
-                  <PiggyBank size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
-                ) : (
-                  <MapPin size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
-                )}
-              </View>
-            </Marker>
+            />
           );
         })}
         {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn

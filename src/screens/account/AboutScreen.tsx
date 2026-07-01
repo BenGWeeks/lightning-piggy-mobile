@@ -467,10 +467,12 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 2,
-      borderColor: colors.brandPink,
+      // Secondary action — purple accent so it reads as the lighter-weight
+      // sibling of the filled pink "Zap the Team" primary CTA above it.
+      borderColor: colors.accentSecondary,
     },
     feedbackButtonText: {
-      color: colors.brandPink,
+      color: colors.accentSecondary,
       fontSize: 14,
       fontWeight: '600',
     },
