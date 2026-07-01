@@ -32,6 +32,7 @@ import {
   deleteNwcUrl,
   deleteXpub,
   deleteMnemonic,
+  deleteWalletCaches,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
@@ -1173,9 +1174,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       `nostr_groups_${loggedOutPubkey}`,
       `groups_following_only_${loggedOutPubkey}`,
       walletListKey,
-      // Per-wallet tx caches (AsyncStorage). One key per wallet that
-      // was bound to this identity.
-      ...walletIds.map((id) => `txs_${id}`),
     ];
     const allKeys = await AsyncStorage.getAllKeys();
     const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
@@ -1188,6 +1186,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
     }
     await AsyncStorage.multiRemove(toRemove);
+    // Per-wallet balance/txs/seenReceipts caches for every wallet bound to this
+    // identity — via deleteWalletCaches so the key set can't drift from removeWallet.
+    await Promise.all(walletIds.map((id) => deleteWalletCaches(id)));
     // Decrypted DM plaintext must not survive logout / account wipe (#689
     // review / #690): delete the file-backed wrap + skip-set caches and this
     // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
