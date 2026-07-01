@@ -170,7 +170,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   // is what WalletTransaction rows carry, so matching is a direct .has()
   // per row. We bump a single counter on either change to force a render
   // — the actual lookups go through swapRecoveryService each time.
-  const [, setSwapStateTick] = useState(0);
+  const [swapStateTick, setSwapStateTick] = useState(0);
   useEffect(() => {
     const bump = () => setSwapStateTick((n) => n + 1);
     const unsubAttention = swapRecoveryService.subscribeAttention(bump);
@@ -389,6 +389,12 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
         data={rows}
         keyExtractor={(row) => row.key}
         renderItem={renderRow}
+        // Swap-recovery attention/claimed flags live outside `data` (they're
+        // read live from swapRecoveryService inside renderRow via
+        // iconStateFor). FlatList only re-renders rows when data/renderItem/
+        // extraData change by shallow compare, so thread the tick here to
+        // force a badge refresh when only the swap state bumps.
+        extraData={swapStateTick}
         refreshControl={refreshControl}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
