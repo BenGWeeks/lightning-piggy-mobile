@@ -115,11 +115,21 @@ const SendSheet: React.FC<Props> = ({
   const [scanned, setScanned] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('scan');
   const [pasteText, setPasteText] = useState('');
+  // Bumped on every *programmatic* pasteText set (sheet open, clipboard paste,
+  // edit-address prefill, reset) to remount the BottomSheetTextInput below with
+  // a fresh `defaultValue`. The field is intentionally uncontrolled during typing
+  // (no `value` prop) so a slow re-render of this large sheet can never cause RN
+  // to re-push a stale JS snapshot over text the user has since kept typing
+  // natively — the exact "duplicated stale prefix" / dropped-character race
+  // reported in #873 on Android. Same pattern applied to `memo` below.
+  const [pasteTextKey, setPasteTextKey] = useState(0);
   const [satsValue, setSatsValue] = useState(''); // amount input for lightning addresses (no invoice amount)
   const [step, setStep] = useState<Step>('main');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
   const [memo, setMemo] = useState('');
+  // See pasteTextKey above — same uncontrolled-remount pattern for the memo field.
+  const [memoKey, setMemoKey] = useState(0);
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
@@ -186,12 +196,14 @@ const SendSheet: React.FC<Props> = ({
       // dead-end; the user can still switch to Scan, which prompts for access.
       setInputMode(initialAddress || !permission?.granted ? 'paste' : 'scan');
       setPasteText(initialAddress || '');
+      setPasteTextKey((k) => k + 1);
       setSatsValue('');
       setStep('main');
       setLnurlParams(null);
       setResolving(false);
       setIsLnurl(false);
       setMemo('');
+      setMemoKey((k) => k + 1);
       // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
       // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
       setActivePubkey(recipientPubkey);
@@ -258,6 +270,7 @@ const SendSheet: React.FC<Props> = ({
     setStep('main');
     setInputMode('paste');
     setPasteText(prefill);
+    setPasteTextKey((k) => k + 1);
   }, []);
 
   // Resolution failed (typo / unreachable): toast the friendly error, then
@@ -405,6 +418,7 @@ const SendSheet: React.FC<Props> = ({
     const clip = await Clipboard.getStringAsync();
     if (clip) {
       setPasteText(clip);
+      setPasteTextKey((k) => k + 1);
       processInput(clip);
     }
   };
@@ -767,9 +781,11 @@ const SendSheet: React.FC<Props> = ({
     setDecoded(null);
     setScanned(false);
     setPasteText('');
+    setPasteTextKey((k) => k + 1);
     setSatsValue('');
     setStep('main');
     setMemo('');
+    setMemoKey((k) => k + 1);
     setLnurlParams(null);
     setResolving(false);
     setActivePubkey(undefined);
@@ -935,10 +951,11 @@ const SendSheet: React.FC<Props> = ({
                 ) : (
                   <View style={styles.pasteSection}>
                     <BottomSheetTextInput
+                      key={pasteTextKey}
                       style={styles.pasteInput}
                       placeholder="Paste invoice, lightning or bitcoin address..."
                       placeholderTextColor={colors.textSupplementary}
-                      value={pasteText}
+                      defaultValue={pasteText}
                       onChangeText={setPasteText}
                       multiline
                       autoCapitalize="none"
@@ -1057,10 +1074,11 @@ const SendSheet: React.FC<Props> = ({
                   {/* Memo / comment field for Lightning address payments */}
                   {needsAmount && (
                     <BottomSheetTextInput
+                      key={memoKey}
                       style={styles.memoInput}
                       placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
                       placeholderTextColor={colors.textSupplementary}
-                      value={memo}
+                      defaultValue={memo}
                       onChangeText={setMemo}
                       maxLength={lnurlParams?.commentAllowed || 150}
                       autoCorrect
