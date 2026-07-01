@@ -64,4 +64,26 @@ describe('deleteWalletCaches', () => {
     multiRemove.mockRestore();
     warn.mockRestore();
   });
+
+  it('warns (but does not throw) when a per-key removeItem also fails in the fallback', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const multiRemove = jest
+      .spyOn(AsyncStorage, 'multiRemove')
+      .mockRejectedValueOnce(new Error('batch failed'));
+    const removeItem = jest
+      .spyOn(AsyncStorage, 'removeItem')
+      .mockRejectedValueOnce(new Error('key failed')) // balance_w1 fails
+      .mockResolvedValue(undefined); // remaining keys succeed
+
+    await expect(deleteWalletCaches('w1')).resolves.toBeUndefined();
+
+    // The batch-failure warning plus a per-key warning for the failed key.
+    expect(
+      warn.mock.calls.some((c) => String(c[0]).includes('removeItem failed for balance_w1')),
+    ).toBe(true);
+
+    multiRemove.mockRestore();
+    removeItem.mockRestore();
+    warn.mockRestore();
+  });
 });

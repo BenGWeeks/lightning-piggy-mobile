@@ -252,7 +252,14 @@ export async function bestEffortMultiRemove(keys: string[]): Promise<void> {
     await AsyncStorage.multiRemove(keys);
   } catch (err) {
     console.warn(`bestEffortMultiRemove: multiRemove failed (${keys.length} keys), per-key`, err);
-    await Promise.allSettled(keys.map((k) => AsyncStorage.removeItem(k)));
+    const results = await Promise.allSettled(keys.map((k) => AsyncStorage.removeItem(k)));
+    // Surface any per-key failures too — a swallowed reject here could leave
+    // sensitive residue on disk, defeating the point of the fallback.
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.warn(`bestEffortMultiRemove: removeItem failed for ${keys[i]}`, r.reason);
+      }
+    });
   }
 }
 
