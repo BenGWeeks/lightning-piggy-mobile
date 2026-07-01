@@ -996,9 +996,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.deleteCoinosRecovery(walletId);
       }
 
+      await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
       const currentList = await walletStorage.getWalletList();
-      const updated = currentList.filter((w) => w.id !== walletId);
-      await walletStorage.saveWalletList(updated);
+      await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
 
       setWallets((prev) => {
         const remaining = prev.filter((w) => w.id !== walletId);
