@@ -17,8 +17,9 @@ import {
   type MarketMode,
 } from '../utils/marketMode';
 import {
+  distinctCountries,
   distinctCurrencies,
-  distinctLocations,
+  distinctMerchants,
   filterMarketProducts,
   isMarketFilterActive,
   type MarketFilter,
@@ -66,10 +67,12 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
 
-  // Search + location + currency filters. The query is debounced so re-filtering
-  // stays off the per-keystroke path; location/currency apply immediately.
+  // Search + merchant + country + currency filters. The query is debounced so
+  // re-filtering stays off the per-keystroke path; the chip axes apply
+  // immediately.
   const [query, setQuery] = useState('');
-  const [location, setLocation] = useState<string | null>(null);
+  const [merchant, setMerchant] = useState<string | null>(null);
+  const [country, setCountry] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, 250);
 
@@ -81,30 +84,32 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   }, [mode, trustSet]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
-  const locations = useMemo(() => distinctLocations(baseProducts, sellerOf), [baseProducts]);
+  const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
+  const countries = useMemo(() => distinctCountries(baseProducts, sellerOf), [baseProducts]);
   const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
   const filter = useMemo<MarketFilter>(
-    () => ({ query: debouncedQuery, location, currency }),
-    [debouncedQuery, location, currency],
+    () => ({ query: debouncedQuery, merchant, country, currency }),
+    [debouncedQuery, merchant, country, currency],
   );
   // `active` tracks the live (un-debounced) query so the Clear pill appears as
   // soon as the user types.
-  const filterActive = isMarketFilterActive({ query, location, currency });
+  const filterActive = isMarketFilterActive({ query, merchant, country, currency });
 
   const products = useMemo(
     () => filterMarketProducts(baseProducts, filter, sellerOf),
     [baseProducts, filter],
   );
 
-  // Reset the three FILTER axes (search + location + currency). The
+  // Reset the FILTER axes (search + merchant + country + currency). The
   // marketplace MODE (Preferred Sellers / WoT: Friends) is a separate
   // top-level selector above the filter bar, not a filter, so it is left
   // unchanged by design — "Clear filters" shouldn't yank the user out of the
   // WoT view they deliberately chose (Copilot review on #948).
   const clearFilters = useCallback(() => {
     setQuery('');
-    setLocation(null);
+    setMerchant(null);
+    setCountry(null);
     setCurrency(null);
   }, []);
 
@@ -177,9 +182,12 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       <MarketFilterBar
         query={query}
         onChangeQuery={setQuery}
-        locations={locations}
-        selectedLocation={location}
-        onSelectLocation={setLocation}
+        merchants={merchants}
+        selectedMerchant={merchant}
+        onSelectMerchant={setMerchant}
+        countries={countries}
+        selectedCountry={country}
+        onSelectCountry={setCountry}
         currencies={currencies}
         selectedCurrency={currency}
         onSelectCurrency={setCurrency}

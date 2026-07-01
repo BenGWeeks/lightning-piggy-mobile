@@ -1,8 +1,9 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-/** Styles for {@link MarketFilterBar} — the search input plus the location /
- * currency chip rows on the Market screen. Selected chips fill brand-pink to
+/** Styles for {@link MarketFilterBar} — the search input plus the merchant /
+ * country / currency chip rows on the Market screen. Selected chips fill
+ * brand-pink to
  * match {@link createMarketModeSelectorStyles}, so the filter controls read as
  * siblings of the marketplace-mode selector above them. */
 export const createMarketFilterBarStyles = (colors: Palette) =>

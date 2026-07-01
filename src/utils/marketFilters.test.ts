@@ -2,10 +2,12 @@ import {
   EMPTY_MARKET_FILTER,
   currencyOf,
   distinctCurrencies,
-  distinctLocations,
+  distinctCountries,
+  distinctMerchants,
   filterMarketProducts,
   isMarketFilterActive,
-  productLocation,
+  productCountry,
+  productMerchant,
   productMatchesSearch,
   type ResolveVendor,
 } from './marketFilters';
@@ -70,14 +72,25 @@ describe('currencyOf', () => {
   });
 });
 
-describe('productLocation', () => {
+describe('productCountry', () => {
   it("returns the selling vendor's country", () => {
-    expect(productLocation(product({ sellerName: 'Robotechy' }), resolve)).toBe('United Kingdom');
-    expect(productLocation(product({ sellerName: 'TBHS' }), resolve)).toBe('El Salvador');
+    expect(productCountry(product({ sellerName: 'Robotechy' }), resolve)).toBe('United Kingdom');
+    expect(productCountry(product({ sellerName: 'TBHS' }), resolve)).toBe('El Salvador');
   });
 
   it('returns null for an orphan seller (not in the directory)', () => {
-    expect(productLocation(product({ sellerName: 'Unknown Shop' }), resolve)).toBeNull();
+    expect(productCountry(product({ sellerName: 'Unknown Shop' }), resolve)).toBeNull();
+  });
+});
+
+describe('productMerchant', () => {
+  it("returns the selling vendor's display name", () => {
+    expect(productMerchant(product({ sellerName: 'Robotechy' }), resolve)).toBe('Robotechy');
+    expect(productMerchant(product({ sellerName: 'Danish Bacon' }), resolve)).toBe('Danish Bacon');
+  });
+
+  it('returns null for an orphan seller (not in the directory)', () => {
+    expect(productMerchant(product({ sellerName: 'Unknown Shop' }), resolve)).toBeNull();
   });
 });
 
@@ -112,7 +125,7 @@ describe('productMatchesSearch', () => {
   });
 });
 
-describe('distinctLocations', () => {
+describe('distinctCountries', () => {
   it('returns sorted distinct vendor countries', () => {
     const products = [
       product({ id: '1', sellerName: 'Robotechy' }), // United Kingdom
@@ -120,16 +133,33 @@ describe('distinctLocations', () => {
       product({ id: '3', sellerName: 'TBHS' }), // El Salvador
       product({ id: '4', sellerName: 'Robotechy' }), // dup UK
     ];
-    expect(distinctLocations(products, resolve)).toEqual([
+    expect(distinctCountries(products, resolve)).toEqual([
       'Denmark',
       'El Salvador',
       'United Kingdom',
     ]);
   });
 
-  it('skips orphan sellers with no resolvable location', () => {
+  it('skips orphan sellers with no resolvable country', () => {
     const products = [product({ id: '1', sellerName: 'Unknown Shop' })];
-    expect(distinctLocations(products, resolve)).toEqual([]);
+    expect(distinctCountries(products, resolve)).toEqual([]);
+  });
+});
+
+describe('distinctMerchants', () => {
+  it('returns sorted distinct vendor names', () => {
+    const products = [
+      product({ id: '1', sellerName: 'Robotechy' }),
+      product({ id: '2', sellerName: 'Danish Bacon' }),
+      product({ id: '3', sellerName: 'TBHS' }),
+      product({ id: '4', sellerName: 'Robotechy' }), // dup
+    ];
+    expect(distinctMerchants(products, resolve)).toEqual(['Danish Bacon', 'Robotechy', 'TBHS']);
+  });
+
+  it('skips orphan sellers with no resolvable merchant', () => {
+    const products = [product({ id: '1', sellerName: 'Unknown Shop' })];
+    expect(distinctMerchants(products, resolve)).toEqual([]);
   });
 });
 
@@ -159,9 +189,18 @@ describe('isMarketFilterActive', () => {
   });
 
   it('is true when any axis is set', () => {
-    expect(isMarketFilterActive({ query: 'pig', location: null, currency: null })).toBe(true);
-    expect(isMarketFilterActive({ query: '', location: 'Denmark', currency: null })).toBe(true);
-    expect(isMarketFilterActive({ query: '  ', location: null, currency: 'GBP' })).toBe(true);
+    expect(
+      isMarketFilterActive({ query: 'pig', merchant: null, country: null, currency: null }),
+    ).toBe(true);
+    expect(
+      isMarketFilterActive({ query: '', merchant: 'Robotechy', country: null, currency: null }),
+    ).toBe(true);
+    expect(
+      isMarketFilterActive({ query: '', merchant: null, country: 'Denmark', currency: null }),
+    ).toBe(true);
+    expect(
+      isMarketFilterActive({ query: '  ', merchant: null, country: null, currency: 'GBP' }),
+    ).toBe(true);
   });
 });
 
@@ -207,16 +246,25 @@ describe('filterMarketProducts', () => {
   it('filters by search query', () => {
     const out = filterMarketProducts(
       products,
-      { query: 'piggy', location: null, currency: null },
+      { query: 'piggy', merchant: null, country: null, currency: null },
       resolve,
     );
     expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'piggy-dk']);
   });
 
-  it('filters by location', () => {
+  it('filters by merchant', () => {
     const out = filterMarketProducts(
       products,
-      { query: '', location: 'United Kingdom', currency: null },
+      { query: '', merchant: 'Robotechy', country: null, currency: null },
+      resolve,
+    );
+    expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk']);
+  });
+
+  it('filters by country', () => {
+    const out = filterMarketProducts(
+      products,
+      { query: '', merchant: null, country: 'United Kingdom', currency: null },
       resolve,
     );
     expect(out.map((p) => p.id)).toEqual(['piggy-uk', 'badge-uk']);
@@ -225,26 +273,37 @@ describe('filterMarketProducts', () => {
   it('filters by currency', () => {
     const out = filterMarketProducts(
       products,
-      { query: '', location: null, currency: 'USD' },
+      { query: '', merchant: null, country: null, currency: 'USD' },
       resolve,
     );
     expect(out.map((p) => p.id)).toEqual(['merch-sv']);
   });
 
-  it('composes search + location + currency (AND semantics)', () => {
+  it('composes search + merchant + country + currency (AND semantics)', () => {
     const out = filterMarketProducts(
       products,
-      { query: 'lightning', location: 'United Kingdom', currency: 'GBP' },
+      { query: 'lightning', merchant: 'Robotechy', country: 'United Kingdom', currency: 'GBP' },
       resolve,
     );
     expect(out.map((p) => p.id)).toEqual(['piggy-uk']);
+  });
+
+  it('merchant AND country compose to exclude a same-country different-merchant row', () => {
+    // Danish Bacon is the only DK merchant here; narrowing to merchant
+    // "Robotechy" AND country "Denmark" yields nothing (AND, not OR).
+    const out = filterMarketProducts(
+      products,
+      { query: '', merchant: 'Robotechy', country: 'Denmark', currency: null },
+      resolve,
+    );
+    expect(out).toEqual([]);
   });
 
   it('returns an empty array when nothing matches, without mutating input', () => {
     const copy = [...products];
     const out = filterMarketProducts(
       products,
-      { query: 'lightning', location: 'El Salvador', currency: null },
+      { query: 'lightning', merchant: null, country: 'El Salvador', currency: null },
       resolve,
     );
     expect(out).toEqual([]);

@@ -9,10 +9,14 @@ interface Props {
   /** Immediate search text (the screen debounces it before filtering). */
   query: string;
   onChangeQuery: (text: string) => void;
-  /** Distinct locations present in the data; `null` selection means "All". */
-  locations: string[];
-  selectedLocation: string | null;
-  onSelectLocation: (location: string | null) => void;
+  /** Distinct merchants present in the data; `null` selection means "All". */
+  merchants: string[];
+  selectedMerchant: string | null;
+  onSelectMerchant: (merchant: string | null) => void;
+  /** Distinct countries present in the data; `null` selection means "All". */
+  countries: string[];
+  selectedCountry: string | null;
+  onSelectCountry: (country: string | null) => void;
   /** Distinct currencies present in the data; `null` selection means "All". */
   currencies: string[];
   selectedCurrency: string | null;
@@ -45,12 +49,12 @@ const Chip: React.FC<{
 );
 
 /**
- * Search + location + currency filter bar for the Market screen.
+ * Search + merchant + country + currency filter bar for the Market screen.
  *
- * The search input is controlled (the screen owns the debounce); the location
- * and currency chip rows are sourced from the DISTINCT values present in the
- * loaded products (passed in by the screen) rather than hardcoded, so they
- * stay correct as the catalogue changes. Each row leads with an "All" chip
+ * The search input is controlled (the screen owns the debounce); the merchant,
+ * country and currency chip rows are sourced from the DISTINCT values present
+ * in the loaded products (passed in by the screen) rather than hardcoded, so
+ * they stay correct as the catalogue changes. Each row leads with an "All" chip
  * that clears that axis. A "Clear" pill resets every axis at once and only
  * shows while a filter is active.
  *
@@ -61,9 +65,12 @@ const Chip: React.FC<{
 const MarketFilterBar: React.FC<Props> = ({
   query,
   onChangeQuery,
-  locations,
-  selectedLocation,
-  onSelectLocation,
+  merchants,
+  selectedMerchant,
+  onSelectMerchant,
+  countries,
+  selectedCountry,
+  onSelectCountry,
   currencies,
   selectedCurrency,
   onSelectCurrency,
@@ -101,33 +108,65 @@ const MarketFilterBar: React.FC<Props> = ({
         ) : null}
       </View>
 
-      {/* Location chips */}
-      {locations.length > 0 ? (
+      {/* Merchant chips */}
+      {merchants.length > 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipRow}
-          testID="market-filter-locations"
+          testID="market-filter-merchants"
         >
-          <Text style={styles.rowLabel}>Location</Text>
+          <Text style={styles.rowLabel}>Merchant</Text>
           <Chip
             label="All"
-            selected={selectedLocation === null}
-            onPress={() => onSelectLocation(null)}
-            testID="market-filter-location-all"
+            selected={selectedMerchant === null}
+            onPress={() => onSelectMerchant(null)}
+            testID="market-filter-merchant-all"
             styles={styles}
           />
-          {locations.map((loc) => (
+          {merchants.map((m) => (
             <Chip
-              key={loc}
-              label={loc}
-              selected={selectedLocation === loc}
-              onPress={() => onSelectLocation(selectedLocation === loc ? null : loc)}
+              key={m}
+              label={m}
+              selected={selectedMerchant === m}
+              onPress={() => onSelectMerchant(selectedMerchant === m ? null : m)}
+              // Slugify the merchant name so the testID has no spaces (e.g.
+              // "Danish Bacon" -> "danish-bacon"), keeping Maestro selectors
+              // stable — matching the codebase's filter-chip convention.
+              testID={`market-filter-merchant-${vendorSlug(m)}`}
+              styles={styles}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
+
+      {/* Country chips */}
+      {countries.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+          testID="market-filter-countries"
+        >
+          <Text style={styles.rowLabel}>Country</Text>
+          <Chip
+            label="All"
+            selected={selectedCountry === null}
+            onPress={() => onSelectCountry(null)}
+            testID="market-filter-country-all"
+            styles={styles}
+          />
+          {countries.map((c) => (
+            <Chip
+              key={c}
+              label={c}
+              selected={selectedCountry === c}
+              onPress={() => onSelectCountry(selectedCountry === c ? null : c)}
               // Slugify the country so the testID has no spaces (e.g.
               // "United Kingdom" -> "united-kingdom"), keeping Maestro
               // selectors stable — matching the codebase's filter-chip
               // convention (per Copilot review on #948).
-              testID={`market-filter-location-${vendorSlug(loc)}`}
+              testID={`market-filter-country-${vendorSlug(c)}`}
               styles={styles}
             />
           ))}
