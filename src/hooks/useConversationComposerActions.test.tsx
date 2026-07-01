@@ -29,6 +29,9 @@ jest.mock('../components/BrandedAlert', () => ({
 
 const EVENT_ID = 'rumor-event-id-857';
 const PUBKEY = 'a'.repeat(64);
+// Target relays the send fans out to — carried on onRumorReady so the
+// pending/failed status can seed its relay breakdown for the info sheet.
+const RELAYS = ['wss://a', 'wss://b'];
 
 function setup() {
   const setMessages = jest.fn();
@@ -69,8 +72,12 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
         // The hook fires onRumorReady synchronously — at that instant the store
         // must already carry a PENDING status (the instant bubble).
-        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14 });
-        pendingSeenInStore = getDmDeliveryStatus(EVENT_ID)?.pending === true;
+        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
+        const seeded = getDmDeliveryStatus(EVENT_ID);
+        pendingSeenInStore = seeded?.pending === true;
+        // The pending status seeds its relay breakdown from the target relays
+        // (the missing-relays fix): the info sheet can list them while in flight.
+        expect(Object.keys(seeded?.relayResults ?? {})).toEqual(RELAYS);
         return { success: true, delivery: delivered };
       },
     );
@@ -108,7 +115,7 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     };
     mockSendDirectMessage.mockImplementation(
       async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
-        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14 });
+        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
         return { success: false, delivery: failedDelivery, error: 'all relays down' };
       },
     );
@@ -134,7 +141,7 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       // watchdog must still flip the pending bubble to a red failed tick.
       mockSendDirectMessage.mockImplementation(
         (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
-          hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14 });
+          hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
           return new Promise<SendResult>(() => {}); // never settles
         },
       );
@@ -152,6 +159,9 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       const status = getDmDeliveryStatus(EVENT_ID);
       expect(status?.pending).toBeFalsy();
       expect(status?.delivered).toBe(false);
+      // The hung-send failed status still carries the attempted relays (seeded
+      // as failed) so the info sheet lists them — not an empty breakdown.
+      expect(Object.keys(status?.relayResults ?? {})).toEqual(RELAYS);
     } finally {
       jest.useRealTimers();
     }
@@ -175,7 +185,7 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     let finalize: ((d: DeliveryStatus) => void) | undefined;
     mockSendDirectMessage.mockImplementation(
       async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
-        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14 });
+        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
         finalize = hooks?.onDeliveryFinalized;
         return { success: true, delivery: earlySingle };
       },

@@ -39,6 +39,8 @@ import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
@@ -46,6 +48,7 @@ import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
+  deriveGroupWireKind,
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
@@ -61,7 +64,7 @@ type GroupConversationNavigation = NativeStackNavigationProp<
 
 // Pre-classified variant of GroupMessage — created in a useMemo so
 // classifyMessageContent is NOT called inside the hot renderMessage path.
-type ClassifiedMessage = GroupMessage & { content: BubbleContent };
+type ClassifiedMessage = GroupMessage & { content: BubbleContent; wireKind: 14 | 15 };
 
 interface MemberRow {
   pubkey: string;
@@ -244,6 +247,7 @@ const GroupConversationScreen: React.FC = () => {
     handleShareContactPicked,
     handleSendInvoiceToGroup,
     handleSendVoiceNote,
+    resendText,
   } = useGroupComposerActions({
     group,
     draft,
@@ -255,6 +259,17 @@ const GroupConversationScreen: React.FC = () => {
     setContactPickerOpen,
     setVoiceSheetOpen,
   });
+
+  // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
+  // Group sends aren't per-relay tracked (no delivery store), so the sheet
+  // shows the protocol/kind/event-id metadata + a Re-publish for sent text.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
   // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
@@ -360,7 +375,15 @@ const GroupConversationScreen: React.FC = () => {
     // Sanitise before classify so a tofu placeholder (#764) never reaches
     // the bubble's text branch.
     () =>
-      messages.map((m) => ({ ...m, content: classifyMessageContent(sanitizeDisplayText(m.text)) })),
+      messages.map((m) => ({
+        ...m,
+        content: classifyMessageContent(sanitizeDisplayText(m.text)),
+        // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
+        // stored text rather than hard-coding 14, so the info sheet reports
+        // kind-15 for voice/image file bubbles. Precomputed here (not in the
+        // hot renderMessage path) alongside the content classification.
+        wireKind: deriveGroupWireKind(m.text),
+      })),
     [messages],
   );
 
@@ -401,6 +424,13 @@ const GroupConversationScreen: React.FC = () => {
           onOpenGifFullscreen={setFullscreenGifUrl}
           onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
+          // Group DMs are NIP-17 gift-wrapped: kind-14 chat or kind-15 encrypted
+          // file (voice/image). The info sheet reads the protocol/kind off this,
+          // so pass the per-message wireKind derived above rather than a hard
+          // 14. Group sends aren't per-relay tracked, so no deliveryStatus (the
+          // sheet shows "Not tracked").
+          wireKind={item.wireKind}
+          onShowInfo={handleShowInfo}
           testIdPrefix="group-conversation"
         />
       );
@@ -413,6 +443,7 @@ const GroupConversationScreen: React.FC = () => {
       openSharedContact,
       openLocation,
       isInvoicePaid,
+      handleShowInfo,
     ],
   );
 
@@ -746,6 +777,11 @@ const GroupConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );
