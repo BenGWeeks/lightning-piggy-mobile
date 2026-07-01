@@ -136,7 +136,16 @@ export const BubbleFooter: React.FC<{
           so the affordance wasn't discoverable (#856 follow-up). Rendered for
           any bubble that has an info handler, on both sent + received. */}
       {onOpenInfo ? (
-        <View testID={`dm-bubble-info-icon-${messageId}`} accessibilityElementsHidden>
+        <View
+          testID={`dm-bubble-info-icon-${messageId}`}
+          // Decorative — the parent touch target already carries the label/role.
+          // Hide from BOTH accessibility trees: `accessibilityElementsHidden` is
+          // iOS-only, so add `importantForAccessibility="no-hide-descendants"`
+          // for Android so the shield isn't focused/announced separately (Copilot).
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
           <ShieldCheck size={12} color={infoTint} strokeWidth={2.25} />
         </View>
       ) : null}
