@@ -102,21 +102,25 @@ const MarketFilterBar: React.FC<Props> = ({
   // the exit transition so the panel animates OUT before it unmounts.
   const translateX = useRef(new Animated.Value(panelWidth)).current;
   const [rendered, setRendered] = useState(visible);
+  // Track the previous open state so we only animate on an actual open/close
+  // TRANSITION — not on every re-run (e.g. a `panelWidth` change from rotation
+  // while the panel is already open, which must NOT re-trigger the slide).
+  const wasVisible = useRef(false);
 
   useEffect(() => {
-    if (visible) {
+    const opening = visible && !wasVisible.current;
+    const closing = !visible && wasVisible.current;
+    wasVisible.current = visible;
+
+    if (opening) {
       setRendered(true);
       // Snap to the CURRENT panel width before animating in, so a width change
       // while the panel was closed (rotation / tablet resize) can't leave the
       // ref holding a stale width and briefly show the drawer partially
       // on-screen — it always starts fully off to the right.
       translateX.setValue(panelWidth);
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 220,
-        useNativeDriver: true,
-      }).start();
-    } else {
+      Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+    } else if (closing) {
       Animated.timing(translateX, {
         toValue: panelWidth,
         duration: 200,
@@ -124,6 +128,12 @@ const MarketFilterBar: React.FC<Props> = ({
       }).start(({ finished }) => {
         if (finished) setRendered(false);
       });
+    } else if (!visible) {
+      // Closed and a width change came through (rotation while closed): keep the
+      // off-screen resting position in sync so the NEXT open still starts fully
+      // hidden. Deliberately does nothing while OPEN, so rotation mid-session
+      // can't make the drawer jump off and slide back in.
+      translateX.setValue(panelWidth);
     }
   }, [visible, panelWidth, translateX]);
 
