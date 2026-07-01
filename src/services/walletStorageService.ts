@@ -245,13 +245,29 @@ export async function deleteMnemonic(walletId: string): Promise<void> {
 // Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
 // receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
 // no balance or transaction residue behind — a privacy concern on shared
-// devices. Best-effort: an absent key is a multiRemove no-op.
+// devices. An absent key is a multiRemove no-op.
+//
+// This backs a privacy guarantee, so a failure must not be swallowed silently:
+// if the batch multiRemove throws (transient storage error), we log it and fall
+// back to best-effort per-key removes so a single bad key can't leave the whole
+// set of blobs on disk.
 export async function deleteWalletCaches(walletId: string): Promise<void> {
-  await AsyncStorage.multiRemove([
-    `balance_${walletId}`,
-    `txs_${walletId}`,
-    `seenReceipts_${walletId}`,
-  ]).catch(() => {});
+  const keys = [`balance_${walletId}`, `txs_${walletId}`, `seenReceipts_${walletId}`];
+  try {
+    await AsyncStorage.multiRemove(keys);
+  } catch (err) {
+    console.warn(
+      `deleteWalletCaches: multiRemove failed for ${walletId}, falling back per-key`,
+      err,
+    );
+    await Promise.all(
+      keys.map((k) =>
+        AsyncStorage.removeItem(k).catch((e) =>
+          console.warn(`deleteWalletCaches: removeItem failed for ${k}`, e),
+        ),
+      ),
+    );
+  }
 }
 
 // --- Electrum / block-explorer server ---

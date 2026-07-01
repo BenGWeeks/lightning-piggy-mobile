@@ -41,4 +41,27 @@ describe('deleteWalletCaches', () => {
   it('is a no-op when the wallet has no cached blobs', async () => {
     await expect(deleteWalletCaches('absent')).resolves.toBeUndefined();
   });
+
+  it('falls back to per-key removeItem when the batch multiRemove fails', async () => {
+    // A privacy helper must not silently leave residue when the batch throws.
+    await AsyncStorage.setItem('balance_w1', '1234');
+    await AsyncStorage.setItem('txs_w1', '[]');
+    await AsyncStorage.setItem('seenReceipts_w1', '[]');
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const multiRemove = jest
+      .spyOn(AsyncStorage, 'multiRemove')
+      .mockRejectedValueOnce(new Error('transient storage error'));
+
+    await deleteWalletCaches('w1');
+
+    // Despite the batch failure, every target blob is gone via the per-key path.
+    expect(await AsyncStorage.getItem('balance_w1')).toBeNull();
+    expect(await AsyncStorage.getItem('txs_w1')).toBeNull();
+    expect(await AsyncStorage.getItem('seenReceipts_w1')).toBeNull();
+    expect(warn).toHaveBeenCalled();
+
+    multiRemove.mockRestore();
+    warn.mockRestore();
+  });
 });
