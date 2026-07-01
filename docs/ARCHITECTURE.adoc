@@ -167,7 +167,7 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 
 | Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `amberService.ts`, `nostrRelayStorage.ts`, `trustGraphService.ts`
 | Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts` / `nostrLiveDmSub.ts`, `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
-| Background DM | `backgroundDmService.ts`, `backgroundDmHeadlessTask.ts`, `backgroundDmPreference.ts`
+| Background sync / DM ping | `backgroundTask.ts` (registers the periodic `expo-background-task` — WorkManager on Android / BGTaskScheduler on iOS — that runs while the UI isn't mounted), `backgroundSyncService.ts` (the headless detect-and-ping worker: notices new encrypted inbound traffic and fires a generic notification without decrypting — works for both nsec and Amber users). See `architecture/notifications.adoc`.
 | Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `nostrPlacesNip52.ts`, `republishPiggyService.ts`
 | Wallet — Lightning | `nwcService.ts`, `nwcEncryption.ts`, `nwcRelayHealth.ts`, `nwcErrors.ts`, `lnurlService.ts`, `lnurlWithdrawService.ts`
 | Wallet — on-chain | `onchainService.ts` (BDK), `boltzService.ts`, `swapRecoveryService.ts`, `walletStorageService.ts`
