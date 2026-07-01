@@ -33,6 +33,7 @@ import {
   deleteXpub,
   deleteMnemonic,
   deleteWalletCaches,
+  bestEffortMultiRemove,
 } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
@@ -1185,9 +1186,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // content must not survive logout / account wipe, so remove every blob.
       if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
     }
-    await AsyncStorage.multiRemove(toRemove);
-    // Per-wallet balance/txs/seenReceipts caches for every wallet bound to this
-    // identity — via deleteWalletCaches so the key set can't drift from removeWallet.
+    // Best-effort so a transient multiRemove rejection can't abort the wipe below.
+    await bestEffortMultiRemove(toRemove);
     await Promise.all(walletIds.map((id) => deleteWalletCaches(id)));
     // Decrypted DM plaintext must not survive logout / account wipe (#689
     // review / #690): delete the file-backed wrap + skip-set caches and this

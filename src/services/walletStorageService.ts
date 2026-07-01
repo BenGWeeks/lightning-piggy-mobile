@@ -242,32 +242,30 @@ export async function deleteMnemonic(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
 }
 
-// Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
-// receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
-// no balance or transaction residue behind — a privacy concern on shared
-// devices. An absent key is a multiRemove no-op.
-//
-// This backs a privacy guarantee, so a failure must not be swallowed silently:
-// if the batch multiRemove throws (transient storage error), we log it and fall
-// back to best-effort per-key removes so a single bad key can't leave the whole
-// set of blobs on disk.
-export async function deleteWalletCaches(walletId: string): Promise<void> {
-  const keys = [`balance_${walletId}`, `txs_${walletId}`, `seenReceipts_${walletId}`];
+// Best-effort AsyncStorage.multiRemove: if the batch rejects (a transient
+// storage error), log once and fall back to per-key removeItem so one bad key
+// can't strand the whole set — and the caller's wipe can still finish. Backs
+// privacy wipes, so failures are never swallowed silently. Absent keys no-op.
+export async function bestEffortMultiRemove(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
   try {
     await AsyncStorage.multiRemove(keys);
   } catch (err) {
-    console.warn(
-      `deleteWalletCaches: multiRemove failed for ${walletId}, falling back per-key`,
-      err,
-    );
-    await Promise.all(
-      keys.map((k) =>
-        AsyncStorage.removeItem(k).catch((e) =>
-          console.warn(`deleteWalletCaches: removeItem failed for ${k}`, e),
-        ),
-      ),
-    );
+    console.warn(`bestEffortMultiRemove: multiRemove failed (${keys.length} keys), per-key`, err);
+    await Promise.allSettled(keys.map((k) => AsyncStorage.removeItem(k)));
   }
+}
+
+// Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
+// receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
+// no balance or transaction residue behind — a privacy concern on shared
+// devices.
+export async function deleteWalletCaches(walletId: string): Promise<void> {
+  await bestEffortMultiRemove([
+    `balance_${walletId}`,
+    `txs_${walletId}`,
+    `seenReceipts_${walletId}`,
+  ]);
 }
 
 // --- Electrum / block-explorer server ---

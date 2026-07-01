@@ -95,8 +95,8 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
 
-// Scan AsyncStorage for every `group_messages_*` blob and return the
-// set of message ids that look like NIP-17 wrap ids (64-char hex —
+// Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
+// the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to
 // pre-seed `knownWrapIds` on cold start so the live DM sub doesn't
 // redundantly decrypt + re-route group wraps it already processed in
