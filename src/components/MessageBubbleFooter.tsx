@@ -9,10 +9,12 @@ type Styles = MessageBubbleStyles;
 
 /**
  * Delivery indicator for a sent DM (#856, design approved 2026-06-12).
- * WhatsApp-style single/double coverage in the payment-success green:
+ * WhatsApp-style single/double coverage in the delivered-tick colour
+ * (`styles.deliveryTickDelivered` — currently white for contrast on the sent
+ * bubble; theme-driven, so don't assume a literal colour here):
  *   - pending (no relay acked yet) → faint Clock
- *   - delivered to ≥1 but not all target relays → single green Check
- *   - delivered to ALL target relays → double green CheckCheck
+ *   - delivered to ≥1 but not all target relays → single Check
+ *   - delivered to ALL target relays → double CheckCheck
  *   - failed (every relay rejected) → red AlertCircle
  * Single→double is computed from the per-relay `relayResults`; the exact
  * "Sent to N of M relays" breakdown lives behind a long-press (recipient relay
@@ -53,18 +55,20 @@ const DeliveryTick: React.FC<{
     );
   }
 
-  const green = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
+  // Theme-driven delivered-tick colour (white today, may change by theme) — not
+  // necessarily green, so name it semantically rather than by hue.
+  const deliveredColor = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
   // All target relays acked → double tick; otherwise ≥1 → single tick.
   if (ok === total) {
     return (
       <View testID={testID} accessibilityLabel="Sent to all relays">
-        <CheckCheck size={14} strokeWidth={2.5} color={green} />
+        <CheckCheck size={14} strokeWidth={2.5} color={deliveredColor} />
       </View>
     );
   }
   return (
     <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
-      <Check size={13} strokeWidth={2.5} color={green} />
+      <Check size={13} strokeWidth={2.5} color={deliveredColor} />
     </View>
   );
 };
@@ -118,9 +122,13 @@ export const BubbleFooter: React.FC<{
       // reachable by screen readers (long-press alone isn't). (Copilot #858)
       onPress={onOpenInfo}
       onLongPress={onOpenInfo}
-      accessibilityRole="button"
-      accessibilityLabel={fromMe ? 'Delivery status' : 'Message info'}
-      accessibilityHint="Opens message details"
+      // When there's no info handler (tick-only footer) the row is inert — mark
+      // it disabled and drop the button semantics so screen readers don't
+      // announce a focusable control that does nothing (Copilot).
+      disabled={!onOpenInfo}
+      accessibilityRole={onOpenInfo ? 'button' : undefined}
+      accessibilityLabel={onOpenInfo ? (fromMe ? 'Delivery status' : 'Message info') : undefined}
+      accessibilityHint={onOpenInfo ? 'Opens message details' : undefined}
       testID={`dm-bubble-delivery-footer-${messageId}`}
     >
       {/* A small shield next to the time signals the bubble is tappable for
