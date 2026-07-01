@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { Image } from 'expo-image';
 import {
   BottomSheetModal,
   BottomSheetView,
@@ -167,7 +168,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <Image
                   source={{ uri: product.image }}
                   style={styles.thumb}
-                  resizeMode="cover"
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  recyclingKey={product.image}
                   onError={() => setImageFailed(true)}
                 />
               ) : (

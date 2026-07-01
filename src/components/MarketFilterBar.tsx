@@ -106,6 +106,11 @@ const MarketFilterBar: React.FC<Props> = ({
   useEffect(() => {
     if (visible) {
       setRendered(true);
+      // Snap to the CURRENT panel width before animating in, so a width change
+      // while the panel was closed (rotation / tablet resize) can't leave the
+      // ref holding a stale width and briefly show the drawer partially
+      // on-screen — it always starts fully off to the right.
+      translateX.setValue(panelWidth);
       Animated.timing(translateX, {
         toValue: 0,
         duration: 220,
@@ -249,7 +254,7 @@ const MarketFilterBar: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.doneButton}
           onPress={onClose}
-          accessibilityLabel="Apply filters"
+          accessibilityLabel="Close filters"
           testID="market-filter-done"
           activeOpacity={0.8}
         >

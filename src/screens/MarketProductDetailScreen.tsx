@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, Image, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
+import { Image } from 'expo-image';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -138,7 +139,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Image
               source={{ uri: product.image }}
               style={styles.image}
-              resizeMode="cover"
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={product.image}
               onError={() => setImageFailed(true)}
             />
           ) : (
