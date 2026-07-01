@@ -97,7 +97,7 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       skipKey: 'skip_key',
     });
     expect(res.entries).toEqual([
-      { id: 'w1', partnerPubkey: ALICE, fromMe: false, createdAt: 100, text: `msg-from-${ALICE.slice(0, 4)}`, wireKind: 14 }, // prettier-ignore
+      { id: 'w1', partnerPubkey: ALICE, fromMe: false, createdAt: 100, text: `msg-from-${ALICE.slice(0, 4)}`, renderText: `msg-from-${ALICE.slice(0, 4)}`, wireKind: 14 }, // prettier-ignore
     ]);
     expect(res.stored).toBe(1);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
@@ -135,6 +135,10 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     });
     expect(res.entries[0].text).toBe('🛒 Order Placed · 21 sats');
     expect(res.entries[0].text).not.toContain('{');
+    // renderText carries the raw order JSON so the conversation thread renders
+    // the order card on the FIRST open (the inbox `text` preview can't be parsed
+    // back into a card). #market
+    expect(res.entries[0].renderText).toBe(orderJson);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
     expect(rows[0].wireKind).toBe(16);
