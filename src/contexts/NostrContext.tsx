@@ -52,6 +52,7 @@ import { wipeDmStoresForAccount } from './dmAccountWipe';
 import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
 import { wipeLocalDmStore } from '../services/localDb';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
+import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
@@ -1186,7 +1187,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
     // content must not survive logout / account wipe, so remove every blob.
     for (const k of allKeys) {
-      if (k.startsWith('group_messages_')) toRemove.push(k);
+      if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
     }
     await AsyncStorage.multiRemove(toRemove);
     // Decrypted DM plaintext must not survive logout / account wipe (#689
