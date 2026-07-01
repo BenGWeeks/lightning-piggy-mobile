@@ -112,6 +112,51 @@ Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the sc
 
 On top of these, Lightning Piggy Mobile uses the [Boltz v2](https://docs.boltz.exchange) submarine swap API for trustless Lightning ↔ on-chain transfers.
 
+## Architecture
+
+Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.83) that runs from a **custom dev-client** — it ships custom native modules, so Expo Go is not used. Lightning payments ride on **Nostr Wallet Connect (NWC)**; the social layer is **Nostr** (encrypted DMs, zaps, contacts, geo-caches). A fuller write-up lives in [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc).
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Screens & Components  (src/screens, src/components)         │
+│  Home · Messages · Explore · Friends + Account drawer        │
+├─────────────────────────────────────────────────────────────┤
+│  Navigation  (src/navigation/AppNavigator.tsx)              │
+│  4 tabs → Explore stack · account drawer · root stack        │
+├─────────────────────────────────────────────────────────────┤
+│  Contexts  (src/contexts)          Hooks  (src/hooks)        │
+│  WalletContext · NostrContext ·    UI-facing per-feature     │
+│  Groups · TrustGraph · LiveLoc     logic                     │
+├─────────────────────────────────────────────────────────────┤
+│  Services  (src/services) — by domain                        │
+│  Nostr (nostrService, dm*, places) · Wallet (nwcService,     │
+│  onchainService/BDK, lnurl, boltz) · location/geofence ·     │
+│  media upload · NFC · notifications                          │
+├─────────────────────────────────────────────────────────────┤
+│  Persistence                                                 │
+│  SQLCipher DM store (op-sqlite) · expo-secure-store (keys) · │
+│  AsyncStorage caches (per-account namespaced)                │
+├─────────────────────────────────────────────────────────────┤
+│  Native  (modules/, plugins/)                                │
+│  amber-signer (NIP-55 IPC) · background-dm-service (#279) ·  │
+│  Expo config plugins (NFC, foreground service, Amber queries)│
+└─────────────────────────────────────────────────────────────┘
+        │                    │                     │
+   Nostr relays        NWC wallet svc        Electrum / Boltz
+   (DMs, zaps,         (pay_invoice,         (on-chain sync,
+    contacts, caches)   get_balance)          LN↔on-chain swaps)
+```
+
+**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. Two Android-only **native modules** (`amber-signer`, `background-dm-service`) and a set of **Expo config plugins** round out the stack.
+
+**Key data flows.**
+
+- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB; a background foreground-service keeps the subscription alive on Android.
+- **Paying over NWC** — a scanned invoice (or an LNURL-pay / Lightning address resolved to a BOLT-11) is sent to the wallet service as an encrypted NIP-47 `pay_invoice` request over the NWC relay; the encrypted response updates balance and history. Zaps (kind 9734 request → 9735 receipt) ride the same rail.
+- **Publishing a geo-cache ("Piglet")** — a NIP-GC listing (kind 37516) is published with a NIP-32 payout label and a stable `d` tag; the LNURL-withdraw bearer stays on the physical NFC tag / QR and in the hider's secure store, never on the public event. Claims record a found-log (kind 7516).
+
+See [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc) for the module map, the full Nostr event-kind reference, signer options (nsec / Amber; NIP-46 planned), and persistence detail.
+
 ## Getting Started
 
 ### Prerequisites
