@@ -1182,11 +1182,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
     for (const k of allKeys) {
       if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
-    }
-    // group_messages_* holds decrypted group-chat plaintext keyed by random
-    // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
-    // content must not survive logout / account wipe, so remove every blob.
-    for (const k of allKeys) {
+      // group_messages_* holds decrypted group-chat plaintext keyed by random
+      // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
+      // content must not survive logout / account wipe, so remove every blob.
       if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
     }
     await AsyncStorage.multiRemove(toRemove);

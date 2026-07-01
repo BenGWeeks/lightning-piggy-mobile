@@ -996,12 +996,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.deleteCoinosRecovery(walletId);
       }
 
-      // Delete the per-wallet balance/txs/seenReceipts caches BEFORE persisting
-      // the shortened wallet list. If the ordering were reversed and the app
-      // crashed between saveWalletList and the cache delete, the wallet would be
-      // gone from the list yet its cached blobs would linger as orphaned residue
-      // — exactly the privacy leak this change is meant to prevent.
-      await walletStorage.deleteWalletCaches(walletId);
+      await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
 
