@@ -1,17 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import {
-  Zap,
-  MapPin,
-  UserRound,
-  Radio,
-  Check,
-  CheckCheck,
-  Clock,
-  AlertCircle,
-  ShieldCheck,
-} from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import {
   createMessageBubbleStyles,
@@ -35,7 +25,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import { summariseDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
@@ -43,6 +33,7 @@ import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
 import LibreMiniMap from './LibreMiniMap';
+import { BubbleFooter } from './MessageBubbleFooter';
 
 // Stable empty arrays for the location-card mini-maps — LibreMiniMap
 // requires merchants/caches/events, but DM cards never plot any. Module
@@ -133,146 +124,7 @@ interface Props {
   }) => void;
 }
 
-/**
- * Delivery indicator for a sent DM (#856, design approved 2026-06-12).
- * WhatsApp-style single/double coverage in the payment-success green:
- *   - pending (no relay acked yet) → faint Clock
- *   - delivered to ≥1 but not all target relays → single green Check
- *   - delivered to ALL target relays → double green CheckCheck
- *   - failed (every relay rejected) → red AlertCircle
- * Single→double is computed from the per-relay `relayResults`; the exact
- * "Sent to N of M relays" breakdown lives behind a long-press (recipient relay
- * lists run to 11, so one glyph per relay would be noise). Retry/outbox for the
- * failed state is #857 — this only renders the distinct visual.
- */
-const DeliveryTick: React.FC<{
-  styles: Styles;
-  status: DeliveryStatus;
-  testID: string;
-}> = ({ styles, status, testID }) => {
-  const { ok, total } = summariseDelivery(status);
-  // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
-  // node Maestro can resolve — testIDs on lucide-react-native icons don't
-  // reliably surface in the accessibility tree.
-
-  // Still in flight — the optimistic bubble before any relay has settled (#857).
-  // Keyed off the explicit `pending` flag, not `total === 0`, so a settled
-  // all-failed send (zero relays accepted) renders the red glyph below instead.
-  if (status.pending) {
-    return (
-      <View testID={testID} accessibilityLabel="Message sending">
-        <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
-      </View>
-    );
-  }
-
-  // No relay accepted (every relay rejected, or a hard pre-publish error) →
-  // failed. The bubble's tap opens the info sheet with a Re-publish action.
-  if (ok === 0) {
-    return (
-      <View testID={testID} accessibilityLabel="Send failed">
-        <AlertCircle
-          size={13}
-          color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
-        />
-      </View>
-    );
-  }
-
-  const green = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
-  // All target relays acked → double tick; otherwise ≥1 → single tick.
-  if (ok === total) {
-    return (
-      <View testID={testID} accessibilityLabel="Sent to all relays">
-        <CheckCheck size={14} strokeWidth={2.5} color={green} />
-      </View>
-    );
-  }
-  return (
-    <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
-      <Check size={13} strokeWidth={2.5} color={green} />
-    </View>
-  );
-};
-
 type Styles = MessageBubbleStyles;
-
-/**
- * Shared time-row footer for every bubble variant (#856). Renders the
- * timestamp and, on a sent (`fromMe`) bubble that carries a tracked
- * `deliveryStatus`, the delivery tick beside it — long-pressable to open the
- * per-relay breakdown. Received bubbles and untracked sends fall back to the
- * bare timestamp, so this is a drop-in for each variant's old `<Text>` time.
- *
- * `timeStyle` is the variant's existing time text style (e.g. `gifTime`,
- * `imageBubbleTime`, `bubbleTime`) so each card keeps its own ink/placement;
- * only the tick is appended.
- */
-const BubbleFooter: React.FC<{
-  styles: Styles;
-  // Per-message id so the footer/tick testIDs are unique within a thread that
-  // has many bubbles (Copilot #858) — Maestro can still match the bare prefix.
-  messageId: string;
-  fromMe: boolean;
-  createdAt: number;
-  timeStyle: object | (object | undefined)[];
-  deliveryStatus?: DeliveryStatus;
-  // Opens the message-info sheet (tap or long-press) for sent AND received.
-  onOpenInfo?: () => void;
-  // Tint for the info-affordance shield (#856 discoverability). White on a
-  // coloured (sent) bubble, supplementary grey on a surface (received) one — so
-  // it reads on either background.
-  infoTint: string;
-}> = ({
-  styles,
-  messageId,
-  fromMe,
-  createdAt,
-  timeStyle,
-  deliveryStatus,
-  onOpenInfo,
-  infoTint,
-}) => {
-  const showTick = fromMe && !!deliveryStatus;
-  // No info handler and no tick → plain timestamp (e.g. a legacy row).
-  if (!onOpenInfo && !showTick) {
-    return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
-  }
-  return (
-    <TouchableOpacity
-      style={styles.bubbleFooterRow}
-      activeOpacity={onOpenInfo ? 0.6 : 1}
-      // Tap AND long-press both open the info sheet — tap is discoverable and
-      // reachable by screen readers (long-press alone isn't). (Copilot #858)
-      onPress={onOpenInfo}
-      onLongPress={onOpenInfo}
-      accessibilityRole="button"
-      accessibilityLabel={fromMe ? 'Delivery status' : 'Message info'}
-      accessibilityHint="Opens message details"
-      testID={`dm-bubble-delivery-footer-${messageId}`}
-    >
-      {/* A small shield next to the time signals the bubble is tappable for
-          encryption + delivery details — previously only the bare time showed,
-          so the affordance wasn't discoverable (#856 follow-up). Rendered for
-          any bubble that has an info handler, on both sent + received. */}
-      {onOpenInfo ? (
-        <View testID={`dm-bubble-info-icon-${messageId}`} accessibilityElementsHidden>
-          <ShieldCheck size={12} color={infoTint} strokeWidth={2.25} />
-        </View>
-      ) : null}
-      {/* Footer-row time zeroes the standalone bubbleTime top margin so the
-          tick sits level with the timestamp (Copilot #858). */}
-      <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
-      {showTick ? (
-        <DeliveryTick
-          styles={styles}
-          status={deliveryStatus as DeliveryStatus}
-          testID={`dm-bubble-delivery-tick-${messageId}`}
-        />
-      ) : null}
-    </TouchableOpacity>
-  );
-};
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
