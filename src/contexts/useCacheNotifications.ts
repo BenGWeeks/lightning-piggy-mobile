@@ -66,6 +66,22 @@ const REFETCH_COORDS_INTERVAL_MS = 60_000;
 // JS thread during warm re-foreground (#751 warm-path audit #5).
 const REFETCH_MIN_GAP_MS = 10_000;
 
+// Per-surface notification copy. Comments and found-logs are separate
+// event kinds now, so the OS notification title should match what actually
+// happened rather than always claiming a "find" (Copilot #760).
+interface NotifyCopy {
+  title: string;
+  body: string;
+}
+const FOUND_LOG_COPY: NotifyCopy = {
+  title: 'New find on your cache',
+  body: 'Open Lightning Piggy to view',
+};
+const COMMENT_COPY: NotifyCopy = {
+  title: 'New comment on your cache',
+  body: 'Open Lightning Piggy to view',
+};
+
 export interface UseCacheNotificationsParams {
   /** Active viewer's hex pubkey. Null when logged out — sub stays closed. */
   pubkey: string | null;
@@ -107,7 +123,12 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // Wall-clock of the last refetch we actually started — see REFETCH_MIN_GAP_MS.
     let lastRefetchStartedAt = 0;
     const seen = new Set<string>();
-    const subOpenedAtSec = Math.floor(Date.now() / 1000);
+    // Freshness baseline. Reset to "now" every time we (re)arm the relay
+    // subscriptions in refetchAndRearm — NOT just once on mount — so the
+    // relay's historical replay that predates a *later* (re)subscribe (e.g.
+    // a cache published mid-session that changes the coord set minutes in)
+    // can't slip past the gate and fire stale notifications (Copilot #760).
+    let subOpenedAtSec = Math.floor(Date.now() / 1000);
 
     // Shared per-event handler. `coordTagKey` is `A` (uppercase NIP-22 root
     // pointer, for kind-1111 comments) or `a` (lowercase NIP-GC cache
@@ -115,7 +136,12 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // filter armed. `broadcast` fans a fresh found-log out on the in-app
     // event bus so an open HuntPiggyDetail refreshes without polling;
     // comments pass `false` (no in-app live surface yet).
-    const handle = (ev: VerifiedEvent, coordTagKey: 'A' | 'a', broadcast: boolean): void => {
+    const handle = (
+      ev: VerifiedEvent,
+      coordTagKey: 'A' | 'a',
+      broadcast: boolean,
+      copy: NotifyCopy,
+    ): void => {
       if (cancelled) return;
       if (seen.has(ev.id)) return;
       seen.add(ev.id);
@@ -149,8 +175,8 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       // resolve those off the hot path and pass them in.
       void fireCacheNotification({
         cacheCoord: coordTag,
-        title: 'New find on your cache',
-        body: 'Open Lightning Piggy to view',
+        title: copy.title,
+        body: copy.body,
       });
 
       if (broadcast) notifyFoundLog(coordTag, ev.id);
@@ -189,17 +215,21 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
           unsubscribeFoundLogs = null;
         }
         if (coords.length === 0) return;
+        // Re-baseline the freshness gate to the moment we (re)arm, so the
+        // replay the relay sends for this fresh subscription (since: now−7d)
+        // stays silent — only events created at/after this re-subscribe fire.
+        subOpenedAtSec = Math.floor(Date.now() / 1000);
         unsubscribeComments = subscribeCacheCommentsForCoords({
           viewerPubkey: pubkey,
           relays: readRelays,
           cacheCoords: coords,
-          onEvent: (ev) => handle(ev, 'A', false),
+          onEvent: (ev) => handle(ev, 'A', false, COMMENT_COPY),
         });
         unsubscribeFoundLogs = subscribeCacheFoundLogsForCoords({
           viewerPubkey: pubkey,
           relays: readRelays,
           cacheCoords: coords,
-          onEvent: (ev) => handle(ev, 'a', true),
+          onEvent: (ev) => handle(ev, 'a', true, FOUND_LOG_COPY),
         });
       } catch {
         // Non-fatal — leave the previous sub (if any) in place; the next
