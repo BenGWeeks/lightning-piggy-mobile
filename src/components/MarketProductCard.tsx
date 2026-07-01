@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
@@ -59,7 +60,8 @@ const MarketProductCard: React.FC<Props> = ({
         <Image
           source={{ uri: product.image }}
           style={styles.image}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
           onError={() => setImageFailed(true)}
         />
       ) : (

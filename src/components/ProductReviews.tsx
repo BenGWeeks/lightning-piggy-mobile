@@ -155,10 +155,13 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     onCount?.(aggregate.count);
   }, [aggregate.count, onCount]);
 
-  const ownReview = useMemo(
-    () => (pubkey ? reviews.find((r) => r.pubkey === pubkey) : undefined),
-    [reviews, pubkey],
-  );
+  const ownReview = useMemo(() => {
+    if (!pubkey) return undefined;
+    // Hex pubkeys are case-insensitive — normalize both sides so an uppercase
+    // hex from any relay/client still matches the current user's own review.
+    const lower = pubkey.toLowerCase();
+    return reviews.find((r) => r.pubkey.toLowerCase() === lower);
+  }, [reviews, pubkey]);
 
   const onSubmit = async (stars: number, content: string) => {
     try {
