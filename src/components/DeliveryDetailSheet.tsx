@@ -103,10 +103,10 @@ export default function DeliveryDetailSheet({
 
   const HeaderIcon = sent ? Send : Inbox;
   const showRelays = sent && relays.length > 0;
-  // While the send is still in flight, the seeded relays are all `failed`
-  // placeholders — render them with a neutral pending Clock (not a red ✗) so an
-  // in-flight send reads as "publishing to these relays", not "all failed".
-  const pending = !!status?.pending;
+  // `sending` (above) is reused for the relay rows below: while the send is
+  // still in flight the seeded relays are all `failed` placeholders, so we
+  // render a neutral pending Clock (not a red ✗) — reads as "publishing to
+  // these relays", not "all failed".
 
   return (
     <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
@@ -136,13 +136,13 @@ export default function DeliveryDetailSheet({
                   <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
                     {isOk ? (
                       <Check size={16} color={colors.green} strokeWidth={3} />
-                    ) : pending ? (
+                    ) : sending ? (
                       <Clock size={16} color={colors.textSupplementary} strokeWidth={2.5} />
                     ) : (
                       <X size={16} color={colors.red} strokeWidth={3} />
                     )}
                     <Text
-                      style={[styles.relayLabel, !isOk && !pending && styles.relayLabelFailed]}
+                      style={[styles.relayLabel, !isOk && !sending && styles.relayLabelFailed]}
                       numberOfLines={1}
                     >
                       {shortRelayLabel(url)}
