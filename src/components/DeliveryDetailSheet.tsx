@@ -54,13 +54,17 @@ export default function DeliveryDetailSheet({
   // settled, so the title says "Sending…" rather than "Sent to 0 of N relays".
   const sending = !!status?.pending;
 
+  // A settled (non-pending) sent status with no relay breakdown (total === 0,
+  // e.g. `failedDelivery({ eventId })` with no relay list) is a tracked FAILURE,
+  // not a success — `delivered` is false and the bubble shows the red tick. Say
+  // "Send failed" so the sheet title doesn't contradict the bubble (Copilot).
   const title = sent
     ? sending
       ? total > 0
         ? `Sending to ${total} relays…`
         : 'Sending…'
       : total === 0
-        ? 'Sent'
+        ? 'Send failed'
         : `Sent to ${ok} of ${total} relays`
     : 'Message received';
 
@@ -74,19 +78,22 @@ export default function DeliveryDetailSheet({
   // A received message has no relay outcomes (we didn't publish it). A SENT
   // message with no delivery data was sent before tracking existed (or its
   // status wasn't persisted) — show "Not tracked", not "Received".
+  // Once a status exists and isn't pending, the send has settled. `ok === 0`
+  // means no relay accepted — a Failure — whether the breakdown is empty
+  // (total === 0, e.g. a pre-publish `failedDelivery`) or every listed relay
+  // rejected. "Not tracked" is reserved for `!status` (Copilot). A previous
+  // `total === 0 ? 'Pending'` branch mislabelled tracked failures as pending.
   const statusLabel = !status
     ? sent
       ? 'Not tracked'
       : 'Received'
     : status.pending
       ? 'Sending'
-      : total === 0
-        ? 'Pending'
-        : ok === 0
-          ? 'Failed'
-          : ok < total
-            ? 'Partially delivered'
-            : 'Delivered';
+      : ok === 0
+        ? 'Failed'
+        : ok < total
+          ? 'Partially delivered'
+          : 'Delivered';
 
   const copyEventId = () => {
     if (!info.eventId) return;
