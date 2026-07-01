@@ -62,6 +62,9 @@ const MarketProductCard: React.FC<Props> = ({
           style={styles.image}
           contentFit="cover"
           cachePolicy="memory-disk"
+          // Stable key so recycled grid tiles don't briefly show the previous
+          // tile's image while scrolling the virtualized list.
+          recyclingKey={product.image}
           onError={() => setImageFailed(true)}
         />
       ) : (
