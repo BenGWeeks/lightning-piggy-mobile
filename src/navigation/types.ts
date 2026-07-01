@@ -108,8 +108,9 @@ export type ExploreStackParamList = {
     | undefined;
   Places: undefined;
   PlaceDetail: { placeId: number };
-  // Market — Lightning Piggy vendor directory ("See all" from the Explore
-  // Market rail). Static list today (see src/data/marketVendors.ts).
+  // Market — Lightning Piggy product grid ("See all" from the Explore Market
+  // rail); tiles open MarketProductDetail. Static catalogue today (see
+  // src/data/marketProducts.ts, resolved to sellers via src/data/marketVendors.ts).
   Market: undefined;
   // Full product page opened from a Market grid tile — product info plus
   // Nostr reviews (kind 31555) + comments (kind 1111). `productId` keys into

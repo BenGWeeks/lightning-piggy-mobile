@@ -77,10 +77,13 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
       accessibilityValue={{ min: 0, max: STARS_MAX, now: value }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
+        // Clamp to 0..STARS_MAX so decrement can reach 0 ("none"), matching the
+        // documented value range and `accessibilityValue.min` above (Copilot
+        // review on #948).
         if (e.nativeEvent.actionName === 'increment') {
           onChange(Math.min(STARS_MAX, value + 1));
         } else if (e.nativeEvent.actionName === 'decrement') {
-          onChange(Math.max(1, value - 1));
+          onChange(Math.max(0, value - 1));
         }
       }}
     >

@@ -1019,16 +1019,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           onSeeAll={onSeeAllMarket}
           seeAllTestId="explore-card-market"
           keyExtractor={(p) => p.id}
-          renderItem={(product) => (
-            <MarketProductCard
-              product={product}
-              sellerName={sellerOf(product)?.name ?? product.sellerName}
-              vendor={sellerOf(product)}
-              variant="rail"
-              onPress={() => openMarketProduct(product)}
-              testID={`market-product-card-${product.id}`}
-            />
-          )}
+          renderItem={(product) => {
+            // Resolve the vendor once — `sellerOf` linearly scans
+            // MARKET_VENDORS, so reuse it for both props (Copilot review on
+            // #948).
+            const vendor = sellerOf(product);
+            return (
+              <MarketProductCard
+                product={product}
+                sellerName={vendor?.name ?? product.sellerName}
+                vendor={vendor}
+                variant="rail"
+                onPress={() => openMarketProduct(product)}
+                testID={`market-product-card-${product.id}`}
+              />
+            );
+          }}
         />
 
         <ContentRail<{ event: ParsedEvent; distance: number }>

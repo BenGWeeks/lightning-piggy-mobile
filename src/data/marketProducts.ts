@@ -119,7 +119,10 @@ export const MARKET_PRODUCTS: MarketProduct[] = [
     description: 'Wonderful Lightning Piggy merch — piggies incoming.',
     priceSats: gbpToSats(25),
     priceFiatLabel: '£25',
-    image: 'https://lightningpiggy.com/images/logos/danish-bacon.png',
+    // SatoshiStore's own avatar (their shop og:image is a text-printed t-shirt
+    // photo; see the vendor entry in marketVendors.ts) — NOT the Danish Bacon
+    // logo, which would mis-brand this seller's product (Copilot review on #948).
+    image: 'https://unavatar.io/twitter/satoshistoreio',
     sellerName: 'SatoshiStore.io',
     url: 'https://satoshistore.io/collections/lightning-piggy',
     featured: false,
