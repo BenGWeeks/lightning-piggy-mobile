@@ -1,6 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, Image, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
@@ -8,10 +10,23 @@ import { marketFeedbackContext } from '../utils/marketFeedback';
 import VendorAvatar from '../components/VendorAvatar';
 import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
-import type { ExploreNavigation, MarketProductDetailRoute } from '../navigation/types';
+import MarketCheckoutSheet from '../components/MarketCheckoutSheet';
+import type {
+  ExploreNavigation,
+  MarketProductDetailRoute,
+  RootStackParamList,
+} from '../navigation/types';
+
+// Composite nav type so the "Buy" flow can `navigate('Conversation', …)` after
+// placing an order — the Conversation route lives on the root stack, not the
+// Explore stack (same pattern as HuntPiggyDetailScreen).
+type MarketProductDetailNavigation = CompositeNavigationProp<
+  ExploreNavigation,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 interface Props {
-  navigation: ExploreNavigation;
+  navigation: MarketProductDetailNavigation;
   route: MarketProductDetailRoute;
 }
 
@@ -28,6 +43,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
   const [loginVisible, setLoginVisible] = useState(false);
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
 
   const product = useMemo(
     () => MARKET_PRODUCTS.find((p) => p.id === route.params.productId),
@@ -39,14 +55,34 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (product ? marketFeedbackContext(product, vendor) : null),
     [product, vendor],
   );
+  // In-app checkout is available exactly when the seller has a Nostr identity to
+  // address the order to (same gate as reviews/comments). The merchant pubkey is
+  // resolved once by `marketFeedbackContext`.
+  const vendorPubkey = feedback?.merchantPubkey ?? null;
 
   const onRequestSignIn = useCallback(() => setLoginVisible(true), []);
+  // In-app order for sellers with a Nostr identity; external website otherwise.
   const openShop = useCallback(() => {
     if (!product) return;
+    if (vendorPubkey) {
+      setCheckoutVisible(true);
+      return;
+    }
     Linking.openURL(product.url).catch(() => {
       // Swallow — a malformed/unsupported URL shouldn't crash the screen.
     });
-  }, [product]);
+  }, [product, vendorPubkey]);
+
+  const onOrderPlaced = useCallback(
+    (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => {
+      navigation.navigate('Conversation', {
+        pubkey: info.vendorPubkey,
+        name: info.vendorName,
+        picture: info.vendorLogo ?? null,
+      });
+    },
+    [navigation],
+  );
 
   if (!product) {
     return (
@@ -138,7 +174,11 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
             <Text style={styles.buyText}>Buy from {sellerName}</Text>
-            <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
+            {/* In-app checkout for Nostr sellers; the external-link glyph is only
+                shown when tapping Buy leaves the app for the seller's website. */}
+            {vendorPubkey ? null : (
+              <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
+            )}
           </TouchableOpacity>
         </View>
 
@@ -161,6 +201,19 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         )}
       </ScrollView>
+
+      {vendorPubkey ? (
+        <MarketCheckoutSheet
+          visible={checkoutVisible}
+          onClose={() => setCheckoutVisible(false)}
+          product={product}
+          sellerName={sellerName}
+          vendorPubkey={vendorPubkey}
+          vendorLogo={vendor?.logo}
+          onRequestSignIn={onRequestSignIn}
+          onPlaced={onOrderPlaced}
+        />
+      ) : null}
 
       <NostrLoginSheet visible={loginVisible} onClose={() => setLoginVisible(false)} />
     </View>
