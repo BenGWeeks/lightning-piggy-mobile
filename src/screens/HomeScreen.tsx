@@ -276,6 +276,16 @@ const HomeScreen: React.FC = () => {
   // Transfer needs at least two wallets (a source + destination).
   const isTransferDisabled = walletsHydrated && wallets.length < 2;
 
+  // Render the (virtualized) TransactionList only on the real-wallet branch:
+  // a wallet is selected, we're not on the carousel's "Add wallet" card, and
+  // the first-load spinner has finished. The other branches stay in a
+  // ScrollView (see below) so pull-to-refresh still works on empty states.
+  const showTransactionList =
+    hasWallets &&
+    !addCardActive &&
+    activeWalletId !== null &&
+    !(loadingTransactions && transactions.length === 0);
+
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
@@ -350,35 +360,44 @@ const HomeScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Transaction list */}
+      {/* Transaction list. The list branch renders TransactionList's FlatList
+          directly as the scroller (passing the RefreshControl through), so the
+          list virtualizes properly. The non-list branches (welcome / add-wallet
+          / first-load spinner) stay in a ScrollView so pull-to-refresh keeps
+          working on them too. */}
       <View style={styles.transactionsWrapper}>
-        <ScrollView
-          style={styles.transactionsContainer}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-        >
-          {!hasWallets ? (
-            <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
-          ) : addCardActive || activeWalletId === null ? (
-            // On the "Add wallet" card (or no active wallet) show an add-wallet
-            // prompt rather than the previous wallet's transactions (#666).
-            <View style={styles.emptyState}>
-              <TouchableOpacity
-                onPress={() => setWizardOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Add a wallet"
-                testID="home-add-wallet-empty"
-              >
-                <Text style={styles.addWalletText}>+ Add a Wallet</Text>
-              </TouchableOpacity>
-            </View>
-          ) : loadingTransactions && transactions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color="#EC008C" />
-            </View>
-          ) : (
-            <TransactionList transactions={transactions} />
-          )}
-        </ScrollView>
+        {showTransactionList ? (
+          <TransactionList
+            transactions={transactions}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          />
+        ) : (
+          <ScrollView
+            style={styles.transactionsContainer}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          >
+            {!hasWallets ? (
+              <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
+            ) : addCardActive || activeWalletId === null ? (
+              // On the "Add wallet" card (or no active wallet) show an add-wallet
+              // prompt rather than the previous wallet's transactions (#666).
+              <View style={styles.emptyState}>
+                <TouchableOpacity
+                  onPress={() => setWizardOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a wallet"
+                  testID="home-add-wallet-empty"
+                >
+                  <Text style={styles.addWalletText}>+ Add a Wallet</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <ActivityIndicator size="small" color="#EC008C" />
+              </View>
+            )}
+          </ScrollView>
+        )}
       </View>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
