@@ -247,9 +247,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
   const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
   const onSeeAllMarket = useCallback(() => navigation.navigate('Market'), [navigation]);
-  // Product card tap opens the product's external "Buy" link (Market has no
-  // per-product detail screen — the URL *is* the destination, same as on
-  // MarketScreen).
+  // Explore-rail product tap opens the seller's external "Buy" link directly —
+  // a deliberate shortcut for the compact hub rail. (The full Market GRID
+  // instead pushes MarketProductDetail, where reviews/comments live; the rail
+  // keeps its lightweight tap so the hub doesn't deep-link into a sub-stack.)
   const openMarketProduct = useCallback((product: MarketProduct) => {
     Linking.openURL(product.url).catch(() => {});
   }, []);

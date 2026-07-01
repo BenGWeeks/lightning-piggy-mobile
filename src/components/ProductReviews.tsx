@@ -53,13 +53,28 @@ const ReviewForm: React.FC<{
   const [stars, setStars] = useState(existingStars);
   const [content, setContent] = useState(existingText);
   const [hint, setHint] = useState<string | null>(null);
+  // Whether the user has started editing. Once they have, we STOP adopting the
+  // loaded/updated existing review so a late relay response can never clobber
+  // their in-progress input (Copilot review on #948).
+  const [touched, setTouched] = useState(false);
 
-  // Keep the form synced when the user's own review loads/changes, without
-  // clobbering an in-progress edit (depend on the primitive values).
+  // Adopt the user's own review into the form only while it is still pristine
+  // (they haven't typed yet). This prefills the form when the existing review
+  // arrives after mount without overwriting edits already in progress.
   useEffect(() => {
+    if (touched) return;
     setStars(existingStars);
     setContent(existingText);
-  }, [existingStars, existingText]);
+  }, [existingStars, existingText, touched]);
+
+  const onChangeStars = (next: number) => {
+    setTouched(true);
+    setStars(next);
+  };
+  const onChangeContent = (next: string) => {
+    setTouched(true);
+    setContent(next);
+  };
 
   if (!canPublish) {
     return (
@@ -86,11 +101,11 @@ const ReviewForm: React.FC<{
   return (
     <View style={styles.form} testID="product-review-form">
       <Text style={styles.formLabel}>{existing ? 'Update your review' : 'Write a review'}</Text>
-      <StarRatingInput value={stars} onChange={setStars} testID="product-review-star-input" />
+      <StarRatingInput value={stars} onChange={onChangeStars} testID="product-review-star-input" />
       <TextInput
         style={styles.input}
         value={content}
-        onChangeText={setContent}
+        onChangeText={onChangeContent}
         placeholder="Share your experience (optional)"
         placeholderTextColor={colors.textSupplementary}
         multiline

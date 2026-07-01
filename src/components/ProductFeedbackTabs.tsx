@@ -30,6 +30,17 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
   const [tab, setTab] = useState<Tab>('reviews');
   const [reviewCount, setReviewCount] = useState(0);
   const [commentCount, setCommentCount] = useState(0);
+  // Lazy-mount: Reviews is the default tab so it mounts immediately; Comments
+  // (and its relay fetch) is deferred until the user first opens that tab, so
+  // landing on the product page fires ONE relay query, not two (Copilot review
+  // on #948). Once visited a tab stays mounted (hidden) so switching back never
+  // refetches or loses an in-progress compose.
+  const [commentsMounted, setCommentsMounted] = useState(false);
+
+  const selectTab = useCallback((next: Tab) => {
+    setTab(next);
+    if (next === 'comments') setCommentsMounted(true);
+  }, []);
 
   const onReviewCount = useCallback((n: number) => setReviewCount(n), []);
   const onCommentCount = useCallback((n: number) => setCommentCount(n), []);
@@ -39,7 +50,7 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
     return (
       <Pressable
         style={[styles.tab, active && styles.tabActive]}
-        onPress={() => setTab(value)}
+        onPress={() => selectTab(value)}
         accessibilityRole="tab"
         accessibilityState={{ selected: active }}
         testID={`product-feedback-tab-${value}`}
@@ -69,11 +80,13 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
           <ProductReviews coord={coord} onRequestSignIn={onRequestSignIn} onCount={onReviewCount} />
         </View>
         <View style={tab === 'comments' ? styles.visible : styles.hidden}>
-          <ProductComments
-            root={commentRoot}
-            onRequestSignIn={onRequestSignIn}
-            onCount={onCommentCount}
-          />
+          {commentsMounted ? (
+            <ProductComments
+              root={commentRoot}
+              onRequestSignIn={onRequestSignIn}
+              onCount={onCommentCount}
+            />
+          ) : null}
         </View>
       </View>
     </View>
