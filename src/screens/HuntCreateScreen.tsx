@@ -529,14 +529,28 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [stage]);
 
+  // Single entry point for setting the LNURL from ANY source — typing,
+  // paste or scan. Besides storing the value it drops a prior `validated`
+  // or `noPrize` stage back to `idle`, so a changed link re-engages the
+  // Validate affordance and is re-vetted before publish. Callers pre-shape
+  // the value (trim / strip `lightning:`); the stage reset is shared here
+  // so paste can't leave stale validation behind (#955 review). The
+  // functional `setStage` keeps this correct without a `stage` dependency.
+  const applyLnurl = useCallback((value: string) => {
+    setLnurl(value);
+    setStage((prev) =>
+      prev.kind === 'validated' || prev.kind === 'noPrize' ? { kind: 'idle' } : prev,
+    );
+  }, []);
+
   const handlePaste = useCallback(async () => {
     try {
       const v = await Clipboard.getStringAsync();
-      if (v) setLnurl(v.trim());
+      if (v) applyLnurl(v.trim());
     } catch {
       // Clipboard read can fail silently on cold start; nothing user-actionable.
     }
-  }, []);
+  }, [applyLnurl]);
 
   // Open the QR scanner — if permission was already granted we skip
   // straight to the camera; otherwise the modal shows a Grant button
@@ -565,11 +579,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       const lnurlOnly = /^lightning:/i.test(trimmed)
         ? trimmed.slice('lightning:'.length).trim()
         : trimmed;
-      setLnurl(lnurlOnly);
-      if (stage.kind === 'validated' || stage.kind === 'noPrize') setStage({ kind: 'idle' });
+      applyLnurl(lnurlOnly);
       setScannerOpen(false);
     },
-    [scannerOpen, stage.kind],
+    [scannerOpen, applyLnurl],
   );
 
   const handleValidate = useCallback(async () => {
@@ -1292,14 +1305,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   placeholder="lnurl1… or lightning:LNURL1…"
                   placeholderTextColor={colors.textSupplementary}
                   value={lnurl}
-                  onChangeText={(s) => {
-                    setLnurl(s);
-                    // Typing a link supersedes a "skip prize" choice and
-                    // invalidates a prior validation — drop back to idle
-                    // so the Validate affordance re-engages.
-                    if (stage.kind === 'validated' || stage.kind === 'noPrize')
-                      setStage({ kind: 'idle' });
-                  }}
+                  // Typing a link supersedes a "skip prize" choice and
+                  // invalidates a prior validation — `applyLnurl` drops the
+                  // stage back to idle so the Validate affordance re-engages
+                  // (shared with paste + scan so all three behave the same).
+                  onChangeText={applyLnurl}
                   autoCapitalize="none"
                   autoCorrect={false}
                   // Single line — LNURLs are long but truncating visually
