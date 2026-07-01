@@ -94,7 +94,11 @@ export function buildCommentTags(root: CommentRoot, reply?: CommentRoot): string
 
   // Root scope (UPPERCASE).
   if (root instanceof URL) {
-    tags.push(['I', root.toString()], ['K', root.hostname]);
+    // NIP-22 scopes a URL comment with an external identity: the `K`/`k` tag is
+    // the external-id KIND from NIP-73, which for any URL is the literal string
+    // `"web"` (NOT the hostname). See NIP-22 "comment on a website's url" and
+    // the NIP-73 supported-IDs table (URLs → `k` = "web").
+    tags.push(['I', root.toString()], ['K', 'web']);
   } else if (isAddressableKind(root.kind)) {
     tags.push(['A', addressableCoord(root)], ['K', root.kind.toString()], ['P', root.pubkey]);
   } else if (isReplaceableKind(root.kind)) {
@@ -110,7 +114,7 @@ export function buildCommentTags(root: CommentRoot, reply?: CommentRoot): string
   // Immediate parent (lowercase): the reply target, or the root when top-level.
   const parent = reply ?? root;
   if (parent instanceof URL) {
-    tags.push(['i', parent.toString()], ['k', parent.hostname]);
+    tags.push(['i', parent.toString()], ['k', 'web']);
   } else if (isAddressableKind(parent.kind)) {
     tags.push(['a', addressableCoord(parent)], ['k', parent.kind.toString()], ['p', parent.pubkey]);
   } else if (isReplaceableKind(parent.kind)) {

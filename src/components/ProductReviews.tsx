@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -140,6 +140,17 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
   const { reviews, aggregate, loading, error, refetch } = useProductReviews(coord);
   const { publishReview, publishing, canPublish } = usePublishProductFeedback();
 
+  // Pending post-publish refetch timer, cleared on unmount so a late fire can
+  // never call refetch (and setState) after this component is gone (Copilot
+  // review on #948).
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    },
+    [],
+  );
+
   useEffect(() => {
     onCount?.(aggregate.count);
   }, [aggregate.count, onCount]);
@@ -153,7 +164,9 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     try {
       await publishReview({ coord, stars, content });
       // Relays need a beat to serve the new event back; refresh shortly after.
-      setTimeout(refetch, 1500);
+      // Track the timer so unmount can cancel it (see cleanup effect above).
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = setTimeout(refetch, 1500);
     } catch {
       // Swallow — a failed publish leaves the form intact to retry.
     }

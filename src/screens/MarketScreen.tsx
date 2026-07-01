@@ -116,20 +116,26 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const renderProduct = useCallback(
-    ({ item }: { item: MarketProduct }) => (
-      // Fixed-width wrapper sizes the tile; the card fills it (width: '100%').
-      // This is what keeps a lone last tile from stretching full-width.
-      <View style={{ width: tileWidth }}>
-        <MarketProductCard
-          product={item}
-          sellerName={sellerOf(item)?.name ?? item.sellerName}
-          vendor={sellerOf(item)}
-          variant="grid"
-          onPress={() => openProduct(item)}
-          testID={`market-product-card-${item.id}`}
-        />
-      </View>
-    ),
+    ({ item }: { item: MarketProduct }) => {
+      // Resolve the vendor once — `sellerOf` linearly scans MARKET_VENDORS, so
+      // reuse the result for both `sellerName` and `vendor` (Copilot review on
+      // #948).
+      const vendor = sellerOf(item);
+      return (
+        // Fixed-width wrapper sizes the tile; the card fills it (width: '100%').
+        // This is what keeps a lone last tile from stretching full-width.
+        <View style={{ width: tileWidth }}>
+          <MarketProductCard
+            product={item}
+            sellerName={vendor?.name ?? item.sellerName}
+            vendor={vendor}
+            variant="grid"
+            onPress={() => openProduct(item)}
+            testID={`market-product-card-${item.id}`}
+          />
+        </View>
+      );
+    },
     [tileWidth, openProduct],
   );
 

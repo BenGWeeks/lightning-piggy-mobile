@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -47,6 +47,17 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
   const { publishComment, publishing, canPublish } = usePublishProductFeedback();
   const [content, setContent] = useState('');
 
+  // Pending post-publish refetch timer, cleared on unmount so a late fire can
+  // never call refetch (and setState) after this component is gone (Copilot
+  // review on #948).
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    },
+    [],
+  );
+
   useEffect(() => {
     onCount?.(topLevel.length);
   }, [topLevel.length, onCount]);
@@ -56,7 +67,9 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
     try {
       await publishComment({ root, content });
       setContent('');
-      setTimeout(refetch, 1500);
+      // Track the timer so unmount can cancel it (see cleanup effect above).
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = setTimeout(refetch, 1500);
     } catch {
       // Swallow — leave the text intact so the user can retry.
     }

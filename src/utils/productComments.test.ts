@@ -106,10 +106,15 @@ describe('buildCommentTags + isTopLevelComment', () => {
     expect(isTopLevelComment(comment(tags), product())).toBe(false);
   });
 
-  it('uses hostname for K/k and href for I/i on a URL root', () => {
+  it('uses the NIP-73 "web" external-id kind for K/k and href for I/i on a URL root', () => {
     const tags = buildCommentTags(new URL('https://shop.example/x'));
+    // NIP-22 + NIP-73: a URL root scopes to the URL (I/i) with the external
+    // identity kind "web" (K/k) — the literal string, not the hostname.
     expect(tags).toContainEqual(['I', 'https://shop.example/x']);
-    expect(tags).toContainEqual(['K', 'shop.example']);
+    expect(tags).toContainEqual(['K', 'web']);
+    // The lowercase parent mirrors the root for a top-level comment.
+    expect(tags).toContainEqual(['i', 'https://shop.example/x']);
+    expect(tags).toContainEqual(['k', 'web']);
   });
 });
 
