@@ -24,11 +24,25 @@ export const createMarketProductCardStyles = (colors: Palette) =>
       borderRadius: 12,
       overflow: 'hidden',
     },
+    // ----- grid (square tile, fills a fixed-width wrapper) ------------------
+    gridCard: {
+      width: '100%',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
 
     // ----- image (cover) ---------------------------------------------------
     imageWrap: {
       width: '100%',
       height: 130,
+      backgroundColor: colors.background,
+      position: 'relative',
+    },
+    // Square image for the grid tile — fills the tile width, height follows.
+    gridImageWrap: {
+      width: '100%',
+      aspectRatio: 1,
       backgroundColor: colors.background,
       position: 'relative',
     },
@@ -54,10 +68,22 @@ export const createMarketProductCardStyles = (colors: Palette) =>
       padding: 12,
       gap: 4,
     },
+    // Condensed body for the grid tile (less padding, tighter gaps).
+    gridBody: {
+      padding: 10,
+      gap: 3,
+    },
     title: {
       fontSize: 14,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    // Two-line title with a reserved min-height so tiles in a row stay a
+    // uniform height whether the title wraps to one line or two.
+    gridTitle: {
+      fontSize: 13,
+      lineHeight: 17,
+      minHeight: 34,
     },
     priceRow: {
       flexDirection: 'row',

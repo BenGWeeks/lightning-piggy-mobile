@@ -59,10 +59,21 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.textSupplementary,
     },
-    listContent: {
-      padding: 16,
-      gap: 12,
+    // ----- product grid ----------------------------------------------------
+    // Outer padding matches MARKET_GRID_PADDING (16); the tile width is
+    // derived to fill the row inside it. Row gutter comes from gridRow's
+    // marginBottom, the column gutter from justify-between spacing.
+    gridContent: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
       paddingBottom: 32,
+    },
+    // Each grid row: tiles pushed to the outer edges with the gutter between
+    // (MARKET_GRID_GAP is baked into the derived tile width). A lone last tile
+    // stays left-aligned at column width rather than stretching.
+    gridRow: {
+      justifyContent: 'space-between',
+      marginBottom: 12,
     },
     emptyWrap: {
       paddingVertical: 48,

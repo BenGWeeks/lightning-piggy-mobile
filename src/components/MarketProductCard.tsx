@@ -21,8 +21,10 @@ interface Props {
   /**
    * `rail` — fixed-width vertical card for the Explore horizontal rail.
    * `list` — full-width card for the Market screen list.
+   * `grid` — roughly-square tile for the Market screen 2-column grid (the
+   *   caller sizes the tile via a fixed-width wrapper; the card fills it).
    */
-  variant: 'rail' | 'list';
+  variant: 'rail' | 'list' | 'grid';
   /** testID base, e.g. `market-product-card-<id>`. */
   testID?: string;
 }
@@ -47,10 +49,12 @@ const MarketProductCard: React.FC<Props> = ({
   const [imageFailed, setImageFailed] = useState(false);
   const hasImage = product.image.length > 0 && !imageFailed;
 
-  const cardStyle = variant === 'rail' ? styles.railCard : styles.listCard;
+  const isGrid = variant === 'grid';
+  const cardStyle =
+    variant === 'rail' ? styles.railCard : isGrid ? styles.gridCard : styles.listCard;
 
   const image = (
-    <View style={styles.imageWrap}>
+    <View style={isGrid ? styles.gridImageWrap : styles.imageWrap}>
       {hasImage ? (
         <Image
           source={{ uri: product.image }}
@@ -81,8 +85,8 @@ const MarketProductCard: React.FC<Props> = ({
       activeOpacity={0.8}
     >
       {image}
-      <View style={styles.body}>
-        <Text style={styles.title} numberOfLines={2}>
+      <View style={isGrid ? styles.gridBody : styles.body}>
+        <Text style={[styles.title, isGrid && styles.gridTitle]} numberOfLines={2}>
           {product.title}
         </Text>
         <View style={styles.priceRow}>
@@ -95,7 +99,7 @@ const MarketProductCard: React.FC<Props> = ({
           {vendor ? (
             <VendorAvatar
               vendor={vendor}
-              size={20}
+              size={isGrid ? 16 : 20}
               testID={testID ? `${testID}-vendor-avatar` : undefined}
             />
           ) : null}

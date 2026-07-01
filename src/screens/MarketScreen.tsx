@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, FlatList, Linking } from 'react-native';
+import { View, Text, Image, TouchableOpacity, FlatList, useWindowDimensions } from 'react-native';
 import { ChevronLeft } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
@@ -23,6 +23,7 @@ import {
   isMarketFilterActive,
   type MarketFilter,
 } from '../utils/marketFilters';
+import { MARKET_GRID_COLUMNS, marketGridTileWidth } from '../utils/marketGrid';
 import { ExploreNavigation } from '../navigation/types';
 
 interface Props {
@@ -56,6 +57,12 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
   const { trustSet } = useTrustGraph();
+
+  // Derive the square tile width from the live window so rotation / tablet
+  // widths stay a clean 2-up grid; a fixed width (not flex) also keeps a lone
+  // last tile in an odd-length list at column width instead of stretching.
+  const { width: windowWidth } = useWindowDimensions();
+  const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
 
@@ -101,11 +108,30 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     setCurrency(null);
   }, []);
 
-  const openProduct = useCallback((product: MarketProduct) => {
-    Linking.openURL(product.url).catch(() => {
-      // Swallow — a malformed/unsupported URL shouldn't crash the screen.
-    });
-  }, []);
+  const openProduct = useCallback(
+    (product: MarketProduct) => {
+      navigation.navigate('MarketProductDetail', { productId: product.id });
+    },
+    [navigation],
+  );
+
+  const renderProduct = useCallback(
+    ({ item }: { item: MarketProduct }) => (
+      // Fixed-width wrapper sizes the tile; the card fills it (width: '100%').
+      // This is what keeps a lone last tile from stretching full-width.
+      <View style={{ width: tileWidth }}>
+        <MarketProductCard
+          product={item}
+          sellerName={sellerOf(item)?.name ?? item.sellerName}
+          vendor={sellerOf(item)}
+          variant="grid"
+          onPress={() => openProduct(item)}
+          testID={`market-product-card-${item.id}`}
+        />
+      </View>
+    ),
+    [tileWidth, openProduct],
+  );
 
   const emptyCopy = filterActive
     ? 'No products match your search or filters.'
@@ -158,25 +184,21 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       <FlatList
         data={products}
         keyExtractor={(p) => p.id}
-        contentContainerStyle={styles.listContent}
+        numColumns={MARKET_GRID_COLUMNS}
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={styles.gridContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        removeClippedSubviews
+        initialNumToRender={8}
+        windowSize={7}
         ListEmptyComponent={
           <View style={styles.emptyWrap} testID="market-empty">
             <Text style={styles.emptyText}>{emptyCopy}</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <MarketProductCard
-            product={item}
-            sellerName={sellerOf(item)?.name ?? item.sellerName}
-            vendor={sellerOf(item)}
-            variant="list"
-            onPress={() => openProduct(item)}
-            testID={`market-product-card-${item.id}`}
-          />
-        )}
+        renderItem={renderProduct}
       />
     </View>
   );
