@@ -15,6 +15,7 @@ import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { LiveLocationProvider } from './src/contexts/LiveLocationContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { LocaleProvider } from './src/contexts/LocaleContext';
 import { SendingAnimationProvider } from './src/contexts/SendingAnimationContext';
 import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
@@ -475,42 +476,46 @@ export default function App() {
             Without edge-to-edge, Android 15+ silently reports 0 keyboard
             height to every API (see #194 diagnosis). */}
         <KeyboardProvider>
-          <ThemeProvider>
-            {/* SendingAnimationProvider mirrors ThemeProvider: a persisted
+          {/* LocaleProvider mirrors ThemeProvider: a persisted device-wide
+              preference (locale override, defaults to 'system') read high
+              in the tree so every screen's `useTranslation()` sees it. #137. */}
+          <LocaleProvider>
+            <ThemeProvider>
+              {/* SendingAnimationProvider mirrors ThemeProvider: a persisted
                 Appearance preference (bubbles vs lightning) read by the
                 payment send overlay. Sits beside the theme so both load
                 their AsyncStorage value once, high in the tree. */}
-            <SendingAnimationProvider>
-              <WalletProvider>
-                <NostrProvider>
-                  {/* TrustGraphProvider derives the L1+L2 web-of-trust set
+              <SendingAnimationProvider>
+                <WalletProvider>
+                  <NostrProvider>
+                    {/* TrustGraphProvider derives the L1+L2 web-of-trust set
                     from Nostr contacts. Lives inside NostrProvider so it
                     can read `contacts` + `pubkey`, but outside Groups
                     because nothing else depends on it. */}
-                  <TrustGraphProvider>
-                    {/* GroupsProvider sits inside Nostr so groups can subscribe
+                    <TrustGraphProvider>
+                      {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
-                    <GroupsProvider>
-                      {/* LiveLocationProvider sits inside Nostr (uses the
+                      <GroupsProvider>
+                        {/* LiveLocationProvider sits inside Nostr (uses the
                       signer + sendDirectMessage) but outside the
                       navigator so an active share survives screen
                       transitions and pause/resume cycles. */}
-                      <LiveLocationProvider>
-                        {/* UserLocationProvider: ONE GPS watch subscription
+                        <LiveLocationProvider>
+                          {/* UserLocationProvider: ONE GPS watch subscription
                         shared across every map surface, so all screens
                         see the same live position + accuracy halo and
                         we don't fan out to N concurrent watches. */}
-                        <UserLocationProvider>
-                          <BottomSheetModalProvider>
-                            <ThemedStatusBar />
-                            {/* Sits above the navigator so a single banner
+                          <UserLocationProvider>
+                            <BottomSheetModalProvider>
+                              <ThemedStatusBar />
+                              {/* Sits above the navigator so a single banner
                             covers every screen + tab when the device
                             loses connectivity. Slides on/off via the
                             internal `isConnected` check — no layout
                             penalty when online (returns null). See #634. */}
-                            <OfflineBanner />
-                            <AppNavigator />
-                            {/* Global claim sheet for standalone LNURL-withdraw
+                              <OfflineBanner />
+                              <AppNavigator />
+                              {/* Global claim sheet for standalone LNURL-withdraw
                             vouchers (gift cards, bounty stickers). Opened by the
                             `lightning:`/`lnurlw:` deep-link/intent-filter path
                             above via `openLnurlWithdrawSheet`. Generic (no Piggy
@@ -521,35 +526,36 @@ export default function App() {
                             that context) and inside WalletProvider (needs
                             makeInvoice). Replaced the broken passive foreground
                             NFC listener (#341). */}
-                            <LnurlWithdrawHost />
-                          </BottomSheetModalProvider>
-                        </UserLocationProvider>
-                      </LiveLocationProvider>
-                      {/* BrandedToast: brand-themed wrapper around
+                              <LnurlWithdrawHost />
+                            </BottomSheetModalProvider>
+                          </UserLocationProvider>
+                        </LiveLocationProvider>
+                        {/* BrandedToast: brand-themed wrapper around
                       `react-native-toast-message`. Single mount for the
                       app's toast slot — keeps styling (pink success
                       accent, red error, rounded corners + shadow that
                       mirror BrandedAlert) in one place. ESLint blocks
                       direct imports of the underlying lib elsewhere. */}
-                      <BrandedToast />
-                      <GlobalIncomingPaymentOverlay />
-                      {/* Fires OS notifications for incoming payments / zaps
+                        <BrandedToast />
+                        <GlobalIncomingPaymentOverlay />
+                        {/* Fires OS notifications for incoming payments / zaps
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}
-                      <PaymentNotifier />
-                      {/* BrandedAlertHost: portal target for the on-brand
+                        <PaymentNotifier />
+                        {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert
                       drop-in re-export, NOT the system Alert) renders
                       above the rest of the UI without z-index gymnastics. */}
-                      <BrandedAlertHost />
-                    </GroupsProvider>
-                  </TrustGraphProvider>
-                </NostrProvider>
-              </WalletProvider>
-            </SendingAnimationProvider>
-            <BootSplash done={bootDone} />
-          </ThemeProvider>
+                        <BrandedAlertHost />
+                      </GroupsProvider>
+                    </TrustGraphProvider>
+                  </NostrProvider>
+                </WalletProvider>
+              </SendingAnimationProvider>
+              <BootSplash done={bootDone} />
+            </ThemeProvider>
+          </LocaleProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

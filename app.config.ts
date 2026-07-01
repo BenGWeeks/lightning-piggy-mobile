@@ -126,6 +126,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // breakdown.
     './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-localization — reads the device's locale list at startup so
+    // LocaleContext can default the in-app language to it (#137). No
+    // permissions/options needed; just links the native module.
+    'expo-localization',
     // expo-notifications config plugin sets the Android notification
     // small icon + colour, and is a no-op on iOS beyond linking the native
     // module. The small icon is a white PiggyBank silhouette (lucide
