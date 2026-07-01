@@ -113,6 +113,7 @@ const MarketFilterBar: React.FC<Props> = ({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.chipRow}
           testID="market-filter-merchants"
         >
@@ -145,6 +146,7 @@ const MarketFilterBar: React.FC<Props> = ({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.chipRow}
           testID="market-filter-countries"
         >
@@ -178,6 +180,7 @@ const MarketFilterBar: React.FC<Props> = ({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.chipRow}
           testID="market-filter-currencies"
         >
