@@ -13,3 +13,10 @@ android {
     versionName '0.1.0'
   }
 }
+
+dependencies {
+  // React Native core (HeadlessJsTaskService / HeadlessJsTaskConfig / Arguments)
+  // is provided at runtime by the host app, so compileOnly — no version needed;
+  // the RN gradle plugin resolves it. Mirrors expo-task-manager's headless setup.
+  compileOnly "com.facebook.react:react-android"
+}
