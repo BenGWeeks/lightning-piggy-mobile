@@ -1,5 +1,6 @@
 import {
   EMPTY_MARKET_FILTER,
+  countActiveMarketFilters,
   currencyOf,
   distinctCurrencies,
   distinctCountries,
@@ -201,6 +202,45 @@ describe('isMarketFilterActive', () => {
     expect(
       isMarketFilterActive({ query: '  ', merchant: null, country: null, currency: 'GBP' }),
     ).toBe(true);
+  });
+});
+
+describe('countActiveMarketFilters', () => {
+  it('is 0 for the empty filter', () => {
+    expect(countActiveMarketFilters(EMPTY_MARKET_FILTER)).toBe(0);
+  });
+
+  it('counts each active category axis (merchant / country / currency)', () => {
+    expect(
+      countActiveMarketFilters({
+        query: '',
+        merchant: 'Robotechy',
+        country: null,
+        currency: null,
+      }),
+    ).toBe(1);
+    expect(
+      countActiveMarketFilters({
+        query: '',
+        merchant: 'Robotechy',
+        country: 'United Kingdom',
+        currency: 'GBP',
+      }),
+    ).toBe(3);
+  });
+
+  it('ignores the search query (it has its own inline field, not the panel badge)', () => {
+    expect(
+      countActiveMarketFilters({ query: 'piggy', merchant: null, country: null, currency: null }),
+    ).toBe(0);
+    expect(
+      countActiveMarketFilters({
+        query: 'piggy',
+        merchant: 'Robotechy',
+        country: null,
+        currency: null,
+      }),
+    ).toBe(1);
   });
 });
 

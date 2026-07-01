@@ -1,53 +1,73 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-/** Styles for {@link MarketFilterBar} — the search input plus the merchant /
- * country / currency chip rows on the Market screen. Selected chips fill
- * brand-pink to
- * match {@link createMarketModeSelectorStyles}, so the filter controls read as
- * siblings of the marketplace-mode selector above them. */
+/** Styles for {@link MarketFilterBar} — the right-anchored, slide-in filter
+ * panel housing the merchant / country / currency chip sections. Selected
+ * chips fill brand-pink to match {@link createMarketModeSelectorStyles}, so the
+ * filter controls read as siblings of the marketplace-mode selector. The search
+ * box no longer lives here — it stays inline in the Market header (see
+ * {@link createMarketScreenStyles}). */
 export const createMarketFilterBarStyles = (colors: Palette) =>
   StyleSheet.create({
-    container: {
-      paddingTop: 8,
-      paddingBottom: 4,
-      gap: 8,
+    // ----- panel shell -----------------------------------------------------
+    backdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    },
+    // Right-anchored drawer spanning the full height; slides in via translateX.
+    panel: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      right: 0,
       backgroundColor: colors.background,
+      borderTopLeftRadius: 20,
+      borderBottomLeftRadius: 20,
+      paddingTop: 52,
+      paddingBottom: 28,
+      paddingHorizontal: 20,
     },
-    // ----- search ----------------------------------------------------------
-    searchRow: {
-      marginHorizontal: 16,
+    panelHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 12,
-      height: 40,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      backgroundColor: colors.surface,
+      gap: 12,
+      marginBottom: 4,
     },
-    searchInput: {
+    panelTitle: {
       flex: 1,
-      fontSize: 14,
-      color: colors.textBody,
-      // Strip the default vertical padding so the text centres in the pill.
-      paddingVertical: 0,
+      fontSize: 20,
+      fontWeight: '800',
+      color: colors.textHeader,
     },
-    // ----- chip rows -------------------------------------------------------
-    chipRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 16,
+    clearText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.brandPink,
     },
-    rowLabel: {
-      fontSize: 11,
+    panelScroll: {
+      flex: 1,
+    },
+    panelScrollContent: {
+      paddingBottom: 8,
+    },
+    // ----- sections --------------------------------------------------------
+    section: {
+      marginTop: 18,
+    },
+    sectionLabel: {
+      fontSize: 13,
       fontWeight: '700',
       textTransform: 'uppercase',
+      letterSpacing: 0.6,
       color: colors.textSupplementary,
-      marginRight: 2,
+      marginBottom: 10,
     },
+    chipWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    // ----- chips -----------------------------------------------------------
     chip: {
       paddingHorizontal: 12,
       paddingVertical: 6,
@@ -69,19 +89,18 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
       color: colors.white,
       fontWeight: '700',
     },
-    // ----- clear-all -------------------------------------------------------
-    clearButton: {
-      marginHorizontal: 16,
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
+    // ----- done ------------------------------------------------------------
+    doneButton: {
+      marginTop: 16,
+      paddingVertical: 14,
+      borderRadius: 999,
+      backgroundColor: colors.brandPink,
       alignItems: 'center',
-      gap: 4,
-      paddingVertical: 2,
     },
-    clearText: {
-      fontSize: 12,
+    doneText: {
+      color: colors.white,
+      fontSize: 15,
       fontWeight: '700',
-      color: colors.brandPink,
     },
   });
 

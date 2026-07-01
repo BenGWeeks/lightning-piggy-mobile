@@ -59,6 +59,72 @@ export const createMarketScreenStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.textSupplementary,
     },
+    // ----- inline search + filter button -----------------------------------
+    // A single compact row: the search pill (flex) plus a square filter icon
+    // button. Replaces the old three always-visible chip rows so the grid
+    // starts higher.
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 4,
+      backgroundColor: colors.background,
+    },
+    searchRow: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+      height: 40,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.textBody,
+      // Strip the default vertical padding so the text centres in the pill.
+      paddingVertical: 0,
+    },
+    filterButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterButtonActive: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    // Count badge pinned to the button's top-right corner when filters apply.
+    filterBadge: {
+      position: 'absolute',
+      top: -4,
+      right: -4,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      borderRadius: 999,
+      backgroundColor: colors.brandPink,
+      borderWidth: 2,
+      borderColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterBadgeText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.white,
+    },
     // ----- product grid ----------------------------------------------------
     // Outer padding matches MARKET_GRID_PADDING (16); the tile width is
     // derived to fill the row inside it. Row gutter comes from gridRow's

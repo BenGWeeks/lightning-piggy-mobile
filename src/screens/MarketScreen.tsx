@@ -1,6 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, FlatList, useWindowDimensions } from 'react-native';
-import { ChevronLeft } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  Image,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  useWindowDimensions,
+} from 'react-native';
+import { ChevronLeft, Search, SlidersHorizontal, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
 import MarketFilterBar from '../components/MarketFilterBar';
@@ -17,6 +25,7 @@ import {
   type MarketMode,
 } from '../utils/marketMode';
 import {
+  countActiveMarketFilters,
   distinctCountries,
   distinctCurrencies,
   distinctMerchants,
@@ -67,6 +76,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
 
+  // The category filters (merchant / country / currency) live in a right-anchored
+  // slide-in panel to keep the main view compact; the search box stays inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   // Search + merchant + country + currency filters. The query is debounced so
   // re-filtering stays off the per-keystroke path; the chip axes apply
   // immediately.
@@ -92,22 +105,32 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     () => ({ query: debouncedQuery, merchant, country, currency }),
     [debouncedQuery, merchant, country, currency],
   );
-  // `active` tracks the live (un-debounced) query so the Clear pill appears as
-  // soon as the user types.
+  // `active` tracks the live (un-debounced) query so the empty-state copy flips
+  // as soon as the user types.
   const filterActive = isMarketFilterActive({ query, merchant, country, currency });
+  // Count of active CATEGORY axes (merchant / country / currency) — the ones
+  // housed in the panel. Drives the badge on the header's filter icon and the
+  // panel's own "Clear filters" affordance (the inline search has its own
+  // clear button, so it is excluded here).
+  const categoryFilterCount = countActiveMarketFilters({
+    query,
+    merchant,
+    country,
+    currency,
+  });
 
   const products = useMemo(
     () => filterMarketProducts(baseProducts, filter, sellerOf),
     [baseProducts, filter],
   );
 
-  // Reset the FILTER axes (search + merchant + country + currency). The
-  // marketplace MODE (Preferred Sellers / WoT: Friends) is a separate
-  // top-level selector above the filter bar, not a filter, so it is left
-  // unchanged by design — "Clear filters" shouldn't yank the user out of the
-  // WoT view they deliberately chose (Copilot review on #948).
+  // Reset the CATEGORY filter axes (merchant + country + currency) from inside
+  // the panel. The inline search keeps its own clear button, so it is left
+  // untouched here. The marketplace MODE (Preferred Sellers / WoT: Friends) is
+  // a separate top-level selector, not a filter, so it is also left unchanged by
+  // design — "Clear filters" shouldn't yank the user out of the WoT view they
+  // deliberately chose (Copilot review on #948).
   const clearFilters = useCallback(() => {
-    setQuery('');
     setMerchant(null);
     setCountry(null);
     setCurrency(null);
@@ -179,9 +202,59 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.modeCaption}>Showing: {marketModeOption(mode).label}</Text>
       </View>
 
+      {/* Inline search + a compact filter icon that opens the slide-in panel.
+          Keeping only this single row (instead of three chip rows) reclaims the
+          vertical space so the product grid starts higher. */}
+      <View style={styles.searchBar}>
+        <View style={styles.searchRow}>
+          <Search size={16} color={colors.textSupplementary} strokeWidth={2.25} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search products or sellers"
+            placeholderTextColor={colors.textSupplementary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            testID="market-search-input"
+          />
+          {query.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setQuery('')}
+              accessibilityLabel="Clear search"
+              testID="market-search-clear"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <X size={16} color={colors.textSupplementary} strokeWidth={2.25} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <TouchableOpacity
+          style={[styles.filterButton, categoryFilterCount > 0 && styles.filterButtonActive]}
+          onPress={() => setFiltersOpen(true)}
+          accessibilityLabel={
+            categoryFilterCount > 0 ? `Filters, ${categoryFilterCount} applied` : 'Filters'
+          }
+          testID="market-filter-button"
+          activeOpacity={0.7}
+        >
+          <SlidersHorizontal
+            size={18}
+            color={categoryFilterCount > 0 ? colors.white : colors.textBody}
+            strokeWidth={2.25}
+          />
+          {categoryFilterCount > 0 ? (
+            <View style={styles.filterBadge} testID="market-filter-badge">
+              <Text style={styles.filterBadgeText}>{categoryFilterCount}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      </View>
+
       <MarketFilterBar
-        query={query}
-        onChangeQuery={setQuery}
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
         merchants={merchants}
         selectedMerchant={merchant}
         onSelectMerchant={setMerchant}
@@ -191,7 +264,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         currencies={currencies}
         selectedCurrency={currency}
         onSelectCurrency={setCurrency}
-        active={filterActive}
+        active={categoryFilterCount > 0}
         onClear={clearFilters}
       />
 
