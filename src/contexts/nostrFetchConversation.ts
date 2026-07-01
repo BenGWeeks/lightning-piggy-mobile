@@ -297,7 +297,11 @@ export async function fetchConversationFor(
         decrypted.push({
           id: e.id,
           fromMe: e.fromMe,
-          text: e.text,
+          // Thread render uses the raw content (order JSON for kind 16/17) so a
+          // freshly-decrypted order card renders on first open; `e.text` is the
+          // inbox preview and would fall through to the "unsupported" placeholder
+          // (#market). Falls back to `text` for entries without renderText.
+          text: e.renderText ?? e.text,
           createdAt: e.createdAt,
           wireKind: e.wireKind,
           rumorId: e.rumorId,
