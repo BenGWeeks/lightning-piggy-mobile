@@ -77,22 +77,26 @@ export function useMarketCheckout(): UseMarketCheckout {
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
 
-      const line: MarketOrderLine = {
-        merchantPubkey: vendorPubkey,
-        dTag: input.dTag,
-        quantity: input.quantity,
-        priceSats: input.priceSats,
-      };
-      const { rumor, orderId, totalSats } = buildMarketOrder({
-        buyerPubkey: pubkey,
-        vendorPubkey,
-        lines: [line],
-        note: input.note,
-      });
-
       setStatus('placing');
       setError(null);
       try {
+        // Build the order INSIDE the guarded section: if construction throws
+        // synchronously (e.g. crypto/RNG unavailable, or an unexpected input
+        // shape), the catch below reliably flips status to 'error' and surfaces
+        // a message rather than leaving the sheet stuck with no feedback.
+        const line: MarketOrderLine = {
+          merchantPubkey: vendorPubkey,
+          dTag: input.dTag,
+          quantity: input.quantity,
+          priceSats: input.priceSats,
+        };
+        const { rumor, orderId, totalSats } = buildMarketOrder({
+          buyerPubkey: pubkey,
+          vendorPubkey,
+          lines: [line],
+          note: input.note,
+        });
+
         let delivered = false;
         let sendError: string | undefined;
 

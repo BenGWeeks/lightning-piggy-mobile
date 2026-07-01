@@ -158,12 +158,30 @@ export function dedupeNewestPerAuthor(events: NostrEvent[]): NostrEvent[] {
   return [...byAuthor.values()];
 }
 
-/** De-dupe (newest per author), parse, drop malformed, sort newest-first. */
+/**
+ * Parse events into usable reviews, then keep the newest *parseable* review per
+ * author, sorted newest-first.
+ *
+ * De-duping happens AFTER parsing (not before): if we de-duped raw events first,
+ * a reviewer's newer-but-malformed kind-31555 (e.g. missing/invalid thumb) would
+ * win, then get dropped by {@link parseReviewEvent}, silently hiding that
+ * author's last *valid* review and skewing the aggregate. Parsing first means a
+ * malformed newer event is discarded and the author's newest VALID review still
+ * counts. Authors are keyed case-insensitively (pubkeys are hex) so a
+ * differently-cased duplicate can't double-count.
+ */
 export function parseReviews(events: NostrEvent[]): ParsedReview[] {
-  return dedupeNewestPerAuthor(events)
-    .map(parseReviewEvent)
-    .filter((r): r is ParsedReview => r !== null)
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const newestPerAuthor = new Map<string, ParsedReview>();
+  for (const event of events) {
+    const review = parseReviewEvent(event);
+    if (!review) continue;
+    const key = review.pubkey.toLowerCase();
+    const existing = newestPerAuthor.get(key);
+    if (!existing || review.createdAt > existing.createdAt) {
+      newestPerAuthor.set(key, review);
+    }
+  }
+  return [...newestPerAuthor.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Mean star value across reviews (0 when empty). Dedupe BEFORE calling. */

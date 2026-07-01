@@ -216,6 +216,24 @@ describe('parseReviews + aggregateReviews', () => {
     expect(reviews[0].stars).toBeCloseTo(5, 6);
   });
 
+  it("keeps an author's newest VALID review when a newer event is malformed", () => {
+    // A publishes a valid 4-star review, then a NEWER but malformed one (no
+    // thumb rating). De-duping before parsing would let the malformed newer
+    // event win and then be dropped, hiding A's review entirely. Parsing first
+    // keeps the valid one.
+    const reviews = parseReviews([
+      mk('A', 'a-valid', 4, 10),
+      ev({ id: 'a-malformed', pubkey: 'A', created_at: 20, tags: [['d', COORD]] }),
+    ]);
+    expect(reviews.map((r) => r.id)).toEqual(['a-valid']);
+    expect(reviews[0].stars).toBeCloseTo(4, 6);
+  });
+
+  it('treats differently-cased pubkeys as the same author (newest wins)', () => {
+    const reviews = parseReviews([mk('abc', 'lower', 3, 10), mk('ABC', 'upper', 5, 20)]);
+    expect(reviews.map((r) => r.id)).toEqual(['upper']);
+  });
+
   it('aggregates the mean star value; empty -> {average:0,count:0}', () => {
     expect(aggregateReviews([])).toEqual({ average: 0, count: 0 });
     const reviews = parseReviews([mk('A', 'a', 5, 1), mk('B', 'b', 3, 2)]);
