@@ -138,8 +138,8 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 │  AsyncStorage caches (per-account namespaced)                │
 ├─────────────────────────────────────────────────────────────┤
 │  Native  (modules/, plugins/)                                │
-│  amber-signer (NIP-55 IPC) · background-dm-service (#279) ·  │
-│  Expo config plugins (NFC, foreground service, Amber queries)│
+│  amber-signer (NIP-55 IPC) — the only native module ·        │
+│  Expo config plugins (NFC, Amber queries, fg-service perms)  │
 └─────────────────────────────────────────────────────────────┘
         │                    │                     │
    Nostr relays        NWC wallet svc        Electrum / Boltz
@@ -147,11 +147,11 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
     contacts, caches)   get_balance)          LN↔on-chain swaps)
 ```
 
-**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. Two Android-only **native modules** (`amber-signer`, `background-dm-service`) and a set of **Expo config plugins** round out the stack.
+**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. One Android-only **native module** (`amber-signer`, the NIP-55 Amber IPC bridge — the only Expo native module that ships) and a set of **Expo config plugins** round out the stack. Background DM delivery rides `expo-background-task` (Android WorkManager / iOS BGTaskScheduler), not a persistent native service.
 
 **Key data flows.**
 
-- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB; a background foreground-service keeps the subscription alive on Android.
+- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping — it notices new inbound traffic and fires a generic notification without decrypting; a persistent realtime relay foreground service is only scaffolded (manifest permissions via `withForegroundService.js`) and not yet implemented. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc).
 - **Paying over NWC** — a scanned invoice (or an LNURL-pay / Lightning address resolved to a BOLT-11) is sent to the wallet service as an encrypted NIP-47 `pay_invoice` request over the NWC relay; the encrypted response updates balance and history. Zaps (kind 9734 request → 9735 receipt) ride the same rail.
 - **Publishing a geo-cache ("Piglet")** — a NIP-GC listing (kind 37516) is published with a NIP-32 payout label and a stable `d` tag; the LNURL-withdraw bearer stays on the physical NFC tag / QR and in the hider's secure store, never on the public event. Claims record a found-log (kind 7516).
 

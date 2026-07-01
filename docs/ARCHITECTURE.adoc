@@ -22,7 +22,7 @@ custom native modules, so Expo Go is not used).
 |===
 | Layer | Responsibility
 
-| **Native / config** | Expo config plugins (`plugins/`) + local native modules (`modules/`) — Android manifest edits, the Amber signer bridge, the background-DM foreground service.
+| **Native / config** | Expo config plugins (`plugins/`) + one local native module (`modules/amber-signer`) — Android manifest edits and the Amber signer IPC bridge. Background DM delivery is handled by `expo-background-task`, not a native service.
 | **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
 | **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
 | **Navigation** | `src/navigation/AppNavigator.tsx` — a four-tab bottom bar plus an Explore stack, an account drawer, and a root stack for conversation screens.
@@ -47,7 +47,7 @@ custom native modules, so Expo Go is not used).
 | NFC | `react-native-nfc-manager` | Read/write Lightning + Nostr tags; Hunt "Piglet" claim tags.
 | UI | `@gorhom/bottom-sheet`, `react-native-reanimated`, `@shopify/react-native-skia`, `lucide-react-native` | Bottom sheets, animation, canvas, icons.
 | Media | `expo-image-picker`, `expo-camera`, `expo-audio`, `expo-calendar`, `expo-contacts` | Attachments, QR scanning, voice notes, Add-to-Calendar, phone contacts.
-| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + the Android background-DM service.
+| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). A realtime foreground service is a future upgrade — see <<native>> and `architecture/notifications.adoc`.
 |===
 
 Marketing version lives in `package.json` / `app.config.ts` (single source of
@@ -70,6 +70,7 @@ Three variants install side-by-side via distinct identifiers, driven by the
 | production | Lightning Piggy | `com.lightningpiggy.app`
 |===
 
+[[native]]
 == Native layer
 
 === Config plugins (`plugins/`)
@@ -85,7 +86,7 @@ changes are hand-edited into `android/` / `ios/`.
 | `withAmberQueries.js` | Android `<queries>` for the `nostrsigner:` / `nostr:` schemes so the app can discover and launch the Amber signer and other Nostr apps.
 | `withLargeHeap.js` | Android `largeHeap="true"` — a memory workaround retained from the Leaflet-WebView era.
 | `withNfc.js` | Android NFC permission + feature + NDEF intent filters for the app's deep-link schemes; iOS NFC usage string + TAG entitlement.
-| `withForegroundService.js` | Android foreground-service permissions for the background-DM service (#279): `FOREGROUND_SERVICE(_DATA_SYNC)`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`.
+| `withForegroundService.js` | Scaffolds Android manifest permissions (`FOREGROUND_SERVICE(_DATA_SYNC)`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`) for a *future* realtime relay foreground service (#279). It only declares the permissions — the Kotlin `Service` itself is not implemented; background DM delivery currently ships via `expo-background-task` (see `architecture/notifications.adoc`).
 |===
 
 `app.config.ts` also registers the MapLibre, secure-store, notifications,
@@ -95,8 +96,9 @@ build-properties plugins, and declares the deep-link schemes (`lightningpiggy://
 
 === Local native modules (`modules/`)
 
-Both are Android-only Expo modules, loaded via `requireOptionalNativeModule` so
-they degrade gracefully on binaries that predate them.
+`modules/amber-signer` is the *only* Expo native module that ships. It is
+Android-only and loaded via `requireOptionalNativeModule` so it degrades
+gracefully on binaries that predate it.
 
 *`amber-signer`* — an IPC bridge to the https://github.com/greenart7c3/Amber[Amber]
 Nostr signer app, so the private key never enters Lightning Piggy's process.
@@ -105,10 +107,14 @@ Exposes `getPublicKey`, `signEvent`, `nip04Encrypt/Decrypt`,
 avoids per-event approval dialogs), and `isInstalled`. Wrapped by
 `src/services/amberService.ts`.
 
-*`background-dm-service`* (#279) — hosts a persistent Android foreground service
-that keeps relay WebSocket subscriptions alive while the app is backgrounded or
-closed, so new DMs can raise a notification. Exposes `startForegroundService`,
-`stopForegroundService`, `isBackgroundDmServiceAvailable`. See
+NOTE: There is no `background-dm-service` native module. Background DM delivery
+ships as a periodic `expo-background-task` detect-and-ping (Android WorkManager /
+iOS BGTaskScheduler): when the UI is not mounted the OS runs `runBackgroundSync`
+(`src/services/backgroundSyncService.ts`), which notices new encrypted inbound
+traffic and fires a generic notification *without decrypting*. A persistent
+realtime relay Kotlin foreground `Service` is only *scaffolded* — its manifest
+permissions are declared by `withForegroundService.js` but the `Service` class is
+not implemented, and is documented as a future upgrade. See
 `architecture/notifications.adoc` for the full background/notification model.
 
 == State: contexts
@@ -309,8 +315,12 @@ use the older WebView transport; those are the migration tail, not the main map.
   fetch kind-1059 (and legacy kind-4) events. `dmIngest.ts` unwraps them once
   (guarded by the decrypt-once gate), and `dmDb.ts` upserts the plaintext into
   the encrypted SQLite store keyed by `(owner, event_id)`.
-. When backgrounded on Android, the `background-dm-service` keeps the
-  subscription alive and raises a notification for new wraps.
+. When the app is closed on Android, a periodic `expo-background-task`
+  (WorkManager, ~15-min floor) runs `runBackgroundSync`, which detects new
+  inbound wraps and raises a generic notification *without decrypting them*
+  (detect-and-ping). A persistent foreground service for realtime delivery is
+  scaffolded (permissions only) but not yet implemented — see
+  `architecture/notifications.adoc`.
 
 === Paying an invoice over NWC
 
