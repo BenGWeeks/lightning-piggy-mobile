@@ -149,13 +149,21 @@ class BackgroundDmService : HeadlessJsTaskService() {
     return builder
       .setContentTitle("Lightning Piggy is watching for messages")
       .setContentText("Tap to open. This keeps your messages arriving in the background.")
-      // Use the app's own launcher icon for the small icon. Resolving it via
-      // the package manager avoids hard-coding an R.drawable reference, which
-      // would couple this module to the app's resource ids.
-      .setSmallIcon(applicationInfo.icon)
+      // Monochrome pig-snout silhouette (this module's res/drawable) — a proper
+      // status-bar small icon, unlike the launcher icon which renders as a
+      // solid square/circle once Android masks it. Resolve by name so the
+      // module doesn't hard-code the app's generated R id; fall back to the
+      // launcher icon if the resource can't be found.
+      .setSmallIcon(resolveSmallIcon())
       .setOngoing(true)
       .setContentIntent(buildLaunchPendingIntent())
       .build()
+  }
+
+  /** The monochrome notification icon, or the launcher icon as a fallback. */
+  private fun resolveSmallIcon(): Int {
+    val id = resources.getIdentifier("ic_bg_dm_notification", "drawable", packageName)
+    return if (id != 0) id else applicationInfo.icon
   }
 
   /** PendingIntent that re-launches the app's main launcher activity on tap. */
