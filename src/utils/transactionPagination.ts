@@ -29,11 +29,16 @@ export function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 // never mutates the input.
 export function sortTransactions(transactions: WalletTransaction[]): WalletTransaction[] {
   return [...transactions].sort((a, b) => {
-    const aTime = a.settled_at || a.created_at;
-    const bTime = b.settled_at || b.created_at;
-    if (!aTime && !bTime) return 0;
-    if (!aTime) return -1;
-    if (!bTime) return 1;
+    // Nullish coalescing (not `||`) so a legitimate `0` (epoch) timestamp is
+    // kept rather than falling through to the next field; only null/undefined
+    // counts as "missing" (pending) and sorts to the top.
+    const aTime = a.settled_at ?? a.created_at;
+    const bTime = b.settled_at ?? b.created_at;
+    const aMissing = aTime == null;
+    const bMissing = bTime == null;
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return -1;
+    if (bMissing) return 1;
     return bTime - aTime;
   });
 }
@@ -77,12 +82,14 @@ export function buildTransactionRows(
   const rows: TxRow[] = [];
   let currentDayKey: string | null = null;
   visible.forEach((tx, fallbackIndex) => {
-    const ts = tx.settled_at || tx.created_at;
-    const dayKey = ts ? new Date(ts * 1000).toDateString() : '__pending__';
+    // Nullish coalescing + explicit null check so a `0` (epoch) timestamp is a
+    // real day, not grouped under "Pending"; only null/undefined is missing.
+    const ts = tx.settled_at ?? tx.created_at;
+    const dayKey = ts != null ? new Date(ts * 1000).toDateString() : '__pending__';
     if (dayKey !== currentDayKey) {
       rows.push({
         kind: 'header',
-        label: ts ? formatDayHeader(ts) : 'Pending',
+        label: ts != null ? formatDayHeader(ts) : 'Pending',
         key: `h:${dayKey}`,
       });
       currentDayKey = dayKey;

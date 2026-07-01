@@ -107,6 +107,28 @@ describe('sortTransactions', () => {
     sortTransactions(all);
     expect(all).toEqual(copy);
   });
+
+  it('treats a `0` (epoch) timestamp as a real time, not pending', () => {
+    // settled_at === 0 is a legitimate epoch timestamp; it must sort as the
+    // oldest settled entry (below newer ones) rather than jumping to the top
+    // like a pending (null) row.
+    const epoch = tx({ paymentHash: 'epoch', settled_at: 0, created_at: 0 });
+    const pending = tx({ paymentHash: 'pending', settled_at: null, created_at: null });
+    const newer = tx({ paymentHash: 'newer', settled_at: REF });
+    const sorted = sortTransactions([epoch, newer, pending]);
+    // pending first, then newest settled, then the epoch (oldest) settled.
+    expect(sorted.map((t) => t.paymentHash)).toEqual(['pending', 'newer', 'epoch']);
+  });
+
+  it('prefers settled_at even when it is `0` (does not fall through to created_at)', () => {
+    // settled_at === 0 must win over a non-zero created_at; with `||` the 0
+    // would be skipped and created_at used instead, mis-ordering the row.
+    const settledAtEpoch = tx({ paymentHash: 'x', settled_at: 0, created_at: REF });
+    const other = tx({ paymentHash: 'y', settled_at: daysAgo(1) });
+    const sorted = sortTransactions([settledAtEpoch, other]);
+    // `other` (day-ago) is newer than the epoch, so it sorts first.
+    expect(sorted.map((t) => t.paymentHash)).toEqual(['y', 'x']);
+  });
 });
 
 describe('txKey', () => {
@@ -149,5 +171,14 @@ describe('buildTransactionRows', () => {
     const rows = buildTransactionRows(makeMany(10), fmt);
     const keys = rows.map((r) => r.key);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('groups a `0` (epoch) timestamp under its real day, not "Pending"', () => {
+    // settled_at === 0 is a valid epoch timestamp: it must produce a formatted
+    // day header (1970-01-01), never the "Pending" bucket.
+    const visible = [tx({ paymentHash: 'epoch', settled_at: 0, created_at: 0 })];
+    const rows = buildTransactionRows(visible, fmt);
+    expect(rows[0]).toMatchObject({ kind: 'header', label: fmt(0) });
+    expect((rows[0] as { label: string }).label).not.toBe('Pending');
   });
 });

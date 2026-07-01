@@ -247,8 +247,10 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
       const item = row.tx;
       const isIncoming = item.type === 'incoming';
       const amountSats = Math.abs(item.amount);
-      const ts = item.settled_at || item.created_at;
-      const isPending = !ts && !item.blockHeight;
+      // `??` (not `||`) so a `0` (epoch) timestamp counts as present; only
+      // null/undefined means the tx has no settle/create time yet (pending).
+      const ts = item.settled_at ?? item.created_at;
+      const isPending = ts == null && !item.blockHeight;
       const zapCpRaw = item.zapCounterparty ?? undefined;
       // Prefer the live profile from contacts (which refreshes when the
       // profile cache updates) over the snapshot embedded in the tx.
@@ -292,7 +294,9 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
         primary = isIncoming ? 'Received' : 'Sent';
       }
 
-      const timeStr = ts ? formatTime(ts) : '';
+      // Explicit null check so a `0` (epoch) timestamp still formats instead of
+      // rendering an empty string.
+      const timeStr = ts != null ? formatTime(ts) : '';
       const counterpartyAvatar =
         zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
       const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
