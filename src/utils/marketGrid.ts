@@ -24,6 +24,10 @@ export const MARKET_GRID_PADDING = 16;
  *
  * Clamped to a sane minimum so a pathologically narrow window never yields a
  * zero/negative width. Floored to whole pixels to avoid sub-pixel seams.
+ *
+ * Total over any input: a non-finite argument (`NaN`/`±Infinity`, e.g. a
+ * window width read before layout) coerces to the minimum tile rather than
+ * poisoning the rest of the layout maths with `NaN` (Copilot review on #948).
  */
 export const marketGridTileWidth = (
   windowWidth: number,
@@ -31,9 +35,9 @@ export const marketGridTileWidth = (
   gap: number = MARKET_GRID_GAP,
   padding: number = MARKET_GRID_PADDING,
 ): number => {
-  const safeColumns = Math.max(1, Math.floor(columns));
+  const safeColumns = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : 1;
   const usable = windowWidth - padding * 2;
   const totalGap = gap * (safeColumns - 1);
   const tile = (usable - totalGap) / safeColumns;
-  return Math.max(1, Math.floor(tile));
+  return Number.isFinite(tile) ? Math.max(1, Math.floor(tile)) : 1;
 };

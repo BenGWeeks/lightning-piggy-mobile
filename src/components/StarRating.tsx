@@ -66,7 +66,24 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
   const shown = hover ?? value;
 
   return (
-    <View style={styles.inputRow} testID={testID} accessibilityRole="adjustable">
+    <View
+      style={styles.inputRow}
+      testID={testID}
+      accessibilityRole="adjustable"
+      // Expose the rating to screen readers and let them change it: without
+      // these, "adjustable" is announced but increment/decrement gestures do
+      // nothing (mirrors AmountSlider; Copilot review on #948).
+      accessibilityLabel="Rating"
+      accessibilityValue={{ min: 0, max: STARS_MAX, now: value }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'increment') {
+          onChange(Math.min(STARS_MAX, value + 1));
+        } else if (e.nativeEvent.actionName === 'decrement') {
+          onChange(Math.max(1, value - 1));
+        }
+      }}
+    >
       {Array.from({ length: STARS_MAX }).map((_, i) => {
         const star = i + 1;
         const filled = star <= shown;

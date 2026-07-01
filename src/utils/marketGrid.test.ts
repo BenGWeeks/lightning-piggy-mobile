@@ -48,4 +48,13 @@ describe('marketGridTileWidth', () => {
     expect(marketGridTileWidth(390, 0)).toBeGreaterThanOrEqual(1);
     expect(marketGridTileWidth(390, -2)).toBeGreaterThanOrEqual(1);
   });
+
+  it('coerces non-finite inputs to the minimum tile instead of returning NaN', () => {
+    expect(marketGridTileWidth(Number.NaN)).toBe(1);
+    expect(marketGridTileWidth(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(marketGridTileWidth(390, Number.NaN)).not.toBeNaN();
+    expect(marketGridTileWidth(390, Number.NaN)).toBeGreaterThanOrEqual(1);
+    expect(marketGridTileWidth(390, 2, Number.NaN)).toBe(1);
+    expect(marketGridTileWidth(390, 2, 12, Number.NaN)).toBe(1);
+  });
 });
