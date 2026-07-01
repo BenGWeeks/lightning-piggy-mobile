@@ -79,6 +79,7 @@ import NfcUnlockSheet from '../components/NfcUnlockSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
+import { canWriteHuntTag } from './huntCreateNfcGate';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -1001,7 +1002,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // it calls `onWritten`, which advances the stage so the stepper +
   // step header flip to "done".
   const handleOpenNfcSheet = useCallback(() => {
-    if (!lnurl.trim()) return;
+    // A reward LNURL is enough on its own. A no-prize public cache has
+    // an empty LNURL by design but still writes the 2-record hunt
+    // payload (LP deep link + nostr:naddr) via `writeHuntTagToTag`, so
+    // `isPublic && pubkey` opens the sheet too (#954/#955). Only the
+    // private single-record path genuinely needs an LNURL.
+    if (!canWriteHuntTag({ lnurl, isPublic, pubkey })) return;
     // We deliberately keep `lastWrittenLock` populated when reopening
     // the sheet so a rewrite of the same Piglet PWD_AUTHs the chip
     // with the previously-stored PIN and the hider doesn't have to
@@ -1011,7 +1017,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // showing the right secret.
     setPinRevealed(false);
     setNfcSheetVisible(true);
-  }, [lnurl]);
+  }, [lnurl, isPublic, pubkey]);
 
   const handleOpenUnlockSheet = useCallback(() => {
     unlockSucceededRef.current = false;
@@ -1168,6 +1174,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // non-LP cache. LP-ness in the wizard = a withdraw link is present
   // (`lnurl`) OR the edited listing is flagged LP (#681 review).
   const listingIsLpInEdit = lnurl.trim().length > 0 || isLpPiggyEdit;
+
+  // Whether the Step 6 NFC-write flow may proceed. See `canWriteHuntTag`
+  // for the reasoning: a reward LNURL always works, a no-prize public
+  // cache (#954/#955) writes the 2-record payload with no LNURL, and a
+  // private no-LNURL listing stays gated.
+  const canWriteNfcTag = canWriteHuntTag({ lnurl, isPublic, pubkey });
 
   return (
     <KeyboardAvoidingView
@@ -1598,15 +1610,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <TouchableOpacity
                 style={[
                   styles.primaryButton,
-                  (!nfcReady || !lnurl.trim()) && styles.primaryButtonDisabled,
+                  (!nfcReady || !canWriteNfcTag) && styles.primaryButtonDisabled,
                 ]}
                 onPress={handleOpenNfcSheet}
-                // Cross-device edit can reach this step with an empty
-                // LNURL — the listing-only-save path. `handleOpenNfcSheet`
-                // bails silently on `!lnurl.trim()` anyway, but the
-                // affordance needs to look disabled so the user knows
-                // to paste an LNURL on step 2 first.
-                disabled={!nfcReady || !lnurl.trim()}
+                // A no-prize public cache can write the 2-record hunt
+                // payload with no LNURL, so `canWriteNfcTag` enables the
+                // button via `isPublic && pubkey` (#954/#955). A private
+                // listing-only edit (no LNURL, not public) still leaves
+                // the affordance disabled so the user knows to paste an
+                // LNURL on step 2 first.
+                disabled={!nfcReady || !canWriteNfcTag}
                 testID="hunt-write-nfc-button"
               >
                 <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -1614,7 +1627,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
                 </Text>
               </TouchableOpacity>
-              {nfcReady && !lnurl.trim() ? (
+              {nfcReady && !canWriteNfcTag ? (
                 <Text style={styles.helper}>
                   No LNURL yet — paste a fresh withdraw link on step 2 to enable the tag write. Or
                   skip this step: the listing already saved without touching the tag.
