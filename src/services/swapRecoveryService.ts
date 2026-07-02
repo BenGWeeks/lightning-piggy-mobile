@@ -354,7 +354,15 @@ interface PersistedReverseSwap {
     claimLeaf: { version: number; output: string };
     refundLeaf: { version: number; output: string };
   };
+  /** Consecutive 404s from the status endpoint — see the tolerance gate. */
+  notFoundCount?: number;
 }
+
+// A single 404 must not destroy claim secrets: a transient API/routing
+// misbehaviour would delete the preimage + claim key while Boltz's lockup may
+// still be claimable. Require this many CONSECUTIVE 404s (counter persisted
+// in the swap record so it survives restarts) before cleaning up.
+const SWAP_404_DELETE_THRESHOLD = 3;
 
 /**
  * List all persisted reverse swap IDs from SecureStore by trying common
@@ -491,19 +499,41 @@ async function recoverSwap(swapId: string): Promise<void> {
   const swap = JSON.parse(raw) as PersistedReverseSwap;
   const paymentHash = swap.preimage ? paymentHashFromPreimage(swap.preimage) : null;
 
-  // Query Boltz status
-  const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
+  // Query Boltz status. Timed fetch — the recovery pass is single-flight, so
+  // a hung request here would block every future recovery trigger (startup,
+  // pull-to-refresh, retry) for the whole session.
+  const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
   if (!res.ok) {
     console.warn(`[SwapRecovery] Boltz returned ${res.status} for ${swapId}`);
     if (res.status === 404) {
-      await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
-      await unregisterPendingSwap(swapId);
-      if (paymentHash) attentionPaymentHashes.delete(paymentHash);
+      // Tolerate transient 404s: only delete the claim secrets after
+      // SWAP_404_DELETE_THRESHOLD consecutive misses (counter persisted in
+      // the record). A single flaky response must not destroy the preimage
+      // and claim key while the lockup may still be claimable.
+      const misses = (swap.notFoundCount ?? 0) + 1;
+      if (misses >= SWAP_404_DELETE_THRESHOLD) {
+        console.warn(`[SwapRecovery] Swap ${swapId} gone (${misses}×404) — cleaning up`);
+        await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
+        await unregisterPendingSwap(swapId);
+        if (paymentHash) attentionPaymentHashes.delete(paymentHash);
+      } else {
+        await SecureStore.setItemAsync(
+          `boltz_swap_${swapId}`,
+          JSON.stringify({ ...swap, notFoundCount: misses }),
+        );
+      }
     }
     return;
   }
   const data = await res.json();
   console.log(`[SwapRecovery] Swap ${swapId} status: ${data.status}`);
+  // The swap exists again — a stale 404 streak is no longer consecutive.
+  if (swap.notFoundCount) {
+    await SecureStore.setItemAsync(
+      `boltz_swap_${swapId}`,
+      JSON.stringify({ ...swap, notFoundCount: undefined }),
+    );
+  }
 
   // Terminal success states — cleanup
   if (data.status === 'invoice.settled' || data.status === 'transaction.claimed') {

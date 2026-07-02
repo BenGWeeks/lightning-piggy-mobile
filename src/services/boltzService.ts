@@ -121,8 +121,11 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
   };
 }
 
-/** Fetch with a timeout to prevent hanging on slow/unreachable APIs. */
-async function fetchWithTimeout(
+/** Fetch with a timeout to prevent hanging on slow/unreachable APIs.
+ * Exported for swapRecoveryService — its recovery pass is single-flight, so
+ * one bare `fetch` hanging there used to block every future recovery trigger
+ * for the whole session (swap audit finding, 2026-07-02). */
+export async function fetchWithTimeout(
   url: string,
   init?: RequestInit,
   timeoutMs = 10000,
