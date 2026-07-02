@@ -749,7 +749,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await fetchInvoiceForDest(dest);
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Persist swap state for crash recovery + refund (includes all keys and scripts)
+        // Persist swap state for crash recovery + refund (includes all keys
+        // and scripts). `sourceWalletId` lets the recovery pass derive a
+        // refund address if the app is killed before the swap settles.
+        // Registered in the index too so recoverPendingSwaps actually finds
+        // it (previously this record was written but never read).
         await SecureStore.setItemAsync(
           `submarine_swap_${swap.id}`,
           JSON.stringify({
@@ -760,9 +764,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             claimPublicKey: swap.claimPublicKey,
             timeoutBlockHeight: swap.timeoutBlockHeight,
             swapTree: swap.swapTree,
+            sourceWalletId: sourceId,
             createdAt: Date.now(),
           }),
+          { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
         );
+        await swapRecoveryService.registerPendingSubmarineSwap(swap.id);
 
         // Foreground: broadcast the on-chain tx (the user's action).
         // Background: wait for Boltz to pay the LN invoice, handle refund path.

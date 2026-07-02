@@ -38,6 +38,8 @@ import {
   setNotificationsForeground,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
+import { setSubmarineRefundHandler } from './src/services/swapRecoveryService';
+import { recoverSubmarineRefund } from './src/utils/submarineRefund';
 import { syncBackgroundDmWatchFromPreference } from './src/services/backgroundDmService';
 import { kickPlacesHydration } from './src/services/btcMapService';
 import PaymentNotifier from './src/components/PaymentNotifier';
@@ -133,6 +135,11 @@ export default function App() {
     // enabled it last session (#279 realtime upgrade). Android-only; no-op
     // when the preference is OFF or on iOS.
     void syncBackgroundDmWatchFromPreference();
+
+    // Wire the submarine-swap refund recovery: the recovery pass detects a
+    // failed on-chain→LN swap and calls this to surface the refund prompt
+    // (needs BDK + the branded Alert, which the leaf service can't import).
+    setSubmarineRefundHandler(recoverSubmarineRefund);
 
     // Foreground signal — notificationService suppresses a message
     // notification only when the app is active AND the user is on that
