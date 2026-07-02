@@ -4,13 +4,20 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import com.facebook.react.HeadlessJsTaskService
+import android.os.IBinder
+import android.util.Log
+import com.facebook.react.ReactApplication
+import com.facebook.react.ReactInstanceEventListener
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.bridge.UiThreadUtil
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
+import com.facebook.react.jstasks.HeadlessJsTaskContext
 
 /**
  * BackgroundDmService — the Amethyst-style persistent foreground service that
@@ -18,30 +25,45 @@ import com.facebook.react.jstasks.HeadlessJsTaskConfig
  * swiped away (#279 realtime upgrade). No FCM, no Google Play Services, so it
  * works on GrapheneOS / microG / un-googled devices.
  *
- * It extends React Native's [HeadlessJsTaskService], whose whole job is to spin
- * up a (headless) JS context and run a registered task in it even when no
- * Activity is mounted. The task we run is "BackgroundDmTask" (registered in
- * src/services/backgroundDmHeadlessTask.ts via AppRegistry.registerHeadlessTask),
- * which calls backgroundDmService.runBackgroundDmWatch() to open the live
- * kind-1059 subscription and fire signer-aware local notifications.
+ * A plain [Service] (NOT React Native's HeadlessJsTaskService) that spins up
+ * the React JS runtime itself and dispatches the "BackgroundDmTask" headless
+ * task (registered in src/services/backgroundDmHeadlessTask.ts) via
+ * [HeadlessJsTaskContext]. Two deliberate departures from
+ * HeadlessJsTaskService, both battery/AOSP-policy driven:
  *
- * Lifecycle: onStartCommand → startForeground(persistent chip) → super starts
- * the JS task. The task's returned Promise never resolves (the subscription is
- * long-lived), so HeadlessJsTaskService keeps the context — and thus the
- * WebSocket — alive until we stopSelf() (triggered by stopService() from JS).
+ *  1. NO permanent wake lock. HeadlessJsTaskService acquires a no-timeout
+ *     PARTIAL_WAKE_LOCK it only releases in onDestroy — for our
+ *     never-finishing watch task that pinned the CPU awake for the entire
+ *     session (Play-vitals "excessive wake lock" territory). The relay
+ *     socket + foreground-service network exemption deliver messages without
+ *     it; in deep Doze delivery may batch to maintenance windows, which is
+ *     the honest battery/latency trade-off (users can grant an
+ *     unrestricted-battery exemption for realtime-in-Doze).
+ *
+ *  2. foregroundServiceType="specialUse" (was dataSync). Android 15 caps
+ *     dataSync services at 6h/24h and forbids starting them from
+ *     BOOT_COMPLETED; specialUse (with the FGS_SUBTYPE property declared in
+ *     the module manifest) has neither restriction, so the watch runs
+ *     all day and the boot re-arm works on every Android version again.
+ *
+ * Lifecycle: onStartCommand → startForeground(persistent chip) → dispatch the
+ * headless task (once per instance). The task's returned Promise never
+ * resolves (the subscription is long-lived), so the JS context — and thus the
+ * WebSocket — stays alive until stopSelf() (triggered by stopService() from
+ * JS).
  */
-class BackgroundDmService : HeadlessJsTaskService() {
+class BackgroundDmService : Service() {
 
   companion object {
+    private const val TAG = "LPBackgroundDmService"
+
     // Must match notificationService.ts CHANNEL_BACKGROUND_SERVICE. The JS
     // side creates this LOW-importance channel via expo-notifications on app
     // launch; we also create it defensively here in case the service is
     // started (e.g. from BootReceiver) before any JS has run this session.
     const val CHANNEL_ID = "background-service"
 
-    // A fixed, non-zero foreground notification id. Distinct from the JS-posted
-    // FOREGROUND_SERVICE_NOTIFICATION_ID chip (that one is an expo-notifications
-    // string id on a different code path); this integer id is the one bound to
+    // A fixed, non-zero foreground notification id — the one bound to
     // startForeground(), which is what actually keeps the process alive.
     private const val FOREGROUND_NOTIFICATION_ID = 4279
 
@@ -65,22 +87,24 @@ class BackgroundDmService : HeadlessJsTaskService() {
     }
   }
 
-  // True once this instance has kicked off its headless JS task. A repeat
+  // True once this instance has dispatched its headless JS task. A repeat
   // startService() on a running service (e.g. app-launch preference re-sync
   // while the watch is already ON) re-enters onStartCommand on the SAME
-  // instance; without this guard super would start a SECOND never-finishing
+  // instance; without this guard we'd dispatch a SECOND never-finishing
   // headless task, stacking JS work per re-sync. Instance state is enough:
   // a new instance (fresh start or START_STICKY restart) starts false.
   private var headlessTaskStarted = false
 
+  override fun onBind(intent: Intent?): IBinder? = null
+
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // Android O+ mandates that a service started via startForegroundService()
     // calls startForeground() within ~5s or the system kills it with an ANR.
-    // Do it FIRST, before super (which kicks off the JS task).
+    // Do it FIRST, before the JS dispatch below.
     promoteToForeground()
     if (!headlessTaskStarted) {
       headlessTaskStarted = true
-      super.onStartCommand(intent, flags, startId)
+      startHeadlessTask()
     }
     // START_STICKY: if the OS kills us under memory pressure, restart the
     // service when resources free up (intent will be null on the restart —
@@ -89,22 +113,71 @@ class BackgroundDmService : HeadlessJsTaskService() {
   }
 
   /**
-   * Build the headless task config. Returning a non-null config tells
-   * HeadlessJsTaskService to run [HEADLESS_TASK_NAME] in a headless JS context.
-   *
-   *  - timeout = 0: no timeout. The watch is a long-lived subscription, not a
-   *    one-shot job, so we never want RN to force-finish it.
-   *  - allowedInForeground = true: also run if the app happens to be in the
-   *    foreground when the service starts, so toggling the feature on while the
-   *    app is open behaves identically to the backgrounded case.
+   * Acquire a ReactContext (starting the React runtime if no Activity ever
+   * ran this session — the BootReceiver path) and dispatch the headless task
+   * in it. Mirrors HeadlessJsTaskService's context acquisition for both the
+   * bridgeless (ReactHost) and bridge (ReactInstanceManager) architectures —
+   * minus its permanent wake lock (see the class doc).
    */
-  override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig {
-    return HeadlessJsTaskConfig(
-      HEADLESS_TASK_NAME,
-      Arguments.createMap(),
-      0L,
-      true,
-    )
+  private fun startHeadlessTask() {
+    val application = application as? ReactApplication
+    if (application == null) {
+      Log.w(TAG, "Application is not a ReactApplication — cannot run the watch task")
+      stopSelf()
+      return
+    }
+    val reactHost = application.reactHost
+    if (reactHost != null) {
+      // Bridgeless (new architecture — the Expo SDK 55 default).
+      val current = reactHost.currentReactContext
+      if (current != null) {
+        dispatchTask(current)
+      } else {
+        reactHost.addReactInstanceEventListener(
+          object : ReactInstanceEventListener {
+            override fun onReactContextInitialized(context: ReactContext) {
+              reactHost.removeReactInstanceEventListener(this)
+              dispatchTask(context)
+            }
+          },
+        )
+        reactHost.start()
+      }
+    } else {
+      // Legacy bridge architecture.
+      val manager = application.reactNativeHost.reactInstanceManager
+      val current = manager.currentReactContext
+      if (current != null) {
+        dispatchTask(current)
+      } else {
+        manager.addReactInstanceEventListener(
+          object : ReactInstanceEventListener {
+            override fun onReactContextInitialized(context: ReactContext) {
+              manager.removeReactInstanceEventListener(this)
+              dispatchTask(context)
+            }
+          },
+        )
+        manager.createReactContextInBackground()
+      }
+    }
+  }
+
+  /** Dispatch BackgroundDmTask on the UI thread (HeadlessJsTaskContext requires it). */
+  private fun dispatchTask(reactContext: ReactContext) {
+    // timeout = 0: the watch is a long-lived subscription, never force-finish.
+    // allowedInForeground = true: toggling the feature on while the app is
+    // open behaves identically to the backgrounded case.
+    val config = HeadlessJsTaskConfig(HEADLESS_TASK_NAME, Arguments.createMap(), 0L, true)
+    UiThreadUtil.runOnUiThread {
+      try {
+        HeadlessJsTaskContext.getInstance(reactContext).startTask(config)
+      } catch (e: Exception) {
+        // e.g. IllegalStateException from task bookkeeping — never crash the
+        // service; a dead watch with a visible chip beats a crash loop.
+        Log.w(TAG, "Failed to dispatch headless watch task", e)
+      }
+    }
   }
 
   /** Post the mandatory ongoing notification and enter the foreground. */
@@ -113,15 +186,16 @@ class BackgroundDmService : HeadlessJsTaskService() {
 
     val notification: Notification = buildNotification()
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      // On API 29+ we must declare the foreground service type at runtime too,
-      // matching android:foregroundServiceType="dataSync" in the manifest.
+    if (Build.VERSION.SDK_INT >= 34) {
+      // API 34+ requires the runtime type to match the manifest declaration
+      // (specialUse, with the FGS_SUBTYPE property explaining the use).
       startForeground(
         FOREGROUND_NOTIFICATION_ID,
         notification,
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
       )
     } else {
+      // Pre-34 the typed overload isn't required (types are informational).
       startForeground(FOREGROUND_NOTIFICATION_ID, notification)
     }
   }

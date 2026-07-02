@@ -56,7 +56,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
 import { getUserRelays, mergeRelays } from './nostrRelayStorage';
 import { perAccountKey } from './perAccountStorage';
-import { RELAY_LIST_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { RELAY_LIST_CACHE_KEY_BASE, CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import { claimWrapNotification } from './dmWrapNotificationDedupe';
 import type { RelayConfig } from '../types/nostr';
 import * as nostrService from './nostrService';
@@ -135,6 +135,32 @@ async function resolveReadRelays(pubkey: string): Promise<string[]> {
   return mergeRelays({ nip65, user })
     .filter((r) => r.read)
     .map((r) => r.url);
+}
+
+/**
+ * The viewer's followed pubkeys from the per-account contacts cache, for the
+ * watch's follow gate (mirrors the live sub's gate — strangers must not be
+ * able to spam OS notifications by gift-wrapping to a pubkey). `null` means
+ * the cache has never been written (fresh install / pre-first-sync): we then
+ * FAIL OPEN and notify, because "no cache yet" is indistinguishable from
+ * "follows not hydrated" and silently eating real messages is worse. An
+ * empty cached array gates strictly, matching the live sub.
+ */
+async function loadFollowedPubkeys(pubkey: string): Promise<Set<string> | null> {
+  try {
+    const raw = await AsyncStorage.getItem(perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const set = new Set<string>();
+    for (const c of parsed) {
+      const pk = (c as { pubkey?: unknown })?.pubkey;
+      if (typeof pk === 'string' && HEX64.test(pk.toLowerCase())) set.add(pk.toLowerCase());
+    }
+    return set;
+  } catch {
+    return null;
+  }
 }
 
 interface ActiveWatch {
@@ -238,6 +264,8 @@ async function handleWrap(input: {
   decryptWrap: ((wrap: nostrService.RawGiftWrapEvent) => DecodedRumor | null) | null;
   /** True once the subscription's initial backlog replay has settled (EOSE). */
   backlogSettled: () => boolean;
+  /** Followed pubkeys for the follow gate; null = cache absent → fail open. */
+  followedPubkeys: Set<string> | null;
 }): Promise<void> {
   const { ev, viewerPubkey, readRelays, subOpenedAtSec, decryptWrap } = input;
   // This background watch only cares about NIP-17 gift wraps (kind 1059) —
@@ -281,6 +309,16 @@ async function handleWrap(input: {
   if (!partnership) return;
   // Never notify for our own echoes (self-wraps / outgoing copies).
   if (partnership.fromMe) return;
+  // Follow gate (mirrors the live sub's): a stranger must not be able to
+  // spam OS notifications by gift-wrapping to our pubkey. Deliberately does
+  // NOT claim the wrap id — the live sub's follow-gate defer buffer may
+  // legitimately replay and notify for this wrap once follows hydrate.
+  if (
+    input.followedPubkeys &&
+    !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
+  ) {
+    return;
+  }
   // Claim BEFORE the async name resolution below — the claim is the
   // synchronous point that closes the race with the foreground live sub
   // processing the same wrap on the same JS thread.
@@ -363,9 +401,13 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   }
 
   const decryptWrap = buildDecryptor(identity);
+  // Follow gate data — only meaningful on the content path (the contentless
+  // path can't know the sender, so it can't be gated). Loaded once per arm;
+  // the 15-min safety re-arm refreshes it as follows change.
+  const followedPubkeys = decryptWrap ? await loadFollowedPubkeys(activePubkey) : null;
   const subOpenedAtSec = Math.floor(Date.now() / 1000);
   console.warn(
-    `[BgDmWatch] arming: viewer=${activePubkey.slice(0, 8)}… relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'}`,
+    `[BgDmWatch] arming: viewer=${activePubkey.slice(0, 8)}… relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'} follows=${followedPubkeys ? followedPubkeys.size : 'uncached'}`,
   );
 
   // Backlog-settled latch for the contentless path (see handleWrap). The nsec
@@ -399,6 +441,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
         subOpenedAtSec,
         decryptWrap,
         backlogSettled: () => eosed,
+        followedPubkeys,
       }).catch((e) => {
         console.warn('[backgroundDmService] handleWrap failed:', e);
       });

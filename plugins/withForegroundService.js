@@ -23,17 +23,19 @@ const { withAndroidManifest } = require('expo/config-plugins');
  *
  *   1. `<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>`
  *      — required for any foreground service on Android 9+.
- *   2. `<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>`
+ *   2. `<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>`
  *      — required on Android 14 (API 34)+ in addition to the above for
- *      `foregroundServiceType="dataSync"`.
+ *      `foregroundServiceType="specialUse"` (chosen over dataSync because
+ *      Android 15 caps dataSync at 6h/24h and bans it from BOOT_COMPLETED;
+ *      the module manifest declares the mandatory FGS_SUBTYPE property).
  *   3. `<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>`
  *      — required on Android 13+ to display the persistent foreground
  *      notification at all (POST_NOTIFICATIONS is a runtime permission;
  *      requested lazily by `notificationService.ts`).
  *   4. `<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>`
  *      — so we can re-arm the listener after device reboot.
- *   5. `<uses-permission android:name="android.permission.WAKE_LOCK"/>`
- *      — partial wake lock during socket-recovery windows.
+ *   (WAKE_LOCK was dropped with the HeadlessJsTaskService-based service —
+ *   the custom Service holds no wake lock; see BackgroundDmService.kt.)
  *
  * What the TS layer now adds on top (the realtime-DM upgrade, #279):
  *
@@ -47,8 +49,8 @@ const { withAndroidManifest } = require('expo/config-plugins');
  * Where the native glue now lives (it HAS landed — #279):
  *
  *   - The Kotlin foreground `Service` (`BackgroundDmService`, a
- *     HeadlessJsTaskService that hosts the `BackgroundDmTask` headless JS
- *     task calling `backgroundDmService.runBackgroundDmWatch()`), its JS↔native
+ *     custom Service that dispatches the `BackgroundDmTask` headless JS
+ *     task via HeadlessJsTaskContext — no wake lock, calling `backgroundDmService.runBackgroundDmWatch()`), its JS↔native
  *     start/stop bridge (`BackgroundDmModule`), and the reboot `BootReceiver`
  *     all live in the local Expo module `modules/background-dm-service`.
  *   - Crucially, the `<service android:foregroundServiceType="dataSync">` and
@@ -70,10 +72,9 @@ const { withAndroidManifest } = require('expo/config-plugins');
  */
 const REQUIRED_PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
-  'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+  'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.RECEIVE_BOOT_COMPLETED',
-  'android.permission.WAKE_LOCK',
 ];
 
 module.exports = function withForegroundService(config) {
@@ -95,7 +96,7 @@ module.exports = function withForegroundService(config) {
       }
     }
 
-    // The <service android:foregroundServiceType="dataSync"> and the reboot
+    // The <service android:foregroundServiceType="specialUse"> and the reboot
     // <receiver> are declared by the local Expo module's own manifest
     // (modules/background-dm-service/android/src/main/AndroidManifest.xml),
     // which merges into the app manifest at build time. They live there — not

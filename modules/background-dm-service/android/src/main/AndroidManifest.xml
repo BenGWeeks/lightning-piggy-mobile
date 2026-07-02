@@ -8,17 +8,20 @@
     adding a <service> on its own). The module manifest is merged into the
     app manifest at build time.
 
-    Permissions (FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC,
-    POST_NOTIFICATIONS, RECEIVE_BOOT_COMPLETED, WAKE_LOCK) stay declared in
-    the app manifest via plugins/withForegroundService.js — they're meaningful
-    on their own and surface in the install prompt.
+    Permissions (FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE,
+    POST_NOTIFICATIONS, RECEIVE_BOOT_COMPLETED) stay declared in the app
+    manifest via plugins/withForegroundService.js — they're meaningful on
+    their own and surface in the install prompt.
   -->
 
   <application>
     <!--
-      foregroundServiceType="dataSync": we're keeping a relay WebSocket alive
-      to sync inbound DMs. Android 14 (API 34)+ requires both the type here
-      AND the FOREGROUND_SERVICE_DATA_SYNC permission.
+      foregroundServiceType="specialUse" (was dataSync): Android 15 caps
+      dataSync services at 6h per 24h and forbids starting them from
+      BOOT_COMPLETED; specialUse has neither restriction. Requires the
+      FOREGROUND_SERVICE_SPECIAL_USE permission (app manifest, via
+      plugins/withForegroundService.js) plus the FGS_SUBTYPE property below
+      declaring the concrete use for platform/store review.
       exported="false": only our own app may start it.
       stopWithTask="false": survive the user swiping the app from Recents, so
       the watch keeps running like Amethyst's.
@@ -27,8 +30,12 @@
       android:name="com.lightningpiggy.backgrounddm.BackgroundDmService"
       android:enabled="true"
       android:exported="false"
-      android:foregroundServiceType="dataSync"
-      android:stopWithTask="false" />
+      android:foregroundServiceType="specialUse"
+      android:stopWithTask="false">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Opt-in realtime direct-message notifications over a user-configured Nostr relay WebSocket, without FCM/push services (the app targets de-googled devices). Runs only while the in-app toggle is enabled; a persistent status notification is always shown." />
+    </service>
 
     <!--
       Re-arm the watch after a device reboot. Uses RECEIVE_BOOT_COMPLETED
