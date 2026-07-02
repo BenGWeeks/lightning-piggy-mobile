@@ -35,7 +35,11 @@ class BootReceiver : BroadcastReceiver() {
     if (action != Intent.ACTION_BOOT_COMPLETED && action != ACTION_QUICKBOOT_POWERON) {
       return
     }
-    if (Build.VERSION.SDK_INT >= 35) {
+    // The BOOT_COMPLETED dataSync-FGS ban applies to apps TARGETING API 35+
+    // running on API 35+ devices — gate on both so a build that still targets
+    // <35 keeps its boot re-arm (and the code matches the platform rule).
+    val targetSdk = context.applicationContext.applicationInfo.targetSdkVersion
+    if (Build.VERSION.SDK_INT >= 35 && targetSdk >= 35) {
       Log.i(TAG, "Skipping boot re-arm: dataSync FGS from BOOT_COMPLETED is forbidden on API 35+")
       return
     }

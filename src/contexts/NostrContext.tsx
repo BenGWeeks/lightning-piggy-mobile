@@ -1196,7 +1196,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // service + subscription and dismiss the chip; the preference itself is
     // kept (device-level, like user relay overrides) so the next login's
     // sync re-arms it.
-    void stopBackgroundDmWatch().catch((e) => {
+    // Awaited (not fire-and-forget) so the watch is deterministically dead
+    // BEFORE the identity state below is cleared — otherwise there's a
+    // window where it could still notify for the just-signed-out account.
+    await stopBackgroundDmWatch().catch((e) => {
       if (__DEV__) console.warn('[Nostr] post-logout watch stop failed:', e);
     });
 

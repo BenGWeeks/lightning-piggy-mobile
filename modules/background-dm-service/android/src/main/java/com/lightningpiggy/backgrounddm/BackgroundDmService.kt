@@ -143,6 +143,10 @@ class BackgroundDmService : HeadlessJsTaskService() {
     ).apply {
       description = "The persistent status shown while Lightning Piggy watches for messages"
       setShowBadge(false)
+      // Match the JS-side channel definition (notificationService.ts) exactly:
+      // channel attributes are effectively immutable after first creation, so
+      // whichever side runs first must define the same lockscreen behaviour.
+      lockscreenVisibility = Notification.VISIBILITY_PUBLIC
     }
     manager.createNotificationChannel(channel)
   }
