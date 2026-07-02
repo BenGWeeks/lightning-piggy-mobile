@@ -2019,11 +2019,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               </TouchableOpacity>
 
-              <Text style={styles.warning}>
-                ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the
-                URL) can claim sats up to your daily limit. Set a per-find amount you&apos;re OK
-                losing if it leaks.
-              </Text>
+              {/* The bearer-token warning is only accurate when the listing
+                  actually carries an LNURL — on the no-prize publish path
+                  there's no reward URL to leak, so hide it (Copilot #955). */}
+              {listingIsLpInEdit ? (
+                <Text style={styles.warning}>
+                  ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the
+                  URL) can claim sats up to your daily limit. Set a per-find amount you&apos;re OK
+                  losing if it leaks.
+                </Text>
+              ) : null}
 
               {stage.kind === 'idle' || stage.kind === 'validating' ? (
                 <Text style={styles.helper}>
