@@ -486,6 +486,9 @@ export async function showForegroundServiceNotification(opts: {
   title: string;
   body: string;
 }): Promise<string | null> {
+  // Enforce the Android-only contract — on iOS there is no foreground
+  // service, so a stray call must not schedule a phantom notification.
+  if (Platform.OS !== 'android') return null;
   try {
     const granted = await hasNotificationPermission();
     if (!granted) return null;
@@ -494,9 +497,10 @@ export async function showForegroundServiceNotification(opts: {
       content: {
         title: opts.title,
         body: opts.body,
-        // The chip is informational only — no routing payload needed beyond
-        // the discriminator so a tap still opens the app.
-        data: { kind: 'background-service' },
+        // `kind: 'dm'` with no thread id routes a tap to the Messages list
+        // (see navigateFromNotification) — the right landing place for a
+        // "watching for messages" chip; unknown kinds would land on Home.
+        data: { kind: 'dm' },
         // `sticky` (Android `ongoing`) keeps the user from swiping it away
         // while the service runs — matching Amethyst's persistent chip.
         sticky: true,

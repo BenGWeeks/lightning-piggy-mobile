@@ -426,10 +426,14 @@ export async function startBackgroundDmWatch(): Promise<void> {
 export async function stopBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
   // Stop the native service first: this tears down the headless JS context
-  // (and the subscription running inside it). Then close any inline
-  // subscription this foreground context owns (the fallback path) and dismiss
-  // the chip.
-  await stopForegroundService();
+  // (and the subscription running inside it). Best-effort — a transient
+  // bridge error must not skip the rest of the cleanup below, or the watch
+  // is left half-stopped with the chip still up.
+  await stopForegroundService().catch((e) => {
+    console.warn('[BgDmWatch] native stop failed (continuing cleanup):', e);
+  });
+  // Then close any inline subscription this foreground context owns (the
+  // fallback path) and dismiss the chip.
   stopBackgroundDmWatchSubscription();
   await dismissForegroundServiceNotification();
 }
