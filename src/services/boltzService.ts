@@ -24,6 +24,7 @@ import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
 
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
@@ -600,25 +601,29 @@ export function isBitcoinAddress(input: string): boolean {
 /**
  * Fetch lockup transaction details for a submarine swap.
  * Used to get the UTXO needed for refund transaction construction.
+ *
+ * The v2 endpoint returns only `{ id, hex, timeoutBlockHeight }` — it has NO
+ * `index` (vout) or amount fields, so the previous `data.index ?? 0` /
+ * `statusData.onchainAmount ?? 0` reads guessed vout 0 with amount 0 and the
+ * refund either threw "amount too small" or signed the wrong outpoint (swap
+ * audit finding, 2026-07-02). Instead, parse the returned raw tx and locate
+ * the output paying `lockupAddress` — which also verifies the lockup really
+ * pays the address we hold the refund script for.
  */
 export async function getSubmarineSwapLockup(
   swapId: string,
+  lockupAddress: string,
 ): Promise<{ txId: string; vout: number; amount: number } | null> {
   try {
     const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();
     const txId = data.transactionId ?? data.id;
-    if (!txId) return null;
-    // Fetch expected amount from swap status
-    const statusRes = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!statusRes.ok) return null;
-    const statusData = await statusRes.json();
-    return {
-      txId,
-      vout: data.index ?? 0,
-      amount: statusData.onchainAmount ?? 0,
-    };
+    const txHex = data.hex;
+    if (!txId || typeof txHex !== 'string' || !txHex) return null;
+    const lockup = extractLockupFromTxHex(txHex, lockupAddress);
+    if (!lockup) return null;
+    return { txId, vout: lockup.vout, amount: lockup.amount };
   } catch {
     return null;
   }

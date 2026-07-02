@@ -25,7 +25,7 @@ export async function promptSubmarineRefund(
   let lockup: Awaited<ReturnType<typeof boltzService.getSubmarineSwapLockup>> | null = null;
   let destAddr: string | undefined;
   try {
-    lockup = await boltzService.getSubmarineSwapLockup(swap.id);
+    lockup = await boltzService.getSubmarineSwapLockup(swap.id, swap.address);
     if (lockup) destAddr = await onchainService.getNextReceiveAddress(sourceWalletId);
   } catch (e) {
     console.warn('[Transfer] submarine refund lookup failed:', e);

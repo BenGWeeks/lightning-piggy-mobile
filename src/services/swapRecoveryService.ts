@@ -8,18 +8,12 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import * as bitcoin from 'bitcoinjs-lib';
-import * as ecc from '@bitcoinerlab/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
-
-// Required for bitcoinjs-lib to derive output scripts from taproot (bech32m)
-// addresses — lockup addresses are taproot, so without this toOutputScript
-// throws "No ECC Library provided".
-bitcoin.initEccLib(ecc);
 
 /** Shape of the transaction-row data this module needs to classify a row as
  *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
@@ -344,33 +338,8 @@ export async function recordSubmarineSwapLegs(
   await recordSwapMeta(lnPaymentHash, swapId, 'submarine');
 }
 
-/**
- * Boltz v2 /swap/{id} returns only transaction.id + transaction.hex — not
- * vout/onchainAmount. Parse the raw tx to find the output that matches our
- * lockup address.
- */
-function extractLockupFromTxHex(
-  txHex: string,
-  lockupAddress: string,
-): { vout: number; amount: number } | null {
-  try {
-    const tx = bitcoin.Transaction.fromHex(txHex);
-    const expectedScript = bitcoin.address.toOutputScript(lockupAddress);
-    for (let i = 0; i < tx.outs.length; i++) {
-      const script = tx.outs[i].script;
-      if (
-        script.length === expectedScript.length &&
-        script.every((b, j) => b === expectedScript[j])
-      ) {
-        return { vout: i, amount: Number(tx.outs[i].value) };
-      }
-    }
-    return null;
-  } catch (e) {
-    console.warn('[SwapRecovery] Failed to parse lockup tx hex:', e);
-    return null;
-  }
-}
+// Lockup-output parsing moved to utils/lockupTx (shared with boltzService's
+// submarine refund lookup without an import cycle).
 
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
