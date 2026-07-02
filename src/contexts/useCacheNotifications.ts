@@ -1,11 +1,11 @@
 /**
  * useCacheNotifications — foreground live subscription that fires an OS
  * notification when fresh activity lands on one of the viewer's published
- * geo-caches (#740, #760).
+ * geo-caches (#740, #945).
  *
  * Two event surfaces are watched against the viewer's own cache coords:
  *   - kind-1111 NIP-22 comments (`#A` root pointer) — #740
- *   - kind-7516 NIP-GC found-logs (`#a` cache pointer) — #760
+ *   - kind-7516 NIP-GC found-logs (`#a` cache pointer) — #945
  * A found-log additionally fans out on the in-app event bus
  * (`notifyFoundLog`) so an open HuntPiggyDetail can refresh in-place;
  * comments stay notification-only (no in-app live surface yet).
@@ -68,7 +68,7 @@ const REFETCH_MIN_GAP_MS = 10_000;
 
 // Per-surface notification copy. Comments and found-logs are separate
 // event kinds now, so the OS notification title should match what actually
-// happened rather than always claiming a "find" (Copilot #760).
+// happened rather than always claiming a "find" (Copilot #946).
 interface NotifyCopy {
   title: string;
   body: string;
@@ -127,7 +127,7 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // subscriptions in refetchAndRearm — NOT just once on mount — so the
     // relay's historical replay that predates a *later* (re)subscribe (e.g.
     // a cache published mid-session that changes the coord set minutes in)
-    // can't slip past the gate and fire stale notifications (Copilot #760).
+    // can't slip past the gate and fire stale notifications (Copilot #946).
     let subOpenedAtSec = Math.floor(Date.now() / 1000);
 
     // Shared per-event handler. `coordTagKey` is `A` (uppercase NIP-22 root
@@ -201,9 +201,12 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
         if (cancelled) return;
         const coords = myCaches.map((c) => c.coord);
         // Set-equality (order-independent — fetchCachesByAuthor ordering is
-        // not guaranteed). Skip the tear-down + re-arm when unchanged.
+        // not guaranteed). Skip the tear-down + re-arm when unchanged. O(1)
+        // membership via a Set — this runs every minute and on AppState
+        // resume, and a user can own many caches (Copilot #946).
+        const currentSet = new Set(currentCoords);
         const sameSet =
-          coords.length === currentCoords.length && coords.every((c) => currentCoords.includes(c));
+          coords.length === currentCoords.length && coords.every((c) => currentSet.has(c));
         if (sameSet) return;
         currentCoords = coords;
         if (unsubscribeComments) {

@@ -88,10 +88,20 @@ function makeEvent(
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
+  // Spy AppState.addEventListener so the tests can read `.mock.calls` (the
+  // hook registers a 'change' listener) and get back a real subscription
+  // shape. Without this it's a real RN function and `.mock` is undefined
+  // (Copilot #946).
+  jest
+    .spyOn(AppState, 'addEventListener')
+    .mockReturnValue({ remove: jest.fn() } as unknown as ReturnType<
+      typeof AppState.addEventListener
+    >);
 });
 
 afterEach(() => {
   (Date.now as jest.Mock).mockRestore?.();
+  (AppState.addEventListener as jest.Mock).mockRestore?.();
 });
 
 describe('useCacheNotifications', () => {

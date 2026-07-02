@@ -423,7 +423,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     relays,
   });
 
-  // Cache-activity notifications (#740, #760) — live subs against the
+  // Cache-activity notifications (#740, #945) — live subs against the
   // viewer's owned cache coords: kind-1111 comments AND kind-7516 found-logs.
   // Fires `fireCacheNotification` per fresh arrival + fans found-logs out on
   // the in-app event bus (`notifyFoundLog`). See useCacheNotifications.
