@@ -35,7 +35,13 @@ export function amountSatsFromBolt11(bolt11: string): number | null {
     if (!section?.value) return null;
     const msats = Number(section.value);
     if (!Number.isFinite(msats) || msats < 0) return null;
-    return Math.floor(msats / 1000);
+    // Fail closed on a sub-sat (non-1000-multiple) msats amount rather than
+    // flooring — this gates verifyReverseSwapInvoice, and flooring would let
+    // an invoice charging e.g. +999 msats slip past the exact-amount check
+    // (Copilot review, #961). A real Boltz reverse-swap invoice is a whole
+    // number of sats.
+    if (msats % 1000 !== 0) return null;
+    return msats / 1000;
   } catch (error) {
     if (__DEV__) console.warn('[bolt11] amount decode failed:', error);
     return null;

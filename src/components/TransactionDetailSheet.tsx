@@ -133,9 +133,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
         <Copy size={14} color={colors.textSupplementary} />
         {explorerTxId ? (
           <TouchableOpacity
-            onPress={() =>
-              Linking.openURL(`https://mempool.space/tx/${explorerTxId}`).catch(() => {})
-            }
+            onPress={(e) => {
+              // Don't also trigger the parent row's copy handler — nested
+              // touchables otherwise stack both actions (Copilot review, #961).
+              e.stopPropagation();
+              Linking.openURL(`https://mempool.space/tx/${explorerTxId}`).catch(() => {});
+            }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel={`View ${label.toLowerCase()} in block explorer`}
             testID={`tx-detail-explorer-${label.toLowerCase().replace(/\s+/g, '-')}`}
