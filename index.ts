@@ -4,6 +4,10 @@ import { perfAnchor, perfLog, perfHeartbeatStart } from './src/utils/perfLog';
 // Side-effect import: defines the background-sync task in the global scope
 // so expo-background-task can invoke it after an OS-driven relaunch (#279).
 import './src/services/backgroundTask';
+// Side-effect import: registers the BackgroundDmTask headless JS task in the
+// global scope so the native Android foreground service (and the BootReceiver
+// after a reboot) can run it even when no React tree is mounted (#279).
+import './src/services/backgroundDmHeadlessTask';
 
 // Anchor T0 at the FIRST line of JS execution (this module is the
 // app's entry point per registerRootComponent below). Every later
