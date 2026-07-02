@@ -62,6 +62,7 @@ import {
   runBackgroundDmWatch,
   startBackgroundDmWatch,
   stopBackgroundDmWatch,
+  rearmBackgroundDmWatchForActiveIdentity,
   __isWatchActiveForTests,
   __resetForTests,
 } from './backgroundDmService';
@@ -325,6 +326,36 @@ describe('remote signer path: contentless notifications', () => {
 
     expect(mockFireMessageNotification).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'New encrypted message' }),
+    );
+  });
+});
+
+describe('rearmBackgroundDmWatchForActiveIdentity (account switch, #288)', () => {
+  it('is a no-op when no watch is armed', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await rearmBackgroundDmWatchForActiveIdentity();
+    expect(mockSubscribe).not.toHaveBeenCalled();
+  });
+
+  it('swaps the running subscription to the new active identity', async () => {
+    const OTHER = 'c'.repeat(64);
+    const unsub = jest.fn();
+    mockSubscribe.mockReturnValue(unsub);
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await runBackgroundDmWatch();
+
+    // Account switch: the registry now reports OTHER as active.
+    mockLoadIdentities.mockResolvedValue({
+      identities: [{ pubkey: OTHER, signerType: 'nsec', nsec: 'nsec1yyy', lastUsedAt: 2 }],
+      activePubkey: OTHER,
+    });
+    mockDecodeNsec.mockReturnValue({ pubkey: OTHER, secretKey: SECRET });
+    await rearmBackgroundDmWatchForActiveIdentity();
+
+    expect(unsub).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+    expect(mockSubscribe.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ viewerPubkey: OTHER }),
     );
   });
 });

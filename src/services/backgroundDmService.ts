@@ -391,6 +391,12 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // its own startForeground() chip, so posting the Expo sticky chip as
       // well would stack two ongoing entries in the shade.
       await startForegroundService();
+      // If the service was ALREADY running, the start above is a no-op (the
+      // service guards against stacking a second headless task) — but the
+      // active identity may have changed since its watch armed (login adding
+      // a new account). Swap the subscription in place; no-op after a fresh
+      // start (the headless task hasn't armed anything in this context yet).
+      await rearmBackgroundDmWatchForActiveIdentity();
     } else {
       // Fallback (native module absent — Expo Go / stale dev client): the
       // Expo sticky chip is the only status surface, and the subscription
@@ -436,6 +442,22 @@ export async function stopBackgroundDmWatch(): Promise<void> {
   // fallback path) and dismiss the chip.
   stopBackgroundDmWatchSubscription();
   await dismissForegroundServiceNotification();
+}
+
+/**
+ * Re-arm the live subscription for the (possibly changed) active identity.
+ * Call after an account switch (#288): the running watch — whether hosted by
+ * the native service's headless task or the inline fallback — was armed for
+ * the PREVIOUS pubkey and would otherwise keep notifying for it until the
+ * next app relaunch. Both hosts share this module's JS context (one React
+ * context per process), so re-running the arm swaps the subscription in
+ * place; the service, chip, and wake lock keep running untouched. No-op when
+ * no watch is currently armed (feature off, or start was hard-stopped).
+ */
+export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  if (!activeWatch) return;
+  await runBackgroundDmWatch();
 }
 
 /**

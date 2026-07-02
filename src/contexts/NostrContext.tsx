@@ -12,6 +12,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
+import {
+  rearmBackgroundDmWatchForActiveIdentity,
+  stopBackgroundDmWatch,
+  syncBackgroundDmWatchFromPreference,
+} from '../services/backgroundDmService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -1025,6 +1030,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggedIn(true);
         setIsLoggingIn(false);
 
+        // Restart the background DM watch if the user has it enabled — a
+        // full logout stopped it, and the launch-time sync has already run,
+        // so without this the toggle would read ON with nothing watching
+        // until the next app relaunch (#279).
+        void syncBackgroundDmWatchFromPreference().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
+        });
+
         // First-launch migration for this identity — idempotent flag
         // means this is a no-op once the user has migrated on any
         // previous login.
@@ -1085,6 +1098,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSignerType('amber');
       setIsLoggedIn(true);
       setIsLoggingIn(false);
+
+      // Mirror the nsec login: restart the watch if enabled — see the
+      // comment there (#279). Amber identities get contentless alerts.
+      void syncBackgroundDmWatchFromPreference().catch((e) => {
+        if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
+      });
 
       try {
         await migrateToPerAccountStorage(pk);
@@ -1249,9 +1268,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           loadRelays,
           loadProfile,
         });
+        // Same staleness as switchIdentity: the watch is still subscribed
+        // for the signed-out pubkey — swap it to the successor (#279).
+        void rearmBackgroundDmWatchForActiveIdentity().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] post-sign-out watch re-arm failed:', e);
+        });
         return;
       }
     }
+
+    // Last identity gone — a still-running watch would keep receiving (and
+    // notifying for) DMs to an account the user just signed out of. Stop the
+    // service + subscription and dismiss the chip; the preference itself is
+    // kept (device-level, like user relay overrides) so the next login's
+    // sync re-arms it.
+    void stopBackgroundDmWatch().catch((e) => {
+      if (__DEV__) console.warn('[Nostr] post-logout watch stop failed:', e);
+    });
 
     setPubkey(null);
     setProfile(null);
@@ -1331,6 +1364,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPubkey(target.pubkey);
       setSignerType(target.signerType);
       setIsLoggedIn(true);
+
+      // Re-arm the background DM watch for the new identity — the running
+      // watch was subscribed for the previous pubkey and would keep
+      // notifying for it until the next app relaunch (#279).
+      void rearmBackgroundDmWatchForActiveIdentity().catch((e) => {
+        if (__DEV__) console.warn('[Nostr] post-switch watch re-arm failed:', e);
+      });
 
       // Eagerly hydrate from persisted per-account caches. The next
       // tab focus / pull-to-refresh will fan out to relays.
