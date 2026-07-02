@@ -9,6 +9,7 @@ const mockLoadIdentities = jest.fn();
 const mockGetUserRelays = jest.fn();
 const mockAsyncGetItem = jest.fn();
 const mockFireMessageNotification = jest.fn().mockResolvedValue('id');
+const mockHasPermission = jest.fn();
 const mockShowForeground = jest.fn().mockResolvedValue('fg');
 const mockDismissForeground = jest.fn().mockResolvedValue(undefined);
 const mockUnwrapWrapNsec = jest.fn();
@@ -42,6 +43,7 @@ jest.mock('./dmLiveSubscription', () => ({
 }));
 jest.mock('./notificationService', () => ({
   fireMessageNotification: (...a: unknown[]) => mockFireMessageNotification(...a),
+  hasNotificationPermission: () => mockHasPermission(),
   showForegroundServiceNotification: (...a: unknown[]) => mockShowForeground(...a),
   dismissForegroundServiceNotification: (...a: unknown[]) => mockDismissForeground(...a),
 }));
@@ -96,6 +98,8 @@ beforeEach(() => {
   mockSubscribe.mockReturnValue(() => {});
   mockGetUserRelays.mockResolvedValue(READ_RELAYS);
   mockAsyncGetItem.mockResolvedValue(null);
+  mockHasPermission.mockResolvedValue(true);
+  mockShowForeground.mockResolvedValue('fg');
   mockDecodeNsec.mockReturnValue({ pubkey: ME, secretKey: SECRET });
 });
 
@@ -333,13 +337,32 @@ describe('start / stop lifecycle', () => {
     expect(mockSubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it('does not arm anything when the foreground chip cannot be posted', async () => {
-    // Null chip = notification permission missing/revoked. Arming anyway
-    // would run an invisible battery-draining watch (Copilot review, PR #958).
+  it('hard-stops without arming when notification permission is missing', async () => {
+    // Without permission the watch is an invisible battery drain — no chip,
+    // no message alerts (Copilot review, PR #958).
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockHasPermission.mockResolvedValue(false);
+    await startBackgroundDmWatch();
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
+  it('does not arm anything when the fallback chip cannot be posted', async () => {
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     mockShowForeground.mockResolvedValueOnce(null);
     await startBackgroundDmWatch();
     expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
+  it('dismisses the chip when the fallback arm finds nothing to watch', async () => {
+    // Arming can fail after the chip is up (no identity / no relays) — the
+    // chip must not stay in the shade promising a watch that is not running.
+    mockLoadIdentities.mockResolvedValue({ identities: [], activePubkey: null });
+    await startBackgroundDmWatch();
+    expect(mockShowForeground).toHaveBeenCalledTimes(1);
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
     expect(__isWatchActiveForTests()).toBe(false);
   });
 

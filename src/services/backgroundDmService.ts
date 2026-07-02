@@ -63,6 +63,7 @@ import * as nostrService from './nostrService';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
   fireMessageNotification,
+  hasNotificationPermission,
   showForegroundServiceNotification,
   dismissForegroundServiceNotification,
 } from './notificationService';
@@ -374,26 +375,40 @@ function stopBackgroundDmWatchSubscription(): void {
  */
 export async function startBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  const chipId = await showForegroundServiceNotification({
-    title: 'Lightning Piggy is watching for messages',
-    body: 'Tap to open. This keeps your messages arriving in the background.',
-  });
-  // A null chip means notification permission is missing/revoked (or the
-  // post threw). Without it the user gets an invisible battery-draining
-  // watch — and none of the message notifications the watch exists to
-  // deliver — so treat it as a hard stop rather than arming anyway.
-  if (chipId === null) {
-    console.warn('[BgDmWatch] not started: foreground chip could not be posted (permission?)');
+  // Without notification permission the watch is an invisible battery drain —
+  // it can't post the status chip or any of the message alerts it exists to
+  // deliver — so a missing/revoked permission is a hard stop, not a warning.
+  const granted = await hasNotificationPermission().catch(() => false);
+  if (!granted) {
+    console.warn('[BgDmWatch] not started: notification permission missing');
     return;
   }
   try {
     if (isBackgroundDmServiceAvailable()) {
       // Native service owns the watch: it spins up a headless JS context and
-      // runs the BackgroundDmTask (→ runBackgroundDmWatch) there. Arming it here
-      // too would open a duplicate subscription in the foreground context.
+      // runs the BackgroundDmTask (→ runBackgroundDmWatch) there. Arming it
+      // here too would open a duplicate subscription — and the service posts
+      // its own startForeground() chip, so posting the Expo sticky chip as
+      // well would stack two ongoing entries in the shade.
       await startForegroundService();
     } else {
-      await runBackgroundDmWatch();
+      // Fallback (native module absent — Expo Go / stale dev client): the
+      // Expo sticky chip is the only status surface, and the subscription
+      // runs inline in this JS context.
+      const chipId = await showForegroundServiceNotification({
+        title: 'Lightning Piggy is watching for messages',
+        body: 'Tap to open. This keeps your messages arriving in the background.',
+      });
+      if (chipId === null) {
+        console.warn('[BgDmWatch] not started: foreground chip could not be posted');
+        return;
+      }
+      const armed = await runBackgroundDmWatch();
+      if (!armed) {
+        // Nothing to watch (no identity / no relays) — don't leave a chip
+        // promising a watch that isn't running.
+        await dismissForegroundServiceNotification();
+      }
     }
   } catch (e) {
     // Don't leave a stray chip (or half-armed subscription) behind when the
