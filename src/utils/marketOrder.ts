@@ -101,11 +101,14 @@ function normalizeQuantity(quantity: number): number {
   return Number.isFinite(quantity) && quantity >= 1 ? Math.floor(quantity) : 1;
 }
 
-/** Total in sats for a set of lines: Σ (positive-int quantity × non-negative price). */
+/** Total in sats for a set of lines: Σ (positive-int quantity × non-negative price).
+ * Prices are rounded to whole sats — `parseOrderEvent` only accepts an
+ * integer `amount` tag, so a fractional total would be dropped on parse. */
 export function orderTotalSats(lines: MarketOrderLine[]): number {
   return lines.reduce((sum, line) => {
     const qty = normalizeQuantity(line.quantity);
-    const price = Number.isFinite(line.priceSats) && line.priceSats >= 0 ? line.priceSats : 0;
+    const price =
+      Number.isFinite(line.priceSats) && line.priceSats >= 0 ? Math.round(line.priceSats) : 0;
     return sum + qty * price;
   }, 0);
 }

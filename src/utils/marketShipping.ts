@@ -135,8 +135,13 @@ export function filterShippingOptions(
  * the 30406 base price + the product's `shipping_option` surcharge.
  */
 export function shippingCostFor(option: ShippingOption, ref?: ProductShippingRef): number {
+  // The surcharge only applies when the ref actually points at THIS option —
+  // a mismatched ref must not silently over/under-charge shipping.
+  const applies = ref?.coordinate === option.coordinate;
   const extra =
-    ref && Number.isFinite(ref.extraAmount) && (ref.extraAmount ?? 0) > 0 ? ref.extraAmount! : 0;
+    applies && Number.isFinite(ref?.extraAmount) && (ref?.extraAmount ?? 0) > 0
+      ? ref!.extraAmount!
+      : 0;
   return option.baseAmount + extra;
 }
 

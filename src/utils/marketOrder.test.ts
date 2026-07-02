@@ -43,6 +43,11 @@ describe('orderTotalSats', () => {
     expect(orderTotalSats([line({ quantity: 2.9, priceSats: 100 })])).toBe(200);
     expect(orderTotalSats([line({ quantity: 1, priceSats: -5 })])).toBe(0);
   });
+
+  it('rounds a fractional price to whole sats (parseOrderEvent rejects a decimal amount)', () => {
+    expect(orderTotalSats([line({ quantity: 3, priceSats: 100.4 })])).toBe(300);
+    expect(orderTotalSats([line({ quantity: 1, priceSats: 99.5 })])).toBe(100);
+  });
 });
 
 describe('newOrderId', () => {

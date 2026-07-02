@@ -142,6 +142,16 @@ describe('shippingCostFor', () => {
     expect(shippingCostFor(option, { coordinate: option.coordinate, extraAmount: 2 })).toBe(6.5);
     expect(shippingCostFor(option, { coordinate: option.coordinate, extraAmount: -3 })).toBe(4.5);
   });
+
+  it('ignores a surcharge whose ref points at a DIFFERENT option', () => {
+    const option = makeOption({ baseAmount: 4.5 });
+    expect(
+      shippingCostFor(option, {
+        coordinate: `${SHIPPING_OPTION_KIND}:${PK}:other`,
+        extraAmount: 2,
+      }),
+    ).toBe(4.5);
+  });
 });
 
 describe('shippingCostSats', () => {
