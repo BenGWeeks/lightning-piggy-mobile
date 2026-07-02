@@ -301,6 +301,23 @@ describe('start / stop lifecycle', () => {
     expect(mockSubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('does not arm anything when the foreground chip cannot be posted', async () => {
+    // Null chip = notification permission missing/revoked. Arming anyway
+    // would run an invisible battery-draining watch (Copilot review, PR #958).
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockShowForeground.mockResolvedValueOnce(null);
+    await startBackgroundDmWatch();
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
+  it('cleans up the chip when arming throws', async () => {
+    mockLoadIdentities.mockRejectedValueOnce(new Error('identities store unavailable'));
+    await startBackgroundDmWatch();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
   it('stop dismisses the chip and closes the subscription', async () => {
     const unsub = jest.fn();
     mockSubscribe.mockReturnValue(unsub);

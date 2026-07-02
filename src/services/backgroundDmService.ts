@@ -354,17 +354,33 @@ function stopBackgroundDmWatchSubscription(): void {
  */
 export async function startBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await showForegroundServiceNotification({
+  const chipId = await showForegroundServiceNotification({
     title: 'Lightning Piggy is watching for messages',
     body: 'Tap to open. This keeps your messages arriving in the background.',
   });
-  if (isBackgroundDmServiceAvailable()) {
-    // Native service owns the watch: it spins up a headless JS context and
-    // runs the BackgroundDmTask (→ runBackgroundDmWatch) there. Arming it here
-    // too would open a duplicate subscription in the foreground context.
-    await startForegroundService();
-  } else {
-    await runBackgroundDmWatch();
+  // A null chip means notification permission is missing/revoked (or the
+  // post threw). Without it the user gets an invisible battery-draining
+  // watch — and none of the message notifications the watch exists to
+  // deliver — so treat it as a hard stop rather than arming anyway.
+  if (chipId === null) {
+    console.warn('[BgDmWatch] not started: foreground chip could not be posted (permission?)');
+    return;
+  }
+  try {
+    if (isBackgroundDmServiceAvailable()) {
+      // Native service owns the watch: it spins up a headless JS context and
+      // runs the BackgroundDmTask (→ runBackgroundDmWatch) there. Arming it here
+      // too would open a duplicate subscription in the foreground context.
+      await startForegroundService();
+    } else {
+      await runBackgroundDmWatch();
+    }
+  } catch (e) {
+    // Don't leave a stray chip (or half-armed subscription) behind when the
+    // start failed — clean up and log; callers don't handle a rejection here.
+    console.warn('[BgDmWatch] start failed — cleaning up:', e);
+    stopBackgroundDmWatchSubscription();
+    await dismissForegroundServiceNotification();
   }
 }
 
