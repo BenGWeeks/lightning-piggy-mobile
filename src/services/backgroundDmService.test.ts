@@ -259,7 +259,9 @@ describe('nsec path: content notifications', () => {
     // Contacts cache exists but PARTNER is not in it.
     mockAsyncGetItem.mockImplementation((key: string) =>
       Promise.resolve(
-        key.startsWith('nostr_contacts_cache') ? JSON.stringify([{ pubkey: 'f'.repeat(64) }]) : null,
+        key.startsWith('nostr_contacts_cache')
+          ? JSON.stringify([{ pubkey: 'f'.repeat(64) }])
+          : null,
       ),
     );
 
