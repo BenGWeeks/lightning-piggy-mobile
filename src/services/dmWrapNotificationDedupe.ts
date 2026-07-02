@@ -10,7 +10,11 @@ const claimed = new Set<string>();
 // Insertion-ordered Set: when full, evict the oldest half in one pass.
 const MAX_CLAIMED = 512;
 
-/** True exactly once per wrap id — the caller that gets `true` fires. */
+/**
+ * True exactly once per non-empty wrap id — the caller that gets `true`
+ * fires. A missing/empty id always returns `true` (no dedupe possible, and
+ * bad data must never suppress a real notification).
+ */
 export function claimWrapNotification(wrapId: string | null | undefined): boolean {
   if (!wrapId) return true;
   if (claimed.has(wrapId)) return false;

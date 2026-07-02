@@ -312,7 +312,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   const decryptWrap = buildDecryptor(identity);
   const subOpenedAtSec = Math.floor(Date.now() / 1000);
   console.warn(
-    `[BgDmWatch] arming: relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'}`,
+    `[BgDmWatch] arming: viewer=${activePubkey.slice(0, 8)}… relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'}`,
   );
 
   // Backlog-settled latch for the contentless path (see handleWrap). The nsec
