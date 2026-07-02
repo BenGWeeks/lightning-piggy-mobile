@@ -88,6 +88,12 @@ function settleBacklog(): void {
   (call?.[0] as { onEose?: () => void }).onEose?.();
 }
 
+// Fire the wrap subscription's close signal (all relays dropped).
+function dropWrapsSub(): void {
+  const call = mockSubscribe.mock.calls.at(-1);
+  (call?.[0] as { onWrapsClose?: (reasons: string[]) => void }).onWrapsClose?.(['relay closed']);
+}
+
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -327,6 +333,64 @@ describe('remote signer path: contentless notifications', () => {
     expect(mockFireMessageNotification).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'New encrypted message' }),
     );
+  });
+});
+
+describe('self-re-arm on relay drop', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('re-arms with backoff when the wrap subscription closes', async () => {
+    await runBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+
+    dropWrapsSub();
+    // First retry fires after the 5s base delay.
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('backs off exponentially on rapid failures, resets after a long-lived sub', async () => {
+    await runBackgroundDmWatch();
+    dropWrapsSub(); // immediate fail (offline-style)
+    await jest.advanceTimersByTimeAsync(5_000); // retry 1 (after 5s)
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+    dropWrapsSub(); // fails again immediately
+    await jest.advanceTimersByTimeAsync(5_000); // only 5s — retry 2 needs 10s
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(5_000); // 10s total → retry 2
+    expect(mockSubscribe).toHaveBeenCalledTimes(3);
+
+    // A sub that survives ≥60s counts as healthy — its drop resets the
+    // backoff so the next retry is the base 5s again. (EOSE is NOT the
+    // health signal: nostr-tools EOSEs unreachable relays too.)
+    await jest.advanceTimersByTimeAsync(61_000);
+    dropWrapsSub();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(4);
+  });
+
+  it('does NOT re-arm on the close fired by an intentional stop', async () => {
+    const unsub = jest.fn(() => dropWrapsSub());
+    mockSubscribe.mockReturnValue(unsub);
+    await startBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    await stopBackgroundDmWatch();
+    // The teardown's own close signal must not schedule anything.
+    await jest.advanceTimersByTimeAsync(10 * 60_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('safety interval re-arms a live watch periodically', async () => {
+    await runBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(15 * 60_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
   });
 });
 

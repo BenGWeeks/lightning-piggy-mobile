@@ -144,6 +144,59 @@ interface ActiveWatch {
 
 let activeWatch: ActiveWatch | null = null;
 
+// --- Self-re-arm on relay drop ---
+// The app-wide SimplePool deliberately does NOT auto-reconnect (flipping
+// enableReconnect would change lifecycle behaviour for every subscription in
+// the app), so when the wrap subscription closes on every relay this watch
+// has gone deaf while the chip still promises otherwise. The watch re-arms
+// itself: the subscription's onclose triggers a backoff-scheduled re-arm,
+// and a coarse safety interval re-arms periodically as a catch-all.
+// Re-arms are silent by construction — re-subscribing over healthy sockets
+// reuses the pool's open connections, the freshness gate mutes the backlog
+// replay, and the wrap-id claim table prevents duplicate notifications.
+const RECONNECT_BASE_DELAY_MS = 5_000;
+const RECONNECT_MAX_DELAY_MS = 5 * 60_000;
+const SAFETY_REARM_INTERVAL_MS = 15 * 60_000;
+// A subscription that lived at least this long before closing counts as
+// having been healthy — the next drop retries from the shortest delay. NB
+// EOSE is NOT a usable health signal here: nostr-tools marks unreachable
+// relays as EOSE'd so waiters don't hang, so a fully-offline arm still
+// "EOSEs" (verified live: it pinned the backoff at 5s during an outage).
+const HEALTHY_SUB_MIN_LIFETIME_MS = 60_000;
+
+// Bumped on every (re)arm and teardown. onclose closures capture the
+// generation at arm time; a stale generation means "this close belongs to a
+// subscription we already superseded on purpose" and must not re-arm.
+let watchGeneration = 0;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let safetyRearmTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleWatchReconnect(generation: number): void {
+  // Stale close (already superseded), intentionally-stopped watch, or a
+  // reconnect already pending: no-op.
+  if (generation !== watchGeneration || !activeWatch || reconnectTimer) return;
+  const delay = Math.min(
+    RECONNECT_BASE_DELAY_MS * 2 ** Math.min(reconnectAttempt, 10),
+    RECONNECT_MAX_DELAY_MS,
+  );
+  reconnectAttempt += 1;
+  console.warn(`[BgDmWatch] wrap sub closed — re-arming in ${Math.round(delay / 1000)}s`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void runBackgroundDmWatch().catch((e) => {
+      console.warn('[BgDmWatch] re-arm failed:', e);
+    });
+  }, delay);
+}
+
 /**
  * Resolve a sender's display name from the persisted profile cache, falling
  * back to a relay fetch, then to a shortened npub-ish hex. Best-effort and
@@ -318,12 +371,23 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   // Backlog-settled latch for the contentless path (see handleWrap). The nsec
   // path doesn't need it — its per-wrap rumor-timestamp gate is stricter.
   let eosed = false;
+  // This arm supersedes any pending reconnect and starts a fresh generation.
+  clearReconnectTimer();
+  const generation = ++watchGeneration;
+  const armedAtMs = Date.now();
   const unsubscribe = subscribeInboxDmsForViewer({
     viewerPubkey: activePubkey,
     relays: readRelays,
     wrapsLimit: decryptWrap ? BACKLOG_WRAPS_LIMIT : CONTENTLESS_BACKLOG_WRAPS_LIMIT,
     onEose: () => {
       eosed = true;
+    },
+    onWrapsClose: () => {
+      // Lifetime-based health: a sub that survived a while was genuinely
+      // connected, so its drop retries from the base delay; a rapid-fail
+      // (offline) keeps climbing the exponential ladder.
+      if (Date.now() - armedAtMs >= HEALTHY_SUB_MIN_LIFETIME_MS) reconnectAttempt = 0;
+      scheduleWatchReconnect(generation);
     },
     onEvent: (ev) => {
       // Fire-and-forget per event; swallow per-event errors so one bad wrap
@@ -342,11 +406,32 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   });
 
   activeWatch = { viewerPubkey: activePubkey, unsubscribe };
+  // Belt-and-braces: a periodic re-arm catches anything the onclose signal
+  // misses (e.g. a subscription alive on one zombie relay that never
+  // delivers). Cheap on healthy sockets; silent by construction.
+  if (!safetyRearmTimer) {
+    safetyRearmTimer = setInterval(() => {
+      if (!activeWatch) return;
+      void runBackgroundDmWatch().catch(() => {});
+    }, SAFETY_REARM_INTERVAL_MS);
+  }
   return true;
 }
 
 /** Close the live subscription without touching the foreground chip. */
 function stopBackgroundDmWatchSubscription(): void {
+  // Invalidate in-flight close signals + pending reconnects FIRST — the
+  // unsubscribe below fires onWrapsClose synchronously, and without the bump
+  // that intentional close would schedule a bogus reconnect. NB the backoff
+  // counter is NOT reset here: every re-arm passes through this teardown, so
+  // resetting would pin a dead-network loop at the shortest delay forever.
+  // It resets on a healthy EOSE and on an intentional stopBackgroundDmWatch.
+  watchGeneration += 1;
+  clearReconnectTimer();
+  if (safetyRearmTimer) {
+    clearInterval(safetyRearmTimer);
+    safetyRearmTimer = null;
+  }
   if (activeWatch) {
     try {
       activeWatch.unsubscribe();
@@ -439,7 +524,9 @@ export async function stopBackgroundDmWatch(): Promise<void> {
     console.warn('[BgDmWatch] native stop failed (continuing cleanup):', e);
   });
   // Then close any inline subscription this foreground context owns (the
-  // fallback path) and dismiss the chip.
+  // fallback path) and dismiss the chip. An intentional stop also resets the
+  // reconnect backoff so the next enable starts fresh.
+  reconnectAttempt = 0;
   stopBackgroundDmWatchSubscription();
   await dismissForegroundServiceNotification();
 }
@@ -482,5 +569,6 @@ export function __isWatchActiveForTests(): boolean {
 
 /** Test hook: tear down state between tests. */
 export function __resetForTests(): void {
+  reconnectAttempt = 0;
   stopBackgroundDmWatchSubscription();
 }
