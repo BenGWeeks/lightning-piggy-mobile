@@ -4,7 +4,11 @@ import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import { NSEC_KEY } from '../contexts/nostrAuthKeys';
-import { buildMarketOrder, type MarketOrderLine } from '../utils/marketOrder';
+import {
+  buildMarketOrder,
+  type MarketOrderLine,
+  type OrderShippingInput,
+} from '../utils/marketOrder';
 
 // In-app Market checkout orchestration (#market). The PURE order-building lives
 // in utils/marketOrder (unit-tested); this thin hook adds the signer + relay
@@ -33,6 +37,8 @@ export interface PlaceOrderInput {
   quantity: number;
   /** Optional free-text note to the merchant. */
   note?: string;
+  /** Chosen shipping option (coordinate + all-in sats cost), when any (#948). */
+  shipping?: OrderShippingInput;
 }
 
 export interface PlaceOrderResult {
@@ -95,6 +101,7 @@ export function useMarketCheckout(): UseMarketCheckout {
           vendorPubkey,
           lines: [line],
           note: input.note,
+          shipping: input.shipping,
         });
 
         let delivered = false;

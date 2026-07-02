@@ -85,6 +85,41 @@ describe('buildMarketOrder', () => {
     ]);
   });
 
+  it('threads the chosen shipping option: tag, all-in amount, itemised content (#948)', () => {
+    const shippingCoord = `30406:${VENDOR}:royal-mail-48`;
+    const { rumor, totalSats } = buildMarketOrder({
+      buyerPubkey: BUYER,
+      vendorPubkey: VENDOR,
+      lines: [line({ quantity: 2, priceSats: 100_000 })],
+      createdAt: 1_700_000_000,
+      note: 'Ring the bell',
+      shipping: { coordinate: shippingCoord, costSats: 7_500, title: 'Royal Mail Tracked 48' },
+    });
+
+    // Amount is the ALL-IN total (subtotal + shipping) per Gamma.
+    expect(totalSats).toBe(207_500);
+    expect(rumor.tags).toContainEqual(['amount', '207500']);
+    expect(rumor.tags).toContainEqual(['shipping', shippingCoord]);
+    // The human-readable summary itemises shipping AND keeps the note.
+    expect(rumor.content).toContain('Ring the bell');
+    expect(rumor.content).toContain('Subtotal: 200,000 sats');
+    expect(rumor.content).toContain('Shipping (Royal Mail Tracked 48): 7,500 sats');
+    expect(rumor.content).toContain('Total: 207,500 sats');
+    // parseOrderEvent reads the shipping coordinate straight back.
+    expect(parseOrderEvent(rumor)?.shipping).toBe(shippingCoord);
+  });
+
+  it('emits no shipping tag and an unchanged amount without a shipping input', () => {
+    const { rumor, totalSats } = buildMarketOrder({
+      buyerPubkey: BUYER,
+      vendorPubkey: VENDOR,
+      lines: [line({ quantity: 1, priceSats: 50_000 })],
+    });
+    expect(totalSats).toBe(50_000);
+    expect(rumor.tags.some((t) => t[0] === 'shipping')).toBe(false);
+    expect(rumor.content).toBe('');
+  });
+
   it('gift-wraps the order to the VENDOR pubkey (no plaintext leak) and honours the note', () => {
     const buyerSk = generateSecretKey();
     const buyerPk = getPublicKey(buyerSk);

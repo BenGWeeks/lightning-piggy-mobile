@@ -40,6 +40,16 @@ export interface MarketOrderLine {
   priceSats: number;
 }
 
+/** The buyer's chosen shipping, threaded onto the order (#948 Option A). */
+export interface OrderShippingInput {
+  /** The chosen option's coordinate — `30406:<merchantPubkey>:<d>`. */
+  coordinate: string;
+  /** All-in shipping cost (30406 base + product surcharge), in sats. */
+  costSats: number;
+  /** Human label for the itemised summary (e.g. "Royal Mail Tracked 48"). */
+  title: string;
+}
+
 export interface BuildOrderInput {
   /** Buyer's Nostr pubkey (hex) — the rumor author. */
   buyerPubkey: string;
@@ -53,6 +63,12 @@ export interface BuildOrderInput {
   createdAt?: number;
   /** Optional free-text note to the merchant. */
   note?: string;
+  /**
+   * The chosen shipping option, when the merchant publishes kind-30406
+   * options. Adds a `["shipping", <coordinate>]` tag, folds the cost into
+   * `amount` (all-in total per Gamma), and itemises the content summary.
+   */
+  shipping?: OrderShippingInput;
 }
 
 /** An unsigned NIP-17 rumor ready to gift-wrap: no `id`/`sig` (that's the seal/wrap's job). */
@@ -123,8 +139,9 @@ export function shortOrderId(orderId: string): string {
  *   ["subject", "Order <short id>"] – human subject line
  *   ["type", "1"]                   – order creation
  *   ["order", <uuid>]              – the order id (threads status/receipt)
- *   ["amount", <totalSats>]        – total price in sats
+ *   ["amount", <totalSats>]        – ALL-IN total in sats (subtotal + shipping)
  *   ["item", "30402:<merchant>:<dTag>", <qty>]  – one per product line
+ *   ["shipping", "30406:<merchant>:<dTag>"]     – chosen shipping option, when any
  *
  * The merchant's order-service replies with a kind-16 `["type","2"]` payment
  * request carrying the BOLT11 invoice, which LP renders as a payable order card.
@@ -132,7 +149,12 @@ export function shortOrderId(orderId: string): string {
 export function buildMarketOrder(input: BuildOrderInput): BuiltMarketOrder {
   const orderId = input.orderId ?? newOrderId();
   const createdAt = input.createdAt ?? Math.floor(Date.now() / 1000);
-  const totalSats = orderTotalSats(input.lines);
+  const subtotalSats = orderTotalSats(input.lines);
+  const shippingSats =
+    input.shipping && Number.isFinite(input.shipping.costSats) && input.shipping.costSats >= 0
+      ? Math.round(input.shipping.costSats)
+      : 0;
+  const totalSats = subtotalSats + shippingSats;
 
   const tags: string[][] = [
     ['p', input.vendorPubkey],
@@ -148,6 +170,21 @@ export function buildMarketOrder(input: BuildOrderInput): BuiltMarketOrder {
       String(normalizeQuantity(line.quantity)),
     ]);
   }
+  if (input.shipping) tags.push(['shipping', input.shipping.coordinate]);
+
+  // Human-readable itemisation so the merchant's (and the buyer's own echo)
+  // DM summary shows exactly how the all-in amount breaks down.
+  const contentParts: string[] = [];
+  if (input.note?.trim()) contentParts.push(input.note.trim());
+  if (input.shipping) {
+    contentParts.push(
+      [
+        `Subtotal: ${subtotalSats.toLocaleString('en-US')} sats`,
+        `Shipping (${input.shipping.title}): ${shippingSats.toLocaleString('en-US')} sats`,
+        `Total: ${totalSats.toLocaleString('en-US')} sats`,
+      ].join('\n'),
+    );
+  }
 
   return {
     orderId,
@@ -157,7 +194,7 @@ export function buildMarketOrder(input: BuildOrderInput): BuiltMarketOrder {
       kind: 16,
       created_at: createdAt,
       tags,
-      content: input.note ?? '',
+      content: contentParts.join('\n\n'),
     },
   };
 }

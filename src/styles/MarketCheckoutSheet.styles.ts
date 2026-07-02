@@ -100,6 +100,21 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       minWidth: 24,
       textAlign: 'center',
     },
+    summaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    summaryLabel: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+    },
+    summaryValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textBody,
+    },
     totalRow: {
       flexDirection: 'row',
       alignItems: 'center',
