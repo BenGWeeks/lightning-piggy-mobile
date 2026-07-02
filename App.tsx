@@ -38,6 +38,8 @@ import {
   setNotificationsForeground,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
+import { setSubmarineRefundHandler } from './src/services/swapRecoveryService';
+import { recoverSubmarineRefund } from './src/utils/submarineRefund';
 import { kickPlacesHydration } from './src/services/btcMapService';
 import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
@@ -128,6 +130,11 @@ export default function App() {
     // Register the periodic background detect-and-ping (#279). Idempotent;
     // OS schedules it (~15 min floor on Android, usage-based on iOS).
     void registerBackgroundSync();
+
+    // Wire the submarine-swap refund recovery: the recovery pass detects a
+    // failed on-chain→LN swap and calls this to surface the refund prompt
+    // (needs BDK + the branded Alert, which the leaf service can't import).
+    setSubmarineRefundHandler(recoverSubmarineRefund);
 
     // Foreground signal — notificationService suppresses a message
     // notification only when the app is active AND the user is on that

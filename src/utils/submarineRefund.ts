@@ -2,6 +2,8 @@ import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
+import * as swapRecoveryService from '../services/swapRecoveryService';
+import type { PersistedSubmarineSwap } from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
 
 /**
@@ -52,6 +54,7 @@ export async function promptSubmarineRefund(
           try {
             await boltzService.refundSwap(swap, lockup, destAddr);
             await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
+            await swapRecoveryService.unregisterPendingSubmarineSwap(swap.id);
             Toast.show({
               type: 'success',
               text1: 'Refund sent',
@@ -72,5 +75,39 @@ export async function promptSubmarineRefund(
       },
       { text: 'Later', style: 'cancel' },
     ],
+  );
+}
+
+/**
+ * The submarine refund handler the recovery pass invokes when a persisted
+ * submarine swap has failed (see swapRecoveryService.setSubmarineRefundHandler).
+ * Rebuilds the SubmarineSwapResult shape `promptSubmarineRefund` needs from the
+ * persisted record and delegates. Registered once at app start.
+ */
+export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Promise<void> {
+  if (!swap.sourceWalletId || !swap.swapTree) {
+    // Older records (pre-recovery) lack the refund destination / script tree —
+    // nothing we can reconstruct. Surface it so the user can contact support.
+    Toast.show({
+      type: 'error',
+      text1: 'Swap needs attention',
+      text2: `A pending swap (${swap.id.slice(0, 8)}…) failed and can't be auto-refunded. Contact Boltz support with this ID.`,
+      position: 'top',
+      visibilityTime: 12000,
+    });
+    return;
+  }
+  await promptSubmarineRefund(
+    {
+      id: swap.id,
+      address: swap.address,
+      expectedAmount: swap.expectedAmount,
+      timeoutBlockHeight: swap.timeoutBlockHeight,
+      refundPrivateKey: swap.refundPrivateKey,
+      claimPublicKey: swap.claimPublicKey,
+      swapTree: swap.swapTree as boltzService.SubmarineSwapResult['swapTree'],
+    },
+    swap.sourceWalletId,
+    'recovered after app restart',
   );
 }
