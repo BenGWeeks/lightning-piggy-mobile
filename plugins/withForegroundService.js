@@ -11,8 +11,7 @@ const { withAndroidManifest } = require('expo/config-plugins');
  *     suspend background WebSockets within minutes for an idle app.
  *     Periodic WorkManager jobs run at most every 15 min and are
  *     coalesced under battery saver, missing real-time messages.
- *   - A *foreground* service holds a `dataSync` (or
- *     `specialUse` on Android 14+) type, displays a persistent
+ *   - A *foreground* service holds a `specialUse` type, displays a persistent
  *     notification, and is exempt from Doze. This is the only
  *     Doze-immune path that does NOT require Google Play Services.
  *   - FCM (the alternative) requires GMS, which doesn't exist on
@@ -53,7 +52,7 @@ const { withAndroidManifest } = require('expo/config-plugins');
  *     task via HeadlessJsTaskContext — no wake lock, calling `backgroundDmService.runBackgroundDmWatch()`), its JS↔native
  *     start/stop bridge (`BackgroundDmModule`), and the reboot `BootReceiver`
  *     all live in the local Expo module `modules/background-dm-service`.
- *   - Crucially, the `<service android:foregroundServiceType="dataSync">` and
+ *   - Crucially, the `<service android:foregroundServiceType="specialUse">` and
  *     the `<receiver>` for BOOT_COMPLETED are declared in THAT module's own
  *     AndroidManifest.xml — NOT injected here. The classes they name live in
  *     the same module, so they compile together and the manifest can never

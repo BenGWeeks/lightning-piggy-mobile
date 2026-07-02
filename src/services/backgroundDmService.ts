@@ -383,12 +383,17 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   // Tear down any existing watch so we never stack two subscriptions.
   stopBackgroundDmWatchSubscription();
 
-  const { identities, activePubkey } = await loadIdentities();
+  const blob = await loadIdentities();
+  // Normalise to lowercase before validating/subscribing — identities are
+  // accepted case-insensitively upstream, but relay filters and the follow
+  // gate compare lowercase hex; an uppercase-stored pubkey must not silently
+  // refuse to arm (Copilot review on #958).
+  const activePubkey = blob.activePubkey?.toLowerCase();
   if (!activePubkey || !HEX64.test(activePubkey)) {
     console.warn('[BgDmWatch] not armed: no active pubkey');
     return false;
   }
-  const identity = identities.find((i) => i.pubkey === activePubkey);
+  const identity = blob.identities.find((i) => i.pubkey.toLowerCase() === activePubkey);
   if (!identity) {
     console.warn('[BgDmWatch] not armed: active identity not found');
     return false;
