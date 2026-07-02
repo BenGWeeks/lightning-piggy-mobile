@@ -23,6 +23,7 @@ import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
+import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
 
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
@@ -235,6 +236,14 @@ export async function createReverseSwap(
   console.log(
     `[Boltz] Reverse swap created: id=${data.id} lockup=${data.lockupAddress} onchainAmount=${data.onchainAmount}`,
   );
+  // Trust boundary: the swap is only trustless if the invoice binds to OUR
+  // preimage for OUR amount. Verify BEFORE returning (and thus before any
+  // caller pays) — throwing here is a clean pre-commit failure.
+  verifyReverseSwapInvoice({
+    invoice: data.invoice,
+    expectedPaymentHash: preimageHash,
+    expectedAmountSats: amountSats,
+  });
   return {
     id: data.id,
     invoice: data.invoice,
