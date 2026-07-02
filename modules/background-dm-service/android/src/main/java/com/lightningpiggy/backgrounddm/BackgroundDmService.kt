@@ -66,12 +66,23 @@ class BackgroundDmService : HeadlessJsTaskService() {
     }
   }
 
+  // True once this instance has kicked off its headless JS task. A repeat
+  // startService() on a running service (e.g. app-launch preference re-sync
+  // while the watch is already ON) re-enters onStartCommand on the SAME
+  // instance; without this guard super would start a SECOND never-finishing
+  // headless task, stacking JS work per re-sync. Instance state is enough:
+  // a new instance (fresh start or START_STICKY restart) starts false.
+  private var headlessTaskStarted = false
+
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // Android O+ mandates that a service started via startForegroundService()
     // calls startForeground() within ~5s or the system kills it with an ANR.
     // Do it FIRST, before super (which kicks off the JS task).
     promoteToForeground()
-    super.onStartCommand(intent, flags, startId)
+    if (!headlessTaskStarted) {
+      headlessTaskStarted = true
+      super.onStartCommand(intent, flags, startId)
+    }
     // START_STICKY: if the OS kills us under memory pressure, restart the
     // service when resources free up (intent will be null on the restart —
     // we don't depend on extras, so that's fine).

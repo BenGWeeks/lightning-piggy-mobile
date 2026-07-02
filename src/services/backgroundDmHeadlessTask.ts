@@ -27,6 +27,7 @@
 import { AppRegistry, Platform } from 'react-native';
 import { runBackgroundDmWatch } from './backgroundDmService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
+import { hasNotificationPermission } from './notificationService';
 import { stopForegroundService } from '../../modules/background-dm-service';
 
 /** Must match BackgroundDmService.HEADLESS_TASK_NAME (Kotlin). */
@@ -46,6 +47,17 @@ if (Platform.OS === 'android') {
       return;
     }
 
+    // Also self-check notification permission (check-only — never prompts, so
+    // it's headless-safe). A boot re-arm can start the service for a user who
+    // revoked permission after enabling: the watch could never surface an
+    // alert, so keeping the service (and its wake lock) alive is pure drain.
+    const granted = await hasNotificationPermission().catch(() => false);
+    if (!granted) {
+      console.warn('[BgDmWatch] notification permission missing — stopping service');
+      await stopForegroundService().catch(() => {});
+      return;
+    }
+
     // Arm the live subscription. runBackgroundDmWatch resolves as soon as the
     // subscription is OPEN (not when it ends) — but the native
     // HeadlessJsTaskService keeps the JS context alive only while the returned
@@ -55,6 +67,13 @@ if (Platform.OS === 'android') {
     // subscription's own callbacks keep firing notifications in the meantime.
     const armed = await runBackgroundDmWatch();
     console.warn(`[BgDmWatch] headless task: watch armed=${armed}`);
+    if (!armed) {
+      // Nothing to watch (no identity / no relays / not Android). Holding the
+      // never-settling promise here would pin the foreground service + wake
+      // lock while watching nothing — stop the service and finish instead.
+      await stopForegroundService().catch(() => {});
+      return;
+    }
     return new Promise<void>(() => {
       // Intentionally never resolves — see the comment above. The service is
       // torn down by stopService() (from stopBackgroundDmWatch), which kills
