@@ -1,10 +1,17 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  type ListRenderItemInfo,
+} from 'react-native';
+import type { RefreshControlProps } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
@@ -23,9 +30,22 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
 import type { RootStackParamList } from '../navigation/types';
+import { AVATAR_SIZE, createTransactionListStyles } from '../styles/TransactionList.styles';
+import {
+  buildTransactionRows,
+  hasMoreTransactions,
+  nextPage,
+  sortTransactions,
+  windowTransactions,
+  INITIAL_PAGE_SIZE,
+  type TxRow,
+} from '../utils/transactionPagination';
 
 interface Props {
   transactions: WalletTransaction[];
+  // Forwarded to the FlatList so Home's pull-to-refresh keeps working now
+  // that the list is the scroller (it used to live on Home's ScrollView).
+  refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
@@ -37,9 +57,9 @@ function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
   return 'Nostr user';
 }
 
-/** Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
- * "https://memestore.satmo-dev.xyz - Order #4497" renders with the domain
- * prominent and the full URL/memo below, matching Primal's treatment. */
+// Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
+// "https://memestore.satmo-dev.xyz - Order #4497" renders with the domain
+// prominent and the full URL/memo below, matching Primal's treatment.
 function splitDescription(desc: string): { primary: string; subtitle: string | null } {
   const trimmed = desc.trim();
   const urlMatch = trimmed.match(/^(https?:\/\/)([^\s/]+)(.*)$/i);
@@ -75,25 +95,7 @@ function formatTime(ts: number): string {
   });
 }
 
-const INITIAL_COUNT = 20;
-
-type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string };
-type HeaderRow = { kind: 'header'; label: string; key: string };
-type Row = ItemRow | HeaderRow;
-
-/** Build a deterministic key for a transaction row. Prefers settled-payment
- * identifiers, falling back to on-chain txid, then bolt11, then a composite
- * of the stable shape fields so pending rows still get distinct keys.
- * Self-payments produce two entries with the same paymentHash / bolt11
- * (incoming + outgoing leg), so always include `tx.type` to disambiguate. */
-function txKey(tx: WalletTransaction, fallbackIndex: number): string {
-  if (tx.paymentHash) return `ph:${tx.type}:${tx.paymentHash}`;
-  if (tx.txid) return `tx:${tx.type}:${tx.txid}`;
-  if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
-  return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
-}
-
-const TransactionList: React.FC<Props> = ({ transactions }) => {
+const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   // Per-mount first-render marker. The previous module-scope `let`
   // never reset, so navigating away + back (or switching wallets,
   // which forces a remount via the activeWalletId effect) silently
@@ -104,7 +106,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     perfLog(`TransactionList first render (${transactions.length} txs)`);
   }
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createTransactionListStyles(colors), [colors]);
   const { currency, activeWalletId } = useWallet();
   const { btcPrice } = useWalletLive();
   const { contacts } = useNostrContacts();
@@ -152,7 +154,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     const match = desc.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
     return match ? match[0].toLowerCase() : null;
   };
-  const [showAll, setShowAll] = useState(false);
+  // Incremental "infinite scroll" page counter. Page 1 renders the initial
+  // window; onEndReached advances it, revealing another slice. The full tx
+  // array already lives in memory (WalletContext owns it), so this is
+  // in-memory windowing — we just avoid mounting hundreds of rows at once.
+  const [pagesLoaded, setPagesLoaded] = useState(1);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [detailIconState, setDetailIconState] = useState<TransactionIconState | undefined>(
     undefined,
@@ -165,7 +171,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   // is what WalletTransaction rows carry, so matching is a direct .has()
   // per row. We bump a single counter on either change to force a render
   // — the actual lookups go through swapRecoveryService each time.
-  const [, setSwapStateTick] = useState(0);
+  const [swapStateTick, setSwapStateTick] = useState(0);
   useEffect(() => {
     const bump = () => setSwapStateTick((n) => n + 1);
     const unsubAttention = swapRecoveryService.subscribeAttention(bump);
@@ -184,10 +190,10 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     };
   }, []);
 
-  /** Maps a row's live swap-recovery flags (Boltz row? in the attention set?
-   *  claim recorded?) onto the icon badge. The badge rules — including why a
-   *  recorded claim shows 'done' even when `settled_at` is missing (the #891
-   *  ambiguous-pay case) — live in `swapIconState`. */
+  // Maps a row's live swap-recovery flags (Boltz row? in the attention set?
+  // claim recorded?) onto the icon badge. The badge rules — including why a
+  // recorded claim shows 'done' even when `settled_at` is missing (the #891
+  // ambiguous-pay case) — live in `swapIconState`.
   const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined =>
     swapIconState(tx, {
       isBoltz: swapRecoveryService.isBoltzTransaction(tx),
@@ -203,196 +209,213 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
 
-  // Collapse the list back to the initial N rows when the active wallet
+  // Collapse the list back to the first page when the active wallet
   // changes, but NOT on every transactions-array update. WalletContext
   // polls balances/transactions every few seconds and emits a new array
-  // reference each time; keying the reset on `transactions` meant the
-  // effect fired on every poll and immediately undid the user's "Show
-  // all N" tap (symptom: tap appeared to expand for a split second and
-  // then collapse). HomeScreen renders TransactionList without a `key`
-  // so it doesn't remount on wallet switch — we reset explicitly here
-  // instead.
+  // reference each time; keying the reset on `transactions` would fire the
+  // effect on every poll and snap the user back to the top mid-scroll.
+  // HomeScreen renders TransactionList without a `key` so it doesn't remount
+  // on wallet switch — we reset explicitly here instead.
   useEffect(() => {
-    setShowAll(false);
+    setPagesLoaded(1);
   }, [activeWalletId]);
 
-  if (transactions.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>No transactions yet</Text>
-      </View>
-    );
-  }
+  const sorted = useMemo(() => sortTransactions(transactions), [transactions]);
+  const visibleTransactions = useMemo(
+    () => windowTransactions(sorted, pagesLoaded),
+    [sorted, pagesLoaded],
+  );
+  const hasMore = hasMoreTransactions(transactions.length, pagesLoaded);
 
-  // Sort: pending (no timestamp) first, then newest first.
-  const sorted = [...transactions].sort((a, b) => {
-    const aTime = a.settled_at || a.created_at;
-    const bTime = b.settled_at || b.created_at;
-    if (!aTime && !bTime) return 0;
-    if (!aTime) return -1;
-    if (!bTime) return 1;
-    return bTime - aTime;
-  });
-  const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
-  const hasMore = transactions.length > INITIAL_COUNT;
+  // Flatten the visible window into day-header + tx rows for the FlatList.
+  const rows: TxRow[] = useMemo(
+    () => buildTransactionRows(visibleTransactions, formatDayHeader),
+    [visibleTransactions],
+  );
 
-  // Flatten into a mixed list of day headers + rows. Pending entries (no
-  // timestamp) get a "Pending" header so they still group visually.
-  const rows: Row[] = [];
-  let currentDayKey: string | null = null;
-  visibleTransactions.forEach((tx, fallbackIndex) => {
-    const ts = tx.settled_at || tx.created_at;
-    const dayKey = ts ? new Date(ts * 1000).toDateString() : '__pending__';
-    if (dayKey !== currentDayKey) {
-      rows.push({
-        kind: 'header',
-        label: ts ? formatDayHeader(ts) : 'Pending',
-        key: `h:${dayKey}`,
-      });
-      currentDayKey = dayKey;
-    }
-    rows.push({ kind: 'tx', tx, key: txKey(tx, fallbackIndex) });
-  });
+  // Reveal the next slice when the user scrolls near the bottom. `nextPage`
+  // caps at the page that fully reveals the array, so repeated onEndReached
+  // fires near the end don't churn state.
+  const handleEndReached = useCallback(() => {
+    setPagesLoaded((p) => nextPage(transactions.length, p));
+  }, [transactions.length]);
 
-  return (
-    <View style={styles.list}>
-      {rows.map((row) => {
-        if (row.kind === 'header') {
-          return (
-            <Text key={row.key} style={styles.dayHeader}>
-              {row.label}
-            </Text>
-          );
-        }
-        const item = row.tx;
-        const isIncoming = item.type === 'incoming';
-        const amountSats = Math.abs(item.amount);
-        const ts = item.settled_at || item.created_at;
-        const isPending = !ts && !item.blockHeight;
-        const zapCpRaw = item.zapCounterparty ?? undefined;
-        // Prefer the live profile from contacts (which refreshes when the
-        // profile cache updates) over the snapshot embedded in the tx.
-        const liveProfile = zapCpRaw?.pubkey
-          ? contactProfileByPubkey.get(zapCpRaw.pubkey)
-          : undefined;
-        const zapCp = zapCpRaw
-          ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
-          : undefined;
+  const renderRow = useCallback(
+    ({ item: row }: ListRenderItemInfo<TxRow>) => {
+      if (row.kind === 'header') {
+        return <Text style={styles.dayHeader}>{row.label}</Text>;
+      }
+      const item = row.tx;
+      const isIncoming = item.type === 'incoming';
+      const amountSats = Math.abs(item.amount);
+      // `??` (not `||`) so a `0` (epoch) timestamp counts as present; only
+      // null/undefined means the tx has no settle/create time yet (pending).
+      const ts = item.settled_at ?? item.created_at;
+      const isPending = ts == null && !item.blockHeight;
+      const zapCpRaw = item.zapCounterparty ?? undefined;
+      // Prefer the live profile from contacts (which refreshes when the
+      // profile cache updates) over the snapshot embedded in the tx.
+      const liveProfile = zapCpRaw?.pubkey
+        ? contactProfileByPubkey.get(zapCpRaw.pubkey)
+        : undefined;
+      const zapCp = zapCpRaw
+        ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
+        : undefined;
 
-        // For non-zap transactions, attempt to resolve the counterparty
-        // via a lightning-address in the description. Keyed in
-        // `contactByLud16` off the user's contacts, so it only promotes
-        // people they follow (same source Friends tab reads from).
-        const lud16FromDescription = !zapCp ? findLud16InDescription(item.description) : null;
-        const descriptionContact = lud16FromDescription
-          ? contactByLud16.get(lud16FromDescription)
-          : undefined;
+      // For non-zap transactions, attempt to resolve the counterparty
+      // via a lightning-address in the description. Keyed in
+      // `contactByLud16` off the user's contacts, so it only promotes
+      // people they follow (same source Friends tab reads from).
+      const lud16FromDescription = !zapCp ? findLud16InDescription(item.description) : null;
+      const descriptionContact = lud16FromDescription
+        ? contactByLud16.get(lud16FromDescription)
+        : undefined;
 
-        // Primary label: counterparty name if attributed; else contact-by-
-        // lud16 name; else URL host or raw description; else
-        // "Received" / "Sent".
-        let primary: string;
-        let subtitle: string | null = null;
-        if (isPending) {
-          primary = 'Pending';
-        } else if (zapCp) {
-          primary = zapCounterpartyLabel(zapCp);
-          subtitle = zapCp.comment?.trim() || null;
-        } else if (descriptionContact) {
-          primary =
-            descriptionContact.profile?.displayName ??
-            descriptionContact.profile?.name ??
-            lud16FromDescription ??
-            (isIncoming ? 'Received' : 'Sent');
-        } else if (item.description) {
-          const split = splitDescription(item.description);
-          primary = split.primary;
-          subtitle = split.subtitle;
-        } else {
-          primary = isIncoming ? 'Received' : 'Sent';
-        }
+      // Primary label: counterparty name if attributed; else contact-by-
+      // lud16 name; else URL host or raw description; else
+      // "Received" / "Sent".
+      let primary: string;
+      let subtitle: string | null = null;
+      if (isPending) {
+        primary = 'Pending';
+      } else if (zapCp) {
+        primary = zapCounterpartyLabel(zapCp);
+        subtitle = zapCp.comment?.trim() || null;
+      } else if (descriptionContact) {
+        primary =
+          descriptionContact.profile?.displayName ??
+          descriptionContact.profile?.name ??
+          lud16FromDescription ??
+          (isIncoming ? 'Received' : 'Sent');
+      } else if (item.description) {
+        const split = splitDescription(item.description);
+        primary = split.primary;
+        subtitle = split.subtitle;
+      } else {
+        primary = isIncoming ? 'Received' : 'Sent';
+      }
 
-        const timeStr = ts ? formatTime(ts) : '';
-        const counterpartyAvatar =
-          zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
-        const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
+      // Explicit null check so a `0` (epoch) timestamp still formats instead of
+      // rendering an empty string.
+      const timeStr = ts != null ? formatTime(ts) : '';
+      const counterpartyAvatar =
+        zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
+      const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
-        const rowIconState = iconStateFor(item);
+      const rowIconState = iconStateFor(item);
 
-        return (
-          <TouchableOpacity
-            key={row.key}
-            style={[styles.item, isPending && styles.itemPending]}
-            onPress={() => {
-              setDetail(item as TransactionDetailData);
-              setDetailIconState(rowIconState);
-            }}
-            accessibilityLabel={`Open details for ${primary}`}
-          >
-            <View style={styles.avatarWrap}>
-              {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
-                <Image
-                  source={{ uri: counterpartyAvatar }}
-                  style={styles.avatar}
-                  cachePolicy="memory-disk"
-                  recyclingKey={counterpartyAvatar}
-                  autoplay={false}
-                  contentFit="cover"
-                />
-              ) : (
-                <TransactionTypeIcon
-                  category={getTxCategory(item)}
-                  size={AVATAR_SIZE}
-                  state={rowIconState}
-                />
-              )}
+      return (
+        <TouchableOpacity
+          style={[styles.item, isPending && styles.itemPending]}
+          onPress={() => {
+            setDetail(item as TransactionDetailData);
+            setDetailIconState(rowIconState);
+          }}
+          accessibilityLabel={`Open details for ${primary}`}
+        >
+          <View style={styles.avatarWrap}>
+            {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
+              <Image
+                source={{ uri: counterpartyAvatar }}
+                style={styles.avatar}
+                cachePolicy="memory-disk"
+                recyclingKey={counterpartyAvatar}
+                autoplay={false}
+                contentFit="cover"
+              />
+            ) : (
+              <TransactionTypeIcon
+                category={getTxCategory(item)}
+                size={AVATAR_SIZE}
+                state={rowIconState}
+              />
+            )}
+          </View>
+
+          <View style={styles.centerCol}>
+            <View style={styles.centerLine}>
+              <Text style={[styles.primary, isPending && styles.pendingText]} numberOfLines={1}>
+                {primary}
+              </Text>
+              {timeStr ? <Text style={styles.time}> | {timeStr}</Text> : null}
             </View>
+            {subtitle ? (
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
 
-            <View style={styles.centerCol}>
-              <View style={styles.centerLine}>
-                <Text style={[styles.primary, isPending && styles.pendingText]} numberOfLines={1}>
-                  {primary}
-                </Text>
-                {timeStr ? <Text style={styles.time}> | {timeStr}</Text> : null}
-              </View>
-              {subtitle ? (
-                <Text style={styles.subtitle} numberOfLines={1}>
-                  {subtitle}
-                </Text>
-              ) : null}
-            </View>
-
-            <View style={styles.rightCol}>
-              <View style={styles.amountsColumn}>
-                <Text
-                  style={[
-                    styles.amount,
-                    isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
-                  ]}
-                >
-                  {amountSats.toLocaleString()} sats
-                </Text>
-                {fiatStr ? (
-                  <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
-                ) : null}
-              </View>
+          <View style={styles.rightCol}>
+            <View style={styles.amountsColumn}>
               <Text
                 style={[
-                  styles.arrow,
+                  styles.amount,
                   isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
                 ]}
               >
-                {isIncoming ? '↓' : '↑'}
+                {amountSats.toLocaleString()} sats
               </Text>
+              {fiatStr ? (
+                <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
+              ) : null}
             </View>
-          </TouchableOpacity>
-        );
-      })}
-      {hasMore && !showAll && (
-        <TouchableOpacity style={styles.showMore} onPress={() => setShowAll(true)}>
-          <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
+            <Text
+              style={[
+                styles.arrow,
+                isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+              ]}
+            >
+              {isIncoming ? '↓' : '↑'}
+            </Text>
+          </View>
         </TouchableOpacity>
-      )}
+      );
+    },
+    // iconStateFor / findLud16InDescription are stable per-render closures;
+    // the maps + price + styles cover all the data they read.
+    [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency],
+  );
+
+  const listFooter = hasMore ? (
+    <View
+      style={styles.footerSpinner}
+      accessibilityLabel="Loading more transactions"
+      testID="transaction-list-loading-more"
+    >
+      <ActivityIndicator size="small" color={colors.brandPink} />
+    </View>
+  ) : null;
+
+  return (
+    <>
+      <FlatList
+        style={styles.list}
+        data={rows}
+        keyExtractor={(row) => row.key}
+        renderItem={renderRow}
+        // Swap-recovery attention/claimed flags live outside `data` (they're
+        // read live from swapRecoveryService inside renderRow via
+        // iconStateFor). FlatList only re-renders rows when data/renderItem/
+        // extraData change by shallow compare, so thread the tick here to
+        // force a badge refresh when only the swap state bumps.
+        extraData={swapStateTick}
+        refreshControl={refreshControl}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={listFooter}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No transactions yet</Text>
+          </View>
+        }
+        // Match the first-page window so FlatList's initial render matches the
+        // paging logic and can't drift if the page size is tuned (Copilot #940).
+        initialNumToRender={INITIAL_PAGE_SIZE}
+        windowSize={11}
+        removeClippedSubviews
+        testID="transaction-list"
+      />
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
@@ -473,130 +496,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             : undefined
         }
       />
-    </View>
+    </>
   );
 };
-
-const AVATAR_SIZE = 40;
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    list: {
-      flex: 1,
-    },
-    emptyContainer: {
-      padding: 40,
-      alignItems: 'center',
-    },
-    emptyText: {
-      color: colors.textSupplementary,
-      fontSize: 16,
-    },
-    dayHeader: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-      paddingHorizontal: 16,
-      paddingTop: 16,
-      paddingBottom: 6,
-    },
-    item: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      gap: 12,
-    },
-    avatarWrap: {
-      width: AVATAR_SIZE,
-      height: AVATAR_SIZE,
-    },
-    avatar: {
-      width: AVATAR_SIZE,
-      height: AVATAR_SIZE,
-      borderRadius: AVATAR_SIZE / 2,
-      backgroundColor: colors.background,
-    },
-    avatarPlaceholder: {
-      width: AVATAR_SIZE,
-      height: AVATAR_SIZE,
-      borderRadius: AVATAR_SIZE / 2,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarPlaceholderIcon: {
-      fontSize: 20,
-      color: colors.brandPink,
-    },
-    centerCol: {
-      flex: 1,
-      minWidth: 0,
-    },
-    centerLine: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-    },
-    primary: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.textHeader,
-      flexShrink: 1,
-    },
-    time: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginLeft: 4,
-    },
-    subtitle: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    rightCol: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    amountsColumn: {
-      alignItems: 'flex-end',
-    },
-    amount: {
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    arrow: {
-      fontSize: 22,
-      fontWeight: '700',
-    },
-    fiat: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      marginTop: 1,
-    },
-    showMore: {
-      paddingVertical: 16,
-      alignItems: 'center',
-    },
-    showMoreText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    incoming: {
-      color: colors.green,
-    },
-    outgoing: {
-      color: colors.red,
-    },
-    itemPending: {
-      opacity: 0.5,
-    },
-    pendingText: {
-      color: colors.textSupplementary,
-    },
-  });
 
 export default TransactionList;
