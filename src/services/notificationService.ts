@@ -474,8 +474,8 @@ export async function firePaymentNotification(opts: {
  * realtime upgrade). This is the ongoing "Lightning Piggy is watching for
  * messages" notification Android requires a foreground service to display.
  * Always uses a fixed identifier so repeated calls update the SAME entry
- * rather than stacking. `sticky: true` + the LOW-importance channel make it
- * a silent, non-dismissable status chip.
+ * rather than stacking. The LOW-importance channel keeps it silent; it is
+ * deliberately swipeable (see the `sticky` note below).
  *
  * Returns the notification id on success, or null if we couldn't post (no
  * permission yet, or expo-notifications threw). Android-only by intent — on
@@ -501,9 +501,12 @@ export async function showForegroundServiceNotification(opts: {
         // (see navigateFromNotification) — the right landing place for a
         // "watching for messages" chip; unknown kinds would land on Home.
         data: { kind: 'dm' },
-        // `sticky` (Android `ongoing`) keeps the user from swiping it away
-        // while the service runs — matching Amethyst's persistent chip.
-        sticky: true,
+        // Deliberately NOT sticky: this JS-posted chip only exists on the
+        // non-native fallback path, where the watch dies with the process —
+        // an ongoing notification would then linger undismissably with no JS
+        // left to clear it. Swipeable is honest; the native service's own
+        // startForeground() chip covers the persistent case.
+        sticky: false,
       },
       trigger:
         Platform.OS === 'android'

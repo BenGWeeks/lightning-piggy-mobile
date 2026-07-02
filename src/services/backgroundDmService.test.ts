@@ -503,6 +503,21 @@ describe('start / stop lifecycle', () => {
     expect(mockSubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('stops the whole watch when permission is revoked before a re-arm', async () => {
+    // The safety re-arm / reconnect call runBackgroundDmWatch directly — a
+    // revoked POST_NOTIFICATIONS must tear the watch down, not leave an
+    // invisible battery drain (Copilot review, PR #958).
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await runBackgroundDmWatch();
+    expect(__isWatchActiveForTests()).toBe(true);
+
+    mockHasPermission.mockResolvedValue(false);
+    expect(await runBackgroundDmWatch()).toBe(false);
+    await Promise.resolve();
+    expect(mockDismissForeground).toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
   it('hard-stops without arming when notification permission is missing', async () => {
     // Without permission the watch is an invisible battery drain — no chip,
     // no message alerts (Copilot review, PR #958).

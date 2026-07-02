@@ -380,6 +380,19 @@ function buildDecryptor(
 export async function runBackgroundDmWatch(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
 
+  // Re-check notification permission on EVERY arm — including the safety
+  // re-arm and relay-drop reconnect paths. If the user revoked
+  // POST_NOTIFICATIONS after enabling the watch, keeping the subscription
+  // (and service) alive is an invisible battery drain that can never surface
+  // an alert — hard-stop the whole watch instead, matching what
+  // startBackgroundDmWatch and the headless task enforce on entry.
+  const granted = await hasNotificationPermission().catch(() => false);
+  if (!granted) {
+    console.warn('[BgDmWatch] permission revoked — stopping the watch');
+    void stopBackgroundDmWatch().catch(() => {});
+    return false;
+  }
+
   // Tear down any existing watch so we never stack two subscriptions.
   stopBackgroundDmWatchSubscription();
 
