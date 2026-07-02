@@ -18,6 +18,11 @@ import type { Translations } from './locales/types';
 const en: Translations = enJson;
 const es: Translations = esJson;
 
+/** Raw catalogue dict — exported so LocaleContext can build its own
+ *  per-locale I18n instance for rendering (see the render-purity note
+ *  there) without duplicating the JSON imports. */
+export const translations = { en, es };
+
 export const SUPPORTED_LOCALES = ['en', 'es'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -25,10 +30,23 @@ export function isSupportedLocale(code: string): code is SupportedLocale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(code);
 }
 
-const i18n = new I18n({ en, es });
-i18n.defaultLocale = 'en';
-i18n.enableFallback = true;
-i18n.locale = 'en';
+/** Shared config every I18n instance in the app uses — kept in one place
+ *  so the module-level singleton below and LocaleContext's per-locale
+ *  render instances can't drift apart. */
+export function createI18nInstance(locale: SupportedLocale): I18n {
+  const instance = new I18n(translations);
+  instance.defaultLocale = 'en';
+  instance.enableFallback = true;
+  instance.locale = locale;
+  return instance;
+}
+
+// Module-level singleton for non-React call sites only (service/util code
+// that can't use `useTranslation()`). `LocaleContext` keeps its `.locale`
+// in sync via a `useEffect` — after commit, never during render — so nothing
+// in the render phase ever depends on this object's mutable state. See the
+// comment on `t()` below and the render-purity note in LocaleContext.tsx.
+const i18n = createI18nInstance('en');
 
 export default i18n;
 
@@ -36,9 +54,10 @@ export default i18n;
  * Plain (non-hook) translate — for service/util call sites that aren't
  * React components and can't use `useTranslation()`. Always reads
  * whichever locale `LocaleContext` last set on the shared `i18n`
- * instance, so it stays in sync with the in-app override without extra
- * plumbing. Not wired to anything yet (GIPHY's `lang` param is a
- * follow-up per #137), but the surface is ready when that lands.
+ * instance (synced post-commit, so it can lag the UI by a tick — fine
+ * for imperative/async call sites, which is all this is for). Not wired
+ * to anything yet (GIPHY's `lang` param is a follow-up per #137), but
+ * the surface is ready when that lands.
  */
 export function t(scope: Scope, options?: TranslateOptions): string {
   return i18n.t(scope, options);
