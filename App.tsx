@@ -40,6 +40,7 @@ import {
 import { registerBackgroundSync } from './src/services/backgroundTask';
 import { setSubmarineRefundHandler } from './src/services/swapRecoveryService';
 import { recoverSubmarineRefund } from './src/utils/submarineRefund';
+import { syncBackgroundDmWatchFromPreference } from './src/services/backgroundDmService';
 import { kickPlacesHydration } from './src/services/btcMapService';
 import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
@@ -130,6 +131,10 @@ export default function App() {
     // Register the periodic background detect-and-ping (#279). Idempotent;
     // OS schedules it (~15 min floor on Android, usage-based on iOS).
     void registerBackgroundSync();
+    // Re-arm the Amethyst-style realtime background DM watch if the user
+    // enabled it last session (#279 realtime upgrade). Android-only; no-op
+    // when the preference is OFF or on iOS.
+    void syncBackgroundDmWatchFromPreference();
 
     // Wire the submarine-swap refund recovery: the recovery pass detects a
     // failed on-chain→LN swap and calls this to surface the refund prompt
