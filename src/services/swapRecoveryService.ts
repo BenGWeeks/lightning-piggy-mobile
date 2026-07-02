@@ -511,6 +511,9 @@ async function runRecoveryPass(): Promise<void> {
   // need attention, and the `finally` block fires a single `notifyAttention`
   // so subscribers see one coherent update per pass.
   attentionPaymentHashes.clear();
+  // Reverse and submarine recovery are INDEPENDENT — each in its own guard so a
+  // failure in one (e.g. a corrupt reverse index) can't skip the other. The
+  // `finally` fires a single attention notify per pass regardless (Copilot #961).
   try {
     const index = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
     const ids = index ? (JSON.parse(index) as string[]) : [];
@@ -540,10 +543,14 @@ async function runRecoveryPass(): Promise<void> {
         }
       }
     }
-    // Submarine swaps index + recover independently of the reverse index.
+  } catch (e) {
+    console.warn('[SwapRecovery] Failed to load reverse swap index:', e);
+  }
+
+  try {
     await recoverSubmarineSwaps();
   } catch (e) {
-    console.warn('[SwapRecovery] Failed to load swap index:', e);
+    console.warn('[SwapRecovery] Submarine recovery pass failed:', e);
   } finally {
     // Single notify after the batch so subscribers (TransactionList) re-render
     // once per recovery pass instead of once per swap.
