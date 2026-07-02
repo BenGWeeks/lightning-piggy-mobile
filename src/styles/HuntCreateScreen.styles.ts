@@ -491,6 +491,27 @@ export const createHuntCreateScreenStyles = (colors: Palette) =>
       fontSize: 15,
       fontWeight: '700',
     },
+    skipPrizeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: 100,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      marginTop: 12,
+    },
+    skipPrizeButtonText: {
+      color: colors.brandPink,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    addPrizeInsteadText: {
+      color: colors.brandPink,
+      fontSize: 13,
+      fontWeight: '600',
+      marginTop: 8,
+    },
     crossDeviceBanner: {
       backgroundColor: colors.surface,
       borderLeftWidth: 3,

@@ -48,8 +48,15 @@ import {
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
-import type { Palette } from '../styles/palettes';
 import { createHuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
+import {
+  LevelPicker,
+  NfcSupportedTagsCard,
+  OptionPicker,
+  StepHeader,
+  StepNavRow,
+  StepProgressBar,
+} from '../components/HuntCreateWizardChrome';
 import type { RouteProp } from '@react-navigation/native';
 import { ExploreNavigation, ExploreStackParamList, HuntCacheFallback } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -72,6 +79,7 @@ import NfcUnlockSheet from '../components/NfcUnlockSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
+import { canWriteHuntTag } from './huntCreateNfcGate';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -85,6 +93,10 @@ type Stage =
   | { kind: 'idle' }
   | { kind: 'validating' }
   | { kind: 'validated'; params: LnurlWithdrawParams }
+  // Hider chose to publish a no-reward cache: no LNURL, no prize. A
+  // publishable state like 'validated', but yields a plain NIP-GC
+  // listing (no `amount` tag) because there is no withdraw link.
+  | { kind: 'noPrize' }
   | { kind: 'saved'; lnurlw: string }
   | { kind: 'writing-nfc' }
   | { kind: 'wrote-nfc' };
@@ -518,14 +530,28 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [stage]);
 
+  // Single entry point for setting the LNURL from ANY source — typing,
+  // paste or scan. Besides storing the value it drops a prior `validated`
+  // or `noPrize` stage back to `idle`, so a changed link re-engages the
+  // Validate affordance and is re-vetted before publish. Callers pre-shape
+  // the value (trim / strip `lightning:`); the stage reset is shared here
+  // so paste can't leave stale validation behind (#955 review). The
+  // functional `setStage` keeps this correct without a `stage` dependency.
+  const applyLnurl = useCallback((value: string) => {
+    setLnurl(value);
+    setStage((prev) =>
+      prev.kind === 'validated' || prev.kind === 'noPrize' ? { kind: 'idle' } : prev,
+    );
+  }, []);
+
   const handlePaste = useCallback(async () => {
     try {
       const v = await Clipboard.getStringAsync();
-      if (v) setLnurl(v.trim());
+      if (v) applyLnurl(v.trim());
     } catch {
       // Clipboard read can fail silently on cold start; nothing user-actionable.
     }
-  }, []);
+  }, [applyLnurl]);
 
   // Open the QR scanner — if permission was already granted we skip
   // straight to the camera; otherwise the modal shows a Grant button
@@ -554,11 +580,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       const lnurlOnly = /^lightning:/i.test(trimmed)
         ? trimmed.slice('lightning:'.length).trim()
         : trimmed;
-      setLnurl(lnurlOnly);
-      if (stage.kind === 'validated') setStage({ kind: 'idle' });
+      applyLnurl(lnurlOnly);
       setScannerOpen(false);
     },
-    [scannerOpen, stage.kind],
+    [scannerOpen, applyLnurl],
   );
 
   const handleValidate = useCallback(async () => {
@@ -588,10 +613,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     );
     // Cross-device edit accepts an `idle` stage: the user can update
     // metadata (title, location, etc.) without re-validating an LNURL
-    // they may not have on this device. Normal flow still requires
-    // `validated` so a brand-new hide must vet the LNURL first.
-    if (stage.kind !== 'validated' && !crossDeviceEdit) {
-      console.log(`[Publish] aborted: stage !== validated (was ${stage.kind})`);
+    // they may not have on this device. A fresh hide publishes from
+    // either `validated` (LNURL vetted) or `noPrize` (the hider opted
+    // out of a reward) — the prize is genuinely optional.
+    if (stage.kind !== 'validated' && stage.kind !== 'noPrize' && !crossDeviceEdit) {
+      console.log(`[Publish] aborted: stage not publishable (was ${stage.kind})`);
       return;
     }
     const waitMinutes = parseInt(waitMinutesText.trim(), 10);
@@ -976,7 +1002,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // it calls `onWritten`, which advances the stage so the stepper +
   // step header flip to "done".
   const handleOpenNfcSheet = useCallback(() => {
-    if (!lnurl.trim()) return;
+    // A reward LNURL is enough on its own. A no-prize public cache has
+    // an empty LNURL by design but still writes the 2-record hunt
+    // payload (LP deep link + nostr:naddr) via `writeHuntTagToTag`, so
+    // `isPublic && pubkey` opens the sheet too (#954/#955). Only the
+    // private single-record path genuinely needs an LNURL.
+    if (!canWriteHuntTag({ lnurl, isPublic, pubkey })) return;
     // We deliberately keep `lastWrittenLock` populated when reopening
     // the sheet so a rewrite of the same Piglet PWD_AUTHs the chip
     // with the previously-stored PIN and the hider doesn't have to
@@ -986,7 +1017,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // showing the right secret.
     setPinRevealed(false);
     setNfcSheetVisible(true);
-  }, [lnurl]);
+  }, [lnurl, isPublic, pubkey]);
 
   const handleOpenUnlockSheet = useCallback(() => {
     unlockSucceededRef.current = false;
@@ -1144,6 +1175,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // (`lnurl`) OR the edited listing is flagged LP (#681 review).
   const listingIsLpInEdit = lnurl.trim().length > 0 || isLpPiggyEdit;
 
+  // Whether the Step 6 NFC-write flow may proceed. See `canWriteHuntTag`
+  // for the reasoning: a reward LNURL always works, a no-prize public
+  // cache (#954/#955) writes the 2-record payload with no LNURL, and a
+  // private no-LNURL listing stays gated.
+  const canWriteNfcTag = canWriteHuntTag({ lnurl, isPublic, pubkey });
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -1252,7 +1289,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 title="Make the prize (optional)"
                 subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
                 status={
-                  stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+                  stage.kind === 'validated' ||
+                  stage.kind === 'noPrize' ||
+                  stage.kind === 'saved' ||
+                  stage.kind === 'wrote-nfc'
                     ? 'done'
                     : 'active'
                 }
@@ -1277,10 +1317,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   placeholder="lnurl1… or lightning:LNURL1…"
                   placeholderTextColor={colors.textSupplementary}
                   value={lnurl}
-                  onChangeText={(s) => {
-                    setLnurl(s);
-                    if (stage.kind === 'validated') setStage({ kind: 'idle' });
-                  }}
+                  // Typing a link supersedes a "skip prize" choice and
+                  // invalidates a prior validation — `applyLnurl` drops the
+                  // stage back to idle so the Validate affordance re-engages
+                  // (shared with paste + scan so all three behave the same).
+                  onChangeText={applyLnurl}
                   autoCapitalize="none"
                   autoCorrect={false}
                   // Single line — LNURLs are long but truncating visually
@@ -1309,6 +1350,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
 
               {stage.kind !== 'validated' &&
+                stage.kind !== 'noPrize' &&
                 stage.kind !== 'saved' &&
                 stage.kind !== 'wrote-nfc' && (
                   <TouchableOpacity
@@ -1324,6 +1366,54 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     )}
                   </TouchableOpacity>
                 )}
+
+              {/* The prize is genuinely optional. On a fresh hide (no
+                  cross-device edit), let the hider publish a no-reward
+                  cache without pasting a withdraw link — flips the stage
+                  to `noPrize`, a publishable state that writes a plain
+                  NIP-GC listing with no `amount` tag. Hidden once an LNURL
+                  is validated, while saving, or in an edit flow. */}
+              {!crossDeviceEdit &&
+                !isEditMode &&
+                !lnurl.trim() &&
+                stage.kind !== 'noPrize' &&
+                stage.kind !== 'validated' &&
+                stage.kind !== 'validating' &&
+                stage.kind !== 'saved' &&
+                stage.kind !== 'wrote-nfc' && (
+                  <TouchableOpacity
+                    style={styles.skipPrizeButton}
+                    onPress={() => setStage({ kind: 'noPrize' })}
+                    testID="hunt-create-skip-prize"
+                    accessibilityLabel="Skip prize and publish without a reward"
+                  >
+                    <Text style={styles.skipPrizeButtonText}>
+                      Skip prize — publish without reward
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+              {/* Confirmation that this will be a no-reward cache, with an
+                  escape hatch back to add a prize. */}
+              {stage.kind === 'noPrize' && (
+                <View style={styles.validatedCard} testID="hunt-create-no-prize-card">
+                  <Info size={20} color={colors.brandPink} strokeWidth={2.5} />
+                  <View style={styles.validatedTextWrapper}>
+                    <Text style={styles.validatedTitle}>No reward</Text>
+                    <Text style={styles.validatedMeta}>
+                      This Piglet is just for the find — no sats attached. You can add a withdraw
+                      link above any time before publishing.
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setStage({ kind: 'idle' })}
+                      testID="hunt-create-add-prize-instead"
+                      accessibilityLabel="Add a prize instead"
+                    >
+                      <Text style={styles.addPrizeInsteadText}>Add a prize instead</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
               {/* A withdraw link is present + validated on THIS phone:
                   green "Looks good". */}
@@ -1520,15 +1610,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <TouchableOpacity
                 style={[
                   styles.primaryButton,
-                  (!nfcReady || !lnurl.trim()) && styles.primaryButtonDisabled,
+                  (!nfcReady || !canWriteNfcTag) && styles.primaryButtonDisabled,
                 ]}
                 onPress={handleOpenNfcSheet}
-                // Cross-device edit can reach this step with an empty
-                // LNURL — the listing-only-save path. `handleOpenNfcSheet`
-                // bails silently on `!lnurl.trim()` anyway, but the
-                // affordance needs to look disabled so the user knows
-                // to paste an LNURL on step 2 first.
-                disabled={!nfcReady || !lnurl.trim()}
+                // A no-prize public cache can write the 2-record hunt
+                // payload with no LNURL, so `canWriteNfcTag` enables the
+                // button via `isPublic && pubkey` (#954/#955). A private
+                // listing-only edit (no LNURL, not public) still leaves
+                // the affordance disabled so the user knows to paste an
+                // LNURL on step 2 first.
+                disabled={!nfcReady || !canWriteNfcTag}
                 testID="hunt-write-nfc-button"
               >
                 <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -1536,7 +1627,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
                 </Text>
               </TouchableOpacity>
-              {nfcReady && !lnurl.trim() ? (
+              {nfcReady && !canWriteNfcTag ? (
                 <Text style={styles.helper}>
                   No LNURL yet — paste a fresh withdraw link on step 2 to enable the tag write. Or
                   skip this step: the listing already saved without touching the tag.
@@ -1906,11 +1997,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
               <TouchableOpacity
                 style={styles.publicRow}
-                onPress={() => stage.kind === 'validated' && setIsPublic(!isPublic)}
+                onPress={() =>
+                  (stage.kind === 'validated' || stage.kind === 'noPrize') && setIsPublic(!isPublic)
+                }
                 accessibilityRole="switch"
                 accessibilityState={{ checked: isPublic }}
                 testID="hunt-piggy-public-toggle"
-                disabled={stage.kind !== 'validated'}
+                disabled={stage.kind !== 'validated' && stage.kind !== 'noPrize'}
               >
                 <Globe size={20} color={colors.brandPink} strokeWidth={2} />
                 <View style={styles.publicTextWrapper}>
@@ -1926,15 +2019,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               </TouchableOpacity>
 
-              <Text style={styles.warning}>
-                ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the
-                URL) can claim sats up to your daily limit. Set a per-find amount you&apos;re OK
-                losing if it leaks.
-              </Text>
+              {/* The bearer-token warning is only accurate when the listing
+                  actually carries an LNURL — on the no-prize publish path
+                  there's no reward URL to leak, so hide it (Copilot #955). */}
+              {listingIsLpInEdit ? (
+                <Text style={styles.warning}>
+                  ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the
+                  URL) can claim sats up to your daily limit. Set a per-find amount you&apos;re OK
+                  losing if it leaks.
+                </Text>
+              ) : null}
 
               {stage.kind === 'idle' || stage.kind === 'validating' ? (
                 <Text style={styles.helper}>
-                  Add and validate a prize on step 2 to enable publishing.
+                  Add a prize on step 2 — or skip it there to publish a no-reward cache.
                 </Text>
               ) : null}
               {/* Publish / Save is the step's primary action — own
@@ -2136,251 +2234,5 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     </KeyboardAvoidingView>
   );
 };
-
-// -----------------------------------------------------------------------------
-// Supported-tags visual reference — three "chip family" cards (the two
-// safe families + the one we reject) so the hider knows what to buy
-// before they tap "Write to NFC tag". Locking the NDEF area prevents
-// a passer-by from overwriting the Piglet with a phishing / lure URL
-// (see `writeLnurlToTag` in `nfcService.ts` for the threat model).
-// -----------------------------------------------------------------------------
-
-// Tag-chip recommendations collapsed to a tick / cross pair — the
-// previous four-row matrix gave more detail than the hider needs at
-// write time. Reasons baked into each blurb so the user can pick a
-// sticker without reading a separate doc.
-
-// Numbered step header for the Hide-a-Piglet flow. The screen used to
-// be a flat list of section labels; now each stage gets a visible
-// "Step N · Title" card with a coloured numbered badge so the hider can
-// see the whole arc at a glance. `status` drives the badge tint —
-// active vs done — so completed steps fade back once the user moves on
-// (e.g. Step 2 marks done once LNURL validation lands).
-const StepHeader: React.FC<{
-  n: number;
-  title: string;
-  subtitle: string;
-  status: 'active' | 'done';
-  colors: Palette;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-}> = ({ n, title, subtitle, status, colors, styles }) => (
-  <View style={styles.stepHeader} accessibilityRole="header">
-    <View style={[styles.stepBadge, status === 'done' && styles.stepBadgeDone]}>
-      {status === 'done' ? (
-        <Check size={14} color={colors.white} strokeWidth={2.8} />
-      ) : (
-        <Text style={styles.stepBadgeText}>{n}</Text>
-      )}
-    </View>
-    <View style={styles.stepHeaderText}>
-      <Text style={styles.stepHeaderTitle}>{title}</Text>
-      <Text style={styles.stepHeaderSubtitle}>{subtitle}</Text>
-    </View>
-  </View>
-);
-
-// Top-of-screen horizontal stepper — 5 numbered pips + short labels.
-// Two states only: pink once reached (the current step or behind), grey
-// ahead. The current pip is scaled up so you can see where you are.
-const STEP_LABELS: { n: number; label: string }[] = [
-  { n: 1, label: 'Hardware' },
-  { n: 2, label: 'Prize' },
-  { n: 3, label: 'Location' },
-  { n: 4, label: 'Details' },
-  { n: 5, label: 'Publish' },
-  { n: 6, label: 'Write NFC' },
-];
-
-const StepProgressBar: React.FC<{
-  currentStep: 1 | 2 | 3 | 4 | 5 | 6;
-  onPipPress: (n: 1 | 2 | 3 | 4 | 5 | 6) => void;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-}> = ({ currentStep, onPipPress, styles }) => {
-  return (
-    <View style={styles.stepperRow} accessibilityRole="progressbar">
-      {STEP_LABELS.map(({ n, label }, idx) => {
-        const stepN = n as 1 | 2 | 3 | 4 | 5 | 6;
-        const reached = stepN <= currentStep;
-        const isCurrent = currentStep === stepN;
-        return (
-          <React.Fragment key={n}>
-            <TouchableOpacity
-              style={styles.stepperPipWrap}
-              onPress={() => onPipPress(stepN)}
-              testID={`hunt-piggy-step-pip-${n}`}
-              accessibilityLabel={`Step ${n} of 6: ${label}`}
-            >
-              <View
-                style={[
-                  styles.stepperPip,
-                  reached ? styles.stepperPipActive : styles.stepperPipPending,
-                  isCurrent && styles.stepperPipCurrent,
-                ]}
-              >
-                <Text style={[styles.stepperPipText, !reached && styles.stepperPipTextPending]}>
-                  {n}
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.stepperLabel,
-                  !reached && styles.stepperLabelPending,
-                  isCurrent && styles.stepperLabelCurrent,
-                ]}
-                numberOfLines={1}
-              >
-                {label}
-              </Text>
-            </TouchableOpacity>
-            {idx < STEP_LABELS.length - 1 ? (
-              <View
-                style={[
-                  styles.stepperConnector,
-                  stepN < currentStep
-                    ? styles.stepperConnectorReached
-                    : styles.stepperConnectorPending,
-                ]}
-              />
-            ) : null}
-          </React.Fragment>
-        );
-      })}
-    </View>
-  );
-};
-
-// Back / Next row that lives under each wizard step's content. Step 1
-// has no Back; step 5 swaps Next for the Publish CTA so the row is
-// usually just rendered without `onNext` on the final page.
-const StepNavRow: React.FC<{
-  onBack?: () => void;
-  onNext?: () => void;
-  nextLabel?: string;
-  nextDisabled?: boolean;
-  // Optional leading icon for the next button — the final step uses it
-  // for the Publish / Save / Done action so it isn't text-only.
-  nextIcon?: typeof Check;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-  colors: Palette;
-}> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, nextIcon: NextIcon, styles, colors }) => (
-  <View style={styles.stepNavRow}>
-    {onBack ? (
-      <TouchableOpacity
-        style={styles.stepNavBackButton}
-        onPress={onBack}
-        testID="hunt-piggy-step-back"
-        accessibilityLabel="Back to previous step"
-      >
-        <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
-        <Text style={styles.stepNavBackText}>Back</Text>
-      </TouchableOpacity>
-    ) : null}
-    {onNext ? (
-      <TouchableOpacity
-        style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
-        onPress={onNext}
-        disabled={nextDisabled}
-        testID="hunt-piggy-step-next"
-        accessibilityLabel={nextLabel}
-      >
-        {NextIcon ? <NextIcon size={16} color={colors.white} strokeWidth={2.5} /> : null}
-        <Text style={styles.stepNavNextText}>{NextIcon ? nextLabel : `${nextLabel} ›`}</Text>
-      </TouchableOpacity>
-    ) : null}
-  </View>
-);
-
-// 1-5 level picker for difficulty / terrain — colored rectangles that
-// fill up to the chosen value (mirrors the cache-detail SegmentBar),
-// kept visually distinct from the numbered step pips at the top.
-const LevelPicker: React.FC<{
-  value: number;
-  onChange: (v: number) => void;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-}> = ({ value, onChange, styles }) => (
-  <View style={styles.levelPickerRow}>
-    {[1, 2, 3, 4, 5].map((n) => (
-      <TouchableOpacity
-        key={n}
-        style={[styles.levelSegment, n <= value && styles.levelSegmentFilled]}
-        onPress={() => onChange(n)}
-        testID={`hunt-piggy-level-${n}`}
-        accessibilityLabel={`Level ${n}`}
-        accessibilityState={{ selected: n === value }}
-      />
-    ))}
-  </View>
-);
-
-// Single-select pill row for the geocache-info step (size, type).
-// Values are strings — callers cast at the edge.
-const OptionPicker: React.FC<{
-  value: string;
-  options: { v: string; label: string }[];
-  onChange: (v: string) => void;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-}> = ({ value, options, onChange, styles }) => (
-  <View style={styles.optionPickerRow}>
-    {options.map((o) => {
-      const active = o.v === value;
-      return (
-        <TouchableOpacity
-          key={o.v}
-          style={[styles.optionPill, active && styles.optionPillActive]}
-          onPress={() => onChange(o.v)}
-          testID={`hunt-piggy-option-${o.v}`}
-          accessibilityState={{ selected: active }}
-        >
-          <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
-            {o.label}
-          </Text>
-        </TouchableOpacity>
-      );
-    })}
-  </View>
-);
-
-const NfcSupportedTagsCard: React.FC<{
-  colors: Palette;
-  styles: ReturnType<typeof createHuntCreateScreenStyles>;
-}> = ({ colors, styles }) => (
-  <View style={styles.tagsCard} testID="hunt-create-supported-tags">
-    <View style={styles.tagsCardHeader}>
-      <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
-      <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
-    </View>
-    {/* Tightened two-row form so the "Write to NFC tag" + Next buttons
-        fit on a Pixel without scrolling. Long-form rationale lives in
-        docs/, not in the wizard. */}
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCheck}>✓</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the multi-record payload + the
-        reversible PWD/PACK lock.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG213</Text> — only 144 bytes of user memory, too small
-        for the Hide-a-Piglet payload.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text> — too small or can't
-        lock.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG424</Text> — not supported yet (needs AES auth, GH
-        #558).
-      </Text>
-    </View>
-  </View>
-);
 
 export default HuntCreateScreen;
