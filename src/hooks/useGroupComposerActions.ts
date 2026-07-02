@@ -153,5 +153,8 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow],
   );
 
-  return { ...actions, handleSendInvoiceToGroup };
+  // `sendText` re-exposed as `resendText` for the message-info sheet's
+  // Re-publish (#856), mirroring the 1:1 hook. It runs the full group send
+  // (publish + optimistic row), so a re-publish is a fresh group send.
+  return { ...actions, handleSendInvoiceToGroup, resendText: sendText };
 }

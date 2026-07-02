@@ -34,6 +34,17 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       borderBottomRightRadius: 4,
     },
+    // Legacy NIP-04 (kind 4) SENT bubble — brand violet instead of the NIP-17
+    // pink so the user can tell legacy DMs apart at a glance (#856 follow-up).
+    bubbleMeNip04: {
+      backgroundColor: colors.brandPurple,
+    },
+    // Legacy NIP-04 RECEIVED bubble — surface bg kept (matches NIP-17), but a
+    // violet left edge marks it as legacy on the incoming side too.
+    bubbleThemNip04: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPurple,
+    },
     bubbleText: {
       fontSize: 15,
       color: colors.textBody,

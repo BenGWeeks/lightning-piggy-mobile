@@ -2,6 +2,8 @@ import {
   aggregateRelayResults,
   summariseDelivery,
   shortRelayLabel,
+  pendingDelivery,
+  failedDelivery,
   type RelaySettle,
 } from './dmDeliveryStatus';
 
@@ -141,6 +143,29 @@ describe('summariseDelivery', () => {
       { relay: 'wss://b', ok: false },
     ]);
     expect(summariseDelivery(status)).toEqual({ ok: 1, total: 2 });
+  });
+});
+
+describe('pendingDelivery / failedDelivery relay seeding (missing-relays fix)', () => {
+  it('seeds the pending status with the target relays so the info sheet lists them', () => {
+    const status = pendingDelivery({ eventId: 'e', kind: 14, relays: ['wss://a', 'wss://b'] });
+    expect(status.pending).toBe(true);
+    expect(status.relayResults).toEqual({ 'wss://a': 'failed', 'wss://b': 'failed' });
+    expect(status.targetRelayCount).toBe(2);
+  });
+
+  it('seeds the failed status with the attempted relays (not an empty breakdown)', () => {
+    const status = failedDelivery({ eventId: 'e', kind: 14, relays: ['wss://a', 'wss://b'] });
+    expect(status.pending).toBeUndefined();
+    expect(status.delivered).toBe(false);
+    expect(status.relayResults).toEqual({ 'wss://a': 'failed', 'wss://b': 'failed' });
+    expect(summariseDelivery(status)).toEqual({ ok: 0, total: 2 });
+  });
+
+  it('leaves the breakdown empty when no relays are supplied (legacy / pre-publish error)', () => {
+    expect(pendingDelivery({ eventId: 'e' }).relayResults).toEqual({});
+    expect(failedDelivery({ eventId: 'e' }).relayResults).toEqual({});
+    expect(pendingDelivery().targetRelayCount).toBeUndefined();
   });
 });
 

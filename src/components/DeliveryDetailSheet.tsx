@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Modal, View, Text, Pressable, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Check, X, Send, Inbox, Copy, RotateCw } from 'lucide-react-native';
+import { Check, X, Send, Inbox, Copy, RotateCw, Clock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { Toast } from './BrandedToast';
 import {
@@ -50,11 +50,22 @@ export default function DeliveryDetailSheet({
   const sent = info.direction === 'sent';
   const status = info.deliveryStatus;
   const { ok, total } = status ? summariseDelivery(status) : { ok: 0, total: 0 };
+  // In flight: seeded relays read as `failed` (ok 0 of N), but the send hasn't
+  // settled, so the title says "Sending…" rather than "Sent to 0 of N relays".
+  const sending = !!status?.pending;
 
+  // A settled (non-pending) sent status with no relay breakdown (total === 0,
+  // e.g. `failedDelivery({ eventId })` with no relay list) is a tracked FAILURE,
+  // not a success — `delivered` is false and the bubble shows the red tick. Say
+  // "Send failed" so the sheet title doesn't contradict the bubble (Copilot).
   const title = sent
-    ? total === 0
-      ? 'Sent'
-      : `Sent to ${ok} of ${total} relays`
+    ? sending
+      ? total > 0
+        ? `Sending to ${total} relays…`
+        : 'Sending…'
+      : total === 0
+        ? 'Send failed'
+        : `Sent to ${ok} of ${total} relays`
     : 'Message received';
 
   // Sorted relays (ok first, then by URL) so the order is stable run-to-run.
@@ -67,12 +78,17 @@ export default function DeliveryDetailSheet({
   // A received message has no relay outcomes (we didn't publish it). A SENT
   // message with no delivery data was sent before tracking existed (or its
   // status wasn't persisted) — show "Not tracked", not "Received".
+  // Once a status exists and isn't pending, the send has settled. `ok === 0`
+  // means no relay accepted — a Failure — whether the breakdown is empty
+  // (total === 0, e.g. a pre-publish `failedDelivery`) or every listed relay
+  // rejected. "Not tracked" is reserved for `!status` (Copilot). A previous
+  // `total === 0 ? 'Pending'` branch mislabelled tracked failures as pending.
   const statusLabel = !status
     ? sent
       ? 'Not tracked'
       : 'Received'
-    : total === 0
-      ? 'Pending'
+    : status.pending
+      ? 'Sending'
       : ok === 0
         ? 'Failed'
         : ok < total
@@ -87,6 +103,10 @@ export default function DeliveryDetailSheet({
 
   const HeaderIcon = sent ? Send : Inbox;
   const showRelays = sent && relays.length > 0;
+  // `sending` (above) is reused for the relay rows below: while the send is
+  // still in flight the seeded relays are all `failed` placeholders, so we
+  // render a neutral pending Clock (not a red ✗) — reads as "publishing to
+  // these relays", not "all failed".
 
   return (
     <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
@@ -116,11 +136,13 @@ export default function DeliveryDetailSheet({
                   <View key={url} style={styles.relayRow} testID={`dm-delivery-relay-${i}`}>
                     {isOk ? (
                       <Check size={16} color={colors.green} strokeWidth={3} />
+                    ) : sending ? (
+                      <Clock size={16} color={colors.textSupplementary} strokeWidth={2.5} />
                     ) : (
                       <X size={16} color={colors.red} strokeWidth={3} />
                     )}
                     <Text
-                      style={[styles.relayLabel, !isOk && styles.relayLabelFailed]}
+                      style={[styles.relayLabel, !isOk && !sending && styles.relayLabelFailed]}
                       numberOfLines={1}
                     >
                       {shortRelayLabel(url)}
