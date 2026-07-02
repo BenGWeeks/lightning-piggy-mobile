@@ -414,9 +414,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     relays,
   });
 
-  // Find-log notifications (#740) — live kind-1111 sub against the
-  // viewer's cache coordinates. Sibling to `useDmInbox`'s live sub;
-  // fires `fireCacheNotification` per fresh arrival.
+  // Cache-activity notifications (#740, #945) — live subs against the
+  // viewer's owned cache coords: kind-1111 comments AND kind-7516 found-logs.
+  // Fires `fireCacheNotification` per fresh arrival + fans found-logs out on
+  // the in-app event bus (`notifyFoundLog`). See useCacheNotifications.
   useCacheNotifications({ pubkey, getReadRelays });
 
   const loadProfile = useCallback(
