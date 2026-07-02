@@ -34,12 +34,14 @@ export const BACKGROUND_DM_HEADLESS_TASK = 'BackgroundDmTask';
 
 if (Platform.OS === 'android') {
   AppRegistry.registerHeadlessTask(BACKGROUND_DM_HEADLESS_TASK, () => async () => {
+    console.warn('[BgDmWatch] headless task entered');
     // Self-check the persisted preference. The native BootReceiver starts the
     // service blindly on reboot (it can't read AsyncStorage), so this is the
     // one place that can refuse to run a watch the user disabled — stop the
     // service and return immediately if so.
     const enabled = await loadBackgroundDmEnabled().catch(() => false);
     if (!enabled) {
+      console.warn('[BgDmWatch] preference disabled — stopping service');
       await stopForegroundService().catch(() => {});
       return;
     }
@@ -51,7 +53,8 @@ if (Platform.OS === 'android') {
     // the open: we return a Promise that never settles, anchoring the context
     // so the WebSocket stays alive until the service is stopped. The
     // subscription's own callbacks keep firing notifications in the meantime.
-    await runBackgroundDmWatch();
+    const armed = await runBackgroundDmWatch();
+    console.warn(`[BgDmWatch] headless task: watch armed=${armed}`);
     return new Promise<void>(() => {
       // Intentionally never resolves — see the comment above. The service is
       // torn down by stopService() (from stopBackgroundDmWatch), which kills

@@ -7,6 +7,7 @@
 const mockSubscribe = jest.fn();
 const mockLoadIdentities = jest.fn();
 const mockGetUserRelays = jest.fn();
+const mockAsyncGetItem = jest.fn();
 const mockFireMessageNotification = jest.fn().mockResolvedValue('id');
 const mockShowForeground = jest.fn().mockResolvedValue('fg');
 const mockDismissForeground = jest.fn().mockResolvedValue(undefined);
@@ -20,11 +21,21 @@ const mockGet = jest.fn().mockResolvedValue(null);
 
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('nostr-tools/nip44', () => ({}));
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: { getItem: (...a: unknown[]) => mockAsyncGetItem(...a) },
+}));
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockLoadIdentities() }));
-jest.mock('./nostrRelayStorage', () => ({ getUserRelays: () => mockGetUserRelays() }));
+// mergeRelays is the real one — the relay-resolution fix under test IS the
+// defaults + nip65-cache + overrides merge, so don't stub it out.
+jest.mock('./nostrRelayStorage', () => ({
+  getUserRelays: () => mockGetUserRelays(),
+  mergeRelays: jest.requireActual('./nostrRelayStorage').mergeRelays,
+}));
 jest.mock('./nostrService', () => ({
   decodeNsec: (...a: unknown[]) => mockDecodeNsec(...a),
   fetchProfile: (...a: unknown[]) => mockFetchProfile(...a),
+  DEFAULT_RELAYS: ['wss://default.example'],
 }));
 jest.mock('./dmLiveSubscription', () => ({
   subscribeInboxDmsForViewer: (...a: unknown[]) => mockSubscribe(...a),
@@ -52,6 +63,10 @@ import {
   __isWatchActiveForTests,
   __resetForTests,
 } from './backgroundDmService';
+import {
+  claimWrapNotification,
+  __resetForTests as __resetDedupeForTests,
+} from './dmWrapNotificationDedupe';
 
 const ME = 'a'.repeat(64);
 const PARTNER = 'b'.repeat(64);
@@ -71,8 +86,10 @@ function nowSec(): number {
 beforeEach(() => {
   jest.clearAllMocks();
   __resetForTests();
+  __resetDedupeForTests();
   mockSubscribe.mockReturnValue(() => {});
   mockGetUserRelays.mockResolvedValue(READ_RELAYS);
+  mockAsyncGetItem.mockResolvedValue(null);
   mockDecodeNsec.mockReturnValue({ pubkey: ME, secretKey: SECRET });
 });
 
@@ -96,11 +113,36 @@ describe('runBackgroundDmWatch arming', () => {
     expect(mockSubscribe).not.toHaveBeenCalled();
   });
 
-  it('returns false when there are no read relays', async () => {
+  it('arms on DEFAULT_RELAYS when the user never customised relays (#279 swipe-away bug)', async () => {
+    // Regression guard: getUserRelays() alone is only the explicit overrides
+    // and is [] for most users — the watch must still arm via the defaults.
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     mockGetUserRelays.mockResolvedValue([]);
-    expect(await runBackgroundDmWatch()).toBe(false);
-    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(await runBackgroundDmWatch()).toBe(true);
+    expect(mockSubscribe).toHaveBeenCalledWith(
+      expect.objectContaining({ relays: ['wss://default.example'] }),
+    );
+  });
+
+  it('merges the cached NIP-65 list and user overrides into the read set', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockGetUserRelays.mockResolvedValue([{ url: 'wss://user.example', read: true, write: true }]);
+    mockAsyncGetItem.mockResolvedValue(
+      JSON.stringify([
+        { url: 'wss://nip65.example', read: true, write: true },
+        { url: 'wss://writeonly.example', read: false, write: true },
+      ]),
+    );
+    expect(await runBackgroundDmWatch()).toBe(true);
+    const relays = (mockSubscribe.mock.calls.at(-1)?.[0] as { relays: string[] }).relays;
+    expect(relays).toEqual(
+      expect.arrayContaining([
+        'wss://default.example',
+        'wss://nip65.example',
+        'wss://user.example',
+      ]),
+    );
+    expect(relays).not.toContain('wss://writeonly.example');
   });
 
   it('arms the live subscription for an nsec identity', async () => {
@@ -182,6 +224,26 @@ describe('nsec path: content notifications', () => {
 
     await runBackgroundDmWatch();
     await capturedOnEvent()({ id: 'w3', kind: 1059 });
+    await Promise.resolve();
+
+    expect(mockFireMessageNotification).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when the foreground live sub already claimed the wrap', async () => {
+    mockUnwrapWrapNsec.mockReturnValue({
+      pubkey: PARTNER,
+      created_at: nowSec(),
+      kind: 14,
+      tags: [],
+      content: 'hello there',
+    });
+    mockPartnerFromRumor.mockReturnValue({ partnerPubkey: PARTNER, fromMe: false });
+    mockTextForRumor.mockReturnValue('hello there');
+
+    await runBackgroundDmWatch();
+    // Simulate the live sub (same JS context) winning the claim first.
+    expect(claimWrapNotification('w-claimed')).toBe(true);
+    await capturedOnEvent()({ id: 'w-claimed', kind: 1059 });
     await Promise.resolve();
 
     expect(mockFireMessageNotification).not.toHaveBeenCalled();

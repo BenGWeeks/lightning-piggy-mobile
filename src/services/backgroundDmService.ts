@@ -52,8 +52,13 @@
  * the ~15-min detect-and-ping, just not Doze-immune.
  */
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
-import { getUserRelays } from './nostrRelayStorage';
+import { getUserRelays, mergeRelays } from './nostrRelayStorage';
+import { perAccountKey } from './perAccountStorage';
+import { RELAY_LIST_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { claimWrapNotification } from './dmWrapNotificationDedupe';
+import type { RelayConfig } from '../types/nostr';
 import * as nostrService from './nostrService';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
@@ -90,6 +95,39 @@ const NOTIFY_SKEW_SEC = 120;
 const BACKLOG_WRAPS_LIMIT = 50;
 
 const HEX64 = /^[0-9a-f]{64}$/;
+
+/**
+ * Resolve the viewer's read relays the same way the app's foreground context
+ * does: defaults + cached NIP-65 list + user overrides, merged with the same
+ * precedence (`mergeRelays`). `getUserRelays()` alone is ONLY the user's
+ * explicit in-app overrides — `[]` for anyone who never customised relays —
+ * which is why the watch must never use it bare: it silently armed nothing
+ * for default-relay users (the original #279 swipe-away bug). `mergeRelays`
+ * always folds in DEFAULT_RELAYS, so this can't return an empty read set.
+ */
+async function resolveReadRelays(pubkey: string): Promise<string[]> {
+  let nip65: RelayConfig[] = [];
+  try {
+    const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pubkey));
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) {
+      nip65 = parsed.filter(
+        (r): r is RelayConfig =>
+          r &&
+          typeof r === 'object' &&
+          typeof r.url === 'string' &&
+          typeof r.read === 'boolean' &&
+          typeof r.write === 'boolean',
+      );
+    }
+  } catch {
+    // Unreadable cache just means defaults + user overrides.
+  }
+  const user = await getUserRelays().catch(() => []);
+  return mergeRelays({ nip65, user })
+    .filter((r) => r.read)
+    .map((r) => r.url);
+}
 
 interface ActiveWatch {
   viewerPubkey: string;
@@ -148,8 +186,11 @@ async function handleWrap(input: {
   // Contentless path: remote signer can't decrypt headlessly. We can't tell
   // who it's from (that's inside the wrap), so the notification is fully
   // generic and the thread id is a sentinel that never matches an actively-
-  // viewed thread.
+  // viewed thread. The claim keeps the foreground live sub (which can be
+  // armed in the same JS context and receive this same wrap) from posting a
+  // second notification — see dmWrapNotificationDedupe.
   if (!decryptWrap) {
+    if (!claimWrapNotification(ev.id)) return;
     await fireMessageNotification({
       kind: 'dm',
       threadId: '__background__',
@@ -161,7 +202,10 @@ async function handleWrap(input: {
   }
 
   const rumor = decryptWrap(ev);
-  if (!rumor) return;
+  if (!rumor) {
+    console.warn('[BgDmWatch] wrap skipped: decrypt failed');
+    return;
+  }
   // Only notify for genuinely-fresh arrivals (the inner rumor timestamp is
   // the real send time; the relay's on-open backlog has old timestamps).
   if (rumor.created_at < subOpenedAtSec - NOTIFY_SKEW_SEC) return;
@@ -170,6 +214,11 @@ async function handleWrap(input: {
   if (!partnership) return;
   // Never notify for our own echoes (self-wraps / outgoing copies).
   if (partnership.fromMe) return;
+  // Claim BEFORE the async name resolution below — the claim is the
+  // synchronous point that closes the race with the foreground live sub
+  // processing the same wrap on the same JS thread.
+  if (!claimWrapNotification(ev.id)) return;
+  console.warn('[BgDmWatch] fresh wrap → firing notification');
 
   const senderName = await resolveSenderName(partnership.partnerPubkey, readRelays);
   // textForRumor folds kind-15 file messages into a renderable URL; for a
@@ -177,13 +226,14 @@ async function handleWrap(input: {
   // redacts to generic copy when the user has lock-screen content disabled,
   // so passing the plaintext here is safe.
   const preview = textForRumor(rumor);
-  await fireMessageNotification({
+  const notifId = await fireMessageNotification({
     kind: 'dm',
     threadId: partnership.partnerPubkey,
     title: senderName,
     body: preview,
     data: { conversationPubkey: partnership.partnerPubkey },
   });
+  console.warn(`[BgDmWatch] notification result: ${notifId ?? 'suppressed/failed'}`);
 }
 
 /**
@@ -229,15 +279,27 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   stopBackgroundDmWatchSubscription();
 
   const { identities, activePubkey } = await loadIdentities();
-  if (!activePubkey || !HEX64.test(activePubkey)) return false;
+  if (!activePubkey || !HEX64.test(activePubkey)) {
+    console.warn('[BgDmWatch] not armed: no active pubkey');
+    return false;
+  }
   const identity = identities.find((i) => i.pubkey === activePubkey);
-  if (!identity) return false;
+  if (!identity) {
+    console.warn('[BgDmWatch] not armed: active identity not found');
+    return false;
+  }
 
-  const readRelays = (await getUserRelays()).filter((r) => r.read).map((r) => r.url);
-  if (readRelays.length === 0) return false;
+  const readRelays = await resolveReadRelays(activePubkey);
+  if (readRelays.length === 0) {
+    console.warn('[BgDmWatch] not armed: no read relays');
+    return false;
+  }
 
   const decryptWrap = buildDecryptor(identity);
   const subOpenedAtSec = Math.floor(Date.now() / 1000);
+  console.warn(
+    `[BgDmWatch] arming: relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'}`,
+  );
 
   const unsubscribe = subscribeInboxDmsForViewer({
     viewerPubkey: activePubkey,
@@ -253,7 +315,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
         subOpenedAtSec,
         decryptWrap,
       }).catch((e) => {
-        if (__DEV__) console.warn('[backgroundDmService] handleWrap failed:', e);
+        console.warn('[backgroundDmService] handleWrap failed:', e);
       });
     },
   });
