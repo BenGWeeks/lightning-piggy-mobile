@@ -79,6 +79,12 @@ function capturedOnEvent(): (ev: unknown) => void {
   return (call?.[0] as { onEvent: (ev: unknown) => void }).onEvent;
 }
 
+// Fire the subscription's EOSE callback — marks the backlog replay settled.
+function settleBacklog(): void {
+  const call = mockSubscribe.mock.calls.at(-1);
+  (call?.[0] as { onEose?: () => void }).onEose?.();
+}
+
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -263,6 +269,7 @@ describe('remote signer path: contentless notifications', () => {
     mockLoadIdentities.mockResolvedValue(amberIdentity());
 
     await runBackgroundDmWatch();
+    settleBacklog();
     await capturedOnEvent()({ id: 'w4', kind: 1059 });
     await Promise.resolve();
 
@@ -277,6 +284,30 @@ describe('remote signer path: contentless notifications', () => {
     );
   });
 
+  it('stays silent for backlog wraps replayed before EOSE (no notification burst on arm)', async () => {
+    // Contentless watches can't run the rumor-timestamp freshness gate, so
+    // without the EOSE latch every replayed wrap would become a generic
+    // notification on enable/boot (Copilot review, PR #958).
+    mockLoadIdentities.mockResolvedValue(amberIdentity());
+
+    await runBackgroundDmWatch();
+    await capturedOnEvent()({ id: 'backlog-1', kind: 1059 });
+    await capturedOnEvent()({ id: 'backlog-2', kind: 1059 });
+    await Promise.resolve();
+    expect(mockFireMessageNotification).not.toHaveBeenCalled();
+
+    settleBacklog();
+    await capturedOnEvent()({ id: 'live-1', kind: 1059 });
+    await Promise.resolve();
+    expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the smaller contentless backlog limit when it cannot decrypt', async () => {
+    mockLoadIdentities.mockResolvedValue(amberIdentity());
+    await runBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledWith(expect.objectContaining({ wrapsLimit: 10 }));
+  });
+
   it('falls back to contentless when the nsec fails to decode', async () => {
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     mockDecodeNsec.mockImplementation(() => {
@@ -284,6 +315,7 @@ describe('remote signer path: contentless notifications', () => {
     });
 
     await runBackgroundDmWatch();
+    settleBacklog();
     await capturedOnEvent()({ id: 'w5', kind: 1059 });
     await Promise.resolve();
 

@@ -94,6 +94,13 @@ const NOTIFY_SKEW_SEC = 120;
 // by the foreground live sub.
 const BACKLOG_WRAPS_LIMIT = 50;
 
+// Remote-signer (contentless) watches can't decrypt, so the rumor-timestamp
+// freshness gate can't run — every replayed wrap would otherwise become a
+// generic notification burst on arm (Copilot review, PR #958). Those wraps
+// are gated on EOSE below; this smaller limit additionally bounds any
+// stragglers a slow relay replays after the first relay's EOSE.
+const CONTENTLESS_BACKLOG_WRAPS_LIMIT = 10;
+
 const HEX64 = /^[0-9a-f]{64}$/;
 
 /**
@@ -175,6 +182,8 @@ async function handleWrap(input: {
   readRelays: string[];
   subOpenedAtSec: number;
   decryptWrap: ((wrap: nostrService.RawGiftWrapEvent) => DecodedRumor | null) | null;
+  /** True once the subscription's initial backlog replay has settled (EOSE). */
+  backlogSettled: () => boolean;
 }): Promise<void> {
   const { ev, viewerPubkey, readRelays, subOpenedAtSec, decryptWrap } = input;
   // This background watch only cares about NIP-17 gift wraps (kind 1059) —
@@ -186,10 +195,14 @@ async function handleWrap(input: {
   // Contentless path: remote signer can't decrypt headlessly. We can't tell
   // who it's from (that's inside the wrap), so the notification is fully
   // generic and the thread id is a sentinel that never matches an actively-
-  // viewed thread. The claim keeps the foreground live sub (which can be
-  // armed in the same JS context and receive this same wrap) from posting a
-  // second notification — see dmWrapNotificationDedupe.
+  // viewed thread. Because we can't read the inner rumor timestamp, the
+  // freshness gate below can't run — instead stay SILENT until the initial
+  // backlog replay settles (EOSE), so arming doesn't burst a generic
+  // notification per replayed wrap. The claim keeps the foreground live sub
+  // (which can be armed in the same JS context and receive this same wrap)
+  // from posting a second notification — see dmWrapNotificationDedupe.
   if (!decryptWrap) {
+    if (!input.backlogSettled()) return;
     if (!claimWrapNotification(ev.id)) return;
     await fireMessageNotification({
       kind: 'dm',
@@ -301,10 +314,16 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
     `[BgDmWatch] arming: relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'}`,
   );
 
+  // Backlog-settled latch for the contentless path (see handleWrap). The nsec
+  // path doesn't need it — its per-wrap rumor-timestamp gate is stricter.
+  let eosed = false;
   const unsubscribe = subscribeInboxDmsForViewer({
     viewerPubkey: activePubkey,
     relays: readRelays,
-    wrapsLimit: BACKLOG_WRAPS_LIMIT,
+    wrapsLimit: decryptWrap ? BACKLOG_WRAPS_LIMIT : CONTENTLESS_BACKLOG_WRAPS_LIMIT,
+    onEose: () => {
+      eosed = true;
+    },
     onEvent: (ev) => {
       // Fire-and-forget per event; swallow per-event errors so one bad wrap
       // can't tear down the long-lived subscription.
@@ -314,6 +333,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
         readRelays,
         subOpenedAtSec,
         decryptWrap,
+        backlogSettled: () => eosed,
       }).catch((e) => {
         console.warn('[backgroundDmService] handleWrap failed:', e);
       });
