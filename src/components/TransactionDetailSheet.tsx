@@ -7,7 +7,6 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
@@ -30,6 +29,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  ExternalLink,
   Info,
   MessageCircle,
   XCircle,
@@ -116,7 +116,10 @@ const TransactionDetailSheet: React.FC<Props> = ({
     label: string;
     value: string;
     onCopy: (label: string, value: string) => void;
-  }> = ({ label, value, onCopy }) => (
+    /** When set, an explorer icon opens mempool.space for this txid (tap-out
+     * only — we never query the explorer, so no txid leaks unprompted). */
+    explorerTxId?: string;
+  }> = ({ label, value, onCopy, explorerTxId }) => (
     <TouchableOpacity
       style={styles.row}
       onPress={() => onCopy(label, value)}
@@ -128,6 +131,18 @@ const TransactionDetailSheet: React.FC<Props> = ({
           {truncateMiddle(value)}
         </Text>
         <Copy size={14} color={colors.textSupplementary} />
+        {explorerTxId ? (
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL(`https://mempool.space/tx/${explorerTxId}`).catch(() => {})
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={`View ${label.toLowerCase()} in block explorer`}
+            testID={`tx-detail-explorer-${label.toLowerCase().replace(/\s+/g, '-')}`}
+          >
+            <ExternalLink size={14} color={colors.brandPink} />
+          </TouchableOpacity>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -179,16 +194,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
       setResolvedSwapId(null);
       if (!tx || !isBoltzSwap) return;
 
-      let swapId: string | undefined = tx.swapId;
-      if (!swapId) {
-        try {
-          const indexRaw = await SecureStore.getItemAsync('boltz_swap_index');
-          if (indexRaw) {
-            const ids = JSON.parse(indexRaw) as string[];
-            swapId = ids[ids.length - 1];
-          }
-        } catch {}
-      }
+      // Only resolve a swap id we can attribute to THIS row. The old fallback
+      // took `ids[ids.length - 1]` — the most recent pending swap in the
+      // index, unrelated to the tapped row — which mislabeled the status,
+      // explanation, and support swap-id. If the row carries no swapId, show
+      // the unknown-swap state rather than guessing (swap audit finding).
+      const swapId: string | undefined = tx.swapId;
       if (!swapId || cancelled) return;
       setResolvedSwapId(swapId);
 
@@ -229,8 +240,8 @@ const TransactionDetailSheet: React.FC<Props> = ({
       await swapRecoveryService.recoverPendingSwaps();
       Toast.show({
         type: 'info',
-        text1: 'Finishing swap',
-        text2: 'Any unfinished swaps are being re-broadcast.',
+        text1: 'Retry kicked off',
+        text2: 'Any claimable swaps are being re-broadcast.',
         position: 'top',
         visibilityTime: 6000,
       });
@@ -269,7 +280,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     const pending = !tx.settled_at && !tx.blockHeight;
     if (swap?.terminalFailure) return { style: styles.badgeFailed, text: `Swap: ${swap.status}` };
     if (swap?.terminalSuccess) return { style: styles.badgeConfirmed, text: 'Swap complete' };
-    if (swap?.claimable) return { style: styles.badgeInfo, text: 'Ready to finish' };
+    if (swap?.claimable) return { style: styles.badgeInfo, text: 'Claim available' };
     if (swap) return { style: styles.badgeInfo, text: `Swap: ${swap.status}` };
     if (pending) return { style: styles.badgePending, text: 'Pending' };
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
@@ -302,7 +313,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         heading: 'Swap complete',
         body: incoming
           ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
-          : 'Lightning was paid and Boltz’s on-chain lockup has been swept to your Bitcoin address.',
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
       };
     }
     // Live poll says claimable AND the row is flagged for attention: our
@@ -311,7 +322,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
       return {
         tone: 'warning' as const,
         heading: 'Needs attention',
-        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain transaction that finishes the swap hasn’t broadcast yet. Your funds are safe — tap Finish swap below if it hasn’t cleared.',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
       };
     }
     // Live poll says claimable, but the row isn't (yet) in the attention
@@ -319,8 +330,8 @@ const TransactionDetailSheet: React.FC<Props> = ({
     if (swap?.claimable) {
       return {
         tone: 'info' as const,
-        heading: 'Finishing swap',
-        body: 'Boltz has locked funds on-chain. The transaction that finishes the swap is broadcasting and usually confirms in a few minutes.',
+        heading: 'Claim broadcasting',
+        body: 'Boltz has locked funds on-chain. The claim transaction is broadcasting and usually confirms in a few minutes.',
       };
     }
     // No live swap data yet — trust the row-tap iconState as a fallback.
@@ -328,7 +339,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
       return {
         tone: 'warning' as const,
         heading: 'Needs attention',
-        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain transaction that finishes the swap hasn’t broadcast yet. Your funds are safe — tap Finish swap below if it hasn’t cleared.',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
       };
     }
     if (iconState === 'done') {
@@ -338,7 +349,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         heading: 'Swap complete',
         body: incoming
           ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
-          : 'Lightning was paid and Boltz’s on-chain lockup has been swept to your Bitcoin address.',
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
       };
     }
     if (pending) {
@@ -645,11 +656,30 @@ const TransactionDetailSheet: React.FC<Props> = ({
             </TouchableOpacity>
           ) : null}
 
-          {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
-          {claimTxId ? <CopyRow label="Finish tx" value={claimTxId} onCopy={copyValue} /> : null}
+          {tx.txid ? (
+            <CopyRow
+              label="On-chain tx"
+              value={tx.txid}
+              onCopy={copyValue}
+              explorerTxId={tx.txid}
+            />
+          ) : null}
+          {claimTxId ? (
+            <CopyRow
+              label="Claim tx"
+              value={claimTxId}
+              onCopy={copyValue}
+              explorerTxId={claimTxId}
+            />
+          ) : null}
 
           {swap?.lockupTxId ? (
-            <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />
+            <CopyRow
+              label="Lockup tx"
+              value={swap.lockupTxId}
+              onCopy={copyValue}
+              explorerTxId={swap.lockupTxId}
+            />
           ) : null}
 
           {tx.paymentHash ? (
@@ -666,12 +696,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 style={styles.primaryButton}
                 onPress={handleRetryClaim}
                 disabled={retrying}
-                accessibilityLabel="Finish swap"
+                accessibilityLabel="Retry claim"
               >
                 {retrying ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Finish swap</Text>
+                  <Text style={styles.primaryButtonText}>Retry claim</Text>
                 )}
               </TouchableOpacity>
             ) : null}
@@ -699,8 +729,8 @@ const TransactionDetailSheet: React.FC<Props> = ({
             ) : null}
             {swap?.claimable ? (
               <Text style={styles.info}>
-                Finish swap re-runs the recovery service, which re-broadcasts the on-chain
-                transaction that finishes the swap from persisted swap state.
+                Retry re-runs the swap recovery service, which will re-broadcast the claim
+                transaction from persisted swap state.
               </Text>
             ) : null}
           </View>
