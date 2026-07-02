@@ -37,6 +37,7 @@ import {
   nextPage,
   sortTransactions,
   windowTransactions,
+  INITIAL_PAGE_SIZE,
   type TxRow,
 } from '../utils/transactionPagination';
 
@@ -408,7 +409,9 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
             <Text style={styles.emptyText}>No transactions yet</Text>
           </View>
         }
-        initialNumToRender={20}
+        // Match the first-page window so FlatList's initial render matches the
+        // paging logic and can't drift if the page size is tuned (Copilot #940).
+        initialNumToRender={INITIAL_PAGE_SIZE}
         windowSize={11}
         removeClippedSubviews
         testID="transaction-list"
