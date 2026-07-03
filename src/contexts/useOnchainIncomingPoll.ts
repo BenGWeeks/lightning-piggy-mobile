@@ -68,24 +68,26 @@ export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInStat
         // effect run and this tick are honoured without re-arming the
         // entire poll.
         const onchain = walletsRef.current.filter((w) => w.walletType === 'onchain');
-        await Promise.all(
-          onchain.map((w) =>
-            onchainService
-              .getBalance(w.id)
-              .then((b) => {
-                // Only commit when the balance actually changed — an
-                // unchanged write still costs an AsyncStorage round-trip
-                // (and needlessly re-runs the receive detector).
-                if (b !== null && b !== w.balance) updateWalletInState(w.id, { balance: b });
-              })
-              .catch(() => {
-                // Transient Electrum / Esplora failures are routine; the
-                // next tick will retry. Log only in dev so we don't spam
-                // production with noise from a flaky third-party service.
-                if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
-              }),
-          ),
-        );
+        // Sequential, not Promise.all: onchainService shares a singleton
+        // Electrum connection (`blockchain`), so concurrent BDK syncs
+        // would contend on one socket — and the BDK bindings aren't
+        // guaranteed concurrency-safe. One wallet at a time keeps
+        // resource usage (CPU/network/battery) smooth and avoids
+        // shared-connection races.
+        for (const w of onchain) {
+          try {
+            const b = await onchainService.getBalance(w.id);
+            // Only commit when the balance actually changed — an unchanged
+            // write still costs an AsyncStorage round-trip (and needlessly
+            // re-runs the receive detector).
+            if (b !== null && b !== w.balance) updateWalletInState(w.id, { balance: b });
+          } catch {
+            // Transient Electrum / Esplora failures are routine; the next
+            // tick will retry. Log only in dev so we don't spam production
+            // with noise from a flaky third-party service.
+            if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
+          }
+        }
       } finally {
         inFlight = false;
       }
