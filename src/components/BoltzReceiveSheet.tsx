@@ -466,7 +466,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                 </View>
                 {btcPrice ? (
                   <Text style={styles.amountFiat}>
-                    Aprox {formatFiat(satsToFiat(swap.expectedAmount, btcPrice), currency)}
+                    Approx. {formatFiat(satsToFiat(swap.expectedAmount, btcPrice), currency)}
                   </Text>
                 ) : null}
 

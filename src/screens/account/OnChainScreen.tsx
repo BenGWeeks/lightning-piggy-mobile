@@ -27,8 +27,8 @@ const OnChainScreen: React.FC = () => {
   const [electrumSSL, setElectrumSSL] = useState(true);
   const [defaultOnchainId, setDefaultOnchainIdState] = useState<string | null>(null);
 
-  // Onchain wallets the user could pick as default. Empty list = section
-  // hides itself entirely (nothing to choose between).
+  // Onchain wallets the user could pick as default. Empty list = the section
+  // renders an empty-state hint prompting the user to add an on-chain wallet.
   const onchainWallets = useMemo(
     () => wallets.filter((w) => w.walletType === 'onchain'),
     [wallets],
