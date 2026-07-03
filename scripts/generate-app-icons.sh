@@ -26,10 +26,10 @@ command -v convert >/dev/null || { echo "ImageMagick 'convert' not found"; exit 
 
 # --- Tweakables -------------------------------------------------------------
 SIZE=1024          # master icon size (square; the OS rounds the corners)
-GLYPH_SCALE=640    # mark size within the full icon
-FG_SCALE=545       # mark size for the Android adaptive foreground (safe zone)
+GLYPH_SCALE=576    # mark size within the full icon
+FG_SCALE=490       # mark size for the Android adaptive foreground (safe zone)
 MONO=432           # Android themed/monochrome icon size
-MONO_MARK=260      # mark size within the monochrome canvas
+MONO_MARK=234      # mark size within the monochrome canvas
 MARK_BASE=1280     # canvas the mark is composed on (pig fills it)
 STROKE=1.5         # pig outline stroke width (Lucide's native value)
 BOLT_SCALE=370     # bolt size on the MARK_BASE canvas
