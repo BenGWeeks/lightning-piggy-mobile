@@ -101,6 +101,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   // Session token guards stale callbacks when the user closes + reopens.
   const sessionRef = useRef(0);
 
+  // A swap "flow" is in flight once we leave the amount step to create the
+  // swap and until it's explicitly closed (creating the LN invoice / Boltz
+  // swap, or a live swap awaiting/processing the on-chain payment). While
+  // this is true the lockup-QR + status view MUST stay mounted — see
+  // `handleSheetChange` / `enablePanDownToClose` below for why (#92).
+  const swapInFlight = creating || swap !== null;
+  // Mirror into a ref so the (stable) sheet-change callback always reads the
+  // current value without being re-created on every render.
+  const swapInFlightRef = useRef(false);
+  swapInFlightRef.current = swapInFlight;
+
   // Reset / present the sheet when `visible` flips. Mirrors ReceiveSheet.
   useEffect(() => {
     if (visible) {
@@ -377,7 +388,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      // Only a genuine, user-initiated collapse should close the sheet.
+      // While a swap is being created or is awaiting/processing the on-chain
+      // payment we must keep the lockup-QR + status view mounted: an
+      // incidental gorhom collapse to -1 (e.g. the keyboard blurring as we
+      // leave the amount step while the multi-second NWC/Boltz round-trip is
+      // in flight, combined with the dynamic-content resize) would otherwise
+      // tear the sheet down, unmount it (`if (!visible) return null`) and
+      // lose the address the external sender still needs to pay. The user
+      // leaves this view only via the explicit Cancel/Done/Close control,
+      // which drives `onClose` directly (#92).
+      if (index === -1 && !swapInFlightRef.current) onClose();
     },
     [onClose],
   );
@@ -426,7 +447,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     <BottomSheetModal
       ref={bottomSheetRef}
       onChange={handleSheetChange}
-      enablePanDownToClose
+      // Swipe-to-dismiss only while on the amount step (or a create error).
+      // Once a swap flow is in flight the sheet must not be swipe- or
+      // keyboard-collapsible — removing -1 as a reachable snap keeps the
+      // lockup-QR + status view up until the user explicitly closes it (#92).
+      enablePanDownToClose={!swapInFlight}
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
