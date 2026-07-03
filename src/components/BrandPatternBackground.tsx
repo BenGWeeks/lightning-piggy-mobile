@@ -17,7 +17,8 @@ export type PatternVariant =
   | 'messages-marquee'
   | 'friends-grid'
   | 'friends-rotated'
-  | 'friends-scatter';
+  | 'friends-scatter'
+  | 'explore-compass';
 
 // Dev-only: set to a variant id to force it on both tabs while capturing
 // option screenshots, then set back to null. Only honoured under __DEV__, so a
@@ -28,7 +29,15 @@ const CAPTURE_VARIANT: PatternVariant | null = null;
 // stronger. Tuned on-device.
 const FADE_OPACITY = 0.82;
 
-type MotifName = 'messageCircle' | 'messageSquare' | 'zap' | 'users' | 'heart' | 'userRound';
+type MotifName =
+  | 'messageCircle'
+  | 'messageSquare'
+  | 'zap'
+  | 'users'
+  | 'heart'
+  | 'userRound'
+  | 'compass'
+  | 'map';
 
 interface MotifInstance {
   name: MotifName;
@@ -68,6 +77,16 @@ const MOTIF_PATHS: Record<
       'M16 3.13a4 4 0 0 1 0 7.75',
     ],
     circles: [[9, 7, 4]],
+  },
+  // Lucide "compass" — outer ring + the two-tone needle as a hairline diamond.
+  compass: {
+    circles: [[12, 12, 10]],
+    polygon: '16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76',
+  },
+  // Lucide "map" — folded map outline with the two crease lines as paths.
+  map: {
+    polygon: '1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6',
+    paths: ['M8 2v16', 'M16 6v16'],
   },
 };
 
@@ -125,6 +144,18 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     motifs: [
       { name: 'users', x: 6, y: 8, size: 34 },
       { name: 'users', x: 62, y: 30, size: 22 },
+    ],
+  },
+  // Explore — compass + folded map alternating on a gentle counter-rotation,
+  // same two-motif rhythm as friends-rotated so the tabs read as one house.
+  'explore-compass': {
+    tileW: 58,
+    tileH: 58,
+    transform: 'rotate(-12)',
+    opacity: 0.68,
+    motifs: [
+      { name: 'compass', x: 5, y: 5, size: 22 },
+      { name: 'map', x: 33, y: 33, size: 18 },
     ],
   },
 };
