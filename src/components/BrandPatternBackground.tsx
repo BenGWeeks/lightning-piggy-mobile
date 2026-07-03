@@ -4,12 +4,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Defs, Pattern, Rect, G, Path, Circle, Polygon } from 'react-native-svg';
 import { useThemeColors } from '../contexts/ThemeContext';
 
-// Tone-on-tone monogram background for the Messages / Friends tabs. The mark
-// is drawn INTO a solid brand ground, then the pink->purple fade washes over
-// it at ~82% so it reads as Louis-Vuitton-style canvas texture rather than
-// icons printed on top ("under the fade"). Pure vector via react-native-svg,
-// so it avoids the 754 KB bitmap decode implicated in the cold-tab GPU stall
-// (issue #245) and stays crisp at every density.
+// Tone-on-tone monogram background for the content tabs — Messages and
+// Friends, plus the Explore hub and its sub-sections (via the
+// `explore-compass` variant). The mark is drawn INTO a solid brand ground,
+// then the pink->purple fade washes over it at ~82% so it reads as
+// Louis-Vuitton-style canvas texture rather than icons printed on top ("under
+// the fade"). Pure vector via react-native-svg, so it avoids the 754 KB
+// bitmap decode implicated in the cold-tab GPU stall (issue #245) and stays
+// crisp at every density.
 
 export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
 
