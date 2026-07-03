@@ -11,8 +11,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import TabBackgroundImage from '../components/TabBackgroundImage';
-import BrandGradientBackground from '../components/BrandGradientBackground';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Clock, Search, X, Zap } from 'lucide-react-native';
@@ -720,8 +719,7 @@ const MessagesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <BrandGradientBackground />
-      <TabBackgroundImage style={styles.bgImage} />
+      <BrandPatternBackground variant="messages-weave" />
       <TabHeader
         title={t('messagesScreen.title')}
         icon={<MessageCircle size={20} color={colors.brandPink} />}

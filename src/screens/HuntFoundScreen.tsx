@@ -25,6 +25,7 @@ import { SLEEPING_PATTERN } from '../utils/lnurlCooldown';
 import { useTranslation } from '../contexts/LocaleContext';
 import { t } from '../i18n';
 import type { RouteProp } from '@react-navigation/native';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 
 // LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
 // Neutral about who triggered the cooldown — anyone could have just
@@ -218,6 +219,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container} testID="hunt-found-screen">
       <View style={styles.header}>
+        <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           accessibilityLabel={t('huntFoundScreen.close')}
@@ -394,6 +396,7 @@ const createStyles = (colors: Palette) =>
       paddingTop: 48,
       paddingBottom: 16,
       backgroundColor: colors.brandPink,
+      overflow: 'hidden',
     },
     headerTitle: {
       flex: 1,

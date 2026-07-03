@@ -52,6 +52,7 @@ import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon, { socialLabel, type SocialNetwork } from '../components/SocialIcon';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -210,6 +211,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container} testID="place-detail-screen">
       <View style={styles.header}>
+        <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           accessibilityLabel={t('placeDetailScreen.backToPlaces')}
@@ -570,6 +572,7 @@ const createStyles = (colors: Palette) =>
       paddingTop: 48,
       paddingBottom: 16,
       backgroundColor: colors.brandPink,
+      overflow: 'hidden',
       gap: 12,
     },
     headerTitle: {

@@ -36,6 +36,7 @@ import { useUserLocation } from '../contexts/UserLocationContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import Toast from '../components/BrandedToast';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -195,6 +196,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container} testID="event-detail-screen">
       <View style={styles.header}>
+        <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           accessibilityLabel={t('eventDetailScreen.backToEvents')}
@@ -364,6 +366,7 @@ const createStyles = (colors: Palette) =>
       paddingTop: 48,
       paddingBottom: 16,
       backgroundColor: colors.brandPink,
+      overflow: 'hidden',
     },
     headerTitle: {
       flex: 1,

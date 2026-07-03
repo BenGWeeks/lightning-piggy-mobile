@@ -9,9 +9,9 @@ import React, {
 } from 'react';
 import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -521,7 +521,7 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
+      <BrandPatternBackground variant="friends-rotated" />
       <TabHeader
         title={t('friendsScreen.title')}
         icon={<Users size={20} color={colors.brandPink} />}
