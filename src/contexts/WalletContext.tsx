@@ -28,6 +28,7 @@ import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
+import type { IncomingPaymentSource } from './incomingPaymentSource';
 import {
   CardTheme,
   WalletMetadata,
@@ -62,7 +63,10 @@ export interface IncomingPayment {
   // small visual distinction (#134) — on-chain receives include a
   // mempool/confirmation hint subtitle so users know an unconfirmed
   // tx isn't yet final, while lightning lands instantly settled.
-  source: 'lightning' | 'onchain';
+  // Shared `IncomingPaymentSource` union (not an inline literal) so the
+  // event and the overlay's `ReceiveSource` prop can't drift as new
+  // rails are added.
+  source: IncomingPaymentSource;
   // True when the receipt was found in an already-current transaction list, so
   // the post-receive refresh effect can skip a redundant list_transactions
   // round-trip (#655 review).
