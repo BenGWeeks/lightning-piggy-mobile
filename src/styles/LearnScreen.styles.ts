@@ -18,13 +18,6 @@ export const createLearnScreenStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       overflow: 'hidden',
     },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
-    },
     // Sits below the TabHeader title row, inside the pink header band.
     // Mirrors the Messages/Friends `headerExtras` + `chipRow` pattern so the
     // search affordance reads consistently across the four top-level tabs.
