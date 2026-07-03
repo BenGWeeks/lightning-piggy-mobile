@@ -43,6 +43,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
+  // Real aspect ratio of the product image, learned on load, so the hero
+  // renders at the image's true proportions instead of a fixed square crop.
+  const [imageAspect, setImageAspect] = useState<number | null>(null);
   const [loginVisible, setLoginVisible] = useState(false);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
 
@@ -134,7 +137,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <View style={styles.imageWrap}>
+        <View style={[styles.imageWrap, imageAspect ? { aspectRatio: imageAspect } : null]}>
           {hasImage ? (
             <Image
               source={{ uri: product.image }}
@@ -142,6 +145,10 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               contentFit="cover"
               cachePolicy="memory-disk"
               recyclingKey={product.image}
+              onLoad={(e) => {
+                const { width, height } = e.source ?? {};
+                if (width && height) setImageAspect(width / height);
+              }}
               onError={() => setImageFailed(true)}
             />
           ) : (

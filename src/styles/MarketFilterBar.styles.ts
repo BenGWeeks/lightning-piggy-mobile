@@ -21,8 +21,6 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
       bottom: 0,
       right: 0,
       backgroundColor: colors.background,
-      borderTopLeftRadius: 20,
-      borderBottomLeftRadius: 20,
       paddingTop: 52,
       paddingBottom: 28,
       paddingHorizontal: 20,

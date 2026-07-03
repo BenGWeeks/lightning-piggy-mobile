@@ -144,6 +144,10 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       color: colors.textSupplementary,
     },
     primaryButton: {
+      // `alignSelf: 'stretch'` so the button fills its column even inside the
+      // centered success view (`sentWrap` uses alignItems:'center', which would
+      // otherwise shrink it to hug the label and clip "Go to chat to pay").
+      alignSelf: 'stretch',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -151,6 +155,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       borderRadius: 14,
       paddingVertical: 15,
+      paddingHorizontal: 20,
     },
     primaryButtonDisabled: {
       opacity: 0.6,

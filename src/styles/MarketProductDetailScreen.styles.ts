@@ -32,7 +32,9 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
 
     scrollContent: { paddingBottom: 40 },
 
-    // Product image (square).
+    // Product image. `aspectRatio: 1` is only the pre-load placeholder shape;
+    // once the image loads, MarketProductDetailScreen overrides it inline with
+    // the image's real aspect ratio so the hero isn't cropped to a square.
     imageWrap: {
       width: '100%',
       aspectRatio: 1,
