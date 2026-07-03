@@ -1,0 +1,133 @@
+import { useCallback } from 'react';
+import { InteractionManager } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as nostrConnectService from '../services/nostrConnectService';
+import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { syncBackgroundDmWatchFromPreference } from '../services/backgroundDmService';
+import { PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
+import type { SignerType, Nip46Connection } from '../types/nostr';
+
+/**
+ * NIP-46 ("Nostr Connect" / bunker) login, extracted from NostrContext (#283)
+ * to keep that over-cap file from growing. The QR scan + ack handshake happens
+ * in NostrLoginSheet (it owns the per-app keypair, the URI build, and the
+ * await-for-bunker round-trip); by the time this runs, `nostrConnectService`
+ * already holds a live BunkerSigner and the connection is ready to persist.
+ *
+ * Mirrors `loginWithAmber`'s shape — same post-login background refresh +
+ * per-account migration — so the auto-login effect resumes it on next cold
+ * start. It does NOT route through `persistActiveIdentityKeys` / the
+ * multi-account registry: that layer's `StoredSignerType` only models
+ * nsec/amber (a keyless bunker connection doesn't fit the inline-nsec slot),
+ * so the NIP-46 session persists via its own SecureStore keys
+ * (`PUBKEY_KEY` + `NIP46_CONNECTION_KEY` + `SIGNER_TYPE_KEY`).
+ */
+/**
+ * Restore a persisted NIP-46 session on cold start: read the stored connection
+ * from SecureStore, re-assert it as the active BunkerSigner, and return the
+ * logged-in pubkey (or null if there's nothing to restore / the blob is
+ * corrupt). Called from NostrContext's auto-login effect — the counterpart to
+ * the SecureStore writes `useNip46Login` makes on sign-in.
+ */
+export async function restoreNip46Session(): Promise<string | null> {
+  const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
+  const storedConnRaw = await SecureStore.getItemAsync(NIP46_CONNECTION_KEY);
+  if (!storedPubkey || !storedConnRaw) return null;
+  try {
+    const conn = JSON.parse(storedConnRaw) as Nip46Connection;
+    await nostrConnectService.setActiveConnection(conn);
+    return storedPubkey;
+  } catch (e) {
+    if (__DEV__) console.warn('[Nostr] NIP-46 connection hydrate failed:', e);
+    return null;
+  }
+}
+
+export interface UseNip46LoginDeps {
+  setIsLoggingIn: (v: boolean) => void;
+  setPubkey: (v: string | null) => void;
+  setSignerType: (v: SignerType | null) => void;
+  setIsLoggedIn: (v: boolean) => void;
+  loadRelays: (pk: string) => Promise<string[]>;
+  loadProfile: (pk: string, relays: string[]) => Promise<unknown>;
+  loadContacts: (pk: string, relays: string[]) => Promise<unknown>;
+  loadContactsFromCache: (pk: string) => Promise<unknown>;
+  hydrateDmInboxFromCache: (pk: string) => Promise<unknown>;
+}
+
+export function useNip46Login(deps: UseNip46LoginDeps) {
+  const {
+    setIsLoggingIn,
+    setPubkey,
+    setSignerType,
+    setIsLoggedIn,
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  } = deps;
+
+  return useCallback(
+    async (connection: Nip46Connection): Promise<{ success: boolean; error?: string }> => {
+      setIsLoggingIn(true);
+      try {
+        const pk = connection.userPubkey;
+        setPubkey(pk);
+        await SecureStore.setItemAsync(PUBKEY_KEY, pk);
+        await SecureStore.setItemAsync(NIP46_CONNECTION_KEY, JSON.stringify(connection));
+        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nip46');
+
+        // The pairing flow already populated nostrConnectService's in-memory
+        // cache via `awaitBunkerPair`; re-asserting here is cheap + idempotent.
+        await nostrConnectService.setActiveConnection(connection);
+
+        setSignerType('nip46');
+        setIsLoggedIn(true);
+        setIsLoggingIn(false);
+
+        // Mirror the amber/nsec login: restart the background watch if enabled.
+        void syncBackgroundDmWatchFromPreference().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
+        });
+        try {
+          await migrateToPerAccountStorage(pk);
+        } catch (e) {
+          if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
+        }
+
+        await loadContactsFromCache(pk);
+        await hydrateDmInboxFromCache(pk);
+        InteractionManager.runAfterInteractions(async () => {
+          try {
+            const readRelays = await loadRelays(pk);
+            await loadProfile(pk, readRelays);
+            loadContacts(pk, readRelays).catch((e) =>
+              console.warn('Background contact refresh failed:', e),
+            );
+          } catch (error) {
+            console.warn('NIP-46 post-login refresh failed:', error);
+          }
+        });
+
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'NIP-46 login failed';
+        return { success: false, error: message };
+      } finally {
+        setIsLoggingIn(false);
+      }
+    },
+    [
+      setIsLoggingIn,
+      setPubkey,
+      setSignerType,
+      setIsLoggedIn,
+      loadRelays,
+      loadProfile,
+      loadContacts,
+      loadContactsFromCache,
+      hydrateDmInboxFromCache,
+    ],
+  );
+}

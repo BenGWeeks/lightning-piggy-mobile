@@ -19,13 +19,7 @@ import {
 } from '../services/backgroundDmService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
-import type {
-  NostrProfile,
-  NostrContact,
-  RelayConfig,
-  SignerType,
-  Nip46Connection,
-} from '../types/nostr';
+import type { NostrProfile, NostrContact, RelayConfig, SignerType, Nip46Connection } from '../types/nostr'; // prettier-ignore
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -44,6 +38,8 @@ import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './n
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
 import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
+import { useNip46Login, restoreNip46Session } from './useNip46Login';
+import { nip46Sign } from './nip46DmDecrypt';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
@@ -117,12 +113,7 @@ interface NostrContextType {
   signOutIdentity: (pubkey: string) => Promise<void>;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
-  /**
-   * Finalise a NIP-46 ("Nostr Connect" / bunker) pairing. Called by
-   * `NostrLoginSheet` once the bunker has acked the `nostrconnect://`
-   * QR. The connection is persisted to SecureStore so subsequent app
-   * launches auto-restore the BunkerSigner without re-pairing.
-   */
+  /** Finalise a NIP-46 ("Nostr Connect" / bunker) pairing; see useNip46Login. */
   loginWithNip46: (connection: Nip46Connection) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   /**
@@ -855,21 +846,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             pk = storedPubkey;
           }
         } else if (storedSignerType === 'nip46') {
-          // Hydrate the persisted NIP-46 connection from SecureStore
-          // (same store we wrote it to in `loginWithNip46`). The
-          // `userPubkey` field is what we treat as the logged-in user;
-          // the bunker pubkey is internal plumbing.
-          const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
-          const storedConnRaw = await SecureStore.getItemAsync(NIP46_CONNECTION_KEY);
-          if (storedPubkey && storedConnRaw) {
-            try {
-              const conn = JSON.parse(storedConnRaw) as Nip46Connection;
-              await nostrConnectService.setActiveConnection(conn);
-              pk = storedPubkey;
-            } catch (e) {
-              if (__DEV__) console.warn('[Nostr] NIP-46 connection hydrate failed:', e);
-            }
-          }
+          // Restore the persisted bunker connection (see useNip46Login).
+          pk = await restoreNip46Session();
         }
 
         if (!pk) return;
@@ -926,10 +904,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setIdentities(next.identities);
           }
         } else if (storedSignerType === 'nip46') {
-          // NIP-46 sessions aren't modelled by the multi-account
-          // registry (`StoredSignerType` is nsec/amber only), so we
-          // just restore the active session here — the connection is
-          // already live via `setActiveConnection` above.
+          // Not in the multi-account registry; connection is live above.
           setSignerType('nip46');
           setIsLoggedIn(true);
         }
@@ -1161,79 +1136,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
-  /**
-   * Finalise a NIP-46 ("Nostr Connect" / bunker) pairing. The QR scan +
-   * ack handshake happens in NostrLoginSheet (it owns the per-app
-   * keypair generation, the URI build, and the await-for-bunker round-
-   * trip). By the time we get here, `nostrConnectService` already has
-   * a live `BunkerSigner` in memory and the connection object is ready
-   * to persist.
-   *
-   * Mirrors `loginWithAmber`'s shape — same post-login background
-   * refresh + per-account migration — so the auto-login useEffect can
-   * pick it up on next cold start without special-casing. It does NOT
-   * route through `persistActiveIdentityKeys` / the multi-account
-   * registry: that layer's `StoredSignerType` only models `nsec`/`amber`
-   * (a keyless bunker connection doesn't fit the inline-nsec slot), so
-   * the NIP-46 session persists via its own SecureStore keys
-   * (`PUBKEY_KEY` + `NIP46_CONNECTION_KEY` + `SIGNER_TYPE_KEY`).
-   */
-  const loginWithNip46 = useCallback(
-    async (connection: Nip46Connection): Promise<{ success: boolean; error?: string }> => {
-      setIsLoggingIn(true);
-      try {
-        const pk = connection.userPubkey;
-        setPubkey(pk);
-        await SecureStore.setItemAsync(PUBKEY_KEY, pk);
-        await SecureStore.setItemAsync(NIP46_CONNECTION_KEY, JSON.stringify(connection));
-        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nip46');
-
-        // The pairing flow already populated nostrConnectService's
-        // in-memory cache via `awaitBunkerPair`; re-asserting here is
-        // cheap and idempotent — guards against the (rare) case where
-        // the caller built the connection from a non-pairing path.
-        await nostrConnectService.setActiveConnection(connection);
-
-        setSignerType('nip46');
-        setIsLoggedIn(true);
-        setIsLoggingIn(false);
-
-        // Mirror the amber/nsec login: restart the background watch if
-        // enabled. NIP-46 identities get contentless alerts.
-        void syncBackgroundDmWatchFromPreference().catch((e) => {
-          if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
-        });
-
-        try {
-          await migrateToPerAccountStorage(pk);
-        } catch (e) {
-          if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
-        }
-
-        await loadContactsFromCache(pk);
-        await hydrateDmInboxFromCache(pk);
-        InteractionManager.runAfterInteractions(async () => {
-          try {
-            const readRelays = await loadRelays(pk);
-            await loadProfile(pk, readRelays);
-            loadContacts(pk, readRelays).catch((e) =>
-              console.warn('Background contact refresh failed:', e),
-            );
-          } catch (error) {
-            console.warn('NIP-46 post-login refresh failed:', error);
-          }
-        });
-
-        return { success: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'NIP-46 login failed';
-        return { success: false, error: message };
-      } finally {
-        setIsLoggingIn(false);
-      }
-    },
-    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
-  );
+  // NIP-46 login lives in its own hook (#283); see useNip46Login.
+  const loginWithNip46 = useNip46Login({
+    setIsLoggingIn,
+    setPubkey,
+    setSignerType,
+    setIsLoggedIn,
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  });
 
   // Wipe every per-account AsyncStorage entry for `loggedOutPubkey`.
   // Extracted so the multi-account sign-out path can call it without
@@ -1255,9 +1169,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
     await SecureStore.deleteItemAsync(NIP46_CONNECTION_KEY);
-    // Tear down the live BunkerSigner subscription so the bunker
-    // doesn't keep receiving requests under the previous identity if
-    // someone signs in again immediately.
+    // Tear down the live BunkerSigner so the bunker stops serving the old
+    // identity if someone signs back in immediately.
     await nostrConnectService.setActiveConnection(null).catch(() => {});
     // Clear the dead-key-as-of-#404 amber NIP-17 toggle alongside
     // the per-account caches.
@@ -1515,13 +1428,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       } else if (signerType === 'nip46') {
         try {
-          const eventJson = JSON.stringify(zapEvent);
-          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          return signedEventJson || null;
+          return (await nip46Sign(zapEvent, pubkey)) || null;
         } catch {
           return null;
         }
@@ -1556,15 +1463,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
         } else if (signerType === 'nip46') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
+          const signedEventJson = await nip46Sign(event, pubkey);
           if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
+          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         }
         return true;
       } catch (error) {
@@ -1607,15 +1508,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
         } else if (signerType === 'nip46') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
+          const signedEventJson = await nip46Sign(event, pubkey);
           if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
+          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         }
 
         // We just signed and published this kind-0, so the client already
@@ -1815,11 +1710,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (!signedEventJson) return null;
           return JSON.parse(signedEventJson) as SignedEvent;
         } else if (signerType === 'nip46') {
-          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
+          const signedEventJson = await nip46Sign(event, pubkey);
           if (!signedEventJson) return null;
           return JSON.parse(signedEventJson) as SignedEvent;
         }
