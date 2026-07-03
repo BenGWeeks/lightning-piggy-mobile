@@ -1,5 +1,5 @@
 import { CardTheme } from '../types/wallet';
-import { ImageSourcePropType } from 'react-native';
+import { ImageSourcePropType, ImageResizeMode } from 'react-native';
 
 export interface CardThemeConfig {
   id: CardTheme;
@@ -11,6 +11,11 @@ export interface CardThemeConfig {
   // Tighter than `string`: must be one of the registered cards/* style
   // names so a typo doesn't silently fall back to the default style.
   backgroundImageStyle?: CardTheme;
+  // Defaults to 'contain' (line-art mascots sit as a corner decoration
+  // over the gradient). Full-bleed photo backgrounds set 'stretch' (or
+  // 'cover') so the art fills the whole card with no gradient gap at the
+  // edges.
+  backgroundImageResizeMode?: ImageResizeMode;
 }
 
 export const cardThemes: Record<CardTheme, CardThemeConfig> = {
@@ -40,6 +45,16 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#FFAB40',
     backgroundImage: require('../../assets/images/lightning-cat.png'),
     backgroundImageStyle: 'lightning-cat',
+  },
+  bitpopart: {
+    id: 'bitpopart',
+    name: 'BitPopArt',
+    gradientColors: ['#D81B8C', '#3A1E6E'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFE600',
+    backgroundImage: require('../../assets/images/bitpopart.png'),
+    backgroundImageStyle: 'bitpopart',
+    backgroundImageResizeMode: 'stretch',
   },
   'lightning-cow': {
     id: 'lightning-cow',

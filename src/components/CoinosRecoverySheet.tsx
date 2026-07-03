@@ -4,6 +4,7 @@ import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@g
 import * as Clipboard from 'expo-clipboard';
 import { Copy, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 export interface CoinosRecoveryDetails {
@@ -48,6 +49,7 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   onClose,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const ref = useRef<BottomSheetModal>(null);
   // Content-height only — matches the rest of the app's sheet pattern.
@@ -131,40 +133,37 @@ const CoinosRecoverySheet: React.FC<Props> = ({
           <ShieldAlert size={36} color={colors.white} strokeWidth={2.5} />
         </View>
         <Text style={styles.title} testID="coinos-recovery-title">
-          Save your recovery info
+          {t('coinosRecoverySheet.title')}
         </Text>
-        <Text style={styles.subtitle}>
-          If you lose this device, sign in to {host} with this username and password to recover your
-          funds. Lightning Piggy doesn&apos;t store these for you anywhere else.
-        </Text>
+        <Text style={styles.subtitle}>{t('coinosRecoverySheet.subtitle', { host })}</Text>
 
         <RecoveryRow
-          label="Server"
+          label={t('coinosRecoverySheet.serverLabel')}
           value={details.baseUrl}
-          onCopy={() => copyToClipboard('Server URL', details.baseUrl)}
+          onCopy={() => copyToClipboard(t('coinosRecoverySheet.serverCopyLabel'), details.baseUrl)}
           colors={colors}
           testID="coinos-recovery-server"
         />
         <RecoveryRow
-          label="Username"
+          label={t('coinosRecoverySheet.usernameLabel')}
           value={details.username}
-          onCopy={() => copyToClipboard('Username', details.username)}
+          onCopy={() => copyToClipboard(t('coinosRecoverySheet.usernameLabel'), details.username)}
           colors={colors}
           testID="coinos-recovery-username"
         />
         <RecoveryRow
-          label="Password"
+          label={t('coinosRecoverySheet.passwordLabel')}
           value={details.password}
-          onCopy={() => copyToClipboard('Password', details.password)}
+          onCopy={() => copyToClipboard(t('coinosRecoverySheet.passwordLabel'), details.password)}
           colors={colors}
           monospace
           maskable
           testID="coinos-recovery-password"
         />
         <RecoveryRow
-          label="NWC connection"
+          label={t('coinosRecoverySheet.nwcLabel')}
           value={details.nwc}
-          onCopy={() => copyToClipboard('NWC connection string', details.nwc)}
+          onCopy={() => copyToClipboard(t('coinosRecoverySheet.nwcCopyLabel'), details.nwc)}
           colors={colors}
           monospace
           // The NWC URL is long; the row stretches and wraps but copy
@@ -178,7 +177,7 @@ const CoinosRecoverySheet: React.FC<Props> = ({
 
         {copyHint && (
           <Text style={styles.copyConfirm} testID="coinos-recovery-copy-confirm">
-            {copyHint} copied to clipboard.
+            {t('coinosRecoverySheet.copiedToClipboard', { label: copyHint })}
           </Text>
         )}
 
@@ -199,11 +198,15 @@ const CoinosRecoverySheet: React.FC<Props> = ({
           }}
           testID="coinos-recovery-acknowledge"
           accessibilityLabel={
-            requireAcknowledge ? "I've saved this somewhere" : 'Close recovery info'
+            requireAcknowledge
+              ? t('coinosRecoverySheet.savedAcknowledge')
+              : t('coinosRecoverySheet.closeRecoveryInfo')
           }
         >
           <Text style={styles.primaryButtonText}>
-            {requireAcknowledge ? "I've saved this somewhere" : 'Done'}
+            {requireAcknowledge
+              ? t('coinosRecoverySheet.savedAcknowledge')
+              : t('coinosRecoverySheet.done')}
           </Text>
         </TouchableOpacity>
       </BottomSheetScrollView>
@@ -224,6 +227,7 @@ const RecoveryRow: React.FC<{
   maskable?: boolean;
   testID?: string;
 }> = ({ label, value, onCopy, colors, monospace, truncate, maskable, testID }) => {
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [revealed, setRevealed] = useState(false);
   const shown = maskable && !revealed ? '••••••••••••' : value;
@@ -242,8 +246,12 @@ const RecoveryRow: React.FC<{
           <TouchableOpacity
             onPress={() => setRevealed((v) => !v)}
             style={styles.copyButton}
-            accessibilityLabel={revealed ? `Hide ${label}` : `Reveal ${label}`}
-            testID={`${testID}-reveal`}
+            accessibilityLabel={
+              revealed
+                ? t('coinosRecoverySheet.hideField', { label })
+                : t('coinosRecoverySheet.revealField', { label })
+            }
+            testID={testID ? `${testID}-reveal` : undefined}
             hitSlop={8}
           >
             {revealed ? (
@@ -256,8 +264,8 @@ const RecoveryRow: React.FC<{
         <TouchableOpacity
           onPress={onCopy}
           style={styles.copyButton}
-          accessibilityLabel={`Copy ${label}`}
-          testID={`${testID}-copy`}
+          accessibilityLabel={t('coinosRecoverySheet.copyField', { label })}
+          testID={testID ? `${testID}-copy` : undefined}
           hitSlop={8}
         >
           <Copy size={18} color={colors.brandPink} strokeWidth={2.5} />

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert } from '../components/BrandedAlert';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import {
   stripImageMetadata,
   uploadEncryptedBlob,
@@ -73,7 +73,8 @@ export function useComposerActions({
   setContactPickerOpen,
   setVoiceSheetOpen,
 }: UseComposerActionsParams) {
-  const { isLoggedIn, signEvent, contacts, relays } = useNostr();
+  const { isLoggedIn, signEvent, relays } = useNostr();
+  const { contacts } = useNostrContacts();
 
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);

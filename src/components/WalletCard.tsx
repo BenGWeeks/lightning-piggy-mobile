@@ -2,11 +2,13 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
-import { WalletState } from '../types/wallet';
+import { WalletState, WalletConnectionHealth } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -39,6 +41,7 @@ const CardContent: React.FC<{
   btcPrice?: number | null;
   currency?: FiatCurrency;
   isConnected?: boolean;
+  connectionHealth?: WalletConnectionHealth;
   walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
   hideBalance?: boolean;
@@ -52,6 +55,7 @@ const CardContent: React.FC<{
   btcPrice,
   currency,
   isConnected,
+  connectionHealth,
   walletType = 'nwc',
   walletAlias,
   hideBalance,
@@ -59,6 +63,28 @@ const CardContent: React.FC<{
   showDetails = true,
   isWatchOnly = false,
 }) => {
+  const colors = useThemeColors();
+  const t = useTranslation();
+
+  // Tri-state relay status for the dot + label (#786). On-chain wallets have no
+  // relay, so they stay binary (balance present → Connected). For NWC we prefer
+  // the live `connectionHealth`; before the first connection check it's
+  // undefined, so we fall back to the binary `isConnected`.
+  const health: WalletConnectionHealth =
+    walletType === 'onchain'
+      ? balance !== null
+        ? 'responsive'
+        : 'disconnected'
+      : (connectionHealth ?? (isConnected ? 'responsive' : 'disconnected'));
+  const statusColor =
+    health === 'responsive' ? colors.green : health === 'degraded' ? colors.amber : colors.red;
+  const statusLabel =
+    health === 'responsive'
+      ? t('walletCard.connected')
+      : health === 'degraded'
+        ? t('walletCard.notResponding')
+        : t('walletCard.disconnected');
+
   const toGrey = (hex: string): string => {
     const h = hex.replace('#', '');
     const r = parseInt(h.substring(0, 2), 16);
@@ -85,15 +111,17 @@ const CardContent: React.FC<{
           <Image
             source={theme.backgroundImage}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
+            resizeMode={theme.backgroundImageResizeMode ?? 'contain'}
           />
         </Grayscale>
       ) : theme.backgroundImage ? (
-        <Image
-          source={theme.backgroundImage}
-          style={getCardBgStyle(theme.backgroundImageStyle, false)}
-          resizeMode="contain"
-        />
+        <View style={getCardBgStyle(theme.backgroundImageStyle, false)}>
+          <Image
+            source={theme.backgroundImage}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode={theme.backgroundImageResizeMode ?? 'contain'}
+          />
+        </View>
       ) : null}
 
       {showDetails ? (
@@ -101,28 +129,14 @@ const CardContent: React.FC<{
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
               <View
-                style={[
-                  styles.statusDot,
-                  {
-                    backgroundColor:
-                      walletType === 'onchain'
-                        ? balance !== null
-                          ? '#4CAF50'
-                          : '#F44336'
-                        : isConnected
-                          ? '#4CAF50'
-                          : '#F44336',
-                  },
-                ]}
+                style={[styles.statusDot, { backgroundColor: statusColor }]}
+                testID={`wallet-status-${health}`}
               />
-              <Text style={[styles.statusText, { color: theme.textColor }]}>
-                {walletType === 'onchain'
-                  ? balance !== null
-                    ? 'Connected'
-                    : 'Disconnected'
-                  : isConnected
-                    ? 'Connected'
-                    : 'Disconnected'}
+              <Text
+                style={[styles.statusText, { color: theme.textColor }]}
+                accessibilityLabel={t('walletCard.walletStatus', { status: statusLabel })}
+              >
+                {statusLabel}
               </Text>
             </View>
             <View style={styles.topRightIcons}>
@@ -140,7 +154,7 @@ const CardContent: React.FC<{
                   onPress={onSettingsPress}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   testID="wallet-settings"
-                  accessibilityLabel="Wallet settings"
+                  accessibilityLabel={t('walletCard.walletSettings')}
                 >
                   <SettingsIcon size={22} color={theme.textColor} strokeWidth={1.5} />
                 </TouchableOpacity>
@@ -153,7 +167,11 @@ const CardContent: React.FC<{
               {alias}
             </Text>
             <Text style={[styles.balance, { color: theme.textColor }]}>
-              {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
+              {hideBalance
+                ? '***'
+                : balance !== null
+                  ? t('walletCard.satsBalance', { amount: balance!.toLocaleString() })
+                  : '---'}
             </Text>
             {/* Render the fiat row whenever we know the user's selected
                 currency, even if the BTC price hasn't arrived yet.
@@ -188,12 +206,13 @@ const CardContent: React.FC<{
 
 /** Mini card for theme selection — renders the full card design scaled down */
 export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPress }) => {
+  const t = useTranslation();
   return (
     <TouchableOpacity
       style={[styles.miniCardContainer, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
-      accessibilityLabel={`${theme.name} card design`}
+      accessibilityLabel={t('walletCard.cardDesign', { name: theme.name })}
       testID={`theme-${theme.id}`}
     >
       <View style={styles.miniScaleWrapper}>
@@ -221,12 +240,18 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   // app crashes on `theme.gradientColors` of undefined on boot — see the
   // group-messaging branch test runs.
   const theme = cardThemes[wallet.theme] ?? cardThemes['lightning-piggy'];
+  const t = useTranslation();
 
   return (
     <View
       style={styles.cardContainer}
       testID={`wallet-card-${wallet.walletType}`}
-      accessibilityLabel={`${wallet.alias} ${wallet.walletType} wallet`}
+      accessibilityLabel={t('walletCard.walletAccessibility', {
+        alias: wallet.alias,
+        type: t(
+          wallet.walletType === 'onchain' ? 'walletCard.typeOnchain' : 'walletCard.typeLightning',
+        ),
+      })}
     >
       <CardContent
         theme={theme}
@@ -235,6 +260,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         btcPrice={btcPrice}
         currency={currency}
         isConnected={wallet.isConnected}
+        connectionHealth={wallet.connectionHealth}
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
         hideBalance={wallet.hideBalance}

@@ -1,12 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  StyleSheet,
-  ActivityIndicator,
-  View,
-  Platform,
-  useWindowDimensions,
-} from 'react-native';
+import { Linking, StyleSheet, ActivityIndicator, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NavigationContainer,
   NavigationState,
@@ -23,6 +17,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { setActiveThread, setActiveCache } from '../services/notificationService';
 import {
   RootStackParamList,
@@ -289,6 +284,9 @@ function ExploreStackNavigator() {
 
 function HomeTabs() {
   const { colors } = useTheme();
+  const t = useTranslation();
+  // Reserve the real system-bar inset so the edge-to-edge tab bar clears gesture/3-button nav (see #862).
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -305,8 +303,8 @@ function HomeTabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.divider,
-          height: Platform.OS === 'android' ? 80 : 70,
-          paddingBottom: Platform.OS === 'android' ? 20 : 10,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 6,
         },
         tabBarActiveTintColor: colors.brandPink,
@@ -321,6 +319,7 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
+          tabBarLabel: t('tabs.home'),
           tabBarButtonTestID: 'tab-home',
           tabBarAccessibilityLabel: 'Home tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -337,6 +336,7 @@ function HomeTabs() {
         name="Messages"
         component={MessagesScreen}
         options={{
+          tabBarLabel: t('tabs.messages'),
           tabBarButtonTestID: 'tab-messages',
           tabBarAccessibilityLabel: 'Messages tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -353,6 +353,7 @@ function HomeTabs() {
         name="Explore"
         component={ExploreStackNavigator}
         options={{
+          tabBarLabel: t('tabs.explore'),
           tabBarButtonTestID: 'tab-explore',
           tabBarAccessibilityLabel: 'Explore tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -409,6 +410,7 @@ function HomeTabs() {
         name="Friends"
         component={FriendsScreen}
         options={{
+          tabBarLabel: t('tabs.friends'),
           tabBarButtonTestID: 'tab-friends',
           tabBarAccessibilityLabel: 'Friends tab',
           tabBarIcon: ({ focused, color, size }) => (

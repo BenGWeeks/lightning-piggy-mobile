@@ -65,7 +65,7 @@ lightning-piggy-mobile/
   │   └── utils/          # Utility functions
   ├── assets/             # Images, icons, splash screen
   ├── plugins/            # Expo config plugins (native module configuration)
-  ├── tests/e2e/          # Maestro E2E test files
+  ├── .maestro/          # Maestro E2E test files
   ├── docs/               # Project documentation (this document)
   ├── app.config.ts       # Expo configuration (variants, permissions, plugins)
   └── eas.json            # EAS build profiles

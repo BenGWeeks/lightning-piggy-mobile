@@ -17,6 +17,14 @@ import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
+import { tagsToContacts } from '../utils/contacts';
+import { publishWrapsTrackingRelays } from './nostrDmPublish';
+import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
+import { LP_CLIENT_TAG } from './nip89ClientTag';
+
+export type { DmSendResult };
+// Re-exported for back-compat: the canonical home is ./nip89ClientTag.
+export { LP_CLIENT_TAG };
 
 // Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
 // the Hunt feature's NIP-GC subs) can share the single connection pool
@@ -327,17 +335,6 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     console.warn('Failed to fetch Nostr profile:', error);
     return null;
   }
-}
-
-function tagsToContacts(tags: string[][]): NostrContact[] {
-  return tags
-    .filter((tag) => tag[0] === 'p')
-    .map((tag) => ({
-      pubkey: tag[1],
-      relay: tag[2] || null,
-      petname: tag[3] || null,
-      profile: null,
-    }));
 }
 
 function tagsToRelayList(tags: string[][]): RelayConfig[] {
@@ -801,6 +798,7 @@ export function createZapRequestEvent(
   zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   const tags: string[][] = [
+    [...LP_CLIENT_TAG],
     ['p', recipientPubkey],
     ['amount', amountMsats.toString()],
     ['relays', ...relays],
@@ -834,7 +832,7 @@ export function createContactListEvent(
   return {
     kind: 3,
     created_at: Math.floor(Date.now() / 1000),
-    tags,
+    tags: [[...LP_CLIENT_TAG], ...tags],
     content: '',
   };
 }
@@ -856,7 +854,7 @@ export function createProfileEvent(profileData: {
   return {
     kind: 0,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [],
+    tags: [[...LP_CLIENT_TAG]],
     content: JSON.stringify(cleaned),
   };
 }
@@ -1017,13 +1015,16 @@ export async function fetchInboxDmEvents(
   }
   const __t0 = performance.now();
   try {
-    // maxWait: per-relay EOSE timeout closes the sub at 15 s, so the cold-start
+    // maxWait: per-relay EOSE timeout closes the sub, so the cold-start
     // inbox fetch genuinely terminates — unlike withTimeout which only raced the
     // Promise and left the underlying subscribeEose sub running for up to ~60 s.
+    // 8 s (was 15 s): a slow/unresponsive relay shouldn't hold the inbox
+    // spinner for a quarter-minute that reads as a freeze. The live sub keeps
+    // delivering after this resolves, and pull-to-refresh re-runs the query.
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 15000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 15000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 15000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 8000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 8000, signal: options.signal }),
+      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 8000, signal: options.signal }),
     ]);
     // [Perf] Cold-start freeze attribution (#751). querySync ingests every
     // returned event synchronously (JSON.parse + validateEvent + matchFilters)
@@ -1136,6 +1137,9 @@ export interface GroupStateEventInput {
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
  * for signing + publishing — same pattern as createDirectMessageRumor.
+ *
+ * Tags: the NIP-89 `client` tag (LP_CLIENT_TAG, this is a public event),
+ * then `d` (groupId), `name`, and one `p` per member.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
@@ -1143,10 +1147,7 @@ export function createGroupStateEvent(input: GroupStateEventInput): {
   tags: string[][];
   content: string;
 } {
-  const tags: string[][] = [
-    ['d', input.groupId],
-    ['name', input.name],
-  ];
+  const tags: string[][] = [[...LP_CLIENT_TAG], ['d', input.groupId], ['name', input.name]];
   for (const pk of input.memberPubkeys) {
     tags.push(['p', pk]);
   }
@@ -1199,7 +1200,8 @@ export async function sendNip17ToManyWithNsec(input: {
   rumor: { kind: number; created_at: number; tags: string[][]; content: string };
   recipientPubkeys: string[];
   relays: string[];
-}): Promise<{ wrapsPublished: number; errors: string[] }> {
+  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
+}): Promise<DmSendResult> {
   trackRelays(input.relays);
   // Dedup recipients (sender is included by wrapManyEvents internally).
   const dedupedRecipients = Array.from(new Set(input.recipientPubkeys.map((p) => p.toLowerCase())));
@@ -1208,19 +1210,15 @@ export async function sendNip17ToManyWithNsec(input: {
     input.senderSecretKey,
     dedupedRecipients,
   );
-  const errors: string[] = [];
-  let published = 0;
-  await Promise.all(
-    wraps.map(async (wrap) => {
-      try {
-        await Promise.any(pool.publish(input.relays, wrap as VerifiedEvent));
-        published++;
-      } catch (e) {
-        errors.push((e as Error)?.message ?? 'publish failed');
-      }
-    }),
+  // Rumor id (stable kind-14/15 inner-event id) + kind for the detail sheet.
+  const eventId = getEventHash({ ...input.rumor, pubkey: getPublicKey(input.senderSecretKey) });
+  return publishWrapsTrackingRelays(
+    wraps.map((w) => w as VerifiedEvent),
+    input.relays,
+    pool,
+    { eventId, kind: input.rumor.kind },
+    input.onDeliveryFinalized,
   );
-  return { wrapsPublished: published, errors };
 }
 
 /**
@@ -1266,7 +1264,8 @@ export async function sendNip17ToManyWithSigner(input: {
     tags: string[][];
     content: string;
   }>;
-}): Promise<{ wrapsPublished: number; errors: string[] }> {
+  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
+}): Promise<DmSendResult> {
   trackRelays(input.relays);
 
   // Match nostr-tools' `wrapManyEvents` semantics: include the sender so
@@ -1331,18 +1330,20 @@ export async function sendNip17ToManyWithSigner(input: {
     }
   }
 
-  let published = 0;
-  await Promise.all(
-    signedWraps.map(async (wrap) => {
-      try {
-        await Promise.any(pool.publish(input.relays, wrap));
-        published++;
-      } catch (e) {
-        errors.push((e as Error)?.message ?? 'publish failed');
-      }
-    }),
+  // Any signer-step errors collected above are merged with the publish
+  // results so the caller still sees both failure classes.
+  const publishResult = await publishWrapsTrackingRelays(
+    signedWraps,
+    input.relays,
+    pool,
+    { eventId: rumorWithId.id, kind: input.rumor.kind },
+    input.onDeliveryFinalized,
   );
-  return { wrapsPublished: published, errors };
+  return {
+    wrapsPublished: publishResult.wrapsPublished,
+    errors: [...errors, ...publishResult.errors],
+    delivery: publishResult.delivery,
+  };
 }
 
 /**

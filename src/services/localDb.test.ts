@@ -41,12 +41,49 @@ describe('localDb', () => {
     );
   });
 
-  it('runs the schema (dm_messages table + conversation index) on open', async () => {
+  it('runs the schema (owner-scoped dm_messages table + index) on open', async () => {
     const { getLocalDb: freshGetLocalDb } = require('./localDb');
     await freshGetLocalDb();
     const ddl = mockExecute.mock.calls.map((c) => c[0]).join('\n');
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS dm_messages');
-    expect(ddl).toContain('idx_dm_conversation_created');
+    expect(ddl).toContain('PRIMARY KEY (owner, event_id)');
+    expect(ddl).toContain('idx_dm_owner_conversation_created');
+  });
+
+  it('drops a pre-owner (schema v1) dm_messages table so the v2 schema recreates it', async () => {
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      if (sql.includes('table_info')) {
+        // v1 shape: event_id PK, no owner column
+        return Promise.resolve({ rows: [{ name: 'event_id' }, { name: 'conversation' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await freshGetLocalDb();
+    const sqls = mockExecute.mock.calls.map((c) => c[0]);
+    const dropIdx = sqls.findIndex((s) => s.includes('DROP TABLE dm_messages'));
+    const createIdx = sqls.findIndex((s) => s.includes('CREATE TABLE IF NOT EXISTS dm_messages'));
+    expect(dropIdx).toBeGreaterThanOrEqual(0);
+    expect(dropIdx).toBeLessThan(createIdx); // rebuild, not drop-after-create
+  });
+
+  it('does NOT drop a dm_messages table that already has the owner column', async () => {
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      if (sql.includes('table_info')) {
+        return Promise.resolve({ rows: [{ name: 'owner' }, { name: 'event_id' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await freshGetLocalDb();
+    const sqls = mockExecute.mock.calls.map((c) => c[0]);
+    expect(sqls.some((s) => s.includes('DROP TABLE'))).toBe(false);
   });
 
   it('is single-flight — a second getLocalDb does not reopen', async () => {
@@ -69,6 +106,34 @@ describe('localDb', () => {
   it('verifyEncryptedDb returns the cipher version on a clean encrypted round-trip', async () => {
     const { verifyEncryptedDb: freshVerify } = require('./localDb');
     expect(await freshVerify()).toBe('4.6.0');
+  });
+
+  it('self-heals an undecryptable DB (backup-restore wrong-key) by wiping and recreating', async () => {
+    // First attempt: SQLCipher wrong-key signature from the first PRAGMA.
+    let calls = 0;
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('file is not a database'));
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    const db = await freshGetLocalDb();
+    expect(db).toBe(mockDb);
+    // The heal wiped both halves: DB file deleted + keystore key cleared.
+    expect(mockDelete).toHaveBeenCalled();
+    const { clearLocalDbKey } = require('./localDbKey');
+    expect(clearLocalDbKey).toHaveBeenCalled();
+  });
+
+  it('does NOT heal a transient open error (locked) — rejects for a later retry', async () => {
+    mockOpen.mockImplementationOnce(() => {
+      throw new Error('locked');
+    });
+    const { getLocalDb: freshGetLocalDb } = require('./localDb');
+    await expect(freshGetLocalDb()).rejects.toThrow('locked');
   });
 
   it('refuses to open when SQLCipher is not active (empty cipher_version → plaintext guard)', async () => {

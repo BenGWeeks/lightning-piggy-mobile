@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
+import { createMapPinChassis } from './mapPinChassis';
 
 // Presentation for the shared MapLibre mini-map (LibreMiniMap). Extracted
 // per the standing "styles live in their own file" convention (CLAUDE.md →
@@ -79,23 +80,10 @@ export const createLibreMiniMapStyles = (colors: Palette) =>
       backgroundColor: 'rgba(45, 136, 255, 0.22)',
     },
     // Shared pin chassis — circular white-bordered chip carrying the
-    // category Lucide glyph. 22 px matches the Leaflet `lp-pin` size in
-    // the WebView spec so the swap is visually consistent across the
-    // two renderers.
-    pin: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1.5,
-      borderColor: colors.white,
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 2,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 2,
-    },
+    // category Lucide glyph. Spreads the shared `createMapPinChassis` so
+    // CacheMapMarker's cache pin and these merchant / event pins stay
+    // visually in sync by construction.
+    pin: createMapPinChassis(colors),
     pinLn: { backgroundColor: colors.brandPink },
     pinOnchain: { backgroundColor: '#F7931A' },
     pinPiglet: { backgroundColor: colors.brandPink },

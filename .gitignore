@@ -79,3 +79,7 @@ scripts/check-hawthorn.mjs
 scripts/check-lnurlw.mjs
 scripts/send-test-dm.mjs
 scripts/wait-compare.mjs
+
+# Maestro generated output (reorganised suite lives in .maestro/)
+.maestro/tmp/
+.maestro/**/results/

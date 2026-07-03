@@ -16,11 +16,25 @@
 // implementation that each test swaps in.
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
 const mockEnable = jest.fn(async () => undefined);
+// pay_invoice + lookupInvoice are driven per-test for the ambiguous
+// "unknown Error" outcome path (#891). Defaults are benign so the existing
+// getBalance/connection tests are unaffected. The mock client deliberately
+// omits `executeNip47Request`, so sendPaymentWithTimeout takes the public
+// `provider.sendPayment` fallback — which is what these impls stub.
+let mockSendPaymentImpl: (bolt11: string) => Promise<{ preimage: string }> = async () => ({
+  preimage: 'p'.repeat(64),
+});
+let mockLookupInvoiceImpl: (args: { paymentHash: string }) => Promise<{
+  paid?: boolean;
+  preimage?: string;
+}> = async () => ({ paid: false });
 
 jest.mock('@getalby/sdk', () => ({
   NostrWebLNProvider: jest.fn().mockImplementation(() => ({
     enable: mockEnable,
     getBalance: () => mockGetBalanceImpl(),
+    sendPayment: (bolt11: string) => mockSendPaymentImpl(bolt11),
+    lookupInvoice: (args: { paymentHash: string }) => mockLookupInvoiceImpl(args),
     close: jest.fn(),
     // `client.connected` is read by ensureConnected(); make it look
     // healthy so the reconnect path isn't triggered mid-test.
@@ -32,9 +46,9 @@ import {
   connect,
   getBalance,
   isConnectionError,
-  isRelayInCooldown,
   isReplyTimeoutError,
   isWalletConnected,
+  payInvoice,
 } from './nwcService';
 
 const VALID_NWC_URL =
@@ -48,6 +62,8 @@ beforeEach(async () => {
   jest.useRealTimers();
   // Cheap successful balance for the connect()'s initial getBalance.
   mockGetBalanceImpl = async () => ({ balance: 0 });
+  mockSendPaymentImpl = async () => ({ preimage: 'p'.repeat(64) });
+  mockLookupInvoiceImpl = async () => ({ paid: false });
   const result = await connect(WALLET_ID, VALID_NWC_URL);
   expect(result.success).toBe(true);
 });
@@ -198,38 +214,52 @@ describe('isWalletConnected (#654 — relay responsiveness, not just transport)'
   });
 });
 
-describe('isRelayInCooldown (#656 — back off a dead relay instead of hammering it)', () => {
-  const failConnect = async () => {
-    throw new Error('Failed to connect to wss://relay.example.com');
-  };
+// NB: the relay cooldown / rate-limit back-off internals now live in
+// `nwcRelayHealth.ts` and are covered directly in `nwcRelayHealth.test.ts`
+// (#785). The service-level behaviour that relay-health drives — e.g.
+// `isWalletConnected` flipping after a run of unanswered requests — stays
+// tested above through the mocked provider.
 
-  it('is false for a fresh, responsive connection', () => {
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
+describe('nwcService.payInvoice — ambiguous "unknown Error" outcome (#891)', () => {
+  // A canonical BOLT11 test vector so extractPaymentHash() returns a hash
+  // and the disambiguation branch runs (payment_hash 000102…0102).
+  const BOLT11 =
+    'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsy' +
+    'p3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4e' +
+    'vs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+
+  // The reproduced #891 failure: NWC pay_invoice surfaces the Alby-SDK
+  // "unknown Error"/INTERNAL wrap, and the one-shot lookup FALSELY reports
+  // unpaid (verified live — the LN balance had already dropped). The
+  // payment status is genuinely UNKNOWN, so payInvoice must throw a
+  // ReplyTimeoutError (→ "Still in flight" UX), NOT a hard failure that
+  // callers render as "Payment failed" and the user retries into a double-pay.
+  it('throws a ReplyTimeoutError (status-unknown), not a hard failure, when the lookup cannot confirm paid', async () => {
+    mockSendPaymentImpl = async () => {
+      throw Object.assign(new Error('unknown Error'), { code: 'INTERNAL' });
+    };
+    mockLookupInvoiceImpl = async () => ({ paid: false });
+
+    let thrown: unknown;
+    try {
+      await payInvoice(WALLET_ID, BOLT11);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+    expect(isReplyTimeoutError(thrown)).toBe(true);
   });
 
-  it('stays false until the relay crosses the dead threshold', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false); // 2 failures < threshold (3)
-  });
+  // The happy disambiguation: the wallet DID settle and the lookup confirms
+  // it (paid + preimage) — payInvoice recovers the preimage and succeeds,
+  // so the "unknown Error" wrap never reaches the user.
+  it('returns the preimage when the lookup confirms the payment settled', async () => {
+    const preimage = 'a'.repeat(64);
+    mockSendPaymentImpl = async () => {
+      throw Object.assign(new Error('unknown Error'), { code: 'INTERNAL' });
+    };
+    mockLookupInvoiceImpl = async () => ({ paid: true, preimage });
 
-  it('enters cooldown once the relay is considered dead', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
-  });
-
-  it('clears cooldown the moment the relay answers again', async () => {
-    mockGetBalanceImpl = failConnect;
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
-    mockGetBalanceImpl = async () => ({ balance: 7 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
-    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
+    await expect(payInvoice(WALLET_ID, BOLT11)).resolves.toEqual({ preimage });
   });
 });

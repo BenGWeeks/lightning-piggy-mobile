@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
+import { Toast } from './BrandedToast';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -17,29 +18,46 @@ import {
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { parseBip21 } from '../utils/bip21';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
-import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
-import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import {
+  type DecodedInvoice,
+  decodeInvoice,
+  editAddressPrefill,
+  isLightningAddress,
+  isValidInvoice,
+  isLnurlString,
+  stripLightningPrefix,
+} from '../utils/sendSheetInput';
+import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
-import * as swapRecoveryService from '../services/swapRecoveryService';
-import * as SecureStore from 'expo-secure-store';
+import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSend';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
+import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
+import SendAmountSection from './SendAmountSection';
+import SendModeTabs, { type SendInputMode } from './SendModeTabs';
+import SendNfcPane from './SendNfcPane';
+import SendScanPane from './SendScanPane';
+import type { NfcTagContent } from '../services/nfcService';
 import { perfLog } from '../utils/perfLog';
 
 interface Props {
@@ -57,50 +75,8 @@ interface Props {
   zapEventId?: string;
 }
 
-type InputMode = 'scan' | 'paste';
+type InputMode = SendInputMode;
 type Step = 'main' | 'amount';
-
-interface DecodedInvoice {
-  amountSats: number | null;
-  description: string | null;
-  expiry: number | null;
-}
-
-function decodeInvoice(bolt11: string): DecodedInvoice {
-  try {
-    const decoded = bolt11Decode(bolt11);
-    let amountSats: number | null = null;
-    let description: string | null = null;
-    let expiry: number | null = null;
-
-    for (const section of decoded.sections) {
-      if (section.name === 'amount') {
-        amountSats = Math.round(Number(section.value) / 1000);
-      } else if (section.name === 'description') {
-        description = section.value as string;
-      } else if (section.name === 'expiry') {
-        expiry = section.value as number;
-      }
-    }
-    return { amountSats, description, expiry };
-  } catch {
-    return { amountSats: null, description: null, expiry: null };
-  }
-}
-
-function isLightningAddress(input: string): boolean {
-  return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
-}
-
-function isValidInvoice(data: string): boolean {
-  const lower = data.toLowerCase();
-  return (
-    lower.startsWith('lnbc') ||
-    lower.startsWith('lntb') ||
-    lower.startsWith('lnts') ||
-    lower.startsWith('lnbs')
-  );
-}
 
 let __sendSheetFirstVisibleLogged = false;
 const SendSheet: React.FC<Props> = ({
@@ -117,6 +93,7 @@ const SendSheet: React.FC<Props> = ({
     perfLog('SendSheet first render (visible=true)');
   }
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const {
     payInvoiceForWallet,
@@ -125,10 +102,11 @@ const SendSheet: React.FC<Props> = ({
     addPendingTransaction,
     activeWalletId,
     wallets,
-    btcPrice,
     currency,
   } = useWallet();
-  const { signZapRequest, contacts } = useNostr();
+  const { btcPrice } = useWalletLive();
+  const { signZapRequest } = useNostr();
+  const { contacts } = useNostrContacts();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -138,8 +116,7 @@ const SendSheet: React.FC<Props> = ({
   const [scanned, setScanned] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('scan');
   const [pasteText, setPasteText] = useState('');
-  // Amount input for lightning addresses (no amount in invoice)
-  const [satsValue, setSatsValue] = useState('');
+  const [satsValue, setSatsValue] = useState(''); // amount input for lightning addresses (no invoice amount)
   const [step, setStep] = useState<Step>('main');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -147,11 +124,16 @@ const SendSheet: React.FC<Props> = ({
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+  const [isLnurl, setIsLnurl] = useState(false);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
+  // Whether the in-flight send is a Boltz reverse swap (Lightning → on-chain).
+  // Drives the swap-aware "Boltz swap in progress" overlay copy vs the generic
+  // "Still in flight" used for a plain Lightning send that's slow to confirm.
+  const [inFlightIsSwap, setInFlightIsSwap] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Per-send AbortController so the Cancel button on PaymentProgressOverlay
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
@@ -175,10 +157,12 @@ const SendSheet: React.FC<Props> = ({
     scanned &&
     !isLightningAddress(invoiceData || '') &&
     !isOnchainAddress &&
+    !isLnurl &&
     !!invoiceData &&
     decoded?.amountSats === null;
   const needsAmount =
-    scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11);
+    scanned &&
+    (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11 || isLnurl);
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -188,7 +172,7 @@ const SendSheet: React.FC<Props> = ({
   );
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
-  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : t('sendSheet.walletFallback');
 
   useEffect(() => {
     if (visible) {
@@ -198,12 +182,16 @@ const SendSheet: React.FC<Props> = ({
       setDecoded(null);
       setScanned(false);
       setSending(false);
-      setInputMode(initialAddress ? 'paste' : 'scan');
+      // Default to the paste tab unless the camera is actually usable — opening
+      // on a scanner that can't start (permission unresolved/denied) is a
+      // dead-end; the user can still switch to Scan, which prompts for access.
+      setInputMode(initialAddress || !permission?.granted ? 'paste' : 'scan');
       setPasteText(initialAddress || '');
       setSatsValue('');
       setStep('main');
       setLnurlParams(null);
       setResolving(false);
+      setIsLnurl(false);
       setMemo('');
       // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
       // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
@@ -229,47 +217,64 @@ const SendSheet: React.FC<Props> = ({
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Resolve lightning address when scanned
-  useEffect(() => {
-    if (!scanned || !invoiceData || !isLightningAddress(invoiceData)) return;
-    let cancelled = false;
-    (async () => {
-      setResolving(true);
-      try {
-        const params = await resolveLightningAddress(invoiceData);
-        if (!cancelled) {
-          setLnurlParams(params);
-          // When we're still pointed at a named friend (activePubkey +
-          // recipientName both set), keep the friendly `Pay to <Name>`
-          // label. After "Scan / paste different invoice" clears
-          // activePubkey, let the LNURL server's metadata win again.
-          if (!(activePubkey && recipientName)) {
-            setDecoded((prev) => ({
-              ...prev!,
-              description: params.description || prev?.description || null,
-            }));
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const msg = error instanceof Error ? error.message : 'Failed to resolve address';
-          Alert.alert('Error', msg);
-        }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [scanned, invoiceData, recipientName, activePubkey]);
+  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
+  const pasteTextRef = useRef(pasteText);
+  pasteTextRef.current = pasteText;
+  const invoiceDataRef = useRef(invoiceData);
+  invoiceDataRef.current = invoiceData;
+
+  // Fix-in-place recovery (#871): return to the paste/input step with the bad
+  // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
+  // can be corrected without retyping the whole address. Unwinds the
+  // resolved/scanned state but keeps pasteText / activePubkey. Reads the live
+  // submitted value via refs so the callback identity stays stable (see above).
+  const handleEditAddress = useCallback(() => {
+    const prefill = editAddressPrefill(pasteTextRef.current, invoiceDataRef.current);
+    setInvoiceData(null);
+    setDecoded(null);
+    setScanned(false);
+    setLnurlParams(null);
+    setResolving(false);
+    setSatsValue('');
+    setIsLnurl(false);
+    setIsOnchainAddress(false);
+    setStep('main');
+    setInputMode('paste');
+    setPasteText(prefill);
+  }, []);
+
+  // Resolution failed (typo / unreachable): toast the friendly error, then
+  // hand the user straight back to the editable address (#871).
+  const handleResolveError = useCallback(
+    (title: string, body: string) => {
+      Toast.show({ type: 'error', text1: title, text2: body });
+      handleEditAddress();
+    },
+    [handleEditAddress],
+  );
+
+  // Resolve a scanned/pasted lightning address or raw LNURL into LNURL-pay
+  // params (or report a withdraw claim code). Extracted to keep SendSheet
+  // under the file-size cap — see useSendSheetLnurl.
+  useSendSheetLnurl({
+    scanned,
+    invoiceData,
+    isLnurl,
+    recipientName,
+    activePubkey,
+    setLnurlParams,
+    setDecoded,
+    setResolving,
+    setInvoiceData,
+    setScanned,
+    setIsLnurl,
+    setSatsValue,
+    onResolveError: handleResolveError,
+  });
 
   const processInput = (data: string) => {
-    let input = data.trim();
+    let input = stripLightningPrefix(data);
     let bip21Amount: number | null = null;
-    if (input.toLowerCase().startsWith('lightning:')) {
-      input = input.substring(10);
-    }
     if (input.toLowerCase().startsWith('bitcoin:')) {
       const parsed = parseBip21(input);
       if (parsed) {
@@ -280,6 +285,7 @@ const SendSheet: React.FC<Props> = ({
 
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       // Only use the caller-supplied friend name while we're still
       // pointed at that friend (activePubkey set). After "Scan / paste
@@ -287,14 +293,17 @@ const SendSheet: React.FC<Props> = ({
       // may be a stranger — fall back to the raw input string.
       setDecoded({
         amountSats: null,
-        description: `Pay to ${activePubkey && recipientName ? recipientName : input}`,
+        description: t('sendSheet.payTo', {
+          name: activePubkey && recipientName ? recipientName : input,
+        }),
         expiry: null,
       });
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
+      setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
+      setDecoded({ amountSats: null, description: t('sendSheet.sendToOnchain'), expiry: null });
       setScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
@@ -319,17 +328,27 @@ const SendSheet: React.FC<Props> = ({
       onchainService
         .estimateOnchainFee()
         .then((fees) => {
-          setOnchainFeeEstimate(
-            `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
-          );
+          setOnchainFeeEstimate(t('sendSheet.minerFee', { fee: fees.medium.toLocaleString() }));
         })
         .catch((err) => {
           console.warn('Failed to estimate on-chain fee:', err);
         });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
+      setIsLnurl(false);
       setInvoiceData(input);
       setDecoded(decodeInvoice(input));
+      setScanned(true);
+    } else if (isLnurlString(input)) {
+      // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
+      // pay vs withdraw from the string alone, so stash it and let the
+      // resolve effect above hit the endpoint and route on the server's
+      // tag — payRequest wires up lnurlParams (same amount/send path as a
+      // lightning address), withdrawRequest reports a claim code.
+      setIsOnchainAddress(false);
+      setIsLnurl(true);
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: null, expiry: null });
       setScanned(true);
     }
   };
@@ -337,6 +356,26 @@ const SendSheet: React.FC<Props> = ({
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
     processInput(data);
+  };
+
+  // NFC mode: route whatever the tag held into the same pipeline as a
+  // scanned QR. Withdraw codes and Nostr profiles aren't payable from
+  // here, so say why instead of silently doing nothing.
+  const handleNfcContent = (content: NfcTagContent) => {
+    if (scanned) return;
+    switch (content.type) {
+      case 'lnurl-withdraw':
+        Alert.alert(t('sendSheet.claimCodeTitle'), t('sendSheet.claimCodeBody'));
+        return;
+      case 'npub':
+        Alert.alert(t('sendSheet.notPaymentTagTitle'), t('sendSheet.notPaymentTagBody'));
+        return;
+      case 'unknown':
+        Alert.alert(t('sendSheet.unsupportedTagTitle'), t('sendSheet.unsupportedTagBody'));
+        return;
+      default:
+        processInput(content.data);
+    }
   };
 
   const handlePaste = async () => {
@@ -372,16 +411,20 @@ const SendSheet: React.FC<Props> = ({
         recipientName ||
         (isLightningAddress(invoiceData) ? invoiceData : null) ||
         decoded?.description ||
-        'this recipient';
+        t('sendSheet.thisRecipient');
       const fiat =
         btcPrice !== null ? ` (${satsToFiatString(authorisedAmount, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Confirm large send',
-          `You're about to send ${authorisedAmount.toLocaleString()} sats${fiat} to ${recipientLabel}. Tap Confirm to proceed.`,
+          t('sendSheet.confirmLargeSendTitle'),
+          t('sendSheet.confirmLargeSendBody', {
+            amount: authorisedAmount.toLocaleString(),
+            fiat,
+            recipient: recipientLabel,
+          }),
           [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Confirm', onPress: () => resolve(true) },
+            { text: t('sendSheet.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: t('sendSheet.confirm'), onPress: () => resolve(true) },
           ],
         );
       });
@@ -397,11 +440,12 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     setProgressError(undefined);
     setProgressState('sending');
+    setInFlightIsSwap(false);
     dismissedInFlightRef.current = false;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
@@ -412,81 +456,46 @@ const SendSheet: React.FC<Props> = ({
           // Direct on-chain send from hot wallet
           await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
         } else {
-          // Boltz reverse swap: Lightning → on-chain.
-          //
-          // Persist the swap secrets to SecureStore *before* paying the LN
-          // invoice — `swapRecoveryService` reads these on the next launch
-          // and retries the claim if anything below throws or the app is
-          // killed mid-flow. Without persistence the random preimage and
-          // claim privkey live in JS memory only, and a failed/aborted
-          // claim leaves the on-chain HTLC permanently unspendable. See
-          // issue #481 — the same pattern TransferSheet has had since
-          // its initial Boltz integration.
-          const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await SecureStore.setItemAsync(
-            `boltz_swap_${swap.id}`,
-            JSON.stringify({
-              id: swap.id,
-              preimage: swap.preimage,
-              claimPrivateKey: swap.claimPrivateKey,
-              lockupAddress: swap.lockupAddress,
-              destinationAddress: invoiceData,
-              refundPublicKey: swap.refundPublicKey,
-              swapTree: swap.swapTree,
-            }),
-          );
-          await swapRecoveryService.registerPendingSwap(swap.id);
-          try {
-            await payInvoiceForWallet(walletId!, swap.invoice, {
-              signal,
-              onReplyTimeout: handleReplyTimeout,
-            });
-            const lockup = await boltzService.waitForLockup(swap.id, 120000);
-            const claimTxId = await boltzService.claimSwap(swap, lockup, invoiceData);
-            // Success → drop the recovery record and record the claim so
-            // TransactionList can badge this row 'done' and the detail
-            // sheet can show the broadcast claim txid.
-            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-            await swapRecoveryService.unregisterPendingSwap(swap.id);
-            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
-          } catch (e) {
-            // Leave the persisted record in place so swapRecoveryService can
-            // retry on the next launch. The bare error from claimSwap /
-            // waitForLockup can be opaque ("unknown Error", numeric Electrum
-            // codes); PaymentProgressOverlay surfaces this as the failure
-            // subtitle. Wrap with a "Boltz swap failed:" prefix EXCEPT for
-            // ReplyTimeoutError — that one needs to keep its `name` so the
-            // outer isReplyTimeoutError() branch can route it to the
-            // "Still in flight" overlay state instead of "Payment failed".
-            const detail = e instanceof Error ? e.message || e.toString() : String(e);
-            console.warn(
-              `[Boltz] Swap ${swap.id} failed mid-flight, persisted for recovery:`,
-              detail,
-            );
-            if (isReplyTimeoutError(e)) {
-              throw e;
-            }
-            throw new Error(`Boltz swap failed: ${detail}`);
-          }
+          // Boltz reverse swap: Lightning → on-chain. The orchestration
+          // (persist-before-pay for crash recovery, pay, lockup, claim) and
+          // its #891 error contract live in reverseSwapSend — the catch
+          // below maps SwapSettlingError / ReplyTimeoutError to the
+          // swap-aware "Boltz swap in progress" overlay instead of "Payment
+          // failed".
+          setInFlightIsSwap(true);
+          await executeReverseSwap({
+            walletId: walletId!,
+            destinationAddress: invoiceData,
+            amountSats: currentSats,
+            signal,
+            payInvoice: payInvoiceForWallet,
+            onReplyTimeout: handleReplyTimeout,
+          });
         }
-      } else if (isLightningAddress(invoiceData)) {
+      } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
-          Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.detailsNotResolved'));
           setSending(false);
           return;
         }
         if (currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
         if (currentSats < lnurlParams.minSats) {
-          Alert.alert('Error', `Minimum amount is ${lnurlParams.minSats.toLocaleString()} sats.`);
+          Alert.alert(
+            t('sendSheet.error'),
+            t('sendSheet.minAmount', { min: lnurlParams.minSats.toLocaleString() }),
+          );
           setSending(false);
           return;
         }
         if (currentSats > lnurlParams.maxSats) {
-          Alert.alert('Error', `Maximum amount is ${lnurlParams.maxSats.toLocaleString()} sats.`);
+          Alert.alert(
+            t('sendSheet.error'),
+            t('sendSheet.maxAmount', { max: lnurlParams.maxSats.toLocaleString() }),
+          );
           setSending(false);
           return;
         }
@@ -594,7 +603,7 @@ const SendSheet: React.FC<Props> = ({
         // Amount-bearing bolt11s pay as-is; amount-less bolt11s require
         // the user-entered sats threaded through as msats per NIP-47.
         if (isAmountlessBolt11 && currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
@@ -605,7 +614,7 @@ const SendSheet: React.FC<Props> = ({
         // defensive bound, not a UX limitation.
         const MAX_SAFE_SATS = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
         if (isAmountlessBolt11 && currentSats > MAX_SAFE_SATS) {
-          Alert.alert('Error', 'Amount too large.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.amountTooLarge'));
           setSending(false);
           return;
         }
@@ -628,7 +637,10 @@ const SendSheet: React.FC<Props> = ({
         // We also refetch a second time in case the first call raced.
         await refreshBalanceForWallet(walletId);
         const capturedWalletId = walletId;
-        (async () => {
+        // Defer the heavy tx-list refresh (JSON.stringify + zap resolver)
+        // off the interaction path so the success overlay's OK tap is
+        // serviced immediately rather than blocked behind it (#859, #828).
+        deferPostPaymentRefresh(async () => {
           try {
             await new Promise((r) => setTimeout(r, 600));
             await fetchTransactionsForWallet(capturedWalletId);
@@ -638,7 +650,7 @@ const SendSheet: React.FC<Props> = ({
             // Refresh failures are non-fatal — a manual pull-to-refresh
             // or the next natural refresh will pick the tx up.
           }
-        })();
+        });
       }
       if (signal.aborted) return;
       if (dismissedInFlightRef.current) return;
@@ -650,7 +662,10 @@ const SendSheet: React.FC<Props> = ({
       if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
       }
-      if (isReplyTimeoutError(error)) {
+      // Reply-timeout (ambiguous pay outcome) and a post-commit reverse-swap
+      // settling error both mean "the money may have moved; it'll settle" —
+      // surface "Still in flight", never "Payment failed" (#891).
+      if (isReplyTimeoutError(error) || isSwapSettlingError(error)) {
         if (dismissedInFlightRef.current) return;
         setProgressError(undefined);
         setProgressState('in-flight-extended');
@@ -667,7 +682,7 @@ const SendSheet: React.FC<Props> = ({
         return;
       }
       if (dismissedInFlightRef.current) return;
-      const message = error instanceof Error ? error.message : 'Payment failed';
+      const message = error instanceof Error ? error.message : t('sendSheet.paymentFailed');
       setProgressError(message);
       setProgressState('error');
     } finally {
@@ -718,6 +733,13 @@ const SendSheet: React.FC<Props> = ({
     const shouldCloseParent = prevState === 'success' || prevState === 'in-flight-extended';
     if (prevState === 'in-flight-extended') {
       dismissedInFlightRef.current = true;
+      // "Continue in background" on an in-flight swap: kick a recovery pass so
+      // the claim is retried now rather than waiting for the next app launch.
+      // Safe no-op (single-flight guarded) if the lockup isn't claimable yet —
+      // pull-to-refresh / next foreground will retry.
+      swapRecoveryService.recoverPendingSwaps().catch((e) => {
+        console.warn('[Send] continue-in-background swap recovery failed:', e);
+      });
     }
     setProgressState('hidden');
     setProgressError(undefined);
@@ -740,6 +762,7 @@ const SendSheet: React.FC<Props> = ({
     setActivePubkey(undefined);
     setActivePicture(undefined);
     setIsOnchainAddress(false);
+    setIsLnurl(false);
     setBoltzFees(null);
     setLoadingBoltzFees(false);
   };
@@ -758,7 +781,13 @@ const SendSheet: React.FC<Props> = ({
     [],
   );
 
-  if (!visible || !permission) return null;
+  // Open the sheet whenever it's asked to be visible. Do NOT gate on the
+  // camera-permission hook: `useCameraPermissions()` can stay `null` (e.g. the
+  // hook hasn't resolved, or returns null on some devices even when the OS
+  // permission is granted), and gating here made the whole sheet render null so
+  // `.present()` no-op'd and Send silently never opened. Only the scanner tab
+  // needs the permission, and it handles a missing one with its own prompt.
+  if (!visible) return null;
 
   // On-chain sends from a hot on-chain wallet go direct; otherwise they
   // hop through a Boltz reverse swap whose server-reported min/max must
@@ -802,10 +831,10 @@ const SendSheet: React.FC<Props> = ({
           <BottomSheetView style={styles.content}>
             <AmountEntryScreen
               initialSats={currentSats}
-              title="Enter amount"
+              title={t('sendSheet.enterAmountTitle')}
               minSats={amountMinSats}
               maxSats={amountMaxSats}
-              confirmLabel="Done"
+              confirmLabel={t('sendSheet.done')}
               onBack={() => setStep('main')}
               onConfirm={(sats) => {
                 setSatsValue(String(sats));
@@ -815,25 +844,19 @@ const SendSheet: React.FC<Props> = ({
           </BottomSheetView>
         ) : (
           <BottomSheetScrollView
-            // Padding only — NOT `styles.content` (flex: 1). A flex-1 scroll
-            // content-container sizes to the viewport, so when the keyboard
-            // shrinks the window the content collapses and dynamic sizing
-            // re-measures the sheet down to header height (the "sheet doesn't
-            // show fully / doesn't lift" bug). Matching NostrLoginSheet —
-            // intrinsic content height + interactive keyboard — lifts the
-            // whole sheet above the keyboard. See #521 / #522.
-            contentContainerStyle={{
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
-            }}
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+            ]}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.innerContent}>
-              <Text style={styles.title}>Send</Text>
+              <Text style={styles.title}>{t('sendSheet.send')}</Text>
 
               {/* Wallet selector */}
               {wallets.filter((w) => w.isConnected).length > 1 ? (
                 <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>From:</Text>
+                  <Text style={styles.walletLabel}>{t('sendSheet.from')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
                       style={styles.walletDropdown}
@@ -877,91 +900,60 @@ const SendSheet: React.FC<Props> = ({
                   </View>
                 </View>
               ) : (
-                <Text style={styles.walletLabel}>From: {walletName}</Text>
+                <Text style={styles.walletLabel}>
+                  {t('sendSheet.fromWallet', { wallet: walletName })}
+                </Text>
               )}
 
-              {/* Mode tabs */}
-              {!scanned && (
-                <View style={styles.tabRow}>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
-                    onPress={() => setInputMode('scan')}
-                    accessibilityLabel="Scan tab"
-                    testID="send-tab-scan"
-                  >
-                    <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
-                      Scan
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
-                    onPress={() => setInputMode('paste')}
-                    accessibilityLabel="Input tab"
-                    testID="send-tab-input"
-                  >
-                    <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                      Input
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
+              {!scanned && <SendModeTabs mode={inputMode} onChange={setInputMode} />}
 
-              {/* Scanner or paste input */}
+              {/* Scanner, paste input, or NFC reader */}
               {!scanned ? (
-                inputMode === 'scan' ? (
-                  <View style={styles.cameraContainer}>
-                    {!permission.granted ? (
-                      <View style={styles.permissionContainer}>
-                        <Text style={styles.permissionText}>
-                          Camera access needed to scan QR codes
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.permissionButton}
-                          onPress={requestPermission}
-                        >
-                          <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <CameraView
-                        style={styles.camera}
-                        facing="back"
-                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                        onBarcodeScanned={handleBarCodeScanned}
-                      />
-                    )}
-                  </View>
+                inputMode === 'nfc' ? (
+                  <SendNfcPane
+                    active={visible && !scanned && inputMode === 'nfc'}
+                    onContent={handleNfcContent}
+                  />
+                ) : inputMode === 'scan' ? (
+                  <SendScanPane
+                    permissionGranted={!!permission?.granted}
+                    onRequestPermission={requestPermission}
+                    onBarcodeScanned={handleBarCodeScanned}
+                  />
                 ) : (
                   <View style={styles.pasteSection}>
                     <BottomSheetTextInput
                       style={styles.pasteInput}
-                      placeholder="Paste invoice, lightning or bitcoin address..."
+                      placeholder={t('sendSheet.pastePlaceholder')}
                       placeholderTextColor={colors.textSupplementary}
                       value={pasteText}
                       onChangeText={setPasteText}
                       multiline
                       autoCapitalize="none"
                       autoCorrect={false}
-                      accessibilityLabel="Paste invoice or address"
+                      accessibilityLabel={t('sendSheet.pasteInvoiceLabel')}
                       testID="send-paste-input"
                     />
                     <View style={styles.pasteButtonRow}>
                       <TouchableOpacity
                         style={styles.pasteButton}
                         onPress={handlePaste}
-                        accessibilityLabel="Paste from clipboard"
+                        accessibilityLabel={t('sendSheet.pasteFromClipboard')}
                         testID="send-paste-clipboard"
                       >
-                        <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+                        <Text style={styles.pasteButtonText}>
+                          {t('sendSheet.pasteFromClipboard')}
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
                         onPress={handlePasteSubmit}
                         disabled={!pasteText.trim()}
-                        accessibilityLabel="Go — process pasted invoice or address"
+                        accessibilityLabel={t('sendSheet.goLabel')}
                         testID="send-paste-go"
                       >
-                        <Text style={styles.goButtonText}>Go</Text>
+                        <Text style={styles.goButtonText}>{t('sendSheet.go')}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -982,56 +974,20 @@ const SendSheet: React.FC<Props> = ({
                     <Text style={styles.detailDescription}>{decoded.description}</Text>
                   ) : null}
 
-                  {needsAmount ? (
-                    /* Lightning address, on-chain, or amount-less bolt11: amount entered on a dedicated step */
-                    <View style={styles.amountSection}>
-                      {resolving ? (
-                        <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
-                        <TouchableOpacity
-                          style={styles.amountPickerRow}
-                          onPress={() => setStep('amount')}
-                          testID="send-amount-picker"
-                          accessibilityLabel="Enter amount"
-                        >
-                          {currentSats > 0 ? (
-                            <>
-                              <Text style={styles.amountPickerValue}>
-                                {currentSats.toLocaleString()} sats
-                              </Text>
-                              {btcPrice ? (
-                                <Text style={styles.amountPickerFiat}>
-                                  {satsToFiatString(currentSats, btcPrice, currency)}
-                                </Text>
-                              ) : null}
-                            </>
-                          ) : (
-                            <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
-                          )}
-                        </TouchableOpacity>
-                      ) : null}
-                      {lnurlParams ? (
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
-                    /* Bolt11 with amount */
-                    <View style={styles.amountDisplay}>
-                      <Text style={styles.amountValue}>
-                        {decoded.amountSats.toLocaleString()} sats
-                      </Text>
-                      {btcPrice ? (
-                        <Text style={styles.amountFiat}>
-                          {satsToFiatString(decoded.amountSats, btcPrice, currency)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : (
-                    <Text style={styles.amountValue}>Amount not specified</Text>
-                  )}
+                  <SendAmountSection
+                    needsAmount={needsAmount}
+                    resolving={resolving}
+                    lnurlParams={lnurlParams}
+                    isOnchainAddress={isOnchainAddress}
+                    isAmountlessBolt11={isAmountlessBolt11}
+                    currentSats={currentSats}
+                    decodedAmountSats={decoded?.amountSats}
+                    btcPrice={btcPrice}
+                    currency={currency}
+                    onEnterAmount={() => setStep('amount')}
+                    styles={styles}
+                    spinnerColor={colors.brandPink}
+                  />
 
                   {isOnchainAddress && invoiceData ? (
                     <Text style={styles.detailAddress}>
@@ -1067,7 +1023,7 @@ const SendSheet: React.FC<Props> = ({
                         <TouchableOpacity
                           onPress={() => Linking.openURL('https://boltz.exchange')}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          accessibilityLabel="Powered by Boltz"
+                          accessibilityLabel={t('sendSheet.poweredByBoltz')}
                         >
                           <ExpoImage
                             source={require('../../assets/images/boltz-logo.png')}
@@ -1079,12 +1035,16 @@ const SendSheet: React.FC<Props> = ({
                       <Text style={styles.feeText}>
                         {selectedWallet?.walletType === 'onchain' &&
                         selectedWallet?.onchainImportMethod === 'mnemonic'
-                          ? (onchainFeeEstimate ?? 'Estimating fee...')
+                          ? (onchainFeeEstimate ?? t('sendSheet.estimatingFee'))
                           : loadingBoltzFees
-                            ? 'Loading fees...'
+                            ? t('sendSheet.loadingFees')
                             : boltzFees
-                              ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
-                              : 'Fee estimate unavailable'}
+                              ? t('sendSheet.swapFee', {
+                                  fee: boltzService
+                                    .calculateSwapFee(currentSats, boltzFees)
+                                    .toLocaleString(),
+                                })
+                              : t('sendSheet.feeUnavailable')}
                       </Text>
                     </View>
                   )}
@@ -1093,19 +1053,40 @@ const SendSheet: React.FC<Props> = ({
                   {needsAmount && (
                     <BottomSheetTextInput
                       style={styles.memoInput}
-                      placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                      placeholder={
+                        activePubkey
+                          ? t('sendSheet.zapMessagePlaceholder')
+                          : t('sendSheet.commentPlaceholder')
+                      }
                       placeholderTextColor={colors.textSupplementary}
                       value={memo}
                       onChangeText={setMemo}
                       maxLength={lnurlParams?.commentAllowed || 150}
                       autoCorrect
                       testID="sendsheet-memo-input"
-                      accessibilityLabel="Zap message"
+                      accessibilityLabel={t('sendSheet.zapMessageLabel')}
                     />
                   )}
 
-                  <TouchableOpacity onPress={handleReset}>
-                    <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                  {/* Edit-in-place: keep what was typed so a typo can be
+                      fixed without retyping (#871). Only meaningful for
+                      addresses / LNURL — a scanned bolt11 isn't hand-edited. */}
+                  {(isLightningAddress(invoiceData || '') || isLnurl) && (
+                    <TouchableOpacity
+                      onPress={handleEditAddress}
+                      accessibilityLabel={t('sendSheet.editAddress')}
+                      testID="sendsheet-edit-address"
+                    >
+                      <Text style={styles.resetText}>{t('sendSheet.editAddress')}</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    onPress={handleReset}
+                    accessibilityLabel={t('sendSheet.resetLabel')}
+                    testID="sendsheet-reset"
+                  >
+                    <Text style={styles.resetText}>{t('sendSheet.resetText')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1113,8 +1094,10 @@ const SendSheet: React.FC<Props> = ({
               {/* Balance */}
               {walletBalance !== null && btcPrice !== null && (
                 <Text style={styles.balanceText}>
-                  Balance: {walletBalance.toLocaleString()} sats (
-                  {satsToFiatString(walletBalance, btcPrice, currency)})
+                  {t('sendSheet.balance', {
+                    balance: walletBalance.toLocaleString(),
+                    fiat: satsToFiatString(walletBalance, btcPrice, currency),
+                  })}
                 </Text>
               )}
 
@@ -1127,19 +1110,19 @@ const SendSheet: React.FC<Props> = ({
                     onClose();
                   }}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('sendSheet.cancel')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
                   onPress={handleSend}
                   disabled={!canSend || sending}
-                  accessibilityLabel="Send"
+                  accessibilityLabel={t('sendSheet.send')}
                   testID="sendsheet-send-button"
                 >
                   {sending ? (
                     <ActivityIndicator color={colors.brandPink} />
                   ) : (
-                    <Text style={styles.sendButtonText}>Send</Text>
+                    <Text style={styles.sendButtonText}>{t('sendSheet.send')}</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1155,6 +1138,7 @@ const SendSheet: React.FC<Props> = ({
         errorMessage={progressError}
         onDismiss={handleOverlayDismiss}
         onCancel={handleCancelPayment}
+        inFlightIsSwap={inFlightIsSwap}
       />
     </>
   );

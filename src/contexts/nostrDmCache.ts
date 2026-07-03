@@ -1,30 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
-import { evictNip17CacheBytes, evictNip17CacheOverflow } from '../utils/nip17Cache';
 import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import type { ConversationMessage } from './nostrContextTypes';
 
-// AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
-// use the same cache shape (wrap-id → decrypted rumor entry); they're
-// kept under separate keys so cross-signer login on the same device
-// doesn't leak plaintext between identities. As of #288 the keys are
-// also per-account namespaced — each base is suffixed with `_${pubkey}`
-// via `perAccountKey()` at every read/write site.
+// Legacy keys for the plaintext NIP-17 wrap caches (#176/#687/#689 — RETIRED
+// in #848). Decrypted rumors now persist as rows in the encrypted SQLCipher
+// DB (services/dmDb); nothing writes these caches any more. The keys remain
+// so the one-time migration (dmStoreMigrationRunner) can import + delete an
+// existing install's cache, and so logout wipes can clean up stragglers.
+// Both signer paths share the entry shape; separate keys kept cross-signer
+// login on the same device from leaking plaintext between identities, and
+// since #288 each base is suffixed with `_${pubkey}` via `perAccountKey()`.
 export const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
 export const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
-// Count cap for the wrap plaintext cache. High because the cache is now
-// file-backed (no ~2 MB SQLite row limit), so the byte cap below is the
-// real binding limit — the count cap is just a sanity ceiling (#687).
-export const NIP17_CACHE_CAP = 50_000;
-// The wrap cache (wrap-id -> decrypted plaintext) is persisted to a FILE,
-// not an AsyncStorage row. AsyncStorage rows hit Android's ~2 MB SQLite
-// CursorWindow limit on READ; once the cache passed that it failed to
-// hydrate (and under the old 1.5 MB write cap a large inbox was mostly
-// evicted), so the dedup signal was lost and EVERY cold start re-decrypted
-// the whole inbox — a ~64-88 s JS-thread freeze (#687). Files have no
-// per-row read cap, so the cache holds the whole inbox and dedup hits.
-export const WRAP_CACHE_MAX_BYTES = 12_000_000;
 export const isWrapCacheKey = (key: string): boolean =>
   key.startsWith(AMBER_NIP17_CACHE_KEY_BASE) || key.startsWith(NSEC_NIP17_CACHE_KEY_BASE);
 // The key is already filesystem-safe (base + '_' + hex pubkey).
@@ -85,8 +74,8 @@ export async function writeNip17SkipSet(storageKey: string, set: Set<string>): P
   }
 }
 
-/** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
- * from followed senders — see refreshDmInbox's filter gate. */
+/** Entry shape of the retired plaintext wrap cache — kept for the one-time
+ * import into the encrypted DB (dmStoreMigrationRunner, #848). */
 export type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
@@ -104,50 +93,6 @@ export function safeParseRecord<T>(raw: string | null): Record<string, T> {
     // fall through — treat corrupted blob as empty
   }
   return {};
-}
-
-/** Persist a wrap-id cache back to its per-account file (expo-file-system,
- * #689 — no longer AsyncStorage; the old row blew the ~2 MB CursorWindow read
- * cap), enforcing the size cap in insertion order (oldest-inserted evicts
- * first). Combined with
- * the `touchNip17CacheEntry` helper called on every cache hit during
- * `refreshDmInbox`, this gives true LRU semantics: a re-touched entry
- * is delete+reinserted to the tail, so it survives the next eviction
- * sweep even if 5000 newer wraps arrive after it. Without the touch
- * this is FIFO-by-first-write — see #193 for why FIFO regresses to
- * pre-#176 behaviour for users with very active inboxes.
- *
- * Object keys in JS preserve insertion order for non-integer string
- * keys, and wrap ids are hex, so iteration order is stable across
- * `JSON.parse` / `JSON.stringify` round-trips — the on-disk LRU order
- * survives app restarts without any new persistence machinery.
- *
- * Returns the number of entries evicted so callers can include it in
- * a perf log line. Write failures are surfaced as a warn — a corrupted
- * storage subsystem would otherwise silently re-decrypt on every
- * refresh with no breadcrumb. */
-export async function writeNip17Cache(
-  storageKey: string,
-  cache: Record<string, Nip17CacheEntry>,
-): Promise<number> {
-  const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
-  // Byte cap — generous now the cache is file-backed (no ~2 MB SQLite
-  // CursorWindow read limit). The old 1.5 MB AsyncStorage cap evicted most
-  // of a large inbox, losing the dedup signal and re-decrypting it on every
-  // cold start (#687).
-  const evictedBytes = evictNip17CacheBytes(cache, WRAP_CACHE_MAX_BYTES);
-  try {
-    const f = new File(Paths.document, wrapCacheFileName(storageKey));
-    if (f.exists) f.delete();
-    f.create();
-    f.write(JSON.stringify(cache));
-    // Retire any legacy AsyncStorage row so the old (possibly unreadable /
-    // oversized) copy stops shadowing the file + eating the 2 MB budget.
-    AsyncStorage.removeItem(storageKey).catch(() => {});
-  } catch (err) {
-    console.warn(`[Nostr] NIP-17 cache file write failed (${storageKey}):`, err);
-  }
-  return evicted + evictedBytes;
 }
 
 /**
@@ -338,6 +283,8 @@ export function mergeConversationMessages(
     // this the user would see two bubbles for the same GIF/text: the
     // optimistic local- row persisted by ConversationScreen on send,
     // plus the NIP-17 self-wrap echo from the relay.
+    let inheritedDelivery: ConversationMessage['deliveryStatus'];
+    let inheritedRumorId: string | undefined;
     if (!m.id.startsWith('local-')) {
       let bestKey: string | null = null;
       let bestDelta = Infinity;
@@ -352,9 +299,32 @@ export function mergeConversationMessages(
           bestKey = k;
         }
       }
-      if (bestKey !== null) map.delete(bestKey);
+      if (bestKey !== null) {
+        // Carry the per-relay delivery breakdown (#856) AND the rumorId (#857)
+        // from the dropped optimistic row onto the real-id echo, so the sent
+        // bubble keeps its tick after the relay self-wrap replaces the local-
+        // row. The echo from a warm DB read has no rumorId of its own (the
+        // encrypted store doesn't persist it), so without this carry-over the
+        // store key would be lost and the tick stripped.
+        inheritedDelivery = map.get(bestKey)?.deliveryStatus;
+        inheritedRumorId = map.get(bestKey)?.rumorId;
+        map.delete(bestKey);
+      }
     }
-    map.set(m.id, m);
+    // A fresh echo with no delivery info must not clobber a delivery status we
+    // already attached to this same id on a prior merge (#856). Once the tick
+    // is on a real-id row, re-decrypting the same wrap on the next refresh
+    // re-supplies the row without delivery — keep the existing one. Same for
+    // rumorId (#857), which a fresh-decrypt echo DOES carry but a warm DB read
+    // does not — prefer whichever source has it.
+    const prevRow = map.get(m.id);
+    const deliveryStatus = m.deliveryStatus ?? inheritedDelivery ?? prevRow?.deliveryStatus;
+    const rumorId = m.rumorId ?? inheritedRumorId ?? prevRow?.rumorId;
+    const merged =
+      deliveryStatus !== m.deliveryStatus || rumorId !== m.rumorId
+        ? { ...m, deliveryStatus, rumorId }
+        : m;
+    map.set(m.id, merged);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   // Keep the newest DM_CONV_CAP messages; drop oldest.
@@ -367,4 +337,57 @@ export function mergeConversationMessages(
     result = result.slice(drop);
   }
   return result;
+}
+
+/**
+ * Carry `deliveryStatus` (#856) from the CURRENT in-memory messages onto a
+ * freshly-fetched list, so a sent bubble keeps its tick when a thread reload /
+ * live-sub echo replaces the optimistic row.
+ *
+ * Why this exists separately from `mergeConversationMessages`: the persisted
+ * conv-cache merge can miss the carry-over when the relay echo lands BEFORE
+ * the fire-and-forget `appendLocalDmMessage` write commits — at that moment
+ * the on-disk cache has no `local-` row to inherit from, so the echo overwrites
+ * with no tick. The in-memory state always holds the authoritative
+ * `deliveryStatus`, so reconciling against it closes that race.
+ *
+ * A `next` row inherits the status of (1) the same id in `prev`, or failing
+ * that (2) a `prev` row — typically the optimistic `local-` one — with the
+ * same `fromMe` + `text` within the echo window. `next` rows that already
+ * carry a status keep their own.
+ */
+export function reconcileDeliveryStatus(
+  prev: ConversationMessage[],
+  next: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map<string, ConversationMessage>();
+  for (const p of prev) byId.set(p.id, p);
+  return next.map((n) => {
+    // Inherit both the delivery status (#856) and the rumorId (#857, the
+    // delivery-store key) from the matching prev row — by id, else the
+    // local-echo pairing (fromMe + text + window) that covers the optimistic
+    // `local-` → real-id handoff. A warm-DB echo carries neither of its own.
+    let inheritedDelivery = n.deliveryStatus;
+    let inheritedRumorId = n.rumorId;
+    if (!inheritedDelivery || !inheritedRumorId) {
+      const sameId = byId.get(n.id);
+      let paired = sameId;
+      if (!paired || (!paired.deliveryStatus && !paired.rumorId)) {
+        let bestDelta = Infinity;
+        for (const p of prev) {
+          if (!p.deliveryStatus && !p.rumorId) continue;
+          if (p.fromMe !== n.fromMe || p.text !== n.text) continue;
+          const delta = Math.abs(p.createdAt - n.createdAt);
+          if (delta > LOCAL_DM_ECHO_WINDOW_SECS || delta >= bestDelta) continue;
+          bestDelta = delta;
+          paired = p;
+        }
+      }
+      inheritedDelivery = inheritedDelivery ?? paired?.deliveryStatus;
+      inheritedRumorId = inheritedRumorId ?? paired?.rumorId;
+    }
+    return inheritedDelivery !== n.deliveryStatus || inheritedRumorId !== n.rumorId
+      ? { ...n, deliveryStatus: inheritedDelivery, rumorId: inheritedRumorId }
+      : n;
+  });
 }

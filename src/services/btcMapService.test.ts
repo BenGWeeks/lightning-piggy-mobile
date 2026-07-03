@@ -4,6 +4,7 @@ import {
   acceptsOnchain,
   daysSinceVerified,
   fetchPlacesInBbox,
+  fetchPlacesInBboxResult,
   formatAddress,
   lightningAddressOf,
   peekCachedAnchorSync,
@@ -192,6 +193,127 @@ describe('fetchPlacesInBbox (search endpoint)', () => {
 
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
     await expect(fetchPlacesInBbox(bbox)).resolves.toEqual([]);
+  });
+
+  describe('fetchPlacesInBboxResult (empty-vs-error distinction)', () => {
+    const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
+
+    it('flags a successful response ok:true even when it returns no places', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+      // A genuine "no merchants in this viewport" — authoritative empty.
+      await expect(fetchPlacesInBboxResult(bbox)).resolves.toEqual({ ok: true, places: [] });
+    });
+
+    it('flags a failed fetch ok:false and falls back to the cached set', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      // Warm the cache with a successful fetch first.
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 7, lat: 0.5, lon: 0.5, 'osm:name': 'Cached' }],
+      });
+      const warm = await fetchPlacesInBboxResult(bbox);
+      expect(warm.ok).toBe(true);
+      expect(warm.places).toHaveLength(1);
+
+      // Now the network blips — ok:false with the stale fallback.
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+      const blip = await fetchPlacesInBboxResult(bbox);
+      expect(blip.ok).toBe(false);
+      expect(blip.places).toEqual(warm.places);
+    });
+  });
+
+  // Category-filter regression coverage (#860). The v4 search endpoint
+  // dropped the explicit `categories` field but still returns a single
+  // `icon` token, so reshape() falls back to `[icon]`. These assertions
+  // pin that fallback so the Explore / Map / Places category filter never
+  // silently empties again if the endpoint shape shifts.
+  describe('category derivation from the v4 icon field', () => {
+    it('derives categories from icon when the API omits categories', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 1, lat: 51.5, lon: -0.1, icon: 'restaurant' }],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.icon).toBe('restaurant');
+      expect(place.categories).toEqual(['restaurant']);
+    });
+
+    it('keeps an explicit categories array — icon fallback does not override it', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 2, lat: 51.5, lon: -0.1, icon: 'restaurant', categories: ['cafe', 'bar'] },
+        ],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.categories).toEqual(['cafe', 'bar']);
+    });
+
+    it('yields null categories when neither categories nor icon are present', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 3, lat: 51.5, lon: -0.1, 'osm:name': 'Plain' }],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.icon).toBeNull();
+      expect(place.categories).toBeNull();
+    });
+
+    it('drops whitespace-only / empty entries from an explicit categories array', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 4, lat: 51.5, lon: -0.1, categories: ['cafe', '   ', '', ' bar '] },
+        ],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.categories).toEqual(['cafe', 'bar']);
+    });
+
+    it('yields null categories when icon is whitespace-only', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 5, lat: 51.5, lon: -0.1, icon: '   ' }],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.categories).toBeNull();
+    });
+
+    it('trims a normal icon token when deriving categories', async () => {
+      const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 6, lat: 51.5, lon: -0.1, icon: ' restaurant ' }],
+      });
+
+      const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+      const [place] = await fetchPlacesInBbox(bbox);
+
+      expect(place.categories).toEqual(['restaurant']);
+    });
   });
 
   it('populates peekCachedPlacesSync + peekCachedAnchorSync after a successful fetch', async () => {

@@ -1,3 +1,5 @@
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+
 /** Options accepted by `refreshDmInbox`. All fields optional so existing
  * callers continue to work without changes. `signal` lets a screen
  * cancel the refresh on unmount so the decrypt loop stops chewing the
@@ -11,6 +13,15 @@
  * filtered cache would mask new unfollowed entries fetched this round. */
 export interface RefreshDmInboxOptions {
   force?: boolean;
+  /** Automated cold-start top-up pass (#751). Bypasses the freshness TTL
+   * like `force` (it fires right after the capped first pass stamps the
+   * cursor), but — unlike `force` — does not itself bypass the #743
+   * skip-set (`includeNonFollows`, the dev follow-gate-off path, still
+   * does — even during a backfill) and RESPECTS the
+   * kind-4 `since` floor. A backfill is not a user-intent refresh, so it
+   * must not re-pay decrypts the persisted caches already cover; running
+   * it as `force` was the every-cold-start 28-30 s decrypt sweep (#846). */
+  backfill?: boolean;
   signal?: AbortSignal;
   includeNonFollows?: boolean;
 }
@@ -30,4 +41,17 @@ export interface ConversationMessage {
   fromMe: boolean;
   text: string;
   createdAt: number;
+  // Per-relay delivery breakdown for a locally-sent message (#856). Persisted
+  // with the optimistic row so the tick survives a thread reload. Absent on
+  // received messages and on relay-echoed copies — only the local- send row
+  // the composer appends carries it.
+  deliveryStatus?: DeliveryStatus;
+  // Wire protocol the message travelled on, for the message-info sheet (#856):
+  // 4 = NIP-04 (legacy plaintext DM), 14/15 = NIP-17 rumor kind (gift-wrapped).
+  // Absent on the optimistic local- row (known once decrypted / echoed).
+  wireKind?: number;
+  // NIP-17 inner-rumor event id (#857). Stable across the optimistic row and
+  // the relay echo (which has a DIFFERENT `id` — the outer wrap id), so it keys
+  // the delivery-status store. Set on our own sent rows only.
+  rumorId?: string;
 }

@@ -62,7 +62,7 @@ adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox
 adb shell pm disable-user --user 0 com.google.android.apps.maps
 # undo with: adb shell pm enable <package>
 ----
-*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `tests/e2e/_subflow-login-as-piggy.yaml` / `_subflow-seed-test-wallet.yaml`.
+*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `.maestro/common/login-as-piggy.yaml` / `.maestro/common/seed-test-wallet.yaml`.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
@@ -209,10 +209,10 @@ The IME finishes composing each chunk before the next one starts. For nsec / npu
 source .env && echo -n "$MAESTRO_NWC1" | wl-copy   # Wayland
 # or
 echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
-maestro test tests/e2e/test-add-wallet-via-paste.yaml
+maestro test .maestro/wallets/flow-115-add-wallet-via-paste.yaml
 ----
 
-The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow. +
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `.maestro/wallets/flow-115-add-wallet-via-paste.yaml` for the flow. +
 
 *Why `pasteText` (Maestro's built-in) doesn't help:* Maestro's `pasteText` / `copyTextFrom` use an **internal shim clipboard** (not Android's `ClipboardManager`) and still synthesize key events under the hood — so they hit the exact same wrapper-targeting failure. Seeding the real device clipboard and tapping an in-app Paste button bypasses both the shim and the keystroke path. Confirmed via the Maestro docs (https://docs.maestro.dev/api-reference/commands/pastetext) and feature-request https://github.com/mobile-dev-inc/Maestro/issues/2029. Deep-link seeding (`app://.../path?value=...`) is the only other approach that bypasses text entry entirely — viable if a Paste button isn't desired in the UI.
 
@@ -693,7 +693,7 @@ done &
 2. **Use a real device** for any work that needs reliable foreground location (Map sub-screen, geofence settings, hub mini-map preview). The emulator-1080p (Medium_Phone API 36.1) profile is fine for everything *except* live-position UI. +
 3. **Mock-location app** like _Lockito_ on the emulator. Heavier but works for journey simulation as well as static fixes. +
 *Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
-*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`tests/e2e/screenshots-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
+*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`.maestro/ui/flow-104-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
 
 | Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
 never fires settlement, only the slow balance-diff fallback eventually

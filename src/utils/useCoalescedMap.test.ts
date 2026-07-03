@@ -127,4 +127,39 @@ describe('useCoalescedMap', () => {
     });
     expect(result.current.map.size).toBe(0);
   });
+
+  it('maxSize caps the committed Map, evicting oldest-inserted entries on flush', () => {
+    const { result } = renderHook(() => useCoalescedMap<number>({ flushMs: 100, maxSize: 3 }));
+    act(() => {
+      result.current.enqueue('a', 1);
+      result.current.enqueue('b', 2);
+      result.current.enqueue('c', 3);
+      result.current.enqueue('d', 4);
+      result.current.enqueue('e', 5);
+      result.current.flush();
+    });
+    // The two oldest-inserted (a, b) are evicted; the newest three remain.
+    expect(result.current.map.size).toBe(3);
+    expect(result.current.map.has('a')).toBe(false);
+    expect(result.current.map.has('b')).toBe(false);
+    expect([...result.current.map.keys()]).toEqual(['c', 'd', 'e']);
+  });
+
+  it('maxSize caps the initial seed too — not just flushes', () => {
+    const { result } = renderHook(() =>
+      useCoalescedMap<number>({
+        maxSize: 2,
+        initial: () =>
+          new Map([
+            ['a', 1],
+            ['b', 2],
+            ['c', 3],
+          ]),
+      }),
+    );
+    // Over-cap seed is trimmed oldest-first immediately, before any flush.
+    expect(result.current.map.size).toBe(2);
+    expect(result.current.map.has('a')).toBe(false);
+    expect([...result.current.map.keys()]).toEqual(['b', 'c']);
+  });
 });

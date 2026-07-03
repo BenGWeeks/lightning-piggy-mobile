@@ -34,7 +34,7 @@ const RELAYS = [
 ];
 
 const BRANCH = env.BRANCH || 'main';
-const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/tests/e2e/fixtures`;
+const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;
 
 // Each Piggy maps to (env var, fixture filename, friendly label, lud16).
 // `lud16` resolves to a dedicated LNbits wallet on bank.weeksfamily.me
@@ -50,7 +50,7 @@ const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mo
 // nsec, so they don't depend on a third-party hotlink staying alive.
 // Re-host via the BUD-02 upload flow if a blob ever 404s.
 const PIGGIES = [
-  // Mapping matches tests/e2e/README.adoc — note NSEC2=Little, NSEC3=Middle.
+  // Mapping matches .maestro/README.adoc — note NSEC2=Little, NSEC3=Middle.
   {
     envVar: 'MAESTRO_NSEC_BIG',
     file: 'big-piggy-profile.png',

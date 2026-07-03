@@ -1,6 +1,12 @@
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 
+// A valid Nostr pubkey is 64 lowercase hex chars. Used to drop inbox entries
+// keyed on a malformed partner pubkey — rows that predate the partnerFromRumor
+// validation fix (#849) and would otherwise render as un-nameable raw-hex
+// `dcc…` conversations the user can't open or identify.
+const PUBKEY_HEX64 = /^[0-9a-f]{64}$/;
+
 export interface ConversationSummary {
   /**
    * Stable id — `pubkey` (hex) for identified counterparties; otherwise
@@ -152,6 +158,12 @@ export interface DmInboxEntry {
   createdAt: number;
   text: string;
   wireKind: number;
+  /** NIP-17 rumor (inner kind-14/15) event id — stable across the recipient +
+   * self wraps and identical to what the sender computed at send time. Keys the
+   * delivery-status store so a sent bubble's tick survives the local- → echo id
+   * swap (#857). `id` above is the OUTER wrap id (random per ephemeral key), so
+   * it can't serve as that key. Absent for legacy / received rows. */
+  rumorId?: string;
 }
 
 import * as nip19 from 'nostr-tools/nip19';
@@ -219,6 +231,11 @@ export function buildDmSummaries(
   const winner = new Map<string, DmInboxEntry>();
   for (const entry of entries) {
     const key = entry.partnerPubkey.toLowerCase();
+    // Drop entries with a malformed partner pubkey (#849): junk rows stored
+    // before the partnerFromRumor fix would otherwise show as un-nameable
+    // raw-hex `dcc…` conversations. The ingest fix stops new ones; this hides
+    // any already in the store without a risky DB migration.
+    if (!PUBKEY_HEX64.test(key)) continue;
     if (followPubkeys && !followPubkeys.has(key)) continue;
     const existing = winner.get(key);
     if (!existing) {

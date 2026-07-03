@@ -34,9 +34,10 @@ import FriendNoteFeed from '../components/FriendNoteFeed';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
 import FullscreenImageModal from '../components/FullscreenImageModal';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { isNfcSupported } from '../services/nfcService';
 import {
@@ -60,12 +61,14 @@ type ContactProfileRoute = RouteProp<RootStackParamList, 'ContactProfile'>;
 // ContactProfileBody) is preserved untouched for callers that still
 // want a quick-glance presentation — see issue #435.
 const ContactProfileScreen: React.FC = () => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<ContactProfileNavigation>();
   const route = useRoute<ContactProfileRoute>();
-  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
+  const { sendDirectMessage, relays } = useNostr();
+  const { contacts, followContact, unfollowContact } = useNostrContacts();
   const { hasWallets } = useWallet();
 
   const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);
@@ -244,7 +247,10 @@ const ContactProfileScreen: React.FC = () => {
 
   const handleZap = useCallback(async () => {
     if (!hasWallets) {
-      Alert.alert('No wallet attached', 'Connect a Lightning wallet first to send zaps.');
+      Alert.alert(
+        t('contactProfileScreen.noWalletTitle'),
+        t('contactProfileScreen.noWalletMessage'),
+      );
       return;
     }
     let address = contact.lightningAddress;
@@ -261,8 +267,8 @@ const ContactProfileScreen: React.FC = () => {
     }
     if (!address) {
       Alert.alert(
-        'No Lightning address',
-        `${contact.name} hasn’t published a Lightning address, so they can’t receive zaps yet.`,
+        t('contactProfileScreen.noLightningAddressTitle'),
+        t('contactProfileScreen.noLightningAddressMessage', { name: contact.name }),
       );
       return;
     }
@@ -286,22 +292,26 @@ const ContactProfileScreen: React.FC = () => {
       // Unfollow — back-gesture / tap-outside dismissal doesn't fire
       // either button's onPress and would otherwise leave the chip
       // stuck spinning forever.
-      Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unfollow',
-          style: 'destructive',
-          onPress: async () => {
-            setLoadingFollow(true);
-            try {
-              const success = await unfollowContact(contact.pubkey!);
-              if (success) setFollowing(false);
-            } finally {
-              setLoadingFollow(false);
-            }
+      Alert.alert(
+        t('contactProfileScreen.unfollow'),
+        t('contactProfileScreen.unfollowMessage', { name: contact.name }),
+        [
+          { text: t('contactProfileScreen.cancel'), style: 'cancel' },
+          {
+            text: t('contactProfileScreen.unfollow'),
+            style: 'destructive',
+            onPress: async () => {
+              setLoadingFollow(true);
+              try {
+                const success = await unfollowContact(contact.pubkey!);
+                if (success) setFollowing(false);
+              } finally {
+                setLoadingFollow(false);
+              }
+            },
           },
-        },
-      ]);
+        ],
+      );
       return;
     }
     setLoadingFollow(true);
@@ -318,7 +328,7 @@ const ContactProfileScreen: React.FC = () => {
     await Clipboard.setStringAsync(npub);
     Toast.show({
       type: 'success',
-      text1: 'Public key copied',
+      text1: t('contactProfileScreen.publicKeyCopied'),
       position: 'top',
       visibilityTime: 1800,
     });
@@ -329,7 +339,7 @@ const ContactProfileScreen: React.FC = () => {
     await Clipboard.setStringAsync(contact.lightningAddress);
     Toast.show({
       type: 'success',
-      text1: 'Lightning address copied',
+      text1: t('contactProfileScreen.lightningAddressCopied'),
       position: 'top',
       visibilityTime: 1800,
     });
@@ -347,7 +357,7 @@ const ContactProfileScreen: React.FC = () => {
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
     const nprofile = nprofileEncode(contact.pubkey, relayHints);
-    const label = contact.name || 'a contact';
+    const label = contact.name || t('contactProfileScreen.contactFallback');
     const nostrUri = `nostr:${nprofile}`;
     const webUrl = `https://njump.me/${npub}`;
     try {
@@ -369,14 +379,14 @@ const ContactProfileScreen: React.FC = () => {
         const readRelays = relays.filter((r) => r.read).map((r) => r.url);
         const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
         const nprofile = nprofileEncode(contact.pubkey, relayHints);
-        const label = contact.name || 'a contact';
-        const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
+        const label = contact.name || t('contactProfileScreen.contactFallback');
+        const payload = t('contactProfileScreen.sharedContactPayload', { label, nprofile });
         const result = await sendDirectMessage(friend.pubkey, payload);
         if (!result.success) {
           Toast.show({
             type: 'error',
-            text1: 'Share failed',
-            text2: result.error ?? 'Could not share contact.',
+            text1: t('contactProfileScreen.shareFailed'),
+            text2: result.error ?? t('contactProfileScreen.couldNotShareContact'),
             position: 'top',
             visibilityTime: 4000,
           });
@@ -384,7 +394,7 @@ const ContactProfileScreen: React.FC = () => {
         }
         Toast.show({
           type: 'success',
-          text1: `${label} shared with ${friend.name}`,
+          text1: t('contactProfileScreen.sharedWith', { label, name: friend.name }),
           position: 'top',
           visibilityTime: 2500,
         });
@@ -421,7 +431,7 @@ const ContactProfileScreen: React.FC = () => {
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.headerButton}
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('contactProfileScreen.goBack')}
           testID="contact-profile-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -432,7 +442,7 @@ const ContactProfileScreen: React.FC = () => {
             onPress={() => setActionsSheetOpen(true)}
             disabled={sharing}
             style={styles.headerButton}
-            accessibilityLabel="More actions"
+            accessibilityLabel={t('contactProfileScreen.moreActions')}
             testID="contact-more-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -475,7 +485,7 @@ const ContactProfileScreen: React.FC = () => {
                 activeOpacity={0.85}
                 onPress={() => setFullscreenUrl(contact.picture)}
                 accessibilityRole="imagebutton"
-                accessibilityLabel="View profile picture full screen"
+                accessibilityLabel={t('contactProfileScreen.viewProfilePictureFullScreen')}
                 testID="profile-screen-avatar-fullscreen"
               >
                 <Image
@@ -501,7 +511,7 @@ const ContactProfileScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.actionIconButton}
                   onPress={() => setQrSheetOpen(true)}
-                  accessibilityLabel="Show QR code"
+                  accessibilityLabel={t('contactProfileScreen.showQrCode')}
                   testID="contact-profile-qr-button"
                 >
                   <QrCode size={20} color={colors.white} />
@@ -519,10 +529,10 @@ const ContactProfileScreen: React.FC = () => {
                 accessibilityRole="button"
                 accessibilityLabel={
                   !hasWallets
-                    ? 'Zap (no wallet attached)'
+                    ? t('contactProfileScreen.zapNoWallet')
                     : contact.lightningAddress
-                      ? 'Zap'
-                      : 'Zap (no Lightning address)'
+                      ? t('contactProfileScreen.zap')
+                      : t('contactProfileScreen.zapNoLightningAddress')
                 }
                 testID="contact-profile-zap-button"
               >
@@ -532,7 +542,7 @@ const ContactProfileScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.actionIconButton}
                   onPress={handleMessage}
-                  accessibilityLabel="Message"
+                  accessibilityLabel={t('contactProfileScreen.message')}
                   testID="contact-profile-message-button"
                 >
                   <MessageCircle size={20} color={colors.white} />
@@ -545,14 +555,20 @@ const ContactProfileScreen: React.FC = () => {
                 style={[styles.followButton, following && styles.followingButton]}
                 onPress={handleFollowToggle}
                 disabled={loadingFollow}
-                accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+                accessibilityLabel={
+                  following ? t('contactProfileScreen.unfollow') : t('contactProfileScreen.follow')
+                }
                 testID="contact-profile-follow-button"
               >
                 <Text
                   style={[styles.followButtonText, following && styles.followingButtonText]}
                   numberOfLines={1}
                 >
-                  {loadingFollow ? '...' : following ? 'Following' : 'Follow'}
+                  {loadingFollow
+                    ? '...'
+                    : following
+                      ? t('contactProfileScreen.following')
+                      : t('contactProfileScreen.follow')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -573,7 +589,7 @@ const ContactProfileScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.npubRow}
             onPress={handleCopyNpub}
-            accessibilityLabel="Copy npub"
+            accessibilityLabel={t('contactProfileScreen.copyNpub')}
             testID="contact-copy-npub-button"
           >
             <Text style={styles.npubText}>{npubDisplay}</Text>
@@ -587,7 +603,7 @@ const ContactProfileScreen: React.FC = () => {
             <View style={styles.lnAddressEditRow}>
               <TextInput
                 style={styles.lnAddressInput}
-                placeholder="user@domain.com"
+                placeholder={t('contactProfileScreen.lnAddressPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 value={lnAddressDraft}
                 onChangeText={setLnAddressDraft}
@@ -613,7 +629,7 @@ const ContactProfileScreen: React.FC = () => {
                   } catch {
                     Toast.show({
                       type: 'error',
-                      text1: 'Failed to save lightning address',
+                      text1: t('contactProfileScreen.failedToSaveLightningAddress'),
                       position: 'top',
                       visibilityTime: 3000,
                     });
@@ -623,7 +639,9 @@ const ContactProfileScreen: React.FC = () => {
                 }}
               >
                 <Text style={styles.lnAddressSaveText}>
-                  {lnAddressDraft.trim() ? 'Save' : 'Cancel'}
+                  {lnAddressDraft.trim()
+                    ? t('contactProfileScreen.save')
+                    : t('contactProfileScreen.cancel')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -636,7 +654,7 @@ const ContactProfileScreen: React.FC = () => {
               }}
             >
               <Text style={styles.lightningAddress} numberOfLines={1}>
-                {contact.lightningAddress || 'Add Lightning Address'}
+                {contact.lightningAddress || t('contactProfileScreen.addLightningAddress')}
               </Text>
             </TouchableOpacity>
           )
@@ -644,7 +662,7 @@ const ContactProfileScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.lnAddressRow}
             onPress={handleCopyLnAddress}
-            accessibilityLabel="Copy Lightning address"
+            accessibilityLabel={t('contactProfileScreen.copyLightningAddress')}
             testID="contact-copy-lud16-button"
           >
             <Text style={styles.lightningAddress} numberOfLines={1}>
@@ -691,8 +709,10 @@ const ContactProfileScreen: React.FC = () => {
         visible={shareOpen}
         onClose={() => setShareOpen(false)}
         onSelect={handleShareToFriend}
-        title={`Share ${contact.name || 'contact'}`}
-        subtitle="They'll receive an encrypted Nostr DM with a person card."
+        title={t('contactProfileScreen.shareTitle', {
+          name: contact.name || t('contactProfileScreen.contactShort'),
+        })}
+        subtitle={t('contactProfileScreen.shareSubtitle')}
       />
 
       <ContactActionsSheet

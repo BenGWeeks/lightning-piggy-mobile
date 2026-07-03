@@ -43,6 +43,16 @@ export interface CoalescedMap<V> {
   reset: () => void;
 }
 
+/** Evict oldest-inserted entries (Map preserves insertion order) down to `max`. */
+function capOldest<V>(map: Map<string, V>, max: number | undefined): void {
+  if (max === undefined || map.size <= max) return;
+  let toDelete = map.size - max;
+  for (const key of map.keys()) {
+    if (toDelete-- <= 0) break;
+    map.delete(key);
+  }
+}
+
 export function useCoalescedMap<V>(options?: {
   /** Seed the committed Map on first render (e.g. from a sync cache peek). */
   initial?: () => Map<string, V>;
@@ -50,6 +60,14 @@ export function useCoalescedMap<V>(options?: {
   shouldReplace?: (existing: V, incoming: V) => boolean;
   flushMs?: number;
   flushThreshold?: number;
+  /**
+   * Cap the committed Map. On each flush, once the Map exceeds this size the
+   * oldest-inserted entries are evicted (Map preserves insertion order) down to
+   * the cap. Use for a long-lived subscription whose key space grows unbounded
+   * (e.g. per-event-id feeds) so the Map can't balloon over a long session.
+   * Omit for naturally-bounded key spaces (e.g. keyed per-cache).
+   */
+  maxSize?: number;
 }): CoalescedMap<V> {
   // 100 ms feels instant (≤120 ms reads as same-frame) yet coalesces a typical
   // relay event burst into 2–3 commits. 25-item threshold flushes early when a
@@ -61,8 +79,17 @@ export function useCoalescedMap<V>(options?: {
   // stable (callers pass an inline arrow each render).
   const shouldReplaceRef = useRef(options?.shouldReplace);
   shouldReplaceRef.current = options?.shouldReplace;
+  // Held in a ref so `flush` (deps: []) stays referentially stable.
+  const maxSizeRef = useRef(options?.maxSize);
+  maxSizeRef.current = options?.maxSize;
 
-  const [map, setMap] = useState<Map<string, V>>(() => options?.initial?.() ?? new Map());
+  const [map, setMap] = useState<Map<string, V>>(() => {
+    // Cap the seed too, so a caller seeding via `initial` over the cap isn't
+    // left oversized until the first flush (Copilot review).
+    const seed = options?.initial?.() ?? new Map();
+    capOldest(seed, options?.maxSize);
+    return seed;
+  });
   const pendingRef = useRef<Map<string, V>>(new Map());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Distinguish full unmount (React throws on setState) from a focus blur — the
@@ -97,6 +124,9 @@ export function useCoalescedMap<V>(options?: {
         if (existing !== undefined && replace && !replace(existing, value)) continue;
         next.set(key, value);
       }
+      // Evict oldest-inserted entries once over the cap so a long-lived
+      // subscription can't grow the committed Map unbounded.
+      capOldest(next, maxSizeRef.current);
       return next;
     });
   }, []);

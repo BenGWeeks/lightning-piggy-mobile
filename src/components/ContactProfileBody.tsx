@@ -6,6 +6,7 @@ import FullscreenImageModal from './FullscreenImageModal';
 import { Zap, UserRound, ChevronRight, Share2 } from 'lucide-react-native';
 import { npubEncode } from '../services/nostrService';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 export interface ContactProfileBodyData {
@@ -52,6 +53,7 @@ const ContactProfileBody: React.FC<Props> = ({
   onViewFullProfile,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
@@ -67,7 +69,10 @@ const ContactProfileBody: React.FC<Props> = ({
     if (!npub) return;
     const webUrl = `https://njump.me/${npub}`;
     try {
-      await Share.share({ message: `${contact.name || 'a contact'}\n${webUrl}`, url: webUrl });
+      await Share.share({
+        message: `${contact.name || t('contactProfileBody.aContact')}\n${webUrl}`,
+        url: webUrl,
+      });
     } catch {
       // User dismissed / platform rejected — nothing to surface.
     }
@@ -118,7 +123,7 @@ const ContactProfileBody: React.FC<Props> = ({
             activeOpacity={0.85}
             onPress={() => setFullscreenUrl(contact.picture)}
             accessibilityRole="imagebutton"
-            accessibilityLabel="View profile picture full screen"
+            accessibilityLabel={t('contactProfileBody.viewPictureFullscreen')}
             testID="profile-avatar-fullscreen"
           >
             <Image
@@ -182,8 +187,12 @@ const ContactProfileBody: React.FC<Props> = ({
               accessibilityState={{ disabled: messageDisabled }}
               accessibilityLabel={
                 messageDisabled
-                  ? `Message (${!contact.pubkey ? 'no Nostr key' : 'unavailable'})`
-                  : 'Message'
+                  ? t('contactProfileBody.messageWithReason', {
+                      reason: !contact.pubkey
+                        ? t('contactProfileBody.noNostrKey')
+                        : t('contactProfileBody.unavailable'),
+                    })
+                  : t('contactProfileBody.message')
               }
               testID="contact-message-button"
             >
@@ -216,7 +225,11 @@ const ContactProfileBody: React.FC<Props> = ({
               accessibilityRole="button"
               accessibilityState={{ disabled: !onZap }}
               accessibilityLabel={
-                zapDisabled ? `Zap (${zapDisabledReason ?? 'unavailable'})` : 'Zap'
+                zapDisabled
+                  ? t('contactProfileBody.zapWithReason', {
+                      reason: zapDisabledReason ?? t('contactProfileBody.unavailable'),
+                    })
+                  : t('contactProfileBody.zap')
               }
               testID="profile-sheet-zap-button"
             >
@@ -234,7 +247,9 @@ const ContactProfileBody: React.FC<Props> = ({
           disabled={!npub}
           accessibilityRole="button"
           accessibilityState={{ disabled: !npub }}
-          accessibilityLabel={npub ? 'Share contact' : 'Share (no Nostr key)'}
+          accessibilityLabel={
+            npub ? t('contactProfileBody.shareContact') : t('contactProfileBody.shareNoNostrKey')
+          }
           testID="contact-share-button"
         >
           <Share2
@@ -247,10 +262,10 @@ const ContactProfileBody: React.FC<Props> = ({
           <TouchableOpacity
             style={styles.viewProfileButton}
             onPress={onViewFullProfile}
-            accessibilityLabel="View full profile"
+            accessibilityLabel={t('contactProfileBody.viewFullProfileA11y')}
             testID="contact-view-full-profile"
           >
-            <Text style={styles.viewProfileButtonText}>View profile</Text>
+            <Text style={styles.viewProfileButtonText}>{t('contactProfileBody.viewProfile')}</Text>
             <ChevronRight size={16} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         ) : null}

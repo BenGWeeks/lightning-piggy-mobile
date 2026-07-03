@@ -38,6 +38,18 @@ module.exports = {
     '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure))',
     '/node_modules/react-native-reanimated/plugin/',
   ],
+  // bitcoinjs-lib (and bip32) vendor `uint8array-tools`, which resolves to
+  // its ESM-only browser build under jest-expo's react-native export
+  // condition — unparseable by the CJS require pipeline, so ANY suite that
+  // loaded real bitcoinjs-lib failed at import time (tests previously had to
+  // stub the whole library). Mapping the package to its shipped CJS build
+  // lets money-path parsers (utils/lockupTx) be tested against the REAL
+  // bitcoinjs-lib. Suites that explicitly jest.mock('bitcoinjs-lib') are
+  // unaffected (explicit mocks take precedence over the mapper).
+  moduleNameMapper: {
+    '^uint8array-tools$':
+      '<rootDir>/node_modules/bitcoinjs-lib/node_modules/uint8array-tools/src/cjs/index.cjs',
+  },
   coverageThreshold: {
     // Floor — the CI workflow enforces the relative gate (no regression vs main).
     // This is a belt-and-braces hard floor so coverage cannot collapse to 0%.

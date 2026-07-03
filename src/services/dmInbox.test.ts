@@ -1,7 +1,7 @@
 const mockGetInboxLatest = jest.fn();
 const mockGetConversation = jest.fn();
 jest.mock('./dmDb', () => ({
-  getInboxLatest: () => mockGetInboxLatest(),
+  getInboxLatest: (...args: unknown[]) => mockGetInboxLatest(...args),
   getConversationMessages: (...args: unknown[]) => mockGetConversation(...args),
 }));
 
@@ -9,6 +9,7 @@ import { rowsToInboxEntries, loadInboxEntries, loadConversationEntries } from '.
 import type { DmMessageRow } from './dmDb';
 
 const row = (over: Partial<DmMessageRow> = {}): DmMessageRow => ({
+  owner: 'owner1',
   eventId: 'evt1',
   conversation: 'partnerPk',
   createdAt: 100,
@@ -56,8 +57,8 @@ describe('dmInbox', () => {
 
   it('loadInboxEntries projects getInboxLatest rows', async () => {
     mockGetInboxLatest.mockResolvedValue([row({ eventId: 'x', conversation: 'carol' })]);
-    const out = await loadInboxEntries();
-    expect(mockGetInboxLatest).toHaveBeenCalledTimes(1);
+    const out = await loadInboxEntries('owner1');
+    expect(mockGetInboxLatest).toHaveBeenCalledWith('owner1');
     expect(out).toEqual([
       {
         id: 'x',
@@ -72,8 +73,11 @@ describe('dmInbox', () => {
 
   it('loadConversationEntries forwards pagination opts and projects rows', async () => {
     mockGetConversation.mockResolvedValue([row({ eventId: 'm1' })]);
-    const out = await loadConversationEntries('partnerPk', { limit: 20, beforeCreatedAt: 50 });
-    expect(mockGetConversation).toHaveBeenCalledWith('partnerPk', {
+    const out = await loadConversationEntries('owner1', 'partnerPk', {
+      limit: 20,
+      beforeCreatedAt: 50,
+    });
+    expect(mockGetConversation).toHaveBeenCalledWith('owner1', 'partnerPk', {
       limit: 20,
       beforeCreatedAt: 50,
     });
