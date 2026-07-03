@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Check, ChevronLeft, Lock } from 'lucide-react-native';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { HuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
 
@@ -40,13 +41,13 @@ export const StepHeader: React.FC<{
 // Top-of-screen horizontal stepper — numbered pips + short labels. Two
 // states only: pink once reached (current step or behind), grey ahead.
 // The current pip is scaled up so you can see where you are.
-const STEP_LABELS: { n: number; label: string }[] = [
-  { n: 1, label: 'Hardware' },
-  { n: 2, label: 'Prize' },
-  { n: 3, label: 'Location' },
-  { n: 4, label: 'Details' },
-  { n: 5, label: 'Publish' },
-  { n: 6, label: 'Write NFC' },
+const STEP_LABELS: { n: number; labelKey: string }[] = [
+  { n: 1, labelKey: 'stepHardware' },
+  { n: 2, labelKey: 'stepPrize' },
+  { n: 3, labelKey: 'stepLocation' },
+  { n: 4, labelKey: 'stepDetails' },
+  { n: 5, labelKey: 'stepPublish' },
+  { n: 6, labelKey: 'stepWriteNfc' },
 ];
 
 export const StepProgressBar: React.FC<{
@@ -54,19 +55,21 @@ export const StepProgressBar: React.FC<{
   onPipPress: (n: 1 | 2 | 3 | 4 | 5 | 6) => void;
   styles: HuntCreateScreenStyles;
 }> = ({ currentStep, onPipPress, styles }) => {
+  const t = useTranslation();
   return (
     <View style={styles.stepperRow} accessibilityRole="progressbar">
-      {STEP_LABELS.map(({ n, label }, idx) => {
+      {STEP_LABELS.map(({ n, labelKey }, idx) => {
         const stepN = n as 1 | 2 | 3 | 4 | 5 | 6;
         const reached = stepN <= currentStep;
         const isCurrent = currentStep === stepN;
+        const label = t(`huntCreateWizardChrome.${labelKey}`);
         return (
           <React.Fragment key={n}>
             <TouchableOpacity
               style={styles.stepperPipWrap}
               onPress={() => onPipPress(stepN)}
               testID={`hunt-piggy-step-pip-${n}`}
-              accessibilityLabel={`Step ${n} of 6: ${label}`}
+              accessibilityLabel={t('huntCreateWizardChrome.stepAccessibility', { n, label })}
             >
               <View
                 style={[
@@ -120,33 +123,39 @@ export const StepNavRow: React.FC<{
   nextIcon?: typeof Check;
   styles: HuntCreateScreenStyles;
   colors: Palette;
-}> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, nextIcon: NextIcon, styles, colors }) => (
-  <View style={styles.stepNavRow}>
-    {onBack ? (
-      <TouchableOpacity
-        style={styles.stepNavBackButton}
-        onPress={onBack}
-        testID="hunt-piggy-step-back"
-        accessibilityLabel="Back to previous step"
-      >
-        <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
-        <Text style={styles.stepNavBackText}>Back</Text>
-      </TouchableOpacity>
-    ) : null}
-    {onNext ? (
-      <TouchableOpacity
-        style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
-        onPress={onNext}
-        disabled={nextDisabled}
-        testID="hunt-piggy-step-next"
-        accessibilityLabel={nextLabel}
-      >
-        {NextIcon ? <NextIcon size={16} color={colors.white} strokeWidth={2.5} /> : null}
-        <Text style={styles.stepNavNextText}>{NextIcon ? nextLabel : `${nextLabel} ›`}</Text>
-      </TouchableOpacity>
-    ) : null}
-  </View>
-);
+}> = ({ onBack, onNext, nextLabel, nextDisabled, nextIcon: NextIcon, styles, colors }) => {
+  const t = useTranslation();
+  const resolvedNextLabel = nextLabel ?? t('huntCreateWizardChrome.next');
+  return (
+    <View style={styles.stepNavRow}>
+      {onBack ? (
+        <TouchableOpacity
+          style={styles.stepNavBackButton}
+          onPress={onBack}
+          testID="hunt-piggy-step-back"
+          accessibilityLabel={t('huntCreateWizardChrome.backToPreviousStep')}
+        >
+          <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
+          <Text style={styles.stepNavBackText}>{t('huntCreateWizardChrome.back')}</Text>
+        </TouchableOpacity>
+      ) : null}
+      {onNext ? (
+        <TouchableOpacity
+          style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
+          onPress={onNext}
+          disabled={nextDisabled}
+          testID="hunt-piggy-step-next"
+          accessibilityLabel={resolvedNextLabel}
+        >
+          {NextIcon ? <NextIcon size={16} color={colors.white} strokeWidth={2.5} /> : null}
+          <Text style={styles.stepNavNextText}>
+            {NextIcon ? resolvedNextLabel : `${resolvedNextLabel} ›`}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+};
 
 // 1-5 level picker for difficulty / terrain — coloured rectangles that
 // fill up to the chosen value (mirrors the cache-detail SegmentBar), kept
@@ -155,20 +164,23 @@ export const LevelPicker: React.FC<{
   value: number;
   onChange: (v: number) => void;
   styles: HuntCreateScreenStyles;
-}> = ({ value, onChange, styles }) => (
-  <View style={styles.levelPickerRow}>
-    {[1, 2, 3, 4, 5].map((n) => (
-      <TouchableOpacity
-        key={n}
-        style={[styles.levelSegment, n <= value && styles.levelSegmentFilled]}
-        onPress={() => onChange(n)}
-        testID={`hunt-piggy-level-${n}`}
-        accessibilityLabel={`Level ${n}`}
-        accessibilityState={{ selected: n === value }}
-      />
-    ))}
-  </View>
-);
+}> = ({ value, onChange, styles }) => {
+  const t = useTranslation();
+  return (
+    <View style={styles.levelPickerRow}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <TouchableOpacity
+          key={n}
+          style={[styles.levelSegment, n <= value && styles.levelSegmentFilled]}
+          onPress={() => onChange(n)}
+          testID={`hunt-piggy-level-${n}`}
+          accessibilityLabel={t('huntCreateWizardChrome.level', { n })}
+          accessibilityState={{ selected: n === value }}
+        />
+      ))}
+    </View>
+  );
+};
 
 // Single-select pill row for the geocache-info step (size, type). Values
 // are strings — callers cast at the edge.
@@ -201,42 +213,47 @@ export const OptionPicker: React.FC<{
 export const NfcSupportedTagsCard: React.FC<{
   colors: Palette;
   styles: HuntCreateScreenStyles;
-}> = ({ colors, styles }) => (
-  <View style={styles.tagsCard} testID="hunt-create-supported-tags">
-    <View style={styles.tagsCardHeader}>
-      <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
-      <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
+}> = ({ colors, styles }) => {
+  const t = useTranslation();
+  return (
+    <View style={styles.tagsCard} testID="hunt-create-supported-tags">
+      <View style={styles.tagsCardHeader}>
+        <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
+        <Text style={styles.tagsCardHeaderText}>
+          {t('huntCreateWizardChrome.supportedNfcTags')}
+        </Text>
+      </View>
+      {/* Tightened two-row form so the "Write to NFC tag" + Next buttons
+          fit on a Pixel without scrolling. Long-form rationale lives in
+          docs/, not in the wizard. */}
+      <View style={styles.tagsCardParagraph}>
+        <Text style={styles.tagsCardCheck}>✓</Text>
+        <Text style={styles.tagsCardParagraphText}>
+          <Text style={styles.tagsCardName}>NTAG215 / 216</Text>
+          {t('huntCreateWizardChrome.ntag215Desc')}
+        </Text>
+      </View>
+      <View style={styles.tagsCardParagraph}>
+        <Text style={styles.tagsCardCross}>✗</Text>
+        <Text style={styles.tagsCardParagraphText}>
+          <Text style={styles.tagsCardName}>NTAG213</Text>
+          {t('huntCreateWizardChrome.ntag213Desc')}
+        </Text>
+      </View>
+      <View style={styles.tagsCardParagraph}>
+        <Text style={styles.tagsCardCross}>✗</Text>
+        <Text style={styles.tagsCardParagraphText}>
+          <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text>
+          {t('huntCreateWizardChrome.ultralightDesc')}
+        </Text>
+      </View>
+      <View style={styles.tagsCardParagraph}>
+        <Text style={styles.tagsCardCross}>✗</Text>
+        <Text style={styles.tagsCardParagraphText}>
+          <Text style={styles.tagsCardName}>NTAG424</Text>
+          {t('huntCreateWizardChrome.ntag424Desc')}
+        </Text>
+      </View>
     </View>
-    {/* Tightened two-row form so the "Write to NFC tag" + Next buttons
-        fit on a Pixel without scrolling. Long-form rationale lives in
-        docs/, not in the wizard. */}
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCheck}>✓</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the multi-record payload + the
-        reversible PWD/PACK lock.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG213</Text> — only 144 bytes of user memory, too small
-        for the Hide-a-Piglet payload.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text> — too small or can't
-        lock.
-      </Text>
-    </View>
-    <View style={styles.tagsCardParagraph}>
-      <Text style={styles.tagsCardCross}>✗</Text>
-      <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG424</Text> — not supported yet (needs AES auth, GH
-        #558).
-      </Text>
-    </View>
-  </View>
-);
+  );
+};

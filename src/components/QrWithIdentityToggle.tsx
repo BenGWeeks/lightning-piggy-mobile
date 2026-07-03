@@ -5,6 +5,7 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { Copy, Share2, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -27,6 +28,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
   onNfcWrite,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // Clamp the initial mode to 'npub' when no lightning address exists —
   // otherwise a defaultMode='lightning' caller produces an empty
@@ -46,13 +48,13 @@ const QrWithIdentityToggle: React.FC<Props> = ({
   const qrValue = mode === 'npub' ? `nostr:${npub}` : `lightning:${lightningAddress || ''}`;
   const displayValue =
     mode === 'npub' ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : lightningAddress || '';
-  const valueLabel = mode === 'npub' ? 'npub' : 'Lightning address';
+  const valueLabel = mode === 'npub' ? 'npub' : t('qrWithIdentityToggle.lightningAddress');
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(plainValue);
     Toast.show({
       type: 'success',
-      text1: `${valueLabel} copied`,
+      text1: t('qrWithIdentityToggle.copied', { label: valueLabel }),
       position: 'top',
       visibilityTime: 1800,
     });
@@ -74,7 +76,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.toggleTab, mode === 'npub' && styles.toggleTabActive]}
             onPress={() => setMode('npub')}
-            accessibilityLabel="Show npub QR"
+            accessibilityLabel={t('qrWithIdentityToggle.showNpubQr')}
             testID="profile-qr-toggle-npub"
           >
             <Text style={[styles.toggleText, mode === 'npub' && styles.toggleTextActive]}>
@@ -84,7 +86,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.toggleTab, mode === 'lightning' && styles.toggleTabActive]}
             onPress={() => setMode('lightning')}
-            accessibilityLabel="Show Lightning address QR"
+            accessibilityLabel={t('qrWithIdentityToggle.showLightningQr')}
             testID="profile-qr-toggle-lightning"
           >
             <Text style={[styles.toggleText, mode === 'lightning' && styles.toggleTextActive]}>
@@ -99,7 +101,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         testID="profile-qr-image"
         accessible
         accessibilityRole="image"
-        accessibilityLabel={`QR code for your ${valueLabel}`}
+        accessibilityLabel={t('qrWithIdentityToggle.qrCodeFor', { label: valueLabel })}
       >
         <QRCode value={qrValue} size={200} backgroundColor="#FFFFFF" color="#000000" />
       </View>
@@ -108,7 +110,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         style={styles.valueRow}
         onPress={handleCopy}
         accessibilityRole="button"
-        accessibilityLabel={`Copy ${valueLabel}`}
+        accessibilityLabel={t('qrWithIdentityToggle.copy', { label: valueLabel })}
         testID="profile-qr-value-row"
       >
         <Text style={styles.valueText} numberOfLines={1}>
@@ -121,7 +123,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.iconButton}
           onPress={handleCopy}
-          accessibilityLabel={`Copy ${valueLabel}`}
+          accessibilityLabel={t('qrWithIdentityToggle.copy', { label: valueLabel })}
           testID="profile-qr-copy-button"
         >
           <Copy size={22} color={colors.brandPink} />
@@ -133,7 +135,9 @@ const QrWithIdentityToggle: React.FC<Props> = ({
             onPress={nfcSupported ? onNfcWrite : undefined}
             disabled={!nfcSupported}
             accessibilityLabel={
-              nfcSupported ? `Write ${valueLabel} to NFC tag` : 'NFC not supported on this device'
+              nfcSupported
+                ? t('qrWithIdentityToggle.writeToNfc', { label: valueLabel })
+                : t('qrWithIdentityToggle.nfcNotSupported')
             }
             testID="profile-qr-nfc-button"
           >
@@ -148,7 +152,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.iconButton}
           onPress={handleShare}
-          accessibilityLabel={`Share ${valueLabel}`}
+          accessibilityLabel={t('qrWithIdentityToggle.share', { label: valueLabel })}
           testID="profile-qr-share-button"
         >
           <Share2 size={22} color={colors.brandPink} />

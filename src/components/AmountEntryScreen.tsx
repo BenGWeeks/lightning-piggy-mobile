@@ -5,6 +5,7 @@ import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createAmountEntryStyles } from '../styles/AmountEntryScreen.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 
@@ -48,18 +49,24 @@ type Key =
 
 const AmountEntryScreen: React.FC<Props> = ({
   initialSats = 0,
-  title = 'Custom amount',
+  title,
   minSats,
   maxSats,
-  confirmLabel = 'Confirm',
+  confirmLabel,
   enableMemo = false,
   initialMemo = '',
-  memoPlaceholder = "What's it for? (optional)",
+  memoPlaceholder,
   memoMaxLength = 80,
   onConfirm,
   onBack,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
+  // Defaults resolved in-body (not in the parameter list) so they can be
+  // translated via the `t` hook, which can't be called in the destructure.
+  const resolvedTitle = title ?? t('amountEntryScreen.customAmount');
+  const resolvedConfirmLabel = confirmLabel ?? t('amountEntryScreen.confirm');
+  const resolvedMemoPlaceholder = memoPlaceholder ?? t('amountEntryScreen.memoPlaceholder');
   // Pad the bottom by the safe-area inset so the keypad's bottom row (the
   // "0" key + backspace) clears the system navigation bar. Under 3-button
   // nav the bar is tall enough to draw over the last keypad row otherwise
@@ -223,8 +230,8 @@ const AmountEntryScreen: React.FC<Props> = ({
       if (!btcPrice) return '—';
       return formatFiat(satsToFiat(currentSats, btcPrice), currency);
     }
-    return `${currentSats.toLocaleString()} sats`;
-  }, [primaryUnit, currentSats, btcPrice, currency]);
+    return t('amountEntryScreen.satsAmount', { amount: currentSats.toLocaleString() });
+  }, [primaryUnit, currentSats, btcPrice, currency, t]);
 
   const primaryUnitLabel = primaryUnit === 'sats' ? 'SATS' : currency.toUpperCase();
   const secondaryUnitLabel = primaryUnit === 'sats' ? currency.toUpperCase() : 'SATS';
@@ -264,20 +271,20 @@ const AmountEntryScreen: React.FC<Props> = ({
             onPress={onBack}
             style={styles.backButton}
             testID="amount-entry-back"
-            accessibilityLabel="Back"
+            accessibilityLabel={t('amountEntryScreen.back')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.textBody} />
           </TouchableOpacity>
         ) : null}
-        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.title}>{resolvedTitle}</Text>
       </View>
 
       <View style={styles.topArea}>
         <View style={styles.card}>
           <View style={styles.primarySection}>
             <View style={styles.cardRowTop}>
-              <Text style={styles.label}>Enter amount</Text>
+              <Text style={styles.label}>{t('amountEntryScreen.enterAmount')}</Text>
               <View style={[styles.pill, styles.pillPrimary]}>
                 <Text style={styles.pillText}>{primaryUnitLabel}</Text>
               </View>
@@ -287,7 +294,10 @@ const AmountEntryScreen: React.FC<Props> = ({
               numberOfLines={1}
               adjustsFontSizeToFit
               testID="amount-entry-input"
-              accessibilityLabel={`Amount ${primaryDisplay} ${primaryUnitLabel}`}
+              accessibilityLabel={t('amountEntryScreen.amountA11y', {
+                amount: primaryDisplay,
+                unit: primaryUnitLabel,
+              })}
             >
               {primaryDisplay}
             </Text>
@@ -295,7 +305,7 @@ const AmountEntryScreen: React.FC<Props> = ({
 
           <View style={styles.secondarySection}>
             <View style={styles.cardRowTop}>
-              <Text style={styles.label}>Will receive about</Text>
+              <Text style={styles.label}>{t('amountEntryScreen.willReceiveAbout')}</Text>
               <View style={[styles.pill, styles.pillSecondary]}>
                 <Text style={styles.pillText}>{secondaryUnitLabel}</Text>
               </View>
@@ -313,7 +323,9 @@ const AmountEntryScreen: React.FC<Props> = ({
             style={styles.swapButton}
             onPress={swapPrimary}
             testID="amount-entry-swap"
-            accessibilityLabel={`Switch primary to ${secondaryUnitLabel}`}
+            accessibilityLabel={t('amountEntryScreen.switchPrimaryTo', {
+              unit: secondaryUnitLabel,
+            })}
             accessibilityRole="button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -323,14 +335,21 @@ const AmountEntryScreen: React.FC<Props> = ({
 
         {minSats !== undefined && maxSats !== undefined ? (
           <Text style={styles.rangeText}>
-            {minSats.toLocaleString()} – {maxSats.toLocaleString()} sats
+            {t('amountEntryScreen.range', {
+              min: minSats.toLocaleString(),
+              max: maxSats.toLocaleString(),
+            })}
           </Text>
         ) : null}
         {belowMin ? (
-          <Text style={styles.warningText}>Minimum is {minSats?.toLocaleString()} sats.</Text>
+          <Text style={styles.warningText}>
+            {t('amountEntryScreen.minimumIs', { min: minSats?.toLocaleString() })}
+          </Text>
         ) : null}
         {aboveMax ? (
-          <Text style={styles.warningText}>Maximum is {maxSats?.toLocaleString()} sats.</Text>
+          <Text style={styles.warningText}>
+            {t('amountEntryScreen.maximumIs', { max: maxSats?.toLocaleString() })}
+          </Text>
         ) : null}
 
         {enableMemo ? (
@@ -347,14 +366,14 @@ const AmountEntryScreen: React.FC<Props> = ({
             style={styles.memoInput}
             value={memo}
             onChangeText={setMemo}
-            placeholder={memoPlaceholder}
+            placeholder={resolvedMemoPlaceholder}
             placeholderTextColor={colors.textSupplementary}
             maxLength={memoMaxLength}
             autoCapitalize="sentences"
             autoCorrect
             returnKeyType="done"
             testID="amount-entry-memo"
-            accessibilityLabel="Invoice memo"
+            accessibilityLabel={t('amountEntryScreen.invoiceMemo')}
           />
         ) : null}
       </View>
@@ -366,9 +385,9 @@ const AmountEntryScreen: React.FC<Props> = ({
         }
         disabled={!canConfirm}
         testID="amount-entry-confirm"
-        accessibilityLabel={confirmLabel}
+        accessibilityLabel={resolvedConfirmLabel}
       >
-        <Text style={styles.confirmButtonText}>{confirmLabel}</Text>
+        <Text style={styles.confirmButtonText}>{resolvedConfirmLabel}</Text>
       </TouchableOpacity>
 
       <View style={styles.keypad}>
@@ -385,7 +404,7 @@ const AmountEntryScreen: React.FC<Props> = ({
                     style={styles.key}
                     onPress={pressBackspace}
                     testID="amount-entry-key-del"
-                    accessibilityLabel="Delete"
+                    accessibilityLabel={t('amountEntryScreen.delete')}
                   >
                     <Delete size={22} color={colors.textHeader} />
                   </TouchableOpacity>
@@ -398,7 +417,7 @@ const AmountEntryScreen: React.FC<Props> = ({
                     style={[styles.key, styles.keyFilled]}
                     onPress={pressDecimal}
                     testID="amount-entry-key-decimal"
-                    accessibilityLabel="Decimal point"
+                    accessibilityLabel={t('amountEntryScreen.decimalPoint')}
                   >
                     <Text style={styles.keyDigit}>.</Text>
                   </TouchableOpacity>

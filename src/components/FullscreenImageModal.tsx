@@ -17,6 +17,7 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
+import { useTranslation } from '../contexts/LocaleContext';
 
 interface Props {
   url: string | null;
@@ -27,6 +28,7 @@ const MAX_SCALE = 5;
 const DOUBLE_TAP_SCALE = 2.5;
 
 const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
+  const t = useTranslation();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scale = useSharedValue(1);
@@ -112,7 +114,7 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
         <GestureDetector gesture={composed}>
           <Animated.View
             style={styles.backdrop}
-            accessibilityLabel="Full-screen image (pinch to zoom, tap to close)"
+            accessibilityLabel={t('fullscreenImageModal.backdropLabel')}
             testID="fullscreen-image-backdrop"
           >
             {url ? (
@@ -125,7 +127,7 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
                   recyclingKey={url}
                   autoplay={false}
                   transition={150}
-                  accessibilityLabel="Full-screen image"
+                  accessibilityLabel={t('fullscreenImageModal.imageLabel')}
                 />
               </Animated.View>
             ) : null}
@@ -138,7 +140,7 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
           style={[styles.closeButton, { top: insets.top + 8 }]}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close full-screen image"
+          accessibilityLabel={t('fullscreenImageModal.close')}
           testID="fullscreen-image-close"
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >

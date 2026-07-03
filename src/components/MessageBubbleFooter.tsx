@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Check, CheckCheck, Clock, AlertCircle, ShieldCheck } from 'lucide-react-native';
 import { summariseDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { formatTime } from '../utils/messageContent';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { MessageBubbleStyles } from '../styles/MessageBubble.styles';
 
 type Styles = MessageBubbleStyles;
@@ -26,6 +27,7 @@ const DeliveryTick: React.FC<{
   status: DeliveryStatus;
   testID: string;
 }> = ({ styles, status, testID }) => {
+  const t = useTranslation();
   const { ok, total } = summariseDelivery(status);
   // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
   // node Maestro can resolve — testIDs on lucide-react-native icons don't
@@ -36,7 +38,7 @@ const DeliveryTick: React.FC<{
   // all-failed send (zero relays accepted) renders the red glyph below instead.
   if (status.pending) {
     return (
-      <View testID={testID} accessibilityLabel="Message sending">
+      <View testID={testID} accessibilityLabel={t('messageBubbleFooter.messageSending')}>
         <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
       </View>
     );
@@ -46,7 +48,7 @@ const DeliveryTick: React.FC<{
   // failed. The bubble's tap opens the info sheet with a Re-publish action.
   if (ok === 0) {
     return (
-      <View testID={testID} accessibilityLabel="Send failed">
+      <View testID={testID} accessibilityLabel={t('messageBubbleFooter.sendFailed')}>
         <AlertCircle
           size={13}
           color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
@@ -61,13 +63,16 @@ const DeliveryTick: React.FC<{
   // All target relays acked → double tick; otherwise ≥1 → single tick.
   if (ok === total) {
     return (
-      <View testID={testID} accessibilityLabel="Sent to all relays">
+      <View testID={testID} accessibilityLabel={t('messageBubbleFooter.sentAllRelays')}>
         <CheckCheck size={14} strokeWidth={2.5} color={deliveredColor} />
       </View>
     );
   }
   return (
-    <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
+    <View
+      testID={testID}
+      accessibilityLabel={t('messageBubbleFooter.sentSomeRelays', { ok, total })}
+    >
       <Check size={13} strokeWidth={2.5} color={deliveredColor} />
     </View>
   );
@@ -109,6 +114,7 @@ export const BubbleFooter: React.FC<{
   onOpenInfo,
   infoTint,
 }) => {
+  const t = useTranslation();
   const showTick = fromMe && !!deliveryStatus;
   // No info handler and no tick → plain timestamp (e.g. a legacy row).
   if (!onOpenInfo && !showTick) {
@@ -127,8 +133,14 @@ export const BubbleFooter: React.FC<{
       // announce a focusable control that does nothing (Copilot).
       disabled={!onOpenInfo}
       accessibilityRole={onOpenInfo ? 'button' : undefined}
-      accessibilityLabel={onOpenInfo ? (fromMe ? 'Delivery status' : 'Message info') : undefined}
-      accessibilityHint={onOpenInfo ? 'Opens message details' : undefined}
+      accessibilityLabel={
+        onOpenInfo
+          ? fromMe
+            ? t('messageBubbleFooter.deliveryStatus')
+            : t('messageBubbleFooter.messageInfo')
+          : undefined
+      }
+      accessibilityHint={onOpenInfo ? t('messageBubbleFooter.opensMessageDetails') : undefined}
       testID={`dm-bubble-delivery-footer-${messageId}`}
     >
       {/* A small shield next to the time signals the bubble is tappable for

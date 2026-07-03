@@ -28,6 +28,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
@@ -93,6 +94,7 @@ const SendSheet: React.FC<Props> = ({
     perfLog('SendSheet first render (visible=true)');
   }
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const {
     payInvoiceForWallet,
@@ -171,7 +173,7 @@ const SendSheet: React.FC<Props> = ({
   );
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
-  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : t('sendSheet.walletFallback');
 
   useEffect(() => {
     if (visible) {
@@ -310,7 +312,9 @@ const SendSheet: React.FC<Props> = ({
       // may be a stranger — fall back to the raw input string.
       setDecoded({
         amountSats: null,
-        description: `Pay to ${activePubkey && recipientName ? recipientName : input}`,
+        description: t('sendSheet.payTo', {
+          name: activePubkey && recipientName ? recipientName : input,
+        }),
         expiry: null,
       });
       setScanned(true);
@@ -318,7 +322,7 @@ const SendSheet: React.FC<Props> = ({
       setIsOnchainAddress(true);
       setIsLnurl(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
+      setDecoded({ amountSats: null, description: t('sendSheet.sendToOnchain'), expiry: null });
       setScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
@@ -343,9 +347,7 @@ const SendSheet: React.FC<Props> = ({
       onchainService
         .estimateOnchainFee()
         .then((fees) => {
-          setOnchainFeeEstimate(
-            `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
-          );
+          setOnchainFeeEstimate(t('sendSheet.minerFee', { fee: fees.medium.toLocaleString() }));
         })
         .catch((err) => {
           console.warn('Failed to estimate on-chain fee:', err);
@@ -382,19 +384,13 @@ const SendSheet: React.FC<Props> = ({
     if (scanned) return;
     switch (content.type) {
       case 'lnurl-withdraw':
-        Alert.alert(
-          'This is a claim code',
-          'This tag holds a withdraw (claim) code, not a payment request. Use Receive to claim it.',
-        );
+        Alert.alert(t('sendSheet.claimCodeTitle'), t('sendSheet.claimCodeBody'));
         return;
       case 'npub':
-        Alert.alert('Not a payment tag', 'This tag holds a Nostr profile, not a payment request.');
+        Alert.alert(t('sendSheet.notPaymentTagTitle'), t('sendSheet.notPaymentTagBody'));
         return;
       case 'unknown':
-        Alert.alert(
-          'Unsupported tag',
-          "Couldn't find a Lightning invoice, address or LNURL on this tag.",
-        );
+        Alert.alert(t('sendSheet.unsupportedTagTitle'), t('sendSheet.unsupportedTagBody'));
         return;
       default:
         processInput(content.data);
@@ -434,16 +430,20 @@ const SendSheet: React.FC<Props> = ({
         recipientName ||
         (isLightningAddress(invoiceData) ? invoiceData : null) ||
         decoded?.description ||
-        'this recipient';
+        t('sendSheet.thisRecipient');
       const fiat =
         btcPrice !== null ? ` (${satsToFiatString(authorisedAmount, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Confirm large send',
-          `You're about to send ${authorisedAmount.toLocaleString()} sats${fiat} to ${recipientLabel}. Tap Confirm to proceed.`,
+          t('sendSheet.confirmLargeSendTitle'),
+          t('sendSheet.confirmLargeSendBody', {
+            amount: authorisedAmount.toLocaleString(),
+            fiat,
+            recipient: recipientLabel,
+          }),
           [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Confirm', onPress: () => resolve(true) },
+            { text: t('sendSheet.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: t('sendSheet.confirm'), onPress: () => resolve(true) },
           ],
         );
       });
@@ -464,7 +464,7 @@ const SendSheet: React.FC<Props> = ({
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
@@ -493,22 +493,28 @@ const SendSheet: React.FC<Props> = ({
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {
-          Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.detailsNotResolved'));
           setSending(false);
           return;
         }
         if (currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
         if (currentSats < lnurlParams.minSats) {
-          Alert.alert('Error', `Minimum amount is ${lnurlParams.minSats.toLocaleString()} sats.`);
+          Alert.alert(
+            t('sendSheet.error'),
+            t('sendSheet.minAmount', { min: lnurlParams.minSats.toLocaleString() }),
+          );
           setSending(false);
           return;
         }
         if (currentSats > lnurlParams.maxSats) {
-          Alert.alert('Error', `Maximum amount is ${lnurlParams.maxSats.toLocaleString()} sats.`);
+          Alert.alert(
+            t('sendSheet.error'),
+            t('sendSheet.maxAmount', { max: lnurlParams.maxSats.toLocaleString() }),
+          );
           setSending(false);
           return;
         }
@@ -616,7 +622,7 @@ const SendSheet: React.FC<Props> = ({
         // Amount-bearing bolt11s pay as-is; amount-less bolt11s require
         // the user-entered sats threaded through as msats per NIP-47.
         if (isAmountlessBolt11 && currentSats <= 0) {
-          Alert.alert('Error', 'Please enter an amount.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.enterAmount'));
           setSending(false);
           return;
         }
@@ -627,7 +633,7 @@ const SendSheet: React.FC<Props> = ({
         // defensive bound, not a UX limitation.
         const MAX_SAFE_SATS = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
         if (isAmountlessBolt11 && currentSats > MAX_SAFE_SATS) {
-          Alert.alert('Error', 'Amount too large.');
+          Alert.alert(t('sendSheet.error'), t('sendSheet.amountTooLarge'));
           setSending(false);
           return;
         }
@@ -695,7 +701,7 @@ const SendSheet: React.FC<Props> = ({
         return;
       }
       if (dismissedInFlightRef.current) return;
-      const message = error instanceof Error ? error.message : 'Payment failed';
+      const message = error instanceof Error ? error.message : t('sendSheet.paymentFailed');
       setProgressError(message);
       setProgressState('error');
     } finally {
@@ -844,10 +850,10 @@ const SendSheet: React.FC<Props> = ({
           <BottomSheetView style={styles.content}>
             <AmountEntryScreen
               initialSats={currentSats}
-              title="Enter amount"
+              title={t('sendSheet.enterAmountTitle')}
               minSats={amountMinSats}
               maxSats={amountMaxSats}
-              confirmLabel="Done"
+              confirmLabel={t('sendSheet.done')}
               onBack={() => setStep('main')}
               onConfirm={(sats) => {
                 setSatsValue(String(sats));
@@ -864,12 +870,12 @@ const SendSheet: React.FC<Props> = ({
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.innerContent}>
-              <Text style={styles.title}>Send</Text>
+              <Text style={styles.title}>{t('sendSheet.send')}</Text>
 
               {/* Wallet selector */}
               {wallets.filter((w) => w.isConnected).length > 1 ? (
                 <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>From:</Text>
+                  <Text style={styles.walletLabel}>{t('sendSheet.from')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
                       style={styles.walletDropdown}
@@ -913,7 +919,9 @@ const SendSheet: React.FC<Props> = ({
                   </View>
                 </View>
               ) : (
-                <Text style={styles.walletLabel}>From: {walletName}</Text>
+                <Text style={styles.walletLabel}>
+                  {t('sendSheet.fromWallet', { wallet: walletName })}
+                </Text>
               )}
 
               {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
@@ -936,33 +944,35 @@ const SendSheet: React.FC<Props> = ({
                   <View style={styles.pasteSection}>
                     <BottomSheetTextInput
                       style={styles.pasteInput}
-                      placeholder="Paste invoice, lightning or bitcoin address..."
+                      placeholder={t('sendSheet.pastePlaceholder')}
                       placeholderTextColor={colors.textSupplementary}
                       value={pasteText}
                       onChangeText={setPasteText}
                       multiline
                       autoCapitalize="none"
                       autoCorrect={false}
-                      accessibilityLabel="Paste invoice or address"
+                      accessibilityLabel={t('sendSheet.pasteInvoiceLabel')}
                       testID="send-paste-input"
                     />
                     <View style={styles.pasteButtonRow}>
                       <TouchableOpacity
                         style={styles.pasteButton}
                         onPress={handlePaste}
-                        accessibilityLabel="Paste from clipboard"
+                        accessibilityLabel={t('sendSheet.pasteFromClipboard')}
                         testID="send-paste-clipboard"
                       >
-                        <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+                        <Text style={styles.pasteButtonText}>
+                          {t('sendSheet.pasteFromClipboard')}
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
                         onPress={handlePasteSubmit}
                         disabled={!pasteText.trim()}
-                        accessibilityLabel="Go — process pasted invoice or address"
+                        accessibilityLabel={t('sendSheet.goLabel')}
                         testID="send-paste-go"
                       >
-                        <Text style={styles.goButtonText}>Go</Text>
+                        <Text style={styles.goButtonText}>{t('sendSheet.go')}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1032,7 +1042,7 @@ const SendSheet: React.FC<Props> = ({
                         <TouchableOpacity
                           onPress={() => Linking.openURL('https://boltz.exchange')}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          accessibilityLabel="Powered by Boltz"
+                          accessibilityLabel={t('sendSheet.poweredByBoltz')}
                         >
                           <ExpoImage
                             source={require('../../assets/images/boltz-logo.png')}
@@ -1044,12 +1054,16 @@ const SendSheet: React.FC<Props> = ({
                       <Text style={styles.feeText}>
                         {selectedWallet?.walletType === 'onchain' &&
                         selectedWallet?.onchainImportMethod === 'mnemonic'
-                          ? (onchainFeeEstimate ?? 'Estimating fee...')
+                          ? (onchainFeeEstimate ?? t('sendSheet.estimatingFee'))
                           : loadingBoltzFees
-                            ? 'Loading fees...'
+                            ? t('sendSheet.loadingFees')
                             : boltzFees
-                              ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
-                              : 'Fee estimate unavailable'}
+                              ? t('sendSheet.swapFee', {
+                                  fee: boltzService
+                                    .calculateSwapFee(currentSats, boltzFees)
+                                    .toLocaleString(),
+                                })
+                              : t('sendSheet.feeUnavailable')}
                       </Text>
                     </View>
                   )}
@@ -1058,14 +1072,18 @@ const SendSheet: React.FC<Props> = ({
                   {needsAmount && (
                     <BottomSheetTextInput
                       style={styles.memoInput}
-                      placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                      placeholder={
+                        activePubkey
+                          ? t('sendSheet.zapMessagePlaceholder')
+                          : t('sendSheet.commentPlaceholder')
+                      }
                       placeholderTextColor={colors.textSupplementary}
                       value={memo}
                       onChangeText={setMemo}
                       maxLength={lnurlParams?.commentAllowed || 150}
                       autoCorrect
                       testID="sendsheet-memo-input"
-                      accessibilityLabel="Zap message"
+                      accessibilityLabel={t('sendSheet.zapMessageLabel')}
                     />
                   )}
 
@@ -1075,19 +1093,19 @@ const SendSheet: React.FC<Props> = ({
                   {(isLightningAddress(invoiceData || '') || isLnurl) && (
                     <TouchableOpacity
                       onPress={handleEditAddress}
-                      accessibilityLabel="Edit address"
+                      accessibilityLabel={t('sendSheet.editAddress')}
                       testID="sendsheet-edit-address"
                     >
-                      <Text style={styles.resetText}>Edit address</Text>
+                      <Text style={styles.resetText}>{t('sendSheet.editAddress')}</Text>
                     </TouchableOpacity>
                   )}
 
                   <TouchableOpacity
                     onPress={handleReset}
-                    accessibilityLabel="Scan or paste a different invoice"
+                    accessibilityLabel={t('sendSheet.resetLabel')}
                     testID="sendsheet-reset"
                   >
-                    <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                    <Text style={styles.resetText}>{t('sendSheet.resetText')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1095,8 +1113,10 @@ const SendSheet: React.FC<Props> = ({
               {/* Balance */}
               {walletBalance !== null && btcPrice !== null && (
                 <Text style={styles.balanceText}>
-                  Balance: {walletBalance.toLocaleString()} sats (
-                  {satsToFiatString(walletBalance, btcPrice, currency)})
+                  {t('sendSheet.balance', {
+                    balance: walletBalance.toLocaleString(),
+                    fiat: satsToFiatString(walletBalance, btcPrice, currency),
+                  })}
                 </Text>
               )}
 
@@ -1109,19 +1129,19 @@ const SendSheet: React.FC<Props> = ({
                     onClose();
                   }}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('sendSheet.cancel')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
                   onPress={handleSend}
                   disabled={!canSend || sending}
-                  accessibilityLabel="Send"
+                  accessibilityLabel={t('sendSheet.send')}
                   testID="sendsheet-send-button"
                 >
                   {sending ? (
                     <ActivityIndicator color={colors.brandPink} />
                   ) : (
-                    <Text style={styles.sendButtonText}>Send</Text>
+                    <Text style={styles.sendButtonText}>{t('sendSheet.send')}</Text>
                   )}
                 </TouchableOpacity>
               </View>

@@ -13,6 +13,7 @@ import {
 import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native';
 import { createMissionDetailScreenStyles } from '../styles/MissionDetailScreen.styles';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { extractYouTubeId } from '../utils/youtube';
 
 import { ExploreNavigation, MissionDetailRoute } from '../navigation/types';
@@ -24,6 +25,7 @@ interface Props {
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMissionDetailScreenStyles(colors), [colors]);
   const { courseId, missionId } = route.params;
   const course = courses.find((c) => c.id === courseId);
@@ -39,9 +41,13 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   if (!course || !mission) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
-        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>Mission not found</Text>
+        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>
+          {t('missionDetailScreen.missionNotFound')}
+        </Text>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>Go back</Text>
+          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>
+            {t('missionDetailScreen.goBack')}
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -74,7 +80,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             onPress={() =>
               Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch((e) => {
                 console.warn('Failed to open URL:', e);
-                Alert.alert('Unable to open link', 'Please try again later.');
+                Alert.alert(
+                  t('missionDetailScreen.unableToOpenLinkTitle'),
+                  t('missionDetailScreen.unableToOpenLinkMessage'),
+                );
               })
             }
             activeOpacity={0.8}
@@ -88,7 +97,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={styles.videoTouchable}>
             <Image source={thumbnailSource} style={styles.videoThumbnail} resizeMode="cover" />
             <View style={styles.comingSoonBubble}>
-              <Text style={styles.comingSoonBubbleText}>Coming soon</Text>
+              <Text style={styles.comingSoonBubbleText}>{t('missionDetailScreen.comingSoon')}</Text>
             </View>
           </View>
         )}
@@ -105,7 +114,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             onPress={() =>
               Linking.openURL(mission.producer!.channelUrl).catch((e) => {
                 console.warn('Failed to open URL:', e);
-                Alert.alert('Unable to open link', 'Please try again later.');
+                Alert.alert(
+                  t('missionDetailScreen.unableToOpenLinkTitle'),
+                  t('missionDetailScreen.unableToOpenLinkMessage'),
+                );
               })
             }
           >
@@ -121,21 +133,26 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             onPress={() =>
               Linking.openURL(mission.fullVideoUrl!).catch((e) => {
                 console.warn('Failed to open URL:', e);
-                Alert.alert('Unable to open link', 'Please try again later.');
+                Alert.alert(
+                  t('missionDetailScreen.unableToOpenLinkTitle'),
+                  t('missionDetailScreen.unableToOpenLinkMessage'),
+                );
               })
             }
           >
-            <Text style={styles.fullEpisodeLink}>Watch full episode free</Text>
+            <Text style={styles.fullEpisodeLink}>{t('missionDetailScreen.watchFullEpisode')}</Text>
           </TouchableOpacity>
         )}
 
         {/* Mission info */}
-        <Text style={styles.missionLabel}>Mission {mission.number}</Text>
+        <Text style={styles.missionLabel}>
+          {t('missionDetailScreen.missionLabel', { number: mission.number })}
+        </Text>
         <Text style={styles.missionTitle}>{mission.title}</Text>
         <Text style={styles.missionDescription}>{mission.description}</Text>
 
         {/* Learning outcomes */}
-        <Text style={styles.outcomesTitle}>Learning outcomes</Text>
+        <Text style={styles.outcomesTitle}>{t('missionDetailScreen.learningOutcomes')}</Text>
         {mission.learningOutcomes.map((outcome, index) => (
           <View key={index} style={styles.outcomeRow}>
             <View style={[styles.outcomeDot, completed && styles.outcomeDotComplete]}>
@@ -148,19 +165,21 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {/* Complete button */}
         {isComingSoon ? (
           <View style={[styles.completeButton, styles.completeButtonDisabled]}>
-            <Text style={styles.completeButtonText}>Mark as Complete</Text>
+            <Text style={styles.completeButtonText}>{t('missionDetailScreen.markAsComplete')}</Text>
           </View>
         ) : !completed ? (
           <TouchableOpacity style={styles.completeButton} onPress={handleToggle}>
-            <Text style={styles.completeButtonText}>Mark as Complete</Text>
+            <Text style={styles.completeButtonText}>{t('missionDetailScreen.markAsComplete')}</Text>
           </TouchableOpacity>
         ) : (
           <>
             <View style={styles.completedBanner}>
-              <Text style={styles.completedBannerText}>Mission Complete!</Text>
+              <Text style={styles.completedBannerText}>
+                {t('missionDetailScreen.missionComplete')}
+              </Text>
             </View>
             <TouchableOpacity onPress={handleToggle}>
-              <Text style={styles.incompleteLink}>Mark as Incomplete</Text>
+              <Text style={styles.incompleteLink}>{t('missionDetailScreen.markAsIncomplete')}</Text>
             </TouchableOpacity>
           </>
         )}

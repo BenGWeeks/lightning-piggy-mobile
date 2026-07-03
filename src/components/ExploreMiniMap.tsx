@@ -4,6 +4,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { MapPin } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createExploreMiniMapStyles } from '../styles/ExploreMiniMap.styles';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
@@ -66,6 +67,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   onSelectEvent,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createExploreMiniMapStyles(colors), [colors]);
   const isFocused = useIsFocused();
 
@@ -90,11 +92,8 @@ export const ExploreMiniMap: React.FC<Props> = ({
       <View style={styles.deniedCard}>
         <MapPin size={20} color={colors.brandPink} strokeWidth={2.5} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.deniedTitle}>Allow location for nearby content</Text>
-          <Text style={styles.deniedSub}>
-            We use a coarse 5 km area to find merchants, caches, and meetups around you. Nothing
-            leaves your device beyond that.
-          </Text>
+          <Text style={styles.deniedTitle}>{t('exploreMiniMap.allowLocationTitle')}</Text>
+          <Text style={styles.deniedSub}>{t('exploreMiniMap.allowLocationBody')}</Text>
         </View>
       </View>
     );

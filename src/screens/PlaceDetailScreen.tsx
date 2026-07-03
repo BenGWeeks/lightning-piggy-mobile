@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
@@ -120,6 +121,7 @@ const SocialRow: React.FC<{
 
 const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { placeId } = route.params;
   const [place, setPlace] = useState<BtcMapPlace | null>(null);
@@ -165,7 +167,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         const found = await fetchPlaceById(placeId);
         if (cancelled) return;
         if (!found) {
-          setError("This place isn't in our cached list anymore — try opening it from the map.");
+          setError(t('placeDetailScreen.notInCache'));
         } else {
           setPlace(found);
           // Bulk dataset only carries list-essential fields (id/lat/lon/
@@ -190,7 +192,9 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const openDirections = useCallback(() => {
     if (!place) return;
-    const label = encodeURIComponent(place.tags.name ?? 'Bitcoin place');
+    const label = encodeURIComponent(
+      place.tags.name ?? t('placeDetailScreen.bitcoinPlaceFallback'),
+    );
     const uri = `geo:${place.lat},${place.lon}?q=${place.lat},${place.lon}(${label})`;
     Linking.openURL(uri).catch(() => {
       Linking.openURL(
@@ -210,27 +214,27 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          accessibilityLabel="Back to Places"
+          accessibilityLabel={t('placeDetailScreen.backToPlaces')}
           testID="place-detail-back-button"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {place?.tags.name ?? 'Place'}
+          {place?.tags.name ?? t('placeDetailScreen.placeFallback')}
         </Text>
         {place && btcMapMerchantUrl(place) ? (
           <TouchableOpacity
             onPress={() => {
               const url = btcMapMerchantUrl(place)!;
-              const name = place.tags.name ?? 'this Bitcoin merchant';
+              const name = place.tags.name ?? t('placeDetailScreen.thisBitcoinMerchant');
               Share.share({
-                message: `${name} accepts Bitcoin — ${url}`,
+                message: t('placeDetailScreen.shareMessage', { name, url }),
                 url,
                 title: name,
               }).catch(() => {});
             }}
-            accessibilityLabel="Share this merchant"
+            accessibilityLabel={t('placeDetailScreen.shareThisMerchant')}
             testID="place-detail-share-header"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -257,37 +261,40 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
                 );
               })()}
-              <Text style={styles.title}>{place.tags.name ?? 'Unnamed merchant'}</Text>
+              <Text style={styles.title}>
+                {place.tags.name ?? t('placeDetailScreen.unnamedMerchant')}
+              </Text>
             </View>
             <View style={styles.chipRow}>
               {isBoosted(place) ? (
                 <View style={styles.chipFeatured} testID="place-detail-featured-chip">
                   <Sparkles size={12} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.chipPinkText}>Featured</Text>
+                  <Text style={styles.chipPinkText}>{t('placeDetailScreen.featured')}</Text>
                 </View>
               ) : null}
               {acceptsLightning(place) ? (
                 <View style={styles.chipPink}>
                   <Zap size={12} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.chipPinkText}>Lightning</Text>
+                  <Text style={styles.chipPinkText}>{t('placeDetailScreen.lightning')}</Text>
                 </View>
               ) : null}
               {acceptsOnchain(place) ? (
                 <View style={styles.chipOrange}>
                   <MapPin size={12} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.chipPinkText}>On-chain</Text>
+                  <Text style={styles.chipPinkText}>{t('placeDetailScreen.onChain')}</Text>
                 </View>
               ) : null}
               {pos ? (
                 <View style={styles.chipGrey}>
                   <Text style={styles.chipGreyText}>
-                    {formatDistance(
-                      haversineMetres(
-                        { lat: pos.lat, lon: pos.lon },
-                        { lat: place.lat, lon: place.lon },
+                    {t('placeDetailScreen.distanceAway', {
+                      distance: formatDistance(
+                        haversineMetres(
+                          { lat: pos.lat, lon: pos.lon },
+                          { lat: place.lat, lon: place.lon },
+                        ),
                       ),
-                    )}{' '}
-                    away
+                    })}
                   </Text>
                 </View>
               ) : null}
@@ -299,27 +306,29 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Accessibility size={12} color={colors.textHeader} strokeWidth={2.5} />
                   <Text style={styles.chipFeatureText}>
                     {place.tags['wheelchair'] === 'limited'
-                      ? 'Wheelchair limited'
-                      : 'Wheelchair accessible'}
+                      ? t('placeDetailScreen.wheelchairLimited')
+                      : t('placeDetailScreen.wheelchairAccessible')}
                   </Text>
                 </View>
               ) : null}
               {place.tags['takeaway'] === 'yes' ? (
                 <View style={styles.chipFeature}>
                   <ShoppingBag size={12} color={colors.textHeader} strokeWidth={2.5} />
-                  <Text style={styles.chipFeatureText}>Takeaway</Text>
+                  <Text style={styles.chipFeatureText}>{t('placeDetailScreen.takeaway')}</Text>
                 </View>
               ) : null}
               {place.tags['delivery'] === 'yes' ? (
                 <View style={styles.chipFeature}>
                   <Truck size={12} color={colors.textHeader} strokeWidth={2.5} />
-                  <Text style={styles.chipFeatureText}>Delivery</Text>
+                  <Text style={styles.chipFeatureText}>{t('placeDetailScreen.delivery')}</Text>
                 </View>
               ) : null}
               {place.tags['outdoor_seating'] === 'yes' ? (
                 <View style={styles.chipFeature}>
                   <Trees size={12} color={colors.textHeader} strokeWidth={2.5} />
-                  <Text style={styles.chipFeatureText}>Outdoor seating</Text>
+                  <Text style={styles.chipFeatureText}>
+                    {t('placeDetailScreen.outdoorSeating')}
+                  </Text>
                 </View>
               ) : null}
             </View>
@@ -327,16 +336,22 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.address}>{formatAddress(place)}</Text>
 
             {place.tags['brand'] ? (
-              <Text style={styles.metaLine}>Part of {place.tags['brand']}</Text>
+              <Text style={styles.metaLine}>
+                {t('placeDetailScreen.partOf', { brand: place.tags['brand'] })}
+              </Text>
             ) : null}
             {place.tags['cuisine'] ? (
               <Text style={styles.metaLine}>
-                Cuisine · {place.tags['cuisine'].replace(/;/g, ', ')}
+                {t('placeDetailScreen.cuisine', {
+                  value: place.tags['cuisine'].replace(/;/g, ', '),
+                })}
               </Text>
             ) : null}
             {place.tags['level'] || place.tags['addr:floor'] ? (
               <Text style={styles.metaLine}>
-                Floor {place.tags['level'] ?? place.tags['addr:floor']}
+                {t('placeDetailScreen.floor', {
+                  value: place.tags['level'] ?? place.tags['addr:floor'],
+                })}
               </Text>
             ) : null}
             {place.tags['wheelchair:description'] ? (
@@ -367,7 +382,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.primaryAction}
                   testID="place-detail-pay-button"
-                  accessibilityLabel="Pay this merchant"
+                  accessibilityLabel={t('placeDetailScreen.payThisMerchant')}
                   onPress={() => {
                     // TODO: route through SendSheet with the lud16 pre-filled.
                     // For now nudge into the user's flow via deep-link.
@@ -376,14 +391,14 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   }}
                 >
                   <Zap size={16} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryActionText}>Pay</Text>
+                  <Text style={styles.primaryActionText}>{t('placeDetailScreen.pay')}</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
 
             {place.opening_hours ? (
               <View style={styles.contactSection}>
-                <Text style={styles.sectionLabel}>Opening hours</Text>
+                <Text style={styles.sectionLabel}>{t('placeDetailScreen.openingHours')}</Text>
                 <View style={styles.contactRow}>
                   <Clock size={14} color={colors.brandPink} strokeWidth={2.5} />
                   <Text style={styles.contactText}>{place.opening_hours}</Text>
@@ -400,7 +415,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             place.telegramUrl ||
             place.whatsappUrl ? (
               <View style={styles.contactSection}>
-                <Text style={styles.sectionLabel}>Contact</Text>
+                <Text style={styles.sectionLabel}>{t('placeDetailScreen.contact')}</Text>
                 {place.phone ? (
                   <TouchableOpacity
                     style={styles.contactRow}
@@ -458,25 +473,29 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.lifecycleBlock}>
                 {place.tags['check_date:currency:XBT'] ? (
                   <Text style={styles.lifecycleText}>
-                    Bitcoin acceptance confirmed {place.tags['check_date:currency:XBT']}.
+                    {t('placeDetailScreen.acceptanceConfirmed', {
+                      date: place.tags['check_date:currency:XBT'],
+                    })}
                   </Text>
                 ) : null}
                 {place.verified_at ? (
                   <Text style={styles.lifecycleText}>
-                    Last community-verified {daysSinceVerified(place)} days ago via OpenStreetMap.
+                    {t('placeDetailScreen.lastVerified', { days: daysSinceVerified(place) })}
                   </Text>
                 ) : null}
                 {place.updatedAt ? (
                   <Text style={styles.lifecycleText}>
-                    Last updated {formatYMD(place.updatedAt)}.
+                    {t('placeDetailScreen.lastUpdated', { date: formatYMD(place.updatedAt) })}
                   </Text>
                 ) : null}
                 {place.tags['start_date'] ? (
-                  <Text style={styles.lifecycleText}>Open since {place.tags['start_date']}.</Text>
+                  <Text style={styles.lifecycleText}>
+                    {t('placeDetailScreen.openSince', { date: place.tags['start_date'] })}
+                  </Text>
                 ) : null}
                 {place.createdAt ? (
                   <Text style={styles.lifecycleText}>
-                    Listed on BTC Map {formatYMD(place.createdAt)}.
+                    {t('placeDetailScreen.listedOnBtcMap', { date: formatYMD(place.createdAt) })}
                   </Text>
                 ) : null}
                 {(place.commentsCount ?? 0) > 0 && btcMapMerchantUrl(place) ? (
@@ -485,9 +504,11 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="place-detail-comments-link"
                   >
                     <Text style={[styles.lifecycleText, styles.commentsLink]}>
-                      {place.commentsCount}{' '}
-                      {place.commentsCount === 1 ? 'community note' : 'community notes'} on BTC Map
-                      →
+                      {place.commentsCount === 1
+                        ? t('placeDetailScreen.communityNote', { count: place.commentsCount ?? 0 })
+                        : t('placeDetailScreen.communityNotes', {
+                            count: place.commentsCount ?? 0,
+                          })}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -502,11 +523,11 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 style={[styles.btcMapActionButton, styles.btcMapActionButtonPrimary]}
                 onPress={openDirections}
                 testID="place-detail-directions-button"
-                accessibilityLabel="Open directions"
+                accessibilityLabel={t('placeDetailScreen.openDirections')}
               >
                 <NavigationIcon size={14} color={colors.white} strokeWidth={2.5} />
                 <Text style={[styles.btcMapActionText, styles.btcMapActionTextPrimary]}>
-                  Directions
+                  {t('placeDetailScreen.directions')}
                 </Text>
               </TouchableOpacity>
               {btcMapVerifyUrl(place) ? (
@@ -514,10 +535,12 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   style={styles.btcMapActionButton}
                   onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
                   testID="place-detail-verify"
-                  accessibilityLabel="Verify this listing on BTC Map"
+                  accessibilityLabel={t('placeDetailScreen.verifyListing')}
                 >
                   <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.btcMapActionText}>Verify on BTC Map</Text>
+                  <Text style={styles.btcMapActionText}>
+                    {t('placeDetailScreen.verifyOnBtcMap')}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
               {btcMapMerchantUrl(place) ? (
@@ -525,10 +548,10 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   style={styles.btcMapActionButton}
                   onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
                   testID="place-detail-suggest-edit"
-                  accessibilityLabel="Suggest an edit on BTC Map"
+                  accessibilityLabel={t('placeDetailScreen.suggestEditOnBtcMap')}
                 >
                   <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.btcMapActionText}>Suggest an edit</Text>
+                  <Text style={styles.btcMapActionText}>{t('placeDetailScreen.suggestEdit')}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>

@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
@@ -48,13 +49,18 @@ interface Props {
   refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
-function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
-  if (cp.anonymous) return 'Anonymous';
+// Translate function shape as provided by the `useTranslation()` hook. Passed
+// into render-path helpers so they use the hook translator (updates on locale
+// change immediately) rather than the module-level one (which lags the UI).
+type Translate = ReturnType<typeof useTranslation>;
+
+function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
+  if (cp.anonymous) return t('transactionList.anonymous');
   const profile = cp.profile;
   if (profile?.displayName) return profile.displayName;
   if (profile?.name) return profile.name;
   if (profile?.npub) return `${profile.npub.slice(0, 12)}…`;
-  return 'Nostr user';
+  return t('transactionList.nostrUser');
 }
 
 // Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
@@ -70,7 +76,7 @@ function splitDescription(desc: string): { primary: string; subtitle: string | n
   return { primary: trimmed, subtitle: null };
 }
 
-function formatDayHeader(ts: number): string {
+function formatDayHeader(ts: number, t: Translate): string {
   const date = new Date(ts * 1000);
   const today = new Date();
   const yesterday = new Date();
@@ -79,8 +85,8 @@ function formatDayHeader(ts: number): string {
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
-  if (sameDay(date, today)) return 'Today';
-  if (sameDay(date, yesterday)) return 'Yesterday';
+  if (sameDay(date, today)) return t('transactionList.today');
+  if (sameDay(date, yesterday)) return t('transactionList.yesterday');
   return date.toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short',
@@ -106,6 +112,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     perfLog(`TransactionList first render (${transactions.length} txs)`);
   }
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createTransactionListStyles(colors), [colors]);
   const { currency, activeWalletId } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -229,8 +236,8 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
 
   // Flatten the visible window into day-header + tx rows for the FlatList.
   const rows: TxRow[] = useMemo(
-    () => buildTransactionRows(visibleTransactions, formatDayHeader),
-    [visibleTransactions],
+    () => buildTransactionRows(visibleTransactions, (ts) => formatDayHeader(ts, t)),
+    [visibleTransactions, t],
   );
 
   // Reveal the next slice when the user scrolls near the bottom. `nextPage`
@@ -277,22 +284,22 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
       let primary: string;
       let subtitle: string | null = null;
       if (isPending) {
-        primary = 'Pending';
+        primary = t('transactionList.pending');
       } else if (zapCp) {
-        primary = zapCounterpartyLabel(zapCp);
+        primary = zapCounterpartyLabel(zapCp, t);
         subtitle = zapCp.comment?.trim() || null;
       } else if (descriptionContact) {
         primary =
           descriptionContact.profile?.displayName ??
           descriptionContact.profile?.name ??
           lud16FromDescription ??
-          (isIncoming ? 'Received' : 'Sent');
+          (isIncoming ? t('transactionList.received') : t('transactionList.sent'));
       } else if (item.description) {
         const split = splitDescription(item.description);
         primary = split.primary;
         subtitle = split.subtitle;
       } else {
-        primary = isIncoming ? 'Received' : 'Sent';
+        primary = isIncoming ? t('transactionList.received') : t('transactionList.sent');
       }
 
       // Explicit null check so a `0` (epoch) timestamp still formats instead of
@@ -311,7 +318,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
             setDetail(item as TransactionDetailData);
             setDetailIconState(rowIconState);
           }}
-          accessibilityLabel={`Open details for ${primary}`}
+          accessibilityLabel={t('transactionList.openDetailsFor', { name: primary })}
         >
           <View style={styles.avatarWrap}>
             {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
@@ -374,13 +381,13 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     },
     // iconStateFor / findLud16InDescription are stable per-render closures;
     // the maps + price + styles cover all the data they read.
-    [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency],
+    [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, t],
   );
 
   const listFooter = hasMore ? (
     <View
       style={styles.footerSpinner}
-      accessibilityLabel="Loading more transactions"
+      accessibilityLabel={t('transactionList.loadingMore')}
       testID="transaction-list-loading-more"
     >
       <ActivityIndicator size="small" color={colors.brandPink} />
@@ -406,7 +413,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
         ListFooterComponent={listFooter}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No transactions yet</Text>
+            <Text style={styles.emptyText}>{t('transactionList.noTransactions')}</Text>
           </View>
         }
         // Match the first-page window so FlatList's initial render matches the

@@ -10,39 +10,16 @@ import {
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import WebOfTrustChip from './WebOfTrustChip';
 import WebOfTrustBottomSheet from './WebOfTrustBottomSheet';
 import type { Palette } from '../styles/palettes';
 
-// Distance + date options live next to the component so the sheet
-// stays self-contained — same chip-row pattern as HuntFilterSheet but
-// single-select (radio-style): each picks a max-cap, so combining
-// them would be meaningless.
-const DISTANCE_OPTIONS: readonly { label: string; value: number | null }[] = [
-  { label: 'All', value: null },
-  { label: '5 km', value: 5_000 },
-  { label: '25 km', value: 25_000 },
-  { label: '150 km', value: 150_000 },
-  { label: '500 km', value: 500_000 },
-  { label: '1000 km', value: 1_000_000 },
-];
-
 // "Sort by" options on the Events list. Distance-first when location is
 // known; date-first when the user wants chronological ordering regardless
 // of where the meetup is.
 export type EventsSortKey = 'date' | 'distance';
-const SORT_OPTIONS: readonly { label: string; value: EventsSortKey }[] = [
-  { label: 'Date', value: 'date' },
-  { label: 'Distance', value: 'distance' },
-];
-
-const DATE_OPTIONS: readonly { label: string; value: number | null }[] = [
-  { label: 'Anytime', value: null },
-  { label: 'Today', value: 24 * 60 * 60 },
-  { label: 'This week', value: 7 * 24 * 60 * 60 },
-  { label: 'This month', value: 31 * 24 * 60 * 60 },
-];
 
 interface Props {
   visible: boolean;
@@ -72,12 +49,47 @@ const EventsFilterSheet: React.FC<Props> = ({
   onClearAll,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // The WoT tier lives in TrustGraphContext; the picker UI is the shared
   // `WebOfTrustBottomSheet`. This sheet just renders the current-tier
   // chip and opens the picker on tap.
   const { wotTier } = useTrustGraph();
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
+
+  // Distance + date options are single-select max-caps (radio-style):
+  // each picks a max-cap, so combining them would be meaningless. `id`
+  // is a stable, locale-independent token used for testIDs; `label` is
+  // the translated display string.
+  const DISTANCE_OPTIONS: readonly { id: string; label: string; value: number | null }[] = useMemo(
+    () => [
+      { id: 'All', label: t('eventsFilterSheet.distanceAll'), value: null },
+      { id: '5km', label: '5 km', value: 5_000 },
+      { id: '25km', label: '25 km', value: 25_000 },
+      { id: '150km', label: '150 km', value: 150_000 },
+      { id: '500km', label: '500 km', value: 500_000 },
+      { id: '1000km', label: '1000 km', value: 1_000_000 },
+    ],
+    [t],
+  );
+
+  const SORT_OPTIONS: readonly { label: string; value: EventsSortKey }[] = useMemo(
+    () => [
+      { label: t('eventsFilterSheet.sortDate'), value: 'date' },
+      { label: t('eventsFilterSheet.sortDistance'), value: 'distance' },
+    ],
+    [t],
+  );
+
+  const DATE_OPTIONS: readonly { id: string; label: string; value: number | null }[] = useMemo(
+    () => [
+      { id: 'Anytime', label: t('eventsFilterSheet.dateAnytime'), value: null },
+      { id: 'Today', label: t('eventsFilterSheet.dateToday'), value: 24 * 60 * 60 },
+      { id: 'Thisweek', label: t('eventsFilterSheet.dateThisWeek'), value: 7 * 24 * 60 * 60 },
+      { id: 'Thismonth', label: t('eventsFilterSheet.dateThisMonth'), value: 31 * 24 * 60 * 60 },
+    ],
+    [t],
+  );
 
   const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || wotTier !== 'all';
 
@@ -94,20 +106,20 @@ const EventsFilterSheet: React.FC<Props> = ({
       >
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Filters</Text>
+          <Text style={styles.title}>{t('eventsFilterSheet.title')}</Text>
           {anyActive ? (
             <TouchableOpacity
               onPress={onClearAll}
               testID="events-filter-clear-all"
-              accessibilityLabel="Clear all filters"
+              accessibilityLabel={t('eventsFilterSheet.clearAllAccessibility')}
             >
-              <Text style={styles.clearText}>Clear all</Text>
+              <Text style={styles.clearText}>{t('eventsFilterSheet.clearAll')}</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
             onPress={onClose}
             testID="events-filter-close"
-            accessibilityLabel="Close filters"
+            accessibilityLabel={t('eventsFilterSheet.closeAccessibility')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <X size={20} color={colors.textHeader} strokeWidth={2.5} />
@@ -116,7 +128,7 @@ const EventsFilterSheet: React.FC<Props> = ({
 
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
           {/* Web-of-Trust — chip + tap-to-open-sheet (#535) */}
-          <Text style={styles.section}>Safety</Text>
+          <Text style={styles.section}>{t('eventsFilterSheet.safety')}</Text>
           <View style={styles.wotRow}>
             <WebOfTrustChip
               currentTier={wotTier}
@@ -124,19 +136,18 @@ const EventsFilterSheet: React.FC<Props> = ({
               testID="events-filter-wot-chip"
             />
             {wotUntrustedHidden > 0 ? (
-              <Text style={styles.wotHiddenCount}>{wotUntrustedHidden} hidden</Text>
+              <Text style={styles.wotHiddenCount}>
+                {t('eventsFilterSheet.hiddenCount', { count: wotUntrustedHidden })}
+              </Text>
             ) : null}
           </View>
-          <Text style={styles.sectionHint}>
-            Only events from organisers your trust graph reaches are shown — tap the chip to widen
-            the tier.
-          </Text>
+          <Text style={styles.sectionHint}>{t('eventsFilterSheet.safetyHint')}</Text>
 
           {/* Sort by — single-select. Default 'date' (chronological is the
             most natural ordering for a meetup list), but distance-sort
             useful when the user is filtering for a wide radius and wants
             to see the nearest meetups first. */}
-          <Text style={styles.section}>Sort by</Text>
+          <Text style={styles.section}>{t('eventsFilterSheet.sortBy')}</Text>
           <View style={styles.chipRow}>
             {SORT_OPTIONS.map((opt) => {
               const active = sortBy === opt.value;
@@ -146,7 +157,7 @@ const EventsFilterSheet: React.FC<Props> = ({
                   style={[styles.chip, active ? styles.chipActive : null]}
                   onPress={() => onChangeSortBy(opt.value)}
                   testID={`events-filter-sort-${opt.value}`}
-                  accessibilityLabel={`Sort by ${opt.label}`}
+                  accessibilityLabel={t('eventsFilterSheet.sortByLabel', { label: opt.label })}
                 >
                   <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
                     {opt.label}
@@ -157,17 +168,19 @@ const EventsFilterSheet: React.FC<Props> = ({
           </View>
 
           {/* Distance — single-select max-cap */}
-          <Text style={styles.section}>Distance</Text>
+          <Text style={styles.section}>{t('eventsFilterSheet.distance')}</Text>
           <View style={styles.chipRow}>
             {DISTANCE_OPTIONS.map((opt) => {
               const active = maxDistanceMetres === opt.value;
               return (
                 <TouchableOpacity
-                  key={opt.label}
+                  key={opt.id}
                   style={[styles.chip, active ? styles.chipActive : null]}
                   onPress={() => onChangeMaxDistance(opt.value)}
-                  testID={`events-filter-distance-${opt.label.replace(/\s/g, '')}`}
-                  accessibilityLabel={`Show events within ${opt.label}`}
+                  testID={`events-filter-distance-${opt.id}`}
+                  accessibilityLabel={t('eventsFilterSheet.showEventsWithin', {
+                    distance: opt.label,
+                  })}
                 >
                   <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
                     {opt.label}
@@ -178,17 +191,17 @@ const EventsFilterSheet: React.FC<Props> = ({
           </View>
 
           {/* Date range — single-select max-cap */}
-          <Text style={styles.section}>Date range</Text>
+          <Text style={styles.section}>{t('eventsFilterSheet.dateRange')}</Text>
           <View style={styles.chipRow}>
             {DATE_OPTIONS.map((opt) => {
               const active = maxFromNowSec === opt.value;
               return (
                 <TouchableOpacity
-                  key={opt.label}
+                  key={opt.id}
                   style={[styles.chip, active ? styles.chipActive : null]}
                   onPress={() => onChangeMaxFromNow(opt.value)}
-                  testID={`events-filter-date-${opt.label.replace(/\s/g, '')}`}
-                  accessibilityLabel={`Show events ${opt.label}`}
+                  testID={`events-filter-date-${opt.id}`}
+                  accessibilityLabel={t('eventsFilterSheet.showEventsDate', { range: opt.label })}
                 >
                   <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
                     {opt.label}
@@ -203,9 +216,9 @@ const EventsFilterSheet: React.FC<Props> = ({
           style={styles.doneButton}
           onPress={onClose}
           testID="events-filter-done"
-          accessibilityLabel="Apply filters"
+          accessibilityLabel={t('eventsFilterSheet.applyAccessibility')}
         >
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={styles.doneText}>{t('eventsFilterSheet.done')}</Text>
         </TouchableOpacity>
 
         <WebOfTrustBottomSheet
