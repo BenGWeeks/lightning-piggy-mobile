@@ -23,8 +23,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { CardTheme, WalletType } from '../types/wallet';
-import { themeList } from '../themes/cardThemes';
-import { MiniWalletCard } from './WalletCard';
+import WalletCardPicker from './WalletCardPicker';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateOnchainImport } from '../services/onchainService';
 import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
@@ -628,16 +627,11 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
           {step === 'theme' && (
             <View style={styles.stepContent}>
               <Text style={styles.description}>Choose a card design for this wallet.</Text>
-              <View style={styles.themeGrid}>
-                {themeList.map((theme) => (
-                  <MiniWalletCard
-                    key={theme.id}
-                    theme={theme}
-                    selected={selectedTheme === theme.id}
-                    onPress={() => setSelectedTheme(theme.id)}
-                  />
-                ))}
-              </View>
+              <WalletCardPicker
+                selectedTheme={selectedTheme}
+                onSelect={setSelectedTheme}
+                variant="coverflow"
+              />
               {error && <Text style={styles.errorText}>{error}</Text>}
               <View style={styles.buttonRow}>
                 <TouchableOpacity

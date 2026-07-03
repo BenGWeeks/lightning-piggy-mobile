@@ -12,8 +12,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
-import { themeList } from '../themes/cardThemes';
-import { MiniWalletCard } from './WalletCard';
+import WalletCardPicker from './WalletCardPicker';
 import {
   getXpub,
   getNwcUrl,
@@ -42,7 +41,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
-  // + full 8-card theme grid) is long enough that dynamic sizing pushed
+  // + full 15-card theme picker) is long enough that dynamic sizing pushed
   // it to 100% and the handle was tight against the status bar.
   const snapPoints = useMemo(() => ['85%'], []);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -458,16 +457,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           )}
 
           <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
-          <View style={styles.themeGrid}>
-            {themeList.map((theme) => (
-              <MiniWalletCard
-                key={theme.id}
-                theme={theme}
-                selected={selectedTheme === theme.id}
-                onPress={() => setSelectedTheme(theme.id)}
-              />
-            ))}
-          </View>
+          <WalletCardPicker selectedTheme={selectedTheme} onSelect={setSelectedTheme} />
 
           <TouchableOpacity
             style={styles.saveButton}

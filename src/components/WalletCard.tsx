@@ -12,7 +12,8 @@ import { useThemeColors } from '../contexts/ThemeContext';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
 export const CARD_WIDTH = SCREEN_WIDTH - CARD_MARGIN * 2;
-const CARD_HEIGHT = 200;
+export const CARD_HEIGHT = 200;
+export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT;
 
 // Mini preview is the full card scaled down
 const MINI_CONTAINER_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // ~47% of sheet width
@@ -30,6 +31,10 @@ interface MiniCardProps {
   theme: CardThemeConfig;
   selected?: boolean;
   onPress?: () => void;
+  // Rendered width. Defaults to the 2-up grid width; the cover-flow picker
+  // passes a larger value. Height + scale are derived to keep the card's
+  // aspect ratio.
+  width?: number;
 }
 
 /** Full card visual — used both directly and scaled for mini previews */
@@ -199,24 +204,31 @@ const CardContent: React.FC<{
 };
 
 /** Mini card for theme selection — renders the full card design scaled down */
-export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPress }) => {
+export const MiniWalletCard: React.FC<MiniCardProps> = ({
+  theme,
+  selected,
+  onPress,
+  width = MINI_CONTAINER_WIDTH,
+}) => {
+  const scale = width / CARD_WIDTH;
+  const height = CARD_HEIGHT * scale;
   return (
     <TouchableOpacity
-      style={[styles.miniCardContainer, selected && styles.miniCardSelected]}
+      style={[styles.miniCardContainer, { width, height }, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityLabel={`${theme.name} card design`}
       testID={`theme-${theme.id}`}
     >
-      <View style={styles.miniScaleWrapper}>
+      <View style={[styles.miniScaleWrapper, { width, height }]}>
         <View
           style={{
             width: CARD_WIDTH,
             height: CARD_HEIGHT,
             transform: [
-              { translateX: -(CARD_WIDTH * (1 - MINI_SCALE)) / 2 },
-              { translateY: -(CARD_HEIGHT * (1 - MINI_SCALE)) / 2 },
-              { scale: MINI_SCALE },
+              { translateX: -(CARD_WIDTH * (1 - scale)) / 2 },
+              { translateY: -(CARD_HEIGHT * (1 - scale)) / 2 },
+              { scale },
             ],
           }}
         >
