@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, GestureResponderEvent } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -49,6 +50,7 @@ const FULL_ALPHABET = [
 const AlphabetBar: React.FC<Props> = React.memo(
   ({ letters, currentLetter, onLetterPress }) => {
     const colors = useThemeColors();
+    const t = useTranslation();
     const styles = useMemo(() => createStyles(colors), [colors]);
     const [tapped, setTapped] = useState<string | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,7 +139,7 @@ const AlphabetBar: React.FC<Props> = React.memo(
         ref={barRef}
         style={styles.alphabetBar}
         accessibilityRole="list"
-        accessibilityLabel="Alphabet index"
+        accessibilityLabel={t('alphabetBar.alphabetIndex')}
         onLayout={(e) => {
           barLayout.current.height = e.nativeEvent.layout.height;
         }}
@@ -157,7 +159,11 @@ const AlphabetBar: React.FC<Props> = React.memo(
               onPress={() => enabled && handlePress(letter)}
               disabled={!enabled}
               accessibilityRole="button"
-              accessibilityLabel={enabled ? `Jump to ${letter}` : `${letter} (no contacts)`}
+              accessibilityLabel={
+                enabled
+                  ? t('alphabetBar.jumpTo', { letter })
+                  : t('alphabetBar.noContacts', { letter })
+              }
               accessibilityState={{ disabled: !enabled }}
               testID={`alphabet-${letter}`}
             >
@@ -205,8 +211,10 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       paddingTop: 8,
       paddingBottom: 8,
-      width: 22,
-      marginLeft: 2,
+      // Wider + nudged in from the screen edge so the letters are easier to
+      // tap (were tight against the left bezel at width 22 / marginLeft 2).
+      width: 26,
+      marginLeft: 6,
     },
     alphabetLetterTouch: {
       // `flex: 1` distributes the 27 letter buckets proportionally
@@ -218,7 +226,7 @@ const createStyles = (colors: Palette) =>
       flex: 1,
       paddingHorizontal: 2,
       borderRadius: 8,
-      width: 18,
+      width: 24,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -231,8 +239,8 @@ const createStyles = (colors: Palette) =>
       // remain visible in constrained layouts such as
       // FriendPickerSheet, reducing the chance that trailing letters
       // get clipped on smaller screens.
-      fontSize: 9,
-      lineHeight: 11,
+      fontSize: 11,
+      lineHeight: 13,
       fontWeight: '700',
       color: colors.textSupplementary,
       textAlign: 'center',

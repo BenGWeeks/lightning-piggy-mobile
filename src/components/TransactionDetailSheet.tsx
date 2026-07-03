@@ -7,12 +7,11 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
-import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
 import { createTransactionDetailSheetStyles } from '../styles/TransactionDetailSheet.styles';
@@ -22,11 +21,22 @@ import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import TransactionTypeIcon from './TransactionTypeIcon';
+import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t as translate } from '../i18n';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
-import { Copy, Zap, MessageCircle } from 'lucide-react-native';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Info,
+  MessageCircle,
+  XCircle,
+  Zap,
+} from 'lucide-react-native';
 
 export interface TransactionDetailData {
   type: 'incoming' | 'outgoing' | string;
@@ -56,9 +66,9 @@ export interface CounterpartyContact {
 }
 
 function zapCounterpartyName(sender: ZapCounterpartyInfo): string {
-  if (sender.anonymous) return 'Anonymous';
+  if (sender.anonymous) return translate('transactionDetailSheet.anonymous');
   const p = sender.profile;
-  return p?.displayName || p?.name || 'Nostr user';
+  return p?.displayName || p?.name || translate('transactionDetailSheet.nostrUser');
 }
 
 interface Props {
@@ -75,6 +85,12 @@ interface Props {
   onZapCounterparty?: (contact: CounterpartyContact) => void;
   /** Fired when the user taps the Message icon in the recipient/sender card. */
   onMessageCounterparty?: (contact: CounterpartyContact) => void;
+  /** Mirrors the badge state on the originating row (`TransactionTypeIcon`).
+   *  Decoupled from the live Boltz polling so the header icon stays in
+   *  lockstep with what the user just tapped in the list — and so the
+   *  explanation callout below the status pill matches what the badge
+   *  promised. See issue #519. */
+  iconState?: TransactionIconState;
 }
 
 type BoltzSwapView = {
@@ -94,18 +110,27 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onCounterpartyPress,
   onZapCounterparty,
   onMessageCounterparty,
+  iconState,
 }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
   const CopyRow: React.FC<{
     label: string;
+    /** Stable English slug used only for the explorer testID — kept
+     * independent of the translated `label` so Maestro selectors don't
+     * change across locales. */
+    fieldId: string;
     value: string;
     onCopy: (label: string, value: string) => void;
-  }> = ({ label, value, onCopy }) => (
+    /** When set, an explorer icon opens mempool.space for this txid (tap-out
+     * only — we never query the explorer, so no txid leaks unprompted). */
+    explorerTxId?: string;
+  }> = ({ label, fieldId, value, onCopy, explorerTxId }) => (
     <TouchableOpacity
       style={styles.row}
       onPress={() => onCopy(label, value)}
-      accessibilityLabel={`Copy ${label.toLowerCase()}`}
+      accessibilityLabel={t('transactionDetailSheet.copyField', { field: label.toLowerCase() })}
     >
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={styles.rowValueWrap}>
@@ -113,11 +138,30 @@ const TransactionDetailSheet: React.FC<Props> = ({
           {truncateMiddle(value)}
         </Text>
         <Copy size={14} color={colors.textSupplementary} />
+        {explorerTxId ? (
+          <TouchableOpacity
+            onPress={(e) => {
+              // Don't also trigger the parent row's copy handler — nested
+              // touchables otherwise stack both actions (Copilot review, #961).
+              e.stopPropagation();
+              Linking.openURL(`https://mempool.space/tx/${explorerTxId}`).catch(() => {});
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={t('transactionDetailSheet.viewFieldInExplorer', {
+              field: label.toLowerCase(),
+            })}
+            testID={`tx-detail-explorer-${fieldId}`}
+          >
+            <ExternalLink size={14} color={colors.brandPink} />
+          </TouchableOpacity>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
-  const { btcPrice, currency, activeWallet } = useWallet();
-  const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
+  const { currency, activeWallet } = useWallet();
+  const { btcPrice } = useWalletLive();
+  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
+  const { contacts } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [resolvedSwapId, setResolvedSwapId] = useState<string | null>(null);
@@ -153,18 +197,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     };
   }, [visible, tx, activeWallet]);
 
-  // Match Boltz-minted invoice memos ("Send to BTC address" /
-  // "Receive from BTC address") — settled swaps don't carry tx.swapId.
-  const isBoltzSwap = useMemo(() => {
-    if (!tx) return false;
-    if (tx.swapId) return true;
-    if (tx.description) {
-      if (/boltz swap/i.test(tx.description)) return true;
-      if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
-      if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
-    }
-    return false;
-  }, [tx]);
+  const isBoltzSwap = useMemo(() => swapRecoveryService.isBoltzTransaction(tx), [tx]);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,16 +206,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
       setResolvedSwapId(null);
       if (!tx || !isBoltzSwap) return;
 
-      let swapId: string | undefined = tx.swapId;
-      if (!swapId) {
-        try {
-          const indexRaw = await SecureStore.getItemAsync('boltz_swap_index');
-          if (indexRaw) {
-            const ids = JSON.parse(indexRaw) as string[];
-            swapId = ids[ids.length - 1];
-          }
-        } catch {}
-      }
+      // Only resolve a swap id we can attribute to THIS row. The old fallback
+      // took `ids[ids.length - 1]` — the most recent pending swap in the
+      // index, unrelated to the tapped row — which mislabeled the status,
+      // explanation, and support swap-id. If the row carries no swapId, show
+      // the unknown-swap state rather than guessing (swap audit finding).
+      const swapId: string | undefined = tx.swapId;
       if (!swapId || cancelled) return;
       setResolvedSwapId(swapId);
 
@@ -223,15 +252,15 @@ const TransactionDetailSheet: React.FC<Props> = ({
       await swapRecoveryService.recoverPendingSwaps();
       Toast.show({
         type: 'info',
-        text1: 'Retry kicked off',
-        text2: 'Any claimable swaps are being re-broadcast.',
+        text1: t('transactionDetailSheet.retryKickedOffTitle'),
+        text2: t('transactionDetailSheet.retryKickedOffMessage'),
         position: 'top',
         visibilityTime: 6000,
       });
     } catch (e) {
       Toast.show({
         type: 'error',
-        text1: 'Retry failed',
+        text1: t('transactionDetailSheet.retryFailedTitle'),
         text2: e instanceof Error ? e.message : String(e),
         position: 'top',
         visibilityTime: 8000,
@@ -239,17 +268,20 @@ const TransactionDetailSheet: React.FC<Props> = ({
     } finally {
       setRetrying(false);
     }
-  }, []);
+  }, [t]);
 
-  const copyValue = useCallback(async (label: string, value: string) => {
-    await Clipboard.setStringAsync(value);
-    Toast.show({
-      type: 'info',
-      text1: `${label} copied`,
-      position: 'top',
-      visibilityTime: 2000,
-    });
-  }, []);
+  const copyValue = useCallback(
+    async (label: string, value: string) => {
+      await Clipboard.setStringAsync(value);
+      Toast.show({
+        type: 'info',
+        text1: t('transactionDetailSheet.fieldCopied', { field: label }),
+        position: 'top',
+        visibilityTime: 2000,
+      });
+    },
+    [t],
+  );
 
   const renderBackdrop = useCallback(
     (p: BottomSheetBackdropProps) => (
@@ -261,15 +293,153 @@ const TransactionDetailSheet: React.FC<Props> = ({
   const statusBadge = useMemo(() => {
     if (!tx) return null;
     const pending = !tx.settled_at && !tx.blockHeight;
-    if (swap?.terminalFailure) return { style: styles.badgeFailed, text: `Swap: ${swap.status}` };
-    if (swap?.terminalSuccess) return { style: styles.badgeConfirmed, text: 'Swap complete' };
-    if (swap?.claimable) return { style: styles.badgeInfo, text: 'Claim available' };
-    if (swap) return { style: styles.badgeInfo, text: `Swap: ${swap.status}` };
-    if (pending) return { style: styles.badgePending, text: 'Pending' };
-    return { style: styles.badgeConfirmed, text: 'Confirmed' };
-  }, [tx, swap]);
+    if (swap?.terminalFailure)
+      return {
+        style: styles.badgeFailed,
+        text: t('transactionDetailSheet.swapStatus', { status: swap.status }),
+      };
+    if (swap?.terminalSuccess)
+      return { style: styles.badgeConfirmed, text: t('transactionDetailSheet.swapComplete') };
+    if (swap?.claimable)
+      return { style: styles.badgeInfo, text: t('transactionDetailSheet.claimAvailable') };
+    if (swap)
+      return {
+        style: styles.badgeInfo,
+        text: t('transactionDetailSheet.swapStatus', { status: swap.status }),
+      };
+    if (pending) return { style: styles.badgePending, text: t('transactionDetailSheet.pending') };
+    return { style: styles.badgeConfirmed, text: t('transactionDetailSheet.confirmed') };
+  }, [tx, swap, styles, t]);
+
+  /** Plain-English explanation of where this Boltz swap is right now.
+   *  Only set when the row is a Boltz swap — vanilla LN/on-chain rows
+   *  don't need it. Combines the icon-state the row decided on with the
+   *  live `swap` poll, so the copy stays accurate even after the user
+   *  taps in. */
+  const boltzExplanation = useMemo(() => {
+    if (!tx || !isBoltzSwap) return null;
+    const pending = !tx.settled_at && !tx.blockHeight;
+    // Prefer live Boltz poll results (`swap.*`) over `iconState` whenever
+    // they're available: `iconState` is snapshotted from the row tap and
+    // can be stale, whereas the live poll is the latest server-side truth.
+    // Fall through to `iconState`-driven copy only when the live state is
+    // ambiguous or hasn't loaded yet.
+    if (swap?.terminalFailure) {
+      return {
+        tone: 'failure' as const,
+        heading: t('transactionDetailSheet.swapFailedHeading'),
+        body: t('transactionDetailSheet.swapFailedBody', { status: swap.status }),
+      };
+    }
+    if (swap?.terminalSuccess) {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: t('transactionDetailSheet.swapComplete'),
+        body: incoming
+          ? t('transactionDetailSheet.swapCompleteIncomingBody')
+          : t('transactionDetailSheet.swapCompleteOutgoingBody'),
+      };
+    }
+    // Live poll says claimable AND the row is flagged for attention: our
+    // claim hasn't broadcast — show the actionable warning callout.
+    if (swap?.claimable && iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: t('transactionDetailSheet.needsAttentionHeading'),
+        body: t('transactionDetailSheet.needsAttentionBody'),
+      };
+    }
+    // Live poll says claimable, but the row isn't (yet) in the attention
+    // set — most likely the claim is mid-broadcast on the happy path.
+    if (swap?.claimable) {
+      return {
+        tone: 'info' as const,
+        heading: t('transactionDetailSheet.claimBroadcastingHeading'),
+        body: t('transactionDetailSheet.claimBroadcastingBody'),
+      };
+    }
+    // No live swap data yet — trust the row-tap iconState as a fallback.
+    if (iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: t('transactionDetailSheet.needsAttentionHeading'),
+        body: t('transactionDetailSheet.needsAttentionBody'),
+      };
+    }
+    if (iconState === 'done') {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: t('transactionDetailSheet.swapComplete'),
+        body: incoming
+          ? t('transactionDetailSheet.swapCompleteIncomingBody')
+          : t('transactionDetailSheet.swapCompleteOutgoingBody'),
+      };
+    }
+    if (pending) {
+      if (swap?.status === 'invoice.set' || swap?.status === 'swap.created') {
+        return {
+          tone: 'info' as const,
+          heading: t('transactionDetailSheet.swapInProgressHeading'),
+          body: t('transactionDetailSheet.swapInProgressWaitingBody'),
+        };
+      }
+      return {
+        tone: 'info' as const,
+        heading: t('transactionDetailSheet.swapInProgressHeading'),
+        body: swap?.status
+          ? t('transactionDetailSheet.swapInProgressStatusBody', { status: swap.status })
+          : t('transactionDetailSheet.swapInProgressCheckingBody'),
+      };
+    }
+    return null;
+  }, [tx, isBoltzSwap, iconState, swap, t]);
+
+  const calloutTone = boltzExplanation
+    ? (() => {
+        switch (boltzExplanation.tone) {
+          case 'warning':
+            return {
+              bg: colors.zapYellowLight,
+              accent: colors.zapYellow,
+              ink: colors.zapYellowDark,
+              Icon: AlertTriangle,
+            };
+          case 'success':
+            return {
+              bg: colors.greenLight,
+              accent: colors.green,
+              ink: colors.greenDark,
+              Icon: CheckCircle2,
+            };
+          case 'failure':
+            return {
+              bg: colors.redLight,
+              accent: colors.red,
+              ink: colors.red,
+              Icon: XCircle,
+            };
+          case 'info':
+          default:
+            return {
+              bg: colors.brandPinkLight,
+              accent: colors.brandPink,
+              ink: colors.textBody,
+              Icon: Info,
+            };
+        }
+      })()
+    : null;
 
   const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
+
+  // Claim txid (the on-chain tx that swept the lockup to our destination)
+  // for outgoing reverse swaps we performed the claim on. Sourced from
+  // swapRecoveryService's claimed-hash cache — `null` means we know the
+  // swap was claimed but don't have the txid (terminal-success poll), and
+  // `undefined` means the claim isn't recorded at all.
+  const claimTxId = tx?.paymentHash ? swapRecoveryService.getClaimTxId(tx.paymentHash) : undefined;
 
   const boltzInitialMessage = useMemo(() => {
     if (!tx) return '';
@@ -277,20 +447,31 @@ const TransactionDetailSheet: React.FC<Props> = ({
     const amount = Math.abs(tx.amount);
     const dateTs = tx.settled_at || tx.created_at;
     const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
-    const lines: string[] = ['Hi Boltz support,', ''];
-    lines.push('I have a question about this transaction:');
-    if (effectiveSwapId) lines.push(`• Swap ID: ${effectiveSwapId}`);
-    if (swap?.status) lines.push(`• Swap status: ${swap.status}`);
-    if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
-    if (tx.txid) lines.push(`• On-chain tx: ${tx.txid}`);
-    if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
-    lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
-    lines.push(`• Amount: ${amount.toLocaleString()} sats`);
-    if (dateStr) lines.push(`• Time: ${dateStr}`);
-    lines.push('', 'Details:');
-    lines.push('(describe the issue)');
+    const lines: string[] = [t('transactionDetailSheet.supportGreeting'), ''];
+    lines.push(t('transactionDetailSheet.supportIntro'));
+    if (effectiveSwapId)
+      lines.push(t('transactionDetailSheet.supportSwapId', { value: effectiveSwapId }));
+    if (swap?.status)
+      lines.push(t('transactionDetailSheet.supportSwapStatus', { value: swap.status }));
+    if (swap?.lockupTxId)
+      lines.push(t('transactionDetailSheet.supportLockupTx', { value: swap.lockupTxId }));
+    if (claimTxId) lines.push(t('transactionDetailSheet.supportClaimTx', { value: claimTxId }));
+    if (tx.txid) lines.push(t('transactionDetailSheet.supportOnchainTx', { value: tx.txid }));
+    if (tx.paymentHash)
+      lines.push(t('transactionDetailSheet.supportPaymentHash', { value: tx.paymentHash }));
+    lines.push(
+      t('transactionDetailSheet.supportDirection', {
+        value: isIncoming
+          ? t('transactionDetailSheet.directionReceived')
+          : t('transactionDetailSheet.directionSent'),
+      }),
+    );
+    lines.push(t('transactionDetailSheet.supportAmount', { amount: amount.toLocaleString() }));
+    if (dateStr) lines.push(t('transactionDetailSheet.supportTime', { value: dateStr }));
+    lines.push('', t('transactionDetailSheet.supportDetails'));
+    lines.push(t('transactionDetailSheet.supportDescribeIssue'));
     return lines.join('\n');
-  }, [tx, effectiveSwapId, swap]);
+  }, [tx, effectiveSwapId, swap, claimTxId, t]);
 
   if (!tx) return null;
 
@@ -340,7 +521,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <TransactionTypeIcon category={getTxCategory(tx)} size={56} />
+              <TransactionTypeIcon category={getTxCategory(tx)} size={56} state={iconState} />
             </View>
             <Text
               style={[
@@ -358,11 +539,55 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 <Text style={styles.badgeText}>{statusBadge.text}</Text>
               </View>
             ) : null}
+            {boltzExplanation && calloutTone
+              ? (() => {
+                  const CalloutIcon = calloutTone.Icon;
+                  return (
+                    <View
+                      style={[
+                        styles.callout,
+                        { backgroundColor: calloutTone.bg, borderLeftColor: calloutTone.accent },
+                      ]}
+                      // `accessible` is required for the combined
+                      // accessibilityLabel below to be announced as a
+                      // single element to screen readers — without it
+                      // the role/label can be skipped or split across
+                      // the child Text nodes. `accessibilityLiveRegion`
+                      // makes warning/failure callouts announce
+                      // unprompted when they appear, matching the
+                      // BrandedAlert convention used elsewhere in the
+                      // app for actionable callouts.
+                      accessible
+                      accessibilityRole={boltzExplanation.tone === 'warning' ? 'alert' : undefined}
+                      accessibilityLiveRegion={
+                        boltzExplanation.tone === 'warning' || boltzExplanation.tone === 'failure'
+                          ? 'assertive'
+                          : 'polite'
+                      }
+                      accessibilityLabel={`${boltzExplanation.heading}: ${boltzExplanation.body}`}
+                    >
+                      <CalloutIcon size={24} color={calloutTone.ink} strokeWidth={2.5} />
+                      <View style={styles.calloutBody}>
+                        <Text style={[styles.calloutHeading, { color: calloutTone.ink }]}>
+                          {boltzExplanation.heading}
+                        </Text>
+                        <Text style={[styles.calloutText, { color: calloutTone.ink }]}>
+                          {boltzExplanation.body}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()
+              : null}
           </View>
 
           {zapCounterparty ? (
             <>
-              <Text style={styles.senderLabel}>{isIncoming ? 'Sender' : 'Recipient'}</Text>
+              <Text style={styles.senderLabel}>
+                {isIncoming
+                  ? t('transactionDetailSheet.sender')
+                  : t('transactionDetailSheet.recipient')}
+              </Text>
               <TouchableOpacity
                 style={styles.senderCard}
                 onPress={() => {
@@ -371,7 +596,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
                   onCounterpartyPress?.(counterpartyContact);
                 }}
                 disabled={!counterpartyContact || !onCounterpartyPress}
-                accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
+                accessibilityLabel={`${isIncoming ? t('transactionDetailSheet.sender') : t('transactionDetailSheet.recipient')} ${zapCounterpartyName(zapCounterparty)}`}
                 testID="tx-detail-sender-card"
               >
                 {zapCounterparty.profile?.picture &&
@@ -379,7 +604,9 @@ const TransactionDetailSheet: React.FC<Props> = ({
                   <Image
                     source={{ uri: zapCounterparty.profile.picture }}
                     style={styles.senderAvatar}
-                    cachePolicy="disk"
+                    cachePolicy="memory-disk"
+                    recyclingKey={zapCounterparty.profile.picture}
+                    autoplay={false}
                     contentFit="cover"
                   />
                 ) : (
@@ -410,7 +637,9 @@ const TransactionDetailSheet: React.FC<Props> = ({
                         }}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.senderActionIcon}
-                        accessibilityLabel={`Zap ${counterpartyContact.name}`}
+                        accessibilityLabel={t('transactionDetailSheet.zapCounterparty', {
+                          name: counterpartyContact.name,
+                        })}
                         testID="tx-detail-zap"
                       >
                         <Zap size={20} color={colors.white} fill={colors.white} />
@@ -425,7 +654,9 @@ const TransactionDetailSheet: React.FC<Props> = ({
                         }}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={styles.senderActionIcon}
-                        accessibilityLabel={`Message ${counterpartyContact.name}`}
+                        accessibilityLabel={t('transactionDetailSheet.messageCounterparty', {
+                          name: counterpartyContact.name,
+                        })}
                         testID="tx-detail-message"
                       >
                         <MessageCircle size={20} color={colors.white} />
@@ -442,14 +673,14 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
           {dateStr ? (
             <View style={styles.row}>
-              <Text style={styles.rowLabel}>Date</Text>
+              <Text style={styles.rowLabel}>{t('transactionDetailSheet.dateLabel')}</Text>
               <Text style={styles.rowValue}>{dateStr}</Text>
             </View>
           ) : null}
 
           {tx.blockHeight ? (
             <View style={styles.row}>
-              <Text style={styles.rowLabel}>Block</Text>
+              <Text style={styles.rowLabel}>{t('transactionDetailSheet.blockLabel')}</Text>
               <Text style={styles.rowValue}>{tx.blockHeight.toLocaleString()}</Text>
             </View>
           ) : null}
@@ -457,10 +688,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
           {typeof tx.feesSats === 'number' && tx.feesSats > 0 ? (
             <TouchableOpacity
               style={styles.row}
-              onPress={() => copyValue('Fee', `${tx.feesSats} sats`)}
-              accessibilityLabel="Copy fee"
+              onPress={() => copyValue(t('transactionDetailSheet.feeLabel'), `${tx.feesSats} sats`)}
+              accessibilityLabel={t('transactionDetailSheet.copyField', {
+                field: t('transactionDetailSheet.feeLabel').toLowerCase(),
+              })}
             >
-              <Text style={styles.rowLabel}>Fee</Text>
+              <Text style={styles.rowLabel}>{t('transactionDetailSheet.feeLabel')}</Text>
               <View style={styles.rowValueWrap}>
                 <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
                 <Copy size={14} color={colors.textSupplementary} />
@@ -468,19 +701,61 @@ const TransactionDetailSheet: React.FC<Props> = ({
             </TouchableOpacity>
           ) : null}
 
-          {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
+          {tx.txid ? (
+            <CopyRow
+              label={t('transactionDetailSheet.onchainTxLabel')}
+              fieldId="on-chain-tx"
+              value={tx.txid}
+              onCopy={copyValue}
+              explorerTxId={tx.txid}
+            />
+          ) : null}
+          {claimTxId ? (
+            <CopyRow
+              label={t('transactionDetailSheet.claimTxLabel')}
+              fieldId="claim-tx"
+              value={claimTxId}
+              onCopy={copyValue}
+              explorerTxId={claimTxId}
+            />
+          ) : null}
 
           {swap?.lockupTxId ? (
-            <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />
+            <CopyRow
+              label={t('transactionDetailSheet.lockupTxLabel')}
+              fieldId="lockup-tx"
+              value={swap.lockupTxId}
+              onCopy={copyValue}
+              explorerTxId={swap.lockupTxId}
+            />
           ) : null}
 
           {tx.paymentHash ? (
-            <CopyRow label="Payment hash" value={tx.paymentHash} onCopy={copyValue} />
+            <CopyRow
+              label={t('transactionDetailSheet.paymentHashLabel')}
+              fieldId="payment-hash"
+              value={tx.paymentHash}
+              onCopy={copyValue}
+            />
           ) : null}
 
-          {preimage ? <CopyRow label="Preimage" value={preimage} onCopy={copyValue} /> : null}
+          {preimage ? (
+            <CopyRow
+              label={t('transactionDetailSheet.preimageLabel')}
+              fieldId="preimage"
+              value={preimage}
+              onCopy={copyValue}
+            />
+          ) : null}
 
-          {invoice ? <CopyRow label="Invoice" value={invoice} onCopy={copyValue} /> : null}
+          {invoice ? (
+            <CopyRow
+              label={t('transactionDetailSheet.invoiceLabel')}
+              fieldId="invoice"
+              value={invoice}
+              onCopy={copyValue}
+            />
+          ) : null}
 
           <View style={styles.actions}>
             {swap?.claimable ? (
@@ -488,12 +763,14 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 style={styles.primaryButton}
                 onPress={handleRetryClaim}
                 disabled={retrying}
-                accessibilityLabel="Retry claim"
+                accessibilityLabel={t('transactionDetailSheet.retryClaim')}
               >
                 {retrying ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Retry claim</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {t('transactionDetailSheet.retryClaim')}
+                  </Text>
                 )}
               </TouchableOpacity>
             ) : null}
@@ -504,26 +781,27 @@ const TransactionDetailSheet: React.FC<Props> = ({
                   const id = tx.txid || swap?.lockupTxId;
                   if (id) Linking.openURL(`https://mempool.space/tx/${id}`);
                 }}
-                accessibilityLabel="View on mempool.space"
+                accessibilityLabel={t('transactionDetailSheet.viewOnMempool')}
               >
-                <Text style={styles.secondaryButtonText}>View on mempool.space</Text>
+                <Text style={styles.secondaryButtonText}>
+                  {t('transactionDetailSheet.viewOnMempool')}
+                </Text>
               </TouchableOpacity>
             ) : null}
             {isBoltzSwap ? (
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={() => setSupportSheetOpen(true)}
-                accessibilityLabel="Contact Boltz support"
+                accessibilityLabel={t('transactionDetailSheet.contactBoltzSupport')}
                 testID="contact-boltz-support"
               >
-                <Text style={styles.secondaryButtonText}>Contact Boltz support</Text>
+                <Text style={styles.secondaryButtonText}>
+                  {t('transactionDetailSheet.contactBoltzSupport')}
+                </Text>
               </TouchableOpacity>
             ) : null}
             {swap?.claimable ? (
-              <Text style={styles.info}>
-                Retry re-runs the swap recovery service, which will re-broadcast the claim
-                transaction from persisted swap state.
-              </Text>
+              <Text style={styles.info}>{t('transactionDetailSheet.retryInfo')}</Text>
             ) : null}
           </View>
         </BottomSheetView>
@@ -535,12 +813,12 @@ const TransactionDetailSheet: React.FC<Props> = ({
         isLoggedIn={isLoggedIn}
         signerType={signerType}
         onLoginPress={() => setLoginSheetOpen(true)}
-        title="Contact Boltz support"
-        subtitle="Your message will be sent as an encrypted Nostr DM to the Boltz team."
+        title={t('transactionDetailSheet.contactBoltzSupport')}
+        subtitle={t('transactionDetailSheet.feedbackSubtitle')}
         initialMessage={boltzInitialMessage}
         messagePrefix="[Boltz Support]"
-        successTitle="Message sent"
-        successMessage="Boltz support will reply via Nostr DM. Check your usual Nostr client for the response."
+        successTitle={t('transactionDetailSheet.feedbackSuccessTitle')}
+        successMessage={t('transactionDetailSheet.feedbackSuccessMessage')}
       />
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </>

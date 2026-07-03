@@ -11,7 +11,7 @@
 #   2. responsive    — wall clock between launch and the first
 #                      `[Perf] refreshDmInbox` log line (LP's own marker
 #                      saying the inbox refresh path settled)
-#   3. tab nav       — Home → Messages → Learn → Friends, each tap
+#   3. tab nav       — Home → Messages → Explore → Friends, each tap
 #                      timed end-to-end via a Maestro flow that uses
 #                      `tab-<name>` testIDs (no coordinates per CLAUDE.md)
 #
@@ -71,7 +71,7 @@ appId: $PKG
 EOF
 }
 
-for t in messages learn friends; do
+for t in messages explore friends; do
   write_tab_flow "$t"
 done
 # tab-home is intentionally not measured per tap: Home is the default tab so it mounts during cold-start, its `[Perf] HomeScreen first render` marker fires once at app launch, and tapping the Home tab afterwards (with `freezeOnBlur: true` keeping it mounted) does not trigger a re-render or re-fire the marker. The cold-start time-to-Home is implicitly captured in `time-to-wallet` / `time-to-responsive` already.
@@ -173,24 +173,24 @@ run_sample() {
   local responsive_ms
   responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts" "$launch_start")
 
-  # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-learn measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
+  # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-explore measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
   sleep 1.5
 
-  local msgs_ms learn_ms friends_ms
+  local msgs_ms explore_ms friends_ms
 
   # Each tab times "tap dispatch → screen first commits its initial render", using a `[Perf] X first render` marker each tab screen logs once on mount. tap_and_time computes a fresh device-side `since_ts` at tap dispatch so log lines emitted before the tap (e.g. HomeScreen's marker during cold-start) don't false-positive the wait. Maestro JVM cold-start (~5–10 s per invocation) is in every measurement as a constant baseline; before/after comparisons within the same script run are still valid because that baseline cancels.
   msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] MessagesScreen first render')
-  learn_ms=$(tap_and_time learn 'ReactNativeJS.*\[Perf\] LearnScreen first render')
+  explore_ms=$(tap_and_time explore 'ReactNativeJS.*\[Perf\] ExploreHomeScreen first render')
   friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render')
 
   echo "  cold_total=${total_time}ms  wait=${wait_time}ms  wallet=${wallet_ms:-TIMEOUT}ms  responsive=${responsive_ms:-TIMEOUT}ms"
-  echo "  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
+  echo "  messages=${msgs_ms:-—}ms  explore=${explore_ms:-—}ms  friends=${friends_ms:-—}ms"
 
   $ADB logcat -d -t "$since_ts" 2>/dev/null \
-    | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|HomeScreen first render|MessagesScreen first render|LearnScreen first render|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
+    | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|HomeScreen first render|MessagesScreen first render|ExploreHomeScreen first render|LessonsScreen first render|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
     > "$OUT/sample-$n.log" 2>/dev/null || true
 
-  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
+  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${msgs_ms:-—}|${explore_ms:-—}|${friends_ms:-—}")
 }
 
 # ---- median across N integer samples ---------------------------------------
@@ -225,7 +225,7 @@ done
   echo
   echo "device: \`$DEVICE\` · package: \`$PKG\` · samples: $SAMPLES"
   echo
-  echo "| sample | TotalTime | WaitTime | time-to-wallet | time-to-responsive | tab-messages | tab-learn | tab-friends |"
+  echo "| sample | TotalTime | WaitTime | time-to-wallet | time-to-responsive | tab-messages | tab-explore | tab-friends |"
   echo "|--------|-----------|----------|----------------|--------------------|--------------|-----------|-------------|"
   for row in "${ROWS[@]}"; do
     IFS='|' read -r n a b w c e f g <<<"$row"

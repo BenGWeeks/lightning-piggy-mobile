@@ -2,6 +2,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 // Main tab param list
 export type MainTabParamList = {
@@ -9,7 +10,11 @@ export type MainTabParamList = {
     | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
     | undefined;
   Messages: undefined;
-  Learn: undefined;
+  // Explore hosts a sub-stack so the type carries NavigatorScreenParams
+  // — that's what lets the Linking listener (App.tsx → navigateToHuntFound
+  // in AppNavigator.tsx) target a specific Explore-stack screen like
+  // HuntFound from outside the React tree.
+  Explore: NavigatorScreenParams<ExploreStackParamList> | undefined;
   Friends: undefined;
 };
 
@@ -24,6 +29,8 @@ export type AccountDrawerParamList = {
   AccountOnChain: undefined;
   AccountDisplay: undefined;
   AccountAppearance: undefined;
+  AccountNearby: undefined;
+  AccountSecurity: undefined;
   AccountAbout: undefined;
 };
 
@@ -38,22 +45,108 @@ export type RootStackParamList = {
   };
   Groups: undefined;
   GroupConversation: { groupId: string };
+  // Full-page friends profile (#435). `phoneContactId` is set when the
+  // contact came from the device address book and can be edited inline.
+  ContactProfile: {
+    contact: ContactProfileBodyData;
+    phoneContactId?: string;
+  };
+  // Graceful fallback when a scanned tag / nostr: link resolves to an
+  // entity Lightning Piggy can't display. `entity` is a human-readable
+  // label for the message + warning log; `detail` carries the raw value.
+  UnsupportedEntity: {
+    entity: string;
+    detail?: string;
+  };
 };
 
-// Learn sub-stack
-export type LearnStackParamList = {
-  LearnHome: undefined;
+// Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons
+// (existing course content), Map (BTC Map merchants), Hunt (geocaching
+// game), and Events (NIP-52 meetups). MainTabParamList above references
+// this via NavigatorScreenParams<ExploreStackParamList>; the lexical
+// definition order is reversed (forward reference at type level), which
+// TypeScript resolves fine — keep the order as-is.
+// See plan .claude/plans/look-through-the-issues-squishy-wigderson.md
+// for motivation; closes parts of #467 and #468.
+// Published kind-37516 listing fields carried into the edit wizard (the
+// cross-device source of truth). Named so the wizard's hydration helper can
+// share the shape. `createdAt` here is the event envelope `created_at` (last
+// publish), which the wizard compares against the local record's `updatedAt`
+// to decide which side is fresher (#596 / #681).
+export interface HuntCacheFallback {
+  coord: string;
+  hiderPubkey: string;
+  d: string;
+  name: string;
+  description: string;
+  geohash: string | null;
+  difficulty: number | null;
+  terrain: number | null;
+  size: string | null;
+  cacheType: string | null;
+  hint: string | null;
+  imageUrl: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  waitSeconds: number | null;
+  uses: number | null;
+  isLpPiggy: boolean;
+  payoutSats: number | null;
+}
+
+export type ExploreStackParamList = {
+  ExploreHome: undefined;
+  Lessons: undefined;
   CourseDetail: { courseId: string };
   MissionDetail: { courseId: string; missionId: string };
+  // `returnTo` is set only when the Map is opened from a DM conversation's
+  // live-location card — it carries that conversation's route so Map's back
+  // button returns to the DM rather than the Explore tab. In-stack entry
+  // points (Explore/Places/Events/Hunt) omit it and fall back to goBack().
+  Map:
+    | { returnTo?: { screen: 'Conversation'; params: RootStackParamList['Conversation'] } }
+    | undefined;
+  Places: undefined;
+  PlaceDetail: { placeId: number };
+  Hunt: undefined;
+  // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
+  // reuses the same screen, pre-fills every field, and on save replaces
+  // the local record + re-emits the kind 37516 listing under the same
+  // `d` tag. Omit to create a new Piggy.
+  //
+  // `fallbackCache` (optional) is the published ParsedCache as known to
+  // the caller — used to hydrate the wizard when the local HiddenPiggy
+  // record is missing on this device but the active identity is the
+  // event's author (#596 cross-device edit). Plain-JSON shape, safe to
+  // serialise through navigation state.
+  HuntCreate:
+    | {
+        piggyId?: string;
+        fallbackCache?: HuntCacheFallback;
+      }
+    | undefined;
+  // `coord` (optional) is the kind 37516 cache coord the finder is
+  // claiming against. When supplied, recordClaim stores it as piggyId
+  // so HuntPiggyDetailScreen can unlock the find-log composer via
+  // lastClaimForPiggyId(coord). Omit only on the legacy deep-link
+  // entry path where we don't know the coord yet.
+  HuntFound: { lnurl: string; coord?: string };
+  // `openComposer` (optional) bounces the find-log compose UI open on
+  // mount — used by HuntFoundScreen after a successful claim so the
+  // finder doesn't have to remember to tap the compose button.
+  HuntPiggyDetail: { coord: string; openComposer?: boolean };
+  MyPiglets: undefined;
+  Events: undefined;
+  EventDetail: { coord: string };
 };
 
 // Navigation prop shortcuts
 export type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
-export type LearnNavigation = NativeStackNavigationProp<LearnStackParamList>;
+export type ExploreNavigation = NativeStackNavigationProp<ExploreStackParamList>;
 export type AccountDrawerNavigation = DrawerNavigationProp<AccountDrawerParamList>;
 
 // Route prop shortcuts
-export type CourseDetailRoute = RouteProp<LearnStackParamList, 'CourseDetail'>;
-export type MissionDetailRoute = RouteProp<LearnStackParamList, 'MissionDetail'>;
+export type CourseDetailRoute = RouteProp<ExploreStackParamList, 'CourseDetail'>;
+export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;

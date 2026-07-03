@@ -1,0 +1,89 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Hunt Create — toggle Public publishes to relays after save
+---
+# Smoke flow for the M6.2 publish path. Walks the hider through:
+# paste live LNURL → validate → fill memo → drop pin → toggle Public →
+# save. The publish step requires a Nostr signer (nsec or Amber); on
+# emulators without one, the toast tells the user "Could not sign
+# Piggy listing — saved locally". We accept both outcomes (relay
+# publish OR signer-declined toast); both prove the create flow ran
+# end-to-end. The deterministic-relay assertion (event lands +
+# Discover sees it) lives in the M8 fixture-relay flow.
+#
+# Run: maestro test .maestro/hunt/flow-040-hunt-publish-public.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'hunt-create-piggy-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Paste an LNURL-withdraw via Maestro's `-e LNURL_W=…` env arg —
+# NEVER hardcoded in this file. Bearer tokens in source = leaked
+# secrets. Run locally:
+#
+#   export MAESTRO_TEST_LNURL_W='lnurlw://your-dev-lnbits/.../...'
+#   maestro test .maestro/hunt/flow-040-hunt-publish-public.yaml \
+#     -e LNURL_W=$MAESTRO_TEST_LNURL_W
+- tapOn:
+    id: 'hunt-piggy-lnurl-input'
+- inputText: '${LNURL_W}'
+- tapOn:
+    id: 'hunt-piggy-validate-button'
+- extendedWaitUntil:
+    visible: 'Looks good'
+    timeout: 8000
+
+# Memo + GPS pin + Public toggle.
+- tapOn:
+    id: 'hunt-piggy-memo-input'
+- inputText: 'Geo-Cache 1 — Maestro publish smoke'
+- tapOn:
+    id: 'hunt-piggy-pin-here-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- tapOn:
+    id: 'hunt-piggy-public-toggle'
+
+# Save → publish. The publish action is the step nav row's next slot.
+- tapOn:
+    id: 'hunt-piggy-step-next'
+- waitForAnimationToEnd:
+    timeout: 6000
+
+# Either the success toast OR the signer-declined toast. Both prove
+# the codepath ran without crashing.
+- runFlow:
+    when:
+      visible: 'Piggy published'
+    commands:
+      - assertVisible: 'Visible on Discover'
+- runFlow:
+    when:
+      notVisible: 'Piggy published'
+    commands:
+      - assertVisible: 'Piggy hidden'
+
+# Bail out — we're in the saved state, NFC write is exercised by
+# test-hunt-write-nfc which doesn't need the publish path. The next
+# slot now reads "Done" and returns to the Hunt screen.
+- tapOn:
+    id: 'hunt-piggy-step-next'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'hunt-screen'

@@ -27,7 +27,7 @@ PACKAGE="com.lightningpiggy.app.dev"
 FIXTURE="/tmp/exif-loaded-fixture.jpg"
 DOWNLOAD="/tmp/exif-uploaded.jpg"
 LOGCAT_TAG="ReactNativeJS"
-MAESTRO_FLOW="tests/e2e/test-exif-strip.yaml"
+MAESTRO_FLOW=".maestro/messaging/flow-067-exif-strip.yaml"
 
 # ---- preflight ----
 command -v exiftool >/dev/null 2>&1 || {

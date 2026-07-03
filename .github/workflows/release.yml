@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed to upload assets to the Release
+  contents: write # needed to upload assets to the Release
 
 env:
   EAS_CLI_VERSION: '18.6.0'
@@ -131,8 +131,10 @@ jobs:
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       NODE_NO_WARNINGS: '1'
+      GH_TOKEN: ${{ github.token }}
     permissions:
-      contents: write   # to push the reset RELEASE_NOTES_NEXT.md back to main
+      contents: write # to push the reset branch
+      pull-requests: write # to open the reset PR (main blocks direct pushes)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -145,19 +147,34 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          cache: npm
+
+      # `eas build:list` (below) resolves the EAS project by EVALUATING
+      # app.config.ts, whose `extra.eas.projectId` is the only place the id
+      # lives. app.config.ts `import`s `expo/config` + ./package.json, so it
+      # can't load without node_modules — without this step every build:list
+      # call dies with a bare `Error: build:list command failed.` (the build
+      # job works only because it runs npm ci; this job and Attach didn't).
+      - name: Install dependencies
+        run: npm ci
 
       - name: Verify ASC API key is wired
         env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
-          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          # The ASC API key is stored under the EXPO_ASC_* secret names (the
+          # same key EAS uses for `eas submit`). Map them onto the ASC_* env
+          # vars the script reads. The earlier ASC_* secret names never
+          # existed, so this job silently soft-skipped and left "What to Test"
+          # blank on every release until v1.2.1.
+          ASC_API_KEY_ID: ${{ secrets.EXPO_ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.EXPO_ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
         run: |
           # The same .p8 EAS uses for `eas submit` is needed here. This is a
           # one-time GH Secrets setup; see docs/DEPLOYMENT.adoc → "TestFlight
           # 'What to Test' automation". If absent, soft-skip rather than fail
           # the release — Ben can fill in "What to Test" manually for this build.
           if [ -z "$ASC_API_KEY_ID" ] || [ -z "$ASC_API_KEY_ISSUER_ID" ] || [ -z "$ASC_API_KEY_P8" ]; then
-            echo "::warning title=ASC API key not configured::Skipping auto-populate of TestFlight 'What to Test'. Add ASC_API_KEY_ID, ASC_API_KEY_ISSUER_ID, ASC_API_KEY_P8 to repo secrets to enable. See docs/DEPLOYMENT.adoc."
+            echo "::warning title=ASC API key not configured::Skipping auto-populate of TestFlight 'What to Test'. Set EXPO_ASC_API_KEY_ID, EXPO_ASC_API_KEY_ISSUER_ID, EXPO_ASC_API_KEY_P8 repo secrets to enable. See docs/DEPLOYMENT.adoc."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -168,13 +185,22 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         id: iosbuild
         run: |
-          # Pick the iOS build EAS just produced for this commit. buildVersion
-          # is the CFBundleVersion (the integer in parens that TestFlight shows
-          # next to the X.Y.Z marketing version).
+          # Pick the iOS build EAS just produced for this commit. The build
+          # number (CFBundleVersion — the integer in parens TestFlight shows
+          # next to the X.Y.Z marketing version) is `appBuildVersion` in
+          # eas-cli >= 18 JSON output; `.buildVersion` is kept as a fallback
+          # for older CLIs. Reading the wrong field made this step report
+          # "no build found" on every release even when the build existed.
+          # --build-profile production: a PREVIEW build of the same commit
+          # (e.g. an ad-hoc device build cut right after the release) can be
+          # newer in the list and has its own build-number counter — the
+          # v1.3.3 rerun polled ASC for preview build "1" forever because
+          # of exactly that.
           version=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform ios --status finished --limit 5 --json --non-interactive \
+            --platform ios --status finished --build-profile production \
+            --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
           if [ -z "$version" ] || [ "$version" = "null" ]; then
             echo "::warning title=No iOS build resolved::Could not find a finished iOS build for commit ${{ github.sha }}. Skipping whatsNew."
             echo "version=" >> "$GITHUB_OUTPUT"
@@ -201,10 +227,10 @@ jobs:
       - name: PATCH whatsNew via App Store Connect API
         if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
         env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
-          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
-          ASC_APP_ID: '6762218164'   # matches eas.json → submit.production.ios.ascAppId
+          ASC_API_KEY_ID: ${{ secrets.EXPO_ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.EXPO_ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_APP_ID: '6762218164' # matches eas.json → submit.production.ios.ascAppId
           ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
           WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
         run: node scripts/asc-set-whats-new.mjs
@@ -241,7 +267,14 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$notes_file" "$archive_file"
           git commit -m "chore(release): archive notes for $tag, reset RELEASE_NOTES_NEXT [skip ci]"
-          git push origin HEAD:main
+          # main is a protected branch (direct pushes rejected with GH006 —
+          # bit the v1.3.3 run), so land the reset via a PR instead.
+          branch="chore/reset-release-notes-${tag}"
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(release): archive notes for $tag, reset What to Test" \
+            --body "Automated post-release reset: archives the shipped bullets to CHANGELOG.md and resets RELEASE_NOTES_NEXT.md to its placeholder. Generated by the $tag release run." \
+            || echo "::warning title=Reset PR not created::Branch $branch was pushed; open the PR manually."
 
   attach-android-apk:
     name: Attach Android APK to Release
@@ -262,26 +295,98 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
+
+      # Required so `eas build:list` can evaluate app.config.ts (which holds
+      # the only copy of extra.eas.projectId and imports expo/config). Missing
+      # this is what made every poll attempt below fail with `Error: build:list
+      # command failed.` on v1.3.0 — the retries masked a hard config-load
+      # error as a transient hiccup, burning the full poll then erroring.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Resolve latest finished Android APK URL
         id: find
         env:
-          # Suppress Node `(node:NNN) [DEPxxxx] DeprecationWarning: ...`
-          # lines that eas-cli emits to stdout, which would otherwise
-          # poison the JSON pipe to jq with `Invalid numeric literal`.
-          # See #207 for the v1.0.0-rc2 release where this manifested.
+          # Suppress Node deprecation warnings on stdout. NODE_NO_WARNINGS
+          # only handles Node-level deprecations though — eas-cli itself
+          # can also print error / progress noise to stdout (`Error:
+          # build:list command failed.` on transient API hiccups,
+          # update-notifier banners), which is what v1.0.2-rc1 tripped on.
+          # The script below captures stderr separately, retries once on
+          # failure, and strips any pre-JSON prefix before jq sees it.
           NODE_NO_WARNINGS: '1'
         run: |
-          # Pick the most recent FINISHED Android production build (the one we just submitted).
-          # Filter by the git commit of the Release tag so we don't accidentally grab an
-          # unrelated older build.
-          url=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform android --status finished --limit 5 --json \
-            --non-interactive \
-            | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty')
+          set -uo pipefail
+
+          # Pick the FINISHED Android production build for THIS commit, filtering
+          # by gitCommitHash so we never grab an unrelated older build.
+          #
+          # This job runs right after build-and-submit, and there's a brief
+          # window where the just-finished build hasn't yet surfaced as
+          # "finished" in `eas build:list` (eventual consistency). A single-shot
+          # query raced here on v1.2.0 and produced a spurious "No Android build
+          # artifact" failure (#674). So POLL: treat both a failed call and an
+          # empty/lagging result as "retry", and only error out once the poll
+          # is exhausted.
+
+          fetch() {
+            local out_file="$1" err_file="$2"
+            npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+              --platform android --status finished --build-profile production \
+              --limit 5 --json \
+              --non-interactive \
+              > "$out_file" 2> "$err_file"
+          }
+
+          OUT=$(mktemp)
+          ERR=$(mktemp)
+          CLEAN=$(mktemp)
+          JQERR=$(mktemp)
+          url=""
+          attempts=12
+          for i in $(seq 1 "$attempts"); do
+            if ! fetch "$OUT" "$ERR"; then
+              echo "::warning title=eas build:list call failed (attempt $i/$attempts)::Transient EAS API hiccup; retrying in 20 s."
+              [ "$i" -lt "$attempts" ] && sleep 20
+              continue
+            fi
+
+            # Strip any non-JSON prefix lines (deprecation banners / progress
+            # noise written to stdout) — keep from the first `[` line onward.
+            sed -n '/^\[/,$p' "$OUT" > "$CLEAN"
+
+            # Fail fast on a genuine jq parse error (malformed JSON / an EAS
+            # CLI output-format change) instead of mistaking it for an
+            # eventual-consistency empty result — otherwise a real format
+            # break burns the whole poll window then fails with a misleading
+            # "not surfaced yet" message.
+            if ! url=$(jq -r --arg sha "${{ github.sha }}" \
+                         '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
+                         "$CLEAN" 2>"$JQERR"); then
+              echo "::error title=jq failed to parse eas build:list output::Likely an EAS CLI / JSON format change — logs below."
+              echo "::group::jq stderr"; cat "$JQERR"; echo "::endgroup::"
+              echo "::group::raw stdout"; cat "$OUT"; echo "::endgroup::"
+              echo "::group::cleaned JSON"; cat "$CLEAN"; echo "::endgroup::"
+              exit 1
+            fi
+            if [ -n "$url" ] && [ "$url" != "null" ]; then
+              echo "Resolved Android APK URL on attempt $i/$attempts."
+              break
+            fi
+
+            echo "::warning title=Finished Android build not surfaced yet (attempt $i/$attempts)::eas build:list has no finished build for ${{ github.sha }} yet; retrying in 20 s."
+            [ "$i" -lt "$attempts" ] && sleep 20
+          done
+
           if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "::error title=No Android build artifact::Could not find a finished Android build for commit ${{ github.sha }}. The EAS build may still be running, or failed."
+            echo "::error title=No Android build artifact for commit ${{ github.sha }} after $attempts attempts::EAS build may have failed, or build:list never surfaced it. Recent builds + last stderr dumped below."
+            echo "::group::recent builds (cleaned)"
+            cat "$CLEAN"
+            echo "::endgroup::"
+            echo "::group::last eas build:list stderr"
+            cat "$ERR"
+            echo "::endgroup::"
             exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
@@ -328,6 +433,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
+          cache: npm
+
+      # `eas build:list` resolves the EAS project by evaluating app.config.ts,
+      # which can't load without node_modules — same failure class as #791.
+      # This job was missed by #792 (it only fixed whats-new + attach) and
+      # broke the v1.3.2 title sync.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Resolve build numbers + edit Release title
         run: |
@@ -335,13 +448,15 @@ jobs:
           # by gitCommitHash so we don't accidentally pick up an unrelated
           # in-flight build from a parallel branch.
           ios_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform ios --status finished --limit 5 --json --non-interactive \
+            --platform ios --status finished --build-profile production \
+            --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
           android_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform android --status finished --limit 5 --json --non-interactive \
+            --platform android --status finished --build-profile production \
+            --limit 5 --json --non-interactive \
             | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+                '[.[] | select(.gitCommitHash == $sha)][0] | (.appBuildVersion // .buildVersion) // empty')
 
           # Derive the original title from the release event payload.
           # Fall back to the tag name if no title was set.
@@ -396,9 +511,21 @@ jobs:
         with:
           ruby-version: '3.3'
 
-      - name: Install asciidoctor-pdf + rouge
+      - name: Setup Node (for the mermaid CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install asciidoctor-pdf + asciidoctor-diagram + rouge + mermaid CLI
         run: |
           gem install asciidoctor-pdf asciidoctor-diagram rouge
+          # mmdc renders DATA_STORAGE.adoc's [mermaid] blocks; generate-docs.sh
+          # points its headless Chrome at docs/puppeteer-mermaid.json
+          # (--no-sandbox) so it launches on the CI runner. Without this the
+          # PDF job failed every release ("mmdc is not installed"). Pinned (like
+          # EAS_CLI_VERSION) for reproducible release docs — 11.9.0 is the
+          # version v1.3.1's PDF was generated with.
+          npm install -g @mermaid-js/mermaid-cli@11.9.0
 
       - name: Generate PDF
         run: bash docs/generate-docs.sh

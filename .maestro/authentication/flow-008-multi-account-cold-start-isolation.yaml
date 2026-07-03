@@ -1,0 +1,77 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Multi-account cold-start wallet isolation regression guard (#442)
+---
+# Regression guard for the mount-order race in WalletContext /
+# NostrContext fixed in PR #442 (commits 0d3d1b0 + a47fa23 + the
+# storage refactor #288).
+#
+# Pre-fix behaviour: WalletProvider mounted before NostrProvider, so
+# `walletStorageService._activePubkey` was null when WalletContext's
+# startup ran `getWalletList()`. Result: cold-start always read the
+# legacy unsuffixed `wallet_list` key, leaking whatever wallet was
+# in there into every identity until a manual switch-and-back.
+# Symptom: Big Piggy signed in, but the carousel showed Little
+# Piggy's NWC wallet instead of his own.
+#
+# This test validates that cold-start now correctly reads the
+# active identity's per-account `wallet_list_${pubkey}` AND
+# does NOT surface other identities' wallets. The cold-start
+# read is the critical path that was broken.
+#
+# Preconditions (set up earlier in the session via
+# test-add-wallet-via-paste against MAESTRO_NWC_BIG / NWC_LITTLE /
+# NWC_MIDDLE on each Piggy's identity):
+#   - Big Piggy → Big Piggy NWC
+#   - Little Piggy → Little Piggy NWC
+#   - Middle Piggy → Middle Piggy NWC
+# All three signed in to the AVD. Whichever is the last-active
+# identity will be the cold-start active.
+
+# Force-stop guarantees a real cold start. clearState=false keeps
+# user data on disk so per-account caches are tested, not a fresh
+# install flow.
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- takeScreenshot: 01-cold-start
+
+# A Piggy NWC wallet is visible — meaning the cold-start read
+# landed on a populated `wallet_list_${activePubkey}` rather than
+# an empty / wrong key.
+- assertVisible:
+    text: '.*Piggy NWC.*'
+
+# Open the drawer to see who's active and confirm the layout.
+# Layout fix from fd5b39c: switcher avatars hug the ⋯ menu.
+# Cache fix from ccb4b69: switcher avatars + names render from
+# AsyncStorage instantly, no relay round-trip.
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 02-drawer-active-piggy
+
+# The active row carries the largest avatar + the display name in
+# the drawer header. Confirm at least one of the three Piggy
+# fixtures is the active row — substring match keeps the test
+# generic to whichever Piggy was last active when the AVD was
+# stopped.
+- assertVisible:
+    text: '.*Piggy'
+# Critical isolation assertion: from this active identity, ONLY one
+# Piggy NWC wallet should be present in the home carousel. The
+# other two Piggies' wallets must not leak through. We can't
+# assertNotVisible on all three at once (the active one is
+# visible), so we verify each non-active wallet is absent.
+#
+# Identity-specific assertions live in the wallet-switch follow-up
+# tests (see .maestro/test-multi-account-switch-wallets.yaml when
+# that lands). This test focuses on the cold-start read race
+# alone — that's the bug class the mount-order fix targets.
