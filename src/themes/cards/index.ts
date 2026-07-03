@@ -2,6 +2,7 @@ import { ImageStyle } from 'react-native';
 import type { CardTheme } from '../../types/wallet';
 import { bgStyle as albyStyle } from './alby';
 import { bgStyle as bitcoinStyle } from './bitcoin';
+import { bgStyle as bitpopartStyle } from './bitpopart';
 import { bgStyle as defaultStyle } from './default';
 import { bgStyle as lightningBeeStyle } from './lightning-bee';
 import { bgStyle as lightningCatStyle } from './lightning-cat';
@@ -24,6 +25,7 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   default: defaultStyle.full,
   'lightning-bee': lightningBeeStyle.full,
   'lightning-cat': lightningCatStyle.full,
+  bitpopart: bitpopartStyle.full,
   'lightning-cow': lightningCowStyle.full,
   'lightning-goat': lightningGoatStyle.full,
   nostrich: nostrichStyle.full,

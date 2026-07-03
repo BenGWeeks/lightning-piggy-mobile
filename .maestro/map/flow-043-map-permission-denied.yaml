@@ -1,0 +1,39 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Map shows a friendly empty state when foreground location is denied
+---
+# When the user denies the foreground location permission Maestro proxies
+# to the OS prompt, MapScreen should not crash — it should render a
+# permission-required empty state with a Back-to-Explore CTA. Verifies the
+# graceful-degradation path of #467.
+#
+# Run: maestro test .maestro/map/flow-043-map-permission-denied.yaml
+
+- launchApp:
+    permissions:
+      location: deny
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-map'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- assertVisible:
+    id: 'map-screen'
+- assertVisible: 'Location permission required'
+- assertVisible:
+    id: 'map-permission-back-button'
+
+- tapOn:
+    id: 'map-permission-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-map'

@@ -12,7 +12,7 @@
 // app hasn't migrated. If kind-4 is empty and verify-recv finds the
 // marker, the migration is live.
 //
-// Usage: MAESTRO_NSEC=$bigpiggy_nsec node scripts/verify-bigpiggy-outbox.mjs
+// Usage: MAESTRO_NSEC_BIG=$bigpiggy_nsec node scripts/verify-bigpiggy-outbox.mjs
 
 import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
@@ -25,9 +25,9 @@ const RELAYS = [
   'wss://relay.primal.net',
 ];
 
-const nsec = process.env.MAESTRO_NSEC;
+const nsec = process.env.MAESTRO_NSEC_BIG;
 if (!nsec) {
-  console.error('MAESTRO_NSEC required');
+  console.error('MAESTRO_NSEC_BIG required');
   process.exit(1);
 }
 const sk = nip19.decode(nsec).data;

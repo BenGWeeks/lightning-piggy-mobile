@@ -23,6 +23,7 @@ import {
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
@@ -59,6 +60,7 @@ type Mode = 'login' | 'create' | 'backup' | 'nip46-pair';
 
 const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { loginWithNsec, loginWithAmber, loginWithNip46, publishProfile, isLoggingIn } = useNostr();
   const [nsecInput, setNsecInput] = useState('');
@@ -135,7 +137,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       setNsecInput('');
       onClose();
     } else {
-      setError(result.error || 'Login failed');
+      setError(result.error || t('nostrLoginSheet.loginFailed'));
     }
   };
 
@@ -155,7 +157,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleFinishCreate = async () => {
     if (!newName.trim()) {
-      setError('Please enter a display name');
+      setError(t('nostrLoginSheet.enterDisplayName'));
       return;
     }
     setCreating(true);
@@ -164,7 +166,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     // Login with the generated nsec first
     const result = await loginWithNsec(generatedNsec);
     if (!result.success) {
-      setError(result.error || 'Failed to create account');
+      setError(result.error || t('nostrLoginSheet.createAccountFailed'));
       setCreating(false);
       return;
     }
@@ -186,7 +188,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleCopyNsec = async () => {
     await Clipboard.setStringAsync(generatedNsec);
-    Alert.alert('Copied', 'Your private key has been copied. Store it somewhere safe!');
+    Alert.alert(t('nostrLoginSheet.copiedTitle'), t('nostrLoginSheet.copiedMessage'));
   };
 
   const handleDone = () => {
@@ -200,7 +202,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (result.success) {
       onClose();
     } else {
-      setError(result.error || 'Amber login failed');
+      setError(result.error || t('nostrLoginSheet.amberLoginFailed'));
     }
   };
 
@@ -316,10 +318,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       >
         {mode === 'login' && (
           <>
-            <Text style={styles.title}>Connect Nostr</Text>
-            <Text style={styles.subtitle}>
-              Enter your private key to connect your Nostr identity.
-            </Text>
+            <Text style={styles.title}>{t('nostrLoginSheet.connectTitle')}</Text>
+            <Text style={styles.subtitle}>{t('nostrLoginSheet.connectSubtitle')}</Text>
 
             <View style={styles.inputRow}>
               <BottomSheetTextInput
@@ -335,13 +335,13 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 autoCorrect={false}
                 secureTextEntry
                 editable={!isLoggingIn}
-                accessibilityLabel="nsec input"
+                accessibilityLabel={t('nostrLoginSheet.nsecInputLabel')}
                 testID="nsec-input"
               />
               <TouchableOpacity
                 style={styles.pasteButton}
                 onPress={handlePaste}
-                accessibilityLabel="Paste"
+                accessibilityLabel={t('nostrLoginSheet.paste')}
                 testID="paste-nsec"
               >
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -366,13 +366,13 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               style={[styles.loginButton, (!nsecInput.trim() || isLoggingIn) && styles.disabled]}
               onPress={handleLogin}
               disabled={!nsecInput.trim() || isLoggingIn}
-              accessibilityLabel="Login"
+              accessibilityLabel={t('nostrLoginSheet.login')}
               testID="login-button"
             >
               {isLoggingIn ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.loginButtonText}>Login</Text>
+                <Text style={styles.loginButtonText}>{t('nostrLoginSheet.login')}</Text>
               )}
             </TouchableOpacity>
 
@@ -381,10 +381,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 style={styles.amberButton}
                 onPress={handleAmber}
                 disabled={isLoggingIn}
-                accessibilityLabel="Use NIP-55 Signer (Amber)"
+                accessibilityLabel={t('nostrLoginSheet.useAmber')}
                 testID="amber-button"
               >
-                <Text style={styles.amberButtonText}>Use NIP-55 Signer (Amber)</Text>
+                <Text style={styles.amberButtonText}>{t('nostrLoginSheet.useAmber')}</Text>
               </TouchableOpacity>
             )}
 
@@ -410,33 +410,31 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
+              <Text style={styles.dividerText}>{t('nostrLoginSheet.or')}</Text>
               <View style={styles.dividerLine} />
             </View>
 
             <TouchableOpacity
               style={styles.createButton}
               onPress={handleCreate}
-              accessibilityLabel="Create a Nostr Account"
+              accessibilityLabel={t('nostrLoginSheet.createAccount')}
               testID="create-account-button"
             >
-              <Text style={styles.createButtonText}>Create a Nostr Account</Text>
+              <Text style={styles.createButtonText}>{t('nostrLoginSheet.createAccount')}</Text>
             </TouchableOpacity>
           </>
         )}
 
         {mode === 'create' && (
           <>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Choose a display name for your new Nostr identity.</Text>
-            <Text style={styles.safetyTip}>
-              Tip: You don't need to use your real name or photo.
-            </Text>
+            <Text style={styles.title}>{t('nostrLoginSheet.createAccountTitle')}</Text>
+            <Text style={styles.subtitle}>{t('nostrLoginSheet.createAccountSubtitle')}</Text>
+            <Text style={styles.safetyTip}>{t('nostrLoginSheet.safetyTip')}</Text>
 
-            <Text style={styles.fieldLabel}>Display Name</Text>
+            <Text style={styles.fieldLabel}>{t('nostrLoginSheet.displayName')}</Text>
             <BottomSheetTextInput
               style={styles.createInput}
-              placeholder="Your name"
+              placeholder={t('nostrLoginSheet.yourName')}
               placeholderTextColor={colors.textSupplementary}
               value={newName}
               onChangeText={(text) => {
@@ -445,7 +443,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               }}
               autoCapitalize="words"
               autoCorrect={false}
-              accessibilityLabel="Display name"
+              accessibilityLabel={t('nostrLoginSheet.displayName')}
               testID="create-name-input"
             />
 
@@ -455,18 +453,20 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               style={[styles.loginButton, creating && styles.disabled]}
               onPress={handleFinishCreate}
               disabled={creating}
-              accessibilityLabel="Create Account"
+              accessibilityLabel={t('nostrLoginSheet.createAccountTitle')}
               testID="create-account-submit"
             >
               {creating ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.loginButtonText}>Create Account</Text>
+                <Text style={styles.loginButtonText}>
+                  {t('nostrLoginSheet.createAccountTitle')}
+                </Text>
               )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.backLink} onPress={() => setMode('login')}>
-              <Text style={styles.backLinkText}>Back to login</Text>
+              <Text style={styles.backLinkText}>{t('nostrLoginSheet.backToLogin')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -521,12 +521,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         {mode === 'backup' && (
           <>
-            <Text style={styles.title}>Back Up Your Key</Text>
-            <Text style={styles.warningText}>
-              Save your private key somewhere safe. If you lose it, you cannot recover your account.
-            </Text>
+            <Text style={styles.title}>{t('nostrLoginSheet.backupTitle')}</Text>
+            <Text style={styles.warningText}>{t('nostrLoginSheet.backupWarning')}</Text>
 
-            <Text style={styles.fieldLabel}>Your Private Key (nsec)</Text>
+            <Text style={styles.fieldLabel}>{t('nostrLoginSheet.privateKeyLabel')}</Text>
             <View style={styles.nsecDisplay}>
               <Text style={styles.nsecText} selectable>
                 {generatedNsec}
@@ -536,19 +534,19 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             <TouchableOpacity
               style={styles.copyButton}
               onPress={handleCopyNsec}
-              accessibilityLabel="Copy private key"
+              accessibilityLabel={t('nostrLoginSheet.copyPrivateKey')}
               testID="copy-nsec"
             >
-              <Text style={styles.copyButtonText}>Copy to Clipboard</Text>
+              <Text style={styles.copyButtonText}>{t('nostrLoginSheet.copyToClipboard')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.loginButton}
               onPress={handleDone}
-              accessibilityLabel="Done"
+              accessibilityLabel={t('nostrLoginSheet.done')}
               testID="backup-done"
             >
-              <Text style={styles.loginButtonText}>I've Saved My Key</Text>
+              <Text style={styles.loginButtonText}>{t('nostrLoginSheet.savedMyKey')}</Text>
             </TouchableOpacity>
           </>
         )}

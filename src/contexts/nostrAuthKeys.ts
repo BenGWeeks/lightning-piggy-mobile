@@ -1,0 +1,19 @@
+import * as SecureStore from 'expo-secure-store';
+
+export const NSEC_KEY = 'nostr_nsec';
+export const PUBKEY_KEY = 'nostr_pubkey';
+export const SIGNER_TYPE_KEY = 'nostr_signer_type';
+/** SecureStore (not AsyncStorage) — the persisted NIP-46 connection
+ *  contains a per-app private key. Anyone with it + the bunker pubkey
+ *  + relay can impersonate this app's session against the bunker. */
+export const NIP46_CONNECTION_KEY = 'nostr_nip46_connection';
+
+// Hardened write options for the legacy single-active-identity slots, which
+// hold the nsec + persisted identity metadata. Matches the repo's existing
+// sensitive-write pattern (identitiesStore.ts, walletStorageService.ts):
+// AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY keeps the secret off iCloud/backup
+// migration. Applied in persistActiveIdentityKeys — the single writer every
+// login flow now routes legacy-slot writes through.
+export const LEGACY_IDENTITY_SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};

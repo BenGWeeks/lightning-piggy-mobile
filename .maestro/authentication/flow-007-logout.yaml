@@ -1,0 +1,61 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Nostr Logout Test
+---
+# Tests logging out from Nostr (assumes already logged in)
+# Run: maestro test .maestro/authentication/flow-007-logout.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Open the account drawer via the profile icon
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Verify we're actually logged in before attempting Sign Out — the QR
+# icon next to the display name only renders when a Nostr profile is
+# connected, so its presence is a reliable logged-in precondition.
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-npub-qr'
+    timeout: 5000
+
+# Sign out row lives at the bottom of the drawer
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-sign-out'
+    timeout: 5000
+
+- tapOn:
+    id: 'drawer-sign-out'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Confirm the Sign Out alert. Tap the branded-alert destructive button by
+# id, NOT `text: 'Sign Out'` — the text matcher is ambiguous against the
+# alert's own title (also "Sign Out") and can match the title, leaving the
+# dialog open. Button order is [Cancel (0), Sign Out (1)], so index 1.
+- tapOn:
+    id: 'branded-alert-button-1'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open drawer → Profile sub-screen and verify the Connect Nostr CTA is back
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'drawer-row-profile'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      id: 'connect-nostr'
+    timeout: 10000

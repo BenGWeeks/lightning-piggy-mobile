@@ -1,0 +1,26 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: 3-way group chat — Middle Piggy sees rename
+---
+# Phase 5. Logs in as Middle Piggy and verifies the rename has propagated
+# via the kind-30200 inbound subscription.
+
+- runFlow:
+    file: ../common/login-as.yaml
+    env:
+      MAESTRO_NSEC_BIG: ${MAESTRO_NSEC_MIDDLE}
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Triad-renamed'
+    timeout: 30000
+
+- runFlow: ../authentication/flow-007-logout.yaml

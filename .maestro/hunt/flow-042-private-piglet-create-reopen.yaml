@@ -1,0 +1,148 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Hunt — a Private (Public-off) Piglet shows in My Piglets and re-opens
+---
+# Verifies the #909/#912 fix: a Piglet saved with the "Make this Piggy
+# public" toggle OFF is a *private* (device-only) Piglet — it must appear
+# in My Piglets → HIDDEN with a "Private" badge, and tapping it must
+# re-open it for editing (header "Edit Piglet"). Before the fix the local
+# record was written but never surfaced, so the private Piglet looked lost.
+#
+# Prereqs (same as flow-040): a logged-in account, and a real LNURL-withdraw
+# passed via env so the Prize step validates. Run:
+#   maestro test .maestro/hunt/flow-042-private-piglet-create-reopen.yaml \
+#     -e LNURL_W=$MAESTRO_TEST_LNURL_W
+# NEVER hardcode the LNURL bearer in this file.
+# NOTE: navigation is most reliable from a warm state (Explore tab on the
+# Geo-caches screen, or Explore home with its rails already loaded) — a cold
+# launch can leave the Geo-caches See-all rail still loading. The core
+# assertions (create → Private badge in My Piglets → re-open as Edit) are the
+# point of this test.
+#
+
+- launchApp:
+    permissions:
+      location: allow
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Explore → Geo-caches → My Piglets → Hide a Piglet
+# Reach the Geo-caches screen. The Explore stack may restore to its home
+# (with the "Geo-caches near you" See-all below the fold) OR straight to
+# the Geo-caches screen — so only navigate via the See-all when we're not
+# already on Geo-caches (i.e. the My-Piglets button isn't showing yet).
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 3000
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-my-piglets-button'
+    commands:
+      # On the Explore home: let the (location-driven) rails load, then
+      # scroll the "Geo-caches near you" See-all into view and open it.
+      - waitForAnimationToEnd:
+          timeout: 8000
+      - scrollUntilVisible:
+          element:
+            id: 'explore-card-hunt'
+          direction: DOWN
+          timeout: 20000
+          visibilityPercentage: 20
+      - tapOn:
+          id: 'explore-card-hunt'
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-my-piglets-button'
+    timeout: 15000
+- tapOn:
+    id: 'hunt-my-piglets-button'
+- extendedWaitUntil:
+    visible:
+      id: 'my-piglets-hide-cta'
+    timeout: 12000
+- tapOn:
+    id: 'my-piglets-hide-cta'
+
+# Step 1 Hardware → Next
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-step-next'
+    timeout: 12000
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 2 Prize — paste + validate the LNURL-withdraw
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-lnurl-input'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-lnurl-input'
+- inputText: '${LNURL_W}'
+- tapOn:
+    id: 'hunt-piggy-validate-button'
+- extendedWaitUntil:
+    visible: 'Looks good'
+    timeout: 15000
+- pressKey: Back
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 3 Location — drop pin at the device's current GPS
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-pin-here-button'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-pin-here-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 4 Details — title (required)
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-name-input'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-name-input'
+- inputText: 'Maestro Private Piglet'
+- pressKey: Back
+- scrollUntilVisible:
+    element:
+      id: 'hunt-piggy-step-next'
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 30
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 5 Publish — leave the Public toggle OFF (its default) → Save.
+# Saving with Public off keeps it device-only (a Private Piglet).
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-public-toggle'
+    timeout: 10000
+- tapOn:
+    text: 'Save'
+- extendedWaitUntil:
+    visible: 'Saved locally'
+    timeout: 10000
+
+# Back to My Piglets — the private Piglet must be listed with a Private badge
+- tapOn:
+    id: 'hunt-create-back-button'
+- extendedWaitUntil:
+    visible: 'My Piglets'
+    timeout: 8000
+- assertVisible: 'Private'
+- assertVisible: 'Maestro Private Piglet'
+
+# Re-open it for editing — header flips to "Edit Piglet"
+- tapOn:
+    text: 'Maestro Private Piglet'
+- extendedWaitUntil:
+    visible: 'Edit Piglet'
+    timeout: 8000
