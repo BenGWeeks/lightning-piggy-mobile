@@ -10,6 +10,7 @@ import React, {
 import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
 import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -513,6 +514,7 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      <BrandGradientBackground />
       <TabBackgroundImage style={styles.bgImage} />
       <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
