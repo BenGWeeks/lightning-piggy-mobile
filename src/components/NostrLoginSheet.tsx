@@ -245,7 +245,12 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       name: 'Lightning Piggy',
     });
     setNip46Uri(uri);
-    console.log('[Nostr][NIP46] pairing URI:', uri);
+    // Never log the full URI: it carries `secret=`, a pairing token that
+    // could be used to impersonate this app session against the bunker.
+    // In dev only, log a secret-redacted copy for debugging.
+    if (__DEV__) {
+      console.log('[Nostr][NIP46] pairing URI:', uri.replace(/(secret=)[^&]*/i, '$1[redacted]'));
+    }
     setMode('nip46-pair');
     setNip46Pairing(true);
     const abort = new AbortController();

@@ -4,7 +4,12 @@ import * as SecureStore from 'expo-secure-store';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { syncBackgroundDmWatchFromPreference } from '../services/backgroundDmService';
-import { PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
+import {
+  PUBKEY_KEY,
+  SIGNER_TYPE_KEY,
+  NIP46_CONNECTION_KEY,
+  LEGACY_IDENTITY_SECURE_OPTIONS,
+} from './nostrAuthKeys';
 import type { SignerType, Nip46Connection } from '../types/nostr';
 
 /**
@@ -74,9 +79,17 @@ export function useNip46Login(deps: UseNip46LoginDeps) {
       try {
         const pk = connection.userPubkey;
         setPubkey(pk);
-        await SecureStore.setItemAsync(PUBKEY_KEY, pk);
-        await SecureStore.setItemAsync(NIP46_CONNECTION_KEY, JSON.stringify(connection));
-        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nip46');
+        // The connection blob embeds a per-app private key (`clientSecretKeyHex`)
+        // that can sign against the bunker, so harden all three writes with
+        // AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY (via LEGACY_IDENTITY_SECURE_OPTIONS):
+        // keeps them off iCloud/device backups and from migrating to a new device.
+        await SecureStore.setItemAsync(PUBKEY_KEY, pk, LEGACY_IDENTITY_SECURE_OPTIONS);
+        await SecureStore.setItemAsync(
+          NIP46_CONNECTION_KEY,
+          JSON.stringify(connection),
+          LEGACY_IDENTITY_SECURE_OPTIONS,
+        );
+        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nip46', LEGACY_IDENTITY_SECURE_OPTIONS);
 
         // The pairing flow already populated nostrConnectService's in-memory
         // cache via `awaitBunkerPair`; re-asserting here is cheap + idempotent.
