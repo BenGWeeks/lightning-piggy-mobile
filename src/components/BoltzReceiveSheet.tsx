@@ -51,7 +51,7 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import Toast from './BrandedToast';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { walletLabel } from '../types/wallet';
 import { createBoltzReceiveSheetStyles } from '../styles/BoltzReceiveSheet.styles';
@@ -74,8 +74,8 @@ type Step = 'amount' | 'qr';
 const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createBoltzReceiveSheetStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, refreshBalanceForWallet, btcPrice, currency } =
-    useWallet();
+  const { wallets, makeInvoiceForWallet, refreshBalanceForWallet, currency } = useWallet();
+  const { btcPrice } = useWalletLive();
 
   const wallet = useMemo(() => wallets.find((w) => w.id === walletId) ?? null, [wallets, walletId]);
 
@@ -301,7 +301,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     if (!swap) return;
     setRefunding(true);
     try {
-      const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
+      const lockup = await boltzService.getSubmarineSwapLockup(swap.id, swap.address);
       if (!lockup) {
         Toast.show({
           type: 'error',

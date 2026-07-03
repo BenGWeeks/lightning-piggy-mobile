@@ -1,0 +1,80 @@
+# EAS upload ignore list.
+#
+# eas-cli uses THIS file instead of .gitignore when deciding what to upload to
+# the cloud builder, so it must be a SUPERSET of .gitignore (everything below
+# the divider is the same as .gitignore) plus the build-only exclusions at the
+# top. Keeping the upload small speeds the "Uploading … MB" phase and avoids
+# shipping docs/screenshots/test artefacts that never end up in the app binary.
+
+# ---- EAS-only exclusions (not needed to build the app) ----
+docs/
+.maestro/
+tests/
+*.md
+*.adoc
+coverage/
+bugreport-*.zip
+
+# ---- mirror of .gitignore (keep in sync) ----
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# jest
+coverage/
+
+# generated native folders
+/ios
+/android
+modules/*/android/build/
+
+# Maestro test screenshots
+*_after_tap_*.png
+*_friends_*.png
+*_search_*.png
+*_scrolled_*.png
+*_account_*.png
+*_logged_*.png
+*_login_*.png
+*_logout_*.png
+*_home_*.png
+*_contacts_*.png
+
+# Build artifacts
+*.apk
+
+# `.claude/` per-machine artefacts
+.claude/

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
-import { Plus, Send } from 'lucide-react-native';
+import { Plus, Send, Mic } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import {
@@ -9,6 +9,7 @@ import {
 } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 /**
@@ -41,6 +42,13 @@ export interface ConversationComposerProps {
   onChangeText: (text: string) => void;
   /** Called when the user taps Send. Send button is disabled when value is empty. */
   onSend: () => void;
+  /**
+   * When provided, the trailing button is a microphone (tap → start a voice
+   * note) WHILE the input is empty, and swaps to the Send button as soon as
+   * the user types — the WhatsApp/Signal pattern (#235). Omit to always show
+   * Send (e.g. surfaces without voice support).
+   */
+  onStartVoiceNote?: () => void;
   /** Whether a send is in flight. Disables the input + swaps the send icon for a spinner. */
   sending: boolean;
   /** Toggles the inline attach panel open/closed. Parent owns the panel-open state. */
@@ -75,11 +83,13 @@ export interface ConversationComposerProps {
     input?: string;
     attach?: string;
     send?: string;
+    voice?: string;
   };
   accessibilityLabels?: {
     input?: string;
     attach?: string;
     send?: string;
+    voice?: string;
   };
 }
 
@@ -87,6 +97,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   value,
   onChangeText,
   onSend,
+  onStartVoiceNote,
   sending,
   onAttachToggle,
   attachOpen,
@@ -94,7 +105,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   onInputFocus,
   attachLoading = false,
   attachPanel,
-  placeholder = 'Message',
+  placeholder,
   disabled = false,
   sendButtonVariant = 'icon',
   attachButtonHasBackground = false,
@@ -103,6 +114,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   accessibilityLabels,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const insets = useSafeAreaInsets();
   const styles = useMemo(
     () =>
@@ -125,6 +137,9 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
 
   const sendDisabled = disabled || !value.trim() || sending;
   const inputDisabled = disabled || sending;
+  // WhatsApp/Signal pattern (#235): show the mic while the input is empty (and
+  // voice is supported here), swap to Send the moment the user types.
+  const showMic = !!onStartVoiceNote && !value.trim() && !sending && !disabled;
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
@@ -134,7 +149,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
           style={styles.attachButton}
           onPress={onAttachToggle}
           disabled={disabled || sending || attachDisabled}
-          accessibilityLabel={accessibilityLabels?.attach ?? 'Attach'}
+          accessibilityLabel={accessibilityLabels?.attach ?? t('conversationComposer.attach')}
           testID={testIDs?.attach}
         >
           {attachLoading ? (
@@ -145,22 +160,33 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
         </TouchableOpacity>
         <TextInput
           style={styles.input}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('conversationComposer.messagePlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={value}
           onChangeText={onChangeText}
           onFocus={onInputFocus}
           multiline
           editable={!inputDisabled}
-          accessibilityLabel={accessibilityLabels?.input ?? 'Message input'}
+          accessibilityLabel={accessibilityLabels?.input ?? t('conversationComposer.messageInput')}
           testID={testIDs?.input}
         />
-        {sendButtonVariant === 'paper-plane' ? (
+        {showMic ? (
+          <TouchableOpacity
+            style={sendButtonVariant === 'paper-plane' ? styles.sendButtonLarge : styles.sendButton}
+            onPress={onStartVoiceNote}
+            accessibilityLabel={
+              accessibilityLabels?.voice ?? t('conversationComposer.recordVoiceNote')
+            }
+            testID={testIDs?.voice ?? 'composer-voice'}
+          >
+            <Mic size={20} color={colors.white} />
+          </TouchableOpacity>
+        ) : sendButtonVariant === 'paper-plane' ? (
           <TouchableOpacity
             style={[styles.sendButtonLarge, sendDisabled && styles.sendButtonDisabled]}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? 'Send message'}
+            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
             testID={testIDs?.send}
           >
             {sending ? (
@@ -182,7 +208,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             style={styles.sendButton}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? 'Send message'}
+            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
             testID={testIDs?.send}
           >
             {sending ? (

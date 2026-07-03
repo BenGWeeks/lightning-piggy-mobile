@@ -41,11 +41,11 @@ run() {
     "$@"
 }
 
-run "Phase 1 — Big creates Triad" tests/e2e/test-3way-group-create-as-big.yaml
-run "Phase 2 — Middle joins"       tests/e2e/test-3way-group-as-middle.yaml
-run "Phase 3 — Little joins"       tests/e2e/test-3way-group-as-little.yaml
-run "Phase 4 — Big renames"        tests/e2e/test-3way-group-rename-as-big.yaml
-run "Phase 5 — Middle sees rename" tests/e2e/test-3way-group-rename-confirm-as-middle.yaml
+run "Phase 1 — Big creates Triad" .maestro/groups/flow-022-3way-group-create-as-big.yaml
+run "Phase 2 — Middle joins"       .maestro/groups/flow-021-3way-group-as-middle.yaml
+run "Phase 3 — Little joins"       .maestro/groups/flow-020-3way-group-as-little.yaml
+run "Phase 4 — Big renames"        .maestro/groups/flow-023-3way-group-rename-as-big.yaml
+run "Phase 5 — Middle sees rename" .maestro/groups/flow-024-3way-group-rename-confirm-as-middle.yaml
 
 echo
 echo "All 3-way group-chat phases passed."

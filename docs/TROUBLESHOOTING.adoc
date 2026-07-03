@@ -7,6 +7,12 @@
 | Boltz reverse swap claim broadcast fails with "mandatory-script-verify-flag-failed (Witness program hash mismatch)"
 | The Taproot internal key for Boltz v2 swaps is a MuSig2 aggregate of Boltz's key and the user's key — in a specific order. Per Boltz docs, **"Boltz's public key always coming first"**: for reverse swaps that means `keyAggregate([refundPubKey, claimPubKey])` (Boltz's refund key first, user's claim key second; **not sorted, not the other way round, not just refundPubKey alone**). Keys must be 33-byte compressed, aggregated via `@scure/btc-signer`'s `keyAggregate` + `keyAggExport`, then used as the x-only internal key when computing the Taproot tweak. See `boltzService.ts` `claimSwap()` and the Boltz docs at https://api.docs.boltz.exchange/claiming-swaps.html. Confirmed against the chain by computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, true)` from `@scure/btc-signer` and matching its `.script` to the on-chain lockup scriptPubKey.
 
+| Boltz reverse swap UI shows "Payment failed — Boltz swap failed: unknown Error" right after the Lightning balance drops
+| First-attempt claim fails deterministically on a freshly created reverse swap. Symptoms: `[Boltz] Reverse swap created` followed almost immediately by `claimSwap` throwing `"unknown Error"` from `boltzService.ts`, while `payInvoiceForWallet` *did* succeed (Lightning balance dropped by the swap amount + fee). Root cause was tracked down in issue #481: the Alby SDK wraps NIP-47 responses with empty error bodies as `Nip47WalletError("unknown Error", "INTERNAL")` *even when the wallet processed the payment*. `nwcService.payInvoice` now looks up the invoice on that error code and returns the preimage if found. **Funds are not lost** even when the lookup fails: after the #481 fix both `SendSheet` and `TransferSheet` persist the full swap state to SecureStore (`boltz_swap_${id}`) and register it with `swapRecoveryService` *before* paying the invoice, so the next launch (or "Retry now" on TransferSheet) re-broadcasts the claim and settles the on-chain side. The `[SwapRecovery] Swap <id> claimed successfully` log line is the marker. If you ever see this overlay, force-stop and relaunch — the funds will land. See `docs/SOLUTION_DESIGN.adoc` → "Persistence + Recovery contract" for the full handshake.
+
+| `SendSheet` reverse swap leaves stuck on-chain HTLC with no recovery path (before the #481 fix)
+| Versions before issue #481 was fixed only persisted the swap secrets in JS memory in `SendSheet` (TransferSheet always persisted to SecureStore). When `claimSwap` failed, the random preimage and claim privkey were GC'd and the HTLC at the lockup address became unspendable from the user side. The Lightning HODL invoice times out after ~24h and Boltz refunds the LN side automatically — funds are not permanently lost but the user can't claim the on-chain side. **If you find a stuck swap from before this fix:** the secrets are unrecoverable; wait for the LN HODL refund (or open a Boltz Discord ticket with the swap ID asking them to cancel the HODL invoice early). See issue #481 for the historical context.
+
 | Bottom sheet doesn't slide up when keyboard opens on Android
 | All of these are required: (1) Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput`. (2) Use `BottomSheetScrollView` (not `BottomSheetView`) as the content wrapper. (3) Set `keyboardBehavior="interactive"` (or `"extend"` if the sheet has multiple snap points and you want the IME to push it to the highest snap — see `GifPickerSheet`), plus `keyboardBlurBehavior="restore"` and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`. (4) Ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustResize.js`). (5) Add a `Keyboard.addListener` to track keyboard height and set dynamic `paddingBottom` on the `contentContainerStyle` (e.g. `paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40`). (6) Do NOT wrap content in `TouchableWithoutFeedback` with `Keyboard.dismiss` — this interferes with the sheet's keyboard handling. See `NostrLoginSheet.tsx` as the reference implementation.
 
@@ -24,6 +30,40 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 *Verify:* `adb shell dumpsys input_method | grep mInputShown` should report `mInputShown=true` once an input is focused. The audit script `scripts/keyboard-screenshot-audit.sh` polls this gate before every screenshot. +
 *Lower-friction alternative:* run daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM (avoiding the "System UI isn't responding" stalls under memory pressure). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
 
+| Android emulator pathologically slow + unstable (ANRs, "isn't responding" dialogs, Maestro driver-startup and `inputText` timeouts) while the HOST has free RAM and idle CPU
+| Don't chase host RAM/CPU — the bottleneck is **disk I/O saturation from the emulator's own RAM-snapshot writeback**. Signature: host load average is high (~8) yet `top` shows the CPU mostly idle and memory free, because the load is processes blocked in **I/O wait**, not computing. +
+*Diagnose (on the host):* +
+[source,bash]
+----
+vmstat 1 3                 # bo (blocks-out) huge, wa (io-wait) 50-67%, b (blocked procs) high
+cat /proc/pressure/io      # full avgN ~67%  -> tasks fully stalled on I/O
+cat /proc/pressure/memory  # ~0.00           -> RAM is NOT the problem
+pidstat -d 1 3 | grep qemu # qemu writing ~750 MB/s, sustained, even with an idle guest
+----
+*Root cause:* launching with `-no-snapshot-load` still keeps quickboot's **file-backed guest RAM**. `~/.android/avd/<AVD>.avd/snapshots/default_boot/ram.img` is sized to the guest RAM (4 GB for `-memory 4096`) and memory-mapped, so the kernel continuously flushes dirty RAM pages back to it (~750 MB/s observed) *even when the guest is idle*. That pins the disk at ~67% I/O-wait, and qemu then blocks on its own writes -> the guest freezes -> every downstream symptom (ANRs, Maestro `port 7001` driver-startup timeout, `inputText` gRPC `DEADLINE_EXCEEDED`). Confirm it's the writer: `ls -la <AVD>.avd/snapshots/default_boot/ram.img` shows its mtime advancing every second. +
+*Fix:* relaunch with **`-no-snapshot`** (NOT `-no-snapshot-load`) so guest RAM is anonymous memory with no writeback: +
+[source,bash]
+----
+adb emu kill
+"$ANDROID_HOME/emulator/emulator" -avd <AVD> -no-snapshot -no-boot-anim -no-audio -memory 4096 -cores 4 -gpu swiftshader_indirect &
+----
+Measured impact: qemu writes dropped **~755 MB/s -> ~10 MB/s**, I/O pressure **67% -> 26%**, and the ANR / Maestro flakiness cleared. Trade-off: `-no-snapshot` disables quickboot, so every launch is a full cold boot (slower start, stable session). **This is the deeper cause behind the GMS-churn entry below — rule it out first.**
+
+| Emulator throws repeated "System UI isn't responding" / "Process system isn't responding" / per-Google-app "isn't responding" ANR dialogs on the `google_apis` AVD (contact avatars never load in Messages, relays stall, Maestro flows die with `Terminated`)
+| The android-34 **google_apis** system image bundles Google apps (Digital Wellbeing, Quicksearch / the Google app, Maps) and a full GMS that churn in the background under the software GPU (`-gpu swiftshader_indirect`), throwing ANR dialogs that steal window focus, starve the Nostr relay websockets + avatar image downloads (so Messages-list profile pictures stay on the default pig placeholder), and abort Maestro runs mid-flow. An in-guest System UI restart (`adb shell am force-stop com.android.systemui`) does **not** hold — it re-ANRs within seconds. First rule out the RAM-snapshot writeback issue above by doing a true cold boot (`adb emu kill`, then relaunch with `-no-snapshot`, not `-no-snapshot-load`); that often clears the ANRs, though the GMS churn can still return under load. +
+*The biggest offender is core GMS, not the bundled apps.* The **"Process system isn't responding"** dialog specifically is `system_server` being pegged (~175% CPU) by `com.google.android.gms.persistent`, which loops ANR-ing and crashing on `.chimera.PersistentIntentOperationService` (`adb logcat \| grep "ANR in"` shows it). Disabling Wellbeing/Quicksearch/Maps quiets the focus-stealing app dialogs but NOT this one — you have to disable GMS itself to stop it. Confirmed harmless here: after disabling GMS, CPU dropped to ~370/400 idle, the ANRs stopped, and the app (which uses no GMS) ran fine. +
+*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-only (`expo-notifications`, "No FCM" per `app.config.ts`), and `expo-location` runs on the platform provider — set the emulator's GPS with `adb emu geo fix 0.0589 52.2964` or Extended Controls → Location (the dev-pin env-var approach was removed in PR #597). There are no `com.google.android.gms` references in the native Android config. +
+*Quick fix (reversible, keeps app data — re-apply after each cold boot, like the keyboard gates above):* +
+[source,bash]
+----
+adb shell pm disable-user --user 0 com.google.android.gms                    # the big one — stops "Process system isn't responding"
+adb shell pm disable-user --user 0 com.google.android.apps.wellbeing
+adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox
+adb shell pm disable-user --user 0 com.google.android.apps.maps
+# undo with: adb shell pm enable <package>
+----
+*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `.maestro/common/login-as-piggy.yaml` / `.maestro/common/seed-test-wallet.yaml`.
+
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
 
@@ -35,6 +75,15 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 
 | App unresponsive after Nostr login (20s lockup)
 | Wrap `setContacts` calls in `startTransition()`, use `InteractionManager.runAfterInteractions` to defer network I/O, add `freezeOnBlur: true` to tab navigator, and yield to event loop between profile fetch batches with `setTimeout(r, 50)`.
+
+| Cold-start "tap Send button feels frozen for ~12 s" but the Maestro perf script reports ~1 s
+| Maestro taps immediately after `HomeScreen first render` (fast ~1 s on Pixel). The real freeze starts 3-7 s LATER when zap-counterparty / profile resolvers run N sequential relay round-trips on the JS thread. A user-driven tap lands INSIDE that window and waits up to 12 s for the queue to drain. +
+*Diagnostic tools (all gated by `EXPO_PUBLIC_KEEP_PERF_LOGS=1` at build time):* +
+1. **JS-thread heartbeat** — `perfHeartbeatStart()` in `src/utils/perfLog.ts` self-schedules every 100 ms and logs the gap between scheduled-fire and actual-fire. Gap > 200 ms is a stutter; > 1 s is a freeze. Captures freezes without needing a tap. +
+2. **Multi-window tap-latency script** — `scripts/perf-cold-tap-windows.sh` cold-starts once per offset and taps Send at +0/+500/+1.5k/+3k/+5k/+7k/+10k/+13k ms after Home renders. Plots tap-to-onPress latency as a curve so the freeze window is visible. +
+3. **`perfLog(tag)`** sprinkled at every cold-start boundary (`WalletProvider first render`, `HomeScreen first render`, `WalletCarousel first render (N wallets)`, `TransactionList first render (N txs)`, `resolveZapSenders[id]: start/done`, etc.). A single `adb logcat \| grep "\[Perf\]"` gives the full attribution. +
+*Common cause + fix:* sequential `await fetchProfile(pk, relays)` in a `for...of` loop over N transactions. Each iteration is one relay round-trip (~500-2000 ms). Replace with two-phase batch: collect all pubkeys → one `zapSenderProfileStorage.getMany([...pks])` from disk → one `nostrService.fetchProfiles(missing, relays)` for the remainder. The incoming branch of `resolveZapSendersForWallet` already used this pattern; the outgoing branch did not until PR #510. +
+*Build a perf-instrumented APK to investigate on a real device:* `EXPO_PUBLIC_KEEP_PERF_LOGS=1 eas build --local --profile production --platform android --non-interactive --output /tmp/lp-perf.apk`. `babel.config.js` skips `transform-remove-console` and `perfLog.ts` honours the same env flag, so `[Perf]` lines survive in the release APK. **Never ship a real release build with the flag set.**
 
 | `npx expo start` fails but `npm start` works
 | The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
@@ -86,6 +135,19 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 3. **EAS dashboard** — https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds renders queue position client-side once a build is in flight; the initial HTML doesn't include it. +
 *Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
 *The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
+
+| Release workflow fails on iOS with "Provisioning profile … doesn't include the NFC Tag Reading capability" / "doesn't include the com.apple.developer.nfc.readersession.formats entitlement"
+| Symptom from the failing GH Actions log: `🍏 iOS build failed: The "Run fastlane" step failed because of an error in the Xcode build process` followed by the entitlement-missing lines. Hit by `v1.0.0-rc2` and `v1.0.1-rc1` releases. +
+*Why:* The iOS provisioning profile currently in EAS's credentials store predates the NFC scan/write feature added in PRs #48 / #49. Xcode cross-checks the entitlements written into the build (e.g. `com.apple.developer.nfc.readersession.formats`) against what the profile permits at signing time. The profile doesn't list NFC Tag Reading → build refuses to sign. Only *entitlement-bearing* config-plugins trigger this — in this repo `plugins/withNfc.js` is the only one. Permission-only plugins (`expo-image-picker`, `expo-contacts`, `expo-location`) just add Info.plist usage strings and don't require a profile refresh. +
+*Fix (interactive, ~5 min):* +
+1. Sign in to https://developer.apple.com/account/resources/identifiers (Apple Developer Portal). +
+2. Find Identifier `com.lightningpiggy.app` → tap **Edit** → scroll to capabilities → enable **NFC Tag Reading** (and any other capabilities later added in `app.config.ts` plugins). Save. +
+3. Go to **Profiles** → find the production profile (the one EAS auto-created, named like `*[expo] com.lightningpiggy.app AppStore <date>`) → tap **Edit** → it'll auto-pull the new capability → save → **Download** the regenerated profile (you don't need to install it locally). +
+4. From the local repo: `eas credentials --platform ios` → select the production profile slot → choose to **delete the existing profile and re-fetch from Apple** so EAS picks up the new one. +
+5. Re-run the failed release: GH Actions → Release workflow → **Run workflow** → select platform `ios` → tag `v1.0.1-rc1` (or whatever's blocked). +
+*Prevention:* Whenever you add an *entitlement-bearing* config-plugin to `app.config.ts` (NFC, push notifications, App Groups, Background Modes, etc. — the ones whose plugin actually writes to the iOS entitlements file), regenerate the iOS profile **before** cutting the next release. Permission-string-only plugins (location, contacts, camera/photos) don't require this. The Deployment Checklist in `docs/DEPLOYMENT.adoc` calls this out as a pre-release step.
+
+*Re-running the release after fixing:* Note that GH Actions → Release workflow → **Run workflow** (`workflow_dispatch`) skips the tag-driven version-rewrite step in `release.yml`. Re-running this way against a stale `app.config.ts` (current default `version: '1.0.0'`) can produce a build whose user-visible version doesn't match the intended release tag. Safer paths: re-trigger the original `release` event (re-create or move the tag), or manually update `app.config.ts` `version` before the manual run.
 
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
@@ -147,10 +209,10 @@ The IME finishes composing each chunk before the next one starts. For nsec / npu
 source .env && echo -n "$MAESTRO_NWC1" | wl-copy   # Wayland
 # or
 echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
-maestro test tests/e2e/test-add-wallet-via-paste.yaml
+maestro test .maestro/wallets/flow-115-add-wallet-via-paste.yaml
 ----
 
-The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow. +
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `.maestro/wallets/flow-115-add-wallet-via-paste.yaml` for the flow. +
 
 *Why `pasteText` (Maestro's built-in) doesn't help:* Maestro's `pasteText` / `copyTextFrom` use an **internal shim clipboard** (not Android's `ClipboardManager`) and still synthesize key events under the hood — so they hit the exact same wrapper-targeting failure. Seeding the real device clipboard and tapping an in-app Paste button bypasses both the shim and the keystroke path. Confirmed via the Maestro docs (https://docs.maestro.dev/api-reference/commands/pastetext) and feature-request https://github.com/mobile-dev-inc/Maestro/issues/2029. Deep-link seeding (`app://.../path?value=...`) is the only other approach that bypasses text entry entirely — viable if a Paste button isn't desired in the UI.
 
@@ -177,12 +239,13 @@ The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead o
 *Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
 
 | NWC "reply timeout" after publish succeeds
-| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
-*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. A flaky / rate-limited relay (e.g. ln.coinos.io under a burst of requests) shows it intermittently — `get_balance` succeeds one moment and times out the next. +
+*Symptom seen on a claim:* an LNURL-withdraw / prize claim sticks on "Claiming sats…" then fails, because the claim calls `makeInvoice` to mint the receiving invoice. Originally `makeInvoice` was the **one** NWC method with no retry (unlike `getBalance` / `payInvoice` / `listTransactions`), so the claim path died on the first timeout while everything else recovered. +
+*Fix / workaround:* `makeInvoice` now wraps its call in `withRetry` + `recordRelayOutcome` like the other methods. If still persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin), and give a rate-limited relay a minute to settle (our own `relayCooldownUntil` parks a relay for 30s–5min after 3 timeouts, #656).
 
 | NWC relay intermittently drops WebSocket connections
 | The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
-*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, `listTransactions()`, and `makeInvoice()`.
 
 | App shows "Unable to load script" on physical device
 | The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.
@@ -305,6 +368,21 @@ eas env:list --environment production
 *Immediate recovery:* `adb reboot`, wait for `getprop sys.boot_completed` = 1, then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` — Expo's CLI install step is more fragile under memory pressure than raw `adb install`. +
 *Prevent:* bump AVD RAM + heap (see the "System UI isn't responding" entry above), and consider using a **Google APIs** (not Google Play) system image for dev — removes the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU.
 
+| Emulator crawls (heartbeat gaps, app at 100%+ CPU) specifically while an NWC wallet is configured but its relay is unreachable
+| Distinct from RAM thrashing: an *unreachable* NWC relay used to make the app churn — it kept polling the dead relay every 10 s and retried `connect()` on every 30 s tick, pinning the JS thread (heartbeat gaps to 180 s+, app at 100–300% CPU). Common trigger when developing remotely: the relay host (e.g. a self-hosted LNbits) is behind a home connection that's down, or only reachable over a VPN that isn't up. +
+*Fix in app:* the relay-resilience work in #654/#656/#657 (merged as #658) stops this — a dead relay is marked Disconnected, parked with an escalating cooldown, and the constant `getBalance` poll is gone. Make sure your build includes it. +
+*Fix in environment:* confirm the relay is actually reachable from the host (`curl -sI https://<relay-host>`, or a websocket probe); if it's only reachable over a VPN, bring the tunnel up (see the WireGuard entry below). A reachable relay answers fast and the churn never starts.
+
+| After bringing up WireGuard (`wg0`) the host loses internet — public sites, the public relay, and Claude Code's API all stop
+| `wg0.conf` has `AllowedIPs = 0.0.0.0/0` (full-tunnel): *every* packet is routed into the tunnel, so if the tunnel endpoint or its upstream is down, all host traffic dies — including the API connection of any Claude Code session running on the host. The self-hosted relay `bank.weeksfamily.me` is **public** and reachable without the VPN, so the tunnel isn't needed to reach it. +
+*Fix:* use **split-tunnel** — set `AllowedIPs` to only the private subnets that genuinely need the VPN (e.g. `10.x.x.x/24`), leaving public traffic on the normal route. +
+*If a test genuinely needs `wg0`:* make it a single atomic command — `sudo wg-quick up wg0 && <do the thing> && sudo wg-quick down wg0` — so a full-tunnel config can't strand the host (and the agent's own API link) with the tunnel left up.
+
+| Maestro fails before any step runs: `AndroidDriverTimeoutException: Maestro Android driver did not start up in time … dadb.open(tcp:7001)`
+| Maestro's on-device driver (gRPC on port 7001) couldn't start in time — almost always host-resource contention, not a flow bug: on a resource-starved AVD the instrumentation install/launch misses Maestro's startup deadline and the run aborts before reaching the first assertion. `adb -s <serial> forward --list` showing no `tcp:7001` entry confirms the driver never came up. +
+*Fix:* free host CPU/RAM (close other heavy apps, browsers, spare desktops), plug the laptop in so the governor can ramp, and give the AVD enough cores (4) and RAM (4 GB). Retry — the driver usually starts once the host isn't saturated. The in-app relay-churn fix (#658) also helps by not pinning the device's JS thread during the run. +
+*Note:* this is independent of the app under test — when the AVD is too contended for Maestro, fall back to verifying app logic with unit tests plus a scripted cold-start + `logcat` check (e.g. assert an event fires once on first launch and zero times on the second).
+
 | React Native app crashes immediately with native SIGSEGV in `facebook::react::MountingCoordinator::pullTransaction`
 | The JS thread (`mqt_v_js`) segfaults in Fabric's mounting pipeline during the first render — the tombstone top frames are `MountingCoordinator::pullTransaction` → `FabricUIManagerBinding::schedulerDidFinishTransaction` → `ShadowTree::mount` → Hermes (`libhermesvm.so`) → `jsi::Function::call`. The process dies before any `console.log` appears. Confirmed via `adb pull /data/tombstones/tombstone_NN` followed by reading the backtrace. +
 *Root cause:* Expo SDK 55 `expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. The New Architecture (Fabric renderer + TurboModules) is not compatible with at least one component or native dep in this app — the shadow tree reaches an inconsistent state on first mount and the native commit null-derefs. +
@@ -340,8 +418,8 @@ This also hits `expo run:android` flows if the APK signatures don't match betwee
 
 | Location-share preview shows a blank rectangle (image never loads)
 | The `staticmap.openstreetmap.de` host (not an official OSM subdomain — it was a German community volunteer's stitcher) stopped resolving (NXDOMAIN) some time before 2026-04. There is no longer a no-API-key static-map stitching service on the `openstreetmap.org` namespace — the original `Static Maps API` was deprecated in 2012 per the https://wiki.openstreetmap.org/wiki/Static_map_images[OSM wiki]. Wikimedia Maps (`maps.wikimedia.org`) also returns 403 to third-party apps. +
-*Fix:* fetch a single slippy-map tile from the official OSMF tile server at `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, computed from (lat,lon,zoom) via the standard slippy-map formula. One 256×256 PNG per unique location, disk-cached by `expo-image` — fits the https://operations.osmfoundation.org/policies/tiles/[OSMF tile usage policy]'s "acceptable use" bar. Two required policy items: (1) cache aggressively (disk cache in expo-image), (2) send a specific identifying `User-Agent` via `source.headers` — the generic RN / OkHttp UA is not acceptable. See `buildStaticMapUrl()` + `USER_AGENT` in `src/services/locationService.ts`. +
-*Trade-off:* single tile = no centered marker (the point can be anywhere inside the tile). The location card's `MapPin` icon and coord text carry the "where" information; the image is scene-setting. If you need a centered marker later, switch `buildStaticMapUrl` to a keyed provider (MapTiler / Geoapify) behind the same interface.
+*Historical fix (superseded in #206):* the cards fetched a single slippy-map tile from `https://tile.openstreetmap.org/{z}/{x}/{y}.png` with a specific `User-Agent`, via `buildStaticMapUrl()` + `USER_AGENT` in `locationService.ts`. The trade-off was no centered marker (single tile = the point sits anywhere inside it), and hitting the OSMF tile server directly sits awkwardly against the https://operations.osmfoundation.org/policies/tiles/[tile usage policy] for a distributed app. +
+*Current state (#206):* both DM location cards now render the shared `LibreMiniMap` (native MapLibre, OpenFreeMap vector tiles — same renderer as every other map surface), which supports proper markers (the viewer's blue "me" dot + the other party's profile-circle) and sidesteps the OSMF tile-policy concern. `buildStaticMapUrl` / `USER_AGENT` / the slippy-map helpers were removed from `locationService.ts`. If a map ever renders blank now, debug it as a MapLibre/OpenFreeMap issue (style URL `tiles.openfreemap.org`, GL context), not a tile-fetch one.
 
 | `expo-location` `getCurrentPositionAsync` throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` on Android emulator even with location services on
 | On Android, `getCurrentPositionAsync` goes through `FusedLocationProviderClient`, which returns the *cached* fix and throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` if the cache is empty — it does not block waiting for a GNSS fix. On emulators the cache is empty until something is actively listening. +
@@ -458,6 +536,9 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 *Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
 *Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
 
+| iOS TestFlight upload fails with "Invalid entitlement for core nfc framework... 'NDEF is disallowed'" / "'TAG is missing in the entitlement'"
+| `plugins/withNfc.js` was injecting `com.apple.developer.nfc.readersession.formats = ['NDEF']`, which Apple's at-upload validator started rejecting on iOS SDK >=26 (deployment target 15.1+). The fix is `['TAG']`. NFCTagReaderSession can read/write NDEF via `Tag.queryNDEFStatus()`, and react-native-nfc-manager routes `NfcTech.Ndef` calls through the TAG session under the hood, so `writeNdefMessage()` keeps working unchanged. Symptoms appear ONLY at upload time (build itself succeeds, fastlane pilot fails with `STATE_ERROR.VALIDATION_ERROR (409)`). Distinguish from the *separate* "Provisioning profile doesn't include the NFC Tag Reading capability" error — that one needs the App ID capability toggled in Apple Developer Portal + provisioning profile regenerated; this one is the entitlement *value* in the .ipa.
+
 | Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
 | Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
 *Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
@@ -552,4 +633,116 @@ actually cancel the LN HTLC — once the payment is on a route the sender cannot
 stop it. Tapping "Cancel" only stops the UI from waiting; the HTLC continues,
 and the recipient may be paid minutes later. The button is being relabelled to
 "Continue in background".
+
+| Wireless ADB IP shown on the phone is unreachable (`adb connect` hangs / 100% packet loss)
+| The IP shown in Settings → Developer options → Wireless debugging is whatever
+the phone reports for its currently-active default network, which is the **VPN
+tunnel address** when a VPN is connected (e.g. `10.2.0.2` from a corporate /
+self-hosted VPN). That address only routes inside the VPN; from a peer machine
+on the home Wi-Fi (`192.168.1.x`) there's no path to it. +
+*Symptoms:* `adb connect 10.x.y.z:NNNNN` hangs ~30 s then fails silently, or
+`ping` returns 100% packet loss. The Pixel's developer options page keeps
+showing the VPN address even after toggling Wi-Fi off and on. +
+*Fix:* Toggle the VPN OFF on the phone, **then** re-open Wireless debugging —
+the page will refresh with the home-Wi-Fi address (`192.168.1.x`). The port
+also changes on every wireless-debugging restart, so always re-read both
+fields. Re-pair if the host hasn't paired before. +
+*Verify reachability before `adb connect`:* `ping -c 2 -W 2 <ip>` from the
+host. If that returns `100% packet loss`, the address isn't routable —
+fastest fallback is USB cable (`adb devices` shows the USB serial like
+`37111FDJH0067B`).
+
+| Pixel screen locks mid-deploy / mid-perf-suite, breaking install or Maestro
+| `adb install` after the build prompts in dev settings (the user has to
+re-tap "Allow" if the screen has slept), and `dumpsys gfxinfo` returns zeros
+when the surface isn't being painted. Maestro flows tap real UI so the screen
+must be unlocked + interactive. Default Android lockscreen kicks in at 30 s –
+2 min idle. +
+*Fix (per-session, not persisted across reboot):*
+[source,bash]
+----
+# Keep the screen on regardless of charging state for as long as adb is connected.
+# Reverts on next reboot, or call again with `false` when done.
+adb shell svc power stayon true
+----
+Or: Settings → System → Developer options → "Stay awake" — keeps the screen
+on while charging, persists across reboot. Pair with USB / charger so you can
+walk away. +
+*Combo for hands-off deploy + perf:* USB cable + `adb shell svc power stayon
+true` + Settings → "Don't lock when on this network" disabled (default), and
+the phone won't auto-lock for the duration of the build (~20 min) and the
+follow-on perf-suite (~3 min).
+
+| Expo SDK 55 dev build crashes on launch with `TurboModuleRegistry.getEnforcing(...): 'PlatformConstants' could not be found`
+| `npx expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. One of our native deps (added in the Explore PR — most likely `expo-task-manager`) doesn't ship new-architecture codegen yet, so the runtime fails when the JS bundle requests `PlatformConstants`. +
+*Fix for local dev:* `sed -i 's/^newArchEnabled=true$/newArchEnabled=false/' android/gradle.properties && rm -rf android/app/.cxx android/app/build android/build && cd android && ./gradlew clean && cd .. && npx expo run:android`. The CMake codegen artifacts from the new-arch build cause `./gradlew clean` to fail on its own; the manual `rm -rf` is mandatory. +
+*Note:* `android/` is gitignored, so the flag flip is local-only. EAS production profiles likely need the same treatment via `eas.json` env vars or an `app.config.ts` override; track as a follow-up when the EAS prod build hits the same error. +
+*Validate:* after the rebuild, kill any running Metro (`pkill -f 'expo start'`), `npm start -- --clear`, then `adb -s <serial> reverse tcp:8081 tcp:8081 && adb -s <serial> shell am force-stop com.lightningpiggy.app.dev && adb -s <serial> shell am start -n com.lightningpiggy.app.dev/.MainActivity`. Watch `adb logcat \| grep ReactNativeJS` for `[Perf] HomeScreen first render` instead of the runtime-not-ready error.
+
+| Android emulator GPS / `geo fix` doesn't propagate to apps using `Location.getCurrentPositionAsync()`
+| `adb -s <serial> emu geo fix <lon> <lat>` writes to the emulator's GPS buffer but doesn't always trigger the `LocationManager.requestLocation` callback — on Pixel-series AVDs running API 34+ the location service can sit idle waiting for a "fix" event that never fires. Apps see an indefinite hang on `getCurrentPositionAsync` even though `geo fix` returned `OK`. +
+*Workarounds:* +
+1. **Send `geo fix` repeatedly** (every ~2 s) for the first 30 s after launch — simulates a moving track and forces the location service to push updates: +
+[source,bash]
+----
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  adb -s emulator-5554 emu geo fix 0.04039 52.28897
+  sleep 3
+done &
+----
+2. **Use a real device** for any work that needs reliable foreground location (Map sub-screen, geofence settings, hub mini-map preview). The emulator-1080p (Medium_Phone API 36.1) profile is fine for everything *except* live-position UI. +
+3. **Mock-location app** like _Lockito_ on the emulator. Heavier but works for journey simulation as well as static fixes. +
+*Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
+*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`.maestro/ui/flow-104-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
+
+| Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
+never fires settlement, only the slow balance-diff fallback eventually
+catches it (~30 s – 3 min lag, see #553)
+| The `expectPayment` poll calls `nwcService.lookupInvoice` every 1 s and
+checks the returned `paid` flag. Two non-obvious gotchas around the result
+shape: +
+**(1) WebLN vs NIP-47.** We use `NostrWebLNProvider` from `@getalby/sdk`,
+whose `lookupInvoice` translates the underlying NIP-47 `Nip47Transaction`
+response into the **WebLN** `LookupInvoiceResponse` shape. So *even though
+LNbits' nwcprovider correctly emits the spec-compliant
+`{type, invoice, settled_at, payment_hash, …}`*, what we receive is
+`{preimage, paymentRequest, paid}`. A predicate that only checks
+`result.settled_at` or `result.state` is dead code on this path and will
+never fire — every tick returns `false`, and settlement only catches via
+the slow balance-diff fallback. Fix: check `result.paid === true`. +
+**(2) Field rename.** WebLN names the bolt11 field `paymentRequest`, not
+`invoice`. Returning `result.invoice` to consumers gives them `undefined`
+forever. `nwcService.lookupInvoice` maps `paymentRequest → invoice` once
+inside the function, so callers can keep using `.invoice`. +
+**Where the layer-confusion bites:** the Alby SDK's *type declaration*
+for `NWCClient.lookupInvoice` returns `Nip47Transaction` (with
+`settled_at`/`state`), but we don't call that — we call
+`NostrWebLNProvider.lookupInvoice`, which returns the WebLN shape. The
+type cast on the result must reflect the WebLN shape, not the NIP-47
+spec. If you ever refactor to the raw `NWCClient`, flip both the field
+names AND the settlement predicate. +
+**Diagnostic recipe** if this regresses: temporarily add
+`console.warn('keys:', Object.keys(result), 'raw:', JSON.stringify(result));`
+inside `nwcService.lookupInvoice` after the call resolves, then issue a
+small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
+— the wire shape will tell you immediately whether you're on the WebLN
+or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
+reply timeout`).
+
+| `[Perf]` / `[PerfTab]` / `[PerfBlock]` log lines missing on a real device
+| Production release builds strip every `console.log` via `babel.config.js`'s `transform-remove-console` plugin. `src/utils/perfLog.ts` is gated by the same `__DEV__ \|\| EXPO_PUBLIC_KEEP_PERF_LOGS === '1'` flag, so the whole module dead-code-eliminates in plain release builds. **The preview profile (`eas.json`) sets `EXPO_PUBLIC_KEEP_PERF_LOGS=1`** — so install the preview APK (`com.lightningpiggy.app.preview`), not the production one, when you need logcat-based perf attribution on a real device. `adb -s <serial> logcat -v time '*:S' ReactNativeJS:V` filters down to just JS console output.
+
+| Perfetto trace via `PERFETTO=1` returns an empty trace on a Pixel / production Android device
+| Consumer-shipped Android (`ro.build.flavor=shiba-user` etc.) runs the locked-down "user" SELinux policy. Perfetto's `linux.ftrace` data source — which our `scripts/lib/perf-stats.sh` config requests for `sched_switch` + atrace categories — is denied to the shell uid on user builds, so the daemon starts, enumerates processes/threads, then collects nothing else (the resulting `.pftrace` is ~500 KB of metadata only, `sched` / `slice` / `perf_sample` tables empty). +
+*Workaround:* the **emulator runs userdebug** by default, so Perfetto works there normally; use the emulator for system-level traces. For real-device JS-thread attribution, fall back to **logcat capture** during a Maestro flow: `adb logcat -c && adb logcat -v time '*:S' ReactNativeJS:V > /tmp/run.logcat &` + run the perf script + grep for `[PerfBlock]` / `[Perf] heartbeat gap=` markers. The heartbeat-gap pattern is what found the GPS-jitter cascade on #31.
+
+| Tab-switch perf script reports 20-30 s on the Pixel but the screen looks fully painted after ~1 s in screenshots
+| Maestro's `extendedWaitUntil: visible: text: "..."` polls UI Automator, which can be very slow on a busy JS thread. The thread might be busy with downstream rail / Nostr fetches that don't affect first paint — content is on screen but Maestro hasn't noticed yet. **Always cross-check the wall-clock number against an `adb exec-out screencap` time-lapse at the same intervals** (e.g. `for t in 1 3 6 10 15 20; do adb exec-out screencap -p > /tmp/t$t.png; sleep ...; done`) before concluding the app is genuinely slow. If md5sums are stable at t=1s onward, the freeze is Maestro's, not yours. The newer `[PerfTab] <tab> ready tap→ready=Xms` marker (`src/utils/perfLog.ts`) reports the in-app moment of usable content, decoupled from Maestro's polling.
+
+| Dev client on the Pixel fails to load with "no script URL provided" or similar after native deps change
+| The dev client APK on the device is paired with the bundle of native modules that was compiled into it. Adding or upgrading a native module (e.g. `@maplibre/maplibre-react-native`, `expo-nfc`, anything in the `plugins` array of `app.config.ts`) means the existing dev APK no longer has the native side of what the JS bundle calls. **Rebuild:** `npx expo run:android --device Pixel_8` (model name, not serial — see project memory `feedback-local-apk-for-pixel`). First time after a native dep churn is ~15 min; subsequent JS edits fast-refresh in ~2 s. Stale dev clients are easy to spot: `adb -s <serial> shell dumpsys package com.lightningpiggy.app.dev \| grep versionName` shows the package version vs. `pkg.version` in `package.json` — drift more than a few patch bumps means rebuild.
+
+| A stale "test cache" event from a disposable dev nsec keeps showing up on the rail / map / Hunt screen
+| When a dev script signed a NIP-GC event with a `generateSecretKey()` random nsec (or an env var that's since been rotated away), we no longer hold the key material to publish a NIP-09 delete or a replacing event under the same `d` tag. The event sits on relays under whatever retention policy they apply — months, sometimes years. Add the orphan signer's hex pubkey to `src/services/devEventDenylist.ts` (the `DEV_LEFTOVER_PUBKEYS` Set). The deny-list is checked at every kind-37516 and kind-31923 ingestion point in `nostrPlacesPublisher.ts`, so the event never reaches storage / rail / map. **What NOT to deny-list:** active named-Piggy fixtures (BIG / MIDDLE / LITTLE / EVIL) — their nsecs are still in `.env`, so a replacement publish under the same `d` tag is the correct fix, not deny-listing. Discover the orphan signers by running a quick `pool.querySync` against the default relays filtered by `kinds: [37516]` and matching the event's `name` tag.
+
 |===

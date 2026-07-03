@@ -23,6 +23,8 @@ import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
+import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
 
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
@@ -119,8 +121,11 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
   };
 }
 
-/** Fetch with a timeout to prevent hanging on slow/unreachable APIs. */
-async function fetchWithTimeout(
+/** Fetch with a timeout to prevent hanging on slow/unreachable APIs.
+ * Exported for swapRecoveryService — its recovery pass is single-flight, so
+ * one bare `fetch` hanging there used to block every future recovery trigger
+ * for the whole session (swap audit finding, 2026-07-02). */
+export async function fetchWithTimeout(
   url: string,
   init?: RequestInit,
   timeoutMs = 10000,
@@ -235,6 +240,14 @@ export async function createReverseSwap(
   console.log(
     `[Boltz] Reverse swap created: id=${data.id} lockup=${data.lockupAddress} onchainAmount=${data.onchainAmount}`,
   );
+  // Trust boundary: the swap is only trustless if the invoice binds to OUR
+  // preimage for OUR amount. Verify BEFORE returning (and thus before any
+  // caller pays) — throwing here is a clean pre-commit failure.
+  verifyReverseSwapInvoice({
+    invoice: data.invoice,
+    expectedPaymentHash: preimageHash,
+    expectedAmountSats: amountSats,
+  });
   return {
     id: data.id,
     invoice: data.invoice,
@@ -517,13 +530,61 @@ export async function claimSwap(
   // Set witness: <sig> <preimage> <claim_script> <control_block>
   tx.setWitness(0, [sig, preimageBytes, claimScript, controlBlock]);
 
-  // Broadcast via the configured Electrum server (BDK)
+  // Broadcast via the configured Electrum server (BDK).
+  //
+  // Retry on transient failures: when waitForLockup returns at
+  // `transaction.mempool`, Boltz has just broadcast the lockup tx but
+  // it may not yet have propagated to *our* Electrum server. The first
+  // claim broadcast can then fail because the input UTXO it spends
+  // from is unknown to our Electrum, and BDK surfaces this with an
+  // empty `localizedMessage` that historically reached the user as a
+  // bare "unknown Error". A short exponential-backoff retry papers
+  // over the propagation race in the common case (~5–15 s gap) and
+  // makes the underlying Electrum complaint visible if the failure
+  // turns out to be terminal. See issue #481.
   const txId = tx.getId();
   console.log(`[Boltz] Broadcasting claim tx: ${txId} (${tx.toHex().length / 2} bytes)`);
   const onchainService = await import('./onchainService');
-  await onchainService.broadcastRawTx(tx.toHex());
+  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'claim', txId);
   console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
   return txId;
+}
+
+// Retry broadcast against transient Electrum propagation gaps. Throws
+// the *last* error with a contextualised message so the caller doesn't
+// surface a bare "unknown Error" if BDK gave us a null message.
+async function broadcastWithRetry(
+  fn: () => Promise<void>,
+  label: 'claim' | 'refund',
+  txId: string,
+  maxAttempts: number = 4,
+): Promise<void> {
+  let lastError: unknown;
+  let delayMs = 2000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await fn();
+      if (attempt > 1) {
+        console.log(`[Boltz] ${label} broadcast succeeded on attempt ${attempt}/${maxAttempts}`);
+      }
+      return;
+    } catch (e) {
+      lastError = e;
+      const msg = e instanceof Error ? e.message || e.toString() : String(e);
+      console.warn(
+        `[Boltz] ${label} broadcast attempt ${attempt}/${maxAttempts} failed for ${txId}: ${msg || '(no message)'}`,
+      );
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs *= 2;
+      }
+    }
+  }
+  const detail =
+    lastError instanceof Error ? lastError.message || lastError.toString() : String(lastError);
+  throw new Error(
+    `Boltz ${label} broadcast failed after ${maxAttempts} attempts (${detail || 'no underlying message — likely Electrum propagation gap or RPC error'})`,
+  );
 }
 
 /**
@@ -543,25 +604,29 @@ export function isBitcoinAddress(input: string): boolean {
 /**
  * Fetch lockup transaction details for a submarine swap.
  * Used to get the UTXO needed for refund transaction construction.
+ *
+ * The v2 endpoint returns only `{ id, hex, timeoutBlockHeight }` — it has NO
+ * `index` (vout) or amount fields, so the previous `data.index ?? 0` /
+ * `statusData.onchainAmount ?? 0` reads guessed vout 0 with amount 0 and the
+ * refund either threw "amount too small" or signed the wrong outpoint (swap
+ * audit finding, 2026-07-02). Instead, parse the returned raw tx and locate
+ * the output paying `lockupAddress` — which also verifies the lockup really
+ * pays the address we hold the refund script for.
  */
 export async function getSubmarineSwapLockup(
   swapId: string,
+  lockupAddress: string,
 ): Promise<{ txId: string; vout: number; amount: number } | null> {
   try {
     const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();
     const txId = data.transactionId ?? data.id;
-    if (!txId) return null;
-    // Fetch expected amount from swap status
-    const statusRes = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!statusRes.ok) return null;
-    const statusData = await statusRes.json();
-    return {
-      txId,
-      vout: data.index ?? 0,
-      amount: statusData.onchainAmount ?? 0,
-    };
+    const txHex = data.hex;
+    if (!txId || typeof txHex !== 'string' || !txHex) return null;
+    const lockup = extractLockupFromTxHex(txHex, lockupAddress);
+    if (!lockup) return null;
+    return { txId, vout: lockup.vout, amount: lockup.amount };
   } catch {
     return null;
   }
@@ -673,7 +738,7 @@ export async function refundSwap(
   const txId = tx.getId();
   console.log(`[Boltz] Broadcasting refund tx: ${txId}`);
   const onchainService = await import('./onchainService');
-  await onchainService.broadcastRawTx(tx.toHex());
+  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'refund', txId);
   console.log(`[Boltz] Refund tx broadcast successfully: ${txId}`);
   return txId;
 }
@@ -740,6 +805,21 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     claimPublicKey: data.claimPublicKey ?? '',
     swapTree: data.swapTree,
   };
+}
+
+/**
+ * True only for an EXPLICIT Boltz fail status thrown by `waitForLockup` /
+ * `waitForSubmarineSwapComplete` (`Swap failed with status: <FAIL_STATUS>`) —
+ * i.e. a TERMINAL failure that warrants the refund path.
+ *
+ * Timeouts (`Timeout waiting for swap …` / `Timeout polling swap …`) and
+ * transient/network errors (`Boltz status check failed: 500`, fetch failures)
+ * are AMBIGUOUS — the swap may still settle — and must NOT be treated as
+ * failures (#894).
+ */
+export function isExplicitSwapFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.startsWith('Swap failed with status: ');
 }
 
 /**

@@ -1,0 +1,95 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Subflow — add an on-chain hot wallet via mnemonic (clipboard-paste)
+---
+# Adds an on-chain BIP-84 hot wallet to the AVD by walking the
+# AddWalletWizard via clipboard paste — same pattern as the canonical
+# `test-add-wallet-via-paste.yaml` for NWC. Requires the device
+# clipboard to be pre-seeded with the 12-word seed phrase before
+# invoking this flow:
+#
+#   source .env
+#   echo -n "$MAESTRO_MNEMONIC_LITTLE" | xclip -selection clipboard   # X11
+#   echo -n "$MAESTRO_MNEMONIC_LITTLE" | wl-copy                       # Wayland
+#   maestro test -e WALLET_NAME='Little Piggy On-chain' \
+#     .maestro/common/add-onchain-mnemonic.yaml
+#
+# `inputText` won't work for 12/24-word seeds (chars drop on
+# BottomSheetTextInput under New Architecture — see TROUBLESHOOTING
+# AddWalletWizard NWC paste pattern). The Paste button bypasses that
+# entirely.
+#
+# Mnemonic import is secret-mode only — the `wallet-type-mnemonic` tile is
+# gated on the AsyncStorage `secret_mode` flag (set this once via
+# `test-secret-mode.yaml` or directly).
+
+- waitForAnimationToEnd: { timeout: 4000 }
+
+# Reach the Add-Wallet card. When 0 wallets exist it's already visible;
+# when N wallets exist it sits N positions to the right in the
+# carousel. `scrollUntilVisible` handles both gracefully. Lower
+# visibility threshold (50%) because adjacent cards peek into the
+# viewport — a partially-visible add-wallet-card is still tappable.
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
+    visibilityPercentage: 50
+- tapOn: { id: 'add-wallet-card' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Scroll the type list up so the dev-mode-only "Import Seed Phrase"
+# tile is reachable below the two production tiles (Lightning + On-chain).
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd: { timeout: 1000 }
+
+- tapOn: { id: 'wallet-type-mnemonic' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Tap the in-app Paste button (added in PR #451 follow-on for Maestro
+# parity with the NWC URL flow). Reads clipboard via expo-clipboard +
+# sets state directly — bypasses the BottomSheetTextInput keystroke
+# path that drops chars in long strings.
+- tapOn: { id: 'wizard-mnemonic-paste' }
+- waitForAnimationToEnd: { timeout: 1500 }
+
+- tapOn: { text: 'Next' }
+- waitForAnimationToEnd: { timeout: 4000 }
+
+# Alias step — same shape as the NWC paste flow.
+- tapOn: { id: 'wallet-alias-input' }
+- tapOn: { id: 'wallet-alias-input' }
+- eraseText: { charactersToErase: 100 }
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd: { timeout: 1500 }
+
+- tapOn: { text: 'Next' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Theme step — pick Bitcoin design and finish.
+- tapOn: { text: 'Bitcoin' }
+- waitForAnimationToEnd: { timeout: 1000 }
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd: { timeout: 1000 }
+
+- tapOn: { id: 'wizard-connect-button' }
+- waitForAnimationToEnd: { timeout: 8000 }
+
+# Substring-match `on-chain` (Maestro requires the regex form for
+# substring assertions; the bare-string form is exact-match).
+# Rationale: Maestro's `inputText` drops chars on >8-12 char inputs
+# (BottomSheetTextInput + New Architecture, see TROUBLESHOOTING.adoc),
+# so the rendered alias may be one or two chars short of the input
+# (e.g. "Little Piggyon-chain"). The wallet still lands correctly;
+# substring match is robust to the dropped chars.
+- assertVisible:
+    text: '.*on-chain.*'

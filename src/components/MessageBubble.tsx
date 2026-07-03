@@ -1,25 +1,47 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
-import type { NostrProfile } from '../types/nostr';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
-  buildStaticMapUrl,
-  formatCoordsForDisplay,
-  USER_AGENT,
-  type SharedLocation,
-} from '../services/locationService';
+  createMessageBubbleStyles,
+  type MessageBubbleStyles,
+} from '../styles/MessageBubble.styles';
+import type { NostrProfile } from '../types/nostr';
+import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
+import type { BtcMapPlace } from '../services/btcMapService';
+import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import {
   type BubbleContent,
-  extractImageUrl,
+  type ParsedImageMessage,
+  extractBitcoinUri,
+  parseImageMessage,
+  parseVoiceNote,
   extractInvoice,
   extractLightningAddress,
   extractSharedContact,
+  isSecretModeTrigger,
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import { isSupportedImageUrl } from '../utils/imageUrl';
+import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { extractUrls } from '../utils/extractUrls';
+import { linkifySegments, hasLink } from '../utils/linkify';
+import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import MessageLinkPreview from './MessageLinkPreview';
+import VoiceNotePlayer from './VoiceNotePlayer';
+import DecryptedImage from './DecryptedImage';
+import LibreMiniMap from './LibreMiniMap';
+import { BubbleFooter } from './MessageBubbleFooter';
+
+// Stable empty arrays for the location-card mini-maps — LibreMiniMap
+// requires merchants/caches/events, but DM cards never plot any. Module
+// constants so the memoised map doesn't see a fresh [] each render.
+const EMPTY_MERCHANTS: BtcMapPlace[] = [];
+const EMPTY_CACHES: ParsedCache[] = [];
+const EMPTY_EVENTS: ParsedEvent[] = [];
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -52,14 +74,112 @@ interface Props {
   onOpenContact: (pubkey: string, profile: NostrProfile | null) => void;
   // Tap a location card → parent opens OSM in the system browser.
   onOpenLocation: (location: SharedLocation) => void;
+  // Live-location bubble extras. The parent owns the live state (most
+  // recent ping, remaining time) so the bubble stays a pure renderer
+  // and doesn't need its own context dependency.
+  //   - `liveLocationLatest`: latest coords seen since the start marker
+  //     landed, keyed by sessionId. Falls back to the marker's coords.
+  //   - `liveLocationStatus`: `active` | `paused` | `ended` per session.
+  //   - `liveLocationRemainingMs`: countdown for the sender's bubble.
+  //   - `onStopLiveLocation`: tapped the in-bubble "Stop" button (sender
+  //     side only — pass `undefined` for receiver bubbles).
+  liveLocationLatest?: Record<string, { location: SharedLocation; ts: number } | undefined>;
+  liveLocationStatus?: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>;
+  liveLocationRemainingMs?: Record<string, number | undefined>;
+  onStopLiveLocation?: (sessionId: string) => void;
+  // Location-card mini-map plumbing (#206). All optional — group bubbles
+  // pass none, so their cards just centre on the shared point with no
+  // me-dot / peer marker.
+  myLat?: number | null; // my live latitude (for the blue "me" dot)
+  myLon?: number | null; // my live longitude
+  myAccuracyMetres?: number | null; // my GPS accuracy → blue halo radius
+  myAvatarUri?: string | null; // my own profile picture → "me" dot avatar
+  peerAvatarUri?: string | null; // the other party's profile picture URL
+  onOpenMap?: () => void; // tap the mini-map → open the full-screen Map
   // Tap a GIF or image bubble → parent shows fullscreen modal. Optional —
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Tapping the "Toggle Secret Mode" button on the magic-trigger card
+  // (when the message body is exactly "secretthreewords"). Parent
+  // owns the secretMode setter + celebration overlay so a list of
+  // cells doesn't each render their own confetti instance.
+  onToggleSecretMode?: () => void;
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
+  // Per-relay delivery breakdown for a sent (fromMe) message (#856). Drives
+  // the footer tick; absent on received bubbles.
+  deliveryStatus?: DeliveryStatus;
+  // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
+  wireKind?: number;
+  // Tapping a bubble (sent OR received) opens the message-info sheet. The
+  // parent builds the MessageInfo from these fields; `resendText` is the raw
+  // payload for the sheet's Re-publish (sent text only). (#856)
+  onShowInfo?: (args: {
+    fromMe: boolean;
+    eventId: string;
+    wireKind?: number;
+    deliveryStatus?: DeliveryStatus;
+    resendText: string;
+  }) => void;
 }
+
+type Styles = MessageBubbleStyles;
+
+/**
+ * Image bubble (#688). Lives in its own component because the encrypted
+ * branch needs render state (the resolved displayable URI for the fullscreen
+ * tap) — a hook can't be called from inside MessageBubble's body, which has
+ * earlier conditional returns. Renders DecryptedImage, which handles both the
+ * plain-URL and fetch-ciphertext→decrypt paths.
+ */
+const ImageBubble: React.FC<{
+  styles: Styles;
+  image: ParsedImageMessage;
+  fromMe: boolean;
+  senderLabel: React.ReactNode;
+  onOpenImageFullscreen?: (url: string) => void;
+  testID: string;
+  // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
+  // the tick like every other variant.
+  footer: React.ReactNode;
+}> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
+  const t = useTranslation();
+  // For plain images the fetchable URL is the display source; for encrypted
+  // ones DecryptedImage resolves a data: URI, which it reports back here so
+  // the fullscreen tap shows the decrypted image, not the ciphertext blob.
+  const [displayUri, setDisplayUri] = useState<string | null>(image.encrypted ? null : image.url);
+  const canOpen = !!onOpenImageFullscreen && !!displayUri;
+  return (
+    <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
+        style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
+        accessibilityLabel={
+          fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
+        }
+        accessibilityRole={canOpen ? 'imagebutton' : 'image'}
+        disabled={!canOpen}
+        testID={testID}
+      >
+        {senderLabel}
+        <DecryptedImage
+          url={image.url}
+          encrypted={image.encrypted}
+          keyHex={image.keyHex}
+          nonceHex={image.nonceHex}
+          mime={image.mime}
+          style={styles.imageBubbleImage}
+          accessibilityLabel={t('messageBubble.sharedImage')}
+          onResolved={image.encrypted ? setDisplayUri : undefined}
+        />
+        {footer}
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 const MessageBubble: React.FC<Props> = ({
   id,
@@ -73,17 +193,77 @@ const MessageBubble: React.FC<Props> = ({
   onPayLightningAddress,
   onOpenContact,
   onOpenLocation,
+  liveLocationLatest,
+  liveLocationStatus,
+  liveLocationRemainingMs,
+  onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  myAvatarUri,
+  peerAvatarUri,
+  onOpenMap,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  onToggleSecretMode,
   testIdPrefix,
+  deliveryStatus,
+  wireKind,
+  onShowInfo,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
+  const t = useTranslation();
 
   // Sender label only renders on group bubbles for incoming messages —
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // Legacy NIP-04 (kind 4) messages are coloured purple so the user can tell
+  // them apart from the encrypted NIP-17 (kind 14/15) pink ones at a glance
+  // (#856 follow-up). Plain text only — NIP-04 never carries gift-wrapped media.
+  const isNip04 = wireKind === 4;
+
+  // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
+  // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
+  // Other media (image/voice) ride on the `text` kind too, so this covers them.
+  const resendPayload =
+    content.kind === 'text' ? content.text : content.kind === 'gif' ? content.url : '';
+
+  // Opens the message-info sheet — for sent AND received bubbles (#856). The
+  // bubble's `id` is prefixed (`dm-<eventId>`); strip it so the sheet shows the
+  // bare event id. The rumor id (deliveryStatus.eventId) is preferred for sent.
+  const openInfo = onShowInfo
+    ? () =>
+        onShowInfo({
+          fromMe,
+          eventId: deliveryStatus?.eventId ?? id.replace(/^dm-/, ''),
+          wireKind,
+          deliveryStatus,
+          resendText: resendPayload,
+        })
+    : undefined;
+
+  // Shield-affordance tint: white on a coloured (sent) bubble, supplementary
+  // grey on a surface (received) one — readable on either background (#856).
+  const infoTint = fromMe ? colors.white : colors.textSupplementary;
+
+  // Reusable footer (time + delivery tick) shared by every bubble variant so a
+  // sent GIF / image / voice note / location / invoice all show the tick, not
+  // just plain text (#856). Each variant passes its own time style.
+  const renderFooter = (timeStyle: object | (object | undefined)[]) => (
+    <BubbleFooter
+      styles={styles}
+      messageId={id}
+      fromMe={fromMe}
+      createdAt={createdAt}
+      timeStyle={timeStyle}
+      deliveryStatus={deliveryStatus}
+      onOpenInfo={openInfo}
+      infoTint={infoTint}
+    />
+  );
 
   if (content.kind === 'gif') {
     return (
@@ -92,7 +272,7 @@ const MessageBubble: React.FC<Props> = ({
           activeOpacity={0.85}
           onPress={() => onOpenGifFullscreen?.(content.url)}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
-          accessibilityLabel={fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'}
+          accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
           accessibilityRole="imagebutton"
           testID={`${testIdPrefix}-gif-${id}`}
         >
@@ -105,7 +285,157 @@ const MessageBubble: React.FC<Props> = ({
             transition={150}
             accessibilityIgnoresInvertColors
           />
-          <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
+          {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (content.kind === 'liveLocationMarker') {
+    const { marker } = content;
+    // No separate card for the end marker — it would duplicate the start card (which flips to "ended"); its coords are folded into liveLocationLatest so the one card shows the last known location.
+    if (marker.phase === 'end') return null;
+    // The receiver's running view of where the sender is right now —
+    // ConversationScreen feeds this from its kind-20069 subscription.
+    // Falls back to the marker's own coordinates so the bubble always
+    // renders a map even before the first ping has landed.
+    const latest = liveLocationLatest?.[marker.sessionId];
+    // May be null on a coordless `end` marker (sender stopped with no fix).
+    const displayLocation: SharedLocation | null = latest?.location ?? marker.location;
+    // Map centre: my own live position on my outgoing share, the peer's
+    // latest position on an incoming one. Falls back to the marker coords
+    // when my live fix isn't wired / hasn't landed yet.
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    const centreLat = fromMe && haveMine ? myLat : (displayLocation?.lat ?? null);
+    const centreLon = fromMe && haveMine ? myLon : (displayLocation?.lon ?? null);
+    // My blue dot shows on incoming cards (where am I vs them) and on my
+    // own live share. Suppressed when I have no fix.
+    const showMyDot = haveMine;
+    // Peer avatar marker only on incoming cards, at their location. The
+    // `peerAvatarUri !== undefined` guard scopes this to the 1:1 path —
+    // group bubbles pass no avatar plumbing, so their card just centres
+    // on the point with no peer chip (#206 group follow-up).
+    const peerMarker =
+      !fromMe && displayLocation && peerAvatarUri !== undefined
+        ? { lat: displayLocation.lat, lon: displayLocation.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
+    // Only `start` markers reach here (end markers return null above), so the wall-clock default is 'active' unless the context says otherwise.
+    const status = liveLocationStatus?.[marker.sessionId] ?? 'active';
+    const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
+    // Sender bubble while the share is still active gets a Stop button.
+    // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
+    const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
+    const titleText =
+      status === 'ended' || status === 'expired'
+        ? t('messageBubble.liveLocationEnded')
+        : status === 'paused'
+          ? fromMe
+            ? t('messageBubble.liveLocationPaused')
+            : t('messageBubble.liveLocationPausedThem')
+          : fromMe
+            ? t('messageBubble.sharingLiveLocation')
+            : t('messageBubble.liveLocation');
+    const subtitleText: string | null = (() => {
+      if (status === 'ended' || status === 'expired') {
+        return latest
+          ? t('messageBubble.lastUpdate', { time: formatTime(Math.floor(latest.ts / 1000)) })
+          : null;
+      }
+      if (latest) {
+        const ageMs = Math.max(0, Date.now() - latest.ts);
+        const mins = Math.floor(ageMs / 60_000);
+        const secs = Math.floor((ageMs % 60_000) / 1000);
+        if (mins >= 1) return t('messageBubble.updatedMinsAgo', { mins });
+        return t('messageBubble.updatedSecsAgo', { secs });
+      }
+      return t('messageBubble.waitingForFirstUpdate');
+    })();
+    const remainingLabel: string | null = (() => {
+      if (status === 'ended' || status === 'expired') return null;
+      if (remaining === null) return null;
+      if (remaining <= 0) return t('messageBubble.ending');
+      const mins = Math.ceil(remaining / 60_000);
+      if (mins < 60) return t('messageBubble.minsLeft', { mins });
+      const hours = Math.floor(mins / 60);
+      const remMin = mins % 60;
+      return remMin === 0
+        ? t('messageBubble.hoursLeft', { hours })
+        : t('messageBubble.hoursMinsLeft', { hours, mins: remMin });
+    })();
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => displayLocation && onOpenLocation(displayLocation)}
+          style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
+          accessibilityLabel={
+            fromMe
+              ? t('messageBubble.sharingLiveLocationA11y', {
+                  remaining: remainingLabel ?? t('messageBubble.noTimeRemaining'),
+                })
+              : t('messageBubble.receivingLiveLocationA11y', {
+                  status: subtitleText ?? t('messageBubble.waiting'),
+                })
+          }
+          testID={`${testIdPrefix}-live-location-${id}`}
+        >
+          {SenderLabel}
+          {centreLat !== null && centreLon !== null ? (
+            <View style={styles.locationMap}>
+              <LibreMiniMap
+                lat={centreLat}
+                lon={centreLon}
+                merchants={EMPTY_MERCHANTS}
+                caches={EMPTY_CACHES}
+                events={EMPTY_EVENTS}
+                fill
+                defaultZoom={15}
+                userLat={showMyDot ? (myLat ?? null) : null}
+                userLon={showMyDot ? (myLon ?? null) : null}
+                userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+                userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
+                profileMarker={peerMarker}
+                onTapMap={onOpenMap}
+              />
+            </View>
+          ) : null}
+          <View style={styles.locationBody}>
+            <View style={styles.locationLabelRow}>
+              <Radio
+                size={14}
+                color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+              />
+              <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
+                {titleText}
+              </Text>
+            </View>
+            {displayLocation ? (
+              <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
+                {formatCoordsForDisplay(displayLocation)}
+              </Text>
+            ) : null}
+            {subtitleText ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {subtitleText}
+              </Text>
+            ) : null}
+            {remainingLabel ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {remainingLabel}
+              </Text>
+            ) : null}
+            {showStop ? (
+              <TouchableOpacity
+                style={styles.liveStopButton}
+                onPress={() => onStopLiveLocation?.(marker.sessionId)}
+                accessibilityLabel={t('messageBubble.stopSharingLiveLocation')}
+                testID={`${testIdPrefix}-live-location-stop-${id}`}
+              >
+                <Text style={styles.invoicePayText}>{t('messageBubble.stopSharing')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -113,25 +443,46 @@ const MessageBubble: React.FC<Props> = ({
 
   if (content.kind === 'location') {
     const { location } = content;
-    const mapUrl = buildStaticMapUrl(location);
+    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
+    // My blue dot only on a received static card — not on my own share
+    // (a static share is a single point, my live position is irrelevant).
+    const showMyDot = !fromMe && haveMine;
+    // Peer avatar marker only on a received card, at the shared point.
+    // `peerAvatarUri !== undefined` scopes the chip to the 1:1 path —
+    // group bubbles pass no avatar plumbing (#206 group follow-up).
+    const peerMarker =
+      !fromMe && peerAvatarUri !== undefined
+        ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
+        : null;
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenLocation(location)}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
-          accessibilityLabel={fromMe ? 'Location sent' : 'Location received'}
+          accessibilityLabel={
+            fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationReceived')
+          }
           testID={`${testIdPrefix}-location-${id}`}
         >
           {SenderLabel}
-          <ExpoImage
-            source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-            style={styles.locationMap}
-            contentFit="cover"
-            cachePolicy="disk"
-            transition={150}
-            accessibilityIgnoresInvertColors
-          />
+          <View style={styles.locationMap}>
+            <LibreMiniMap
+              lat={location.lat}
+              lon={location.lon}
+              merchants={EMPTY_MERCHANTS}
+              caches={EMPTY_CACHES}
+              events={EMPTY_EVENTS}
+              fill
+              defaultZoom={15}
+              userLat={showMyDot ? (myLat ?? null) : null}
+              userLon={showMyDot ? (myLon ?? null) : null}
+              userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
+              userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
+              profileMarker={peerMarker}
+              onTapMap={onOpenMap}
+            />
+          </View>
           <View style={styles.locationBody}>
             <View style={styles.locationLabelRow}>
               <MapPin
@@ -139,7 +490,7 @@ const MessageBubble: React.FC<Props> = ({
                 color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
               />
               <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
-                {fromMe ? 'Location sent' : 'Location'}
+                {fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationLabel')}
               </Text>
             </View>
             <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
@@ -147,18 +498,39 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
             {location.accuracyMeters !== null ? (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
-                ± {location.accuracyMeters} m · OpenStreetMap
+                {t('messageBubble.accuracyOsm', { meters: location.accuracyMeters })}
               </Text>
             ) : (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
                 OpenStreetMap
               </Text>
             )}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Generic, future-proof fallback for an inner event kind the app doesn't
+  // render (#market follow-up). Instead of a blank bubble, show a small muted/
+  // italic placeholder naming the raw Nostr kind. Side-aligned like a normal
+  // bubble so the sender context (fromMe) is preserved, but visually subdued so
+  // it reads as "nothing to do here" rather than a real message.
+  if (content.kind === 'unsupported') {
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View
+          style={[styles.bubble, styles.unsupportedBubble]}
+          accessibilityLabel={t('messageBubble.unsupportedA11y', { kind: content.rawKind })}
+          testID={`${testIdPrefix}-unsupported-${id}`}
+        >
+          {SenderLabel}
+          <Text style={styles.unsupportedText}>
+            {t('messageBubble.unsupportedText', { kind: content.rawKind })}
+          </Text>
+          {renderFooter([styles.bubbleTime])}
+        </View>
       </View>
     );
   }
@@ -166,30 +538,126 @@ const MessageBubble: React.FC<Props> = ({
   // content.kind === 'text' — fall through to per-text-format detection.
   const text = content.text;
 
-  const imageUrl = extractImageUrl(text);
-  if (imageUrl) {
+  // Image (#688) — encrypted NIP-17 kind-15 (fetch ciphertext → decrypt →
+  // display) OR a plain image URL (legacy / other clients → display directly).
+  // Both render through the same bubble; DecryptedImage owns the decrypt path.
+  const image = parseImageMessage(text);
+  if (image) {
+    return (
+      <ImageBubble
+        styles={styles}
+        image={image}
+        fromMe={fromMe}
+        senderLabel={SenderLabel}
+        onOpenImageFullscreen={onOpenImageFullscreen}
+        testID={`${testIdPrefix}-image-${id}`}
+        footer={renderFooter([styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe])}
+      />
+    );
+  }
+
+  // Voice note (#235) — inline player card (play/pause + waveform), shown
+  // for both sender and receiver. Detected before the text/link fallback
+  // so the Blossom `.mp4` URL renders as a player, not a bare link.
+  const voice = parseVoiceNote(text);
+  if (voice) {
+    return (
+      <VoiceNotePlayer
+        url={voice.url}
+        encrypted={voice.encrypted}
+        keyHex={voice.keyHex}
+        nonceHex={voice.nonceHex}
+        mime={voice.mime}
+        fromMe={fromMe}
+        createdAt={createdAt}
+        senderName={senderName}
+        testID={`${testIdPrefix}-voice-${id}`}
+        footer={
+          fromMe && deliveryStatus
+            ? renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])
+            : undefined
+        }
+      />
+    );
+  }
+
+  // "secretthreewords" magic trigger — render an inline card with a
+  // Toggle Secret Mode button. Only LP renders the special UI; on
+  // other Nostr clients the recipient sees the plain word and won't
+  // know what it does. We render the card on BOTH sides (sender +
+  // receiver) so the sender sees a confirmation that the trigger
+  // landed, but only the receiver can usefully tap the button —
+  // sender's button is harmless (toggles their own mode).
+  if (isSecretModeTrigger(text)) {
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => onOpenImageFullscreen?.(imageUrl)}
-          style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
-          accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
-          accessibilityRole={onOpenImageFullscreen ? 'imagebutton' : 'image'}
-          disabled={!onOpenImageFullscreen}
-          testID={`${testIdPrefix}-image-${id}`}
-        >
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.imageBubbleImage}
-            resizeMode="cover"
-            accessibilityLabel="Shared image"
-          />
-          <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
-            {formatTime(createdAt)}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {t('messageBubble.secretMode')}
           </Text>
-        </TouchableOpacity>
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
+            {fromMe
+              ? t('messageBubble.secretModeSenderMemo')
+              : t('messageBubble.secretModeReceiverMemo')}
+          </Text>
+          {!fromMe && onToggleSecretMode && (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={onToggleSecretMode}
+              accessibilityRole="button"
+              accessibilityLabel={t('messageBubble.toggleSecretMode')}
+              testID={`${testIdPrefix}-secret-mode-toggle-${id}`}
+            >
+              <Text style={styles.invoicePayText}>{t('messageBubble.toggleSecretMode')}</Text>
+            </TouchableOpacity>
+          )}
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+        </View>
+      </View>
+    );
+  }
+
+  const bitcoinUri = extractBitcoinUri(text);
+  if (bitcoinUri) {
+    // On-chain BIP-21 share. Tap → parent's onPayInvoice (which opens
+    // SendSheet pre-filled — SendSheet already parses `bitcoin:` URIs
+    // and pre-fills both address and BIP-21 amount, so we hand the raw
+    // URI straight through). Receiver-only Pay button — outgoing
+    // bubbles are informational.
+    const shortAddr =
+      bitcoinUri.address.length > 16
+        ? `${bitcoinUri.address.slice(0, 8)}…${bitcoinUri.address.slice(-6)}`
+        : bitcoinUri.address;
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+          {SenderLabel}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
+          </Text>
+          {bitcoinUri.amountSats !== null ? (
+            <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
+              {t('messageBubble.satsAmount', { amount: bitcoinUri.amountSats.toLocaleString() })}
+            </Text>
+          ) : null}
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
+            {shortAddr}
+          </Text>
+          {fromMe ? null : (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={() => onPayInvoice(bitcoinUri.raw)}
+              accessibilityRole="link"
+              accessibilityLabel={t('messageBubble.payOnchainAddress')}
+              testID={`${testIdPrefix}-bitcoin-pay-${id}`}
+            >
+              <Zap size={16} color={colors.white} fill={colors.white} />
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
+            </TouchableOpacity>
+          )}
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+        </View>
       </View>
     );
   }
@@ -206,12 +674,12 @@ const MessageBubble: React.FC<Props> = ({
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Invoice sent' : 'Invoice received'}
+            {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
           </Text>
           <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
             {invoice.amountSats !== null
-              ? `${invoice.amountSats.toLocaleString()} sats`
-              : 'Any amount'}
+              ? t('messageBubble.satsAmount', { amount: invoice.amountSats.toLocaleString() })
+              : t('messageBubble.anyAmount')}
           </Text>
           {invoice.description ? (
             <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={2}>
@@ -220,21 +688,27 @@ const MessageBubble: React.FC<Props> = ({
           ) : null}
           <View style={styles.invoiceTagRow}>
             {paid ? (
-              <View style={[styles.invoiceTag, styles.invoiceTagPaid]}>
-                <Text style={styles.invoiceTagPaidText}>Paid</Text>
+              <View
+                style={[styles.invoiceTag, styles.invoiceTagPaid]}
+                accessibilityLabel={t('messageBubble.invoicePaid')}
+                testID={`${testIdPrefix}-paid-badge-${id}`}
+              >
+                <Text style={styles.invoiceTagPaidText}>{t('messageBubble.paid')}</Text>
               </View>
             ) : expired ? (
               <View style={[styles.invoiceTag, styles.invoiceTagExpired]}>
-                <Text style={styles.invoiceTagExpiredText}>Expired</Text>
+                <Text style={styles.invoiceTagExpiredText}>{t('messageBubble.expired')}</Text>
               </View>
             ) : fromMe ? (
               <View style={[styles.invoiceTag, styles.invoiceTagUnpaid]}>
-                <Text style={styles.invoiceTagUnpaidText}>Unpaid</Text>
+                <Text style={styles.invoiceTagUnpaidText}>{t('messageBubble.unpaid')}</Text>
               </View>
             ) : null}
             {!paid && !expired && invoice.expiresAt !== null ? (
               <Text style={[styles.invoiceExpiry, fromMe && styles.invoiceExpiryMe]}>
-                expires {formatRelativeFuture(invoice.expiresAt * 1000)}
+                {t('messageBubble.expiresIn', {
+                  time: formatRelativeFuture(invoice.expiresAt * 1000),
+                })}
               </Text>
             ) : null}
           </View>
@@ -242,16 +716,15 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(invoice.raw)}
-              accessibilityLabel="Pay this invoice"
+              accessibilityRole="link"
+              accessibilityLabel={t('messageBubble.payInvoice')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
@@ -268,12 +741,12 @@ const MessageBubble: React.FC<Props> = ({
           activeOpacity={0.8}
           onPress={() => onOpenContact(sharedContact.pubkey, prof)}
           style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
-          accessibilityLabel={`Shared contact ${displayName}`}
+          accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
         >
           {SenderLabel}
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
-            {fromMe ? 'Contact shared' : 'Contact'}
+            {fromMe ? t('messageBubble.contactShared') : t('messageBubble.contact')}
           </Text>
           <View style={styles.contactBodyRow}>
             {/* Always render the silhouette as the base layer so it shows
@@ -284,16 +757,19 @@ const MessageBubble: React.FC<Props> = ({
                 the icon to guarantee contrast against the light avatar BG. */}
             <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
               <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
-              {prof?.picture ? (
-                <Image
+              {prof?.picture && isSupportedImageUrl(prof.picture) ? (
+                <ExpoImage
                   source={{ uri: prof.picture }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                  cachePolicy="memory-disk"
+                  recyclingKey={prof.picture}
+                  autoplay={false}
                 />
               ) : null}
             </View>
             <View style={styles.contactInfo}>
               <Text style={[styles.contactName, fromMe && styles.contactNameMe]} numberOfLines={1}>
-                {loaded ? displayName : 'Loading…'}
+                {loaded ? displayName : t('messageBubble.loading')}
               </Text>
               {prof?.lud16 ? (
                 <Text style={[styles.contactLn, fromMe && styles.contactLnMe]} numberOfLines={1}>
@@ -306,9 +782,7 @@ const MessageBubble: React.FC<Props> = ({
               ) : null}
             </View>
           </View>
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </TouchableOpacity>
       </View>
     );
@@ -321,7 +795,7 @@ const MessageBubble: React.FC<Props> = ({
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Address sent' : 'Lightning address'}
+            {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
           </Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
             {lnAddress}
@@ -330,390 +804,73 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayLightningAddress(lnAddress)}
-              accessibilityLabel="Pay this lightning address"
+              accessibilityLabel={t('messageBubble.payLightningAddress')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </View>
       </View>
     );
   }
 
-  // Plain text fallback — no rich content detected.
+  // Plain text fallback — no rich content detected. Cap link previews
+  // at 1 per message: first non-blocklisted URL wins. All URLs in the body
+  // are rendered as tappable link spans below (see linkifySegments).
+  const previewUrl = (() => {
+    const urls = extractUrls(text);
+    for (const u of urls) {
+      if (!isBlocklisted(u)) return u;
+    }
+    return null;
+  })();
+
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+      <View
+        style={[
+          styles.bubble,
+          fromMe ? styles.bubbleMe : styles.bubbleThem,
+          // NIP-04 (kind 4): purple sent bubble (vs pink NIP-17); a purple
+          // left-edge on the received surface bubble so legacy DMs are
+          // distinguishable on both sides (#856 follow-up).
+          isNip04 && (fromMe ? styles.bubbleMeNip04 : styles.bubbleThemNip04),
+        ]}
+        testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : undefined}
+      >
         {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
-        <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-          {formatTime(createdAt)}
+        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+          {hasLink(text)
+            ? linkifySegments(text).map((seg, i) =>
+                seg.url ? (
+                  <Text
+                    key={i}
+                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                    onPress={() => {
+                      // openURL rejects on a malformed URL / missing handler —
+                      // swallow so a bad link can't raise an unhandled rejection.
+                      void Linking.openURL(seg.url as string).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
+                    testID={`${testIdPrefix}-link-${id}-${i}`}
+                  >
+                    {seg.text}
+                  </Text>
+                ) : (
+                  seg.text
+                ),
+              )
+            : text}
         </Text>
+        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
+        {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
       </View>
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    bubbleRow: {
-      flexDirection: 'row',
-      marginVertical: 2,
-    },
-    bubbleRowLeft: { justifyContent: 'flex-start' },
-    bubbleRowRight: { justifyContent: 'flex-end' },
-    senderLabel: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      marginBottom: 2,
-      textTransform: 'uppercase',
-      letterSpacing: 0.4,
-    },
-    bubble: {
-      maxWidth: '80%',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      paddingBottom: 4,
-      borderRadius: 16,
-    },
-    bubbleThem: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    bubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    bubbleText: {
-      fontSize: 15,
-      color: colors.textBody,
-      lineHeight: 20,
-    },
-    bubbleTextMe: {
-      color: colors.white,
-    },
-    bubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      alignSelf: 'flex-end',
-    },
-    bubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    invoiceCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    invoiceCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    invoiceLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    invoiceLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceAmount: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    invoiceAmountMe: {
-      color: colors.white,
-    },
-    invoiceMemo: {
-      fontSize: 14,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-    invoiceMemoMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    invoiceExpiry: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    invoiceExpiryMe: {
-      color: 'rgba(255,255,255,0.75)',
-    },
-    invoiceTagRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 6,
-    },
-    invoiceTag: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 10,
-      alignSelf: 'flex-start',
-    },
-    invoiceTagPaid: {
-      backgroundColor: '#2e7d32',
-    },
-    invoiceTagPaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagUnpaid: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
-    },
-    invoiceTagUnpaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagExpired: {
-      backgroundColor: 'rgba(0,0,0,0.32)',
-    },
-    invoiceTagExpiredText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoicePayButton: {
-      marginTop: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    invoicePayText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    contactCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    contactCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    contactCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    contactLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    contactLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    contactBodyRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    contactAvatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.background,
-    },
-    contactAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    contactInfo: {
-      flex: 1,
-      minWidth: 0,
-    },
-    contactName: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    contactNameMe: {
-      color: colors.white,
-    },
-    contactLn: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    contactLnMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    gifCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    gifCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    gifCardThem: {
-      backgroundColor: colors.surface,
-    },
-    gifImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    gifTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    gifTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      borderWidth: 1,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    locationCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    locationCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    locationMap: {
-      width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
-    },
-    locationBody: {
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 4,
-      gap: 2,
-    },
-    locationLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    locationLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    locationLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCoords: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    locationCoordsMe: {
-      color: colors.white,
-    },
-    locationAccuracy: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    locationAccuracyMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    imageBubble: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    imageBubbleMe: {
-      backgroundColor: colors.brandPink,
-    },
-    imageBubbleThem: {
-      backgroundColor: colors.surface,
-    },
-    imageBubbleImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    imageBubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    imageBubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-  });
 
 export default MessageBubble;

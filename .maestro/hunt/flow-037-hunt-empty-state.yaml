@@ -1,0 +1,70 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Geo-caches empty list renders Create CTA
+---
+# Smoke flow for the Geo-caches screen (was the Hunt hub before the
+# Hunt+Discover merge in PR #488): with no caches nearby, we expect
+# the empty state to render and the `+` button in the header to be
+# tappable. Tap → HuntCreateScreen with the LNURL paste field.
+# Saving an actual Piggy + writing to NFC is exercised in milestone
+# 8 with a fixture LNURL-w endpoint and mocked NFC.
+#
+# Run: maestro test .maestro/hunt/flow-037-hunt-empty-state.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'hunt-screen'
+- assertVisible:
+    id: 'hunt-create-piggy-button'
+
+# Either populated list or empty state — both are acceptable.
+- runFlow:
+    when:
+      visible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible: 'No geo-caches nearby yet'
+
+# Drill into the Create flow via the header `+` button.
+- tapOn:
+    id: 'hunt-create-piggy-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- assertVisible:
+    id: 'hunt-create-screen'
+- assertVisible:
+    id: 'hunt-piggy-lnurl-input'
+- assertVisible:
+    id: 'hunt-piggy-paste-button'
+
+# Validate button is present but disabled until something is in the input.
+- assertVisible:
+    id: 'hunt-piggy-validate-button'
+
+# Bail back to the Geo-caches screen.
+- tapOn:
+    id: 'hunt-create-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'hunt-screen'
+
+# And back to Explore home.
+- tapOn:
+    id: 'hunt-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-hunt'

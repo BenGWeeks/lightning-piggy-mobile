@@ -1,0 +1,298 @@
+= Data storage architecture
+
+How Lightning Piggy persists data on the device: what lives where, what's
+sensitive, and what's encrypted. Read this before adding a new cache or
+changing how anything is stored.
+
+== Principles
+
+* *Secrets go in the OS keystore.* Anything that is itself a credential —
+  the Nostr `nsec`, an LNURL-withdraw bearer, an NFC tag lock PIN — lives
+  in `expo-secure-store` (Android Keystore / iOS Keychain, hardware-backed).
+  Never in AsyncStorage or a plain file.
+* *Bulk data goes in AsyncStorage or files,* not the keystore — the keystore
+  is for small secrets (a key, a token), not megabytes of cache.
+* *Public vs private.* Nostr public events (geo-caches, NIP-52 events, BTC
+  Map places) are public data — they need no at-rest encryption. *Decrypted
+  DM content is private* — it does, and is the subject of the encrypted-store
+  work (see <<target>>).
+* *The decrypting key is the protected thing.* As long as the key is in the
+  keystore, ciphertext on disk is useless without it. Peer clients stop here
+  and leave the at-rest data unprotected: Damus keeps the `nsec` in the Keychain
+  but stores event data unencrypted; Amethyst holds decrypted data in memory
+  only; 0xchat's Isar DB is plaintext on disk. We go one step further and
+  encrypt the at-rest DB too (Signal's model) — see <<target>>.
+
+== Storage layers (current)
+
+[cols="2,3,2,2",options="header"]
+|===
+| Layer | What | Sensitivity | At-rest protection
+
+| `expo-secure-store`
+  (Android Keystore / iOS Keychain)
+| `nsec`, LNURL-withdraw bearers, NFC lock PINs
+| Secret
+| *Hardware-backed encryption.* Key wrapped by the secure element.
+
+| `AsyncStorage`
+  (Android: SQLite `RKStorage` in the app sandbox)
+| App settings, WoT tier, DM inbox summaries (`nostr_dm_inbox_v1`),
+  per-conversation caches, geo-cache blob (`@lp:nostr-caches-v1`), NIP-52
+  events blob (`@lp:nostr-events-v1`), per-wallet tx caches, last-seen cursors
+| Mixed (mostly public/cache; DM *summaries* are decrypted snippets)
+| App sandbox + OS file-based encryption (FBE). *Not* app-level encrypted.
+
+| `expo-file-system`
+  (app document dir, `Paths.document`)
+| NIP-17 skip-set files, per-account (wrap *ids* only — no plaintext, #743);
+  BTC Map places cache (`btcmap-last-result.json`). The per-account wrap
+  *plaintext* cache (`<key>.json`, #689) is *retired* — #848 migrates it into
+  the encrypted DB and deletes it (verified).
+| Skip-set = public nonces; places are public
+| App sandbox + OS FBE. *Not* app-level encrypted (nothing here needs it).
+
+| `op-sqlite` + SQLCipher
+  (`lightningpiggy.db`, #695/#848)
+| Decrypted DM rows (`dm_messages`: NIP-17 rumors *and* NIP-04 plaintexts),
+  one row per event, keyed `(owner, event_id)`, indexed
+  `(owner, conversation, created_at)`
+| *Decrypted DM plaintext* — the most sensitive bulk data on the device
+| *Whole-file SQLCipher encryption*, key in the OS keystore (#697). Signal's
+  model — see <<keys>>.
+|===
+
+== Gotcha: the 2 MB AsyncStorage row limit
+
+AsyncStorage stores each key as one row in Android's SQLite. Android's
+*CursorWindow caps a single row at ~2 MB on READ* — a value past that throws
+`SQLiteBlobTooBigException` and the row fails to hydrate. A large cache stored
+as one JSON blob therefore *silently fails to load*, which is what caused the
+DM cold-start re-decrypt freeze (#687): the wrap cache blew the limit, hydrated
+empty, and the app re-decrypted the whole inbox on every launch (64-88 s).
+
+Interim fix (#689): the NIP-17 wrap cache moved to a *file* (`expo-file-system`),
+which has no per-row read cap. *Do not store an unbounded cache as a single
+AsyncStorage row.*
+
+The file move fixed the cold-start *seed* but not the underlying cost: a
+focus-triggered `refreshDmInbox` still walks the whole inbox synchronously on
+the JS thread. Measured on a real device (2026-05-26), opening the Messages tab
+ran `refreshDmInbox` for *52 s* and froze the JS thread for *49 s in one
+unbroken block* — while opening an individual conversation was ~2 s (cache hit).
+A single conversation reads fast; the inbox-wide pass does not. That asymmetry
+is the case for <<target>>.
+
+[[target]]
+== Target architecture (#695): indexed, encrypted SQLite
+
+NOTE: *Status:* the DM slice of this architecture is *live* as of #848 —
+`dm_messages` is wired into the inbox refresh, the live DM subscription and
+thread opens (ingest via `dmWrapIngest`/`dmIngest`, reads via `dmDb`'s indexed
+queries), with a one-time verified migration off the plaintext wrap-cache file
+(`dmStoreMigrationRunner`). Transactions/swaps and the public cache tables
+remain future slices.
+
+The blob/file caches don't scale (whole-blob parse, no indexes, the 2 MB trap).
+The target — matching how 0xchat / Damus persist Nostr data — is a single
+*indexed local database*:
+
+* *Engine:* `op-sqlite` (bundles SQLCipher). Chosen over `expo-sqlite` because
+  SQLCipher gives *transparent whole-file encryption* (content *and* metadata),
+  so turning encryption on is just opening with a key — no schema/query change.
+* *One row per event,* not a blob. Indexed by `event_id` (unique → O(log n)
+  dedupe), `created_at`, and `conversation`/`geohash`/`author` as needed →
+  fast paginated reads, no whole-blob parse, no 2 MB ceiling.
+* *Decrypt once at receipt → store plaintext rows.* Cold start becomes an
+  indexed read with no re-decryption (the 0xchat model).
+* *At-rest encryption from day one* (see <<keys>>) — so decrypted DM plaintext
+  is never written to disk in the clear (closes #690). This is the gap every
+  peer client leaves open; we close it (Signal's model).
+* *Sync:* persistent `kind:1059` subscription + a `since` cursor rewound ~3
+  days (to absorb NIP-17's randomised gift-wrap timestamps), advanced off the
+  *inner* rumor's real `created_at`, deduped by id — so we stop re-querying the
+  whole wrap set on every open.
+
+=== What goes in the DB
+
+[cols="2,2,2",options="header"]
+|===
+| Data | Row keyed by | Encrypted?
+| DM wraps / messages (NIP-17) | `event_id` (+ `conversation`, `created_at`) | *Yes* — private content
+| Transactions (Lightning / on-chain) | `payment_hash` / txid (+ `wallet_id`, `created_at`) | *Yes* — private financial
+| Boltz swaps | swap id (+ `status`, `timeout_block`) | *Yes* — private + recovery-critical
+| Geo-caches (NIP-GC 37516) | `coord` (+ `geohash`, `author`) | Harmless (public); encrypted anyway since one DB
+| NIP-52 events (31923) | `coord` (+ `geohash`, `starts_at`) | Harmless (public)
+|===
+
+DMs, transactions, and swaps are *private* and the reason the DB is encrypted.
+Geo-caches and events are *public* but folding them into the same SQLCipher DB
+is simpler than a second plain DB, and the overhead is negligible.
+
+*BTC Map places are the deliberate exception* — public *external bulk* data,
+identical for every user and refreshed wholesale, so they stay in their own
+*plain* cache (`btcmap-last-result.json`), **not** the encrypted DB. That keeps
+the encrypted DB strictly *your* data, so logout = a clean, complete wipe (see
+the storage map under <<Diagrams>>).
+
+*Sequencing:* DMs first (they cause the freeze and need encryption);
+transactions/swaps next (financial); the public Nostr tables after.
+
+[[keys]]
+== Keystore key management (for the encrypted DB)
+
+Signal's wrapped-key model. The key module (`src/services/localDbKey.ts` —
+`getOrCreateLocalDbKey` / `clearLocalDbKey`) is the first slice of the #695/#690
+work, added in #697. One key opens one DB
+holding *both* the private DM rows and the public cache rows — the name is
+deliberately not DM-specific:
+
+. *First run:* generate a random 256-bit DB key.
+. *Store it in `expo-secure-store`* (Keystore/Keychain, hardware-backed where
+  the device supports it) with `keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`
+  so it is never iCloud/device-migration backed up — a 32-byte key is well
+  within the keystore's remit (unlike the bulk cache).
+. *App start:* read the key from secure-store → open the SQLCipher DB with it
+  (`PRAGMA key`). The on-disk file is ciphertext; the key only lives in RAM at
+  runtime.
+. *Optional:* auth-gate retrieval (device unlock / biometric).
+. *Logout / account wipe:* delete the DB file *and* the key from secure-store.
+  *Rotation:* new key + `PRAGMA rekey`.
+
+The hardware keystore wraps the key, so raw extraction of the DB file *or* the
+key off the device yields nothing usable.
+
+== Diagrams
+
+NOTE: These are https://mermaid.js.org[Mermaid] blocks. They render to images
+in the PDF build (`generate-docs.sh` wires `asciidoctor-diagram` +
+`puppeteer-mermaid.json`) and on Mermaid-aware viewers; GitHub's raw `.adoc`
+preview shows them as source.
+
+=== Encrypted DB schema (target)
+
+One SQLCipher database, one row per item, indexed for slice reads. Tables hold
+*your* data — private (DMs, transactions, swaps) and public-but-you-touched
+(profiles, caches, events). Public *external bulk* data (BTC Map places) is
+deliberately NOT here — see the storage map below. Relationships are *soft*:
+the pubkey columns reference Nostr identities, not enforced foreign keys.
+
+[mermaid]
+....
+erDiagram
+    dm_messages {
+        TEXT event_id PK
+        TEXT conversation
+        INTEGER created_at
+        TEXT sender
+        TEXT content
+    }
+    group_messages {
+        TEXT event_id PK
+        TEXT group_id
+        INTEGER created_at
+        TEXT sender
+        TEXT content
+    }
+    transactions {
+        TEXT id PK "payment_hash | txid"
+        TEXT wallet_id
+        TEXT direction
+        INTEGER amount_sats
+        TEXT status
+        INTEGER created_at
+        TEXT memo
+    }
+    swaps {
+        TEXT id PK
+        TEXT status
+        INTEGER amount_sats
+        TEXT preimage
+        TEXT refund_address
+        INTEGER timeout_block
+        INTEGER claimed
+        INTEGER created_at
+    }
+    profiles {
+        TEXT pubkey PK
+        TEXT name
+        TEXT picture
+        TEXT lud16
+        INTEGER updated_at
+    }
+    caches {
+        TEXT coord PK
+        TEXT hider_pubkey
+        TEXT geohash
+        INTEGER is_lp_piggy
+        INTEGER created_at
+    }
+    events {
+        TEXT coord PK
+        TEXT organiser_pubkey
+        TEXT geohash
+        INTEGER starts_at
+    }
+    profiles ||--o{ dm_messages : "sender"
+    profiles ||--o{ group_messages : "sender"
+    profiles ||--o{ caches : "hider_pubkey"
+    profiles ||--o{ events : "organiser_pubkey"
+....
+
+`dm_messages` ships first (#695); the rest migrate in later slices (DMs cause
+the freeze, so they go first; transactions/swaps next as they're financial;
+public Nostr tables after).
+
+=== Storage map — where each kind of data lives
+
+The decision rule. Three durable homes plus a throwaway cache; the axis is
+"secret?", "sensitive/growing collection?", "scalar setting?", or "public
+external bulk dataset?".
+
+[mermaid]
+....
+flowchart TD
+    Q{"What is the data?"}
+    Q -->|"secret / credential"| KS["Keystore<br/>expo-secure-store"]
+    Q -->|"sensitive or growing<br/>collection (your data)"| DB[("Encrypted DB<br/>op-sqlite + SQLCipher")]
+    Q -->|"small scalar setting"| AS["AsyncStorage"]
+    Q -->|"public external<br/>bulk dataset"| PC["Plain cache<br/>file / unencrypted"]
+
+    KS --> KSi["nsec · mnemonics · xpubs<br/>NWC URLs · LNURL bearers<br/>NFC PINs · local_db_key"]
+    DB --> DBi["dm_messages · group_messages<br/>transactions · swaps<br/>profiles · caches · events"]
+    AS --> ASi["theme · WoT tier · cursors<br/>send threshold · feature flags"]
+    PC --> PCi["BTC Map places<br/>btcmap-last-result.json"]
+....
+
+Logout / account wipe deletes the **Keystore** secrets and the **Encrypted DB**
+(+ its key) — a clean, complete user-data wipe. **AsyncStorage** scalars and the
+**Plain cache** survive: they're either non-identifying settings or public data
+that isn't yours to wipe.
+
+=== Migration (old store → new): import the decrypt memo, then delete
+
+Relays remain the *canonical source* for messages. But the old wrap-cache file
+was never independent data — it was purely a *memo of decryptions* this app
+already performed on relay-fetched wraps. So the one-time migration (#848,
+`dmStoreMigrationRunner`) imports that memo as rows, then deletes the
+plaintext file with verification (closing the at-rest gap, #690; ordering
+enforced by `dmStoreMigration`: populate → delete → verify → flag).
+
+Why import rather than the originally-planned "re-fetch and re-decrypt"?
+Re-decrypting the whole inbox on migration day is exactly the cold-start
+decrypt sweep #846/#847 eliminated (~25 ms × hundreds of wraps on the JS
+thread). The memo preserves decrypt-once across the migration at the cost of
+one file read + one DB transaction. Anything the memo didn't cover is
+re-fetched from relays and decrypted once by the normal ingest path — so the
+worst case (corrupt/missing cache) degrades to the re-fetch plan, never to
+data loss.
+
+[mermaid]
+....
+flowchart LR
+    R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once<br/>(steady state)"| DB[("Encrypted DB")]
+    W["Wallet backend<br/>(NWC / on-chain)"] -->|"sync"| DB
+    BM["BTC Map API"] -->|"refresh"| PC["Plain places cache"]
+    OLD["Old plaintext wrap cache<br/>(decrypt memo, #689)"] -->|"one-time import (#848)"| DB
+    OLD -.->|"then deleted, verified"| X["discarded"]
+....

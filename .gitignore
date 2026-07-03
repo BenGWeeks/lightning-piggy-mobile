@@ -63,4 +63,23 @@ modules/*/android/build/
 # Generated documentation
 docs/*.pdf
 
-.claude/
+# `.claude/` per-machine artefacts (worktrees, settings, locks) stay out,
+# but `.claude/agents/` is shared with the repo so the team gets it.
+# Using `.claude/*` (not `.claude/`) so per-directory negation rules below
+# actually work — git ignores everything inside an ignored directory
+# regardless of subsequent `!` exceptions.
+.claude/*
+!.claude/agents/
+
+# Local-only dev/debug scripts that must never be committed — some embed
+# LNURL-withdraw k1 bearer secrets. Kept on disk for local use; ignored so an
+# accidental `git add -A` can't sweep them into a (public) commit again
+# (#752/#341).
+scripts/check-hawthorn.mjs
+scripts/check-lnurlw.mjs
+scripts/send-test-dm.mjs
+scripts/wait-compare.mjs
+
+# Maestro generated output (reorganised suite lives in .maestro/)
+.maestro/tmp/
+.maestro/**/results/

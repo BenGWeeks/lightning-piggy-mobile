@@ -20,12 +20,14 @@ import {
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostrContacts } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
 import type { Group } from '../types/groups';
 import type { NostrContact } from '../types/nostr';
 import AlphabetBar from './AlphabetBar';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   visible: boolean;
@@ -62,24 +64,28 @@ interface MemberRowProps {
 // flood-render that dropped keystrokes mid-IME-composition. See #243.
 const MemberRow = React.memo<MemberRowProps>(
   ({ contact, isSelected, onToggle, styles, colors }) => {
+    const t = useTranslation();
     const { displayName } = contact;
     return (
       <TouchableOpacity
         style={styles.row}
         onPress={() => onToggle(contact.pubkey)}
-        accessibilityLabel={`${isSelected ? 'Deselect' : 'Select'} ${displayName}`}
+        accessibilityLabel={t(
+          isSelected ? 'createGroupSheet.deselectMember' : 'createGroupSheet.selectMember',
+          { name: displayName },
+        )}
         testID={`member-row-${contact.pubkey.slice(0, 12)}`}
       >
         <View style={styles.avatar}>
-          {contact.profile?.picture ? (
+          {isSupportedImageUrl(contact.profile?.picture) ? (
             <Image
-              source={{ uri: contact.profile.picture }}
+              source={{ uri: contact.profile!.picture! }}
               style={styles.avatarImage}
               // memory-disk + recyclingKey match the canonical avatar
               // caching policy (see ConversationRow / ContactListItem /
               // GroupAvatar). Standardised in #245.
               cachePolicy="memory-disk"
-              recyclingKey={contact.profile.picture}
+              recyclingKey={contact.profile!.picture!}
               // First frame only for animated WebP / GIF avatars.
               // Without this, expo-image spawns a FrameDecoderExe
               // thread per animated avatar and decodes every frame on
@@ -124,9 +130,10 @@ const MemberRow = React.memo<MemberRowProps>(
 MemberRow.displayName = 'MemberRow';
 
 const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { contacts } = useNostr();
+  const { contacts } = useNostrContacts();
   const { createGroup } = useGroups();
   const [step, setStep] = useState<Step>('members');
   const [name, setName] = useState('');
@@ -284,13 +291,19 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   const handleCreate = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      Alert.alert('Name required', 'Please enter a group name.');
+      Alert.alert(
+        t('createGroupSheet.nameRequiredTitle'),
+        t('createGroupSheet.nameRequiredMessage'),
+      );
       return;
     }
     if (selected.size === 0) {
       // Defensive — step 1's Next button enforces this, but we keep the
       // guard so the data contract with createGroup() can never be broken.
-      Alert.alert('Members required', 'Please select at least one member.');
+      Alert.alert(
+        t('createGroupSheet.membersRequiredTitle'),
+        t('createGroupSheet.membersRequiredMessage'),
+      );
       setStep('members');
       return;
     }
@@ -305,8 +318,8 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
       // would stay disabled — the user has no way to recover.
       if (__DEV__) console.warn('[CreateGroupSheet] createGroup failed:', err);
       Alert.alert(
-        'Could not create group',
-        'Failed to save the group locally. Try again or restart the app.',
+        t('createGroupSheet.createFailedTitle'),
+        t('createGroupSheet.createFailedMessage'),
       );
     } finally {
       setSaving(false);
@@ -337,27 +350,27 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   const renderStepMembers = () => (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>New Group</Text>
+        <Text style={styles.title}>{t('createGroupSheet.newGroupTitle')}</Text>
         <Text style={styles.subtitle}>
           {selected.size > 0
-            ? `Who's in this group? (${selected.size} selected)`
-            : "Who's in this group?"}
+            ? t('createGroupSheet.whosInGroupCount', { count: selected.size })
+            : t('createGroupSheet.whosInGroup')}
         </Text>
         <BottomSheetTextInput
           style={styles.searchInput}
-          placeholder="Search friends"
+          placeholder={t('createGroupSheet.searchFriends')}
           placeholderTextColor={colors.textSupplementary}
           value={search}
           onChangeText={setSearch}
           autoCapitalize="none"
           autoCorrect={false}
-          accessibilityLabel="Search friends"
+          accessibilityLabel={t('createGroupSheet.searchFriends')}
           testID="create-group-search"
         />
       </View>
       {sortedContacts.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>Add Nostr friends first to include them in a group.</Text>
+          <Text style={styles.emptyText}>{t('createGroupSheet.noFriendsYet')}</Text>
         </View>
       ) : (
         <View style={styles.listWithBar}>
@@ -396,7 +409,7 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
             }}
             ListEmptyComponent={
               <View style={styles.empty}>
-                <Text style={styles.emptyText}>No friends match your search.</Text>
+                <Text style={styles.emptyText}>{t('createGroupSheet.noFriendsMatch')}</Text>
               </View>
             }
           />
@@ -407,10 +420,10 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           style={[styles.primaryButton, !canNext && styles.disabled]}
           onPress={handleNext}
           disabled={!canNext}
-          accessibilityLabel="Next: name your group"
+          accessibilityLabel={t('createGroupSheet.nextAccessibility')}
           testID="create-group-next"
         >
-          <Text style={styles.primaryButtonText}>Next</Text>
+          <Text style={styles.primaryButtonText}>{t('createGroupSheet.next')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -426,20 +439,20 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   const renderStepName = () => (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>New Group</Text>
-        <Text style={styles.subtitle}>Name your group</Text>
+        <Text style={styles.title}>{t('createGroupSheet.newGroupTitle')}</Text>
+        <Text style={styles.subtitle}>{t('createGroupSheet.nameYourGroup')}</Text>
       </View>
       <View style={styles.nameStepBody}>
         <View style={styles.summary}>
           <View style={styles.avatarStrip}>
             {visibleAvatars.map((c) => (
               <View key={c.pubkey} style={styles.summaryAvatar}>
-                {c.profile?.picture ? (
+                {isSupportedImageUrl(c.profile?.picture) ? (
                   <Image
-                    source={{ uri: c.profile.picture }}
+                    source={{ uri: c.profile!.picture! }}
                     style={styles.summaryAvatarImage}
                     cachePolicy="memory-disk"
-                    recyclingKey={c.profile.picture}
+                    recyclingKey={c.profile!.picture!}
                     autoplay={false}
                   />
                 ) : (
@@ -466,10 +479,10 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           </Text>
         </View>
 
-        <Text style={styles.label}>Group Name</Text>
+        <Text style={styles.label}>{t('createGroupSheet.groupNameLabel')}</Text>
         <BottomSheetTextInput
           style={styles.input}
-          placeholder="e.g. Family"
+          placeholder={t('createGroupSheet.groupNamePlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={name}
           onChangeText={setName}
@@ -477,7 +490,7 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           autoCorrect={false}
           autoFocus
           maxLength={80}
-          accessibilityLabel="Group name"
+          accessibilityLabel={t('createGroupSheet.groupNameAccessibility')}
           testID="create-group-name"
         />
       </View>
@@ -486,22 +499,22 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           style={styles.secondaryButton}
           onPress={handleBack}
           disabled={saving}
-          accessibilityLabel="Back to member selection"
+          accessibilityLabel={t('createGroupSheet.backAccessibility')}
           testID="create-group-back"
         >
-          <Text style={styles.secondaryButtonText}>Back</Text>
+          <Text style={styles.secondaryButtonText}>{t('createGroupSheet.back')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.primaryButton, styles.primaryButtonFlex, !canCreate && styles.disabled]}
           onPress={handleCreate}
           disabled={!canCreate}
-          accessibilityLabel="Create group"
+          accessibilityLabel={t('createGroupSheet.createGroupAccessibility')}
           testID="create-group-submit"
         >
           {saving ? (
             <ActivityIndicator color={colors.white} />
           ) : (
-            <Text style={styles.primaryButtonText}>Create Group</Text>
+            <Text style={styles.primaryButtonText}>{t('createGroupSheet.createGroup')}</Text>
           )}
         </TouchableOpacity>
       </View>

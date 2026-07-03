@@ -4,6 +4,7 @@ import { Check } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 import {
   getElectrumServer,
@@ -18,6 +19,7 @@ const DEFAULT_ELECTRUM = 'electrum.blockstream.info:50002';
 
 const OnChainScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets } = useWallet();
@@ -58,8 +60,8 @@ const OnChainScreen: React.FC = () => {
   };
 
   return (
-    <AccountScreenLayout title="On-chain">
-      <Text style={sharedAccountStyles.sectionLabel}>Electrum Server</Text>
+    <AccountScreenLayout title={t('onChainScreen.title')}>
+      <Text style={sharedAccountStyles.sectionLabel}>{t('onChainScreen.electrumServer')}</Text>
       <TextInput
         style={sharedAccountStyles.textInput}
         value={electrumHostPort}
@@ -70,10 +72,10 @@ const OnChainScreen: React.FC = () => {
         autoCorrect={false}
         onBlur={handleElectrumSave}
         testID="electrum-server-input"
-        accessibilityLabel="Electrum server"
+        accessibilityLabel={t('onChainScreen.electrumServerA11y')}
       />
       <View style={sharedAccountStyles.sslRow}>
-        <Text style={sharedAccountStyles.sslLabel}>Use SSL</Text>
+        <Text style={sharedAccountStyles.sslLabel}>{t('onChainScreen.useSsl')}</Text>
         <TouchableOpacity
           style={[
             sharedAccountStyles.sslToggle,
@@ -87,7 +89,7 @@ const OnChainScreen: React.FC = () => {
             disconnectElectrum();
           }}
           testID="electrum-ssl-toggle"
-          accessibilityLabel="Use SSL"
+          accessibilityLabel={t('onChainScreen.useSsl')}
           accessibilityRole="switch"
           accessibilityState={{ checked: electrumSSL }}
         >
@@ -99,10 +101,7 @@ const OnChainScreen: React.FC = () => {
           />
         </TouchableOpacity>
       </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        On-chain wallets use this Electrum server to read balances and broadcast transactions. Point
-        this at your own server if you don&apos;t want to leak addresses to a public one.
-      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.hint')}</Text>
 
       <Text style={[sharedAccountStyles.sectionLabel, styles.sectionGap]}>
         Default on-chain wallet
