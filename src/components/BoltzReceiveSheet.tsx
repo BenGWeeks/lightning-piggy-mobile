@@ -23,11 +23,15 @@
  *      app dies mid-swap.
  *
  * Refund-handling design (the most important call) — see PR description
- * for full rationale; the short version is: persist
- * `submarine_swap_<id>` *with* a fresh `refundDestinationAddress` so
- * `swapRecoveryService.recoverPendingSwaps()` can auto-broadcast on next
- * launch with no user input. Without that, a missed refund window on a
- * dropped foreground task means permanent loss.
+ * for full rationale; the short version is: persist `submarine_swap_<id>`
+ * (refund private key + script tree) so that if the app dies mid-swap,
+ * `swapRecoveryService.recoverPendingSwaps()` picks it up on next launch
+ * and invokes the registered submarine refund handler
+ * (`recoverSubmarineRefund` → `promptSubmarineRefund`), which surfaces a
+ * branded prompt to broadcast the refund. Without that persistence, a
+ * missed refund window on a dropped foreground task means permanent loss.
+ * (We also stash a `refundDestinationAddress` snapshot for logging/future
+ * use; the recovery handler derives its own fresh address at refund time.)
  */
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
@@ -221,8 +225,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
   /**
    * Find a fresh receive address from any of the user's on-chain wallets,
-   * to use as the refund destination. We persist it alongside the swap
-   * so `swapRecoveryService` can auto-broadcast on next launch if needed.
+   * to use as the refund destination snapshot persisted alongside the swap.
+   * (The recovery handler derives its own fresh address at refund time, so
+   * this is captured mainly for logging / diagnostics.)
    * Returns null if the user has no on-chain wallet at all — the swap is
    * still allowed (Boltz support can recover funds in that case) but the
    * user gets a warning.
@@ -265,11 +270,10 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // Step 2 — create the swap with Boltz.
         const created = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Step 3 — pre-fetch a refund destination from one of the user's
-        // on-chain wallets so swapRecoveryService can auto-broadcast a
-        // refund on next launch without prompting. If none exists, store
-        // the swap *without* a destination — recovery will surface a
-        // toast pointing the user back here instead of auto-refunding.
+        // Step 3 — pre-fetch a refund destination snapshot from one of the
+        // user's on-chain wallets. If none exists, warn the user: recovery
+        // can only reclaim funds when there's an on-chain wallet to refund
+        // into (the recovery handler needs one to build the refund tx).
         const refundDestination = await pickRefundDestination();
         if (!refundDestination) {
           Toast.show({
@@ -405,9 +409,18 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
-      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+      <BottomSheetBackdrop
+        {...props}
+        // While a swap is in flight, lock the backdrop so a tap can't dismiss
+        // the sheet to -1 and strand the sender without the lockup QR/payment
+        // request — same guarantee `enablePanDownToClose={!swapInFlight}`
+        // gives against swipe/keyboard collapse (#92).
+        pressBehavior={swapInFlight ? 'none' : 'close'}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+      />
     ),
-    [],
+    [swapInFlight],
   );
 
   if (!visible) return null;

@@ -958,7 +958,9 @@ export async function watchSubmarineSwapStatus(
       if (phase !== lastPhase) {
         lastPhase = phase;
         try {
-          onPhase(phase, status, data);
+          // Normalize so the `rawStatus: string` contract holds at runtime —
+          // `data.status` can be missing on a malformed/early update.
+          onPhase(phase, status ?? 'unknown', data);
         } catch (e) {
           console.warn('[Boltz] watchSubmarineSwapStatus onPhase callback threw:', e);
         }
@@ -970,7 +972,7 @@ export async function watchSubmarineSwapStatus(
 
   return {
     phase: classifySubmarineSwapStatus(result?.status),
-    rawStatus: result?.status,
+    rawStatus: result?.status ?? 'unknown',
     raw: result,
   };
 }

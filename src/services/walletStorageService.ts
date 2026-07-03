@@ -101,7 +101,15 @@ function walletListKey(): string {
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
-const DEFAULT_ONCHAIN_WALLET_ID_KEY = 'default_onchain_wallet_id_v1';
+// Per-account: this points at a wallet id from `wallet_list`, which is
+// itself namespaced per identity (see `walletListKey`). A global default
+// would let one identity's choice clobber the other's, so mirror the
+// same `perAccountKey(...)` scheme. New key (no shipped global value to
+// migrate), so it's namespaced inline without a migration step.
+const DEFAULT_ONCHAIN_WALLET_ID_KEY_BASE = 'default_onchain_wallet_id_v1';
+function defaultOnchainWalletIdKey(): string {
+  return perAccountKey(DEFAULT_ONCHAIN_WALLET_ID_KEY_BASE, _activePubkey);
+}
 const BLOSSOM_SERVER_KEY = 'blossom_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
@@ -257,14 +265,14 @@ export async function setElectrumServer(url: string): Promise<void> {
 // --- Default on-chain wallet (for Boltz refunds + future on-chain destinations) ---
 
 export async function getDefaultOnchainWalletId(): Promise<string | null> {
-  return AsyncStorage.getItem(DEFAULT_ONCHAIN_WALLET_ID_KEY);
+  return AsyncStorage.getItem(defaultOnchainWalletIdKey());
 }
 
 export async function setDefaultOnchainWalletId(walletId: string | null): Promise<void> {
   if (walletId === null) {
-    await AsyncStorage.removeItem(DEFAULT_ONCHAIN_WALLET_ID_KEY);
+    await AsyncStorage.removeItem(defaultOnchainWalletIdKey());
   } else {
-    await AsyncStorage.setItem(DEFAULT_ONCHAIN_WALLET_ID_KEY, walletId);
+    await AsyncStorage.setItem(defaultOnchainWalletIdKey(), walletId);
   }
 }
 
