@@ -3,6 +3,8 @@ import { Modal, View, Text, Pressable, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Check, X, Send, Inbox, Copy, RotateCw, Clock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t } from '../i18n';
 import { Toast } from './BrandedToast';
 import {
   summariseDelivery,
@@ -14,10 +16,12 @@ import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.s
 
 // Human label for a NIP-04/17 message kind shown in the metadata block.
 function kindLabel(kind: number | undefined): string {
-  if (kind === 4) return 'Direct message (kind 4)';
-  if (kind === 14) return 'Direct message (kind 14)';
-  if (kind === 15) return 'File message (kind 15)';
-  return kind === undefined ? 'Unknown' : `Kind ${kind}`;
+  if (kind === 4) return t('deliveryDetailSheet.kind4');
+  if (kind === 14) return t('deliveryDetailSheet.kind14');
+  if (kind === 15) return t('deliveryDetailSheet.kind15');
+  return kind === undefined
+    ? t('deliveryDetailSheet.unknown')
+    : t('deliveryDetailSheet.kindN', { kind });
 }
 
 function shortEventId(id: string): string {
@@ -43,6 +47,7 @@ export default function DeliveryDetailSheet({
   onResend?: () => void;
 }): React.ReactElement | null {
   const colors = useThemeColors();
+  const tr = useTranslation();
   const styles = useMemo(() => createDeliveryDetailSheetStyles(colors), [colors]);
 
   if (!info) return null;
@@ -61,12 +66,12 @@ export default function DeliveryDetailSheet({
   const title = sent
     ? sending
       ? total > 0
-        ? `Sending to ${total} relays…`
-        : 'Sending…'
+        ? tr('deliveryDetailSheet.sendingToRelays', { total })
+        : tr('deliveryDetailSheet.sending')
       : total === 0
-        ? 'Send failed'
-        : `Sent to ${ok} of ${total} relays`
-    : 'Message received';
+        ? tr('deliveryDetailSheet.sendFailed')
+        : tr('deliveryDetailSheet.sentToRelays', { ok, total })
+    : tr('deliveryDetailSheet.messageReceived');
 
   // Sorted relays (ok first, then by URL) so the order is stable run-to-run.
   const relays = status
@@ -85,20 +90,20 @@ export default function DeliveryDetailSheet({
   // `total === 0 ? 'Pending'` branch mislabelled tracked failures as pending.
   const statusLabel = !status
     ? sent
-      ? 'Not tracked'
-      : 'Received'
+      ? tr('deliveryDetailSheet.statusNotTracked')
+      : tr('deliveryDetailSheet.statusReceived')
     : status.pending
-      ? 'Sending'
+      ? tr('deliveryDetailSheet.statusSending')
       : ok === 0
-        ? 'Failed'
+        ? tr('deliveryDetailSheet.statusFailed')
         : ok < total
-          ? 'Partially delivered'
-          : 'Delivered';
+          ? tr('deliveryDetailSheet.statusPartiallyDelivered')
+          : tr('deliveryDetailSheet.statusDelivered');
 
   const copyEventId = () => {
     if (!info.eventId) return;
     void Clipboard.setStringAsync(info.eventId);
-    Toast.show({ type: 'success', text1: 'Event ID copied' });
+    Toast.show({ type: 'success', text1: tr('deliveryDetailSheet.eventIdCopied') });
   };
 
   const HeaderIcon = sent ? Send : Inbox;
@@ -110,7 +115,11 @@ export default function DeliveryDetailSheet({
 
   return (
     <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.root} onPress={onClose} accessibilityLabel="Dismiss message info">
+      <Pressable
+        style={styles.root}
+        onPress={onClose}
+        accessibilityLabel={tr('deliveryDetailSheet.dismissAccessibility')}
+      >
         <View
           onStartShouldSetResponder={() => true}
           accessibilityRole="alert"
@@ -157,21 +166,21 @@ export default function DeliveryDetailSheet({
 
           <View style={styles.metaBlock}>
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Protocol</Text>
+              <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.protocol')}</Text>
               <Text style={styles.metaValue}>{protocolLabel(info.wireKind)}</Text>
             </View>
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Kind</Text>
+              <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.kind')}</Text>
               <Text style={styles.metaValue}>{kindLabel(info.wireKind)}</Text>
             </View>
             {info.eventId ? (
               <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>Event ID</Text>
+                <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.eventId')}</Text>
                 <TouchableOpacity
                   style={styles.copyRow}
                   onPress={copyEventId}
                   accessibilityRole="button"
-                  accessibilityLabel="Copy event ID"
+                  accessibilityLabel={tr('deliveryDetailSheet.copyEventIdAccessibility')}
                   testID="dm-delivery-copy-event-id"
                 >
                   <Text style={[styles.metaValue, styles.metaValueMono]} numberOfLines={1}>
@@ -182,7 +191,7 @@ export default function DeliveryDetailSheet({
               </View>
             ) : null}
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Status</Text>
+              <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.status')}</Text>
               <Text style={styles.metaValue}>{statusLabel}</Text>
             </View>
           </View>
@@ -198,11 +207,13 @@ export default function DeliveryDetailSheet({
                   pressed && styles.buttonPressed,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Re-publish message"
+                accessibilityLabel={tr('deliveryDetailSheet.republishAccessibility')}
                 testID="dm-delivery-detail-resend"
               >
                 <RotateCw size={16} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={[styles.buttonText, styles.buttonTextSecondary]}>Re-publish</Text>
+                <Text style={[styles.buttonText, styles.buttonTextSecondary]}>
+                  {tr('deliveryDetailSheet.republish')}
+                </Text>
               </Pressable>
             ) : null}
             <Pressable
@@ -213,10 +224,10 @@ export default function DeliveryDetailSheet({
                 pressed && styles.buttonPressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={tr('deliveryDetailSheet.closeAccessibility')}
               testID="dm-delivery-detail-close"
             >
-              <Text style={styles.buttonText}>Done</Text>
+              <Text style={styles.buttonText}>{tr('deliveryDetailSheet.done')}</Text>
             </Pressable>
           </View>
         </View>

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { ChevronLeft, Home } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { RootNavigation, RootStackParamList } from '../navigation/types';
 
@@ -17,6 +18,7 @@ interface Props {
 // instead of a blank screen or a crash.
 const UnsupportedEntityScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { entity, detail } = route.params;
 
@@ -34,7 +36,7 @@ const UnsupportedEntityScreen: React.FC<Props> = ({ navigation, route }) => {
       <View style={styles.header}>
         <TouchableOpacity
           onPress={goBack}
-          accessibilityLabel="Back"
+          accessibilityLabel={t('unsupportedEntityScreen.back')}
           testID="unsupported-entity-back-button"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -51,19 +53,16 @@ const UnsupportedEntityScreen: React.FC<Props> = ({ navigation, route }) => {
           resizeMode="contain"
           accessibilityLabel="Lightning Piggy"
         />
-        <Text style={styles.title}>Sorry &mdash; can&apos;t open this</Text>
-        <Text style={styles.message}>
-          Lightning Piggy doesn&apos;t support {entity} yet. You can open it in a dedicated Nostr
-          client, or head back to the app.
-        </Text>
+        <Text style={styles.title}>{t('unsupportedEntityScreen.cantOpenTitle')}</Text>
+        <Text style={styles.message}>{t('unsupportedEntityScreen.message', { entity })}</Text>
         <TouchableOpacity
           style={styles.homeButton}
           onPress={goHome}
-          accessibilityLabel="Back to Home"
+          accessibilityLabel={t('unsupportedEntityScreen.backToHome')}
           testID="unsupported-entity-home-button"
         >
           <Home size={18} color={colors.white} strokeWidth={2.5} />
-          <Text style={styles.homeButtonText}>Back to Home</Text>
+          <Text style={styles.homeButtonText}>{t('unsupportedEntityScreen.backToHome')}</Text>
         </TouchableOpacity>
       </View>
     </View>

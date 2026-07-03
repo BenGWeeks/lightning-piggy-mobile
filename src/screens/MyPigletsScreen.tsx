@@ -15,6 +15,8 @@ import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t } from '../i18n';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
@@ -78,6 +80,7 @@ type SectionRow =
   | { kind: 'friend-found'; entry: FoundEntry };
 
 const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { pubkey, signEvent, relays } = useNostr();
@@ -283,22 +286,25 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     [friendFinds.map, cacheByCoord],
   );
 
-  const sections: { title: string; data: SectionRow[] }[] = useMemo(
+  const sections: { id: string; title: string; data: SectionRow[] }[] = useMemo(
     () => [
       {
-        title: `Hidden${hidden.length > 0 ? ` · ${hidden.length}` : ''}`,
+        id: 'hidden',
+        title: `${t('myPigletsScreen.sectionHidden')}${hidden.length > 0 ? ` · ${hidden.length}` : ''}`,
         data: hidden.map((r) => ({ kind: 'hidden' as const, cache: r.cache, isDraft: r.isDraft })),
       },
       {
-        title: `Found${foundList.length > 0 ? ` · ${foundList.length}` : ''}`,
+        id: 'found',
+        title: `${t('myPigletsScreen.sectionFound')}${foundList.length > 0 ? ` · ${foundList.length}` : ''}`,
         data: foundList.map((e) => ({ kind: 'found' as const, entry: e })),
       },
       {
-        title: `Friends' finds${friendList.length > 0 ? ` · ${friendList.length}` : ''}`,
+        id: 'friends',
+        title: `${t('myPigletsScreen.sectionFriendsFinds')}${friendList.length > 0 ? ` · ${friendList.length}` : ''}`,
         data: friendList.map((e) => ({ kind: 'friend-found' as const, entry: e })),
       },
     ],
-    [hidden, foundList, friendList],
+    [hidden, foundList, friendList, t],
   );
 
   const openCacheByCoord = (coord: string) => {
@@ -327,56 +333,52 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
       if (!piggy) {
         Toast.show({
           type: 'error',
-          text1: "Can't republish",
-          text2: 'Original LNURL not on this device — re-add the Piglet to republish.',
+          text1: t('myPigletsScreen.cantRepublish'),
+          text2: t('myPigletsScreen.cantRepublishBody'),
         });
         return;
       }
-      Alert.alert(
-        'Republish this Piglet?',
-        'Re-emits the listing to relays with a fresh expiration. Your secret LNURL stays on-device.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Republish',
-            onPress: async () => {
-              if (republishingCoord) return;
-              setRepublishingCoord(cache.coord);
-              try {
-                const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-                const { newExpiresAt } = await republishPiggy(piggy, signEvent, writeRelays);
-                // Optimistic local patch so the badge clears before
-                // the relay round-trip lands. The kind 37516 we just
-                // emitted will overwrite this entry naturally next
-                // time the subscription tick refreshes.
-                setAllCaches((prev) =>
-                  prev.map((c) =>
-                    c.coord === cache.coord
-                      ? { ...c, expiresAt: newExpiresAt, createdAt: Math.floor(Date.now() / 1000) }
-                      : c,
-                  ),
-                );
-                setPiggiesById((prev) => {
-                  const next = new Map(prev);
-                  next.set(piggy.id, { ...piggy, expiresAt: newExpiresAt });
-                  return next;
-                });
-                Toast.show({ type: 'success', text1: 'Piggy republished 🐷' });
-              } catch (e) {
-                Toast.show({
-                  type: 'error',
-                  text1: 'Republish failed',
-                  text2: (e as Error).message,
-                });
-              } finally {
-                setRepublishingCoord(null);
-              }
-            },
+      Alert.alert(t('myPigletsScreen.republishTitle'), t('myPigletsScreen.republishBody'), [
+        { text: t('myPigletsScreen.cancel'), style: 'cancel' },
+        {
+          text: t('myPigletsScreen.republish'),
+          onPress: async () => {
+            if (republishingCoord) return;
+            setRepublishingCoord(cache.coord);
+            try {
+              const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+              const { newExpiresAt } = await republishPiggy(piggy, signEvent, writeRelays);
+              // Optimistic local patch so the badge clears before
+              // the relay round-trip lands. The kind 37516 we just
+              // emitted will overwrite this entry naturally next
+              // time the subscription tick refreshes.
+              setAllCaches((prev) =>
+                prev.map((c) =>
+                  c.coord === cache.coord
+                    ? { ...c, expiresAt: newExpiresAt, createdAt: Math.floor(Date.now() / 1000) }
+                    : c,
+                ),
+              );
+              setPiggiesById((prev) => {
+                const next = new Map(prev);
+                next.set(piggy.id, { ...piggy, expiresAt: newExpiresAt });
+                return next;
+              });
+              Toast.show({ type: 'success', text1: t('myPigletsScreen.piggyRepublished') });
+            } catch (e) {
+              Toast.show({
+                type: 'error',
+                text1: t('myPigletsScreen.republishFailed'),
+                text2: (e as Error).message,
+              });
+            } finally {
+              setRepublishingCoord(null);
+            }
           },
-        ],
-      );
+        },
+      ]);
     },
-    [piggiesById, relays, republishingCoord, signEvent],
+    [piggiesById, relays, republishingCoord, signEvent, t],
   );
 
   return (
@@ -391,18 +393,16 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back"
+            accessibilityLabel={t('myPigletsScreen.back')}
             testID="my-piglets-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Piglets</Text>
+          <Text style={styles.headerTitle}>{t('myPigletsScreen.headerTitle')}</Text>
           <View style={{ width: 24 }} />
         </View>
-        <Text style={styles.headerTagline}>
-          What you&apos;ve hidden, found, and what your friends are claiming
-        </Text>
+        <Text style={styles.headerTagline}>{t('myPigletsScreen.headerTagline')}</Text>
       </View>
 
       <SectionList
@@ -432,11 +432,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
           <TouchableOpacity
             style={styles.hideCta}
             onPress={() => navigation.navigate('HuntCreate')}
-            accessibilityLabel="Hide a Piglet"
+            accessibilityLabel={t('myPigletsScreen.hideAPiglet')}
             testID="my-piglets-hide-cta"
           >
             <Plus size={20} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.hideCtaText}>Hide a Piglet</Text>
+            <Text style={styles.hideCtaText}>{t('myPigletsScreen.hideAPiglet')}</Text>
           </TouchableOpacity>
         }
         renderSectionHeader={({ section }) => (
@@ -444,7 +444,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         )}
         renderSectionFooter={({ section }) =>
           section.data.length === 0 ? (
-            <Text style={styles.emptySection}>{emptyTextFor(section.title)}</Text>
+            <Text style={styles.emptySection}>{emptyTextFor(section.id)}</Text>
           ) : null
         }
         renderItem={({ item }) => {
@@ -452,7 +452,10 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
             return (
               <Row
                 cache={item.cache}
-                meta={`Piglet · D${item.cache.difficulty ?? '?'} / T${item.cache.terrain ?? '?'}`}
+                meta={t('myPigletsScreen.pigletMeta', {
+                  difficulty: item.cache.difficulty ?? '?',
+                  terrain: item.cache.terrain ?? '?',
+                })}
                 colors={colors}
                 styles={styles}
                 onPress={() =>
@@ -477,7 +480,9 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
           // depend on the cache mirror).
           const matchingCache = cacheByCoord.get(entry.coord) ?? null;
           const meta =
-            (entry.amountSats ? `⚡ ${entry.amountSats} sats` : 'Found') +
+            (entry.amountSats
+              ? t('myPigletsScreen.foundSats', { count: entry.amountSats })
+              : t('myPigletsScreen.found')) +
             (matchingCache?.name ? ` · ${matchingCache.name}` : '');
           return (
             <Row
@@ -502,12 +507,10 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const emptyTextFor = (title: string): string => {
-  if (title.startsWith('Hidden'))
-    return 'You haven’t hidden a Piglet yet. Tap "Hide a Piglet" to set one up.';
-  if (title.startsWith('Found'))
-    return 'No finds yet — claim a Piglet on the Geo-caches page and it’ll show up here.';
-  return 'No friends have claimed a Piglet yet. Their finds show up here as they happen.';
+const emptyTextFor = (id: string): string => {
+  if (id === 'hidden') return t('myPigletsScreen.emptyHidden');
+  if (id === 'found') return t('myPigletsScreen.emptyFound');
+  return t('myPigletsScreen.emptyFriendsFinds');
 };
 
 interface RowProps {
@@ -536,67 +539,70 @@ const Row: React.FC<RowProps> = ({
   onRepublish,
   republishing,
   isDraft,
-}) => (
-  <TouchableOpacity
-    style={styles.row}
-    onPress={onPress}
-    testID={testID}
-    accessibilityLabel={cache?.name ?? meta}
-  >
-    <View style={styles.iconContainer}>
-      {cache?.imageUrl ? (
-        <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-      ) : (
-        <View
-          style={[
-            styles.iconWrap,
-            cache?.isLpPiggy === false ? styles.iconStandard : styles.iconLp,
-          ]}
-        >
-          {cache?.isLpPiggy === false ? (
-            <MapPin size={22} color={colors.white} strokeWidth={2} />
-          ) : (
-            <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-          )}
-        </View>
-      )}
-      <LpPayoutBadge isLpPiggy={cache?.isLpPiggy ?? false} payoutSats={cache?.payoutSats} />
-    </View>
-    <View style={styles.rowMain}>
-      <View style={styles.rowTitleRow}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {cache?.name ?? 'Cache no longer on relays'}
-        </Text>
-        {/* Expiry badge — NIP-40-aware. Red pill for past-expiry caches
+}) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={onPress}
+      testID={testID}
+      accessibilityLabel={cache?.name ?? meta}
+    >
+      <View style={styles.iconContainer}>
+        {cache?.imageUrl ? (
+          <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
+        ) : (
+          <View
+            style={[
+              styles.iconWrap,
+              cache?.isLpPiggy === false ? styles.iconStandard : styles.iconLp,
+            ]}
+          >
+            {cache?.isLpPiggy === false ? (
+              <MapPin size={22} color={colors.white} strokeWidth={2} />
+            ) : (
+              <PiggyBank size={22} color={colors.white} strokeWidth={2} />
+            )}
+          </View>
+        )}
+        <LpPayoutBadge isLpPiggy={cache?.isLpPiggy ?? false} payoutSats={cache?.payoutSats} />
+      </View>
+      <View style={styles.rowMain}>
+        <View style={styles.rowTitleRow}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {cache?.name ?? t('myPigletsScreen.cacheGone')}
+          </Text>
+          {/* Expiry badge — NIP-40-aware. Red pill for past-expiry caches
             so the hider knows their listing won't appear in finder
             searches anymore; subtle "N d" caption while still active.
             When `onRepublish` is supplied the Expired state becomes
             tappable and re-emits the listing with a fresh window. */}
-        {isDraft ? (
-          <View
-            style={styles.draftBadge}
-            testID={`${testID}-private-badge`}
-            accessibilityLabel="Private — saved on this device, found by tapping its tag (not published)"
-          >
-            <Text style={styles.draftBadgeText}>Private</Text>
-          </View>
-        ) : cache?.expiresAt != null ? (
-          <ExpiryBadge
-            expiresAt={cache.expiresAt}
-            styles={styles}
-            colors={colors}
-            onRepublish={onRepublish}
-            republishing={!!republishing}
-          />
-        ) : null}
+          {isDraft ? (
+            <View
+              style={styles.draftBadge}
+              testID={`${testID}-private-badge`}
+              accessibilityLabel={t('myPigletsScreen.privateBadgeA11y')}
+            >
+              <Text style={styles.draftBadgeText}>{t('myPigletsScreen.private')}</Text>
+            </View>
+          ) : cache?.expiresAt != null ? (
+            <ExpiryBadge
+              expiresAt={cache.expiresAt}
+              styles={styles}
+              colors={colors}
+              onRepublish={onRepublish}
+              republishing={!!republishing}
+            />
+          ) : null}
+        </View>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {meta}
+        </Text>
       </View>
-      <Text style={styles.rowMeta} numberOfLines={1}>
-        {meta}
-      </Text>
-    </View>
-    <ChevronRight size={20} color={colors.textSupplementary} />
-  </TouchableOpacity>
-);
+      <ChevronRight size={20} color={colors.textSupplementary} />
+    </TouchableOpacity>
+  );
+};
 
 // Small pill rendered next to the cache name. Three states:
 //   • already expired → red "Expired" — tappable on hidden-cache rows
@@ -613,18 +619,19 @@ const ExpiryBadge: React.FC<{
   onRepublish?: () => void;
   republishing?: boolean;
 }> = ({ expiresAt, styles, colors, onRepublish, republishing }) => {
+  const t = useTranslation();
   const nowSec = Math.floor(Date.now() / 1000);
   const daysLeft = Math.round((expiresAt - nowSec) / 86400);
   if (daysLeft >= 14) return null;
   const isExpired = daysLeft < 0;
   const canRepublish = isExpired && !!onRepublish;
   const label = republishing
-    ? 'Republishing…'
+    ? t('myPigletsScreen.republishing')
     : isExpired
       ? canRepublish
-        ? 'Republish'
-        : 'Expired'
-      : `Ends ${daysLeft}d`;
+        ? t('myPigletsScreen.republish')
+        : t('myPigletsScreen.expired')
+      : t('myPigletsScreen.endsInDays', { days: daysLeft });
   const badgeStyle = [
     styles.expiryBadge,
     isExpired ? styles.expiryBadgeExpired : styles.expiryBadgeWarn,
@@ -644,7 +651,7 @@ const ExpiryBadge: React.FC<{
         style={badgeStyle}
         onPress={onRepublish}
         disabled={republishing}
-        accessibilityLabel="Republish expired Piglet"
+        accessibilityLabel={t('myPigletsScreen.republishExpiredA11y')}
         testID="my-piglets-republish"
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
       >

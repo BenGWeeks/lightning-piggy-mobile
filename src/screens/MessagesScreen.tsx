@@ -38,6 +38,7 @@ import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   buildConversationSummaries,
   buildDmSummaries,
@@ -60,6 +61,7 @@ type MessagesNavigation = CompositeNavigationProp<
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
   const messagesRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -720,7 +722,10 @@ const MessagesScreen: React.FC = () => {
     <View style={styles.container}>
       <BrandGradientBackground />
       <TabBackgroundImage style={styles.bgImage} />
-      <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
+      <TabHeader
+        title={t('messagesScreen.title')}
+        icon={<MessageCircle size={20} color={colors.brandPink} />}
+      />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (
@@ -729,13 +734,13 @@ const MessagesScreen: React.FC = () => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search conversations..."
+                placeholder={t('messagesScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-input"
               />
               <TouchableOpacity
@@ -744,7 +749,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(false);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('messagesScreen.closeSearch')}
                 testID="messages-close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -759,7 +764,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(true);
                   setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-toggle"
               >
                 <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
@@ -783,12 +788,14 @@ const MessagesScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
-              accessibilityLabel={`Window: last ${windowDays} days. Tap to change.`}
+              accessibilityLabel={t('messagesScreen.windowToggleA11y', { days: windowDays })}
               accessibilityRole="button"
               testID="messages-window-toggle"
             >
               <Clock size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Last {windowDays} days</Text>
+              <Text style={styles.filterChipText}>
+                {t('messagesScreen.lastDays', { days: windowDays })}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={
@@ -799,15 +806,15 @@ const MessagesScreen: React.FC = () => {
               onPress={toggleShowZapCounterparties}
               accessibilityLabel={
                 showZapCounterparties
-                  ? 'Hide zap counterparties from the inbox'
-                  : 'Show zap counterparties in the inbox'
+                  ? t('messagesScreen.hideZapCounterparties')
+                  : t('messagesScreen.showZapCounterparties')
               }
               accessibilityRole="button"
               accessibilityState={{ selected: showZapCounterparties }}
               testID="messages-zaps-toggle"
             >
               <Zap size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Zaps</Text>
+              <Text style={styles.filterChipText}>{t('messagesScreen.zaps')}</Text>
             </TouchableOpacity>
             {/* Hidden marker so Maestro can assert WHICH state the toggle is in (chip is always visible regardless), without relying on accessibilityState which RN exposes inconsistently across Android versions. */}
             <View
@@ -832,15 +839,13 @@ const MessagesScreen: React.FC = () => {
         )}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Connect Nostr</Text>
-            <Text style={styles.emptySubtitle}>
-              Connect your Nostr identity to see your conversations here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>
+            <Text style={styles.emptySubtitle}>{t('messagesScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
-              <Text style={styles.connectButtonText}>Go to Account</Text>
+              <Text style={styles.connectButtonText}>{t('messagesScreen.goToAccount')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -857,10 +862,12 @@ const MessagesScreen: React.FC = () => {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>
-                  {search ? 'No matches' : 'No conversations yet'}
+                  {search ? t('messagesScreen.noMatches') : t('messagesScreen.noConversationsYet')}
                 </Text>
                 <Text style={styles.emptySubtitle}>
-                  {search ? 'Try a different search term.' : 'Zap a friend or tap + to start one.'}
+                  {search
+                    ? t('messagesScreen.tryDifferentSearch')
+                    : t('messagesScreen.noConversationsSubtitle')}
                 </Text>
               </View>
             }
@@ -872,7 +879,7 @@ const MessagesScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.fab}
             onPress={handleStartConversation}
-            accessibilityLabel="Start new conversation"
+            accessibilityLabel={t('messagesScreen.startNewConversation')}
             testID="start-conversation-button"
             activeOpacity={0.85}
           >
@@ -887,7 +894,7 @@ const MessagesScreen: React.FC = () => {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         onSelect={handlePickerSelect}
-        title="Start a conversation"
+        title={t('messagesScreen.startConversationTitle')}
         onNewGroup={() => {
           setPickerVisible(false);
           setCreateGroupVisible(true);

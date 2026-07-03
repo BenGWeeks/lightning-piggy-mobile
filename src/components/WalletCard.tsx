@@ -8,6 +8,7 @@ import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -63,6 +64,7 @@ const CardContent: React.FC<{
   isWatchOnly = false,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
 
   // Tri-state relay status for the dot + label (#786). On-chain wallets have no
   // relay, so they stay binary (balance present → Connected). For NWC we prefer
@@ -78,10 +80,10 @@ const CardContent: React.FC<{
     health === 'responsive' ? colors.green : health === 'degraded' ? colors.amber : colors.red;
   const statusLabel =
     health === 'responsive'
-      ? 'Connected'
+      ? t('walletCard.connected')
       : health === 'degraded'
-        ? 'Not responding'
-        : 'Disconnected';
+        ? t('walletCard.notResponding')
+        : t('walletCard.disconnected');
 
   const toGrey = (hex: string): string => {
     const h = hex.replace('#', '');
@@ -132,7 +134,7 @@ const CardContent: React.FC<{
               />
               <Text
                 style={[styles.statusText, { color: theme.textColor }]}
-                accessibilityLabel={`Wallet status: ${statusLabel}`}
+                accessibilityLabel={t('walletCard.walletStatus', { status: statusLabel })}
               >
                 {statusLabel}
               </Text>
@@ -152,7 +154,7 @@ const CardContent: React.FC<{
                   onPress={onSettingsPress}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   testID="wallet-settings"
-                  accessibilityLabel="Wallet settings"
+                  accessibilityLabel={t('walletCard.walletSettings')}
                 >
                   <SettingsIcon size={22} color={theme.textColor} strokeWidth={1.5} />
                 </TouchableOpacity>
@@ -165,7 +167,11 @@ const CardContent: React.FC<{
               {alias}
             </Text>
             <Text style={[styles.balance, { color: theme.textColor }]}>
-              {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
+              {hideBalance
+                ? '***'
+                : balance !== null
+                  ? t('walletCard.satsBalance', { amount: balance!.toLocaleString() })
+                  : '---'}
             </Text>
             {/* Render the fiat row whenever we know the user's selected
                 currency, even if the BTC price hasn't arrived yet.
@@ -200,12 +206,13 @@ const CardContent: React.FC<{
 
 /** Mini card for theme selection — renders the full card design scaled down */
 export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPress }) => {
+  const t = useTranslation();
   return (
     <TouchableOpacity
       style={[styles.miniCardContainer, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
-      accessibilityLabel={`${theme.name} card design`}
+      accessibilityLabel={t('walletCard.cardDesign', { name: theme.name })}
       testID={`theme-${theme.id}`}
     >
       <View style={styles.miniScaleWrapper}>
@@ -233,12 +240,16 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   // app crashes on `theme.gradientColors` of undefined on boot — see the
   // group-messaging branch test runs.
   const theme = cardThemes[wallet.theme] ?? cardThemes['lightning-piggy'];
+  const t = useTranslation();
 
   return (
     <View
       style={styles.cardContainer}
       testID={`wallet-card-${wallet.walletType}`}
-      accessibilityLabel={`${wallet.alias} ${wallet.walletType} wallet`}
+      accessibilityLabel={t('walletCard.walletAccessibility', {
+        alias: wallet.alias,
+        type: wallet.walletType,
+      })}
     >
       <CardContent
         theme={theme}

@@ -27,6 +27,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
@@ -72,6 +73,7 @@ type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Con
 
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
@@ -382,7 +384,7 @@ const ConversationScreen: React.FC = () => {
       setLiveLocationPickerOpen(false);
       const result = await startShare(pubkey, durationMs);
       if (!result.ok) {
-        Alert.alert('Could not start live share', result.error);
+        Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
         return;
       }
       // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
@@ -395,7 +397,7 @@ const ConversationScreen: React.FC = () => {
     async (sessionId: string) => {
       const result = await stopShare(sessionId);
       if (!result.ok) {
-        Alert.alert('Could not stop live share', result.error);
+        Alert.alert(t('conversationScreen.couldNotStopLiveShareTitle'), result.error);
       }
     },
     [stopShare],
@@ -404,7 +406,10 @@ const ConversationScreen: React.FC = () => {
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
-      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
+      Alert.alert(
+        t('conversationScreen.couldNotOpenLinkTitle'),
+        t('conversationScreen.couldNotOpenLinkBody'),
+      );
     });
   }, []);
 
@@ -528,7 +533,7 @@ const ConversationScreen: React.FC = () => {
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('conversationScreen.goBack')}
           testID="conversation-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -556,7 +561,7 @@ const ConversationScreen: React.FC = () => {
               source: 'nostr',
             });
           }}
-          accessibilityLabel={`Open ${name}'s profile`}
+          accessibilityLabel={t('conversationScreen.openProfile', { name })}
           testID="chat-header-open-profile"
         >
           {avatarNode}
@@ -586,7 +591,7 @@ const ConversationScreen: React.FC = () => {
           {loading ? (
             <View style={styles.loading}>
               <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.loadingText}>Loading messages…</Text>
+              <Text style={styles.loadingText}>{t('conversationScreen.loadingMessages')}</Text>
             </View>
           ) : (
             <FlatList
@@ -615,9 +620,11 @@ const ConversationScreen: React.FC = () => {
               windowSize={10}
               ListEmptyComponent={
                 <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>
                   <Text style={styles.emptySubtitle}>
-                    Say hi{lightningAddress ? ' — or send a zap.' : '.'}
+                    {lightningAddress
+                      ? t('conversationScreen.sayHiZap')
+                      : t('conversationScreen.sayHi')}
                   </Text>
                 </View>
               }
@@ -649,7 +656,7 @@ const ConversationScreen: React.FC = () => {
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={closeAttachPanel}
-              accessibilityLabel="Close attachment panel"
+              accessibilityLabel={t('conversationScreen.closeAttachPanel')}
               testID="conversation-attach-backdrop"
             />
           ) : null}
@@ -659,7 +666,7 @@ const ConversationScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.scrollToBottomFab}
                 onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-                accessibilityLabel="Scroll to most recent message"
+                accessibilityLabel={t('conversationScreen.scrollToRecent')}
                 testID="conversation-scroll-to-bottom"
               >
                 <ArrowDown size={20} color={colors.white} />
@@ -685,7 +692,7 @@ const ConversationScreen: React.FC = () => {
           attachDisabled={sharingLocation || uploadingImage}
           attachLoading={sharingLocation || uploadingImage}
           onInputFocus={closeAttachPanel}
-          placeholder="Message"
+          placeholder={t('conversationScreen.messagePlaceholder')}
           // 1:1 ships the compact lucide Send icon (40x40) + a light-grey
           // attach button background. Defaults match this so we keep the
           // shipped 1:1 visuals byte-for-byte.
@@ -707,7 +714,7 @@ const ConversationScreen: React.FC = () => {
                 setSendSheetOpen(true);
               }}
               zapDisabled={!lightningAddress}
-              zapAccessibilityLabel="Send a zap (unavailable — peer has no Lightning Address)"
+              zapAccessibilityLabel={t('conversationScreen.zapUnavailable')}
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);
@@ -763,7 +770,7 @@ const ConversationScreen: React.FC = () => {
         <Pressable
           style={styles.fullscreenBackdrop}
           onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel="Close full-screen GIF"
+          accessibilityLabel={t('conversationScreen.closeFullscreenGif')}
           testID="conversation-gif-fullscreen"
         >
           {fullscreenGifUrl ? (
@@ -787,8 +794,8 @@ const ConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
-        title={`Share a contact with ${name}`}
-        subtitle="They'll see it as a Nostr profile card they can open."
+        title={t('conversationScreen.shareContactTitle', { name })}
+        subtitle={t('conversationScreen.shareContactSubtitle')}
       />
       <ReceiveSheet
         visible={invoiceSheetOpen}

@@ -4,7 +4,12 @@ import { Sun, Moon, Smartphone, Check, Zap, Droplets, Globe } from 'lucide-react
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useTheme } from '../../contexts/ThemeContext';
-import { useLocale, SUPPORTED_LOCALES, type LocalePreference } from '../../contexts/LocaleContext';
+import {
+  useLocale,
+  useTranslation,
+  SUPPORTED_LOCALES,
+  type LocalePreference,
+} from '../../contexts/LocaleContext';
 import {
   useSendingAnimation,
   type SendingAnimationPreference,
@@ -21,6 +26,7 @@ const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
 
 const AppearanceScreen: React.FC = () => {
   const { colors, preference, setPreference } = useTheme();
+  const t = useTranslation();
   const {
     preference: localePreference,
     setPreference: setLocalePreference,
@@ -42,24 +48,24 @@ const AppearanceScreen: React.FC = () => {
     () => [
       {
         value: 'system',
-        label: 'System',
-        description: 'Follow your device setting',
+        label: t('appearanceScreen.system'),
+        description: t('appearanceScreen.themeSystemDesc'),
         icon: <Smartphone size={20} color={colors.white} />,
       },
       {
         value: 'light',
-        label: 'Light',
-        description: 'Always light theme',
+        label: t('appearanceScreen.themeLight'),
+        description: t('appearanceScreen.themeLightDesc'),
         icon: <Sun size={20} color={colors.white} />,
       },
       {
         value: 'dark',
-        label: 'Dark',
-        description: 'Always dark theme',
+        label: t('appearanceScreen.themeDark'),
+        description: t('appearanceScreen.themeDarkDesc'),
         icon: <Moon size={20} color={colors.white} />,
       },
     ],
-    [colors],
+    [colors, t],
   );
 
   const localeOptions = useMemo<
@@ -73,18 +79,18 @@ const AppearanceScreen: React.FC = () => {
     () => [
       {
         value: 'system',
-        label: 'System',
-        description: 'Follow your device language',
+        label: t('appearanceScreen.system'),
+        description: t('appearanceScreen.localeSystemDesc'),
         icon: <Smartphone size={20} color={colors.white} />,
       },
       ...SUPPORTED_LOCALES.map((code) => ({
         value: code,
         label: LOCALE_LABELS[code],
-        description: `Always ${LOCALE_LABELS[code]}`,
+        description: t('appearanceScreen.alwaysLanguage', { language: LOCALE_LABELS[code] }),
         icon: <Globe size={20} color={colors.white} />,
       })),
     ],
-    [colors],
+    [colors, t],
   );
 
   const sendingAnimationOptions = useMemo<
@@ -98,23 +104,25 @@ const AppearanceScreen: React.FC = () => {
     () => [
       {
         value: 'bubbles',
-        label: 'Bubbles',
-        description: 'Rising bubbles while sending',
+        label: t('appearanceScreen.animBubbles'),
+        description: t('appearanceScreen.animBubblesDesc'),
         icon: <Droplets size={20} color={colors.white} />,
       },
       {
         value: 'lightning',
-        label: 'Lightning',
-        description: 'Crackling bolts while sending',
+        label: t('appearanceScreen.animLightning'),
+        description: t('appearanceScreen.animLightningDesc'),
         icon: <Zap size={20} color={colors.white} />,
       },
     ],
-    [colors],
+    [colors, t],
   );
 
   return (
-    <AccountScreenLayout title="Appearance">
-      <Text style={sharedAccountStyles.sectionLabel}>Theme</Text>
+    <AccountScreenLayout title={t('appearanceScreen.title')}>
+      <Text style={sharedAccountStyles.sectionLabel}>
+        {t('appearanceScreen.themeSectionLabel')}
+      </Text>
       <View style={styles.optionList}>
         {themeOptions.map((opt) => {
           const selected = preference === opt.value;
@@ -123,7 +131,7 @@ const AppearanceScreen: React.FC = () => {
               key={opt.value}
               style={[styles.optionRow, selected && styles.optionRowSelected]}
               onPress={() => setPreference(opt.value)}
-              accessibilityLabel={`${opt.label} theme`}
+              accessibilityLabel={t('appearanceScreen.themeA11y', { label: opt.label })}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
               testID={`appearance-${opt.value}`}
@@ -142,13 +150,12 @@ const AppearanceScreen: React.FC = () => {
           );
         })}
       </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        Affects every screen in the app. "System" follows your device's light/dark setting and
-        switches automatically when it changes.
-      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('appearanceScreen.themeHint')}</Text>
 
       <View style={styles.section}>
-        <Text style={sharedAccountStyles.sectionLabel}>Language</Text>
+        <Text style={sharedAccountStyles.sectionLabel}>
+          {t('appearanceScreen.languageSectionLabel')}
+        </Text>
         <View style={styles.optionList}>
           {localeOptions.map((opt) => {
             const selected = localePreference === opt.value;
@@ -157,7 +164,7 @@ const AppearanceScreen: React.FC = () => {
                 key={opt.value}
                 style={[styles.optionRow, selected && styles.optionRowSelected]}
                 onPress={() => setLocalePreference(opt.value)}
-                accessibilityLabel={`${opt.label} language`}
+                accessibilityLabel={t('appearanceScreen.languageA11y', { label: opt.label })}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
                 testID={`locale-${opt.value}`}
@@ -177,13 +184,14 @@ const AppearanceScreen: React.FC = () => {
           })}
         </View>
         <Text style={sharedAccountStyles.fieldHint}>
-          Translates the app's UI text. Currently active: {LOCALE_LABELS[resolvedLocale]}. Only a
-          couple of screens are translated so far — more land in follow-up updates (#137).
+          {t('appearanceScreen.languageHint', { language: LOCALE_LABELS[resolvedLocale] })}
         </Text>
       </View>
 
       <View style={styles.section}>
-        <Text style={sharedAccountStyles.sectionLabel}>Sending animation</Text>
+        <Text style={sharedAccountStyles.sectionLabel}>
+          {t('appearanceScreen.animationSectionLabel')}
+        </Text>
         <View style={styles.optionList}>
           {sendingAnimationOptions.map((opt) => {
             const selected = sendingAnimation === opt.value;
@@ -192,7 +200,7 @@ const AppearanceScreen: React.FC = () => {
                 key={opt.value}
                 style={[styles.optionRow, selected && styles.optionRowSelected]}
                 onPress={() => setSendingAnimation(opt.value)}
-                accessibilityLabel={`${opt.label} sending animation`}
+                accessibilityLabel={t('appearanceScreen.animationA11y', { label: opt.label })}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
                 testID={`sending-animation-${opt.value}`}
@@ -211,10 +219,7 @@ const AppearanceScreen: React.FC = () => {
             );
           })}
         </View>
-        <Text style={sharedAccountStyles.fieldHint}>
-          The animation shown while a payment is being sent. Both fade from purple to green when the
-          payment succeeds.
-        </Text>
+        <Text style={sharedAccountStyles.fieldHint}>{t('appearanceScreen.animationHint')}</Text>
       </View>
     </AccountScreenLayout>
   );

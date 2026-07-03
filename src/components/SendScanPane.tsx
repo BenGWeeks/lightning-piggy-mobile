@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { CameraView } from 'expo-camera';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createSendScanPaneStyles } from '../styles/SendScanPane.styles';
 
 interface Props {
@@ -27,6 +28,7 @@ const SendScanPane: React.FC<Props> = ({
   onBarcodeScanned,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createSendScanPaneStyles(colors), [colors]);
   const [zoom, setZoom] = useState(0);
   // Gesture callbacks close over the first render — track the live zoom
@@ -65,14 +67,14 @@ const SendScanPane: React.FC<Props> = ({
     <View style={styles.cameraContainer}>
       {!permissionGranted ? (
         <View style={styles.permissionContainer}>
-          <Text style={styles.permissionText}>Camera access needed to scan QR codes</Text>
+          <Text style={styles.permissionText}>{t('sendScanPane.cameraAccessNeeded')}</Text>
           <TouchableOpacity
             style={styles.permissionButton}
             onPress={onRequestPermission}
-            accessibilityLabel="Grant camera permission"
+            accessibilityLabel={t('sendScanPane.grantCameraPermission')}
             testID="send-scan-grant-permission"
           >
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+            <Text style={styles.permissionButtonText}>{t('sendScanPane.grantPermission')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -81,7 +83,7 @@ const SendScanPane: React.FC<Props> = ({
             style={styles.camera}
             testID="send-scan-camera"
             accessible
-            accessibilityLabel="QR code viewfinder"
+            accessibilityLabel={t('sendScanPane.qrViewfinder')}
           >
             <CameraView
               style={styles.camera}

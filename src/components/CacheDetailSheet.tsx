@@ -13,6 +13,7 @@ import { PiggyBank } from 'lucide-react-native';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { useDismissibleSheet } from '../hooks/useDismissibleSheet';
 import { createSheetStyles } from '../styles/sheetStyles';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -23,9 +24,12 @@ interface Props {
 }
 
 export const CacheDetailSheet: React.FC<Props> = ({ cache, colors, onClose, onViewDetails }) => {
+  const t = useTranslation();
   const styles = useMemo(() => createSheetStyles(colors), [colors]);
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
-  const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
+  const kindLabel = cache.isLpPiggy
+    ? t('cacheDetailSheet.piglet')
+    : t('cacheDetailSheet.nipGcCache');
   const specBits = [
     cache.cacheType,
     cache.size,
@@ -39,7 +43,7 @@ export const CacheDetailSheet: React.FC<Props> = ({ cache, colors, onClose, onVi
         onPress={onClose}
         activeOpacity={1}
         accessibilityRole="button"
-        accessibilityLabel="Close cache details"
+        accessibilityLabel={t('cacheDetailSheet.closeDetails')}
         testID="cache-detail-tap-away"
       />
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
@@ -87,9 +91,9 @@ export const CacheDetailSheet: React.FC<Props> = ({ cache, colors, onClose, onVi
             style={styles.sheetButton}
             onPress={onViewDetails}
             testID="cache-detail-view-button"
-            accessibilityLabel={`Open ${kindLabel} detail`}
+            accessibilityLabel={t('cacheDetailSheet.openDetailA11y', { kind: kindLabel })}
           >
-            <Text style={styles.sheetButtonText}>View details</Text>
+            <Text style={styles.sheetButtonText}>{t('cacheDetailSheet.viewDetails')}</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>

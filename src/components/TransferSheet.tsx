@@ -28,6 +28,7 @@ import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
@@ -48,6 +49,7 @@ type Step = 'main' | 'amount';
 
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -247,21 +249,23 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       return;
     }
     if (transferType === 'ln-to-ln') {
-      setFeeEstimate('~0 sats \u00B7 Instant (Lightning)');
+      setFeeEstimate(`~0 sats \u00B7 ${t('transferSheet.instantLightning')}`);
     } else if (transferType === 'ln-to-onchain' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ${t('transferSheet.time10to60min')}`);
     } else if (transferType === 'onchain-to-ln' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ${t('transferSheet.time10to60min')}`);
     } else if (transferType === 'onchain-to-onchain') {
       onchainService
         .estimateOnchainFee()
         .then((fees) => {
-          setFeeEstimate(`~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min`);
+          setFeeEstimate(
+            `~${fees.medium.toLocaleString()} sats \u00B7 ${t('transferSheet.time10to60min')}`,
+          );
         })
         .catch(() => {
-          setFeeEstimate('Fee estimate unavailable');
+          setFeeEstimate(t('transferSheet.feeUnavailable'));
         });
     }
   }, [transferType, currentSats, cachedBoltzFees]);
@@ -451,12 +455,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (altLnWallet) {
         const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
-            'Use Lightning wallet instead?',
-            `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString()} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
+            t('transferSheet.useLightningTitle'),
+            t('transferSheet.useLightningMessage', {
+              alias: altLnWallet.alias,
+              balance: altLnWallet.balance?.toLocaleString() ?? '0',
+            }),
             [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-              { text: 'Use Lightning', onPress: () => resolve(true) },
-              { text: 'Continue with on-chain', onPress: () => resolve(false) },
+              { text: t('transferSheet.cancel'), style: 'cancel', onPress: () => resolve(null) },
+              { text: t('transferSheet.useLightning'), onPress: () => resolve(true) },
+              { text: t('transferSheet.continueOnchain'), onPress: () => resolve(false) },
             ],
           ),
         );
@@ -480,12 +487,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (altOnchainWallet) {
         const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
-            'Use on-chain wallet instead?',
-            `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString()} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
+            t('transferSheet.useOnchainTitle'),
+            t('transferSheet.useOnchainMessage', {
+              alias: altOnchainWallet.alias,
+              balance: altOnchainWallet.balance?.toLocaleString() ?? '0',
+            }),
             [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-              { text: 'Use on-chain', onPress: () => resolve(true) },
-              { text: 'Continue with Lightning', onPress: () => resolve(false) },
+              { text: t('transferSheet.cancel'), style: 'cancel', onPress: () => resolve(null) },
+              { text: t('transferSheet.useOnchain'), onPress: () => resolve(true) },
+              { text: t('transferSheet.continueLightning'), onPress: () => resolve(false) },
             ],
           ),
         );
@@ -501,15 +511,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     if ((transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && cachedBoltzFees) {
       if (currentSats < cachedBoltzFees.minAmount) {
         Alert.alert(
-          'Amount Too Low',
-          `Boltz swap minimum is ${cachedBoltzFees.minAmount.toLocaleString()} sats.`,
+          t('transferSheet.amountTooLowTitle'),
+          t('transferSheet.boltzMinMessage', {
+            min: cachedBoltzFees.minAmount.toLocaleString(),
+          }),
         );
         return;
       }
       if (currentSats > cachedBoltzFees.maxAmount) {
         Alert.alert(
-          'Amount Too High',
-          `Boltz swap maximum is ${cachedBoltzFees.maxAmount.toLocaleString()} sats.`,
+          t('transferSheet.amountTooHighTitle'),
+          t('transferSheet.boltzMaxMessage', {
+            max: cachedBoltzFees.maxAmount.toLocaleString(),
+          }),
         );
         return;
       }
@@ -526,11 +540,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Confirm large transfer',
-          `You're about to transfer ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
+          t('transferSheet.confirmLargeTitle'),
+          t('transferSheet.confirmLargeMessage', {
+            amount: currentSats.toLocaleString(),
+            fiat,
+            source: source.alias,
+            dest: dest.alias,
+          }),
           [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Confirm', onPress: () => resolve(true) },
+            { text: t('transferSheet.cancel'), style: 'cancel', onPress: () => resolve(false) },
+            { text: t('transferSheet.confirm'), onPress: () => resolve(true) },
           ],
         );
       });
@@ -538,7 +557,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
-    setProgressMsg('Preparing transfer...');
+    setProgressMsg(t('transferSheet.preparingTransfer'));
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
@@ -547,8 +566,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     const now = Math.floor(Date.now() / 1000);
     const swapLabel =
       transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln'
-        ? 'Boltz swap in progress'
-        : 'Transfer in progress';
+        ? t('transferSheet.boltzSwapInProgress')
+        : t('transferSheet.transferInProgress');
     addPendingTransaction(sourceId, {
       type: 'outgoing',
       amount: currentSats,
@@ -584,14 +603,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     const fetchInvoiceForDest = async (destWallet: WalletState | WalletMetadata) => {
       if (isCrossProfile) {
         if (!destWallet.lightningAddress) {
-          throw new Error(
-            'Destination wallet has no lightning address. Set one on the destination wallet to receive cross-profile transfers.',
-          );
+          throw new Error(t('transferSheet.noLightningAddressError'));
         }
         const params = await lnurlService.resolveLightningAddress(destWallet.lightningAddress);
         if (currentSats < params.minSats || currentSats > params.maxSats) {
           throw new Error(
-            `Destination accepts ${params.minSats.toLocaleString()}-${params.maxSats.toLocaleString()} sats.`,
+            t('transferSheet.destinationAcceptsRange', {
+              min: params.minSats.toLocaleString(),
+              max: params.maxSats.toLocaleString(),
+            }),
           );
         }
         // Respect the destination LNURL's commentAllowed budget — some
@@ -610,15 +630,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
     try {
       if (transferType === 'ln-to-ln') {
-        setProgressMsg('Creating invoice...');
+        setProgressMsg(t('transferSheet.creatingInvoice'));
         const invoice = await fetchInvoiceForDest(dest);
-        setProgressMsg('Sending payment...');
+        setProgressMsg(t('transferSheet.sendingPayment'));
         await payInvoiceForWallet(sourceId, invoice);
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain.
         // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
         // Background: wait for on-chain lockup, build & broadcast claim tx.
-        setProgressMsg('Creating Boltz swap...');
+        setProgressMsg(t('transferSheet.creatingBoltzSwap'));
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
@@ -663,8 +683,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             await payInvoiceForWallet(sourceId, swap.invoice);
             Toast.show({
               type: 'info',
-              text1: 'Lightning payment sent',
-              text2: `Waiting for Boltz to lock ${amount.toLocaleString()} sats on-chain…`,
+              text1: t('transferSheet.lightningPaymentSent'),
+              text2: t('transferSheet.waitingForBoltzLock', {
+                amount: amount.toLocaleString(),
+              }),
               position: 'top',
               visibilityTime: 5000,
             });
@@ -674,8 +696,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             const claimed = await boltzService.claimSwap(swap, lockup, address);
             Toast.show({
               type: 'success',
-              text1: 'Swap complete',
-              text2: `${amount.toLocaleString()} sats sent on-chain. Claim tx ${claimed.slice(0, 10)}…`,
+              text1: t('transferSheet.swapComplete'),
+              text2: t('transferSheet.swapCompleteOnchain', {
+                amount: amount.toLocaleString(),
+                txid: claimed.slice(0, 10),
+              }),
               position: 'top',
               visibilityTime: 10000,
             });
@@ -715,18 +740,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               // (some SDK throws produce blank-message errors) and we need
               // a non-null sentinel to drive the spinner-suppression +
               // Retry-button render paths.
-              setBackgroundError(msg || 'Background step failed');
-              setProgressMsg(
-                'Background step failed — the LN payment reply may have been dropped ' +
-                  'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
-                  'and broadcast the claim. Otherwise the app will retry automatically on next launch.',
-              );
+              setBackgroundError(msg || t('transferSheet.backgroundStepFailed'));
+              setProgressMsg(t('transferSheet.backgroundStepFailedMessage'));
             }
             Toast.show({
               type: 'error',
-              text1: 'Swap in progress',
-              text2:
-                'Background step hit an error — tap "Retry now" in the sheet or relaunch the app. Funds are safe.',
+              text1: t('transferSheet.swapInProgress'),
+              text2: t('transferSheet.swapInProgressToast'),
               position: 'top',
               visibilityTime: 10000,
             });
@@ -736,16 +756,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Show a terminal "underway" state with the Close button active so
         // the user can dismiss when they're ready. The background task runs
         // independently and will surface completion via toasts.
-        setProgressMsg(
-          'Boltz swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next. Swaps take a little longer to settle.\n\n' +
-            "Safe to close — you'll get a notification when the swap completes. " +
-            'Progress also appears in your transaction history.',
-        );
+        setProgressMsg(t('transferSheet.boltzUnderwayReverse'));
         didHandOff = true;
         setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-ln') {
-        setProgressMsg('Creating Boltz swap...');
+        setProgressMsg(t('transferSheet.creatingBoltzSwap'));
         const invoice = await fetchInvoiceForDest(dest);
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
@@ -773,7 +789,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         // Foreground: broadcast the on-chain tx (the user's action).
         // Background: wait for Boltz to pay the LN invoice, handle refund path.
-        setProgressMsg('Broadcasting on-chain transaction...');
+        setProgressMsg(t('transferSheet.broadcastingOnchain'));
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
@@ -793,8 +809,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
             Toast.show({
               type: 'success',
-              text1: 'Swap complete',
-              text2: `${submarineAmount.toLocaleString()} sats delivered via Lightning.`,
+              text1: t('transferSheet.swapComplete'),
+              text2: t('transferSheet.swapCompleteLightning', {
+                amount: submarineAmount.toLocaleString(),
+              }),
               position: 'top',
               visibilityTime: 10000,
             });
@@ -822,8 +840,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             } else {
               Toast.show({
                 type: 'info',
-                text1: 'Swap still settling',
-                text2: 'Funds are safe — it finishes automatically once the lockup confirms.',
+                text1: t('transferSheet.swapStillSettling'),
+                text2: t('transferSheet.swapStillSettlingToast'),
                 position: 'top',
                 visibilityTime: 12000,
               });
@@ -833,21 +851,17 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
-        setProgressMsg(
-          'Boltz swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next. Swaps take a little longer to settle.\n\n' +
-            "Safe to close — you'll get a notification when the swap completes. " +
-            'Progress also appears in your transaction history.',
-        );
+        setProgressMsg(t('transferSheet.boltzUnderwayForward'));
         didHandOff = true;
         setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
-        setProgressMsg('Sending on-chain transaction...');
+        setProgressMsg(t('transferSheet.sendingOnchain'));
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
       }
 
-      setProgressMsg('Refreshing wallets...');
+      setProgressMsg(t('transferSheet.refreshingWallets'));
 
       // Refresh balances and transactions (non-critical). Cross-profile
       // destinations belong to a different profile's wallet list, so we
@@ -872,25 +886,26 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // early after handing off to the background task.
       const settleMsg =
         transferType === 'onchain-to-onchain'
-          ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : `${currentSats.toLocaleString()} sats transferred.`;
+          ? t('transferSheet.settleMsgOnchain', { amount: currentSats.toLocaleString() })
+          : t('transferSheet.settleMsgTransferred', { amount: currentSats.toLocaleString() });
 
-      Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
+      Alert.alert(t('transferSheet.transferComplete'), settleMsg, [
+        { text: t('transferSheet.ok'), onPress: onClose },
+      ]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transfer failed';
+      const message =
+        error instanceof Error ? error.message : t('transferSheet.transferFailedFallback');
       // "Cannot read property 'reload' of undefined" comes from
       // react-native's HMRClient when Metro drops the dev-client
       // connection. It is NOT a transfer failure — nothing was signed
       // or broadcast. Surface it as a dev-mode hiccup with a clear
       // retry hint instead of a scary "Transfer Failed" alert.
       if (/reload.*of undefined|DevSettings/i.test(message)) {
-        Alert.alert(
-          'Development Reload Needed',
-          'Metro disconnected from the app mid-transfer. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
-          [{ text: 'OK' }],
-        );
+        Alert.alert(t('transferSheet.devReloadTitle'), t('transferSheet.devReloadMessage'), [
+          { text: t('transferSheet.ok') },
+        ]);
       } else {
-        Alert.alert('Transfer Failed', message);
+        Alert.alert(t('transferSheet.transferFailedTitle'), message);
       }
     } finally {
       // When a Boltz swap has been handed off to a background IIFE we leave
@@ -939,7 +954,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const renderWalletLabel = (w: WalletState | WalletMetadata) => {
     const balance = 'balance' in w ? w.balance : null;
     const balanceStr = balance !== null ? ` · ${balance.toLocaleString()} sats` : '';
-    const typeStr = w.walletType === 'onchain' ? 'on-chain' : 'lightning';
+    const typeStr =
+      w.walletType === 'onchain'
+        ? t('transferSheet.walletTypeOnchain')
+        : t('transferSheet.walletTypeLightning');
     return `${w.alias} (${typeStr})${balanceStr}`;
   };
 
@@ -964,7 +982,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // cached so the dropdown reads e.g. "Big Piggy · default"
       // instead of an opaque "This profile (default)" that hides
       // who that is.
-      return cachedName ? `${cachedName} · default` : 'This profile (default)';
+      return cachedName
+        ? t('transferSheet.profileDefaultNamed', { name: cachedName })
+        : t('transferSheet.thisProfileDefault');
     }
     if (cachedName) return cachedName;
     try {
@@ -991,14 +1011,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         <BottomSheetView style={styles.content}>
           <AmountEntryScreen
             initialSats={currentSats}
-            title="Transfer amount"
+            title={t('transferSheet.transferAmountTitle')}
             minSats={
               isBoltzTransfer
                 ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
                 : undefined
             }
             maxSats={isBoltzTransfer ? cachedBoltzFees?.maxAmount : undefined}
-            confirmLabel="Done"
+            confirmLabel={t('transferSheet.done')}
             onBack={() => setStep('main')}
             onConfirm={(sats) => {
               setSatsValue(String(sats));
@@ -1017,7 +1037,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           keyboardShouldPersistTaps="handled"
         >
           <>
-            <Text style={styles.title}>Transfer</Text>
+            <Text style={styles.title}>{t('transferSheet.transferTitle')}</Text>
 
             {/* Source wallet selector */}
             {sending ? (
@@ -1029,7 +1049,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 </Text>
                 {feeEstimate && (
                   <Text style={styles.feeText}>
-                    Fee: {feeEstimate.split('\u00B7')[0].trim()}
+                    {t('transferSheet.feeColon')} {feeEstimate.split('\u00B7')[0].trim()}
                     {feeEstimate.includes('\u00B7')
                       ? ` · ${feeEstimate.split('\u00B7')[1].trim()}`
                       : ''}
@@ -1065,8 +1085,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                         await swapRecoveryService.recoverPendingSwaps();
                         Toast.show({
                           type: 'info',
-                          text1: 'Retry kicked off',
-                          text2: 'Any claimable swaps are being re-broadcast.',
+                          text1: t('transferSheet.retryKickedOff'),
+                          text2: t('transferSheet.retryKickedOffToast'),
                           position: 'top',
                           visibilityTime: 6000,
                         });
@@ -1075,15 +1095,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           // stays suppressed; flip `recoveryAcked` to
                           // swap the message + hide the Retry button.
                           setRecoveryAcked(true);
-                          setProgressMsg(
-                            'Recovery retried — check transaction history for the final status.',
-                          );
+                          setProgressMsg(t('transferSheet.recoveryRetried'));
                         }
                       } catch (err) {
                         const m = err instanceof Error ? err.message : String(err);
                         Toast.show({
                           type: 'error',
-                          text1: 'Retry failed',
+                          text1: t('transferSheet.retryFailed'),
                           text2: m,
                           position: 'top',
                           visibilityTime: 8000,
@@ -1096,27 +1114,27 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       }
                     }}
                     disabled={retryingRecovery}
-                    accessibilityLabel="Retry swap recovery"
+                    accessibilityLabel={t('transferSheet.retrySwapRecovery')}
                     testID="transfer-retry-now"
                   >
                     {retryingRecovery ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.closeButtonText}>Retry now</Text>
+                      <Text style={styles.closeButtonText}>{t('transferSheet.retryNow')}</Text>
                     )}
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
                   style={styles.closeButton}
                   onPress={onClose}
-                  accessibilityLabel="Close"
+                  accessibilityLabel={t('transferSheet.close')}
                 >
-                  <Text style={styles.closeButtonText}>Close</Text>
+                  <Text style={styles.closeButtonText}>{t('transferSheet.close')}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>From</Text>
+                <Text style={styles.sectionLabel}>{t('transferSheet.from')}</Text>
                 <View style={[styles.dropdownWrapper, sourceDropdownOpen && { zIndex: 20 }]}>
                   <TouchableOpacity
                     style={styles.dropdown}
@@ -1125,10 +1143,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       setDestDropdownOpen(false);
                     }}
                     testID="transfer-source-dropdown"
-                    accessibilityLabel="Source wallet"
+                    accessibilityLabel={t('transferSheet.sourceWallet')}
                   >
                     <Text style={styles.dropdownText}>
-                      {source ? renderWalletLabel(source) : 'Select wallet'}
+                      {source ? renderWalletLabel(source) : t('transferSheet.selectWallet')}
                     </Text>
                     <Text style={styles.dropdownArrow}>
                       {sourceDropdownOpen ? '\u25B2' : '\u25BC'}
@@ -1165,7 +1183,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                         </TouchableOpacity>
                       ))}
                       {sourceWallets.length === 0 && (
-                        <Text style={styles.dropdownEmpty}>No wallets that can send</Text>
+                        <Text style={styles.dropdownEmpty}>
+                          {t('transferSheet.noWalletsCanSend')}
+                        </Text>
                       )}
                     </View>
                   )}
@@ -1178,7 +1198,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     (#485). With a single profile, the profile dropdown
                     collapses out and the layout matches the pre-#485
                     flow exactly. */}
-                <Text style={styles.sectionLabel}>To</Text>
+                <Text style={styles.sectionLabel}>{t('transferSheet.to')}</Text>
                 {showProfileDropdown && (
                   <View style={[styles.dropdownWrapper, profileDropdownOpen && { zIndex: 15 }]}>
                     <TouchableOpacity
@@ -1189,7 +1209,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                         setDestDropdownOpen(false);
                       }}
                       testID="transfer-profile-dropdown"
-                      accessibilityLabel="Destination profile"
+                      accessibilityLabel={t('transferSheet.destinationProfile')}
                     >
                       <Text style={styles.dropdownText}>
                         {renderProfileLabel(selectedProfilePubkey ?? activePubkey ?? '')}
@@ -1250,10 +1270,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       setProfileDropdownOpen(false);
                     }}
                     testID="transfer-dest-dropdown"
-                    accessibilityLabel="Destination wallet"
+                    accessibilityLabel={t('transferSheet.destinationWallet')}
                   >
                     <Text style={styles.dropdownText}>
-                      {dest ? renderWalletLabel(dest) : 'Select wallet'}
+                      {dest ? renderWalletLabel(dest) : t('transferSheet.selectWallet')}
                     </Text>
                     <Text style={styles.dropdownArrow}>
                       {destDropdownOpen ? '\u25B2' : '\u25BC'}
@@ -1289,12 +1309,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 </View>
 
                 {/* Amount picker — opens dedicated amount-entry step */}
-                <Text style={styles.sectionLabel}>Amount</Text>
+                <Text style={styles.sectionLabel}>{t('transferSheet.amount')}</Text>
                 <TouchableOpacity
                   style={styles.amountPickerRow}
                   onPress={() => setStep('amount')}
                   testID="transfer-amount-picker"
-                  accessibilityLabel="Enter transfer amount"
+                  accessibilityLabel={t('transferSheet.enterTransferAmount')}
                 >
                   {currentSats > 0 ? (
                     <>
@@ -1308,7 +1328,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       ) : null}
                     </>
                   ) : (
-                    <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
+                    <Text style={styles.amountPickerPlaceholder}>
+                      {t('transferSheet.enterAmount')}
+                    </Text>
                   )}
                 </TouchableOpacity>
 
@@ -1329,11 +1351,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     )}
                     <View>
                       <Text style={styles.feeText}>
-                        Estimated fee: {feeEstimate.split('\u00B7')[0].trim()}
+                        {t('transferSheet.estimatedFee')} {feeEstimate.split('\u00B7')[0].trim()}
                       </Text>
                       {feeEstimate.includes('\u00B7') && (
                         <Text style={styles.feeText}>
-                          Estimated time: {feeEstimate.split('\u00B7')[1].trim()}
+                          {t('transferSheet.estimatedTime')} {feeEstimate.split('\u00B7')[1].trim()}
                         </Text>
                       )}
                     </View>
@@ -1343,16 +1365,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {/* Boltz minimum amount warning */}
                 {belowBoltzMin && (
                   <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzService.BOLTZ_MIN_SATS.toLocaleString()}{' '}
-                    sats.
+                    {t('transferSheet.boltzMinWarning', {
+                      min: boltzService.BOLTZ_MIN_SATS.toLocaleString(),
+                    })}
                   </Text>
                 )}
 
                 {/* Watch-only warning */}
                 {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
-                  <Text style={styles.warningText}>
-                    Watch-only wallets cannot send. Select a different wallet as source.
-                  </Text>
+                  <Text style={styles.warningText}>{t('transferSheet.watchOnlyWarning')}</Text>
                 )}
 
                 {/* Cross-profile LN without lightning address — see #485.
@@ -1363,8 +1384,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     today; this surfaces a clear remediation. */}
                 {crossProfileLnNoAddress && (
                   <Text style={styles.warningText} testID="transfer-cross-profile-no-lud16">
-                    Set a lightning address on the destination wallet to receive cross-profile
-                    transfers. On-chain destinations work without one.
+                    {t('transferSheet.crossProfileNoLud16')}
                   </Text>
                 )}
 
@@ -1374,9 +1394,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     style={styles.cancelButton}
                     onPress={onClose}
                     testID="transfer-cancel"
-                    accessibilityLabel="Cancel transfer"
+                    accessibilityLabel={t('transferSheet.cancelTransfer')}
                   >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                    <Text style={styles.cancelButtonText}>{t('transferSheet.cancel')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
@@ -1386,9 +1406,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onPress={handleTransfer}
                     disabled={!canTransfer || sending}
                     testID="transfer-execute"
-                    accessibilityLabel="Execute transfer"
+                    accessibilityLabel={t('transferSheet.executeTransfer')}
                   >
-                    <Text style={styles.transferButtonText}>Transfer</Text>
+                    <Text style={styles.transferButtonText}>
+                      {t('transferSheet.transferButton')}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </>

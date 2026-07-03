@@ -14,6 +14,7 @@ import { ChevronLeft, Check } from 'lucide-react-native';
 import { createCourseDetailScreenStyles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { ExploreNavigation, CourseDetailRoute } from '../navigation/types';
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
 }
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createCourseDetailScreenStyles(colors), [colors]);
   const { courseId } = route.params;
@@ -38,9 +40,13 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   if (!course) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
-        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>Course not found</Text>
+        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>
+          {t('courseDetailScreen.courseNotFound')}
+        </Text>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>Go back</Text>
+          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>
+            {t('courseDetailScreen.goBack')}
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -55,7 +61,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => navigation.goBack()}
-        accessibilityLabel="Back to Lessons"
+        accessibilityLabel={t('courseDetailScreen.backToLessons')}
         testID="course-detail-back-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
@@ -73,7 +79,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
           <View style={styles.headerContent}>
             <Text style={styles.headerTitle}>{course.title}</Text>
-            <Text style={styles.headerMeta}>{course.missions.length} missions</Text>
+            <Text style={styles.headerMeta}>
+              {t('courseDetailScreen.missionsCount', { count: course.missions.length })}
+            </Text>
             <Text style={styles.headerDescription}>{course.description}</Text>
           </View>
         </View>
@@ -107,18 +115,24 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 />
                 <View style={styles.missionRight}>
                   <Text style={styles.missionTitle}>{mission.title}</Text>
-                  <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>
+                  <Text style={styles.missionMeta}>
+                    {t('courseDetailScreen.outcomesCount', {
+                      count: mission.learningOutcomes.length,
+                    })}
+                  </Text>
                   {done ? (
                     <View style={styles.chipEarned}>
-                      <Text style={styles.chipEarnedText}>Completed</Text>
+                      <Text style={styles.chipEarnedText}>{t('courseDetailScreen.completed')}</Text>
                     </View>
                   ) : isComingSoon ? (
                     <View style={styles.chipComingSoon}>
-                      <Text style={styles.chipComingSoonText}>Coming soon</Text>
+                      <Text style={styles.chipComingSoonText}>
+                        {t('courseDetailScreen.comingSoon')}
+                      </Text>
                     </View>
                   ) : (
                     <View style={styles.chipStart}>
-                      <Text style={styles.chipStartText}>Start</Text>
+                      <Text style={styles.chipStartText}>{t('courseDetailScreen.start')}</Text>
                     </View>
                   )}
                 </View>
@@ -134,10 +148,10 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           {allDone && (
             <>
               <View style={styles.rewardBanner}>
-                <Text style={styles.rewardText}>Course complete!</Text>
+                <Text style={styles.rewardText}>{t('courseDetailScreen.courseComplete')}</Text>
               </View>
               <TouchableOpacity style={styles.tipButton} onPress={() => setTipVisible(true)}>
-                <Text style={styles.tipButtonText}>Request a Tip</Text>
+                <Text style={styles.tipButtonText}>{t('courseDetailScreen.requestATip')}</Text>
               </TouchableOpacity>
             </>
           )}

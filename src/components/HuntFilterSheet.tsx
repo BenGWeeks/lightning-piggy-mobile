@@ -11,44 +11,24 @@ import {
 import { ChevronDown, ChevronUp, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import WebOfTrustChip from './WebOfTrustChip';
 import WebOfTrustBottomSheet from './WebOfTrustBottomSheet';
 import type { Palette } from '../styles/palettes';
 
-// NIP-GC difficulty + terrain scales (geocaching.com convention adopted
-// by treasures.to + LP). Each level has a one-line plain-English label
-// so a first-time geocacher knows what "D3" or "T4" actually means.
-const DIFFICULTY_LEVELS: Record<number, string> = {
-  1: 'Walk-up, child can find it',
-  2: 'Easy, beginner-friendly',
-  3: 'Cunning hide, takes a look',
-  4: 'Cryptic, puzzle-like',
-  5: 'Expert — multi-stage or seriously hidden',
-};
-
-const TERRAIN_LEVELS: Record<number, string> = {
-  1: 'Flat, wheelchair / pram accessible',
-  2: 'Easy stroll, short walk',
-  3: 'Rugged path, hiking boots',
-  4: 'Steep / climbing, scrambling',
-  5: 'Specialised gear required (kayak, rope, etc.)',
-};
-
 // Cache types come from the NIP-GC `t` tag, originally lifted from
-// geocaching.com's taxonomy. Most users will only see "traditional"
-// in the wild; the rest are surfaced when a hider uses them.
-const TYPE_LABELS: Record<string, string> = {
-  traditional: 'Walk to the geohash, find the container',
-  multi: 'Multi-stage: solve clues to reach the final',
-  mystery: 'Puzzle to solve before the coords make sense',
-  virtual: 'No physical container — just visit the spot',
-  event: 'Geocaching meet-up at a time + place',
-  letterbox: 'Container with a stamp + logbook',
-  earthcache: 'Geological / educational location',
-  webcam: 'Pose in front of a public webcam',
-};
-
-const labelForType = (t: string): string => TYPE_LABELS[t] ?? 'Custom cache type';
+// geocaching.com's taxonomy. This is the known set that has a friendly
+// glossary label; anything outside it falls back to a generic label.
+const KNOWN_CACHE_TYPES = [
+  'traditional',
+  'multi',
+  'mystery',
+  'virtual',
+  'event',
+  'letterbox',
+  'earthcache',
+  'webcam',
+];
 
 interface Props {
   visible: boolean;
@@ -80,6 +60,7 @@ const HuntFilterSheet: React.FC<Props> = ({
   onClearAll,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // The WoT picker is owned by `WebOfTrustBottomSheet` — this sheet
   // surfaces the *current* tier via `WebOfTrustChip` and opens the
@@ -121,20 +102,20 @@ const HuntFilterSheet: React.FC<Props> = ({
       >
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Filters</Text>
+          <Text style={styles.title}>{t('huntFilterSheet.filters')}</Text>
           {anyActive ? (
             <TouchableOpacity
               onPress={onClearAll}
               testID="hunt-filter-clear-all"
-              accessibilityLabel="Clear all filters"
+              accessibilityLabel={t('huntFilterSheet.clearAllFilters')}
             >
-              <Text style={styles.clearText}>Clear all</Text>
+              <Text style={styles.clearText}>{t('huntFilterSheet.clearAll')}</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
             onPress={onClose}
             testID="hunt-filter-close"
-            accessibilityLabel="Close filters"
+            accessibilityLabel={t('huntFilterSheet.closeFilters')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <X size={20} color={colors.textHeader} strokeWidth={2.5} />
@@ -143,7 +124,7 @@ const HuntFilterSheet: React.FC<Props> = ({
 
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
           {/* Web-of-Trust — chip + tap-to-open-sheet (#535) */}
-          <Text style={styles.section}>Safety</Text>
+          <Text style={styles.section}>{t('huntFilterSheet.safety')}</Text>
           <View style={styles.wotRow}>
             <WebOfTrustChip
               currentTier={wotTier}
@@ -151,23 +132,24 @@ const HuntFilterSheet: React.FC<Props> = ({
               testID="hunt-filter-wot-chip"
             />
             {wotUntrustedHidden > 0 ? (
-              <Text style={styles.wotHiddenCount}>{wotUntrustedHidden} hidden</Text>
+              <Text style={styles.wotHiddenCount}>
+                {t('huntFilterSheet.hiddenCount', { count: wotUntrustedHidden })}
+              </Text>
             ) : null}
           </View>
-          <Text style={styles.sectionHint}>
-            An unverified geo-cache can be a lure — tap the chip to choose which trust tier should
-            pass.
-          </Text>
+          <Text style={styles.sectionHint}>{t('huntFilterSheet.sectionHint')}</Text>
 
           {/* Difficulty */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.section}>Difficulty</Text>
+            <Text style={styles.section}>{t('huntFilterSheet.difficulty')}</Text>
             <TouchableOpacity
               onPress={() => setShowDifficultyGloss((v) => !v)}
               testID="hunt-filter-difficulty-glossary"
             >
               <Text style={styles.glossText}>
-                {showDifficultyGloss ? 'Hide' : 'What do these mean?'}
+                {showDifficultyGloss
+                  ? t('huntFilterSheet.hide')
+                  : t('huntFilterSheet.whatDoTheseMean')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -180,7 +162,7 @@ const HuntFilterSheet: React.FC<Props> = ({
                   style={[styles.chip, active ? styles.chipActive : null]}
                   onPress={() => toggleInSet(selectedDifficulties, n, onChangeDifficulties)}
                   testID={`hunt-filter-difficulty-${n}`}
-                  accessibilityLabel={`Toggle difficulty ${n}`}
+                  accessibilityLabel={t('huntFilterSheet.toggleDifficulty', { n })}
                 >
                   <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>D{n}</Text>
                 </TouchableOpacity>
@@ -189,9 +171,10 @@ const HuntFilterSheet: React.FC<Props> = ({
           </View>
           {showDifficultyGloss ? (
             <View style={styles.glossBlock}>
-              {Object.entries(DIFFICULTY_LEVELS).map(([n, label]) => (
+              {[1, 2, 3, 4, 5].map((n) => (
                 <Text key={n} style={styles.glossLine}>
-                  <Text style={styles.glossLineKey}>D{n} —</Text> {label}
+                  <Text style={styles.glossLineKey}>D{n} —</Text>{' '}
+                  {t(`huntFilterSheet.difficulty${n}`)}
                 </Text>
               ))}
             </View>
@@ -199,13 +182,15 @@ const HuntFilterSheet: React.FC<Props> = ({
 
           {/* Terrain */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.section}>Terrain</Text>
+            <Text style={styles.section}>{t('huntFilterSheet.terrain')}</Text>
             <TouchableOpacity
               onPress={() => setShowTerrainGloss((v) => !v)}
               testID="hunt-filter-terrain-glossary"
             >
               <Text style={styles.glossText}>
-                {showTerrainGloss ? 'Hide' : 'What do these mean?'}
+                {showTerrainGloss
+                  ? t('huntFilterSheet.hide')
+                  : t('huntFilterSheet.whatDoTheseMean')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -218,7 +203,7 @@ const HuntFilterSheet: React.FC<Props> = ({
                   style={[styles.chip, active ? styles.chipActive : null]}
                   onPress={() => toggleInSet(selectedTerrains, n, onChangeTerrains)}
                   testID={`hunt-filter-terrain-${n}`}
-                  accessibilityLabel={`Toggle terrain ${n}`}
+                  accessibilityLabel={t('huntFilterSheet.toggleTerrain', { n })}
                 >
                   <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>T{n}</Text>
                 </TouchableOpacity>
@@ -227,9 +212,9 @@ const HuntFilterSheet: React.FC<Props> = ({
           </View>
           {showTerrainGloss ? (
             <View style={styles.glossBlock}>
-              {Object.entries(TERRAIN_LEVELS).map(([n, label]) => (
+              {[1, 2, 3, 4, 5].map((n) => (
                 <Text key={n} style={styles.glossLine}>
-                  <Text style={styles.glossLineKey}>T{n} —</Text> {label}
+                  <Text style={styles.glossLineKey}>T{n} —</Text> {t(`huntFilterSheet.terrain${n}`)}
                 </Text>
               ))}
             </View>
@@ -239,29 +224,31 @@ const HuntFilterSheet: React.FC<Props> = ({
           {availableTypes.length > 0 ? (
             <>
               <View style={styles.sectionHeader}>
-                <Text style={styles.section}>Cache type</Text>
+                <Text style={styles.section}>{t('huntFilterSheet.cacheType')}</Text>
                 <TouchableOpacity
                   onPress={() => setShowTypeGloss((v) => !v)}
                   testID="hunt-filter-type-glossary"
                 >
                   <Text style={styles.glossText}>
-                    {showTypeGloss ? 'Hide' : 'What do these mean?'}
+                    {showTypeGloss
+                      ? t('huntFilterSheet.hide')
+                      : t('huntFilterSheet.whatDoTheseMean')}
                   </Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.chipRow}>
-                {availableTypes.map((t) => {
-                  const active = selectedTypes.has(t);
+                {availableTypes.map((type) => {
+                  const active = selectedTypes.has(type);
                   return (
                     <TouchableOpacity
-                      key={t}
+                      key={type}
                       style={[styles.chip, active ? styles.chipActive : null]}
-                      onPress={() => toggleInSet(selectedTypes, t, onChangeTypes)}
-                      testID={`hunt-filter-type-${t}`}
-                      accessibilityLabel={`Toggle ${t} type`}
+                      onPress={() => toggleInSet(selectedTypes, type, onChangeTypes)}
+                      testID={`hunt-filter-type-${type}`}
+                      accessibilityLabel={t('huntFilterSheet.toggleType', { type })}
                     >
                       <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
-                        {t}
+                        {type}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -269,9 +256,12 @@ const HuntFilterSheet: React.FC<Props> = ({
               </View>
               {showTypeGloss ? (
                 <View style={styles.glossBlock}>
-                  {availableTypes.map((t) => (
-                    <Text key={t} style={styles.glossLine}>
-                      <Text style={styles.glossLineKey}>{t} —</Text> {labelForType(t)}
+                  {availableTypes.map((type) => (
+                    <Text key={type} style={styles.glossLine}>
+                      <Text style={styles.glossLineKey}>{type} —</Text>{' '}
+                      {KNOWN_CACHE_TYPES.includes(type)
+                        ? t(`huntFilterSheet.type_${type}`)
+                        : t('huntFilterSheet.typeCustom')}
                     </Text>
                   ))}
                 </View>
@@ -284,9 +274,9 @@ const HuntFilterSheet: React.FC<Props> = ({
           style={styles.doneButton}
           onPress={onClose}
           testID="hunt-filter-done"
-          accessibilityLabel="Apply filters"
+          accessibilityLabel={t('huntFilterSheet.applyFilters')}
         >
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={styles.doneText}>{t('huntFilterSheet.done')}</Text>
         </TouchableOpacity>
 
         {/* Nested sheet — opens on chip tap. */}

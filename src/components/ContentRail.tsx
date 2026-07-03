@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props<T> {
@@ -42,6 +43,7 @@ export function ContentRail<T>({
   loading,
 }: Props<T>): React.ReactElement {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
@@ -49,7 +51,7 @@ export function ContentRail<T>({
       <TouchableOpacity
         style={styles.header}
         onPress={onSeeAll}
-        accessibilityLabel={`${title} — see all`}
+        accessibilityLabel={t('contentRail.seeAllAccessibility', { title })}
         testID={seeAllTestId}
         activeOpacity={0.7}
       >
@@ -58,7 +60,7 @@ export function ContentRail<T>({
           {caption ? <Text style={styles.caption}>{caption}</Text> : null}
         </View>
         <View style={styles.seeAll}>
-          <Text style={styles.seeAllText}>See all</Text>
+          <Text style={styles.seeAllText}>{t('contentRail.seeAll')}</Text>
           <ChevronRight size={16} color={colors.brandPink} strokeWidth={2.5} />
         </View>
       </TouchableOpacity>

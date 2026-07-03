@@ -16,6 +16,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
@@ -34,6 +35,7 @@ import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-home.
   const homeRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -297,7 +299,7 @@ const HomeScreen: React.FC = () => {
         />
 
         <TabHeader
-          title={`Hello${greetingName ? `, ${greetingName}` : ''}!`}
+          title={t('homeScreen.greeting', { name: greetingName })}
           // Keep Home's greeting at its pre-#139 lighter weight + smaller
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
@@ -322,25 +324,25 @@ const HomeScreen: React.FC = () => {
             style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
             onPress={() => setReceiveOpen(true)}
             disabled={isReceiveDisabled}
-            accessibilityLabel="Receive"
+            accessibilityLabel={t('homeScreen.receive')}
             testID="btn-receive"
           >
             <View style={styles.actionCircle}>
               <ArrowDownIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Receive</Text>
+            <Text style={styles.actionText}>{t('homeScreen.receive')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
             onPress={() => setTransferOpen(true)}
             disabled={isTransferDisabled}
-            accessibilityLabel="Transfer"
+            accessibilityLabel={t('homeScreen.transfer')}
             testID="btn-transfer"
           >
             <View style={styles.actionCircle}>
               <ArrowLeftRightIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Transfer</Text>
+            <Text style={styles.actionText}>{t('homeScreen.transfer')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
@@ -349,13 +351,13 @@ const HomeScreen: React.FC = () => {
               setSendOpen(true);
             }}
             disabled={isSendDisabled}
-            accessibilityLabel="Send"
+            accessibilityLabel={t('homeScreen.send')}
             testID="btn-send"
           >
             <View style={styles.actionCircle}>
               <ArrowUpIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Send</Text>
+            <Text style={styles.actionText}>{t('homeScreen.send')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -385,10 +387,10 @@ const HomeScreen: React.FC = () => {
                 <TouchableOpacity
                   onPress={() => setWizardOpen(true)}
                   accessibilityRole="button"
-                  accessibilityLabel="Add a wallet"
+                  accessibilityLabel={t('homeScreen.addWallet')}
                   testID="home-add-wallet-empty"
                 >
-                  <Text style={styles.addWalletText}>+ Add a Wallet</Text>
+                  <Text style={styles.addWalletText}>{t('homeScreen.addWalletText')}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
