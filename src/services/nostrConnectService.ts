@@ -82,7 +82,8 @@ export async function setActiveConnection(connection: Nip46Connection | null): P
     _activeConnection.remoteSignerPubkey === connection.remoteSignerPubkey &&
     _activeConnection.userPubkey === connection.userPubkey &&
     _activeConnection.clientSecretKeyHex === connection.clientSecretKeyHex &&
-    _activeConnection.relays.join('|') === connection.relays.join('|')
+    _activeConnection.relays.join('|') === connection.relays.join('|') &&
+    _activeConnection.perms === connection.perms
   ) {
     return;
   }

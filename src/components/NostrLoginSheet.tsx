@@ -224,6 +224,14 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
    *    the user can retry without thinking it's an app bug.
    */
   const handleNip46 = async () => {
+    // Single-flight guard: a live `nip46AbortRef` means a pairing run is
+    // already in progress. Without this, a double-tap (before `setMode`
+    // re-renders the button away) would start a second run whose
+    // AbortController overwrites the first's ref — leaking the first
+    // bunker subscription/signer, since Cancel could then only abort one.
+    if (nip46AbortRef.current) return;
+    const abort = new AbortController();
+    nip46AbortRef.current = abort;
     setError(null);
     // Per-app keypair — never the user's real nsec. The bunker side
     // sees this as the "client" pubkey for the lifetime of the
@@ -253,8 +261,6 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
     setMode('nip46-pair');
     setNip46Pairing(true);
-    const abort = new AbortController();
-    nip46AbortRef.current = abort;
     try {
       const { connection } = await nostrConnectService.awaitBunkerPair({
         clientSecretKey,
