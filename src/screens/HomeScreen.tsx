@@ -21,6 +21,7 @@ import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
@@ -290,6 +291,10 @@ const HomeScreen: React.FC = () => {
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
       <View style={styles.headerBackground}>
+        {/* Pink→purple brand fade behind the wallet card, matching the
+            Messages/Friends header treatment. Sits below the faded pig
+            and the header content (both render after it). */}
+        <BrandGradientBackground />
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
