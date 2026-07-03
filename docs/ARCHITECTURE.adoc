@@ -166,7 +166,7 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 | Domain | Key modules
 
 | Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `amberService.ts`, `nostrRelayStorage.ts`, `trustGraphService.ts`
-| Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts` / `nostrLiveDmSub.ts`, `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
+| Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts`, `nostrLiveDmSub.ts` (lives in `src/contexts/`, not `src/services/`), `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
 | Background sync / DM ping | `backgroundTask.ts` (registers the periodic `expo-background-task` — WorkManager on Android / BGTaskScheduler on iOS — that runs while the UI isn't mounted), `backgroundSyncService.ts` (the headless detect-and-ping worker: notices new encrypted inbound traffic and fires a generic notification without decrypting — works for both nsec and Amber users). See `architecture/notifications.adoc`.
 | Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `nostrPlacesNip52.ts`, `republishPiggyService.ts`
 | Wallet — Lightning | `nwcService.ts`, `nwcEncryption.ts`, `nwcRelayHealth.ts`, `nwcErrors.ts`, `lnurlService.ts`, `lnurlWithdrawService.ts`
@@ -298,8 +298,9 @@ commercial tile vendor is used.
 
 The MapLibre-native renderer replaced the previous Leaflet-in-WebView stack
 (#552) to fix WebView memory pressure on de-Googled Android (GrapheneOS
-Vanadium). A few peripheral surfaces (e.g. the location-picker sheet) may still
-use the older WebView transport; those are the migration tail, not the main map.
+Vanadium). All map surfaces now use MapLibre-native — including the
+location-picker sheet, which renders through `LibreMiniMap` — and no
+`react-native-webview` map transport remains in `src/`.
 
 == Key data flows
 
@@ -311,7 +312,7 @@ use the older WebView transport; those are the migration tail, not the main map.
   NIP-59, encrypting with NIP-44. Signing/encryption goes through the active
   signer — in-process for nsec, or via the Amber IPC bridge.
 . The gift wrap is published to the recipient's (and the sender's own) relays.
-. Inbound: a live subscription (`nostrLiveDmSub.ts`) plus cold-start backfill
+. Inbound: a live subscription (`src/contexts/nostrLiveDmSub.ts`) plus cold-start backfill
   fetch kind-1059 (and legacy kind-4) events. `dmIngest.ts` unwraps them once
   (guarded by the decrypt-once gate), and `dmDb.ts` upserts the plaintext into
   the encrypted SQLite store keyed by `(owner, event_id)`.
