@@ -104,12 +104,11 @@ const OnChainScreen: React.FC = () => {
       <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.hint')}</Text>
 
       <Text style={[sharedAccountStyles.sectionLabel, styles.sectionGap]}>
-        Default on-chain wallet
+        {t('onChainScreen.defaultWalletTitle')}
       </Text>
       {onchainWallets.length === 0 ? (
         <Text style={[sharedAccountStyles.fieldHint, styles.emptyHint]}>
-          No on-chain wallets yet. Add one via Wallets to set a default destination for Boltz
-          refunds and future on-chain receive flows.
+          {t('onChainScreen.defaultWalletEmpty')}
         </Text>
       ) : (
         <>
@@ -121,7 +120,9 @@ const OnChainScreen: React.FC = () => {
                 style={[styles.walletRow, active && styles.walletRowActive]}
                 onPress={() => handlePickDefault(w.id)}
                 testID={`default-onchain-row-${w.id}`}
-                accessibilityLabel={`Set ${w.alias || 'wallet'} as default on-chain wallet`}
+                accessibilityLabel={t('onChainScreen.defaultWalletRowA11y', {
+                  wallet: w.alias || t('onChainScreen.walletFallback'),
+                })}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: active }}
               >
@@ -132,11 +133,7 @@ const OnChainScreen: React.FC = () => {
               </TouchableOpacity>
             );
           })}
-          <Text style={sharedAccountStyles.fieldHint}>
-            Used as the refund destination for failed Boltz on-chain → Lightning swaps and as the
-            default destination for any future on-chain receive flows. Tap an active row to clear
-            the choice and fall back to the first wallet.
-          </Text>
+          <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.defaultWalletHint')}</Text>
         </>
       )}
     </AccountScreenLayout>

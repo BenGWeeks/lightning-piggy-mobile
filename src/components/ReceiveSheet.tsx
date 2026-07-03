@@ -839,10 +839,10 @@ const ReceiveSheet: React.FC<Props> = ({
                   style={styles.secondaryActionButton}
                   onPress={() => setBoltzReceiveOpen(true)}
                   testID="receive-via-onchain-boltz"
-                  accessibilityLabel="Receive on-chain via Boltz swap"
+                  accessibilityLabel={t('receiveSheet.receiveOnchainBoltzA11y')}
                 >
                   <Text style={styles.secondaryActionText}>
-                    {'Receive on-chain (via Boltz swap)  ₿'}
+                    {t('receiveSheet.receiveOnchainBoltz')}
                   </Text>
                 </TouchableOpacity>
               ) : null}

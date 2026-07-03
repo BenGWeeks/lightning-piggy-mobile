@@ -53,6 +53,7 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from './BrandedToast';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
 import { createBoltzReceiveSheetStyles } from '../styles/BoltzReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
@@ -73,6 +74,7 @@ type Step = 'amount' | 'qr';
 
 const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createBoltzReceiveSheetStyles(colors), [colors]);
   const { wallets, makeInvoiceForWallet, refreshBalanceForWallet, currency } = useWallet();
   const { btcPrice } = useWalletLive();
@@ -111,6 +113,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setPhase('awaiting-payment');
       setRefunding(false);
       setRefundedTxId(null);
+      // Clear any prior session's fee schedule so a failed re-fetch falls
+      // back to the fresh fallback constants instead of showing stale min/max.
+      setFees(null);
       bottomSheetRef.current?.present();
 
       // Fetch fees in the background — non-blocking.
@@ -173,10 +178,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
           await swapRecoveryService.unregisterPendingSubmarineSwap(swap.id);
           Toast.show({
             type: 'success',
-            text1: 'Boltz swap complete',
-            text2: `${swap.expectedAmount.toLocaleString()} sats arrived in ${
-              wallet ? walletLabel(wallet) : 'your wallet'
-            }`,
+            text1: t('boltzReceive.swapCompleteToastTitle'),
+            text2: t('boltzReceive.swapCompleteToastBody', {
+              amount: swap.expectedAmount.toLocaleString(),
+              wallet: wallet ? walletLabel(wallet) : t('boltzReceive.yourWallet'),
+            }),
             position: 'top',
             visibilityTime: 8000,
           });
@@ -257,9 +263,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         if (!refundDestination) {
           Toast.show({
             type: 'info',
-            text1: 'No on-chain wallet for refunds',
-            text2:
-              'Add an on-chain wallet later — refunds need one if Boltz fails. Funds are not at immediate risk.',
+            text1: t('boltzReceive.noOnchainToastTitle'),
+            text2: t('boltzReceive.noOnchainToastBody'),
             position: 'top',
             visibilityTime: 9000,
           });
@@ -281,6 +286,10 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             refundDestinationAddress: refundDestination ?? undefined,
             createdAt: Date.now(),
           }),
+          // Device-only accessibility so the refundPrivateKey in this record
+          // is never included in iCloud/Android backups or device migration —
+          // matches TransferSheet's submarine-swap persistence.
+          { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
         );
         await swapRecoveryService.registerPendingSubmarineSwap(created.id);
 
@@ -294,7 +303,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         setCreating(false);
       }
     },
-    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination],
+    [walletId, wallet, makeInvoiceForWallet, pickRefundDestination, t],
   );
 
   const handleRefund = useCallback(async () => {
@@ -305,8 +314,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       if (!lockup) {
         Toast.show({
           type: 'error',
-          text1: 'Nothing to refund',
-          text2: 'Boltz reports no on-chain payment received yet — nothing locked.',
+          text1: t('boltzReceive.nothingToRefundTitle'),
+          text2: t('boltzReceive.nothingToRefundBody'),
           position: 'top',
           visibilityTime: 8000,
         });
@@ -316,8 +325,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       if (!dest) {
         Toast.show({
           type: 'error',
-          text1: 'Add an on-chain wallet first',
-          text2: 'Refunds need a Bitcoin destination address.',
+          text1: t('boltzReceive.addOnchainFirstTitle'),
+          text2: t('boltzReceive.addOnchainFirstBody'),
           position: 'top',
           visibilityTime: 9000,
         });
@@ -327,8 +336,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       setRefundedTxId(refundTxId);
       Toast.show({
         type: 'success',
-        text1: 'Refund broadcast',
-        text2: `${lockup.amount.toLocaleString()} sats refunded (${refundTxId.slice(0, 10)}…)`,
+        text1: t('boltzReceive.refundBroadcastTitle'),
+        text2: t('boltzReceive.refundBroadcastBody', {
+          amount: lockup.amount.toLocaleString(),
+          txid: refundTxId.slice(0, 10),
+        }),
         position: 'top',
         visibilityTime: 10000,
       });
@@ -339,7 +351,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       console.warn('[BoltzReceive] Refund failed:', msg);
       Toast.show({
         type: 'error',
-        text1: 'Refund failed',
+        text1: t('boltzReceive.refundFailedTitle'),
         text2: msg,
         position: 'top',
         visibilityTime: 10000,
@@ -347,7 +359,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     } finally {
       setRefunding(false);
     }
-  }, [swap, pickRefundDestination]);
+  }, [swap, pickRefundDestination, t]);
 
   const bip21Uri = swap ? boltzService.buildBoltzBip21Uri(swap.address, swap.expectedAmount) : '';
   const fee = swap ? swap.expectedAmount - amountSats : 0;
@@ -386,24 +398,28 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   let statusVariant: 'default' | 'success' | 'error' = 'default';
   switch (phase) {
     case 'awaiting-payment':
-      statusLabel = 'Waiting for the on-chain payment to land in the mempool…';
+      statusLabel = t('boltzReceive.statusAwaitingPayment');
       break;
     case 'detected':
-      statusLabel = 'Payment detected — waiting for confirmations';
+      // `detected` covers both `transaction.mempool` and
+      // `transaction.confirmed`, so the copy must stay accurate whether or
+      // not the lockup has already confirmed — hence no "waiting for
+      // confirmations" wording here.
+      statusLabel = t('boltzReceive.statusDetected');
       break;
     case 'paying-invoice':
-      statusLabel = 'On-chain confirmed — Boltz is paying your Lightning invoice now';
+      statusLabel = t('boltzReceive.statusPayingInvoice');
       break;
     case 'complete':
-      statusLabel = 'Lightning invoice paid by Boltz — funds are in your wallet!';
+      statusLabel = t('boltzReceive.statusComplete');
       statusVariant = 'success';
       break;
     case 'failed':
-      statusLabel = 'Swap failed — the on-chain funds (if sent) can be refunded below.';
+      statusLabel = t('boltzReceive.statusFailed');
       statusVariant = 'error';
       break;
     default:
-      statusLabel = 'Status unknown';
+      statusLabel = t('boltzReceive.statusUnknown');
   }
 
   return (
@@ -424,8 +440,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
           // fiat/sats unit toggle and Boltz min/max enforcement.
           <AmountEntryScreen
             initialSats={amountSats}
-            title="Amount to receive"
-            confirmLabel="Generate on-chain QR"
+            title={t('boltzReceive.amountTitle')}
+            confirmLabel={t('boltzReceive.generateQr')}
             minSats={fees?.minAmount ?? boltzService.BOLTZ_MIN_SATS}
             maxSats={fees?.maxAmount ?? boltzService.BOLTZ_MAX_SATS}
             onBack={() => onClose()}
@@ -433,13 +449,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
           />
         ) : (
           <View style={styles.innerContent}>
-            <Text style={styles.title}>Receive on-chain via Boltz</Text>
-            {wallet ? <Text style={styles.walletLabel}>To: {walletLabel(wallet)}</Text> : null}
+            <Text style={styles.title}>{t('boltzReceive.title')}</Text>
+            {wallet ? (
+              <Text style={styles.walletLabel}>
+                {t('boltzReceive.toWallet', { label: walletLabel(wallet) })}
+              </Text>
+            ) : null}
 
             {creating ? (
               <View style={styles.loadingBlock}>
                 <ActivityIndicator size="large" color={colors.brandPink} />
-                <Text style={styles.subtitle}>Creating Boltz swap…</Text>
+                <Text style={styles.subtitle}>{t('boltzReceive.creating')}</Text>
               </View>
             ) : createError ? (
               <View style={styles.loadingBlock}>
@@ -447,11 +467,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => setStep('amount')}
-                  accessibilityLabel="Try again"
+                  accessibilityLabel={t('boltzReceive.tryAgain')}
                   testID="boltz-receive-retry"
                 >
                   <ChevronLeft size={18} color={colors.brandPink} />
-                  <Text style={styles.actionButtonText}>Back</Text>
+                  <Text style={styles.actionButtonText}>{t('boltzReceive.back')}</Text>
                 </TouchableOpacity>
               </View>
             ) : swap ? (
@@ -466,7 +486,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                 </View>
                 {btcPrice ? (
                   <Text style={styles.amountFiat}>
-                    Approx. {formatFiat(satsToFiat(swap.expectedAmount, btcPrice), currency)}
+                    {t('boltzReceive.approx', {
+                      amount: formatFiat(satsToFiat(swap.expectedAmount, btcPrice), currency),
+                    })}
                   </Text>
                 ) : null}
 
@@ -478,16 +500,22 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
                 <View style={styles.feeBreakdown}>
                   <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>You receive (Lightning)</Text>
-                    <Text style={styles.feeValue}>{amountSats.toLocaleString()} sats</Text>
+                    <Text style={styles.feeLabel}>{t('boltzReceive.youReceiveLightning')}</Text>
+                    <Text style={styles.feeValue}>
+                      {t('boltzReceive.sats', { amount: amountSats.toLocaleString() })}
+                    </Text>
                   </View>
                   <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Sender pays (on-chain)</Text>
-                    <Text style={styles.feeValue}>{swap.expectedAmount.toLocaleString()} sats</Text>
+                    <Text style={styles.feeLabel}>{t('boltzReceive.senderPaysOnchain')}</Text>
+                    <Text style={styles.feeValue}>
+                      {t('boltzReceive.sats', { amount: swap.expectedAmount.toLocaleString() })}
+                    </Text>
                   </View>
                   <View style={styles.feeRow}>
-                    <Text style={styles.feeLabel}>Boltz fee</Text>
-                    <Text style={styles.feeValue}>{fee.toLocaleString()} sats</Text>
+                    <Text style={styles.feeLabel}>{t('boltzReceive.boltzFee')}</Text>
+                    <Text style={styles.feeValue}>
+                      {t('boltzReceive.sats', { amount: fee.toLocaleString() })}
+                    </Text>
                   </View>
                 </View>
 
@@ -497,7 +525,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                     statusVariant === 'success' && styles.statusBlockSuccess,
                     statusVariant === 'error' && styles.statusBlockError,
                   ]}
-                  accessibilityLabel={`Swap status: ${statusLabel}`}
+                  accessibilityLabel={t('boltzReceive.statusA11y', { status: statusLabel })}
                   testID="boltz-receive-status"
                 >
                   {statusVariant === 'success' ? (
@@ -519,8 +547,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
                 {swap.timeoutBlockHeight > 0 ? (
                   <Text style={styles.timeoutNote}>
-                    If unpaid, this swap expires at block {swap.timeoutBlockHeight} (~24h). Any sent
-                    funds can be refunded after that.
+                    {t('boltzReceive.timeoutNote', { height: swap.timeoutBlockHeight })}
                   </Text>
                 ) : null}
 
@@ -529,20 +556,20 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                     style={[styles.actionButton, !bip21Uri && styles.actionButtonDisabled]}
                     onPress={handleCopy}
                     disabled={!bip21Uri}
-                    accessibilityLabel="Copy on-chain address"
+                    accessibilityLabel={t('boltzReceive.copyRequest')}
                     testID="boltz-receive-copy"
                   >
                     <Copy size={20} color={colors.brandPink} />
-                    <Text style={styles.actionButtonText}>Copy</Text>
+                    <Text style={styles.actionButtonText}>{t('boltzReceive.copy')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, !bip21Uri && styles.actionButtonDisabled]}
                     onPress={handleShare}
                     disabled={!bip21Uri}
-                    accessibilityLabel="Share on-chain address"
+                    accessibilityLabel={t('boltzReceive.shareRequest')}
                     testID="boltz-receive-share"
                   >
-                    <Text style={styles.actionButtonText}>Share</Text>
+                    <Text style={styles.actionButtonText}>{t('boltzReceive.share')}</Text>
                     <Share2 size={20} color={colors.brandPink} />
                   </TouchableOpacity>
                 </View>
@@ -556,22 +583,20 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                     ]}
                     onPress={handleRefund}
                     disabled={refunding}
-                    accessibilityLabel="Refund the failed swap"
+                    accessibilityLabel={t('boltzReceive.refundA11y')}
                     testID="boltz-receive-refund"
                   >
                     {refunding ? (
                       <ActivityIndicator color={colors.brandPink} />
                     ) : (
-                      <Text style={styles.refundButtonText}>
-                        Refund the swap to my on-chain wallet
-                      </Text>
+                      <Text style={styles.refundButtonText}>{t('boltzReceive.refundButton')}</Text>
                     )}
                   </Pressable>
                 ) : null}
 
                 {refundedTxId ? (
                   <Text style={styles.timeoutNote}>
-                    Refund tx: {refundedTxId.slice(0, 16)}… broadcast.
+                    {t('boltzReceive.refundTxNote', { txid: refundedTxId.slice(0, 16) })}
                   </Text>
                 ) : null}
 
@@ -584,15 +609,15 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
                 <TouchableOpacity
                   style={[styles.actionButton, { alignSelf: 'stretch' }]}
                   onPress={onClose}
-                  accessibilityLabel="Close"
+                  accessibilityLabel={t('boltzReceive.close')}
                   testID="boltz-receive-close"
                 >
                   <Text style={styles.actionButtonText}>
                     {phase === 'complete'
-                      ? 'Done'
+                      ? t('boltzReceive.done')
                       : phase === 'awaiting-payment'
-                        ? 'Cancel'
-                        : 'Close — swap continues in background'}
+                        ? t('boltzReceive.cancel')
+                        : t('boltzReceive.closeSwapContinues')}
                   </Text>
                 </TouchableOpacity>
               </>
