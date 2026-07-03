@@ -9,7 +9,7 @@ import React, {
 } from 'react';
 import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -513,7 +513,7 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
+      <BrandPatternBackground variant="friends-rotated" />
       <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
