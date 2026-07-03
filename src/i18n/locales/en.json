@@ -1780,7 +1780,9 @@
     "walletSettings": "Wallet settings",
     "satsBalance": "{{amount}} sats",
     "cardDesign": "{{name}} card design",
-    "walletAccessibility": "{{alias}} {{type}} wallet"
+    "walletAccessibility": "{{alias}} {{type}} wallet",
+    "typeLightning": "Lightning",
+    "typeOnchain": "On-chain"
   },
   "walletSettingsSheet": {
     "title": "Wallet Settings",

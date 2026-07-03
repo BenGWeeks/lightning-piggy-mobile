@@ -42,7 +42,7 @@ interface SectionRow {
   testID: string;
 }
 
-const buildSectionRows = (colors: Palette, t: (key: string) => string): SectionRow[] => [
+const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>): SectionRow[] => [
   {
     name: 'AccountProfile',
     label: t('accountDrawerContent.profile'),

@@ -248,7 +248,9 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
       testID={`wallet-card-${wallet.walletType}`}
       accessibilityLabel={t('walletCard.walletAccessibility', {
         alias: wallet.alias,
-        type: wallet.walletType,
+        type: t(
+          wallet.walletType === 'onchain' ? 'walletCard.typeOnchain' : 'walletCard.typeLightning',
+        ),
       })}
     >
       <CardContent
