@@ -31,6 +31,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { useSendingAnimation } from '../contexts/SendingAnimationContext';
 import LightningOverlay from './LightningOverlay';
 import { lightPalette, type Palette } from '../styles/palettes';
+import type { IncomingPaymentSource } from '../contexts/incomingPaymentSource';
 
 export type PaymentProgressState =
   | 'sending'
@@ -45,8 +46,10 @@ export type PaymentProgressState =
 export type PaymentDirection = 'send' | 'receive';
 /** Which rail delivered an incoming payment — used by the receive
  * overlay to show a small hint after the amount (e.g. "1 confirmation
- * pending" for on-chain). Defaults to lightning when omitted. #134. */
-export type ReceiveSource = 'lightning' | 'onchain';
+ * pending" for on-chain). Defaults to lightning when omitted. #134.
+ * Aliases the shared `IncomingPaymentSource` union so the overlay prop
+ * and the WalletContext event can't drift as new rails are added. */
+export type ReceiveSource = IncomingPaymentSource;
 
 interface Props {
   state: PaymentProgressState;
@@ -475,7 +478,7 @@ export default function PaymentProgressOverlay({
   // informational, not a balance commitment.
   const onchainHint =
     isReceive && state === 'success' && receiveSource === 'onchain'
-      ? 'On-chain · 1 confirmation pending'
+      ? t('paymentProgressOverlay.onchainHint')
       : undefined;
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour

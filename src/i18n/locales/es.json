@@ -1378,6 +1378,7 @@
     "toRecipient": "para {{name}}",
     "receivedTitle": "¡Pago recibido!",
     "sentTitle": "¡Pago enviado!",
+    "onchainHint": "On-chain · 1 confirmación pendiente",
     "amountFromRecipient": "{{amount}} de {{name}}",
     "amountToRecipient": "{{amount}} para {{name}}",
     "connectionLostTitle": "Conexión perdida",
