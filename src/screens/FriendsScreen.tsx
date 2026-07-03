@@ -11,7 +11,7 @@ import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-n
 import { InteractionManager } from 'react-native';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
