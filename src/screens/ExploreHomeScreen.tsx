@@ -19,7 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
-import BrandGradientBackground from '../components/BrandGradientBackground';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
@@ -878,12 +878,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.headerBackground}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <BrandGradientBackground style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <TabHeader title="Explore" icon={<Compass size={20} color={colors.brandPink} />} />
         <View style={styles.headerExtras}>
           <Text style={styles.tagline}>Find your way around Bitcoin</Text>

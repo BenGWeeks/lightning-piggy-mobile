@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import EventsFilterSheet, {
   countActiveFilters,
   type EventsSortKey,
@@ -376,12 +377,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="events-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -675,13 +671,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',
