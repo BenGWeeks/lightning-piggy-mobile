@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { GroupSummary } from '../types/groups';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import GroupAvatar, { type ContactInfo } from './GroupAvatar';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
 
@@ -30,7 +30,7 @@ interface Props {
 function senderName(
   pubkey: string,
   contactInfoMap: Map<string, ContactInfo> | undefined,
-  contacts: ReturnType<typeof useNostr>['contacts'],
+  contacts: ReturnType<typeof useNostrContacts>['contacts'],
 ): string {
   const lc = pubkey.toLowerCase();
   const fromMap = contactInfoMap?.get(lc)?.name;
@@ -47,7 +47,8 @@ function senderName(
 const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { contacts, pubkey: myPubkey } = useNostr();
+  const { pubkey: myPubkey } = useNostr();
+  const { contacts } = useNostrContacts();
   const { group, activity } = summary;
   // Bind summary into the parent handler at the leaf so TouchableOpacity
   // sees a stable callback per render — see ConversationRow note.

@@ -1,0 +1,57 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Geo-caches screen renders nearby caches list (or empty state)
+---
+# Smoke flow for the merged Geo-caches screen (was HuntDiscoverScreen
+# before the May 2026 Hunt+Discover merge — see PR #488). With
+# foreground location granted, the screen subscribes to NIP-GC kind
+# 37516 events whose `g` tag falls in the user's coarse 5-char
+# geohash neighbourhood. The live relay state is unpredictable from
+# CI (caches drift, relays flake), so the assertions are structural:
+# either the list renders rows OR the empty-state with the
+# "No geo-caches nearby yet" copy. Both branches are legitimate exits.
+#
+# Run: maestro test .maestro/hunt/flow-036-hunt-discover.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# "Geo-caches near you" rail See-all routes straight to the list now.
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'hunt-screen'
+
+# Either populated list OR the empty state — both are acceptable.
+- runFlow:
+    when:
+      visible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible: 'No geo-caches nearby yet'
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible:
+          id: 'hunt-discover-row-0'
+
+# Back returns to the hub.
+- tapOn:
+    id: 'hunt-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'tab-explore'

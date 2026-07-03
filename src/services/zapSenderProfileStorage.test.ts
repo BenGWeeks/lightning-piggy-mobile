@@ -15,6 +15,7 @@ import {
   __resetForTests,
   get,
   getMany,
+  peekSync,
   setMany,
   type CachedZapSenderProfile,
 } from './zapSenderProfileStorage';
@@ -52,6 +53,36 @@ describe('zapSenderProfileStorage', () => {
 
   it('returns null for an unknown pubkey', async () => {
     expect(await get('z'.repeat(64))).toBeNull();
+  });
+
+  describe('peekSync (synchronous seed for avatar URLs)', () => {
+    it('returns null when the in-memory mirror has not loaded yet', () => {
+      // Cold: no get/getMany/setMany has populated memoryCache.
+      expect(peekSync('a'.repeat(64))).toBeNull();
+    });
+
+    it('returns the cached profile synchronously once the mirror is warm', async () => {
+      const pk = 'a'.repeat(64);
+      await setMany(new Map([[pk, profile({ picture: 'https://x/me.png' })]]));
+      // No await — must come straight from the warm in-memory mirror.
+      const hit = peekSync(pk);
+      expect(hit?.picture).toBe('https://x/me.png');
+    });
+
+    it('returns null for a missing pubkey and for a TTL-expired entry', async () => {
+      const pk = 'a'.repeat(64);
+      await setMany(new Map([[pk, profile()]]));
+      expect(peekSync('b'.repeat(64))).toBeNull();
+      // Roll the clock past TTL — peekSync must then treat the entry as a miss
+      // (same mechanism as the get/getMany TTL test above).
+      const realNow = Date.now;
+      try {
+        jest.spyOn(Date, 'now').mockImplementation(() => realNow() + __TEST__.TTL_MS + 1);
+        expect(peekSync(pk)).toBeNull();
+      } finally {
+        (Date.now as jest.Mock).mockRestore?.();
+      }
+    });
   });
 
   it('getMany returns only the pubkeys present in cache', async () => {

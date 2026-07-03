@@ -58,6 +58,16 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
             // would otherwise spawn a per-row FrameDecoderExe thread.
             // See #243.
             autoplay={false}
+            // Explicit decode-time size hint (#731 Fix 4): without this
+            // Glide logs "-2147483648x-2147483648" (no hint) and allocates
+            // a full-resolution bitmap before downscaling, costing ~600 ms
+            // per avatar on Messages focus. Matching width/height to the
+            // rendered style dimensions (48 dp) tells Glide to downsample
+            // at the BitmapFactory stage — dramatically cheaper allocation
+            // and faster decode. `contentFit="cover"` maps to
+            // Glide's `centerCrop()` transform and must pair with the
+            // explicit size for the downsample hint to take effect.
+            contentFit="cover"
           />
         ) : (
           <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />

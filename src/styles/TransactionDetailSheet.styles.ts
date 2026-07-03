@@ -59,6 +59,34 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       fontSize: 12,
       fontWeight: '700',
     },
+    // Tone-agnostic callout — used for warning/success/failure/info tones
+    // shown below the status pill. Layout is shared; the consumer overrides
+    // `backgroundColor`, `borderLeftColor`, and the heading/text `color`
+    // inline based on the active tone. Default tokens here are the warning
+    // (yellow) variant — kept as the default for back-compat with the
+    // Bootstrap-style alert convention. Tokens live in `palettes.ts`.
+    callout: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginTop: 12,
+      padding: 12,
+      backgroundColor: colors.zapYellowLight,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.zapYellow,
+      borderRadius: 8,
+      gap: 10,
+      alignSelf: 'stretch',
+    },
+    calloutBody: { flex: 1 },
+    calloutHeading: {
+      color: colors.zapYellowDark,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    calloutText: {
+      color: colors.zapYellowDark,
+      lineHeight: 18,
+    },
     row: {
       flexDirection: 'row',
       justifyContent: 'space-between',

@@ -1,0 +1,1 @@
+{"tag":"payRequest","callback":"https://example.com/cb","minSendable":100000,"maxSendable":100000,"metadata":"[[\"text/plain\",\"Birthday card: 100 sats\"]]","commentAllowed":0}

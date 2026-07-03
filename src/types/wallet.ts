@@ -2,6 +2,7 @@ export type CardTheme =
   | 'lightning-piggy'
   | 'lightning-bee'
   | 'lightning-cat'
+  | 'bitpopart'
   | 'lightning-cow'
   | 'lightning-goat'
   | 'nostrich'
@@ -58,6 +59,12 @@ export interface ZapCounterpartyInfo {
     displayName: string | null;
     picture: string | null;
     nip05: string | null;
+    // Lightning address (`name@host`) from the kind-0 `lud16` field.
+    // Optional rather than required so this stays backward-compatible
+    // with cached entries that pre-date persistence: `undefined` means
+    // "we don't know yet, fetch", whereas `null` means "fetched, no
+    // address". Drives the Zap-back button in usePubkeyProfile.
+    lud16?: string | null;
   } | null;
   /** Zap comment from the kind-9734 content field, if any. */
   comment: string;
@@ -100,8 +107,18 @@ export function walletLabel(w: { alias: string; walletType: WalletType }): strin
   return `${w.alias} (${w.walletType === 'onchain' ? 'on-chain' : 'lightning'})`;
 }
 
+/**
+ * Tri-state relay health for the wallet card (#786). `responsive` shows green
+ * "Connected", `degraded` shows amber "Not responding" (connected socket but
+ * the relay is parked / not answering), `disconnected` shows red. Optional /
+ * may be absent before the first connection check, in which case the card
+ * falls back to the binary `isConnected`.
+ */
+export type WalletConnectionHealth = 'responsive' | 'degraded' | 'disconnected';
+
 export interface WalletState extends WalletMetadata {
   isConnected: boolean;
+  connectionHealth?: WalletConnectionHealth;
   balance: number | null;
   walletAlias: string | null; // alias from NWC getInfo()
   transactions: WalletTransaction[];
