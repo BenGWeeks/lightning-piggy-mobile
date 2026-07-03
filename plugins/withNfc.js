@@ -55,27 +55,48 @@ function withNfcAndroid(config) {
           }
           const filters = mainActivity['intent-filter'];
 
-          // INTENT FILTERS DELIBERATELY NOT REGISTERED IN THIS PR.
-          //
-          // The original PR registered:
-          //   - NDEF_DISCOVERED `android:scheme="nostr"` — for tag taps
-          //     to launch the app on a `nostr:npub1…` payload.
-          //   - VIEW + BROWSABLE `android:scheme="lightning"` — for
-          //     deep-linked Lightning URIs (`lightning:lnbc…`).
-          //
-          // Both register the app as a HANDLER, but the JS side has no
-          // `Linking` URL listener / NavigationContainer `linking`
-          // config to route the incoming intent yet. Result on a
-          // shipping build: tapping a tag / following a `lightning:`
-          // link launches the app to a blank Home screen and silently
-          // does nothing — and worse, may intercept the URL away from
-          // the user's preferred handler. Adding scan/route is
-          // tracked as the deferred follow-up to PR #231.
-          //
-          // When that lands, restore the intent-filter registrations
-          // here. Until then, NFC WRITE works fine without them
-          // (writeNpubToTag drives the NfcManager session directly,
-          // no intent involved).
+          // NDEF_DISCOVERED filters for the schemes LP handles on an NFC tap.
+          // Without these, tapping a tag does nothing in foreground/background
+          // (or lands in another wallet) — Android's NFC dispatch has no LP
+          // activity to route the URI to. All five are routed by the Linking
+          // handler in App.tsx:
+          //   - `lightningpiggy` — record 1 of a Hunt/Piglet tag
+          //     (`lightningpiggy://hunt/<coord>`) → opens the cache page.
+          //   - `lightning` / `lnurlw` / `lnurl` — standalone LNURL-withdraw
+          //     tags / gift cards whose FIRST record is the withdraw URI
+          //     (`lnurl://` is the rare spec-allowed cleartext form) → in-app claim
+          //     (#341 rework: replaced a passive foreground listener that lost
+          //     to the system dispatch). Android dispatches on the FIRST NDEF
+          //     record only, so Piglets (record 1 = `lightningpiggy`) are
+          //     unaffected — their `lightning:` bearer is record 3. Android
+          //     shows its app chooser if another LN wallet also handles
+          //     `lightning`/`lnurlw`, so we don't hijack the user's preferred
+          //     wallet.
+          //   - `nostr` — conference contact badges whose first record is
+          //     `nostr:nprofile1…` / `nostr:npub1…` (#754) → ContactProfile
+          //     (UnsupportedEntity for note / nevent).
+          const addNdefScheme = (scheme) => {
+            const exists = filters.some(
+              (f) =>
+                Array.isArray(f.action) &&
+                f.action.some(
+                  (a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED',
+                ) &&
+                Array.isArray(f.data) &&
+                f.data.some((d) => d.$?.['android:scheme'] === scheme),
+            );
+            if (!exists) {
+              filters.push({
+                action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
+                category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+                data: [{ $: { 'android:scheme': scheme } }],
+              });
+            }
+          };
+          // `lnurl` is the rare spec-allowed cleartext form App.tsx also routes;
+          // `nostr` covers contact badges (#754). Register all so their tags
+          // aren't a silent no-op on Android.
+          ['lightningpiggy', 'lightning', 'lnurlw', 'lnurl', 'nostr'].forEach(addNdefScheme);
         }
       }
     }
@@ -98,10 +119,15 @@ function withNfcIos(config) {
   });
 
   // Add NFC entitlement (correct location for readersession.formats).
+  // Apple's App Store Connect validator (Xcode 16+ / SDK 26.x with min iOS 15.1)
+  // rejects 'NDEF' here as "disallowed" and requires 'TAG' instead.
+  // 'TAG' covers reading raw tag UIDs and writing NDEF — the NFCNDEFReaderSession
+  // at runtime works without 'NDEF' being in this entitlement.
+  // Always overwrite (no `if (!...)` guard) — a stale `['NDEF']` from a prior
+  // plugin run or upstream config would silently survive otherwise and the
+  // App Store validator would re-reject the IPA with the same error.
   config = withEntitlementsPlist(config, (config) => {
-    if (!config.modResults['com.apple.developer.nfc.readersession.formats']) {
-      config.modResults['com.apple.developer.nfc.readersession.formats'] = ['NDEF'];
-    }
+    config.modResults['com.apple.developer.nfc.readersession.formats'] = ['TAG'];
     return config;
   });
 

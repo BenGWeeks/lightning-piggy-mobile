@@ -3,6 +3,8 @@ import { TouchableOpacity, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   uri?: string | null;
@@ -12,19 +14,22 @@ interface Props {
 
 const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
-      accessibilityLabel="Profile"
+      accessibilityLabel={t('profileIcon.profile')}
       testID="profile-icon"
     >
       <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
-        {uri ? (
+        {uri && isSupportedImageUrl(uri) ? (
           <Image
             source={{ uri }}
             style={{ width: size, height: size, borderRadius: size / 2 }}
-            cachePolicy="disk"
+            cachePolicy="memory-disk"
+            recyclingKey={uri}
+            autoplay={false}
           />
         ) : (
           <UserRound size={size * 0.6} color={colors.white} strokeWidth={1.75} />

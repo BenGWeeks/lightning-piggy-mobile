@@ -1,0 +1,138 @@
+= Maestro E2E test suite
+
+Maestro flows in this directory run on the developer's AVD (and
+sometimes their physical Pixel) against *real* Nostr relays under the
+developer's *real* signed-in identity. There is no test relay or test
+sandbox — anything a flow does will publish real events that real
+contacts may see.
+
+That makes selector hygiene a safety issue, not just a code-quality
+issue. The rules below are enforced by hand on every PR that touches
+this directory.
+
+== Layout
+
+Flows are organised one folder deep by feature area, mirroring the
+Satmo suite. Composed end-to-end flows are named `flow-NNN-<description>`
+with a globally-sequential number; the shared building blocks under
+`common/` keep descriptive names (they are run via `runFlow`, never
+on their own).
+
+[source]
+----
+.maestro/
+  config.yaml          workspace config (disables system animations)
+  README.adoc          this file
+  common/              shared building blocks (login-as, seed-test-wallet,
+                       send-lud16, …) — composed via runFlow, un-numbered
+  authentication/      flow-NNN  login (dev/amber/perf), logout, create-account,
+                       key import, cold-start isolation
+  cards/               flow-NNN  Revolut/Xapo card flows
+  friends/             flow-NNN  follow/unfollow, contacts, alphabet, search
+  groups/              flow-NNN  create/leave/rename/manage, 3-way Triad, amber
+  hunt/                flow-NNN  geo-cache discover/detail/publish/found + captures
+  map/                 flow-NNN  render, permission-denied, nearby merchants
+  messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode
+  payments/            flow-NNN  send/receive/pay/transfer/swap/amount entry
+  profile/             flow-NNN  edit profile/picture, appearance, account drawer
+  ui/                  flow-NNN  alerts, dialogs, events, NFC, explore tour, WoT
+  wallets/             flow-NNN  add/remove coinos·hot·nwc·onchain·paste, swipe
+  keyboard-audit/      the existing numbered keyboard-focus audit (sub-section)
+  perf/                Stevie's perf-measurement flows (perf-*, run separately)
+  reporting/           run-all.sh runner + report artifacts
+  screenshots/         generated screenshot output (gitignored)
+  fixtures/            test images
+----
+
+Run one flow:
+
+[source,bash]
+----
+maestro test .maestro/payments/flow-080-send-invoice-to-friend.yaml
+----
+
+Run the curated wallet/transfer suite:
+
+[source,bash]
+----
+source .env && bash .maestro/reporting/run-all.sh
+----
+
+== Piggy-only fixtures (group membership)
+
+Any flow that *creates*, *adds members to*, *removes members from*, or
+otherwise mutates a Nostr group MUST scope its member-targeting
+selectors to the three Piggy test accounts and no others. A wildcard
+like `text: 'Remove .*'` or `id: 'member-row-.*'` could happily remove
+the developer's real friend from a real group, send a DM to a stranger,
+or otherwise leak test activity outside the controlled fixture set.
+
+The three Piggy accounts and their `member-row` / `group-member-remove`
+testID suffixes (first 12 hex chars of the pubkey, matching the
+`pubkey.slice(0, 12)` slicing in `CreateGroupSheet.tsx` and
+`GroupMembersSheet.tsx`):
+
+|===
+| Account      | testID suffix    | Notes
+
+| Big Piggy    | `ccedbff9a6f2`   | Default `MAESTRO_NSEC_BIG`. Usually the
+                                    logged-in user, so doesn't appear
+                                    in the *other* members list — appears
+                                    in `group-member-row-*` (with a
+                                    "· you" tag) but NOT in
+                                    `group-member-remove-*`.
+| Middle Piggy | `4b2fcb4e3c30`   | `MAESTRO_NSEC_MIDDLE`.
+| Little Piggy | `d9b33280ba73`   | `MAESTRO_NSEC_LITTLE`. The default
+                                    `MEMBER_PUBKEY_PREFIX` for the
+                                    `groups/flow-025-create-leave-group.yaml` flow.
+| Evil Piggy   | `0b747589`       | `MAESTRO_NSEC_EVIL`. Used as an
+                                    untrusted/non-followed sender in
+                                    follow-gate / spam-filter coverage.
+|===
+
+The "Triad" fixture group (created by
+`groups/flow-022-3way-group-create-as-big.yaml`) has all three Piggies as members
+and is the canonical group to drive any member-mutation flow against.
+
+=== Selector rules
+
+Do:
+
+* `id: 'member-row-d9b33280ba73'` — full Piggy testID
+* `id: 'group-member-remove-d9b33280ba73'` — full Piggy testID
+* `id: 'member-row-${MEMBER_PUBKEY_PREFIX}'` — env var, with the
+  comment in the flow stating that the default + accepted values are
+  Piggy prefixes only
+* `text: 'Triad'` — exact, known fixture group name
+* `text: 'Open group Triad'` — accessibility-label exact match
+
+Don't:
+
+* `text: 'Remove .*'` — matches any member's X button, including real
+  friends
+* `id: 'member-row-.*'` — matches any contact in the picker
+* `text: 'Open group .*'` — opens whichever group happens to be at the
+  top, which on a real signed-in device is whatever the user's most
+  recent group activity is
+* `text: '.* members'` — same problem
+* Any other regex / substring that could resolve to a non-Piggy member
+  or non-fixture group
+
+=== When a flow can't use a Piggy prefix
+
+If a flow needs to exercise a code path the Piggies can't cover (e.g.
+something specific to a profile-card layout that only renders for a
+non-Piggy contact), the flow MUST be gated behind a `runFlow when:`
+clause that asserts a Piggy fixture is present, OR explicitly documented
+at the top of the file as "manual run only — do NOT add to run-all.sh".
+Don't ship an unguarded flow that taps a non-Piggy member.
+
+== Other safety conventions
+
+* Never use coordinate taps (`point:`, `tapOn: { point: }`,
+  `adb shell input tap`). See `CLAUDE.md` § Testing.
+* Never send a real Lightning payment from a flow. Use lightning
+  addresses that don't resolve (`test@example.com`) or invoices the
+  flow generates and then cancels.
+* Never tap "Confirm" / "Send" on a payment, contact-share, or DM
+  unless the recipient is another Piggy.

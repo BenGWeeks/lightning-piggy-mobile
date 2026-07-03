@@ -4,7 +4,8 @@ import { Image } from 'expo-image';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostrContacts } from '../contexts/NostrContext';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 /** Per-contact info shared across rows. Picture + name + lightning
  * address are the three fields screens need to render a row plus
@@ -35,7 +36,7 @@ interface Props {
   /**
    * Optional precomputed pubkey → ContactInfo map. When the row is
    * rendered inside a list (`MessagesScreen` / `GroupsScreen`), the
-   * parent builds this once from `useNostr().contacts` and passes the
+   * parent builds this once from `useNostrContacts().contacts` and passes the
    * same instance to every row, so we don't iterate the contacts list
    * O(rows × avatars × contacts) per render. Standalone usages
    * (without a parent map) fall back to the internal lookup.
@@ -55,7 +56,7 @@ const MAX_AVATARS = 3;
 // `Props` rather than flipping the literal.
 const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactInfoMap }) => {
   const colors = useThemeColors();
-  const { contacts } = useNostr();
+  const { contacts } = useNostrContacts();
   const styles = useMemo(() => createStyles(colors, size), [colors, size]);
 
   // Use the parent's precomputed map when provided; otherwise build a
@@ -114,7 +115,8 @@ interface SingleAvatarProps {
 
 const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize }) => {
   const [errored, setErrored] = useState(false);
-  const showImage = !!picture && !errored;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
+  const showImage = !!picture && !errored && isSupportedImageUrl(picture);
   // Thin white ring on every avatar — separates overlapping circles in
   // the stacked cluster and gives picture + placeholder slots the same
   // visual weight.

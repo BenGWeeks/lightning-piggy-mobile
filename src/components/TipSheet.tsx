@@ -17,8 +17,9 @@ import {
 } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import { Check } from 'lucide-react-native';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { satsToFiatString } from '../services/fiatService';
 import { Course } from '../data/learnContent';
 import { createTipSheetStyles } from '../styles/TipSheet.styles';
@@ -31,8 +32,10 @@ interface Props {
 
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createTipSheetStyles(colors), [colors]);
-  const { makeInvoice, refreshActiveBalance, balance, btcPrice, currency } = useWallet();
+  const { makeInvoice, refreshActiveBalance, balance, currency } = useWallet();
+  const { btcPrice } = useWalletLive();
   const [invoice, setInvoice] = useState('');
   const [loading, setLoading] = useState(false);
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -60,7 +63,10 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       bottomSheetRef.current?.present();
       (async () => {
         try {
-          const inv = await makeInvoice(tipSats, `Lightning Piggy: ${course.title} tip`);
+          const inv = await makeInvoice(
+            tipSats,
+            t('tipSheet.invoiceMemo', { title: course.title }),
+          );
           setInvoice(inv);
           intervalId.current = setInterval(async () => {
             await refreshActiveBalance();
@@ -133,7 +139,11 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const handleShare = async () => {
     if (invoice) {
       await Share.share({
-        message: `Lightning invoice for ${tipSats.toLocaleString()} sats tip (${course.title}):\n\n${invoice}`,
+        message: t('tipSheet.shareMessage', {
+          amount: tipSats.toLocaleString(),
+          title: course.title,
+          invoice,
+        }),
       }).catch(() => {});
     }
   };
@@ -165,41 +175,42 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
             ) : paymentReceived ? (
               <View style={styles.successOverlay}>
                 <Check size={48} color={colors.green} />
-                <Text style={styles.successText}>Tip Received!</Text>
+                <Text style={styles.successText}>{t('tipSheet.tipReceived')}</Text>
               </View>
             ) : invoice ? (
               <QRCode value={invoice} size={200} />
             ) : (
-              <Text style={styles.errorText}>Could not generate invoice</Text>
+              <Text style={styles.errorText}>{t('tipSheet.couldNotGenerate')}</Text>
             )}
           </View>
 
           {/* Suggested tip amount */}
-          <Text style={styles.amountLabel}>Suggested tip</Text>
-          <Text style={styles.amountSats}>{tipSats.toLocaleString()} sats</Text>
+          <Text style={styles.amountLabel}>{t('tipSheet.suggestedTip')}</Text>
+          <Text style={styles.amountSats}>
+            {t('tipSheet.satsAmount', { amount: tipSats.toLocaleString() })}
+          </Text>
           {fiatString ? <Text style={styles.amountFiat}>{fiatString}</Text> : null}
 
           {/* Copy / Share buttons */}
           {invoice && !paymentReceived && (
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-                <Text style={styles.actionButtonText}>{copied ? 'Copied!' : 'Copy Invoice'}</Text>
+                <Text style={styles.actionButtonText}>
+                  {copied ? t('tipSheet.copied') : t('tipSheet.copyInvoice')}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-                <Text style={styles.actionButtonText}>Share</Text>
+                <Text style={styles.actionButtonText}>{t('tipSheet.share')}</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {/* Instructions */}
-          <Text style={styles.instructionText}>
-            Show this to your parent or guardian. They can scan the QR code to send you a tip as a
-            reward for completing this course!
-          </Text>
+          <Text style={styles.instructionText}>{t('tipSheet.instructions')}</Text>
 
           {/* Quiz topics */}
           <View style={styles.quizSection}>
-            <Text style={styles.quizTitle}>Be prepared to explain these topics:</Text>
+            <Text style={styles.quizTitle}>{t('tipSheet.quizTitle')}</Text>
             {quizTopics.map((topic, i) => (
               <View key={i} style={styles.quizRow}>
                 <View style={styles.quizDot} />
@@ -210,7 +221,9 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
           {/* Close button */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>{paymentReceived ? 'Done' : 'Close'}</Text>
+            <Text style={styles.closeButtonText}>
+              {paymentReceived ? t('tipSheet.done') : t('tipSheet.close')}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </BottomSheetView>

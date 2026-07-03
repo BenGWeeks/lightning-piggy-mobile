@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { X as XIcon } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import {
@@ -12,24 +12,45 @@ import {
 } from '../../services/walletStorageService';
 import * as amberService from '../../services/amberService';
 import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
+import { GC_RELAYS } from '../../services/geocacheRelays';
+import { validateRelayUrl } from '../../services/nostrRelayStorage';
 import { useNostr } from '../../contexts/NostrContext';
+import { useNostrDmInbox } from '../../contexts/DmInboxContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
-import type { Palette } from '../../styles/palettes';
+import { useTranslation } from '../../contexts/LocaleContext';
+import { createNostrScreenStyles } from '../../styles/NostrScreen.styles';
 
 type RelayRow = {
   url: string;
-  source: 'user' | 'default' | 'both';
+  /**
+   * 'user' = user-added override only, removable from this screen.
+   * 'default' = baked into the app, not removable here.
+   * 'nip65' = published in the user's kind-10002 (NIP-65) list, no
+   * matching user override (also not removable from this screen —
+   * delete the kind-10002 event to drop these).
+   * 'both-user-default' = covered by BOTH a user override and a
+   * default; the user-added override means it's user-removable
+   * (removing here strips the user row, the default still keeps it
+   * in the merged list, but the user gets to "downgrade" any custom
+   * read/write flags they added on top of the default).
+   */
+  source: 'user' | 'default' | 'nip65' | 'both-user-default';
   read: boolean;
   write: boolean;
   connected: boolean;
 };
 
 const NostrScreen: React.FC = () => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const { profile, signerType, amberNip44Permission, relays } = useNostr();
+  const styles = useMemo(() => createNostrScreenStyles(colors), [colors]);
+  const { profile, signerType, relays, userRelays, addUserRelay, removeUserRelay } = useNostr();
+  // From the hot DM slice, not `useNostr()` — see DmInboxContext for why.
+  const { amberNip44Permission } = useNostrDmInbox();
   const [connStatus, setConnStatus] = useState<Map<string, boolean>>(new Map());
+  const [newRelayInput, setNewRelayInput] = useState('');
+  const [addRelayError, setAddRelayError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -41,28 +62,75 @@ const NostrScreen: React.FC = () => {
   );
 
   const relayRows = useMemo<RelayRow[]>(() => {
-    const userMap = new Map(relays.map((r) => [r.url, r]));
+    const userSet = new Set(userRelays.map((r) => r.url));
     const defaultSet = new Set<string>(DEFAULT_RELAYS);
-    const urls = new Set<string>([...userMap.keys(), ...defaultSet]);
-    return [...urls].map((url) => {
-      const u = userMap.get(url);
-      const inDefault = defaultSet.has(url);
-      const source: RelayRow['source'] = u && inDefault ? 'both' : u ? 'user' : 'default';
+    return relays.map((r) => {
+      const inUser = userSet.has(r.url);
+      const inDefault = defaultSet.has(r.url);
+      let source: RelayRow['source'];
+      if (inUser && inDefault) source = 'both-user-default';
+      else if (inUser) source = 'user';
+      else if (inDefault) source = 'default';
+      else source = 'nip65';
+      // NOTE: a "both-user-nip65" overlap (user explicitly re-added a
+      // relay that's also in their NIP-65 list) collapses to plain
+      // 'user' here — `relays` doesn't expose which entries came from
+      // NIP-65 vs the merge, so we can't disambiguate. Functionally
+      // equivalent: the user override row is still removable, and the
+      // NIP-65 event itself isn't editable from this screen.
       return {
-        url,
+        url: r.url,
         source,
-        read: u ? u.read : true,
-        write: u ? u.write : true,
-        connected: connStatus.get(url) === true,
+        read: r.read,
+        write: r.write,
+        connected: connStatus.get(r.url) === true,
       };
     });
-  }, [relays, connStatus]);
+  }, [relays, userRelays, connStatus]);
+
+  // Geo-cache (NIP-GC kind-37516) relay set — surfaced as its own
+  // sub-section, distinct from the generic relay list above. These are the
+  // relays mobile treasures publish to and read from (#907): the nos.lol /
+  // Damus backbone plus the two relays treasures.to uses for read +
+  // NIP-50 search (ditto.pub, dreamith.to). The set is baked in and always
+  // unioned into every NIP-GC publish/read, so it's shown read-only here.
+  const gcRelayRows = useMemo(
+    () => GC_RELAYS.map((url) => ({ url, connected: connStatus.get(url) === true })),
+    [connStatus],
+  );
+
+  const handleAddRelay = useCallback(async () => {
+    const result = validateRelayUrl(newRelayInput);
+    if (!result.ok) {
+      setAddRelayError(result.error);
+      return;
+    }
+    setAddRelayError(null);
+    try {
+      await addUserRelay({ url: result.url, read: true, write: true });
+      setNewRelayInput('');
+    } catch (e) {
+      setAddRelayError(e instanceof Error ? e.message : t('nostrScreen.failedToAddRelay'));
+    }
+  }, [addUserRelay, newRelayInput, t]);
+
+  const handleRemoveRelay = useCallback(
+    async (url: string) => {
+      try {
+        await removeUserRelay(url);
+      } catch (e) {
+        Alert.alert(
+          t('nostrScreen.removeRelayTitle'),
+          e instanceof Error ? e.message : t('nostrScreen.failedToRemoveRelay'),
+        );
+      }
+    },
+    [removeUserRelay, t],
+  );
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
-  const [amberNip17Enabled, setAmberNip17Enabled] = useState(false);
 
   useEffect(() => {
     getBlossomServer().then(setBlossomServerInput);
-    AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
   }, []);
 
   const handleBlossomSave = async () => {
@@ -71,16 +139,8 @@ const NostrScreen: React.FC = () => {
     await setBlossomServer(normalized);
   };
 
-  const toggleAmberNip17 = useCallback(() => {
-    setAmberNip17Enabled((prev) => {
-      const next = !prev;
-      AsyncStorage.setItem('amber_nip17_enabled', next ? 'true' : 'false').catch(() => {});
-      return next;
-    });
-  }, []);
-
   const grantAmberNip44Permission = useCallback(async () => {
-    if (!profile?.pubkey) throw new Error('No profile pubkey — log in first.');
+    if (!profile?.pubkey) throw new Error(t('nostrScreen.noProfilePubkey'));
     const probePlaintext = 'lightning-piggy-nip44-permission-probe';
     const ciphertext = await amberService.requestNip44Encrypt(
       probePlaintext,
@@ -93,18 +153,30 @@ const NostrScreen: React.FC = () => {
       profile.pubkey,
     );
     if (roundTrip !== probePlaintext) {
-      throw new Error('Amber round-trip mismatch — permission may not be set.');
+      throw new Error(t('nostrScreen.amberRoundTripMismatch'));
     }
-  }, [profile?.pubkey]);
+  }, [profile?.pubkey, t]);
 
   return (
-    <AccountScreenLayout title="Nostr">
-      <Text style={sharedAccountStyles.sectionLabel}>Relays</Text>
+    <AccountScreenLayout title={t('nostrScreen.title')}>
+      <Text style={sharedAccountStyles.sectionLabel}>{t('nostrScreen.relays')}</Text>
       <View style={styles.relayList}>
         {relayRows.map((r) => {
-          const mode = r.read && r.write ? 'read/write' : r.write ? 'write' : 'read';
+          const mode =
+            r.read && r.write
+              ? t('nostrScreen.modeReadWrite')
+              : r.write
+                ? t('nostrScreen.modeWrite')
+                : t('nostrScreen.modeRead');
           const sourceLabel =
-            r.source === 'both' ? 'NIP-65 + default' : r.source === 'user' ? 'NIP-65' : 'default';
+            r.source === 'both-user-default'
+              ? t('nostrScreen.sourceUserDefault')
+              : r.source === 'user'
+                ? t('nostrScreen.sourceUser')
+                : r.source === 'nip65'
+                  ? t('nostrScreen.sourceNip65')
+                  : t('nostrScreen.sourceDefault');
+          const removable = r.source === 'user' || r.source === 'both-user-default';
           return (
             <View key={r.url} style={styles.relayRow}>
               <View
@@ -112,7 +184,9 @@ const NostrScreen: React.FC = () => {
                   styles.statusDot,
                   { backgroundColor: r.connected ? colors.green : colors.red },
                 ]}
-                accessibilityLabel={r.connected ? 'Connected' : 'Disconnected'}
+                accessibilityLabel={
+                  r.connected ? t('nostrScreen.connected') : t('nostrScreen.disconnected')
+                }
               />
               <View style={styles.relayMain}>
                 <Text style={styles.relayUrl} numberOfLines={1} ellipsizeMode="middle">
@@ -121,18 +195,86 @@ const NostrScreen: React.FC = () => {
                 <Text style={styles.relaySource}>{sourceLabel}</Text>
               </View>
               <Text style={styles.relayMode}>{mode}</Text>
+              {removable && (
+                <TouchableOpacity
+                  onPress={() => handleRemoveRelay(r.url)}
+                  style={styles.removeButton}
+                  testID={`relay-list-remove-${r.url}`}
+                  accessibilityLabel={t('nostrScreen.removeRelayLabel', { url: r.url })}
+                  accessibilityRole="button"
+                  hitSlop={8}
+                >
+                  <XIcon size={16} color={colors.white} />
+                </TouchableOpacity>
+              )}
             </View>
           );
         })}
       </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        Green dot = currently connected. NIP-65 relays come from your published kind-10002 list;
-        defaults are baked into the app and always tried as a fallback. Editing is not yet supported
-        in-app — update via another Nostr client for now.
-      </Text>
+      <View style={styles.addRelayRow}>
+        <TextInput
+          style={[sharedAccountStyles.textInput, styles.addRelayInput]}
+          value={newRelayInput}
+          onChangeText={(t) => {
+            setNewRelayInput(t);
+            if (addRelayError) setAddRelayError(null);
+          }}
+          placeholder="wss://relay.example.com"
+          placeholderTextColor="rgba(0,0,0,0.3)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          onSubmitEditing={handleAddRelay}
+          testID="relay-list-add-input"
+          accessibilityLabel={t('nostrScreen.addRelayUrlLabel')}
+        />
+        <TouchableOpacity
+          style={styles.addRelayButton}
+          onPress={handleAddRelay}
+          testID="relay-list-add-button"
+          accessibilityLabel={t('nostrScreen.addRelayLabel')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.addRelayButtonText}>{t('nostrScreen.add')}</Text>
+        </TouchableOpacity>
+      </View>
+      {addRelayError && (
+        <Text
+          style={[sharedAccountStyles.fieldHint, { color: colors.brandPink }]}
+          testID="relay-list-add-error"
+        >
+          {addRelayError}
+        </Text>
+      )}
+      <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.relaysHint')}</Text>
 
       <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
-        Image Server (Blossom)
+        {t('nostrScreen.geoCacheRelays')}
+      </Text>
+      <View style={styles.relayList} testID="gc-relay-list">
+        {gcRelayRows.map((r) => (
+          <View key={r.url} style={styles.relayRow}>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: r.connected ? colors.green : colors.red },
+              ]}
+              accessibilityLabel={r.connected ? 'Connected' : 'Disconnected'}
+            />
+            <View style={styles.relayMain}>
+              <Text style={styles.relayUrl} numberOfLines={1} ellipsizeMode="middle">
+                {r.url}
+              </Text>
+              <Text style={styles.relaySource}>{t('nostrScreen.geoCacheSource')}</Text>
+            </View>
+            <Text style={styles.relayMode}>{t('nostrScreen.modeReadWrite')}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.geoCacheRelaysHint')}</Text>
+
+      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
+        {t('nostrScreen.imageServerBlossom')}
       </Text>
       <TextInput
         style={sharedAccountStyles.textInput}
@@ -145,118 +287,41 @@ const NostrScreen: React.FC = () => {
         keyboardType="url"
         onBlur={handleBlossomSave}
         testID="blossom-server-input"
-        accessibilityLabel="Blossom image server"
+        accessibilityLabel={t('nostrScreen.blossomImageServerLabel')}
       />
-      <Text style={sharedAccountStyles.fieldHint}>
-        Hosts images you send in chats and set as your profile picture. Any Blossom (BUD-01/BUD-02)
-        server works — e.g. blossom.primal.net or nostr.build.
-      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.blossomHint')}</Text>
 
-      {signerType === 'amber' && (
+      {signerType === 'amber' && amberNip44Permission === 'denied' && (
         <>
           <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
-            Encrypted Messages (NIP-17)
+            {t('nostrScreen.encryptedMessages')}
           </Text>
-          <View style={sharedAccountStyles.sslRow}>
-            <Text style={sharedAccountStyles.sslLabel}>Enable NIP-17 on Amber</Text>
-            <TouchableOpacity
-              style={[
-                sharedAccountStyles.sslToggle,
-                amberNip17Enabled && sharedAccountStyles.sslToggleActive,
-              ]}
-              onPress={toggleAmberNip17}
-              testID="amber-nip17-toggle"
-              accessibilityLabel="Enable NIP-17 messages on Amber"
-              accessibilityRole="switch"
-              accessibilityState={{ checked: amberNip17Enabled }}
-            >
-              <View
-                style={[
-                  sharedAccountStyles.sslToggleThumb,
-                  amberNip17Enabled && sharedAccountStyles.sslToggleThumbActive,
-                ]}
-              />
-            </TouchableOpacity>
-          </View>
-          <Text style={sharedAccountStyles.fieldHint}>
-            NIP-17 gift-wrapped messages hide sender metadata from relays, but each one requires a
-            NIP-44 decrypt via Amber. When you first enable this, Amber will ask to approve — tap
-            &quot;Remember my choice&quot; so subsequent messages load silently. Messages from
-            people you don&apos;t follow stay hidden.
+          <Text style={[sharedAccountStyles.fieldHint, { color: colors.brandPink }]}>
+            {t('nostrScreen.amberPermissionHint')}
           </Text>
-          {amberNip17Enabled && amberNip44Permission === 'denied' && (
-            <>
-              <Text
-                style={[sharedAccountStyles.fieldHint, { color: colors.brandPink, marginTop: 8 }]}
-              >
-                Amber hasn&apos;t granted NIP-44 decrypt permission to this app yet — tap the button
-                below to grant it. One dialog, then subsequent messages decrypt silently.
-              </Text>
-              <TouchableOpacity
-                style={[sharedAccountStyles.saveButton, { marginTop: 8 }]}
-                onPress={async () => {
-                  try {
-                    await grantAmberNip44Permission();
-                  } catch (e) {
-                    Alert.alert(
-                      'Amber permission',
-                      e instanceof Error ? e.message : 'Could not grant NIP-44 permission.',
-                    );
-                  }
-                }}
-                accessibilityLabel="Grant Amber NIP-44 permission"
-                testID="amber-nip17-grant"
-              >
-                <Text style={sharedAccountStyles.saveButtonText}>Grant permission in Amber</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity
+            style={[sharedAccountStyles.saveButton, { marginTop: 8 }]}
+            onPress={async () => {
+              try {
+                await grantAmberNip44Permission();
+              } catch (e) {
+                Alert.alert(
+                  t('nostrScreen.amberPermissionTitle'),
+                  e instanceof Error ? e.message : t('nostrScreen.couldNotGrantPermission'),
+                );
+              }
+            }}
+            accessibilityLabel={t('nostrScreen.grantAmberPermissionLabel')}
+            testID="amber-nip17-grant"
+          >
+            <Text style={sharedAccountStyles.saveButtonText}>
+              {t('nostrScreen.grantPermissionInAmber')}
+            </Text>
+          </TouchableOpacity>
         </>
       )}
     </AccountScreenLayout>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    relayList: {
-      backgroundColor: 'rgba(255,255,255,0.1)',
-      borderRadius: 10,
-      paddingVertical: 4,
-    },
-    relayRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      gap: 10,
-    },
-    statusDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      borderWidth: 1,
-      borderColor: colors.white,
-    },
-    relayMain: {
-      flex: 1,
-    },
-    relayUrl: {
-      color: colors.white,
-      fontSize: 13,
-    },
-    relaySource: {
-      color: colors.white,
-      fontSize: 10,
-      opacity: 0.6,
-      marginTop: 1,
-    },
-    relayMode: {
-      color: colors.white,
-      fontSize: 11,
-      opacity: 0.7,
-      fontWeight: '500',
-    },
-  });
 
 export default NostrScreen;

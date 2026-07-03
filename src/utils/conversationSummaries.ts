@@ -1,5 +1,11 @@
 import type { WalletState, WalletTransaction } from '../types/wallet';
-import type { NostrContact } from '../types/nostr';
+import type { NostrContact, NostrProfile } from '../types/nostr';
+
+// A valid Nostr pubkey is 64 lowercase hex chars. Used to drop inbox entries
+// keyed on a malformed partner pubkey — rows that predate the partnerFromRumor
+// validation fix (#849) and would otherwise render as un-nameable raw-hex
+// `dcc…` conversations the user can't open or identify.
+const PUBKEY_HEX64 = /^[0-9a-f]{64}$/;
 
 export interface ConversationSummary {
   /**
@@ -152,6 +158,12 @@ export interface DmInboxEntry {
   createdAt: number;
   text: string;
   wireKind: number;
+  /** NIP-17 rumor (inner kind-14/15) event id — stable across the recipient +
+   * self wraps and identical to what the sender computed at send time. Keys the
+   * delivery-status store so a sent bubble's tick survives the local- → echo id
+   * swap (#857). `id` above is the OUTER wrap id (random per ephemeral key), so
+   * it can't serve as that key. Absent for legacy / received rows. */
+  rumorId?: string;
 }
 
 import * as nip19 from 'nostr-tools/nip19';
@@ -183,11 +195,19 @@ const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
 
 /**
  * Bucket DM entries by partner pubkey and reduce to one ConversationSummary
- * per partner. The caller passes the viewer's followed pubkeys (lowercase)
- * as a safety net: even though refreshDmInbox already filters at the data
- * layer, rebuilding the list after a contact is un-followed should also
- * drop them here — the "Following only" rule is a render-time invariant,
- * not just a fetch-time one.
+ * per partner. `trustedPubkeys` (formerly `followPubkeys`, kept on the
+ * parameter name for diff churn but the semantics have widened) is the
+ * lowercase-hex trust set the caller wants to enforce here as a render-
+ * time safety net: even though `refreshDmInbox` already filters at the
+ * data layer, rebuilding the list after a contact leaves the tier should
+ * also drop them here.
+ *
+ * Since #547 callers pass a **tier-aware trust set** (friends / fof /
+ * all), not just the L1 follow list it used to be. So `trustedPubkeys`
+ * may legitimately include friends-of-follows / seeds / the viewer
+ * themself depending on the current `wotTier`. The contract is the
+ * same — pubkeys present in the set pass the filter — but don't
+ * assume the contents are limited to direct follows.
  *
  * When a partner has both a NIP-04 and a NIP-17 message within
  * DUAL_PUBLISH_WINDOW_SEC we always pick the NIP-17 copy regardless of
@@ -199,7 +219,11 @@ const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
 export function buildDmSummaries(
   entries: DmInboxEntry[],
   contacts: NostrContact[],
-  followPubkeys?: Set<string>,
+  followPubkeys?: ReadonlySet<string>,
+  // Profiles for partners NOT in `contacts` (non-followed DM senders),
+  // fetched separately so their name + avatar resolve instead of showing a
+  // raw npub — keyed by lowercase pubkey (#664).
+  extraProfiles?: ReadonlyMap<string, NostrProfile>,
 ): ConversationSummary[] {
   const contactByPubkey = new Map<string, NostrContact>();
   for (const c of contacts) contactByPubkey.set(c.pubkey.toLowerCase(), c);
@@ -207,6 +231,11 @@ export function buildDmSummaries(
   const winner = new Map<string, DmInboxEntry>();
   for (const entry of entries) {
     const key = entry.partnerPubkey.toLowerCase();
+    // Drop entries with a malformed partner pubkey (#849): junk rows stored
+    // before the partnerFromRumor fix would otherwise show as un-nameable
+    // raw-hex `dcc…` conversations. The ingest fix stops new ones; this hides
+    // any already in the store without a risky DB migration.
+    if (!PUBKEY_HEX64.test(key)) continue;
     if (followPubkeys && !followPubkeys.has(key)) continue;
     const existing = winner.get(key);
     if (!existing) {
@@ -245,19 +274,23 @@ export function buildDmSummaries(
 
   const summaries: ConversationSummary[] = [];
   for (const entry of winner.values()) {
-    const contact = contactByPubkey.get(entry.partnerPubkey.toLowerCase());
+    const key = entry.partnerPubkey.toLowerCase();
+    const contact = contactByPubkey.get(key);
+    // Prefer the contact's profile; for a non-followed sender fall back to the
+    // separately-fetched profile so name + avatar still resolve (#664).
+    const prof = contact?.profile ?? extraProfiles?.get(key) ?? null;
     const name =
-      contact?.profile?.displayName?.trim() ||
-      contact?.profile?.name?.trim() ||
+      prof?.displayName?.trim() ||
+      prof?.name?.trim() ||
       contact?.petname?.trim() ||
       fallbackName(entry.partnerPubkey);
     summaries.push({
       id: entry.partnerPubkey,
       pubkey: entry.partnerPubkey,
       name,
-      picture: contact?.profile?.picture ?? null,
-      nip05: contact?.profile?.nip05 ?? null,
-      lightningAddress: contact?.profile?.lud16 ?? null,
+      picture: prof?.picture ?? null,
+      nip05: prof?.nip05 ?? null,
+      lightningAddress: prof?.lud16 ?? null,
       lastActivityAt: entry.createdAt,
       lastAmountSats: 0,
       lastDirection: entry.fromMe ? 'outgoing' : 'incoming',

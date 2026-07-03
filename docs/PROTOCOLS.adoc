@@ -1,0 +1,433 @@
+== Nostr Protocol State
+
+This page documents which Nostr Improvement Proposals (NIPs) Lightning Piggy Mobile implements, in which direction (send / receive), and any deprecation timelines.
+
+=== DM Protocol State
+
+==== Summary
+
+Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **only** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients but are **never sent**. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor).
+
+[cols="1,1,1,3", options="header"]
+|===
+| Direction | NIP-04 (kind 4) | NIP-17 (kind 1059 → 13 → 14) | Notes
+
+| Send (1:1 DM) | ❌ removed | ✅ only path | `sendDirectMessage` in `src/contexts/NostrContext.tsx`
+| Send (group) | n/a — never supported | ✅ only path | `sendGroupMessage` in `src/contexts/NostrContext.tsx`
+| Receive (display) | ✅ kept | ✅ kept | `fetchConversation`, `refreshDmInbox` query both kinds and merge into one thread sorted by the rumor's `created_at`
+|===
+
+==== Why NIP-17
+
+* NIP-04 is marked `unrecommended` at the top of the NIP itself. AES-256-CBC, no metadata protection — sender pubkey, `created_at`, recipient `p` tag are all on the wire in plaintext.
+* NIP-17 wraps each kind-14 rumor in a kind-13 seal inside a kind-1059 gift wrap. The outer wrap exposes only a random ephemeral pubkey, a `created_at` randomised up to 2 days in the past, the `kind: 1059` tag, and the recipient `p` tag. Sender identity, message kind, true send time, and any tags on the rumor are all hidden from relays and observers.
+* Encryption throughout NIP-17 is **NIP-44** v2 (secp256k1 ECDH → HKDF → ChaCha20 + HMAC-SHA256).
+
+==== Send path (outgoing)
+
+* Inner rumor is built by `createDirectMessageRumor` (1:1) or `createGroupChatRumor` (groups) — both produce a `kind: 14` event with a `pubkey` field but no signature.
+* `sendNip17ToManyWithNsec` (nsec signer) seals + wraps the rumor for each recipient via `nostr-tools` `nip59.wrapManyEvents`, which also wraps for the sender so the message lands in the user's own inbox on other devices.
+* `sendNip17ToManyWithSigner` (Amber signer) does the same SEQUENTIALLY because Amber's native module rejects concurrent intents with `BUSY`. Per recipient: 1× `nip44Encrypt` + 1× `signEvent` for the seal; the gift wrap is signed locally with a fresh ephemeral key (never the user's key) so it does not need a signer round-trip.
+* Wraps are published in parallel via `pool.publish` to the union of the user's NIP-65 write relays and `DEFAULT_RELAYS`.
+
+==== Receive path (display)
+
+The Messages tab fetches both protocols on focus and on conversation open:
+
+* `fetchInboxDmEvents` queries three filters in parallel:
++
+[source]
+----
+{ kinds: [4],    authors: [me] }   // outgoing legacy DMs
+{ kinds: [4],    '#p':     [me] }   // incoming legacy DMs
+{ kinds: [1059], '#p':     [me] }   // gift wraps addressed to us
+----
+* Kind-4 events are NIP-04-decrypted with the appropriate signer (`nip04.decrypt` for nsec, Amber's `nip04Decrypt` IPC for Amber) and merged into the per-peer thread.
+* Kind-1059 wraps are unwrapped via `unwrapWrapNsec` (nsec) or `unwrapWrapViaNip44` (Amber) — both perform the full NIP-17 verification chain: signature check on the wrap, NIP-44-decrypt the wrap to a kind-13 seal, NIP-44-decrypt the seal to a kind-14 rumor, and assert `rumor.pubkey === seal.pubkey` (the spec MUST that prevents sender-spoofing on a tampered rumor).
+* `classifyRumor` then routes 1:1 rumors into the per-peer DM thread and multi-recipient rumors into the matching group room.
+* Threads sort by the **rumor's** `created_at`, never the gift wrap's (the wrap timestamp is intentionally fake per the spec).
+
+==== Deprecation timeline for NIP-04 reads
+
+We will keep the kind-4 read filter and the `nip04.decrypt` codepath until both of:
+
+. The user research signal that no active contacts are still on NIP-04-only clients (Damus is the relevant laggard at the time of writing).
+. The kind-4 plaintext cache (`nip04PlaintextCache` LRU + the per-thread persisted cache) for a representative active user shows zero new fresh-decrypt entries for at least 90 days, evidenced by the `[Perf] fetchConversation` log line `k4=N (hits=0, fresh=0)`.
+
+There is no scheduled removal date. Removal will be announced one release ahead in the GitHub Release notes and the read filter will land behind a feature flag for one release before the codepath itself is deleted.
+
+==== Interop notes
+
+* **Damus** (as of April 2026 master) does not subscribe to kind 1059 — its `HomeModel` filter is kind-4-only. A message Lightning Piggy sends to a Damus-only peer will not appear in their UI until Damus ships NIP-17. Other major clients (Amethyst, 0xchat, Snort, Coracle, Primal) accept NIP-17 and will display Lightning Piggy's outgoing DMs.
+* The `subject` tag on a kind-14 is what 0xchat / Amethyst / Quartz read to display the conversation title — `createGroupChatRumor` always emits one; `createDirectMessageRumor` deliberately omits it (a 1:1 thread has no name). See issue #271 for the cross-client subject-tag interop work.
+* Lightning Piggy does **not** publish a kind-10050 NIP-17 DM relay-list event. We rely on the user's existing NIP-65 write-relay list plus the DEFAULT_RELAYS fallback. If a recipient publishes their own kind-10050 we do not currently honour it — they must accept wraps on at least one relay we publish to.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `src/services/nostrService.ts` :: `createDirectMessageRumor` | Builds the unsigned kind-14 rumor for a 1:1 DM. Single `p` tag, no subject.
+| `src/services/nostrService.ts` :: `createGroupChatRumor` | Builds the unsigned kind-14 rumor for a group message. `subject` tag + one `p` tag per member.
+| `src/services/nostrService.ts` :: `sendNip17ToManyWithNsec` | nsec NIP-17 send. Seals + wraps via `nip59.wrapManyEvents`, publishes in parallel.
+| `src/services/nostrService.ts` :: `sendNip17ToManyWithSigner` | Amber NIP-17 send. Sequential signer loop (BUSY guard), parallel publish.
+| `src/services/nostrService.ts` :: `fetchInboxDmEvents` | Fetches kind-4 (in/out) + kind-1059 (in) in three parallel filters.
+| `src/services/nostrService.ts` :: `unwrapGiftWrap` | nsec unwrap via `nip59.unwrapEvent`. Used in single-event paths.
+| `src/utils/nip17Unwrap.ts` :: `unwrapWrapNsec` / `unwrapWrapViaNip44` | Two-layer NIP-17 unwrap with full verification + skip-and-log on failure.
+| `src/utils/nip17Unwrap.ts` :: `classifyRumor` | Routes a decoded rumor to a 1:1 DM thread or a group room based on the participant set.
+| `src/contexts/NostrContext.tsx` :: `sendDirectMessage` | Application-level 1:1 send. Calls `sendNip17ToMany*` with a one-element recipient list.
+| `src/contexts/NostrContext.tsx` :: `sendGroupMessage` | Application-level group send. Calls `sendNip17ToMany*` with the full member list.
+| `src/contexts/NostrContext.tsx` :: `fetchConversation` / `refreshDmInbox` | Application-level receive paths. Decrypt both protocols, merge into the per-peer thread.
+| `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
+|===
+
+=== Live location: kind-20069 pings + NIP-17 markers (#206)
+
+Live-location sharing rides on the DM pipeline above plus one ephemeral event kind. A share has three on-wire parts:
+
+[cols="1,3",options="header"]
+|===
+| Part | Wire format
+
+| *Start marker* (NIP-17 DM)
+| A normal kind-14 rumor (sealed + gift-wrapped as usual) whose body is, first line first: `[live-location:start]`, then a `geo:<lat>,<lon>` (optionally `;u=<accuracy>`) URI, then a JSON metadata line `{"sessionId":"…","durationMs":900000,"startedAt":<epoch_ms>}`. The sentinel MUST be the first non-empty line to classify (quoting it mid-body does not).
+
+| *Pings* (kind 20069, ephemeral)
+| Published every ~30 s while the watcher runs. Ephemeral (20000–29999) so relays don't persist them — a late joiner sees the share via the start marker, then live pings as they arrive. The NIP-04-encrypted JSON payload carries `{ sessionId, lat, lon, accuracy, heading, ts }` — `sessionId` is validated on decode so a ping is matched to its share (a `['d', sessionId]` tag also scopes the subscription filter).
+
+| *End marker* (NIP-17 DM)
+| First line `[live-location:end]`. Coordinates are OPTIONAL here — if the sender stops with no GPS fix the `geo:` URI is omitted (never a `0,0` pin), and the parser still classifies it so the receiver bubble flips to "ended". A failed end-marker send is retried (sender state machine `stopPending`) until it lands.
+|===
+
+Durations are capped to `MAX_DURATION_MS` (8 h) at parse time. Sessions are scoped to the sender's pubkey in storage so an identity switch can't resume one account's share under another. See `src/services/liveLocationService.ts` (wire format), `liveLocationStateMachine.ts` (lifecycle), and `LiveLocationContext.tsx` (orchestration).
+
+=== Sharing rich objects in a DM: the publish-and-reference pattern (interop)
+
+Recurring question: to share a contact / calendar event / location / poll *inside* a DM and have other clients (Amethyst, Damus, …) render it, do we wrap a dedicated event kind inside NIP-17? *No.* The interoperable Nostr pattern is **publish-and-reference**: the object is published as its own standard event, and the DM only carries a `nostr:` *pointer* to it (NIP-21 / NIP-27) in the kind-14 `content`. The receiving client resolves the pointer and renders the appropriate embedded card. Confirmed against Amethyst's `quartz` (it parses `nostr:naddr`/`nevent`/`nprofile` out of content and renders the referenced event).
+
+[cols="1,2,2",options="header"]
+|===
+| Object | Published as its own event | Referenced in the kind-14 as
+
+| Contact / profile | kind 0 (already exists) | `nostr:nprofile…` in content (no `p` tag — see below)
+| Calendar event | kind 31922 (date) / 31923 (time) — NIP-52, addressable | `nostr:naddr…` in content + `q` tag
+| Note / post | kind 1 | `nostr:nevent…` + `q` tag
+| Article | kind 30023 | `nostr:naddr…` + `q` tag
+| Location (a point) | *no standard kind exists* | best-effort only — see below
+|===
+
+Two hard constraints:
+
+* *The referenced object is public.* The DM envelope stays private (the pointer is inside the encrypted kind-14), but the referenced event is a normal published event anyone can fetch with the `naddr`/`nevent`. There is **no interoperable way to share a _private_ rich object**: per NIP-17, other clients only unwrap kinds *14 (chat), 15 (file), and 7 (reaction)* from a gift wrap — a gift-wrapped kind-31923 or kind-1068 is invisible to them. Private + rich + interoperable: pick two.
+* *Tag rules differ inside a kind-14.* Referencing an **event** → add a `q` (quote) tag (safe, conventional). Referencing a **profile** → content only, *never* a `p` tag — in NIP-17 the kind-14 `p` tags are the chat participants, so tagging a mentioned person would add them to the conversation and re-route a copy to them.
+
+*Location is the genuine exception.* There is no location *event kind* anywhere in the NIPs — NIP-52 carries location as a `location` string tag + a `g` geohash tag on a calendar event, and Amethyst's own "location" is geohash-tagged notes (NIP-73 geohash scope) + a geohash feed. So there is no published "location object" to point an `naddr` at, and the best-effort for a point in a DM is a `geo:` URI in the `content` (a client that decrypts the DM may linkify it). A live, moving pin in a DM is therefore *inherently app-specific* — which is exactly why our live location is a private convention (`[live-location]` markers + kind-20069 pings) rather than a portable card. Polls (NIP-88) are public-only for the same family of reasons (votes must be public to tally), so our `[POLL]` DM encoding is likewise app-private by necessity.
+
+*Why not add a `g` geohash tag to the markers?* Because inside NIP-17 the kind-14's tags are encrypted (the rumor is sealed + gift-wrapped), a `g` tag would be *private* — but that also means relays never see it and so cannot index it. The whole purpose of a `g` tag is relay-side `#g` discovery (geohash feeds), which is impossible on an encrypted rumor. So the tag would add no discovery value and ~no rendering value over the `geo:` URI already in the body. It is **not** worth adding. (Geohash tags *are* best practice on *public* events — kind-1 geo-notes, kind-31923 calendar events — precisely because relays index them; that rationale evaporates inside an encrypted DM.) The one real rule it illustrates: never move location onto the *outer* gift wrap (kind 1059) or seal (kind 13) — only the `["p", recipient]` routing tag belongs there, and anything sensitive must stay inside the encrypted kind-14.
+
+What this means for us:
+
+* *Contact* — already done the interoperable way: `Shared contact: <name>\nnostr:<nprofile>` in the kind-14 content, `nprofile` carrying relay hints, recipient as the only `p` tag (`src/screens/ContactProfileScreen.tsx`, `extractSharedContact` in `MessageBubble.tsx`). No change needed.
+* *Calendar event* — if we ever add "share an event to a DM", publish a NIP-52 kind-31923 and embed its `naddr` + a `q` tag; that interops with Amethyst's calendar for free.
+* *Location / polls* — no interoperable card exists; the app-private encoding is the ceiling. A `g` geohash tag is *not* worth adding (encrypted inside the wrap → relays can't index it → no discovery, ~no rendering gain over the `geo:` URI); keep location in the kind-14 `content` and never on the outer wrap.
+
+References: NIP-17 (DMs, allowed inner kinds 14/15/7), NIP-21 (`nostr:` URIs), NIP-27 (mentions in content; tags optional, only for notification), NIP-52 (calendar kinds + location tags), NIP-88 (polls, public-only). Cross-checked against `vitorpamplona/amethyst` `quartz` (`nip17Dm`, `nip52Calendar`, `nip19Bech32`).
+
+=== Hunt: Lightning extension to NIP-GC (#468)
+
+==== Summary
+
+Lightning Piggy's "Hunt" feature lets users hide LNURL-withdraw "Piggies" in
+the wild and lets others find + claim them. The wallet-level LNURL-w is
+created by the hider in their own wallet (LNbits / Alby / Mutiny / …) — see
+the project memory `No LNbits-specific APIs`. Lightning Piggy is the
+**publisher**, **discoverer**, and **find-log thread** layer.
+
+We adopt **NIP-GC** (Nostr Geocaching, draft by https://treasures.to[treasures.to])
+verbatim and mark Lightning-payout caches with a **NIP-32 label**
+(`L=com.lightningpiggy.app` / `l=payout-lnurl-w`). The LNURL bearer
+token is deliberately **never** put on the public event — it lives
+only on the physical NFC tag / QR and the hider's local SecureStore;
+publishing it on a kind 37516 would let any relay subscriber drain
+the cache without ever physically visiting it (see
+`feedback_lnurl_never_on_relays.md` and the
+`buildCacheListing` security test in `nostrPlacesService.test.ts`).
+A Hunt Piggy is therefore just a NIP-GC `traditional` cache flagged
+by our label; generic geocaching clients (treasures.to et al.)
+ignore the label and render it as a normal cache, while LP routes
+the finder through HuntFoundScreen for claim. The `wait` / `uses`
+fields exist on the local `HiddenPiggy` record for the cooldown UX
+but are NOT published as event tags — that was an early design
+draft that got dropped to avoid side-channel discoverability of
+the cache's economics. **Read the
+upstream draft** in the kind-30817 event with `d="geocaching-events"`
+authored by `npub1pse...zz68` (or
+https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5[the
+nostrhub.io rendering]).
+
+The data model uses **three Nostr kinds with three different lifecycles**:
+
+[cols="1,1,1,3", options="header"]
+|===
+| What | Kind | Lifecycle | NIP source
+
+| Cache listing | `37516` | **Replaceable** (PRE — `30000-39999` range, keyed by `(pubkey, kind, d)`). Hider can re-publish to update LNURL, location, hint, cooldown, expiry, etc.; relays drop the prior version. | NIP-GC §"Geocache Listing Event"
+| Found-log entry | `7516` | **Append-only**, `7000-7999` regular range. Each find produces one event tagged to the cache's `a` coordinate. Optional embedded `kind 7517` verification event for cryptographic find-proof. | NIP-GC §"Found Log Event"
+| Comment / status (DNF, note, maintenance, archived) | `1111` | **Append-only**, NIP-22 comment threading model with the cache as both root + parent. | NIP-GC §"Comment Log Events" + NIP-22
+|===
+
+==== kind 37516 listing — full tag schema
+
+NIP-GC required tags (we always emit):
+
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
+
+| `["d", piggy_id]` | Stable identifier scoped to the hider's pubkey. Format: `piggy_<base36-millis>_<random6>` (see `newPiggyId` in `src/services/piggyStorageService.ts`).
+| `["name", str]` | Short human-readable cache name. Required by NIP-GC.
+| `["g", geohash]` (×7) | Location at every precision from 3 to 9 chars — cheap on event size, dramatically widens prefix-filter surface for proximity queries. See `src/utils/geohash.ts`.
+| `["D", "1-5"]` | Finding difficulty. We default `1` (just-find-the-tag) for NFC-stash Piggies; user can override for tricky hides.
+| `["T", "1-5"]` | Physical terrain. Default `1` (urban/accessible); bump for hilltop / hike-required caches.
+| `["S", "micro\|small\|regular\|large\|other"]` | Cache size. Default `micro` since an NFC sticker is small.
+|===
+
+NIP-GC optional tags (we emit when present):
+
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
+
+| `["t", "traditional\|multi\|mystery"]` | Cache type. Default `traditional` per NIP-GC. **All Lightning Piggies are traditional caches with a Lightning bonus.**
+| `["hint", rot13(str)]` | Plaintext clue, ROT13-encoded per NIP-GC client guidance (prevents inline spoilers in scrolling clients). LP decodes for display; users with non-NIP-GC-aware clients see the rotated text and need to ROT13 themselves.
+| `["image", url]` | EXIF-stripped Blossom / nostr.build URL of the hider's hint photo. Routed through `src/services/imageUploadService.ts`.
+| `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
+|===
+
+LP marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately does NOT go on the public event):
+
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
+
+| `["L", "com.lightningpiggy.app"]` | NIP-32 label namespace declaring "this cache is in the Lightning Piggy taxonomy".
+| `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; LP recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
+|===
+
+**The LNURL never goes in the public event** — that would broadcast a bearer token to every relay subscriber, letting anyone in the world drain the cache without ever physically visiting it (defeating the entire physical-cache premise). The LNURL lives on:
+
+* The **physical artifact** (NFC tag / printed QR) — this is the real access control. Possession = consent to claim.
+* The **hider's local `SecureStore`** (`piggyStorageService.HiddenPiggy.lnurlw`) — for tag-write, re-print, and any future "show me the QR for this Piggy" affordance. Never leaves the device.
+
+This is how TapTheSatsMap (the most prolific NIP-GC publisher, 31 sticker caches) operates — see project memory `treasures.to interop` for the analysis. Wait_time / uses / per-claim caps remain the hider's responsibility to set in their own wallet's LNURL-w configuration; LP doesn't try to mirror them on the event because doing so contributes to side-channel discoverability of the cache's economics without adding any safety.
+
+`content` carries the longer cache description ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown, 100 uses.").
+
+==== kind 7516 found-log — what we emit
+
+Each successful claim produces:
+
+* `["a", "37516:<hider_pubkey>:<piggy_id>"]` — required NIP-GC reference to the cache.
+* `["image", url]` (optional) — finder's photo of the find spot. Same EXIF-strip pipeline as the listing's hint photo.
+* `["amount", "21"]` (LP extension) — sats claimed via the LNURL-w. Drives the `⚡ claimed` badge and "you got 21 sats here 47m ago" copy on the detail screen. Treasures.to et al. ignore this; for them it's a regular found-log.
+* `["verification", <kind-7517-json>]` (optional) — embedded NIP-GC verification event signed by the cache's verification key, if the listing carries one. **For LP Piggies we don't need this** — successful claim of the LNURL-w is its own physical-presence proof (you had the bearer token, the issuer paid you).
+
+==== Subscribe filter shape
+
+* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
+* **Single cache detail (replaceable + thread)** — three filters:
+  ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
+  ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
+  ** `{ kinds: [1111], "#A": ["37516:<hider>:<piggy_id>"] }` — append-only comment thread (DNF / notes / maintenance / archived).
+* **My Piggies (cross-device)** — `{ kinds: [37516], authors: [me] }` and filter the result for the NIP-32 `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label marker. **Not** the `lnurl` tag — that one deliberately never reaches the relay (see the "marker tags" subsection above).
+
+==== Why NIP-GC rather than a custom kind
+
+We initially picked a custom `kind 30408` (still in the PRE range, semantically equivalent). Switched to NIP-GC `kind 37516` after a one-line user direction:
+
+> _"i think we should use their NIPs and use traditional but with an LNUrlw additional field."_
+
+Reasons it's the right call:
+
+* **Network effects.** treasures.to users see our Piggies on their map, vice versa. One geocaching ecosystem on Nostr instead of two competing ones.
+* **No semantic conflict.** A Lightning Piggy *is* a traditional NFC-tag cache — it just also pays. The `lnurl` extension is purely additive; their schema doesn't need to change.
+* **Their schema is more thought-through.** D/T/S/t classification, ROT13 hint convention, NIP-22 comment-thread model, optional cryptographic verification (kind 7517) all generalise beyond what we'd built. We inherit it for free.
+* **Migration cost: trivial.** `30408` → `37516` is a single-kind change; the tag schema is a strict superset of what we had; one orphan test event from the old kind hits its 30-day NIP-40 expiration and ages out.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `com.lightningpiggy.app` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
+| `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
+| `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge. Persists SHA-256 hashes of the LNURL (`lnurlHash`), never the bearer string itself — AsyncStorage is unencrypted, so a stolen / rooted device must not be able to replay un-exhausted Piggies.
+| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).
+| `src/utils/geohash.ts` | Tiny geohash encoder + `geohashPrefixes` helper.
+| `src/utils/rot13.ts` | Tiny ROT13 helper for NIP-GC hint encoding.
+| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens. Tag-family inference (NTAG21x / Mifare Ultralight C / Mifare Classic) and `makeReadOnly()` locking are **Android-only** — `tag.techTypes` is Android-specific and CoreNFC has no equivalent permanent-lock primitive. iOS writes the NDEF record and returns `{ family: 'unknown', locked: false }` so the hider knows the tag is still re-writeable.
+| `src/screens/HuntCreateScreen.tsx` | Hider create flow — paste / validate LNURL, attach hint photo (EXIF-stripped via `imageUploadService`), drop GPS pin → 7-char geohash, optional cooldown / uses hints, optional Public toggle.
+| `src/screens/HuntFoundScreen.tsx` | Finder celebration / claim flow — opens via `lightning:` deep-link, resolves LUD-03, generates bolt11 via `useWallet().makeInvoice`, POSTs to LNURL callback, records to claim history.
+| `src/screens/HuntPiggyDetailScreen.tsx` | Full cache detail — listing fields, hint photo, hider profile (`usePubkeyProfile`), live find-log thread, per-finder Zap button.
+| `src/services/nostrPlacesService.ts` | Pure builders + parsers for kinds 37516 / 7516 / 1111 / 31923. Exposes `GC_LISTING_KIND`, `GC_FOUND_LOG_KIND`, `GC_COMMENT_KIND`, `NIP52_TIME_BASED_KIND`, `isLightningPiggyListing`, `parseCacheListing`, `parseFoundLog`, `parseNip52Event`.
+| `src/services/nostrPlacesPublisher.ts` | Subscribe-side: `subscribeNearbyCaches({geohashPrefixes}, onCache)`, `subscribeCacheFoundLog(cacheCoord, onLog)`, `subscribeCacheComments(cacheCoord, onComment)`, `subscribeNearbyEvents({geohashPrefixes}, onEvent)`. One pool, one filter per call.
+| `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events (7-day TTL, 500-cap, sync peek). See `docs/SOLUTION_DESIGN.adoc` → "Explore tab".
+|===
+
+==== `lightning:` tag-tap / deep-link routing
+
+An NFC tag tap, a QR scan, or a `Linking` call from another app wakes
+Lightning Piggy via the `lightning:` scheme (registered in `app.config.ts`).
+The single handler in `App.tsx`'s Linking listener decides the *direction*
+of money flow and routes to the matching surface. There are two directions:
+
+* **Claim FROM** (money *in*): an LNURL-withdraw voucher → the withdraw
+  claim flow (`HuntFoundScreen`). Introduced in #341 / #468.
+* **Pay TO** (money *out*): an invoice, Lightning Address, or LNURL-pay
+  endpoint → the `SendSheet` on the Home tab. Introduced in #756.
+
+The critical rule: for LNURL forms the direction is keyed off the
+**resolved `tag`** (`payRequest` vs `withdrawRequest`), *never* the bech32
+prefix — a `lnurl1…` can be either kind. `resolveLnurlDirection`
+(`src/services/lnurlService.ts`) does one fetch and returns
+`{ kind: 'pay' | 'withdraw', … }`; both directions branch on that one
+answer so they can never disagree.
+
+|===
+| Tapped / scanned payload | Spec | Direction | Routes to
+
+| `lightning:lnbc…` (also `lntb` / `lnts` / `lnbs`) | BOLT-11 | Pay → out | `SendSheet` prefilled (amount + memo from the invoice; zero-amount invoices prompt for an amount)
+| `lightning:user@host` | LUD-16 | Pay → out | `SendSheet` — resolves the address, prompts for an amount
+| `lightning:lnurl1…` / `lnurlp://` / `https://…` resolving to `payRequest` | LUD-06/17 | Pay → out | `SendSheet`
+| `lightning:lnurl1…` / `lnurlw://` / `lnurl://` resolving to `withdrawRequest` | LUD-03 | Claim → in | `HuntFoundScreen` (no regression to #341)
+| anything else under `lightning:` | — | — | friendly "Link not supported" toast (no silent dead end — Copilot review #488)
+|===
+
+Cold launch is handled the same way as the withdraw and notification
+paths: each route returns a boolean "did it land", and the handler retries
+(~2 s, 100 ms cadence) until `navigationRef.isReady()`.
+
+NOTE: The `payRequest → SendSheet` leg currently passes the resolved
+endpoint URL to `SendSheet.processInput`, which today only decodes bolt11
+and Lightning Addresses. Teaching `processInput` to also resolve a raw
+LNURL-pay endpoint is the remaining wiring (tracked in #756); the bolt11
+and Lightning-Address pay legs are fully wired.
+
+=== Events: NIP-52 calendar consumption
+
+==== Summary
+
+Lightning Piggy's "Events" sub-screen renders nearby Bitcoin meetups, conferences, and workshops as NIP-52 time-based calendar events (`kind 31923`). We are **read-only** for v1 — there's no in-app create flow. Organisers publish via Flockstr / Nostrudel / their own scripts; we surface them on the map and in the list.
+
+We only consume `kind 31923` (time-based). `kind 31922` (date-based all-day) and `kind 31925` (RSVP) are out of scope for v1 — most Bitcoin meetups have a precise start time and RSVP gating would require a kind-30200-equivalent state model we haven't budgeted yet.
+
+==== Tags read by the app
+
+[cols="1,3", options="header"]
+|===
+| Tag | What we do with it
+
+| `["d", str]` | Stable identifier scoped to the organiser pubkey. Forms half of the addressable coordinate `31923:<organiser>:<d>`.
+| `["title", str]` (fallback `["name", str]`) | Headline on the list row + detail screen. NIP-52 spec uses `title`; some early publishers emitted `name` so we accept both.
+| `["start", unix_secs]` | Start time. Required — events without a parseable `start` are dropped.
+| `["end", unix_secs]` | Optional end time. Drives the "ends in" copy on detail; if absent we just show the start.
+| `["location", str]` | Free-form venue / address / "video call link". NIP-52 leaves this open — we display verbatim.
+| `["g", geohash]` (any precision) | We pick the longest `g` tag as the canonical location for distance + map pinning. Multi-precision `g` tags (à la NIP-GC) are honoured because some clients emit them.
+| `["image", url]` | Hero image on EventDetail.
+| `["t", hashtag]` | Surfaced as chips on the detail row.
+| `event.content` | Long-form description, rendered with the same markdown sanitizer as cache descriptions.
+|===
+
+NIP-52 also defines optional `participants`, `references`, `summary`, and per-event RSVPs (`kind 31925`). We ignore these for v1; the loss is graceful (a tag we don't render is just data on the wire).
+
+==== Subscribe filter shape
+
+`subscribeNearbyEvents` opens a single filter:
+
+[source]
+----
+{ kinds: [31923], "#g": [<geohash prefixes for current viewport>] }
+----
+
+Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood. The mini-map's `onBoundsChange` re-opens with a fresh prefix list when the viewport changes substantially.
+
+==== Add-to-Calendar (consumer-side native integration)
+
+`EventDetailScreen` exposes an **Add to Calendar** button. Tapping it:
+
+. Requests `expo-calendar` `READ_CALENDAR` + `WRITE_CALENDAR` permissions lazily (no upfront prompt at app launch).
+. Picks the device default calendar via `Calendar.getDefaultCalendarAsync()` (iOS) or the first writable calendar (Android).
+. Creates an event with `title`, `startDate = start*1000`, `endDate = (end ?? start + 2h)*1000`, `location`, `notes = nostr:nevent1… + description`.
+. Falls back to a "copy to clipboard" hint on permission denial.
+
+This is purely a consumer of the published kind 31923 — nothing is written back to relays.
+
+=== NIP-99: classified-listing consumer (Bag Charm purchase link)
+
+==== Summary
+
+Lightning Piggy uses NIP-99 (`kind 30402`, parameterised-replaceable classified listing) in **consumer-only** mode for the Robotechy Piggy Bag Charm purchase link on `HuntCreateScreen` (the "Hide a Piglet" flow).
+
+==== What's published vs what we render
+
+Robotechy publishes a `kind 30402` listing for the Bag Charm — a physical product the hider can buy to attach an NFC tag to. We don't decode the event ourselves; we link out to a `naddr1…`-encoded reference that resolves on https://www.robotechy.com[robotechy.com]:
+
+[source]
+----
+'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu'
+----
+
+This is the only NIP-99 surface in the app. There is no "marketplace" feature, no in-app price display, no Lightning Piggy-published classified listings. The `naddr` is hard-coded into the source for v1 because there's only one product and re-resolving it on every Hide-a-Piglet open would be wasted relay traffic for zero UX benefit.
+
+==== Why NIP-99 at all
+
+The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is that the seller (Robotechy) is a Nostr-native business and the canonical product page lives on their Nostr classified listing rather than a Web2 product database. Linking via `naddr` lets the URL stay valid even if Robotechy migrates hosting providers, and signals to other Nostr-aware clients that "this is a real Nostr-addressable product".
+
+==== Code reference
+
+* `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
+
+=== Deep-link & NFC tag-tap routing
+
+==== Summary
+
+A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arrive at the same place: the `Linking` handler in `App.tsx` (`getInitialURL()` for cold launch + `addEventListener('url')` for warm). The handler inspects the URI scheme / bech32 prefix and routes to the matching in-app surface. Every branch retries against `navigationRef.isReady()` so a cold-start tap that races the nav tree's mount still lands. Unknown payloads get a friendly toast or the `UnsupportedEntity` screen — never a crash or a blank screen.
+
+Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to LP's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
+
+==== Routing table
+
+|===
+| Tag / link payload | Decodes to | Routes to | Issue
+
+| `https://www.lightningpiggy.com/hunt/<coord>` or `lightningpiggy://hunt/<coord>` | `kind:pubkey:d` coord | `HuntPiggyDetail` (Piglet detail) | #73
+| `nostr:naddr1…` (kind 37516) | Hunt listing coord | `HuntPiggyDetail` | #73
+| `nostr:npub1…` | bare pubkey | `ContactProfile` (profile screen) | #754
+| `nostr:nprofile1…` | pubkey **+ relay hints** | `ContactProfile`, kind-0 fetched off the embedded hints | #754
+| `lnurlw://…` / `lnurl://…` (standalone withdraw voucher) | LNURL-withdraw | `openLnurlWithdrawSheet` (claim bottom sheet) | #103 / #341
+| `lightning:lnbc…` (bolt11) / `lightning:user@host` (Lightning Address) | invoice / LN address | `SendSheet` (pay) | #756
+| `lightning:lnurl1…` / `lnurl(p\|w)://…` / `https://…` | resolved once; routed on the server `tag` | `withdrawRequest` → `openLnurlWithdrawSheet`; `payRequest` → `SendSheet` | #341 / #756
+| other `lightning:` payloads (undecodable) | — | friendly "Link not supported" toast | #488
+| `nostr:note1…` / `nostr:nevent1…` / undecodable `nostr:` | non-profile entity | `UnsupportedEntity` screen | #754
+|===
+
+==== npub vs nprofile (read + write)
+
+`npub` is the bech32 of the bare 32-byte pubkey — identity only. `nprofile` is the NIP-19 TLV encoding of the pubkey **plus optional relay hints**. For a conference badge / contact tap (cold first contact — the scanner doesn't follow the owner yet) `nprofile` is strongly preferred: the embedded hints let the scanner's client find the owner's kind-0 metadata + notes even on niche relays, where a bare `npub` would force a default-relay guess and could render a blank profile.
+
+* **Read (#754):** the `App.tsx` router decodes the reference via `decodeProfileReference` (`src/services/nostrService.ts`), fetches kind-0 off the embedded hints (`fetchProfile(pubkey, hints)` — a bare `npub` carries none, so it falls back to the app's `PROFILE_RELAYS`), and navigates to `ContactProfile`. The fetch races a short budget so a dead relay never strands the user; the pubkey-only stub lets `ContactProfileScreen` retry on the viewer's own relays. Pure decode / shaping helpers are in `src/utils/nostrProfileLink.ts`.
+* **Write (#755):** the "share my profile to NFC" path (`ProfileScreen` / `AccountDrawerContent` → `NfcWriteSheet`) writes `nostr:nprofile1…`, embedding the user's NIP-65 **write (outbox)** relays via `buildOwnProfileRelayHints` (`src/services/nostrService.ts`), capped at 2 to fit an NTAG213 (~144 B) and limit staleness. Falls back to the app defaults when the user has no published write relays — a generic hint still beats none. The bare pubkey is always embedded, so a reader can fall back to outbox discovery if the hints go dead. Sharing a *contact's* profile (`ContactProfileScreen`) writes their `nprofile` too, hints sourced via `buildProfileRelayHints`.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
+| `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (cold launch / deep link).
+| `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (foreground tag tap).
+| `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
+| `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
+| `src/services/nfcNostrWrite.ts` :: `writeNostrProfileToTag` | Writes a single `nostr:nprofile…` / `nostr:npub…` NDEF URI record.
+| `src/navigation/AppNavigator.tsx` :: `navigateToContactProfile` / `navigateToUnsupportedEntity` | Imperative nav helpers callable from outside the React tree.
+|===

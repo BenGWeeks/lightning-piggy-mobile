@@ -6,6 +6,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { ConversationSummary } from '../utils/conversationSummaries';
 import { conversationPreview, formatConversationTimestamp } from '../utils/conversationSummaries';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   summary: ConversationSummary;
@@ -24,7 +25,8 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
     setAvatarError(false);
   }, [summary.picture]);
 
-  const showImage = !!summary.picture && !avatarError;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
+  const showImage = !!summary.picture && !avatarError && isSupportedImageUrl(summary.picture);
   const timestamp = formatConversationTimestamp(summary.lastActivityAt);
   const preview = conversationPreview(summary);
   // Bind the row's summary into the parent handler at the leaf so the
@@ -56,6 +58,16 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
             // would otherwise spawn a per-row FrameDecoderExe thread.
             // See #243.
             autoplay={false}
+            // Explicit decode-time size hint (#731 Fix 4): without this
+            // Glide logs "-2147483648x-2147483648" (no hint) and allocates
+            // a full-resolution bitmap before downscaling, costing ~600 ms
+            // per avatar on Messages focus. Matching width/height to the
+            // rendered style dimensions (48 dp) tells Glide to downsample
+            // at the BitmapFactory stage — dramatically cheaper allocation
+            // and faster decode. `contentFit="cover"` maps to
+            // Glide's `centerCrop()` transform and must pair with the
+            // explicit size for the downsample hint to take effect.
+            contentFit="cover"
           />
         ) : (
           <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />

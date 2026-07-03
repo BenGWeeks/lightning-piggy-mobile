@@ -22,6 +22,7 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
@@ -33,6 +34,7 @@ interface Props {
 
 const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { profile, publishProfile, signEvent, isLoggedIn } = useNostr();
   const [displayName, setDisplayName] = useState('');
@@ -128,7 +130,10 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       const url = await uploadImage(scrubbed.uri, isLoggedIn ? signEvent : null, scrubbed.base64);
       setUrl(url);
     } catch (error) {
-      Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');
+      Alert.alert(
+        t('editProfileSheet.uploadFailedTitle'),
+        error instanceof Error ? error.message : t('editProfileSheet.tryAgain'),
+      );
     } finally {
       setUploading(false);
     }
@@ -146,10 +151,13 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
     });
     setSaving(false);
     if (success) {
-      Alert.alert('Profile Updated', 'Your Nostr profile has been published.');
+      Alert.alert(
+        t('editProfileSheet.profileUpdatedTitle'),
+        t('editProfileSheet.profileUpdatedMessage'),
+      );
       onClose();
     } else {
-      Alert.alert('Error', 'Failed to publish profile. Please try again.');
+      Alert.alert(t('editProfileSheet.errorTitle'), t('editProfileSheet.publishFailed'));
     }
   };
 
@@ -170,18 +178,16 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
         contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Edit Profile</Text>
-        <Text style={styles.safetyTip}>
-          Tip: You don't need to use your real name or photo for your profile.
-        </Text>
+        <Text style={styles.title}>{t('editProfileSheet.title')}</Text>
+        <Text style={styles.safetyTip}>{t('editProfileSheet.safetyTip')}</Text>
 
         {/* Banner image */}
-        <Text style={styles.label}>Banner Image</Text>
+        <Text style={styles.label}>{t('editProfileSheet.bannerImage')}</Text>
         <TouchableOpacity
           style={styles.bannerPicker}
           onPress={() => pickAndUpload('banner')}
           disabled={uploadingBanner}
-          accessibilityLabel="Change banner image"
+          accessibilityLabel={t('editProfileSheet.changeBanner')}
           testID="edit-banner-picker"
         >
           {uploadingBanner ? (
@@ -206,18 +212,18 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
                 />
                 <Circle cx="8.5" cy="8.5" r="1.5" fill={colors.textSupplementary} />
               </Svg>
-              <Text style={styles.placeholderText}>Tap to choose banner</Text>
+              <Text style={styles.placeholderText}>{t('editProfileSheet.tapToChooseBanner')}</Text>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Profile picture */}
-        <Text style={styles.label}>Profile Picture</Text>
+        <Text style={styles.label}>{t('editProfileSheet.profilePicture')}</Text>
         <TouchableOpacity
           style={styles.avatarPicker}
           onPress={() => pickAndUpload('picture')}
           disabled={uploadingPicture}
-          accessibilityLabel="Change profile picture"
+          accessibilityLabel={t('editProfileSheet.changePicture')}
           testID="edit-picture-picker"
         >
           {uploadingPicture ? (
@@ -227,25 +233,25 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           ) : (
             <View style={styles.avatarPlaceholder}>
               <UserRound size={36} color={colors.textBody} strokeWidth={1.75} />
-              <Text style={styles.avatarPlaceholderText}>Tap</Text>
+              <Text style={styles.avatarPlaceholderText}>{t('editProfileSheet.tap')}</Text>
             </View>
           )}
         </TouchableOpacity>
 
-        <Text style={styles.label}>Display Name</Text>
+        <Text style={styles.label}>{t('editProfileSheet.displayName')}</Text>
         <BottomSheetTextInput
           style={styles.input}
-          placeholder="Your name"
+          placeholder={t('editProfileSheet.yourName')}
           placeholderTextColor={colors.textSupplementary}
           value={displayName}
           onChangeText={setDisplayName}
           autoCapitalize="words"
           autoCorrect={false}
-          accessibilityLabel="Display name"
+          accessibilityLabel={t('editProfileSheet.displayName')}
           testID="edit-display-name"
         />
 
-        <Text style={styles.label}>Lightning Address</Text>
+        <Text style={styles.label}>{t('editProfileSheet.lightningAddress')}</Text>
         <BottomSheetTextInput
           style={styles.input}
           placeholder="you@wallet.com"
@@ -255,20 +261,20 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
-          accessibilityLabel="Lightning address"
+          accessibilityLabel={t('editProfileSheet.lightningAddress')}
           testID="edit-lud16"
         />
 
-        <Text style={styles.label}>About</Text>
+        <Text style={styles.label}>{t('editProfileSheet.about')}</Text>
         <BottomSheetTextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Tell the world about yourself..."
+          placeholder={t('editProfileSheet.aboutPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={about}
           onChangeText={setAbout}
           multiline
           numberOfLines={3}
-          accessibilityLabel="About"
+          accessibilityLabel={t('editProfileSheet.about')}
           testID="edit-about"
         />
 
@@ -276,13 +282,13 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           style={[styles.saveButton, saving && styles.disabled]}
           onPress={handleSave}
           disabled={saving}
-          accessibilityLabel="Save profile"
+          accessibilityLabel={t('editProfileSheet.saveProfile')}
           testID="save-profile"
         >
           {saving ? (
             <ActivityIndicator color={colors.white} />
           ) : (
-            <Text style={styles.saveButtonText}>Save Profile</Text>
+            <Text style={styles.saveButtonText}>{t('editProfileSheet.saveProfile')}</Text>
           )}
         </TouchableOpacity>
       </BottomSheetScrollView>
