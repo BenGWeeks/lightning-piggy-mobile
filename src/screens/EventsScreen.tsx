@@ -23,11 +23,14 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import EventsFilterSheet, {
   countActiveFilters,
   type EventsSortKey,
 } from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t as translate } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import {
@@ -60,6 +63,7 @@ interface Props {
  * Replaces the M1 "Coming soon" stub. Closes M7 of the Explore plan.
  */
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // Coalesce per-event setState bursts during the nearby-event relay
@@ -188,9 +192,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         const perm = await Location.requestForegroundPermissionsAsync();
         if (cancelled()) return;
         if (perm.status !== 'granted') {
-          setError(
-            'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
-          );
+          setError(t('eventsScreen.locationPermissionRequired'));
           setLoading(false);
           return;
         }
@@ -246,7 +248,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         setLoading(false);
       }
     },
-    [resetEvents, enqueueEvent],
+    [resetEvents, enqueueEvent, t],
   );
 
   // Open the relay subscription only while the screen is focused (audit
@@ -357,12 +359,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     // affordance is discoverable and the door is propped open.
     Toast.show({
       type: 'info',
-      text1: 'Creating events lands soon',
-      text2:
-        'For now publish your meetup via Flockstr or Coracle — it shows up here automatically.',
+      text1: t('eventsScreen.creatingEventsSoonTitle'),
+      text2: t('eventsScreen.creatingEventsSoonBody'),
       visibilityTime: 5000,
     });
-  }, []);
+  }, [t]);
 
   const openInMaps = useCallback((event: ParsedEvent) => {
     const q = event.location ?? (event.geohash ? event.geohash : event.title);
@@ -376,32 +377,27 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="events-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('eventsScreen.backToExplore')}
             testID="events-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Events</Text>
+          <Text style={styles.headerTitle}>{t('eventsScreen.events')}</Text>
           <TouchableOpacity
             onPress={onCreateEvent}
-            accessibilityLabel="Create event"
+            accessibilityLabel={t('eventsScreen.createEvent')}
             testID="events-create-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Plus size={20} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.headerTagline}>Bitcoin meetups and gatherings near you</Text>
+        <Text style={styles.headerTagline}>{t('eventsScreen.headerTagline')}</Text>
       </View>
 
       {/* Search bar — filters the loaded events client-side. Cheap, no
@@ -411,7 +407,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search events…"
+          placeholder={t('eventsScreen.searchPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -423,7 +419,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.filterIconButton}
           onPress={() => setFilterSheetOpen(true)}
           testID="events-filter-button"
-          accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+          accessibilityLabel={
+            activeFilterCount > 0
+              ? t('eventsScreen.filtersActive', { count: activeFilterCount })
+              : t('eventsScreen.filters')
+          }
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
@@ -438,23 +438,20 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       {loading && events.size === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.brandPink} />
-          <Text style={styles.subtle}>Looking for Bitcoin events near you…</Text>
+          <Text style={styles.subtle}>{t('eventsScreen.lookingForEvents')}</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => reload()}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+            <Text style={styles.retryButtonText}>{t('eventsScreen.retry')}</Text>
           </TouchableOpacity>
         </View>
       ) : sortedEvents.length === 0 ? (
         <View style={styles.center} testID="events-empty-state">
           <CalendarDays size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>No upcoming events nearby</Text>
-          <Text style={styles.subtle}>
-            Bitcoin meetups, conferences and similar gatherings published as NIP-52 calendar events
-            show up here. Try widening your search by travelling — or organise one!
-          </Text>
+          <Text style={styles.emptyTitle}>{t('eventsScreen.noUpcomingEvents')}</Text>
+          <Text style={styles.subtle}>{t('eventsScreen.emptyStateBody')}</Text>
         </View>
       ) : (
         <>
@@ -513,7 +510,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             ListEmptyComponent={
               searchQuery.trim() !== '' ? (
                 <Text style={styles.emptySearchText}>
-                  Nothing matches “{searchQuery.trim()}”. Try a city, hashtag, or organiser name.
+                  {t('eventsScreen.noSearchMatches', { query: searchQuery.trim() })}
                 </Text>
               ) : null
             }
@@ -543,7 +540,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 const formatDate = (ts: number | null): string => {
-  if (!ts) return 'Time TBA';
+  if (!ts) return translate('eventsScreen.timeTba');
   const d = new Date(ts * 1000);
   return d.toLocaleString(undefined, {
     weekday: 'short',
@@ -571,49 +568,52 @@ const EventHero: React.FC<{
   onOpenInMaps: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => (
-  <TouchableOpacity
-    style={styles.heroCard}
-    onPress={onPress}
-    activeOpacity={0.85}
-    testID={`event-hero-${event.d}`}
-    accessibilityLabel={`Next event: ${event.title}`}
-  >
-    {event.imageUrl ? (
-      <Image source={{ uri: event.imageUrl }} style={styles.heroImage} resizeMode="cover" />
-    ) : (
-      <View style={[styles.heroImage, styles.heroImageFallback]}>
-        <CalendarDays size={48} color={colors.brandPink} strokeWidth={1.5} />
-      </View>
-    )}
-    <View style={styles.heroBody}>
-      <Text style={styles.heroUpNext}>UP NEXT</Text>
-      <Text style={styles.heroTitle} numberOfLines={2}>
-        {event.title}
-      </Text>
-      <Text style={styles.heroMeta} numberOfLines={2}>
-        {formatDate(event.startsAt)}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-        {event.location ? ` · ${event.location}` : ''}
-      </Text>
-      {event.description ? (
-        <Text style={styles.heroDescription} numberOfLines={expanded ? 0 : 3}>
-          {event.description}
+}> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={styles.heroCard}
+      onPress={onPress}
+      activeOpacity={0.85}
+      testID={`event-hero-${event.d}`}
+      accessibilityLabel={t('eventsScreen.nextEvent', { title: event.title })}
+    >
+      {event.imageUrl ? (
+        <Image source={{ uri: event.imageUrl }} style={styles.heroImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.heroImage, styles.heroImageFallback]}>
+          <CalendarDays size={48} color={colors.brandPink} strokeWidth={1.5} />
+        </View>
+      )}
+      <View style={styles.heroBody}>
+        <Text style={styles.heroUpNext}>{t('eventsScreen.upNext')}</Text>
+        <Text style={styles.heroTitle} numberOfLines={2}>
+          {event.title}
         </Text>
-      ) : null}
-      {expanded && (event.location || event.geohash) ? (
-        <TouchableOpacity
-          style={styles.locationButton}
-          onPress={onOpenInMaps}
-          testID={`event-hero-${event.d}-open-in-maps`}
-        >
-          <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.locationButtonText}>Open in Maps</Text>
-        </TouchableOpacity>
-      ) : null}
-    </View>
-  </TouchableOpacity>
-);
+        <Text style={styles.heroMeta} numberOfLines={2}>
+          {formatDate(event.startsAt)}
+          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+          {event.location ? ` · ${event.location}` : ''}
+        </Text>
+        {event.description ? (
+          <Text style={styles.heroDescription} numberOfLines={expanded ? 0 : 3}>
+            {event.description}
+          </Text>
+        ) : null}
+        {expanded && (event.location || event.geohash) ? (
+          <TouchableOpacity
+            style={styles.locationButton}
+            onPress={onOpenInMaps}
+            testID={`event-hero-${event.d}-open-in-maps`}
+          >
+            <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
+            <Text style={styles.locationButtonText}>{t('eventsScreen.openInMaps')}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 const EventRow: React.FC<{
   event: ParsedEvent;
@@ -625,6 +625,7 @@ const EventRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+  const t = useTranslation();
   const { day, month } = dayLabel(event.startsAt);
   return (
     <TouchableOpacity
@@ -633,7 +634,7 @@ const EventRow: React.FC<{
       testID={`event-row-${event.d}`}
       accessibilityLabel={event.title}
     >
-      {upNext ? <Text style={styles.upNextChip}>UP NEXT</Text> : null}
+      {upNext ? <Text style={styles.upNextChip}>{t('eventsScreen.upNext')}</Text> : null}
       <View style={styles.dateBlock}>
         <Text style={styles.dateMonth}>{month}</Text>
         <Text style={styles.dateDay}>{day}</Text>
@@ -657,7 +658,7 @@ const EventRow: React.FC<{
             venue address; events without a geohash render an em-dash so
             the layout stays consistent row-to-row. */}
         <Text style={styles.rowDistance} numberOfLines={1}>
-          {Number.isFinite(distance) ? formatDistance(distance) : '— distance unknown'}
+          {Number.isFinite(distance) ? formatDistance(distance) : t('eventsScreen.distanceUnknown')}
         </Text>
       </View>
       <ChevronRight size={20} color={colors.textSupplementary} strokeWidth={2.5} />
@@ -675,13 +676,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

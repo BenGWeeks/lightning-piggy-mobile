@@ -5,6 +5,7 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 import { CURRENCY_LIST, type CurrencyInfo } from '../../services/fiatService';
 
@@ -21,6 +22,7 @@ const filterCurrencies = (query: string): readonly CurrencyInfo[] => {
 
 const DisplayScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { currency, setCurrency } = useWallet();
@@ -36,7 +38,7 @@ const DisplayScreen: React.FC = () => {
       <TouchableOpacity
         style={[styles.row, active && styles.rowActive]}
         onPress={() => setCurrency(item.code)}
-        accessibilityLabel={`Currency ${item.code} ${item.name}`}
+        accessibilityLabel={t('displayScreen.currencyItem', { code: item.code, name: item.name })}
         accessibilityState={{ selected: active }}
         testID={`currency-${item.code}`}
       >
@@ -61,18 +63,18 @@ const DisplayScreen: React.FC = () => {
   // RN doesn't warn about VirtualizedList nested inside a ScrollView.
   const listHeader = (
     <>
-      <Text style={sharedAccountStyles.sectionLabel}>Currency</Text>
+      <Text style={sharedAccountStyles.sectionLabel}>{t('displayScreen.currency')}</Text>
       <View style={styles.searchRow}>
         <Search size={18} color={colors.textSupplementary} />
         <TextInput
           style={styles.searchInput}
           value={search}
           onChangeText={setSearch}
-          placeholder="Search by code or name"
+          placeholder={t('displayScreen.searchPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           autoCapitalize="characters"
           autoCorrect={false}
-          accessibilityLabel="Search currencies"
+          accessibilityLabel={t('displayScreen.searchCurrencies')}
           testID="currency-search"
         />
       </View>
@@ -80,7 +82,7 @@ const DisplayScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title="Currency" scrollable={false}>
+    <AccountScreenLayout title={t('displayScreen.currency')} scrollable={false}>
       <View style={styles.listCard}>
         <FlatList
           data={filtered}
@@ -90,7 +92,7 @@ const DisplayScreen: React.FC = () => {
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No currencies match your search.</Text>
+              <Text style={styles.emptyText}>{t('displayScreen.noMatch')}</Text>
             </View>
           }
           keyboardShouldPersistTaps="handled"

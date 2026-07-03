@@ -121,14 +121,6 @@ export const createMessagesScreenStyles = (colors: Palette) =>
       paddingTop: 0,
       overflow: 'hidden',
     },
-    bgImage: {
-      position: 'absolute',
-      width: '120%',
-      height: 420,
-      right: -40,
-      top: -20,
-      opacity: 0.15,
-    },
     listContent: {
       paddingTop: 12,
       paddingBottom: 20,

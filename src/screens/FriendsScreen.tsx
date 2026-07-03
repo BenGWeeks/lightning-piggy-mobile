@@ -9,9 +9,9 @@ import React, {
 } from 'react';
 import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,6 +23,7 @@ import { fetchProfile } from '../services/nostrService';
 import { useWallet } from '../contexts/WalletContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
@@ -77,6 +78,7 @@ interface ListItem {
 
 const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, refreshProfile, relays } = useNostr();
@@ -342,7 +344,10 @@ const FriendsScreen: React.FC = () => {
   const handleZap = useCallback(
     async (item: ListItem) => {
       if (!hasWallets) {
-        Alert.alert('No wallet attached', 'Connect a Lightning wallet first to send zaps.');
+        Alert.alert(
+          t('friendsScreen.noWalletAttachedTitle'),
+          t('friendsScreen.noWalletAttachedMessage'),
+        );
         return;
       }
       // The contacts-list profile has its lud16 stripped (anti-redirect
@@ -355,15 +360,15 @@ const FriendsScreen: React.FC = () => {
       }
       if (!address) {
         Alert.alert(
-          'No Lightning address',
-          `${item.name} hasn’t published a Lightning address, so they can’t receive zaps yet.`,
+          t('friendsScreen.noLightningAddressTitle'),
+          t('friendsScreen.noLightningAddressMessage', { name: item.name }),
         );
         return;
       }
       setZapTarget({ ...item, lightningAddress: address });
       setSendOpen(true);
     },
-    [hasWallets, relays],
+    [hasWallets, relays, t],
   );
 
   // Tap on a friend row → open the bottom-sheet preview. The sheet
@@ -418,10 +423,13 @@ const FriendsScreen: React.FC = () => {
         });
         return true;
       }
-      Alert.alert('Error', result.error || 'Failed to add contact');
+      Alert.alert(
+        t('friendsScreen.errorTitle'),
+        result.error || t('friendsScreen.failedToAddContact'),
+      );
       return false;
     },
-    [addContact, contacts],
+    [addContact, contacts, t],
   );
 
   // Resolve the celebration's name + avatar LIVE from `contacts` rather than the
@@ -470,7 +478,7 @@ const FriendsScreen: React.FC = () => {
       // wallet. Message needs a Nostr pubkey (phone-only contacts don't
       // have one). Disabled-reason strings are read to screen readers.
       const canZap = hasWallets;
-      const zapDisabledReason = 'no wallet attached';
+      const zapDisabledReason = t('friendsScreen.noWalletAttachedReason');
       return (
         <ContactListItem
           name={item.name}
@@ -502,19 +510,22 @@ const FriendsScreen: React.FC = () => {
         />
       );
     },
-    [handleZap, handleContactPress, hasWallets, navigation],
+    [handleZap, handleContactPress, hasWallets, navigation, t],
   );
 
   const filters: { key: Filter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'nostr', label: 'Nostr' },
-    { key: 'contacts', label: 'Contacts' },
+    { key: 'all', label: t('friendsScreen.filterAll') },
+    { key: 'nostr', label: t('friendsScreen.filterNostr') },
+    { key: 'contacts', label: t('friendsScreen.filterContacts') },
   ];
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
-      <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
+      <BrandPatternBackground variant="friends-rotated" />
+      <TabHeader
+        title={t('friendsScreen.title')}
+        icon={<Users size={20} color={colors.brandPink} />}
+      />
       <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
@@ -524,13 +535,13 @@ const FriendsScreen: React.FC = () => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search..."
+                placeholder={t('friendsScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search friends"
+                accessibilityLabel={t('friendsScreen.searchFriends')}
                 testID="search-input"
               />
               <TouchableOpacity
@@ -539,7 +550,7 @@ const FriendsScreen: React.FC = () => {
                   setSearchExpanded(false);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('friendsScreen.closeSearch')}
                 testID="close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -552,7 +563,7 @@ const FriendsScreen: React.FC = () => {
                   key={f.key}
                   style={[styles.chip, filter === f.key && styles.chipActive]}
                   onPress={() => setFilterAndPersist(f.key)}
-                  accessibilityLabel={`${f.label} filter`}
+                  accessibilityLabel={t('friendsScreen.filterA11y', { filter: f.label })}
                   accessibilityRole="button"
                   accessibilityState={{ selected: filter === f.key }}
                   testID={`friends-filter-${f.key}`}
@@ -579,7 +590,7 @@ const FriendsScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={() => navigation.navigate('Groups')}
-                accessibilityLabel="Groups"
+                accessibilityLabel={t('friendsScreen.groups')}
                 testID="groups-button"
               >
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -602,7 +613,7 @@ const FriendsScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.addButton}
                   onPress={() => setAddFriendVisible(true)}
-                  accessibilityLabel="Add friend"
+                  accessibilityLabel={t('friendsScreen.addFriend')}
                   testID="add-friend-button"
                 >
                   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -630,15 +641,13 @@ const FriendsScreen: React.FC = () => {
       <View style={styles.content}>
         {!isLoggedIn && filter !== 'contacts' ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Connect Nostr</Text>
-            <Text style={styles.emptySubtitle}>
-              Connect your Nostr identity to see your friends here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('friendsScreen.connectNostr')}</Text>
+            <Text style={styles.emptySubtitle}>{t('friendsScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
-              <Text style={styles.connectButtonText}>Go to Account</Text>
+              <Text style={styles.connectButtonText}>{t('friendsScreen.goToAccount')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -662,7 +671,9 @@ const FriendsScreen: React.FC = () => {
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
                     <Text style={styles.emptySubtitle}>
-                      {search ? 'No contacts match your search.' : 'No contacts found.'}
+                      {search
+                        ? t('friendsScreen.noContactsMatch')
+                        : t('friendsScreen.noContactsFound')}
                     </Text>
                   </View>
                 }
@@ -692,7 +703,11 @@ const FriendsScreen: React.FC = () => {
         contact={selectedContact}
         onViewFullProfile={handleViewFullProfile}
         canZap={hasWallets && !!selectedContact?.hasLightningAddress}
-        zapDisabledReason={!hasWallets ? 'no wallet attached' : 'no Lightning address'}
+        zapDisabledReason={
+          !hasWallets
+            ? t('friendsScreen.noWalletAttachedReason')
+            : t('friendsScreen.noLightningAddressReason')
+        }
         onZap={
           selectedContact
             ? () => {

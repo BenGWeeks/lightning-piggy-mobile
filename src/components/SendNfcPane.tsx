@@ -8,6 +8,7 @@ import {
   type NfcTagContent,
 } from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createSendNfcPaneStyles } from '../styles/SendNfcPane.styles';
 
 interface Props {
@@ -25,6 +26,7 @@ type PaneStatus = 'checking' | 'armed' | 'unsupported' | 'error';
 // onPause), and never leave a dangling session on unmount.
 const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createSendNfcPaneStyles(colors), [colors]);
   const [status, setStatus] = useState<PaneStatus>('checking');
   const [errorMessage, setErrorMessage] = useState('');
@@ -60,17 +62,15 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
       }, 600);
     } catch (err) {
       if (!activeRef.current) return;
-      const raw = err instanceof Error ? err.message : 'Failed to read NFC tag';
+      const raw = err instanceof Error ? err.message : t('sendNfcPane.failedToRead');
       // Session cancelled (mode switch / sheet close) — not an error.
       if (/cancell?ed/i.test(raw)) return;
       setStatus('error');
       setErrorMessage(
-        /NFC unavailable on this device/i.test(raw)
-          ? 'NFC is turned off. Please enable NFC in your device settings.'
-          : raw,
+        /NFC unavailable on this device/i.test(raw) ? t('sendNfcPane.nfcTurnedOff') : raw,
       );
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!active) return;
@@ -113,25 +113,23 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
         testID="send-nfc-indicator"
       />
       {status === 'unsupported' ? (
-        <Text style={styles.description}>NFC isn't available on this device.</Text>
+        <Text style={styles.description}>{t('sendNfcPane.nfcUnavailable')}</Text>
       ) : status === 'error' ? (
         <>
           <Text style={styles.description}>{errorMessage}</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => void arm()}
-            accessibilityLabel="Try NFC again"
+            accessibilityLabel={t('sendNfcPane.tryNfcAgain')}
             testID="send-nfc-retry"
           >
-            <Text style={styles.retryButtonText}>Try Again</Text>
+            <Text style={styles.retryButtonText}>{t('sendNfcPane.tryAgain')}</Text>
           </TouchableOpacity>
         </>
       ) : (
         <>
-          <Text style={styles.instruction}>Hold the tag to the back of your phone</Text>
-          <Text style={styles.description}>
-            We'll read a Lightning invoice, address or LNURL from the tag automatically.
-          </Text>
+          <Text style={styles.instruction}>{t('sendNfcPane.holdTag')}</Text>
+          <Text style={styles.description}>{t('sendNfcPane.readInstructions')}</Text>
         </>
       )}
     </View>

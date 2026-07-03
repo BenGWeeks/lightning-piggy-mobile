@@ -3,6 +3,7 @@ import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Marker } from '@maplibre/maplibre-react-native';
 import { PiggyBank, MapPin, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createCacheMapMarkerStyles } from '../styles/CacheMapMarker.styles';
 import { hasPrize } from '../utils/cachePrize';
 
@@ -55,12 +56,15 @@ export const CacheMapMarker: React.FC<CacheMapMarkerProps> = ({
   markerDimStyle,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // Memoise so re-renders of a map carrying many markers don't each redo
   // StyleSheet.create — mirrors LibreMiniMap's own style memoisation.
   const styles = useMemo(() => createCacheMapMarkerStyles(colors), [colors]);
   const prize = hasPrize({ isLpPiggy, payoutSats });
 
-  const label = isLpPiggy ? 'Lightning Piggy cache marker' : 'NIP-GC cache marker';
+  const label = isLpPiggy
+    ? t('cacheMapMarker.lpCacheMarker')
+    : t('cacheMapMarker.nipGcCacheMarker');
 
   // Only present the pin as an activatable "button" when there's actually an
   // onPress to fire — a button role with no action misleads screen readers
@@ -93,7 +97,7 @@ export const CacheMapMarker: React.FC<CacheMapMarkerProps> = ({
             testID="cache-marker-prize-bolt"
             accessible
             accessibilityRole="image"
-            accessibilityLabel="Lightning payout available"
+            accessibilityLabel={t('cacheMapMarker.lightningPayoutAvailable')}
           >
             <Zap size={11} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
           </View>

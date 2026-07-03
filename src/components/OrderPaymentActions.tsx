@@ -5,6 +5,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Zap, QrCode, Copy, Check } from 'lucide-react-native';
 import Toast from './BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createOrderPaymentActionsStyles } from '../styles/OrderPaymentActions.styles';
 import { extractInvoice } from '../utils/messageContent';
 import { payableBolt11, type ParsedOrderEvent } from '../utils/orderEvents';
@@ -48,6 +49,7 @@ function OrderPaymentActions({
   id,
 }: Props): React.ReactElement | null {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createOrderPaymentActionsStyles(colors), [colors]);
   const [showQr, setShowQr] = useState(false);
 
@@ -66,11 +68,11 @@ function OrderPaymentActions({
       <View style={styles.container}>
         <View
           style={styles.paidBadge}
-          accessibilityLabel="Payment received"
+          accessibilityLabel={t('orderPaymentActions.paymentReceivedA11y')}
           testID={`${testIdPrefix}-order-paid-${id}`}
         >
           <Check size={14} color={colors.greenDark} strokeWidth={3} />
-          <Text style={styles.paidBadgeText}>Paid</Text>
+          <Text style={styles.paidBadgeText}>{t('orderPaymentActions.paid')}</Text>
         </View>
       </View>
     );
@@ -90,7 +92,7 @@ function OrderPaymentActions({
     await Clipboard.setStringAsync(bolt11);
     Toast.show({
       type: 'success',
-      text1: 'Invoice copied',
+      text1: t('orderPaymentActions.invoiceCopied'),
       position: 'top',
       visibilityTime: 1800,
     });
@@ -101,11 +103,11 @@ function OrderPaymentActions({
       {paid ? (
         <View
           style={styles.paidBadge}
-          accessibilityLabel="Invoice paid"
+          accessibilityLabel={t('orderPaymentActions.invoicePaidA11y')}
           testID={`${testIdPrefix}-order-paid-${id}`}
         >
           <Check size={14} color={colors.greenDark} strokeWidth={3} />
-          <Text style={styles.paidBadgeText}>Paid</Text>
+          <Text style={styles.paidBadgeText}>{t('orderPaymentActions.paid')}</Text>
         </View>
       ) : (
         <>
@@ -116,17 +118,17 @@ function OrderPaymentActions({
               style={styles.payButton}
               onPress={() => onPayInvoice(bolt11)}
               accessibilityRole="button"
-              accessibilityLabel="Pay this order invoice"
+              accessibilityLabel={t('orderPaymentActions.payInvoiceA11y')}
               testID={`${testIdPrefix}-order-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.payButtonText}>Pay</Text>
+              <Text style={styles.payButtonText}>{t('orderPaymentActions.pay')}</Text>
             </TouchableOpacity>
           ) : null}
 
           {expired ? (
             <Text style={styles.expiredText} testID={`${testIdPrefix}-order-expired-${id}`}>
-              This invoice has expired
+              {t('orderPaymentActions.invoiceExpired')}
             </Text>
           ) : null}
 
@@ -135,21 +137,25 @@ function OrderPaymentActions({
               style={styles.secondaryButton}
               onPress={() => setShowQr((v) => !v)}
               accessibilityRole="button"
-              accessibilityLabel={showQr ? 'Hide invoice QR code' : 'Show invoice QR code'}
+              accessibilityLabel={
+                showQr ? t('orderPaymentActions.hideQrA11y') : t('orderPaymentActions.showQrA11y')
+              }
               testID={`${testIdPrefix}-order-qr-toggle-${id}`}
             >
               <QrCode size={16} color={colors.brandPink} />
-              <Text style={styles.secondaryButtonText}>{showQr ? 'Hide QR' : 'Show QR'}</Text>
+              <Text style={styles.secondaryButtonText}>
+                {showQr ? t('orderPaymentActions.hideQr') : t('orderPaymentActions.showQr')}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={handleCopy}
               accessibilityRole="button"
-              accessibilityLabel="Copy invoice"
+              accessibilityLabel={t('orderPaymentActions.copyInvoiceA11y')}
               testID={`${testIdPrefix}-order-copy-${id}`}
             >
               <Copy size={16} color={colors.brandPink} />
-              <Text style={styles.secondaryButtonText}>Copy</Text>
+              <Text style={styles.secondaryButtonText}>{t('orderPaymentActions.copy')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -158,7 +164,7 @@ function OrderPaymentActions({
               style={styles.qrWrap}
               accessible
               accessibilityRole="image"
-              accessibilityLabel="Lightning invoice QR code"
+              accessibilityLabel={t('orderPaymentActions.qrCodeA11y')}
               testID={`${testIdPrefix}-order-qr-${id}`}
             >
               {/* Normalise to all-uppercase for QR efficiency: a bolt11 is
@@ -170,7 +176,7 @@ function OrderPaymentActions({
                 backgroundColor="#FFFFFF"
                 color="#000000"
               />
-              <Text style={styles.qrHint}>Scan with any Lightning wallet</Text>
+              <Text style={styles.qrHint}>{t('orderPaymentActions.scanHint')}</Text>
             </View>
           ) : null}
         </>

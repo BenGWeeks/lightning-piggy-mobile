@@ -25,6 +25,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Sparkles } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { lightPalette } from '../styles/palettes';
 import type { Palette } from '../styles/palettes';
 
@@ -142,6 +143,7 @@ interface Props {
 
 const SecretModeCelebration: React.FC<Props> = ({ visible, enabled, onDismiss }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const themed = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
 
@@ -202,20 +204,22 @@ const SecretModeCelebration: React.FC<Props> = ({ visible, enabled, onDismiss })
             <Sparkles size={36} color={colors.white} strokeWidth={2.5} />
           </View>
           <Text style={themed.title}>
-            {enabled ? 'Secret Mode Enabled' : 'Secret Mode Disabled'}
+            {enabled
+              ? t('secretModeCelebration.titleEnabled')
+              : t('secretModeCelebration.titleDisabled')}
           </Text>
           <Text style={themed.subtitle}>
             {enabled
-              ? "You've unlocked the hidden surfaces — hot-wallet import, the Following-only chip on Messages and Groups, the Web-of-Trust wider tiers, and other debug widgets."
-              : 'Hidden surfaces are tucked away again. Restart if any toggle still appears.'}
+              ? t('secretModeCelebration.bodyEnabled')
+              : t('secretModeCelebration.bodyDisabled')}
           </Text>
           <TouchableOpacity
             style={themed.button}
             onPress={onDismiss}
             testID="secret-mode-celebration-ok"
-            accessibilityLabel="Dismiss"
+            accessibilityLabel={t('secretModeCelebration.dismiss')}
           >
-            <Text style={themed.buttonText}>OK</Text>
+            <Text style={themed.buttonText}>{t('secretModeCelebration.ok')}</Text>
           </TouchableOpacity>
         </Animated.View>
       </View>

@@ -31,6 +31,7 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 import { CacheMapMarker } from './CacheMapMarker';
@@ -235,6 +236,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
   testID,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createLibreMiniMapStyles(colors), [colors]);
   // When `uniformMarkerSize` is set (the full Map asks for it), every marker
   // chassis renders at this diameter so merchant / cache / event pins, the
@@ -673,7 +675,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.zoomButton}
           onPress={zoomBy(1)}
-          accessibilityLabel="Zoom in"
+          accessibilityLabel={t('libreMiniMap.zoomIn')}
           testID="libre-minimap-zoom-in"
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
@@ -682,7 +684,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.zoomButton}
           onPress={zoomBy(-1)}
-          accessibilityLabel="Zoom out"
+          accessibilityLabel={t('libreMiniMap.zoomOut')}
           testID="libre-minimap-zoom-out"
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
@@ -706,7 +708,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.recenterButton}
           onPress={recenterOnMe}
-          accessibilityLabel="Recenter on my location"
+          accessibilityLabel={t('libreMiniMap.recenterOnMyLocation')}
           testID="libre-minimap-recenter"
         >
           <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
@@ -716,7 +718,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         <TouchableOpacity
           style={interactive ? styles.legendButtonAboveRecenter : styles.legendButton}
           onPress={onOpenLegend}
-          accessibilityLabel="Show map legend"
+          accessibilityLabel={t('libreMiniMap.showMapLegend')}
           testID="libre-minimap-legend"
         >
           <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
@@ -728,11 +730,11 @@ const LibreMiniMapInner: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.openBadge}
           onPress={onTapMap}
-          accessibilityLabel="Open full map"
+          accessibilityLabel={t('libreMiniMap.openFullMap')}
           testID="libre-minimap-open-button"
         >
           <Maximize2 size={12} color={colors.white} strokeWidth={2.5} />
-          <Text style={styles.openBadgeText}>Open map</Text>
+          <Text style={styles.openBadgeText}>{t('libreMiniMap.openMap')}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
