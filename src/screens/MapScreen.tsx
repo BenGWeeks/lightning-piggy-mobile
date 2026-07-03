@@ -63,6 +63,8 @@ import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { useFriendsLiveLocations } from '../hooks/useFriendsLiveLocations';
 import { useIsFocused } from '@react-navigation/native';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t } from '../i18n';
 
 interface Props {
   // Composite so the back handler can return to the DM (`Conversation` is a
@@ -82,6 +84,7 @@ type PermissionState = 'unknown' | 'granted' | 'denied';
  * Google Maps, no API key, OSM tiles streamed from openstreetmap.org).
  */
 const MapScreen: React.FC<Props> = ({ navigation, route }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   // Tier-aware predicate from the Web-of-Trust context. `isTrusted`
   // already encodes the current wotTier (Friends / FoF / All), so
@@ -424,7 +427,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // The header + permission-screen back button can now return to a DM, so the
   // "Back to Explore" wording only fits the in-stack entry points.
-  const backLabel = route.params?.returnTo ? 'Back' : 'Back to Explore';
+  const backLabel = route.params?.returnTo ? t('mapScreen.back') : t('mapScreen.backToExplore');
 
   // ------- render --------------------------------------------------------
 
@@ -439,11 +442,8 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
-          <Text style={styles.deniedTitle}>Location permission required</Text>
-          <Text style={styles.deniedSubtitle}>
-            We use your location to show nearby Bitcoin merchants. Grant location access in Settings
-            to enable this map.
-          </Text>
+          <Text style={styles.deniedTitle}>{t('mapScreen.locationRequiredTitle')}</Text>
+          <Text style={styles.deniedSubtitle}>{t('mapScreen.locationRequiredSubtitle')}</Text>
           <TouchableOpacity
             style={styles.deniedButton}
             onPress={handleBack}
@@ -496,9 +496,12 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.footerError}>{error}</Text>
         ) : (
           <Text style={styles.footerText}>
-            {places.length} merchants
+            {t('mapScreen.merchantsCount', { count: places.length })}
             {caches.map.size > 0
-              ? ` · ${cacheCounts.piglets} Piglets · ${cacheCounts.others} caches`
+              ? t('mapScreen.cachesSuffix', {
+                  piglets: cacheCounts.piglets,
+                  caches: cacheCounts.others,
+                })
               : ''}
           </Text>
         )}
@@ -577,6 +580,7 @@ const Header: React.FC<{
   colors: Palette;
   backLabel: string;
 }> = ({ onBack, onOpenFilters, colors, backLabel }) => {
+  const t = useTranslation();
   const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
     <View style={styles.header}>
@@ -588,10 +592,10 @@ const Header: React.FC<{
       >
         <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Map</Text>
+      <Text style={styles.headerTitle}>{t('mapScreen.title')}</Text>
       <TouchableOpacity
         onPress={onOpenFilters}
-        accessibilityLabel="Filter pins on map"
+        accessibilityLabel={t('mapScreen.filterPins')}
         testID="map-filter-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
@@ -668,6 +672,7 @@ const MerchantDetailSheet: React.FC<{
   colors: Palette;
   styles: MapScreenStyles;
 }> = ({ place, onClose, onViewDetails, colors, styles }) => {
+  const t = useTranslation();
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const days = daysSinceVerified(place);
   const lud16 = lightningAddressOf(place);
@@ -675,10 +680,10 @@ const MerchantDetailSheet: React.FC<{
     days === null
       ? null
       : days === 0
-        ? 'Verified today via OSM'
+        ? t('mapScreen.verifiedToday')
         : days === 1
-          ? 'Verified 1 day ago via OSM'
-          : `Verified ${days} days ago via OSM`;
+          ? t('mapScreen.verifiedOneDay')
+          : t('mapScreen.verifiedDaysAgo', { days });
 
   return (
     <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
@@ -701,7 +706,7 @@ const MerchantDetailSheet: React.FC<{
             );
           })()}
           <Text style={styles.sheetTitle} testID="merchant-detail-name">
-            {place.tags.name ?? 'Unnamed merchant'}
+            {place.tags.name ?? t('mapScreen.unnamedMerchant')}
           </Text>
         </View>
         <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
@@ -709,18 +714,18 @@ const MerchantDetailSheet: React.FC<{
           {isBoosted(place) && (
             <View style={styles.sheetChipFeatured} testID="merchant-detail-featured">
               <Sparkles size={12} color={colors.textHeader} strokeWidth={2.5} />
-              <Text style={styles.sheetChipFeaturedText}>Featured</Text>
+              <Text style={styles.sheetChipFeaturedText}>{t('mapScreen.featured')}</Text>
             </View>
           )}
           {acceptsLightning(place) && (
             <View style={styles.sheetChipPink}>
               <Zap size={12} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.sheetChipPinkText}>Lightning</Text>
+              <Text style={styles.sheetChipPinkText}>{t('mapScreen.lightning')}</Text>
             </View>
           )}
           {acceptsOnchain(place) && (
             <View style={styles.sheetChipOrange}>
-              <Text style={styles.sheetChipOrangeText}>On-chain</Text>
+              <Text style={styles.sheetChipOrangeText}>{t('mapScreen.onchain')}</Text>
             </View>
           )}
         </View>
@@ -750,11 +755,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.tags['contact:website']!)}
                 testID="merchant-detail-website"
-                accessibilityLabel="Open website"
+                accessibilityLabel={t('mapScreen.openWebsite')}
               >
                 <Globe size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Website
+                  {t('mapScreen.website')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -763,7 +768,7 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
                 testID="merchant-detail-phone"
-                accessibilityLabel={`Call ${place.phone}`}
+                accessibilityLabel={t('mapScreen.callPhone', { phone: place.phone })}
               >
                 <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -776,11 +781,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`mailto:${place.email!}`)}
                 testID="merchant-detail-email"
-                accessibilityLabel={`Email ${place.email}`}
+                accessibilityLabel={t('mapScreen.emailAddress', { email: place.email })}
               >
                 <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Email
+                  {t('mapScreen.email')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -789,11 +794,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
                 testID="merchant-detail-facebook"
-                accessibilityLabel="Open Facebook page"
+                accessibilityLabel={t('mapScreen.openFacebook')}
               >
                 <SocialIcon network="facebook" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Facebook
+                  {t('mapScreen.facebook')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -802,11 +807,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
                 testID="merchant-detail-x"
-                accessibilityLabel="Open X profile"
+                accessibilityLabel={t('mapScreen.openX')}
               >
                 <SocialIcon network="x" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  X
+                  {t('mapScreen.x')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -815,11 +820,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
                 testID="merchant-detail-instagram"
-                accessibilityLabel="Open Instagram"
+                accessibilityLabel={t('mapScreen.openInstagram')}
               >
                 <SocialIcon network="instagram" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Instagram
+                  {t('mapScreen.instagram')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -838,7 +843,11 @@ const MerchantDetailSheet: React.FC<{
               // adds the lud16 entry-path on the Home tab.
             }}
             testID="merchant-detail-pay-button"
-            accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
+            accessibilityLabel={
+              lud16
+                ? t('mapScreen.payAddress', { address: lud16 })
+                : t('mapScreen.noLightningAddress')
+            }
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
             {/* Keep the label "Pay" in both states — the disabled
@@ -846,15 +855,15 @@ const MerchantDetailSheet: React.FC<{
                 and the long "No Lightning address" string wraps awkwardly
                 on small screens. Screen readers still get the
                 disambiguating context via accessibilityLabel above. */}
-            <Text style={styles.sheetButtonText}>Pay</Text>
+            <Text style={styles.sheetButtonText}>{t('mapScreen.pay')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
             onPress={onViewDetails}
             testID="merchant-detail-view-button"
-            accessibilityLabel="Open place detail"
+            accessibilityLabel={t('mapScreen.openPlaceDetail')}
           >
-            <Text style={styles.sheetButtonSecondaryText}>View details</Text>
+            <Text style={styles.sheetButtonSecondaryText}>{t('mapScreen.viewDetails')}</Text>
           </TouchableOpacity>
         </View>
         {btcMapVerifyUrl(place) || btcMapMerchantUrl(place) ? (
@@ -864,10 +873,10 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
                 testID="merchant-detail-verify"
-                accessibilityLabel="Verify this listing on BTC Map"
+                accessibilityLabel={t('mapScreen.verifyListing')}
               >
                 <ShieldCheck size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetBtcMapActionText}>Verify</Text>
+                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.verify')}</Text>
               </TouchableOpacity>
             ) : null}
             {btcMapMerchantUrl(place) ? (
@@ -875,9 +884,9 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
                 testID="merchant-detail-suggest-edit"
-                accessibilityLabel="Suggest an edit on BTC Map"
+                accessibilityLabel={t('mapScreen.suggestEditLabel')}
               >
-                <Text style={styles.sheetBtcMapActionText}>Suggest an edit →</Text>
+                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.suggestEdit')}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -894,8 +903,9 @@ const CacheDetailSheet: React.FC<{
   colors: Palette;
   styles: MapScreenStyles;
 }> = ({ cache, onClose, onViewDetails, colors, styles }) => {
+  const t = useTranslation();
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
-  const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
+  const kindLabel = cache.isLpPiggy ? t('mapScreen.piglet') : t('mapScreen.nipgcCache');
   const specBits = [
     cache.cacheType,
     cache.size,
@@ -950,9 +960,9 @@ const CacheDetailSheet: React.FC<{
             style={styles.sheetButton}
             onPress={onViewDetails}
             testID="cache-detail-view-button"
-            accessibilityLabel={`Open ${kindLabel} detail`}
+            accessibilityLabel={t('mapScreen.openKindDetail', { kind: kindLabel })}
           >
-            <Text style={styles.sheetButtonText}>View details</Text>
+            <Text style={styles.sheetButtonText}>{t('mapScreen.viewDetails')}</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -980,22 +990,32 @@ interface FilterOption {
 // still an independent toggle — there's no master "Show all places"
 // switch (unticking the two beneath it gives the same result).
 const PLACES_FILTERS: ReadonlyArray<FilterOption> = [
-  { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
-  { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F7931A' },
+  {
+    key: 'lightning',
+    label: t('mapScreen.lightning'),
+    hint: t('mapScreen.lightningHint'),
+    swatch: '#EC008C',
+  },
+  {
+    key: 'onchain',
+    label: t('mapScreen.onchain'),
+    hint: t('mapScreen.onchainHint'),
+    swatch: '#F7931A',
+  },
 ];
 
 const CACHE_FILTERS: ReadonlyArray<FilterOption> = [
   {
     key: 'piglet',
-    label: 'Piglet',
-    hint: 'Lightning Piggy stash',
+    label: t('mapScreen.piglet'),
+    hint: t('mapScreen.pigletHint'),
     swatch: '#EC008C',
     diamond: true,
   },
   {
     key: 'nipgcCache',
-    label: 'NIP-GC cache',
-    hint: 'Geo-cache (treasures.to et al.)',
+    label: t('mapScreen.nipgcCache'),
+    hint: t('mapScreen.nipgcCacheHint'),
     swatch: '#7A5CFF',
     diamond: true,
   },
@@ -1026,6 +1046,7 @@ const FilterSheet: React.FC<{
   colors,
   styles,
 }) => {
+  const t = useTranslation();
   const toggle = (k: keyof PinFilters) => onChange({ ...filters, [k]: !filters[k] });
   // Render one filter row — extracted so the Places and Geo-caches
   // sections can share the same swatch + toggle layout without
@@ -1039,7 +1060,10 @@ const FilterSheet: React.FC<{
         style={styles.filterRow}
         onPress={() => toggle(opt.key)}
         testID={`map-filter-${opt.key}`}
-        accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
+        accessibilityLabel={t('mapScreen.pinsToggle', {
+          label: opt.label,
+          state: on ? t('mapScreen.on') : t('mapScreen.off'),
+        })}
       >
         <View
           style={[
@@ -1079,7 +1103,7 @@ const FilterSheet: React.FC<{
               when the current tier is hiding pins they might expect to
               see (the cause of the "where did all the geo-caches go?"
               moment that prompted #19 to grow this filter UI). */}
-          <Text style={styles.sheetTitle}>Web of Trust</Text>
+          <Text style={styles.sheetTitle}>{t('mapScreen.webOfTrust')}</Text>
           <View style={styles.wotRow}>
             <WebOfTrustChip
               currentTier={wotTier}
@@ -1087,40 +1111,41 @@ const FilterSheet: React.FC<{
               testID="map-filter-wot-chip"
             />
             {untrustedCacheCount > 0 ? (
-              <Text style={styles.wotHiddenCount}>{untrustedCacheCount} hidden</Text>
+              <Text style={styles.wotHiddenCount}>
+                {t('mapScreen.hiddenCount', { count: untrustedCacheCount })}
+              </Text>
             ) : null}
           </View>
           <Text style={[styles.sheetSubtitle, { marginBottom: 16 }]}>
-            Only caches from hiders you trust at the current tier appear on the map. Tap the chip to
-            widen the tier.
+            {t('mapScreen.trustExplain')}
           </Text>
 
-          <Text style={styles.sheetTitle}>Places</Text>
-          <Text style={styles.sheetSubtitle}>Bitcoin-accepting merchants from BTC Map.</Text>
+          <Text style={styles.sheetTitle}>{t('mapScreen.places')}</Text>
+          <Text style={styles.sheetSubtitle}>{t('mapScreen.placesSubtitle')}</Text>
           <View style={{ marginTop: 8 }}>{PLACES_FILTERS.map(renderFilterRow)}</View>
 
-          <Text style={[styles.sheetTitle, { marginTop: 20 }]}>Geo-caches</Text>
-          <Text style={styles.sheetSubtitle}>Piglets and standard NIP-GC stashes.</Text>
+          <Text style={[styles.sheetTitle, { marginTop: 20 }]}>{t('mapScreen.geocaches')}</Text>
+          <Text style={styles.sheetSubtitle}>{t('mapScreen.geocachesSubtitle')}</Text>
           <View style={{ marginTop: 8 }}>{CACHE_FILTERS.map(renderFilterRow)}</View>
 
           {availableCategories.length > 0 ? (
             <View style={{ marginTop: 16, paddingBottom: 24 }}>
               <View style={styles.categoryHeaderRow}>
-                <Text style={styles.sheetTitle}>Categories</Text>
+                <Text style={styles.sheetTitle}>{t('mapScreen.categories')}</Text>
                 {categoryFilter.size > 0 ? (
                   <TouchableOpacity
                     onPress={clearCategories}
                     testID="map-filter-categories-clear"
-                    accessibilityLabel="Clear category filter"
+                    accessibilityLabel={t('mapScreen.clearCategoryFilter')}
                   >
-                    <Text style={styles.categoryClearText}>Clear</Text>
+                    <Text style={styles.categoryClearText}>{t('mapScreen.clear')}</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
               <Text style={styles.sheetSubtitle}>
                 {categoryFilter.size === 0
-                  ? 'Tap to narrow to one or more BTC Map categories.'
-                  : `${categoryFilter.size} selected`}
+                  ? t('mapScreen.categoriesHint')
+                  : t('mapScreen.categoriesSelected', { count: categoryFilter.size })}
               </Text>
               <View style={styles.categoryChipsWrap}>
                 {availableCategories.map((cat) => {
@@ -1134,7 +1159,10 @@ const FilterSheet: React.FC<{
                         on ? styles.categoryChipOn : styles.categoryChipOff,
                       ]}
                       testID={`map-filter-category-${cat}`}
-                      accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
+                      accessibilityLabel={t('mapScreen.categoryToggle', {
+                        category: cat,
+                        state: on ? t('mapScreen.on') : t('mapScreen.off'),
+                      })}
                     >
                       <Text
                         style={[styles.categoryChipText, on ? styles.categoryChipTextOn : null]}

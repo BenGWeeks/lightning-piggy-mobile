@@ -27,6 +27,7 @@ import Animated, {
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useSendingAnimation } from '../contexts/SendingAnimationContext';
 import LightningOverlay from './LightningOverlay';
 import { lightPalette, type Palette } from '../styles/palettes';
@@ -305,6 +306,7 @@ export default function PaymentProgressOverlay({
   inFlightIsSwap = false,
 }: Props) {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   // Which send animation the user picked in Appearance. Only affects the
@@ -411,45 +413,52 @@ export default function PaymentProgressOverlay({
 
   const formattedAmount =
     typeof amountSats === 'number' && amountSats > 0
-      ? `${amountSats.toLocaleString()} sats`
+      ? t('paymentProgressOverlay.amountSats', { amount: amountSats.toLocaleString() })
       : undefined;
 
   const isReceive = direction === 'receive';
-  let title = isReceive ? 'Waiting for payment…' : 'Sending payment…';
+  let title = isReceive
+    ? t('paymentProgressOverlay.waitingTitle')
+    : t('paymentProgressOverlay.sendingTitle');
   let subtitle: string | undefined = recipientName
     ? isReceive
-      ? `from ${recipientName}`
-      : `to ${recipientName}`
+      ? t('paymentProgressOverlay.fromRecipient', { name: recipientName })
+      : t('paymentProgressOverlay.toRecipient', { name: recipientName })
     : formattedAmount;
   if (state === 'success') {
-    title = isReceive ? 'Payment received!' : 'Payment sent!';
+    title = isReceive
+      ? t('paymentProgressOverlay.receivedTitle')
+      : t('paymentProgressOverlay.sentTitle');
     subtitle = formattedAmount
       ? recipientName
         ? isReceive
-          ? `${formattedAmount} from ${recipientName}`
-          : `${formattedAmount} to ${recipientName}`
+          ? t('paymentProgressOverlay.amountFromRecipient', {
+              amount: formattedAmount,
+              name: recipientName,
+            })
+          : t('paymentProgressOverlay.amountToRecipient', {
+              amount: formattedAmount,
+              name: recipientName,
+            })
         : formattedAmount
       : recipientName
         ? isReceive
-          ? `from ${recipientName}`
-          : `to ${recipientName}`
+          ? t('paymentProgressOverlay.fromRecipient', { name: recipientName })
+          : t('paymentProgressOverlay.toRecipient', { name: recipientName })
         : undefined;
   } else if (state === 'connection-lost') {
-    title = 'Connection lost';
-    subtitle =
-      "We couldn't reach your wallet to confirm. Your payment may still have gone through — check your balance before trying again.";
+    title = t('paymentProgressOverlay.connectionLostTitle');
+    subtitle = t('paymentProgressOverlay.connectionLostSubtitle');
   } else if (state === 'error') {
-    title = 'Payment failed';
+    title = t('paymentProgressOverlay.failedTitle');
     subtitle = humanizedError.message;
   } else if (state === 'in-flight-extended') {
     if (inFlightIsSwap) {
-      title = 'Boltz swap in progress';
-      subtitle =
-        'Swaps take a little longer to settle. Safe to close — it finishes in the background and appears in your transactions.';
+      title = t('paymentProgressOverlay.swapInProgressTitle');
+      subtitle = t('paymentProgressOverlay.swapInProgressSubtitle');
     } else {
-      title = 'Still in flight';
-      subtitle =
-        'This is taking longer than usual to settle. The result will appear in your transactions once it does.';
+      title = t('paymentProgressOverlay.stillInFlightTitle');
+      subtitle = t('paymentProgressOverlay.stillInFlightSubtitle');
     }
   }
 
@@ -549,11 +558,17 @@ export default function PaymentProgressOverlay({
               <TouchableOpacity
                 onPress={() => setShowDetails((prev) => !prev)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={showDetails ? 'Hide error details' : 'Show error details'}
+                accessibilityLabel={
+                  showDetails
+                    ? t('paymentProgressOverlay.hideDetailsA11y')
+                    : t('paymentProgressOverlay.showDetailsA11y')
+                }
                 testID="payment-overlay-details-toggle"
               >
                 <Text style={styles.detailsToggle}>
-                  {showDetails ? 'Hide details' : 'Show details'}
+                  {showDetails
+                    ? t('paymentProgressOverlay.hideDetails')
+                    : t('paymentProgressOverlay.showDetails')}
                 </Text>
               </TouchableOpacity>
             </>
@@ -571,17 +586,17 @@ export default function PaymentProgressOverlay({
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel={
                 state === 'in-flight-extended'
-                  ? 'Continue in background'
-                  : 'Dismiss payment confirmation'
+                  ? t('paymentProgressOverlay.continueInBackground')
+                  : t('paymentProgressOverlay.dismissConfirmationA11y')
               }
               testID="payment-overlay-ok"
             >
               <Text style={styles.okButtonText}>
                 {state === 'in-flight-extended'
-                  ? 'Continue in background'
+                  ? t('paymentProgressOverlay.continueInBackground')
                   : state === 'error'
-                    ? 'Dismiss'
-                    : 'OK'}
+                    ? t('paymentProgressOverlay.dismiss')
+                    : t('paymentProgressOverlay.ok')}
               </Text>
             </TouchableOpacity>
           ) : onCancel ? (
@@ -589,10 +604,10 @@ export default function PaymentProgressOverlay({
               style={styles.cancelButton}
               onPress={onCancel}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Cancel payment"
+              accessibilityLabel={t('paymentProgressOverlay.cancelPaymentA11y')}
               testID="payment-overlay-cancel"
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('paymentProgressOverlay.cancel')}</Text>
             </TouchableOpacity>
           ) : null}
         </Animated.View>

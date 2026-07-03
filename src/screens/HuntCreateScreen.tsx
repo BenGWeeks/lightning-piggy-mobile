@@ -47,6 +47,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { createHuntCreateScreenStyles } from '../styles/HuntCreateScreen.styles';
 import {
@@ -103,6 +104,7 @@ type Stage =
 
 const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createHuntCreateScreenStyles(colors), [colors]);
   const { signEvent, relays, pubkey } = useNostr();
   // Live user position for the hide-pin preview map. Map is centred on
@@ -362,8 +364,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         }
         Toast.show({
           type: 'error',
-          text1: "Can't edit this Piglet",
-          text2: 'Local record missing — it may have been removed from this device.',
+          text1: t('huntCreateScreen.cantEditPiglet'),
+          text2: t('huntCreateScreen.localRecordMissing'),
         });
         navigation.goBack();
         return;
@@ -588,9 +590,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleValidate = useCallback(async () => {
     if (!lnurl.trim()) {
-      Alert.alert('Paste an LNURL first', 'Create the link in your wallet, then paste it here.', [
-        { text: 'OK' },
-      ]);
+      Alert.alert(
+        t('huntCreateScreen.pasteLnurlFirst'),
+        t('huntCreateScreen.pasteLnurlFirstBody'),
+        [{ text: t('huntCreateScreen.ok') }],
+      );
       return;
     }
     setStage({ kind: 'validating' });
@@ -601,9 +605,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       const msg =
         e instanceof LnurlWithdrawError
           ? e.message
-          : `Could not resolve LNURL: ${(e as Error).message}`;
+          : t('huntCreateScreen.couldNotResolveLnurl', { message: (e as Error).message });
       setStage({ kind: 'idle' });
-      Alert.alert("That's not a withdraw link", msg, [{ text: 'OK' }]);
+      Alert.alert(t('huntCreateScreen.notAWithdrawLink'), msg, [
+        { text: t('huntCreateScreen.ok') },
+      ]);
     }
   }, [lnurl]);
 
@@ -721,14 +727,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       console.log(`[Publish] savePiggy threw: ${(e as Error)?.message ?? e}`);
       Toast.show({
         type: 'error',
-        text1: 'Could not save Piggy',
+        text1: t('huntCreateScreen.couldNotSavePiggy'),
         text2: (e as Error).message,
       });
       return;
     }
     console.log(`[Publish] savePiggy ok`);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
-    Toast.show({ type: 'success', text1: isEditMode ? 'Piggy updated 🐷' : 'Piggy hidden 🐷' });
+    Toast.show({
+      type: 'success',
+      text1: isEditMode ? t('huntCreateScreen.piggyUpdated') : t('huntCreateScreen.piggyHidden'),
+    });
 
     // If the hider opted into Public, build + sign + publish the kind
     // 37516 NIP-GC listing with the com.lightningpiggy.app label. The LNURL itself
@@ -742,8 +751,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           console.log(`[Publish] aborted: no location pin`);
           Toast.show({
             type: 'info',
-            text1: 'Saved locally — drop a pin to publish',
-            text2: 'Public Piggies need a location pin so finders can discover them.',
+            text1: t('huntCreateScreen.savedLocallyDropPin'),
+            text2: t('huntCreateScreen.savedLocallyDropPinBody'),
           });
           return;
         }
@@ -755,8 +764,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!signed) {
           Toast.show({
             type: 'error',
-            text1: 'Could not sign Piggy listing',
-            text2: 'Sign-in / Amber declined. Saved locally; retry publish later.',
+            text1: t('huntCreateScreen.couldNotSignListing'),
+            text2: t('huntCreateScreen.couldNotSignListingBody'),
           });
           return;
         }
@@ -789,14 +798,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         }
         Toast.show({
           type: 'success',
-          text1: isEditMode ? 'Piggy republished 🐷' : 'Piggy published 🐷',
-          text2: isEditMode ? 'Updated listing live on relays.' : 'Visible on Discover.',
+          text1: isEditMode
+            ? t('huntCreateScreen.piggyRepublished')
+            : t('huntCreateScreen.piggyPublished'),
+          text2: isEditMode
+            ? t('huntCreateScreen.updatedListingLive')
+            : t('huntCreateScreen.visibleOnDiscover'),
         });
       } catch (e) {
         console.log(`[Publish] publish path threw: ${(e as Error)?.message ?? e}`);
         Toast.show({
           type: 'error',
-          text1: 'Could not publish to relays',
+          text1: t('huntCreateScreen.couldNotPublish'),
           text2: (e as Error).message,
         });
       }
@@ -843,9 +856,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       const perm = await Location.requestForegroundPermissionsAsync();
       if (perm.status !== 'granted') {
-        Alert.alert('Permission needed', 'Location is needed to drop a pin at the cache.', [
-          { text: 'OK' },
-        ]);
+        Alert.alert(
+          t('huntCreateScreen.permissionNeeded'),
+          t('huntCreateScreen.locationPermissionBody'),
+          [{ text: t('huntCreateScreen.ok') }],
+        );
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -853,7 +868,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       const lon = pos.coords.longitude;
       setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) });
     } catch (e) {
-      Alert.alert('Could not get location', (e as Error).message, [{ text: 'OK' }]);
+      Alert.alert(t('huntCreateScreen.couldNotGetLocation'), (e as Error).message, [
+        { text: t('huntCreateScreen.ok') },
+      ]);
     } finally {
       setPinning(false);
     }
@@ -892,7 +909,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(target.uri, {
         mimeType: 'model/stl',
-        dialogTitle: 'Save Piggy Bag Charm STL',
+        dialogTitle: t('huntCreateScreen.saveStlTitle'),
         UTI: 'public.standard-tesselated-geometry-format',
       });
     }
@@ -916,7 +933,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     );
     const base64 = await readAsStringAsync(target.uri, { encoding: 'base64' });
     await SAF.writeAsStringAsync(destUri, base64, { encoding: 'base64' });
-    Toast.show({ type: 'success', text1: 'Saved piggy-bag-charm.stl' });
+    Toast.show({ type: 'success', text1: t('huntCreateScreen.savedStl') });
   }, [stageStlInCache]);
 
   const handleSaveStl = useCallback(async () => {
@@ -924,10 +941,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       if (Platform.OS === 'android') {
         // Two-option prompt — "Save to Files" first (recommended, matches
         // what most users want), "Share…" preserves the original flow.
-        Alert.alert('Save Piggy Bag Charm STL', 'Pick where to save the 3D-print file.', [
-          { text: 'Save to Files', onPress: () => void saveStlToFiles() },
-          { text: 'Share…', onPress: () => void shareStl() },
-          { text: 'Cancel', style: 'cancel' },
+        Alert.alert(t('huntCreateScreen.saveStlTitle'), t('huntCreateScreen.saveStlPrompt'), [
+          { text: t('huntCreateScreen.saveToFiles'), onPress: () => void saveStlToFiles() },
+          { text: t('huntCreateScreen.share'), onPress: () => void shareStl() },
+          { text: t('huntCreateScreen.cancel'), style: 'cancel' },
         ]);
         return;
       }
@@ -936,7 +953,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch (e) {
       Toast.show({
         type: 'info',
-        text1: 'Couldn’t save the STL',
+        text1: t('huntCreateScreen.couldNotSaveStl'),
         text2: (e as Error).message,
       });
     }
@@ -951,9 +968,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         const scrubbed = await stripImageMetadata(uri, base64);
         const url = await uploadImage(scrubbed.uri, signEvent ?? null, scrubbed.base64);
         setHintPhotoUrl(url);
-        Toast.show({ type: 'success', text1: 'Hint photo uploaded' });
+        Toast.show({ type: 'success', text1: t('huntCreateScreen.hintPhotoUploaded') });
       } catch (e) {
-        Alert.alert('Upload failed', (e as Error).message, [{ text: 'OK' }]);
+        Alert.alert(t('huntCreateScreen.uploadFailed'), (e as Error).message, [
+          { text: t('huntCreateScreen.ok') },
+        ]);
       } finally {
         setUploadingHint(false);
       }
@@ -964,9 +983,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const handlePickHintFromLibrary = useCallback(async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to attach a hint photo.', [
-        { text: 'OK' },
-      ]);
+      Alert.alert(
+        t('huntCreateScreen.permissionNeeded'),
+        t('huntCreateScreen.libraryPermissionBody'),
+        [{ text: t('huntCreateScreen.ok') }],
+      );
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -981,9 +1002,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleTakeHintPhoto = useCallback(async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take a hint photo.', [
-        { text: 'OK' },
-      ]);
+      Alert.alert(
+        t('huntCreateScreen.permissionNeeded'),
+        t('huntCreateScreen.cameraPermissionBody'),
+        [{ text: t('huntCreateScreen.ok') }],
+      );
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -1035,7 +1058,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (unlockSucceededRef.current) {
       setLastWrittenLock(null);
       setPinRevealed(false);
-      Toast.show({ type: 'success', text1: 'Tag unlocked' });
+      Toast.show({ type: 'success', text1: t('huntCreateScreen.tagUnlocked') });
     }
     unlockSucceededRef.current = false;
   }, []);
@@ -1104,16 +1127,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             // visible warning — the PIN is only on screen, not on
             // disk yet — and instruct the hider to copy it before
             // tapping Done.
-            Alert.alert(
-              'Save the PIN now',
-              "The tag is locked, but we couldn't find the Piglet record to save its PIN onto. Copy the PIN from the card below before you leave this screen.",
-            );
+            Alert.alert(t('huntCreateScreen.savePinNow'), t('huntCreateScreen.savePinNowBody'));
           }
         } catch (e) {
           console.warn(`[HuntCreate] persist nfcLock failed: ${(e as Error)?.message ?? e}`);
           Alert.alert(
-            'PIN not saved to this device',
-            `The tag is locked, but we couldn't write the PIN to local storage (${(e as Error).message}). Copy the PIN from the card below before you leave this screen — otherwise you'll need an external NFC writer to recover the tag.`,
+            t('huntCreateScreen.pinNotSaved'),
+            t('huntCreateScreen.pinNotSavedBody', { message: (e as Error).message }),
           );
         }
       } else {
@@ -1141,15 +1161,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // older record), not that the prize is zero (#681 review).
     if (max <= 0) return null;
     return min === max
-      ? `${max.toLocaleString()} sats per claim`
-      : `${min.toLocaleString()}–${max.toLocaleString()} sats per claim`;
+      ? t('huntCreateScreen.satsPerClaim', { amount: max.toLocaleString() })
+      : t('huntCreateScreen.satsPerClaimRange', {
+          min: min.toLocaleString(),
+          max: max.toLocaleString(),
+        });
   })();
   // Prize hint for the cross-device card — taken from the editable field
   // (pre-filled from the published `amount`). Shown only when known/>0; we
   // never surface "0 sats" or a green "validated" tick we didn't earn.
   const crossDevicePrizeLine = (() => {
     const n = parseInt(amountSatsText.trim(), 10);
-    return Number.isFinite(n) && n > 0 ? `Prize: ${n.toLocaleString()} sats per claim` : null;
+    return Number.isFinite(n) && n > 0
+      ? t('huntCreateScreen.prizeLine', { amount: n.toLocaleString() })
+      : null;
   })();
 
   // True when the NFC step's primary button should be enabled. Step 5
@@ -1191,13 +1216,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Hunt"
+            accessibilityLabel={t('huntCreateScreen.backToHunt')}
             testID="hunt-create-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{isEditMode ? 'Edit Piglet' : 'Hide a Piglet'}</Text>
+          <Text style={styles.headerTitle}>
+            {isEditMode ? t('huntCreateScreen.editPiglet') : t('huntCreateScreen.hideAPiglet')}
+          </Text>
           <View style={styles.headerRightSpacer} />
         </View>
 
@@ -1212,33 +1239,32 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={1}
-                title="Get the hardware"
-                subtitle="A Piglet lives on a physical artefact. Make or buy one."
+                title={t('huntCreateScreen.step1Title')}
+                subtitle={t('huntCreateScreen.step1Subtitle')}
                 status="active"
                 styles={styles}
                 colors={colors}
               />
               <View style={styles.getPiggyCard} testID="get-a-piggy-card">
-                <Text style={styles.getPiggyTitle}>Need a physical Piggy?</Text>
+                <Text style={styles.getPiggyTitle}>{t('huntCreateScreen.needAPhysicalPiggy')}</Text>
                 <Text style={styles.getPiggyHelper}>
-                  A Piglet lives on a physical artefact — a 3D-printed charm with an NFC tag, or a
-                  sticker with a QR. Make one yourself, or buy a ready-made charm from Robotechy.
+                  {t('huntCreateScreen.needAPhysicalPiggyHelper')}
                 </Text>
                 <Image
                   source={require('../../assets/images/piggy-bag-charm.jpg')}
                   style={styles.getPiggyPhoto}
                   resizeMode="cover"
-                  accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
+                  accessibilityLabel={t('huntCreateScreen.bagCharmPhotoAlt')}
                 />
                 <View style={styles.getPiggyButtonsRow}>
                   <TouchableOpacity
                     style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
                     onPress={handleSaveStl}
                     testID="get-a-piggy-print-button"
-                    accessibilityLabel="Save Piggy Bag Charm STL"
+                    accessibilityLabel={t('huntCreateScreen.saveStlTitle')}
                   >
                     <Printer size={18} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.getPiggyButtonText}>Save STL</Text>
+                    <Text style={styles.getPiggyButtonText}>{t('huntCreateScreen.saveStl')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
@@ -1251,7 +1277,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                       )
                     }
                     testID="get-a-piggy-buy-button"
-                    accessibilityLabel="Buy from Robotechy"
+                    accessibilityLabel={t('huntCreateScreen.buyFromRobotechy')}
                   >
                     <ShoppingBag size={18} color={colors.white} strokeWidth={2.5} />
                     <Image
@@ -1271,10 +1297,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.getPiggyTagsHint}>
                   <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
                   <Text style={styles.getPiggyTagsHintText}>
-                    <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG215 / 216
-                    recommended (≥504 B fits the full multi-record write). NTAG213 / Mifare
-                    Ultralight C work but only fit a single record. Avoid Mifare Classic — it can't
-                    lock.
+                    <Text style={styles.getPiggyTagsHintBold}>
+                      {t('huntCreateScreen.tagChipsLabel')}
+                    </Text>{' '}
+                    {t('huntCreateScreen.tagChipsHint')}
                   </Text>
                 </View>
               </View>
@@ -1286,8 +1312,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={2}
-                title="Make the prize (optional)"
-                subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
+                title={t('huntCreateScreen.step2Title')}
+                subtitle={t('huntCreateScreen.step2Subtitle')}
                 status={
                   stage.kind === 'validated' ||
                   stage.kind === 'noPrize' ||
@@ -1302,15 +1328,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               {crossDeviceEdit && stage.kind !== 'validated' && (
                 <View style={styles.crossDeviceBanner} testID="hunt-piggy-cross-device-banner">
                   <Text style={styles.crossDeviceBannerText}>
-                    No LNURL on this device — paste a fresh withdraw link to re-write the tag, or
-                    skip step 6 to update the listing only.
+                    {t('huntCreateScreen.crossDeviceBanner')}
                   </Text>
                 </View>
               )}
-              <Text style={styles.helper}>
-                Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the
-                per-claim amount, daily limit, and total uses there — then paste it here.
-              </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.createWithdrawLinkHelper')}</Text>
               <View style={styles.inputRow}>
                 <TextInput
                   style={styles.input}
@@ -1334,7 +1356,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   onPress={handleOpenScanner}
                   style={styles.pasteButton}
-                  accessibilityLabel="Scan LNURL QR code"
+                  accessibilityLabel={t('huntCreateScreen.scanLnurlQr')}
                   testID="hunt-piggy-scan-button"
                 >
                   <QrCode size={18} color={colors.brandPink} strokeWidth={2} />
@@ -1342,7 +1364,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   onPress={handlePaste}
                   style={styles.pasteButton}
-                  accessibilityLabel="Paste from clipboard"
+                  accessibilityLabel={t('huntCreateScreen.pasteFromClipboard')}
                   testID="hunt-piggy-paste-button"
                 >
                   <ClipboardIcon size={18} color={colors.brandPink} strokeWidth={2} />
@@ -1362,7 +1384,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     {stage.kind === 'validating' ? (
                       <ActivityIndicator color={colors.white} />
                     ) : (
-                      <Text style={styles.primaryButtonText}>Validate</Text>
+                      <Text style={styles.primaryButtonText}>{t('huntCreateScreen.validate')}</Text>
                     )}
                   </TouchableOpacity>
                 )}
@@ -1385,10 +1407,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={styles.skipPrizeButton}
                     onPress={() => setStage({ kind: 'noPrize' })}
                     testID="hunt-create-skip-prize"
-                    accessibilityLabel="Skip prize and publish without a reward"
+                    accessibilityLabel={t('huntCreateScreen.skipPrizeAccessibility')}
                   >
                     <Text style={styles.skipPrizeButtonText}>
-                      Skip prize — publish without reward
+                      {t('huntCreateScreen.skipPrizeButton')}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1399,17 +1421,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.validatedCard} testID="hunt-create-no-prize-card">
                   <Info size={20} color={colors.brandPink} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
-                    <Text style={styles.validatedTitle}>No reward</Text>
-                    <Text style={styles.validatedMeta}>
-                      This Piglet is just for the find — no sats attached. You can add a withdraw
-                      link above any time before publishing.
-                    </Text>
+                    <Text style={styles.validatedTitle}>{t('huntCreateScreen.noReward')}</Text>
+                    <Text style={styles.validatedMeta}>{t('huntCreateScreen.noRewardBody')}</Text>
                     <TouchableOpacity
                       onPress={() => setStage({ kind: 'idle' })}
                       testID="hunt-create-add-prize-instead"
-                      accessibilityLabel="Add a prize instead"
+                      accessibilityLabel={t('huntCreateScreen.addPrizeInstead')}
                     >
-                      <Text style={styles.addPrizeInsteadText}>Add a prize instead</Text>
+                      <Text style={styles.addPrizeInsteadText}>
+                        {t('huntCreateScreen.addPrizeInstead')}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1421,7 +1442,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.validatedCard}>
                   <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
-                    <Text style={styles.validatedTitle}>Looks good</Text>
+                    <Text style={styles.validatedTitle}>{t('huntCreateScreen.looksGood')}</Text>
                     {validatedSatsLine && (
                       <Text style={styles.validatedMeta}>{validatedSatsLine}</Text>
                     )}
@@ -1441,10 +1462,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.validatedCard}>
                   <Info size={20} color={colors.brandPink} strokeWidth={2.5} />
                   <View style={styles.validatedTextWrapper}>
-                    <Text style={styles.validatedTitle}>Link set up on another device</Text>
+                    <Text style={styles.validatedTitle}>
+                      {t('huntCreateScreen.linkOnAnotherDevice')}
+                    </Text>
                     <Text style={styles.validatedMeta}>
-                      This Piglet&apos;s withdraw link lives on the phone you created it on. You can
-                      still edit the prize, cooldown and uses below.
+                      {t('huntCreateScreen.linkOnAnotherDeviceBody')}
                     </Text>
                     {crossDevicePrizeLine && (
                       <Text style={styles.validatedMeta}>{crossDevicePrizeLine}</Text>
@@ -1458,11 +1480,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 adjust the advertised sats without re-pasting the link (#626).
                 Display hint only; the live LNURL stays authoritative for the
                 actual payout. */}
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Sats per claim</Text>
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.satsPerClaimLabel')}
+              </Text>
               <View style={styles.hintField}>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g. 1000"
+                  placeholder={t('huntCreateScreen.amountPlaceholder')}
                   placeholderTextColor={colors.textSupplementary}
                   keyboardType="number-pad"
                   value={amountSatsText}
@@ -1482,14 +1506,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 back automatically — the hider re-enters them here as
                 soft hints; the wallet still does the actual enforcement. */}
               <Text style={[styles.subSectionLabel, styles.sectionGap]}>
-                Cooldown &amp; uses (optional)
+                {t('huntCreateScreen.cooldownUsesLabel')}
               </Text>
               <View style={styles.hintsRow}>
                 <View style={styles.hintField}>
-                  <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
+                  <Text style={styles.hintFieldLabel}>{t('huntCreateScreen.cooldownMins')}</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g. 180"
+                    placeholder={t('huntCreateScreen.cooldownPlaceholder')}
                     placeholderTextColor={colors.textSupplementary}
                     keyboardType="number-pad"
                     value={waitMinutesText}
@@ -1499,10 +1523,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   />
                 </View>
                 <View style={styles.hintField}>
-                  <Text style={styles.hintFieldLabel}>Total uses</Text>
+                  <Text style={styles.hintFieldLabel}>{t('huntCreateScreen.totalUses')}</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g. 100"
+                    placeholder={t('huntCreateScreen.usesPlaceholder')}
                     placeholderTextColor={colors.textSupplementary}
                     keyboardType="number-pad"
                     value={usesText}
@@ -1512,10 +1536,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   />
                 </View>
               </View>
-              <Text style={styles.helper}>
-                These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
-                hints. The wallet still does the actual enforcement.
-              </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.cooldownUsesHelper')}</Text>
 
               <StepNavRow
                 onBack={() => setCurrentStep(1)}
@@ -1530,8 +1551,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={6}
-                title="Write the tag"
-                subtitle="Write the prize link onto an NFC tag the finder will tap."
+                title={t('huntCreateScreen.step6Title')}
+                subtitle={t('huntCreateScreen.step6Subtitle')}
                 status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
                 styles={styles}
                 colors={colors}
@@ -1543,14 +1564,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 run first. In edit mode the listing was already
                 published, so stage.kind === 'validated' is fine too. */}
               {!nfcReady ? (
-                <Text style={styles.helper}>Publish the Piggy first (step 5).</Text>
+                <Text style={styles.helper}>{t('huntCreateScreen.publishFirst')}</Text>
               ) : null}
               {/* What we'll write, plain-text, so the hider can see the
                 three records that go on the tag before the camera /
                 NFC interaction starts (Ben's request). */}
               {nfcReady && pubkey ? (
                 <View style={styles.payloadPreview}>
-                  <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
+                  <Text style={styles.payloadPreviewLabel}>
+                    {t('huntCreateScreen.tagWillCarry')}
+                  </Text>
                   {/* Public hides emit three records (LP deep link +
                       Nostr naddr + LNURL bearer); private hides emit
                       only the LNURL because the cache isn't on relays
@@ -1589,17 +1612,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   onPress={() => setLockTag((v) => !v)}
                   accessibilityRole="switch"
                   accessibilityState={{ checked: lockTag }}
-                  accessibilityLabel={lockTag ? 'Lock tag — on' : 'Lock tag — off'}
+                  accessibilityLabel={
+                    lockTag ? t('huntCreateScreen.lockTagOn') : t('huntCreateScreen.lockTagOff')
+                  }
                   testID="hunt-write-lock-toggle"
                 >
                   <View style={styles.lockToggleMain}>
-                    <Text style={styles.lockToggleTitle}>Lock the tag</Text>
+                    <Text style={styles.lockToggleTitle}>{t('huntCreateScreen.lockTheTag')}</Text>
                     <Text style={styles.lockToggleHelper}>
                       {Platform.OS !== 'android'
-                        ? "iOS doesn't yet support the chip-level lock — your tag will go out unlocked regardless of this toggle. Lock from an Android phone or NFC Tools to protect it."
+                        ? t('huntCreateScreen.lockHelperIos')
                         : lockTag
-                          ? "Generates a random PIN and writes it to the tag so others can't overwrite the prize link. The PIN appears below after the write."
-                          : "Leaves the tag open — anyone with an NFC writer can replace the contents. Only turn this off if you'll re-lock manually."}
+                          ? t('huntCreateScreen.lockHelperOn')
+                          : t('huntCreateScreen.lockHelperOff')}
                     </Text>
                   </View>
                   <View style={[styles.lockToggleSwitch, lockTag && styles.lockToggleSwitchOn]}>
@@ -1624,14 +1649,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Nfc size={18} color={colors.white} strokeWidth={2.5} />
                 <Text style={styles.primaryButtonText}>
-                  {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
+                  {stage.kind === 'wrote-nfc'
+                    ? t('huntCreateScreen.writeAnotherTag')
+                    : t('huntCreateScreen.writeToNfcTag')}
                 </Text>
               </TouchableOpacity>
               {nfcReady && !canWriteNfcTag ? (
-                <Text style={styles.helper}>
-                  No LNURL yet — paste a fresh withdraw link on step 2 to enable the tag write. Or
-                  skip this step: the listing already saved without touching the tag.
-                </Text>
+                <Text style={styles.helper}>{t('huntCreateScreen.noLnurlYetHelper')}</Text>
               ) : null}
               {/* Post-write PIN row — visible whenever we have lock
                   secrets in hand, either fresh from this session's
@@ -1642,16 +1666,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.pinCard} testID="hunt-write-pin-card">
                   <View style={styles.pinHeader}>
                     <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.pinHeaderText}>Tag locked — your PIN</Text>
+                    <Text style={styles.pinHeaderText}>
+                      {t('huntCreateScreen.tagLockedYourPin')}
+                    </Text>
                   </View>
-                  <Text style={styles.pinHelper}>
-                    Keep this safe. You&apos;ll need it to unlock the tag (e.g. to repoint it to a
-                    different Piggy). If you lose it, the tag stays locked forever.
-                  </Text>
+                  <Text style={styles.pinHelper}>{t('huntCreateScreen.pinHelper')}</Text>
                   <TouchableOpacity
                     style={styles.pinValueRow}
                     onPress={() => setPinRevealed((v) => !v)}
-                    accessibilityLabel={pinRevealed ? 'Hide PIN' : 'Reveal PIN'}
+                    accessibilityLabel={
+                      pinRevealed ? t('huntCreateScreen.hidePin') : t('huntCreateScreen.revealPin')
+                    }
                     testID="hunt-write-pin-reveal"
                   >
                     <Text style={styles.pinValueText}>
@@ -1668,22 +1693,26 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                       style={styles.pinActionSecondary}
                       onPress={async () => {
                         await Clipboard.setStringAsync(lastWrittenLock.pin);
-                        Toast.show({ type: 'success', text1: 'PIN copied' });
+                        Toast.show({ type: 'success', text1: t('huntCreateScreen.pinCopied') });
                       }}
-                      accessibilityLabel="Copy PIN"
+                      accessibilityLabel={t('huntCreateScreen.copyPin')}
                       testID="hunt-write-pin-copy"
                     >
                       <Copy size={16} color={colors.brandPink} strokeWidth={2.5} />
-                      <Text style={styles.pinActionSecondaryText}>Copy</Text>
+                      <Text style={styles.pinActionSecondaryText}>
+                        {t('huntCreateScreen.copy')}
+                      </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.pinActionSecondary}
                       onPress={handleOpenUnlockSheet}
-                      accessibilityLabel="Unlock tag"
+                      accessibilityLabel={t('huntCreateScreen.unlockTag')}
                       testID="hunt-write-pin-unlock"
                     >
                       <Unlock size={16} color={colors.brandPink} strokeWidth={2.5} />
-                      <Text style={styles.pinActionSecondaryText}>Unlock tag</Text>
+                      <Text style={styles.pinActionSecondaryText}>
+                        {t('huntCreateScreen.unlockTag')}
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1691,7 +1720,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <StepNavRow
                 onBack={() => setCurrentStep(5)}
                 onNext={handleDone}
-                nextLabel="Done"
+                nextLabel={t('huntCreateScreen.done')}
                 nextIcon={Check}
                 styles={styles}
                 colors={colors}
@@ -1703,8 +1732,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={3}
-                title="Pick the location"
-                subtitle="Stash the Piglet first, then drop a pin where you hid it."
+                title={t('huntCreateScreen.step3Title')}
+                subtitle={t('huntCreateScreen.step3Subtitle')}
                 status={pin ? 'done' : 'active'}
                 styles={styles}
                 colors={colors}
@@ -1731,13 +1760,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                       <Text style={styles.pinTitle}>
                         {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
                       </Text>
-                      <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+                      <Text style={styles.pinSub}>
+                        {t('huntCreateScreen.geohashLabel', { geohash: pin.geohash })}
+                      </Text>
                     </View>
                     <TouchableOpacity
                       style={styles.pinClearButton}
                       onPress={handleClearPin}
                       testID="hunt-piggy-clear-pin-button"
-                      accessibilityLabel="Clear pin"
+                      accessibilityLabel={t('huntCreateScreen.clearPin')}
                     >
                       <X size={16} color={colors.white} strokeWidth={2.5} />
                     </TouchableOpacity>
@@ -1748,7 +1779,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-adjust-pin-button"
                   >
                     <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.pinButtonText}>Adjust on map</Text>
+                    <Text style={styles.pinButtonText}>{t('huntCreateScreen.adjustOnMap')}</Text>
                   </TouchableOpacity>
                 </>
               ) : (
@@ -1764,7 +1795,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     ) : (
                       <>
                         <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                        <Text style={styles.pinButtonText}>Use my location</Text>
+                        <Text style={styles.pinButtonText}>
+                          {t('huntCreateScreen.useMyLocation')}
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -1774,17 +1807,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-pick-on-map-button"
                   >
                     <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.pinButtonText}>Pick on map</Text>
+                    <Text style={styles.pinButtonText}>{t('huntCreateScreen.pickOnMap')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
-              <Text style={styles.helper}>
-                Stored locally so the Piggy shows in your My Piglets list — you can track who&apos;s
-                found it and find it again yourself. The location is only published to Nostr (as the
-                kind 37516 `g` tag) if you toggle Public on step 6. Leave it private and the Piggy
-                is a physical-only treasure — found only by tapping the tag — ideal for a gift or
-                family Piggy you don&apos;t want strangers hunting.
-              </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.locationHelper')}</Text>
               <StepNavRow
                 onBack={() => setCurrentStep(2)}
                 onNext={() => setCurrentStep(4)}
@@ -1798,14 +1825,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={4}
-                title="Geocache info"
-                subtitle="The finder-facing listing — a photo, a name, and how tough it is to reach."
+                title={t('huntCreateScreen.step4Title')}
+                subtitle={t('huntCreateScreen.step4Subtitle')}
                 status="active"
                 styles={styles}
                 colors={colors}
               />
 
-              <Text style={styles.subSectionLabel}>Photo (optional)</Text>
+              <Text style={styles.subSectionLabel}>{t('huntCreateScreen.photoOptional')}</Text>
               {hintPhotoUrl ? (
                 <View style={styles.hintPreviewWrapper}>
                   <Image
@@ -1816,7 +1843,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   <TouchableOpacity
                     style={styles.hintRemoveButton}
                     onPress={handleRemoveHintPhoto}
-                    accessibilityLabel="Remove photo"
+                    accessibilityLabel={t('huntCreateScreen.removePhoto')}
                     testID="hunt-piggy-remove-hint-button"
                   >
                     <X size={16} color={colors.white} strokeWidth={2.5} />
@@ -1825,7 +1852,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               ) : uploadingHint ? (
                 <View style={styles.hintUploadingWrapper}>
                   <ActivityIndicator color={colors.brandPink} />
-                  <Text style={styles.helper}>Stripping EXIF + uploading…</Text>
+                  <Text style={styles.helper}>{t('huntCreateScreen.strippingExif')}</Text>
                 </View>
               ) : (
                 <View style={styles.hintButtonsRow}>
@@ -1835,7 +1862,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-take-hint-button"
                   >
                     <Camera size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.hintButtonText}>Take photo</Text>
+                    <Text style={styles.hintButtonText}>{t('huntCreateScreen.takePhoto')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.hintButton}
@@ -1843,20 +1870,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     testID="hunt-piggy-pick-hint-button"
                   >
                     <ImagePlus size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.hintButtonText}>From library</Text>
+                    <Text style={styles.hintButtonText}>{t('huntCreateScreen.fromLibrary')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
-              <Text style={styles.helper}>
-                EXIF data (incl. GPS) is stripped before upload. Pick a clue photo, not a photo
-                taken at the cache itself.
-              </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.exifHelper')}</Text>
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Title</Text>
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.titleLabel')}
+              </Text>
               <View style={styles.inputRow}>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g. Longstanton Village Piglet"
+                  placeholder={t('huntCreateScreen.titlePlaceholder')}
                   placeholderTextColor={colors.textSupplementary}
                   value={cacheName}
                   onChangeText={setCacheName}
@@ -1864,11 +1890,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 />
               </View>
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Description</Text>
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.descriptionLabel')}
+              </Text>
               <View style={styles.inputRow}>
                 <TextInput
                   style={[styles.input, styles.inputMultiline]}
-                  placeholder="A line or two for finders — what makes this spot worth the trip."
+                  placeholder={t('huntCreateScreen.descriptionPlaceholder')}
                   placeholderTextColor={colors.textSupplementary}
                   value={cacheDescription}
                   onChangeText={setCacheDescription}
@@ -1877,59 +1905,55 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 />
               </View>
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint (optional)</Text>
-              <Text style={styles.helper}>
-                A light clue a stuck hunter can reveal — not a secret. It&apos;s stored lightly
-                obfuscated (ROT13) on the relay, so don&apos;t put anything sensitive here.
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.hintLabel')}
               </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.hintHelper')}</Text>
               <View style={styles.inputRow}>
                 <TextInput
                   style={[styles.input, styles.inputMultiline]}
-                  placeholder="e.g. Behind the third fence post, under the flat rock."
+                  placeholder={t('huntCreateScreen.hintPlaceholder')}
                   placeholderTextColor={colors.textSupplementary}
                   value={cacheHint}
                   onChangeText={setCacheHint}
                   multiline
-                  accessibilityLabel="Cache hint"
+                  accessibilityLabel={t('huntCreateScreen.cacheHintAccessibility')}
                   testID="hunt-create-hint-input"
                 />
               </View>
 
               <Text style={[styles.subSectionLabel, styles.sectionGap]}>
-                Difficulty · {difficulty}/5
+                {t('huntCreateScreen.difficultyLabel', { level: difficulty })}
               </Text>
-              <Text style={styles.helper}>
-                How tricky the cache is to find — 1 easy, 5 very hard.
-              </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.difficultyHelper')}</Text>
               <LevelPicker
                 value={difficulty}
                 onChange={(v) => setDifficulty(v as 1 | 2 | 3 | 4 | 5)}
                 styles={styles}
               />
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Terrain · {terrain}/5</Text>
-              <Text style={styles.helper}>
-                How rough the journey is — 1 easy walk, 5 needs gear.
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.terrainLabel', { level: terrain })}
               </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.terrainHelper')}</Text>
               <LevelPicker
                 value={terrain}
                 onChange={(v) => setTerrain(v as 1 | 2 | 3 | 4 | 5)}
                 styles={styles}
               />
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Size</Text>
-              <Text style={styles.helper}>
-                Micro (matchbox) · Small (sandwich box) · Regular (ammo can) · Large (bucket) ·
-                Other (custom container).
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.sizeLabel')}
               </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.sizeHelper')}</Text>
               <OptionPicker
                 value={cacheSize}
                 options={[
-                  { v: 'micro', label: 'Micro' },
-                  { v: 'small', label: 'Small' },
-                  { v: 'regular', label: 'Regular' },
-                  { v: 'large', label: 'Large' },
-                  { v: 'other', label: 'Other' },
+                  { v: 'micro', label: t('huntCreateScreen.sizeMicro') },
+                  { v: 'small', label: t('huntCreateScreen.sizeSmall') },
+                  { v: 'regular', label: t('huntCreateScreen.sizeRegular') },
+                  { v: 'large', label: t('huntCreateScreen.sizeLarge') },
+                  { v: 'other', label: t('huntCreateScreen.sizeOther') },
                 ]}
                 onChange={(v) =>
                   setCacheSize(v as 'micro' | 'small' | 'regular' | 'large' | 'other')
@@ -1937,39 +1961,34 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 styles={styles}
               />
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Type</Text>
-              <Text style={styles.helper}>
-                Traditional (the tag is the cache) · Multi (several waypoints to reach it) · Mystery
-                (solve a puzzle for the coordinates) · Virtual (just head to the spot — nothing to
-                tag).
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.typeLabel')}
               </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.typeHelper')}</Text>
               <OptionPicker
                 value={cacheType}
                 options={[
-                  { v: 'traditional', label: 'Traditional' },
-                  { v: 'multi', label: 'Multi' },
-                  { v: 'mystery', label: 'Mystery' },
-                  { v: 'virtual', label: 'Virtual' },
+                  { v: 'traditional', label: t('huntCreateScreen.typeTraditional') },
+                  { v: 'multi', label: t('huntCreateScreen.typeMulti') },
+                  { v: 'mystery', label: t('huntCreateScreen.typeMystery') },
+                  { v: 'virtual', label: t('huntCreateScreen.typeVirtual') },
                 ]}
                 onChange={(v) => setCacheType(v as 'traditional' | 'multi' | 'mystery' | 'virtual')}
                 styles={styles}
               />
 
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Expires after</Text>
-              <Text style={styles.helper}>
-                Relays drop the listing once it expires — anyone searching for nearby caches
-                won&apos;t see it. You can re-publish at any time to extend the window.
-                &quot;Never&quot; leaves the cache up indefinitely (only use this if you&apos;re
-                actively maintaining the tag).
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.expiresAfterLabel')}
               </Text>
+              <Text style={styles.helper}>{t('huntCreateScreen.expiresAfterHelper')}</Text>
               <OptionPicker
                 value={expiryDays}
                 options={[
-                  { v: '30', label: '30 days' },
-                  { v: '90', label: '90 days' },
-                  { v: '180', label: '6 months' },
-                  { v: '365', label: '1 year' },
-                  { v: 'never', label: 'Never' },
+                  { v: '30', label: t('huntCreateScreen.expiry30days') },
+                  { v: '90', label: t('huntCreateScreen.expiry90days') },
+                  { v: '180', label: t('huntCreateScreen.expiry6months') },
+                  { v: '365', label: t('huntCreateScreen.expiry1year') },
+                  { v: 'never', label: t('huntCreateScreen.expiryNever') },
                 ]}
                 onChange={(v) => setExpiryDays(v as '30' | '90' | '180' | '365' | 'never')}
                 styles={styles}
@@ -1988,13 +2007,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <>
               <StepHeader
                 n={5}
-                title="Publish"
-                subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
+                title={t('huntCreateScreen.step5Title')}
+                subtitle={t('huntCreateScreen.step5Subtitle')}
                 status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
                 styles={styles}
                 colors={colors}
               />
-              <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
+              <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+                {t('huntCreateScreen.discoverability')}
+              </Text>
               <TouchableOpacity
                 style={styles.publicRow}
                 onPress={() =>
@@ -2007,11 +2028,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               >
                 <Globe size={20} color={colors.brandPink} strokeWidth={2} />
                 <View style={styles.publicTextWrapper}>
-                  <Text style={styles.publicTitle}>Make this Piggy public</Text>
+                  <Text style={styles.publicTitle}>{t('huntCreateScreen.makePiggyPublic')}</Text>
                   <Text style={styles.publicSub}>
                     {isPublic
-                      ? 'Published to Nostr relays as a kind 37516 event — anyone can see the location and hunt it. Nostr has no private events, so once it is out, treat it as public.'
-                      : 'Stays on this device only — never sent to a relay. Found purely by physically tapping the tag. Best for a private gift or family Piggy.'}
+                      ? t('huntCreateScreen.publicSubOn')
+                      : t('huntCreateScreen.publicSubOff')}
                   </Text>
                 </View>
                 <View style={[styles.toggleTrack, isPublic && styles.toggleTrackOn]}>
@@ -2023,17 +2044,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   actually carries an LNURL — on the no-prize publish path
                   there's no reward URL to leak, so hide it (Copilot #955). */}
               {listingIsLpInEdit ? (
-                <Text style={styles.warning}>
-                  ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the
-                  URL) can claim sats up to your daily limit. Set a per-find amount you&apos;re OK
-                  losing if it leaks.
-                </Text>
+                <Text style={styles.warning}>{t('huntCreateScreen.bearerTokenWarning')}</Text>
               ) : null}
 
               {stage.kind === 'idle' || stage.kind === 'validating' ? (
-                <Text style={styles.helper}>
-                  Add a prize on step 2 — or skip it there to publish a no-reward cache.
-                </Text>
+                <Text style={styles.helper}>{t('huntCreateScreen.addPrizeOnStep2')}</Text>
               ) : null}
               {/* Publish / Save is the step's primary action — own
                 button above the nav row so it reads as the *thing
@@ -2045,7 +2060,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <View style={styles.publishedStrip} testID="hunt-piggy-published-strip">
                   <Check size={18} color={colors.green} strokeWidth={2.5} />
                   <Text style={styles.publishedText}>
-                    {isPublic ? 'Published to relays' : 'Saved locally'}
+                    {isPublic
+                      ? t('huntCreateScreen.publishedToRelays')
+                      : t('huntCreateScreen.savedLocally')}
                   </Text>
                 </View>
               ) : (
@@ -2071,14 +2088,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     (stage.kind === 'idle' && !crossDeviceEdit)
                   }
                   testID="hunt-piggy-publish-button"
-                  accessibilityLabel={isPublic ? 'Publish Piggy' : 'Save Piggy'}
+                  accessibilityLabel={
+                    isPublic
+                      ? t('huntCreateScreen.publishPiggyAccessibility')
+                      : t('huntCreateScreen.savePiggyAccessibility')
+                  }
                 >
                   {isPublic ? (
                     <Globe size={18} color={colors.white} strokeWidth={2.5} />
                   ) : (
                     <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
                   )}
-                  <Text style={styles.primaryButtonText}>{isPublic ? 'Publish' : 'Save'}</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {isPublic ? t('huntCreateScreen.publish') : t('huntCreateScreen.save')}
+                  </Text>
                 </TouchableOpacity>
               )}
               <StepNavRow
@@ -2190,14 +2213,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             {!cameraPermission?.granted ? (
               <View style={styles.scannerPermission}>
                 <Text style={styles.scannerPermissionText}>
-                  Camera access needed to scan a QR code.
+                  {t('huntCreateScreen.cameraAccessNeeded')}
                 </Text>
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={requestCameraPermission}
                   testID="hunt-piggy-scan-grant"
                 >
-                  <Text style={styles.primaryButtonText}>Grant Permission</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {t('huntCreateScreen.grantPermission')}
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -2209,12 +2234,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               />
             )}
             <View style={styles.scannerHintBar}>
-              <Text style={styles.scannerHint}>Point at an LNURL QR code</Text>
+              <Text style={styles.scannerHint}>{t('huntCreateScreen.pointAtLnurlQr')}</Text>
             </View>
             <TouchableOpacity
               style={styles.scannerCloseButton}
               onPress={() => setScannerOpen(false)}
-              accessibilityLabel="Close scanner"
+              accessibilityLabel={t('huntCreateScreen.closeScanner')}
               testID="hunt-piggy-scan-close"
             >
               <X size={22} color={colors.white} strokeWidth={2.5} />

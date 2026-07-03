@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
@@ -42,8 +43,8 @@ interface Props {
   route: RouteProp<ExploreStackParamList, 'EventDetail'>;
 }
 
-const formatDate = (ts: number | null): string => {
-  if (ts === null) return 'Date TBC';
+const formatDate = (ts: number | null, t: ReturnType<typeof useTranslation>): string => {
+  if (ts === null) return t('eventDetailScreen.dateTbc');
   const d = new Date(ts * 1000);
   return d.toLocaleString(undefined, {
     weekday: 'short',
@@ -84,6 +85,7 @@ const decodeGeohash = (gh: string): { lat: number; lng: number } => {
 };
 
 const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { coord } = route.params;
@@ -176,20 +178,20 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     } catch (e) {
       Toast.show({
         type: 'info',
-        text1: 'Couldn’t open calendar',
+        text1: t('eventDetailScreen.couldntOpenCalendar'),
         text2: (e as Error).message,
       });
     }
-  }, [event]);
+  }, [event, t]);
 
   const onShare = useCallback(() => {
     if (!event) return;
-    const when = formatDate(event.startsAt);
+    const when = formatDate(event.startsAt, t);
     Share.share({
       message: `${event.title} — ${when}${event.location ? ` · ${event.location}` : ''}`,
       title: event.title,
     }).catch(() => {});
-  }, [event]);
+  }, [event, t]);
 
   return (
     <View style={styles.container} testID="event-detail-screen">
@@ -197,18 +199,18 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          accessibilityLabel="Back to Events"
+          accessibilityLabel={t('eventDetailScreen.backToEvents')}
           testID="event-detail-back-button"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {event?.title ?? 'Event'}
+          {event?.title ?? t('eventDetailScreen.event')}
         </Text>
         <TouchableOpacity
           onPress={onShare}
-          accessibilityLabel="Share this event"
+          accessibilityLabel={t('eventDetailScreen.shareThisEvent')}
           testID="event-detail-share"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -220,9 +222,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         {loading ? (
           <ActivityIndicator color={colors.brandPink} style={{ marginTop: 40 }} />
         ) : !event ? (
-          <Text style={styles.errorText}>
-            This event isn’t in our local feed anymore. Reload the Events page to refetch.
-          </Text>
+          <Text style={styles.errorText}>{t('eventDetailScreen.notInFeed')}</Text>
         ) : (
           <>
             {event.imageUrl ? (
@@ -233,7 +233,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <View style={styles.metaRow}>
               <Clock size={14} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.metaText}>{formatDate(event.startsAt)}</Text>
+              <Text style={styles.metaText}>{formatDate(event.startsAt, t)}</Text>
             </View>
             {event.location ? (
               <View style={styles.metaRow}>
@@ -247,7 +247,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               style={styles.organiserRow}
               onPress={() => setProfileSheetOpen(true)}
               testID="event-detail-organiser"
-              accessibilityLabel={`Open ${organiserName} profile`}
+              accessibilityLabel={t('eventDetailScreen.openProfile', { name: organiserName })}
             >
               {organiser.picture ? (
                 <Image source={{ uri: organiser.picture }} style={styles.organiserAvatar} />
@@ -257,7 +257,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               )}
               <View style={{ flex: 1 }}>
-                <Text style={styles.organiserLabel}>Organised by</Text>
+                <Text style={styles.organiserLabel}>{t('eventDetailScreen.organisedBy')}</Text>
                 <Text style={styles.organiserName} numberOfLines={1}>
                   {organiserName}
                 </Text>
@@ -299,27 +299,29 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 style={[styles.actionButton, styles.actionButtonPrimary]}
                 onPress={onAddToCalendar}
                 testID="event-detail-add-to-calendar"
-                accessibilityLabel="Add to calendar"
+                accessibilityLabel={t('eventDetailScreen.addToCalendar')}
               >
                 <CalendarPlus size={16} color={colors.white} strokeWidth={2.5} />
-                <Text style={[styles.actionText, styles.actionTextPrimary]}>Add to calendar</Text>
+                <Text style={[styles.actionText, styles.actionTextPrimary]}>
+                  {t('eventDetailScreen.addToCalendar')}
+                </Text>
               </TouchableOpacity>
               {event.location || event.geohash ? (
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={onOpenInMaps}
                   testID="event-detail-open-in-maps"
-                  accessibilityLabel="Open in Maps"
+                  accessibilityLabel={t('eventDetailScreen.openInMaps')}
                 >
                   <NavigationIcon size={16} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.actionText}>Open in Maps</Text>
+                  <Text style={styles.actionText}>{t('eventDetailScreen.openInMaps')}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
 
             <View style={styles.attribution}>
               <Sparkles size={11} color={colors.textSupplementary} strokeWidth={2} />
-              <Text style={styles.attributionText}>NIP-52 calendar event</Text>
+              <Text style={styles.attributionText}>{t('eventDetailScreen.nip52Attribution')}</Text>
             </View>
           </>
         )}

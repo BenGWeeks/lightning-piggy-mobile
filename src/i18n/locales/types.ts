@@ -1,12 +1,13 @@
-// The shape every locale JSON file must match. Adding a key here without
-// adding it to every locale file in src/i18n/index.ts's `en`/`es` (etc.)
-// assignments is a TypeScript error — that's what keeps the catalogues
-// honest as #137's translation batches land one surface at a time.
-export interface Translations {
-  tabs: {
-    home: string;
-    messages: string;
-    explore: string;
-    friends: string;
-  };
-}
+// The shape every locale JSON file must match. `Translations` is derived from
+// the English catalogue (`en.json`) — the source of truth for keys — with every
+// leaf value mapped to `string`. `src/i18n/index.ts` then does
+// `const es: Translations = esJson`, so a Spanish (or any other) catalogue that
+// is missing a key en.json has — or misspells one — is a TypeScript error.
+// That keeps the catalogues honest without a hand-maintained key list.
+import en from './en.json';
+
+type Stringify<T> = {
+  [K in keyof T]: T[K] extends object ? Stringify<T[K]> : string;
+};
+
+export type Translations = Stringify<typeof en>;

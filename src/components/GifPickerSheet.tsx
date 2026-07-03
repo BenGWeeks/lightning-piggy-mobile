@@ -21,6 +21,7 @@ import {
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { searchGifs, getTrending, isConfigured, Gif } from '../services/giphyService';
 
@@ -36,6 +37,7 @@ const TILE_HEIGHT = 110;
 
 const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['75%', '90%'], []);
@@ -177,7 +179,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
         if (!cancelled) setResults(gifs);
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Could not load GIFs.');
+          setError(e instanceof Error ? e.message : t('gifPickerSheet.loadError'));
           setResults([]);
         }
       } finally {
@@ -188,7 +190,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     return () => {
       cancelled = true;
     };
-  }, [visible, debouncedSearch, configured]);
+  }, [visible, debouncedSearch, configured, t]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -218,7 +220,9 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
           onPress={() => onSelect(item)}
           activeOpacity={0.8}
           style={[styles.tile, { width: tileWidth, height: TILE_HEIGHT }]}
-          accessibilityLabel={`Send GIF: ${item.title || 'reaction'}`}
+          accessibilityLabel={t('gifPickerSheet.sendGifLabel', {
+            title: item.title || t('gifPickerSheet.reaction'),
+          })}
           testID={`gif-tile-${item.id}`}
         >
           <ExpoImage
@@ -232,7 +236,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
         </TouchableOpacity>
       );
     },
-    [onSelect, tileWidth, visibleIds],
+    [onSelect, tileWidth, visibleIds, t],
   );
 
   return (
@@ -261,20 +265,20 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       stackBehavior="push"
     >
       <View style={styles.header}>
-        <Text style={styles.title}>Send a GIF</Text>
+        <Text style={styles.title}>{t('gifPickerSheet.title')}</Text>
       </View>
       <View style={styles.searchRow}>
         <Search size={18} color={colors.textSupplementary} />
         <BottomSheetTextInput
           style={styles.searchInput}
-          placeholder="Search for GIFs"
+          placeholder={t('gifPickerSheet.searchPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={search}
           onChangeText={setSearch}
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          accessibilityLabel="Search GIFs"
+          accessibilityLabel={t('gifPickerSheet.searchAccessibility')}
           testID="gif-search-input"
         />
       </View>
@@ -297,7 +301,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
         </View>
       ) : error ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Could not load GIFs</Text>
+          <Text style={styles.emptyTitle}>{t('gifPickerSheet.loadErrorTitle')}</Text>
           <Text style={styles.emptySubtitle}>{error}</Text>
         </View>
       ) : (
@@ -319,7 +323,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
               </View>
             ) : (
               <View style={styles.emptyState}>
-                <Text style={styles.emptySubtitle}>No GIFs matched your search.</Text>
+                <Text style={styles.emptySubtitle}>{t('gifPickerSheet.noResults')}</Text>
               </View>
             )
           }

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native'
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   createMessageBubbleStyles,
   type MessageBubbleStyles,
@@ -144,6 +145,7 @@ const ImageBubble: React.FC<{
   // the tick like every other variant.
   footer: React.ReactNode;
 }> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
+  const t = useTranslation();
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
@@ -155,7 +157,9 @@ const ImageBubble: React.FC<{
         activeOpacity={0.85}
         onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
         style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
-        accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
+        accessibilityLabel={
+          fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
+        }
         accessibilityRole={canOpen ? 'imagebutton' : 'image'}
         disabled={!canOpen}
         testID={testID}
@@ -168,7 +172,7 @@ const ImageBubble: React.FC<{
           nonceHex={image.nonceHex}
           mime={image.mime}
           style={styles.imageBubbleImage}
-          accessibilityLabel="Shared image"
+          accessibilityLabel={t('messageBubble.sharedImage')}
           onResolved={image.encrypted ? setDisplayUri : undefined}
         />
         {footer}
@@ -209,6 +213,7 @@ const MessageBubble: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
+  const t = useTranslation();
 
   // Sender label only renders on group bubbles for incoming messages —
   // identical to existing GroupConversationScreen behaviour. Pulled into
@@ -267,7 +272,7 @@ const MessageBubble: React.FC<Props> = ({
           activeOpacity={0.85}
           onPress={() => onOpenGifFullscreen?.(content.url)}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
-          accessibilityLabel={fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'}
+          accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
           accessibilityRole="imagebutton"
           testID={`${testIdPrefix}-gif-${id}`}
         >
@@ -322,36 +327,40 @@ const MessageBubble: React.FC<Props> = ({
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
     const titleText =
       status === 'ended' || status === 'expired'
-        ? 'Live location ended'
+        ? t('messageBubble.liveLocationEnded')
         : status === 'paused'
           ? fromMe
-            ? 'Live location paused'
-            : 'Live location · paused'
+            ? t('messageBubble.liveLocationPaused')
+            : t('messageBubble.liveLocationPausedThem')
           : fromMe
-            ? 'Sharing live location'
-            : 'Live location';
+            ? t('messageBubble.sharingLiveLocation')
+            : t('messageBubble.liveLocation');
     const subtitleText: string | null = (() => {
       if (status === 'ended' || status === 'expired') {
-        return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
+        return latest
+          ? t('messageBubble.lastUpdate', { time: formatTime(Math.floor(latest.ts / 1000)) })
+          : null;
       }
       if (latest) {
         const ageMs = Math.max(0, Date.now() - latest.ts);
         const mins = Math.floor(ageMs / 60_000);
         const secs = Math.floor((ageMs % 60_000) / 1000);
-        if (mins >= 1) return `Updated ${mins}m ago`;
-        return `Updated ${secs}s ago`;
+        if (mins >= 1) return t('messageBubble.updatedMinsAgo', { mins });
+        return t('messageBubble.updatedSecsAgo', { secs });
       }
-      return 'Waiting for first update…';
+      return t('messageBubble.waitingForFirstUpdate');
     })();
     const remainingLabel: string | null = (() => {
       if (status === 'ended' || status === 'expired') return null;
       if (remaining === null) return null;
-      if (remaining <= 0) return 'Ending…';
+      if (remaining <= 0) return t('messageBubble.ending');
       const mins = Math.ceil(remaining / 60_000);
-      if (mins < 60) return `${mins} min left`;
+      if (mins < 60) return t('messageBubble.minsLeft', { mins });
       const hours = Math.floor(mins / 60);
       const remMin = mins % 60;
-      return remMin === 0 ? `${hours}h left` : `${hours}h ${remMin}m left`;
+      return remMin === 0
+        ? t('messageBubble.hoursLeft', { hours })
+        : t('messageBubble.hoursMinsLeft', { hours, mins: remMin });
     })();
     return (
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
@@ -361,8 +370,12 @@ const MessageBubble: React.FC<Props> = ({
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={
             fromMe
-              ? `Sharing live location with peer, ${remainingLabel ?? 'no time remaining'}`
-              : `Receiving live location, ${subtitleText ?? 'waiting'}`
+              ? t('messageBubble.sharingLiveLocationA11y', {
+                  remaining: remainingLabel ?? t('messageBubble.noTimeRemaining'),
+                })
+              : t('messageBubble.receivingLiveLocationA11y', {
+                  status: subtitleText ?? t('messageBubble.waiting'),
+                })
           }
           testID={`${testIdPrefix}-live-location-${id}`}
         >
@@ -415,10 +428,10 @@ const MessageBubble: React.FC<Props> = ({
               <TouchableOpacity
                 style={styles.liveStopButton}
                 onPress={() => onStopLiveLocation?.(marker.sessionId)}
-                accessibilityLabel="Stop sharing live location"
+                accessibilityLabel={t('messageBubble.stopSharingLiveLocation')}
                 testID={`${testIdPrefix}-live-location-stop-${id}`}
               >
-                <Text style={styles.invoicePayText}>Stop sharing</Text>
+                <Text style={styles.invoicePayText}>{t('messageBubble.stopSharing')}</Text>
               </TouchableOpacity>
             ) : null}
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -447,7 +460,9 @@ const MessageBubble: React.FC<Props> = ({
           activeOpacity={0.85}
           onPress={() => onOpenLocation(location)}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
-          accessibilityLabel={fromMe ? 'Location sent' : 'Location received'}
+          accessibilityLabel={
+            fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationReceived')
+          }
           testID={`${testIdPrefix}-location-${id}`}
         >
           {SenderLabel}
@@ -475,7 +490,7 @@ const MessageBubble: React.FC<Props> = ({
                 color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
               />
               <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
-                {fromMe ? 'Location sent' : 'Location'}
+                {fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationLabel')}
               </Text>
             </View>
             <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
@@ -483,7 +498,7 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
             {location.accuracyMeters !== null ? (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
-                ± {location.accuracyMeters} m · OpenStreetMap
+                {t('messageBubble.accuracyOsm', { meters: location.accuracyMeters })}
               </Text>
             ) : (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
@@ -507,12 +522,12 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View
           style={[styles.bubble, styles.unsupportedBubble]}
-          accessibilityLabel={`Unsupported message type, kind ${content.rawKind}`}
+          accessibilityLabel={t('messageBubble.unsupportedA11y', { kind: content.rawKind })}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
           {SenderLabel}
           <Text style={styles.unsupportedText}>
-            Unsupported message type (kind {content.rawKind})
+            {t('messageBubble.unsupportedText', { kind: content.rawKind })}
           </Text>
           {renderFooter([styles.bubbleTime])}
         </View>
@@ -578,21 +593,23 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
-          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>Secret Mode</Text>
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {t('messageBubble.secretMode')}
+          </Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
             {fromMe
-              ? 'Lightning Piggy will offer the recipient a button to toggle Secret Mode.'
-              : 'Unlocks dev / power-user surfaces in Lightning Piggy.'}
+              ? t('messageBubble.secretModeSenderMemo')
+              : t('messageBubble.secretModeReceiverMemo')}
           </Text>
           {!fromMe && onToggleSecretMode && (
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={onToggleSecretMode}
               accessibilityRole="button"
-              accessibilityLabel="Toggle Secret Mode"
+              accessibilityLabel={t('messageBubble.toggleSecretMode')}
               testID={`${testIdPrefix}-secret-mode-toggle-${id}`}
             >
-              <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.toggleSecretMode')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -617,11 +634,11 @@ const MessageBubble: React.FC<Props> = ({
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'On-chain address sent' : 'On-chain address'}
+            {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
           </Text>
           {bitcoinUri.amountSats !== null ? (
             <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
-              {bitcoinUri.amountSats.toLocaleString()} sats
+              {t('messageBubble.satsAmount', { amount: bitcoinUri.amountSats.toLocaleString() })}
             </Text>
           ) : null}
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
@@ -632,11 +649,11 @@ const MessageBubble: React.FC<Props> = ({
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(bitcoinUri.raw)}
               accessibilityRole="link"
-              accessibilityLabel="Pay this on-chain address"
+              accessibilityLabel={t('messageBubble.payOnchainAddress')}
               testID={`${testIdPrefix}-bitcoin-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -657,12 +674,12 @@ const MessageBubble: React.FC<Props> = ({
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Invoice sent' : 'Invoice received'}
+            {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
           </Text>
           <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
             {invoice.amountSats !== null
-              ? `${invoice.amountSats.toLocaleString()} sats`
-              : 'Any amount'}
+              ? t('messageBubble.satsAmount', { amount: invoice.amountSats.toLocaleString() })
+              : t('messageBubble.anyAmount')}
           </Text>
           {invoice.description ? (
             <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={2}>
@@ -673,23 +690,25 @@ const MessageBubble: React.FC<Props> = ({
             {paid ? (
               <View
                 style={[styles.invoiceTag, styles.invoiceTagPaid]}
-                accessibilityLabel="Invoice paid"
+                accessibilityLabel={t('messageBubble.invoicePaid')}
                 testID={`${testIdPrefix}-paid-badge-${id}`}
               >
-                <Text style={styles.invoiceTagPaidText}>Paid</Text>
+                <Text style={styles.invoiceTagPaidText}>{t('messageBubble.paid')}</Text>
               </View>
             ) : expired ? (
               <View style={[styles.invoiceTag, styles.invoiceTagExpired]}>
-                <Text style={styles.invoiceTagExpiredText}>Expired</Text>
+                <Text style={styles.invoiceTagExpiredText}>{t('messageBubble.expired')}</Text>
               </View>
             ) : fromMe ? (
               <View style={[styles.invoiceTag, styles.invoiceTagUnpaid]}>
-                <Text style={styles.invoiceTagUnpaidText}>Unpaid</Text>
+                <Text style={styles.invoiceTagUnpaidText}>{t('messageBubble.unpaid')}</Text>
               </View>
             ) : null}
             {!paid && !expired && invoice.expiresAt !== null ? (
               <Text style={[styles.invoiceExpiry, fromMe && styles.invoiceExpiryMe]}>
-                expires {formatRelativeFuture(invoice.expiresAt * 1000)}
+                {t('messageBubble.expiresIn', {
+                  time: formatRelativeFuture(invoice.expiresAt * 1000),
+                })}
               </Text>
             ) : null}
           </View>
@@ -698,11 +717,11 @@ const MessageBubble: React.FC<Props> = ({
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(invoice.raw)}
               accessibilityRole="link"
-              accessibilityLabel="Pay this invoice"
+              accessibilityLabel={t('messageBubble.payInvoice')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -722,12 +741,12 @@ const MessageBubble: React.FC<Props> = ({
           activeOpacity={0.8}
           onPress={() => onOpenContact(sharedContact.pubkey, prof)}
           style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
-          accessibilityLabel={`Shared contact ${displayName}`}
+          accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
         >
           {SenderLabel}
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
-            {fromMe ? 'Contact shared' : 'Contact'}
+            {fromMe ? t('messageBubble.contactShared') : t('messageBubble.contact')}
           </Text>
           <View style={styles.contactBodyRow}>
             {/* Always render the silhouette as the base layer so it shows
@@ -750,7 +769,7 @@ const MessageBubble: React.FC<Props> = ({
             </View>
             <View style={styles.contactInfo}>
               <Text style={[styles.contactName, fromMe && styles.contactNameMe]} numberOfLines={1}>
-                {loaded ? displayName : 'Loading…'}
+                {loaded ? displayName : t('messageBubble.loading')}
               </Text>
               {prof?.lud16 ? (
                 <Text style={[styles.contactLn, fromMe && styles.contactLnMe]} numberOfLines={1}>
@@ -776,7 +795,7 @@ const MessageBubble: React.FC<Props> = ({
         <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Address sent' : 'Lightning address'}
+            {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
           </Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
             {lnAddress}
@@ -785,11 +804,11 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayLightningAddress(lnAddress)}
-              accessibilityLabel="Pay this lightning address"
+              accessibilityLabel={t('messageBubble.payLightningAddress')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
@@ -836,7 +855,7 @@ const MessageBubble: React.FC<Props> = ({
                       void Linking.openURL(seg.url as string).catch(() => {});
                     }}
                     accessibilityRole="link"
-                    accessibilityLabel={`Open link ${seg.url}`}
+                    accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
                     testID={`${testIdPrefix}-link-${id}-${i}`}
                   >
                     {seg.text}

@@ -1,16 +1,18 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 const EarnScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Earn</Text>
-      <Text style={styles.subtitle}>Coming soon!</Text>
+      <Text style={styles.title}>{t('earnScreen.title')}</Text>
+      <Text style={styles.subtitle}>{t('earnScreen.comingSoon')}</Text>
     </View>
   );
 };
