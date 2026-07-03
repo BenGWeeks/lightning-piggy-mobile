@@ -251,7 +251,7 @@ const RecoveryRow: React.FC<{
                 ? t('coinosRecoverySheet.hideField', { label })
                 : t('coinosRecoverySheet.revealField', { label })
             }
-            testID={`${testID}-reveal`}
+            testID={testID ? `${testID}-reveal` : undefined}
             hitSlop={8}
           >
             {revealed ? (
@@ -265,7 +265,7 @@ const RecoveryRow: React.FC<{
           onPress={onCopy}
           style={styles.copyButton}
           accessibilityLabel={t('coinosRecoverySheet.copyField', { label })}
-          testID={`${testID}-copy`}
+          testID={testID ? `${testID}-copy` : undefined}
           hitSlop={8}
         >
           <Copy size={18} color={colors.brandPink} strokeWidth={2.5} />
