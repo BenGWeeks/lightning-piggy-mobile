@@ -112,12 +112,13 @@ const ReceiveSheet: React.FC<Props> = ({
     [wallets, selectedWalletId],
   );
   const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
-  // Every wallet is a valid receive destination — an on-chain wallet always
-  // has an address, and an NWC wallet mints an invoice on demand, so a live
-  // connection isn't required just to *receive*. The picker therefore lists
-  // all wallets. (It previously filtered on `w.isConnected`, which hid
-  // receivable-but-idle NWC wallets and silently locked the invoice to the
-  // active wallet — the user couldn't choose where funds landed.)
+  // List all wallets in the picker rather than gating on `isConnected` —
+  // receiving doesn't need a live connection (an on-chain wallet always has an
+  // address, and most NWC wallets mint an invoice on demand). If a chosen
+  // wallet genuinely can't produce one (e.g. a read-only NWC without
+  // `make_invoice`), that surfaces as an error at generate time — which is
+  // better than silently hiding it and locking the invoice to the active
+  // wallet, where the user couldn't choose where funds landed at all.
   const receivableWallets = wallets;
   // Lightning Address is a per-wallet field (#169). Each NWC wallet can
   // carry its own lud16 (either parsed from the NWC URL or set manually
