@@ -117,7 +117,7 @@ const MessageActionsSheet: React.FC<Props> = ({
                 key={emoji}
                 style={[styles.emojiButton, active && styles.emojiButtonActive]}
                 onPress={() => onToggleReaction(emoji, myReactionId)}
-                accessibilityLabel={`React with ${emoji}`}
+                accessibilityLabel={active ? `Remove ${emoji} reaction` : `React with ${emoji}`}
                 accessibilityState={{ selected: active }}
                 testID={`message-actions-emoji-${emoji}`}
               >

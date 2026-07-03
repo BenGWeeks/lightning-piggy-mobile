@@ -130,6 +130,19 @@ export const EMPTY_REACTION_STATE: MessageReactionState = Object.freeze({
 });
 
 /**
+ * Normalize a NIP-25 reaction glyph for display + bucketing. Per spec an
+ * empty content and "+" both mean "like" and "-" means "dislike". Clients
+ * that send the bare "+"/"" like would otherwise render as a literal "+"
+ * pill and bucket separately from a peer who sent "👍". Map them to the
+ * intended glyph so semantically-equal reactions collapse into one pill.
+ */
+export function normalizeReactionEmoji(content: string): string {
+  if (content.length === 0 || content === '+') return '👍';
+  if (content === '-') return '👎';
+  return content;
+}
+
+/**
  * Extract a `ReactionRecord` from a raw kind-7 event payload, or return
  * null if the event is malformed. We accept a loose `event` shape rather
  * than the nostr-tools `Event` type so unit tests can hand us literals.
@@ -144,10 +157,7 @@ export function parseReactionEvent(event: {
 }): ReactionRecord | null {
   if (event.kind !== 7) return null;
   if (typeof event.content !== 'string') return null;
-  // NIP-25 says content MAY be empty (treat as "+") but we want a visible
-  // glyph in the UI, so coerce to "+" and let the renderer pick its own
-  // mapping (or fall back to "+").
-  const emoji = event.content.length > 0 ? event.content : '+';
+  const emoji = normalizeReactionEmoji(event.content);
   // Per spec, the e tag pointing at the target SHOULD be the LAST e tag.
   // If absent, drop the event — without a target there's nothing to render.
   let targetEventId: string | null = null;

@@ -189,7 +189,10 @@ const ImageBubble: React.FC<{
         accessibilityLabel={
           fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
         }
-        accessibilityRole={canOpen ? 'imagebutton' : 'image'}
+        // Announce as an image-button whenever it's interactive — either it can
+        // open fullscreen (tap) OR it can open the actions sheet (long-press).
+        // Only a purely-static image announces as a plain 'image'.
+        accessibilityRole={canOpen || onLongPress ? 'imagebutton' : 'image'}
         disabled={!canOpen && !onLongPress}
         testID={testID}
       >
@@ -274,6 +277,7 @@ const MessageBubble: React.FC<Props> = ({
               disabled={!onToggleReaction}
               onPress={() => onToggleReaction?.(emoji, myReactionId)}
               style={[styles.reactionPill, mine && styles.reactionPillMine]}
+              accessibilityRole="button"
               accessibilityLabel={
                 mine
                   ? `Remove your ${emoji} reaction (${reactors.length} total)`

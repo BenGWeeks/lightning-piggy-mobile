@@ -147,7 +147,7 @@ describe('parseReactionEvent', () => {
     expect(parsed?.targetEventId).toBe(TARGET_2);
   });
 
-  it('coerces empty content to "+" so the renderer always has a glyph', () => {
+  it('normalizes empty content to 👍 so "+"-style likes bucket with 👍', () => {
     const parsed = parseReactionEvent({
       id: 'r1',
       pubkey: PK_A,
@@ -156,7 +156,28 @@ describe('parseReactionEvent', () => {
       created_at: 1000,
       tags: [['e', TARGET_1]],
     });
-    expect(parsed?.emoji).toBe('+');
+    expect(parsed?.emoji).toBe('👍');
+  });
+
+  it('normalizes "+" to 👍 and "-" to 👎', () => {
+    const plus = parseReactionEvent({
+      id: 'r1',
+      pubkey: PK_A,
+      kind: 7,
+      content: '+',
+      created_at: 1000,
+      tags: [['e', TARGET_1]],
+    });
+    const minus = parseReactionEvent({
+      id: 'r2',
+      pubkey: PK_A,
+      kind: 7,
+      content: '-',
+      created_at: 1000,
+      tags: [['e', TARGET_1]],
+    });
+    expect(plus?.emoji).toBe('👍');
+    expect(minus?.emoji).toBe('👎');
   });
 });
 

@@ -113,24 +113,40 @@ export function useConversationReactions({
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
   // get fetched once a decrypt supplies the id.
   useEffect(() => {
+    // Capture the (stable) scheduled-ids Set once so the cleanup closes over
+    // the same instance the effect body used — the ref is never reassigned.
+    const scheduled = reactionFetchScheduledRef.current;
     const targets: string[] = [];
     for (const m of messages) {
       const targetId = m.rumorId;
       if (!targetId) continue;
-      if (reactionFetchScheduledRef.current.has(targetId)) continue;
+      if (scheduled.has(targetId)) continue;
       targets.push(targetId);
-      reactionFetchScheduledRef.current.add(targetId);
+      scheduled.add(targetId);
     }
     if (targets.length === 0) return;
     let cancelled = false;
+    let settled = false;
     (async () => {
-      const events = await fetchReactionsForMessages(targets);
-      if (cancelled || events.length === 0) return;
-      const fresh = events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r);
-      if (!cancelled) mergeFreshRecords(fresh);
+      try {
+        const events = await fetchReactionsForMessages(targets);
+        settled = true;
+        if (cancelled || events.length === 0) return;
+        const fresh = events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r);
+        mergeFreshRecords(fresh);
+      } catch {
+        settled = true;
+      }
     })();
     return () => {
       cancelled = true;
+      // If the effect is torn down (e.g. `messages` changed) before the fetch
+      // resolves, un-schedule this run's ids so a later run can retry.
+      // Otherwise a cancelled in-flight fetch would leave them permanently
+      // marked "scheduled" and their reactions would never load.
+      if (!settled) {
+        for (const id of targets) scheduled.delete(id);
+      }
     };
   }, [messages, fetchReactionsForMessages, mergeFreshRecords]);
 
@@ -138,11 +154,12 @@ export function useConversationReactions({
   const [actionsForMessage, setActionsForMessage] = useState<ActionedMessage | null>(null);
   const closeMessageActions = useCallback(() => setActionsForMessage(null), []);
 
-  // Toggle a reaction emoji for the actioned message. Existing reaction →
-  // NIP-09 delete; otherwise publish a fresh kind-7. Optimistic on both paths.
-  const handleToggleReaction = useCallback(
-    async (emoji: string, existingReactionId: string | null) => {
-      const target = actionsForMessage;
+  // Core toggle: publish/delete a reaction for an EXPLICIT target descriptor.
+  // Taking the target as an argument (rather than reading `actionsForMessage`)
+  // keeps the pill-tap path race-free — the caller passes the item's descriptor
+  // directly instead of seeding state and hoping it commits first.
+  const toggleReactionForTarget = useCallback(
+    async (target: ActionedMessage | null, emoji: string, existingReactionId: string | null) => {
       if (!target || !myPubkey) {
         closeMessageActions();
         return;
@@ -190,7 +207,6 @@ export function useConversationReactions({
       }
     },
     [
-      actionsForMessage,
       closeMessageActions,
       myPubkey,
       publishReaction,
@@ -198,6 +214,16 @@ export function useConversationReactions({
       fetchReactionsForMessages,
       mergeFreshRecords,
     ],
+  );
+
+  // Sheet-driven toggle (MessageActionsSheet): acts on the currently-actioned
+  // message. Reads `actionsForMessage` because the sheet is a singleton bound
+  // to whichever message was long-pressed.
+  const handleToggleReaction = useCallback(
+    (emoji: string, existingReactionId: string | null) => {
+      void toggleReactionForTarget(actionsForMessage, emoji, existingReactionId);
+    },
+    [toggleReactionForTarget, actionsForMessage],
   );
 
   // Zap the actioned message's author. Close the sheet first so SendSheet
@@ -244,14 +270,14 @@ export function useConversationReactions({
     (item: Item) => {
       const descriptor = descriptorForItem(item);
       if (!descriptor) return undefined;
+      // Pass the descriptor straight through so the toggle acts on THIS pill's
+      // message — no `setActionsForMessage` + `setTimeout` dance (which could
+      // race a concurrent long-press and toggle the wrong / a null target).
       return (emoji: string, existingReactionId: string | null) => {
-        // Seed the actioned message so handleToggleReaction knows its target,
-        // then defer one tick so the state is committed before it reads it.
-        setActionsForMessage(descriptor);
-        setTimeout(() => handleToggleReaction(emoji, existingReactionId), 0);
+        void toggleReactionForTarget(descriptor, emoji, existingReactionId);
       };
     },
-    [descriptorForItem, handleToggleReaction],
+    [descriptorForItem, toggleReactionForTarget],
   );
 
   return {
