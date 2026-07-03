@@ -1,6 +1,6 @@
 import {
   parseShippingOptionEvent,
-  dedupeNewestPerD,
+  dedupeNewestPerCoordinate,
   filterShippingOptions,
   shippingCostFor,
   shippingCostSats,
@@ -89,7 +89,7 @@ describe('parseShippingOptionEvent', () => {
   });
 });
 
-describe('dedupeNewestPerD', () => {
+describe('dedupeNewestPerCoordinate', () => {
   it('keeps only the newest revision per coordinate', () => {
     const older = makeOption({ createdAt: 100, title: 'Old' });
     const newer = makeOption({ createdAt: 200, title: 'New' });
@@ -97,7 +97,7 @@ describe('dedupeNewestPerD', () => {
       coordinate: `${SHIPPING_OPTION_KIND}:${PK}:express`,
       dTag: 'express',
     });
-    const deduped = dedupeNewestPerD([older, newer, other]);
+    const deduped = dedupeNewestPerCoordinate([older, newer, other]);
     expect(deduped).toHaveLength(2);
     expect(deduped.find((o) => o.dTag === 'std')?.title).toBe('New');
   });

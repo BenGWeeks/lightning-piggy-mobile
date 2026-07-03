@@ -7,7 +7,7 @@ import { querySyncAbortable } from './relayQuery';
 import {
   SHIPPING_OPTION_KIND,
   parseShippingOptionEvent,
-  dedupeNewestPerD,
+  dedupeNewestPerCoordinate,
   type ShippingOption,
 } from '../utils/marketShipping';
 
@@ -38,5 +38,5 @@ export async function fetchShippingOptions(input: {
   const parsed = events
     .map(parseShippingOptionEvent)
     .filter((o): o is ShippingOption => o !== null);
-  return dedupeNewestPerD(parsed);
+  return dedupeNewestPerCoordinate(parsed);
 }

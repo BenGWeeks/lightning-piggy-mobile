@@ -104,16 +104,19 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
 }
 
 /**
- * Collapse a raw fetch result to the newest event per `d` tag — 30406 is
- * addressable, so relays can return several revisions of the same option.
+ * Collapse a raw fetch result to the newest event per addressable
+ * coordinate (`30406:<pubkey>:<d>`) — 30406 is addressable, so relays can
+ * return several revisions of the same option. Keying on the full
+ * coordinate (not the `d` tag alone) keeps it multi-merchant safe: two
+ * sellers can publish the same `d` without colliding.
  */
-export function dedupeNewestPerD(options: ShippingOption[]): ShippingOption[] {
-  const byD = new Map<string, ShippingOption>();
+export function dedupeNewestPerCoordinate(options: ShippingOption[]): ShippingOption[] {
+  const byCoordinate = new Map<string, ShippingOption>();
   for (const o of options) {
-    const prev = byD.get(o.coordinate);
-    if (!prev || o.createdAt > prev.createdAt) byD.set(o.coordinate, o);
+    const prev = byCoordinate.get(o.coordinate);
+    if (!prev || o.createdAt > prev.createdAt) byCoordinate.set(o.coordinate, o);
   }
-  return [...byD.values()];
+  return [...byCoordinate.values()];
 }
 
 /**
