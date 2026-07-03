@@ -36,7 +36,6 @@ export const createTransferProgressStyles = (colors: Palette) =>
       color: colors.textBody,
       fontWeight: '500',
       textAlign: 'center',
-      flex: 1,
     },
     // --- Step list (issue #62) ---
     stepList: {

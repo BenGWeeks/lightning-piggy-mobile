@@ -1095,8 +1095,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Transfer</Text>
 
             {/* Source wallet selector */}
-            {sending ? (
-              /* Progress view — replaces form while transfer is executing */
+            {sending || progress.phase === 'failed' ? (
+              /* Progress view — replaces the form while a transfer is
+                 executing (`sending`) and stays mounted on failure
+                 (`phase === 'failed'`) so the failing step renders its X
+                 row. `finally` clears `sending` but leaves the failed
+                 progress in place; reopening the sheet resets it to
+                 idle. */
               <TransferProgress
                 amountSats={currentSats}
                 sourceAlias={source?.alias}

@@ -97,6 +97,17 @@ describe('transferPhase state machine', () => {
       expect(p.phase).toBe('done');
       expect(p.activeIndex).toBe(p.steps.length);
     });
+
+    it('clears a stale errorMessage when completing (e.g. after a retry)', () => {
+      // Simulate a progress value that still carries an error from an
+      // earlier failed attempt, then complete it: the terminal success
+      // state must not leak the old error.
+      const failed = failTransfer(startTransfer('ln-to-ln'), 'first attempt failed');
+      expect(failed.errorMessage).toBe('first attempt failed');
+      const completed = completeTransfer({ ...failed, phase: 'in-progress' });
+      expect(completed.phase).toBe('done');
+      expect(completed.errorMessage).toBeUndefined();
+    });
   });
 
   describe('failTransfer', () => {
@@ -106,6 +117,27 @@ describe('transferPhase state machine', () => {
       expect(failed.phase).toBe('failed');
       expect(failed.activeIndex).toBe(1);
       expect(failed.errorMessage).toBe('broadcast rejected');
+    });
+
+    it('is a no-op once phase is done (a late error cannot un-complete)', () => {
+      const done = completeTransfer(startTransfer('ln-to-ln'));
+      const after = failTransfer(done, 'too late');
+      expect(after).toEqual(done);
+      expect(after.phase).toBe('done');
+      expect(after.errorMessage).toBeUndefined();
+    });
+
+    it('is a no-op when idle', () => {
+      const idle = idleProgress();
+      const after = failTransfer(idle, 'nothing running');
+      expect(after).toEqual(idle);
+    });
+
+    it('is a no-op once already failed (keeps the first error)', () => {
+      const failed = failTransfer(startTransfer('ln-to-ln'), 'first error');
+      const again = failTransfer(failed, 'second error');
+      expect(again).toEqual(failed);
+      expect(again.errorMessage).toBe('first error');
     });
   });
 });

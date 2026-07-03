@@ -91,9 +91,10 @@ export const startTransfer = (transferType: TransferType): TransferProgress => (
 /**
  * Mark the current step complete and start the next one. Caller invokes
  * this each time the existing transfer flow finishes a logical phase
- * (e.g. after `payInvoiceForWallet` resolves). If we're already past
- * the last step the call is a no-op — the caller should use
- * `completeTransfer()` to land in the terminal 'done' state instead.
+ * (e.g. after `payInvoiceForWallet` resolves). Advancing off the final
+ * step auto-completes: the call delegates to `completeTransfer()` and
+ * lands in the terminal 'done' state. Only mutates while
+ * `phase === 'in-progress'`; on any other phase it's a no-op.
  */
 export const advanceTransfer = (progress: TransferProgress): TransferProgress => {
   if (progress.phase !== 'in-progress') return progress;
@@ -108,11 +109,14 @@ export const advanceTransfer = (progress: TransferProgress): TransferProgress =>
  * Mark every step complete and flip phase to 'done'. Called by the
  * sheet at the end of the synchronous transfer paths (LN→LN,
  * on-chain→on-chain) and at the handoff point of the Boltz paths.
+ * Clears any `errorMessage` left over from an earlier failed attempt so
+ * the terminal success state never carries stale error data/UI.
  */
 export const completeTransfer = (progress: TransferProgress): TransferProgress => ({
   ...progress,
   phase: 'done',
   activeIndex: progress.steps.length,
+  errorMessage: undefined,
 });
 
 /**
@@ -120,12 +124,21 @@ export const completeTransfer = (progress: TransferProgress): TransferProgress =
  * UI can render an X / error icon on the row that broke. The caller's
  * existing Alert.alert flow still surfaces the human-readable reason —
  * this is just to keep the step list honest.
+ *
+ * Only mutates while `phase === 'in-progress'`; on any terminal or idle
+ * phase it's a no-op, so a late error can't flip an already-`done`
+ * transfer back to `failed`. (While in-progress `activeIndex` is always
+ * a valid step index — `completeTransfer` is what pushes it to
+ * `steps.length` — so the failing row is always renderable.)
  */
 export const failTransfer = (
   progress: TransferProgress,
   errorMessage: string,
-): TransferProgress => ({
-  ...progress,
-  phase: 'failed',
-  errorMessage,
-});
+): TransferProgress => {
+  if (progress.phase !== 'in-progress') return progress;
+  return {
+    ...progress,
+    phase: 'failed',
+    errorMessage,
+  };
+};
