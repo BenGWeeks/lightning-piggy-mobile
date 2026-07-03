@@ -4,7 +4,6 @@ import * as Clipboard from 'expo-clipboard';
 import { Check, X, Send, Inbox, Copy, RotateCw, Clock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t } from '../i18n';
 import { Toast } from './BrandedToast';
 import {
   summariseDelivery,
@@ -15,13 +14,15 @@ import {
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
 
 // Human label for a NIP-04/17 message kind shown in the metadata block.
-function kindLabel(kind: number | undefined): string {
-  if (kind === 4) return t('deliveryDetailSheet.kind4');
-  if (kind === 14) return t('deliveryDetailSheet.kind14');
-  if (kind === 15) return t('deliveryDetailSheet.kind15');
+// Takes the hook translator (`useTranslation()`'s return) so the label tracks
+// the live UI locale — the module-level `t` can lag during a locale switch.
+function kindLabel(kind: number | undefined, tr: ReturnType<typeof useTranslation>): string {
+  if (kind === 4) return tr('deliveryDetailSheet.kind4');
+  if (kind === 14) return tr('deliveryDetailSheet.kind14');
+  if (kind === 15) return tr('deliveryDetailSheet.kind15');
   return kind === undefined
-    ? t('deliveryDetailSheet.unknown')
-    : t('deliveryDetailSheet.kindN', { kind });
+    ? tr('deliveryDetailSheet.unknown')
+    : tr('deliveryDetailSheet.kindN', { kind });
 }
 
 function shortEventId(id: string): string {
@@ -171,7 +172,7 @@ export default function DeliveryDetailSheet({
             </View>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.kind')}</Text>
-              <Text style={styles.metaValue}>{kindLabel(info.wireKind)}</Text>
+              <Text style={styles.metaValue}>{kindLabel(info.wireKind, tr)}</Text>
             </View>
             {info.eventId ? (
               <View style={styles.metaRow}>

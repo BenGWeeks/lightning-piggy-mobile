@@ -17,7 +17,6 @@ import {
 import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { useWallet } from '../contexts/WalletContext';
 import * as coinosService from '../services/coinosService';
@@ -213,12 +212,12 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     setStep('custody');
     setError(
       lastError instanceof coinosService.CoinosError
-        ? coinosErrorCopy(lastError)
+        ? coinosErrorCopy(lastError, tr)
         : lastError instanceof Error
           ? lastError.message
           : tr('createCoinosWalletSheet.genericError'),
     );
-  }, [addNwcWallet, baseUrl]);
+  }, [addNwcWallet, baseUrl, tr]);
 
   const handleAcknowledge = useCallback(() => {
     // Make sure the new wallet is selected as active before we exit so
@@ -377,25 +376,34 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   );
 };
 
-/** Map structured CoinOS errors to user-facing copy. */
-function coinosErrorCopy(err: coinosService.CoinosError): string {
+/**
+ * Map structured CoinOS errors to user-facing copy.
+ *
+ * Takes the hook translate fn (`useTranslation()`'s return) rather than the
+ * module-level `t` — this is render-path/UI copy and the module-level
+ * translator can lag the live UI locale (see src/i18n/index.ts).
+ */
+function coinosErrorCopy(
+  err: coinosService.CoinosError,
+  tr: ReturnType<typeof useTranslation>,
+): string {
   switch (err.code) {
     case 'username_taken':
-      return t('createCoinosWalletSheet.errorUsernameTaken');
+      return tr('createCoinosWalletSheet.errorUsernameTaken');
     case 'rate_limited':
-      return t('createCoinosWalletSheet.errorRateLimited');
+      return tr('createCoinosWalletSheet.errorRateLimited');
     case 'service_down':
-      return t('createCoinosWalletSheet.errorServiceDown');
+      return tr('createCoinosWalletSheet.errorServiceDown');
     case 'network':
-      return t('createCoinosWalletSheet.errorNetwork');
+      return tr('createCoinosWalletSheet.errorNetwork');
     case 'timeout':
-      return t('createCoinosWalletSheet.errorTimeout');
+      return tr('createCoinosWalletSheet.errorTimeout');
     case 'auth':
-      return t('createCoinosWalletSheet.errorAuth');
+      return tr('createCoinosWalletSheet.errorAuth');
     case 'invalid_input':
       return err.message;
     default:
-      return err.message || t('createCoinosWalletSheet.genericError');
+      return err.message || tr('createCoinosWalletSheet.genericError');
   }
 }
 

@@ -390,7 +390,7 @@ const ConversationScreen: React.FC = () => {
       // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
       appendOptimisticLocal(result.markerText);
     },
-    [pubkey, startShare, appendOptimisticLocal],
+    [pubkey, startShare, appendOptimisticLocal, t],
   );
 
   const handleStopLive = useCallback(
@@ -400,18 +400,21 @@ const ConversationScreen: React.FC = () => {
         Alert.alert(t('conversationScreen.couldNotStopLiveShareTitle'), result.error);
       }
     },
-    [stopShare],
+    [stopShare, t],
   );
 
-  const openLocation = useCallback((loc: SharedLocation) => {
-    const url = buildOsmViewUrl(loc);
-    Linking.openURL(url).catch(() => {
-      Alert.alert(
-        t('conversationScreen.couldNotOpenLinkTitle'),
-        t('conversationScreen.couldNotOpenLinkBody'),
-      );
-    });
-  }, []);
+  const openLocation = useCallback(
+    (loc: SharedLocation) => {
+      const url = buildOsmViewUrl(loc);
+      Linking.openURL(url).catch(() => {
+        Alert.alert(
+          t('conversationScreen.couldNotOpenLinkTitle'),
+          t('conversationScreen.couldNotOpenLinkBody'),
+        );
+      });
+    },
+    [t],
+  );
 
   // My live position for the location-card mini-maps (#206) — the blue
   // "me" dot + accuracy halo. Shared GPS subscription, retained for this

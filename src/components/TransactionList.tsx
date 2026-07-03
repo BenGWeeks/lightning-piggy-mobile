@@ -13,7 +13,6 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t as translate } from '../i18n';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
@@ -50,13 +49,18 @@ interface Props {
   refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
-function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
-  if (cp.anonymous) return translate('transactionList.anonymous');
+// Translate function shape as provided by the `useTranslation()` hook. Passed
+// into render-path helpers so they use the hook translator (updates on locale
+// change immediately) rather than the module-level one (which lags the UI).
+type Translate = ReturnType<typeof useTranslation>;
+
+function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
+  if (cp.anonymous) return t('transactionList.anonymous');
   const profile = cp.profile;
   if (profile?.displayName) return profile.displayName;
   if (profile?.name) return profile.name;
   if (profile?.npub) return `${profile.npub.slice(0, 12)}…`;
-  return translate('transactionList.nostrUser');
+  return t('transactionList.nostrUser');
 }
 
 // Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
@@ -72,7 +76,7 @@ function splitDescription(desc: string): { primary: string; subtitle: string | n
   return { primary: trimmed, subtitle: null };
 }
 
-function formatDayHeader(ts: number): string {
+function formatDayHeader(ts: number, t: Translate): string {
   const date = new Date(ts * 1000);
   const today = new Date();
   const yesterday = new Date();
@@ -81,8 +85,8 @@ function formatDayHeader(ts: number): string {
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
-  if (sameDay(date, today)) return translate('transactionList.today');
-  if (sameDay(date, yesterday)) return translate('transactionList.yesterday');
+  if (sameDay(date, today)) return t('transactionList.today');
+  if (sameDay(date, yesterday)) return t('transactionList.yesterday');
   return date.toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short',
@@ -232,8 +236,8 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
 
   // Flatten the visible window into day-header + tx rows for the FlatList.
   const rows: TxRow[] = useMemo(
-    () => buildTransactionRows(visibleTransactions, formatDayHeader),
-    [visibleTransactions],
+    () => buildTransactionRows(visibleTransactions, (ts) => formatDayHeader(ts, t)),
+    [visibleTransactions, t],
   );
 
   // Reveal the next slice when the user scrolls near the bottom. `nextPage`
@@ -282,7 +286,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
       if (isPending) {
         primary = t('transactionList.pending');
       } else if (zapCp) {
-        primary = zapCounterpartyLabel(zapCp);
+        primary = zapCounterpartyLabel(zapCp, t);
         subtitle = zapCp.comment?.trim() || null;
       } else if (descriptionContact) {
         primary =

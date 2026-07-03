@@ -19,7 +19,6 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t as translate } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import type { SignerType } from '../types/nostr';
 
@@ -45,16 +44,20 @@ const FeedbackSheet: React.FC<Props> = ({
   isLoggedIn,
   signerType,
   onLoginPress,
-  title = translate('feedbackSheet.sendFeedbackTitle'),
-  subtitle = translate('feedbackSheet.subtitle'),
+  title,
+  subtitle,
   initialMessage = '',
   messagePrefix = '[Feedback]',
-  successTitle = translate('feedbackSheet.successTitle'),
-  successMessage = translate('feedbackSheet.successMessage'),
+  successTitle,
+  successMessage,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const t = useTranslation();
+  const resolvedTitle = title ?? t('feedbackSheet.sendFeedbackTitle');
+  const resolvedSubtitle = subtitle ?? t('feedbackSheet.subtitle');
+  const resolvedSuccessTitle = successTitle ?? t('feedbackSheet.successTitle');
+  const resolvedSuccessMessage = successMessage ?? t('feedbackSheet.successMessage');
   const sheetRef = useRef<BottomSheetModal>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -113,7 +116,7 @@ const FeedbackSheet: React.FC<Props> = ({
 
       const result = await onSend(fullMessage);
       if (result.success) {
-        Alert.alert(successTitle, successMessage, [
+        Alert.alert(resolvedSuccessTitle, resolvedSuccessMessage, [
           { text: t('feedbackSheet.ok'), onPress: onClose },
         ]);
       } else {
@@ -165,8 +168,8 @@ const FeedbackSheet: React.FC<Props> = ({
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={styles.title}>{resolvedTitle}</Text>
+        <Text style={styles.subtitle}>{resolvedSubtitle}</Text>
 
         {!isLoggedIn ? (
           <View style={styles.loginPrompt}>

@@ -25,7 +25,6 @@ import {
 import type { RouteProp } from '@react-navigation/native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
@@ -43,7 +42,7 @@ interface Props {
   route: RouteProp<ExploreStackParamList, 'EventDetail'>;
 }
 
-const formatDate = (ts: number | null): string => {
+const formatDate = (ts: number | null, t: ReturnType<typeof useTranslation>): string => {
   if (ts === null) return t('eventDetailScreen.dateTbc');
   const d = new Date(ts * 1000);
   return d.toLocaleString(undefined, {
@@ -186,12 +185,12 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onShare = useCallback(() => {
     if (!event) return;
-    const when = formatDate(event.startsAt);
+    const when = formatDate(event.startsAt, t);
     Share.share({
       message: `${event.title} — ${when}${event.location ? ` · ${event.location}` : ''}`,
       title: event.title,
     }).catch(() => {});
-  }, [event]);
+  }, [event, t]);
 
   return (
     <View style={styles.container} testID="event-detail-screen">
@@ -232,7 +231,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <View style={styles.metaRow}>
               <Clock size={14} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.metaText}>{formatDate(event.startsAt)}</Text>
+              <Text style={styles.metaText}>{formatDate(event.startsAt, t)}</Text>
             </View>
             {event.location ? (
               <View style={styles.metaRow}>
