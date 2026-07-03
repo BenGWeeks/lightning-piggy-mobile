@@ -1,0 +1,124 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Boltz submarine swap — full happy path, on-chain → Lightning
+---
+# REAL-MONEY TEST. Sweeps Big Piggy's on-chain balance back to his
+# Lightning wallet via a Boltz submarine swap. Used to restore the
+# Lightning balance after `test-swap-reverse-25k.yaml` so Big Piggy's
+# fixture set doesn't drain to on-chain after a few runs.
+#
+# Costs (similar order as reverse):
+#   - Boltz service fee: ~0.5-1.5 %
+#   - On-chain miner fee for the funding tx: ~150-500 sats
+#   - Total burn: ~300-900 sats per direction
+#
+# NOT FOR CI. Run manually:
+#
+#   maestro test .maestro/payments/flow-089-swap-submarine.yaml
+#
+# Preconditions:
+#   - AVD signed in as Big Piggy
+#   - Big Piggy on-chain wallet has ≥25k spendable sats (the floor
+#     for Boltz; and you need ~26k to cover the swap + miner fee)
+#   - Big Piggy's Lightning wallet is connected (NWC) — destination
+#   - The Transfer flow uses TransferSheet which auto-routes a
+#     wallet-to-wallet transfer through Boltz when source + dest
+#     types differ (on-chain → Lightning ≡ submarine swap).
+
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Pick source = Big Piggy on-chain. The dropdown surfaces every
+# on-chain wallet available; there should be exactly one in the
+# fixture set. Tap the dropdown then the matching item.
+- tapOn:
+    id: 'transfer-source-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1500
+# Use a partial text match — fixture wallet alias is "Big Piggy
+# on-chain" (per scripts/publish-piggy-kind0 + add-onchain-piggy
+# subflow naming).
+- tapOn:
+    text: '.*Big Piggy on-chain.*'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Pick destination = Big Piggy NWC Lightning.
+- tapOn:
+    id: 'transfer-dest-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: '.*Big Piggy.*lightning.*'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter amount. The picker drives AmountEntryScreen with
+# Boltz min/max gates loaded from getSwapFees.
+- tapOn:
+    id: 'transfer-amount-picker'
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+
+# Wait for Boltz min/max to populate — same gate as the bounds
+# tests so a slow fees fetch doesn't false-pass.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
+
+# 25,000 sats — minimum + a little buffer. Adjust upward when Big
+# Piggy's on-chain balance is healthy enough to absorb a larger
+# round-trip (e.g. 30k for a more realistic test once the fixture
+# stabilises).
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-5' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- tapOn: { id: 'amount-entry-key-0' }
+- assertVisible: '25,000'
+
+- tapOn:
+    id: 'amount-entry-confirm'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- takeScreenshot: pre-execute-submarine
+
+- tapOn:
+    id: 'transfer-execute'
+
+# Submarine swap timeline (similar to reverse):
+#   1. Boltz API: create swap → ~1-3 s
+#   2. App: build + broadcast the on-chain funding tx → ~3-10 s
+#   3. Boltz: wait for funding to be seen in mempool → ~30-90 s
+#   4. Boltz: pay the destination bolt11 → ~5-30 s
+#   5. App: settle in destination Lightning balance → instant
+#
+# Total realistic timeout: 4 minutes.
+- extendedWaitUntil:
+    visible: 'Payment sent!'
+    timeout: 240000
+
+- takeScreenshot: post-execute-submarine
+
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000

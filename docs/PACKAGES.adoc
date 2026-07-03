@@ -73,7 +73,10 @@ Third-party packages used by the app. Updated when a dependency is added or its 
 | https://github.com/paulmillr/noble-ciphers[`@noble/ciphers`]
 | paulmillr
 | Audited pure-JS symmetric ciphers — `aes.js` (CBC) powers `nostr-tools`' NIP-04 `nip04.decrypt` / `nip04.encrypt`. Dep of `nostr-tools`, listed here because the DM perf work in `src/contexts/NostrContext.tsx` leans on its throughput (~1 ms / decrypt on mid-range mobile) to keep batched parallel decrypt responsive.
+
 |===
+
+NOTE: For DM URL preview cards (#441) we considered `link-preview-js` (which transitively pulls in `cheerio` ~1.6 MB) and `@flyerhq/react-native-link-preview` (bundles its own card UI). Both rejected on bundle weight — OG meta tags are a tightly-defined `<meta>`-in-`<head>` format that doesn't justify a full DOM parser. We ship a hand-rolled regex extractor instead: `src/utils/parseOgMeta.ts` (~90 lines, zero dependencies). See the "Internal utilities" table below for trade-offs.
 
 == Internal utilities (not packages)
 
@@ -85,4 +88,7 @@ Small locally-authored modules where a third-party dep would be overkill or RN-i
 
 | `src/utils/lru.ts`
 | ~25-line Map-backed LRU cache. Replaces the `lru-cache` npm package which pulls in `node:diagnostics_channel` at v11+ — Metro can't resolve that in React Native. Used for the module-level NIP-04 plaintext cache (max 1000 entries). API intentionally minimal (`get` / `set` / `delete` / `clear` / `size`) so it can be swapped for `react-native-mmkv` in future without touching callers.
+
+| `src/utils/parseOgMeta.ts`
+| ~90-line OpenGraph meta-tag extractor for in-DM link previews (#441). Replaces `link-preview-js` (~1.6 MB transitively, mostly `cheerio`). OG tags are flat `<meta property="og:*" content="...">` elements in `<head>` — a regex sweep covers >99% of real pages without a DOM. Trade-off: less robust on pathologically-malformed HTML and JS-rendered pages without prerender. Failure mode is "no card", not a crash. Falls back to `<title>` and the first reasonable `<img src>` when og:* are absent. Decodes the top entity references (`&amp;`, `&#39;`, numeric/hex char refs); full HTML-entity decoding would need a 2 KB table for marginal gain. The accompanying `src/services/linkPreviewFetcher.ts` does the network fetch (timeout 8 s, 256 KB cap, content-type guard) and feeds raw HTML into `parseOgMeta`.
 |===

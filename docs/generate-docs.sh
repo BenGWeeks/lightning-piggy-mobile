@@ -14,12 +14,31 @@ if ! command -v asciidoctor-pdf &> /dev/null; then
     exit 1
 fi
 
+# Rendering DATA_STORAGE.adoc's [mermaid] diagrams needs the asciidoctor-diagram
+# extension plus the mermaid CLI (mmdc). Check both up front so a missing dep
+# fails with an actionable message instead of an unrendered / aborted PDF.
+if ! gem list -i asciidoctor-diagram &> /dev/null; then
+    echo "Error: asciidoctor-diagram gem is not installed (needed to render [mermaid] blocks)"
+    echo "Please install it with: sudo gem install asciidoctor-diagram"
+    exit 1
+fi
+if ! command -v mmdc &> /dev/null; then
+    echo "Error: mermaid CLI (mmdc) is not installed (needed to render [mermaid] blocks)"
+    echo "Please install it with: npm install -g @mermaid-js/mermaid-cli"
+    exit 1
+fi
+
 # Change to docs directory
 cd "$(dirname "$0")"
 
 # Generate Technical Solution Document
 echo "Generating Technical Solution Document..."
+# -r asciidoctor-diagram renders [mermaid] blocks (e.g. DATA_STORAGE.adoc's
+# schema/storage diagrams) via mmdc. mermaid-puppeteer-config points mmdc's
+# headless Chrome at --no-sandbox so it launches in CI/containers.
 asciidoctor-pdf \
+    -r asciidoctor-diagram \
+    -a mermaid-puppeteer-config=puppeteer-mermaid.json \
     -a pdf-theme=lightning-piggy \
     -a pdf-themesdir=themes \
     -a pdf-fontsdir=themes \

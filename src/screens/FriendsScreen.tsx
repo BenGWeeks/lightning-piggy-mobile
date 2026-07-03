@@ -9,24 +9,29 @@ import React, {
 } from 'react';
 import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { fetchProfile } from '../services/nostrService';
+import { useWallet } from '../contexts/WalletContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
+import AddContactCelebration from '../components/AddContactCelebration';
+import { nip19 } from 'nostr-tools';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
-import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
+import { fetchPhoneContacts, PhoneContact } from '../services/contactsService';
 import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
@@ -47,6 +52,15 @@ const isFilter = (v: string | null): v is Filter =>
 // See issue #245.
 const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
 
+// First alphabet bucket for a name: NFKD-normalise + uppercase, then take the
+// first A-Z char, else '#'. Mirrors MessagesScreen — without the NFKD step an
+// accented INITIAL (É, Ö, …) fails the /[A-Z]/ test and wrongly lands in '#'
+// instead of E / O (#660 review).
+const firstAlpha = (name: string): string => {
+  const m = name.normalize('NFKD').toUpperCase().match(/[A-Z]/);
+  return m ? m[0] : '#';
+};
+
 interface ListItem {
   id: string;
   name: string;
@@ -54,15 +68,26 @@ interface ListItem {
   banner: string | null;
   nip05: string | null;
   lightningAddress: string | null;
+  // Whether the contact has a Lightning address at all (presence). Derived
+  // from the slimmed profile's `hasLud16` flag since the actual `lud16` value
+  // is stripped on the batch path; drives whether the list shows a zap button.
+  hasLightningAddress: boolean;
   pubkey: string | null;
   source: 'nostr' | 'contacts';
 }
 
 const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, relays } = useNostr();
+  const { contacts, refreshContacts, addContact } = useNostrContacts();
+  // Wallet-attached flag drives the per-row zap gate alongside the
+  // contact's Lightning address. Without a wallet there's nothing to
+  // pay from, so the zap action is rendered disabled even when the
+  // contact has a perfectly valid lud16.
+  const { hasWallets } = useWallet();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   // Drives the expensive filter step off a deferred copy of `search`,
@@ -77,6 +102,14 @@ const FriendsScreen: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
+  // Add-contact celebration (#660): set on a successful add (or an
+  // already-following tap) to pop the confetti + "Open profile" card.
+  const [celebration, setCelebration] = useState<{
+    pubkey: string;
+    name: string;
+    picture: string | null;
+    alreadyConnected: boolean;
+  } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
@@ -108,11 +141,10 @@ const FriendsScreen: React.FC = () => {
     [contacts.length],
   );
 
-  useEffect(() => {
-    fetchPhoneContacts()
-      .then(setPhoneContacts)
-      .catch(() => {});
-  }, []);
+  // Phone contacts are fetched via useFocusEffect below — it fires on
+  // every focus including the first mount, so the mount-time useEffect
+  // that previously ran the same fetch was a duplicate. Dropped to
+  // avoid two back-to-back fetches on initial mount (#439 review).
 
   // Restore the persisted Friends-tab filter selection on mount so it
   // survives app restarts (#311). Mirrors the AsyncStorage pattern
@@ -150,6 +182,23 @@ const FriendsScreen: React.FC = () => {
     }, [isLoggedIn, refreshProfile]),
   );
 
+  // Re-fetch phone contacts on focus so a Lightning-address edit
+  // applied in ContactProfileScreen is reflected here when the user
+  // returns. Cheap (AsyncStorage read + a bit of Contacts API merge).
+  useFocusEffect(
+    useCallback(() => {
+      // Deferred like refreshProfile above: the Contacts API merge competes
+      // with the tab-transition animation for JS-thread time, so let the
+      // transition + first paint finish before it runs.
+      const handle = InteractionManager.runAfterInteractions(() => {
+        fetchPhoneContacts()
+          .then(setPhoneContacts)
+          .catch(() => {});
+      });
+      return () => handle.cancel();
+    }, []),
+  );
+
   // Step 1: build + sort the full list. This memo invalidates only when
   // the underlying contact sources or the chip filter change — NOT on
   // every keystroke. The N-log-N Intl.Collator sort runs once per source
@@ -171,6 +220,10 @@ const FriendsScreen: React.FC = () => {
           banner: c.profile?.banner ?? null,
           nip05: c.profile?.nip05 ?? null,
           lightningAddress: c.profile?.lud16 ?? null,
+          // lud16 value is stripped on the batch path; hasLud16 records its
+          // presence so the list can show the zap affordance for zappable
+          // contacts (the verified address is re-resolved at zap time).
+          hasLightningAddress: !!(c.profile?.lud16 || c.profile?.hasLud16),
           pubkey: c.pubkey,
           source: 'nostr',
         });
@@ -186,6 +239,7 @@ const FriendsScreen: React.FC = () => {
           banner: null,
           nip05: null,
           lightningAddress: c.lightningAddress,
+          hasLightningAddress: !!c.lightningAddress,
           pubkey: null,
           source: 'contacts',
         });
@@ -215,12 +269,7 @@ const FriendsScreen: React.FC = () => {
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
     for (const item of combinedList) {
-      const first = item.name.charAt(0).toUpperCase();
-      if (/[A-Z]/.test(first)) {
-        letters.add(first);
-      } else {
-        letters.add('#');
-      }
+      letters.add(firstAlpha(item.name));
     }
     return Array.from(letters).sort();
   }, [combinedList]);
@@ -246,8 +295,7 @@ const FriendsScreen: React.FC = () => {
       const offsetY = e.nativeEvent.contentOffset.y;
       const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
-        const first = combinedList[index].name.charAt(0).toUpperCase();
-        const letter = /[A-Z]/.test(first) ? first : '#';
+        const letter = firstAlpha(combinedList[index].name);
         if (letter !== currentLetter) {
           setCurrentLetter(letter);
         }
@@ -259,11 +307,7 @@ const FriendsScreen: React.FC = () => {
   const scrollToLetter = useCallback(
     (letter: string) => {
       const t0 = __DEV__ ? performance.now() : 0;
-      const index = combinedList.findIndex((item) => {
-        const first = item.name.charAt(0).toUpperCase();
-        if (letter === '#') return !/[A-Z]/.test(first);
-        return first === letter;
-      });
+      const index = combinedList.findIndex((item) => firstAlpha(item.name) === letter);
       if (index >= 0) {
         // Pause scroll tracking to prevent currentLetter flashing during scroll
         scrollTrackingPaused.current = true;
@@ -297,51 +341,191 @@ const FriendsScreen: React.FC = () => {
     setRefreshing(false);
   }, [refreshContacts]);
 
-  const handleZap = useCallback((item: ListItem) => {
-    if (!item.lightningAddress) return;
-    setZapTarget(item);
-    setSendOpen(true);
-  }, []);
+  const handleZap = useCallback(
+    async (item: ListItem) => {
+      if (!hasWallets) {
+        Alert.alert(
+          t('friendsScreen.noWalletAttachedTitle'),
+          t('friendsScreen.noWalletAttachedMessage'),
+        );
+        return;
+      }
+      // The contacts-list profile has its lud16 stripped (anti-redirect
+      // slimming), so resolve the *verified* address on demand before paying.
+      let address = item.lightningAddress;
+      if (!address && item.pubkey) {
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const verified = await fetchProfile(item.pubkey, readRelays);
+        address = verified?.lud16 ?? null;
+      }
+      if (!address) {
+        Alert.alert(
+          t('friendsScreen.noLightningAddressTitle'),
+          t('friendsScreen.noLightningAddressMessage', { name: item.name }),
+        );
+        return;
+      }
+      setZapTarget({ ...item, lightningAddress: address });
+      setSendOpen(true);
+    },
+    [hasWallets, relays, t],
+  );
 
+  // Tap on a friend row → open the bottom-sheet preview. The sheet
+  // gives a quick peek (QR, npub, copy, Zap / Message / Share) without
+  // leaving the list; its "View full profile" link drills into the
+  // full ContactProfile route when the user wants the deep view.
   const handleContactPress = useCallback((item: ListItem) => {
     setSelectedContact(item);
     setProfileSheetVisible(true);
   }, []);
 
+  const handleViewFullProfile = useCallback(() => {
+    if (!selectedContact) return;
+    const item = selectedContact;
+    const phoneContactId = item.source === 'contacts' ? item.id.replace('phone-', '') : undefined;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', {
+      contact: {
+        pubkey: item.pubkey,
+        name: item.name,
+        picture: item.picture,
+        banner: item.banner,
+        nip05: item.nip05,
+        lightningAddress: item.lightningAddress,
+        source: item.source,
+      },
+      phoneContactId,
+    });
+  }, [selectedContact, navigation]);
+
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
       const result = await addContact(npubOrHex);
-      if (!result.success) {
-        Alert.alert('Error', result.error || 'Failed to add contact');
+      if (result.success) {
+        const pk = result.pubkey;
+        // A brand-new follow isn't in `contacts` state yet (the append is
+        // async), so the npub prefix is the expected fallback there; an
+        // already-following tap resolves to the real name. Trim each
+        // candidate so a whitespace-only display name doesn't win and leave
+        // the card reading "connected to ." (#662 review).
+        const existing = contacts.find((c) => c.pubkey === pk);
+        const name =
+          existing?.profile?.displayName?.trim() ||
+          existing?.profile?.name?.trim() ||
+          existing?.petname?.trim() ||
+          `${nip19.npubEncode(pk).slice(0, 12)}…`;
+        setCelebration({
+          pubkey: pk,
+          name,
+          picture: existing?.profile?.picture ?? null,
+          alreadyConnected: !!result.alreadyFollowing,
+        });
+        return true;
       }
-      return result.success;
+      Alert.alert(
+        t('friendsScreen.errorTitle'),
+        result.error || t('friendsScreen.failedToAddContact'),
+      );
+      return false;
     },
-    [addContact],
+    [addContact, contacts, t],
   );
 
+  // Resolve the celebration's name + avatar LIVE from `contacts` rather than the
+  // snapshot taken at add-time: a brand-new follow isn't in `contacts` yet when
+  // the card opens, but followContact fetches its kind-0 and updates `contacts`
+  // shortly after — recomputing here makes the avatar + real name appear in the
+  // open card the moment they resolve (#662). Falls back to the snapshot.
+  const celebDisplay = useMemo(() => {
+    if (!celebration) return { name: '', picture: null as string | null };
+    const c = contacts.find((x) => x.pubkey === celebration.pubkey);
+    const name =
+      c?.profile?.displayName?.trim() ||
+      c?.profile?.name?.trim() ||
+      c?.petname?.trim() ||
+      celebration.name;
+    return { name, picture: c?.profile?.picture ?? celebration.picture ?? null };
+  }, [celebration, contacts]);
+
+  const handleCelebrationOpenProfile = useCallback(() => {
+    if (!celebration) return;
+    const pk = celebration.pubkey;
+    const existing = contacts.find((c) => c.pubkey === pk);
+    setCelebration(null);
+    navigation.navigate('ContactProfile', {
+      contact: {
+        pubkey: pk,
+        // Use the same live-resolved values the card shows (celebDisplay) so a
+        // profile that resolved while the card was open doesn't hand the
+        // profile screen the stale npub/null snapshot (#662 review).
+        name: celebDisplay.name,
+        picture: celebDisplay.picture,
+        banner: existing?.profile?.banner ?? null,
+        nip05: existing?.profile?.nip05 ?? null,
+        lightningAddress: existing?.profile?.lud16 ?? null,
+        source: 'nostr',
+      },
+    });
+  }, [celebration, celebDisplay, contacts, navigation]);
+
   const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => (
-      <ContactListItem
-        name={item.name}
-        picture={item.picture}
-        lightningAddress={item.lightningAddress}
-        onPress={() => handleContactPress(item)}
-        onZap={item.lightningAddress ? () => handleZap(item) : undefined}
-      />
-    ),
-    [handleZap, handleContactPress],
+    ({ item }: { item: ListItem }) => {
+      // Zap affordance only shows for contacts that actually have a
+      // Lightning address (hasLightningAddress). When shown it's enabled
+      // as long as the user has a wallet — the verified address is
+      // re-resolved on tap; greyed + tappable-for-why when there's no
+      // wallet. Message needs a Nostr pubkey (phone-only contacts don't
+      // have one). Disabled-reason strings are read to screen readers.
+      const canZap = hasWallets;
+      const zapDisabledReason = t('friendsScreen.noWalletAttachedReason');
+      return (
+        <ContactListItem
+          name={item.name}
+          picture={item.picture}
+          lightningAddress={item.lightningAddress}
+          canMessage={!!item.pubkey}
+          canZap={canZap}
+          showZap={item.hasLightningAddress}
+          zapDisabledReason={zapDisabledReason}
+          onPress={() => handleContactPress(item)}
+          onZap={() => handleZap(item)}
+          onMessage={
+            // Capture pubkey in a non-null const so TS narrows it inside
+            // the closure — referencing item.pubkey directly inside the
+            // arrow body widens it back to `string | null`.
+            (() => {
+              const pubkey = item.pubkey;
+              if (!pubkey) return undefined;
+              return () =>
+                navigation.navigate('Conversation', {
+                  pubkey,
+                  name: item.name,
+                  picture: item.picture,
+                  lightningAddress: item.lightningAddress,
+                });
+            })()
+          }
+          testID={`friend-row-${item.id}`}
+        />
+      );
+    },
+    [handleZap, handleContactPress, hasWallets, navigation, t],
   );
 
   const filters: { key: Filter; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'nostr', label: 'Nostr' },
-    { key: 'contacts', label: 'Contacts' },
+    { key: 'all', label: t('friendsScreen.filterAll') },
+    { key: 'nostr', label: t('friendsScreen.filterNostr') },
+    { key: 'contacts', label: t('friendsScreen.filterContacts') },
   ];
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
-      <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
+      <BrandPatternBackground variant="friends-rotated" />
+      <TabHeader
+        title={t('friendsScreen.title')}
+        icon={<Users size={20} color={colors.brandPink} />}
+      />
       <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
@@ -351,13 +535,13 @@ const FriendsScreen: React.FC = () => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search..."
+                placeholder={t('friendsScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search friends"
+                accessibilityLabel={t('friendsScreen.searchFriends')}
                 testID="search-input"
               />
               <TouchableOpacity
@@ -366,7 +550,7 @@ const FriendsScreen: React.FC = () => {
                   setSearchExpanded(false);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('friendsScreen.closeSearch')}
                 testID="close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -379,7 +563,7 @@ const FriendsScreen: React.FC = () => {
                   key={f.key}
                   style={[styles.chip, filter === f.key && styles.chipActive]}
                   onPress={() => setFilterAndPersist(f.key)}
-                  accessibilityLabel={`${f.label} filter`}
+                  accessibilityLabel={t('friendsScreen.filterA11y', { filter: f.label })}
                   accessibilityRole="button"
                   accessibilityState={{ selected: filter === f.key }}
                   testID={`friends-filter-${f.key}`}
@@ -406,7 +590,7 @@ const FriendsScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={() => navigation.navigate('Groups')}
-                accessibilityLabel="Groups"
+                accessibilityLabel={t('friendsScreen.groups')}
                 testID="groups-button"
               >
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -429,7 +613,7 @@ const FriendsScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.addButton}
                   onPress={() => setAddFriendVisible(true)}
-                  accessibilityLabel="Add friend"
+                  accessibilityLabel={t('friendsScreen.addFriend')}
                   testID="add-friend-button"
                 >
                   <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -457,15 +641,13 @@ const FriendsScreen: React.FC = () => {
       <View style={styles.content}>
         {!isLoggedIn && filter !== 'contacts' ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Connect Nostr</Text>
-            <Text style={styles.emptySubtitle}>
-              Connect your Nostr identity to see your friends here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('friendsScreen.connectNostr')}</Text>
+            <Text style={styles.emptySubtitle}>{t('friendsScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
-              <Text style={styles.connectButtonText}>Go to Account</Text>
+              <Text style={styles.connectButtonText}>{t('friendsScreen.goToAccount')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -489,7 +671,9 @@ const FriendsScreen: React.FC = () => {
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
                     <Text style={styles.emptySubtitle}>
-                      {search ? 'No contacts match your search.' : 'No contacts found.'}
+                      {search
+                        ? t('friendsScreen.noContactsMatch')
+                        : t('friendsScreen.noContactsFound')}
                     </Text>
                   </View>
                 }
@@ -509,44 +693,45 @@ const FriendsScreen: React.FC = () => {
       <ContactProfileSheet
         visible={profileSheetVisible}
         onClose={() => {
+          // Clear the staged contact alongside hiding the sheet so
+          // re-opening with a different friend doesn't flash the
+          // previous contact's banner / avatar / name before
+          // handleContactPress restages the new selection.
           setProfileSheetVisible(false);
           setSelectedContact(null);
         }}
         contact={selectedContact}
+        onViewFullProfile={handleViewFullProfile}
+        canZap={hasWallets && !!selectedContact?.hasLightningAddress}
+        zapDisabledReason={
+          !hasWallets
+            ? t('friendsScreen.noWalletAttachedReason')
+            : t('friendsScreen.noLightningAddressReason')
+        }
         onZap={
-          selectedContact?.lightningAddress
+          selectedContact
             ? () => {
+                const target = selectedContact;
                 setProfileSheetVisible(false);
-                handleZap(selectedContact);
+                // handleZap re-resolves the verified Lightning address and
+                // either zaps or explains why it can't.
+                handleZap(target);
               }
             : undefined
         }
         onMessage={
           selectedContact?.pubkey
             ? () => {
-                const c = selectedContact;
+                const item = selectedContact;
+                if (!item || !item.pubkey) return;
                 setProfileSheetVisible(false);
                 setSelectedContact(null);
                 navigation.navigate('Conversation', {
-                  pubkey: c.pubkey!,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
+                  pubkey: item.pubkey,
+                  name: item.name,
+                  picture: item.picture,
+                  lightningAddress: item.lightningAddress,
                 });
-              }
-            : undefined
-        }
-        onSetLightningAddress={
-          selectedContact?.source === 'contacts'
-            ? async (address: string) => {
-                const phoneId = selectedContact.id.replace('phone-', '');
-                await setLightningAddress(phoneId, address);
-                setPhoneContacts((prev) =>
-                  prev.map((c) => (c.id === phoneId ? { ...c, lightningAddress: address } : c)),
-                );
-                setSelectedContact((prev) =>
-                  prev ? { ...prev, lightningAddress: address } : prev,
-                );
               }
             : undefined
         }
@@ -556,6 +741,15 @@ const FriendsScreen: React.FC = () => {
         visible={addFriendVisible}
         onClose={() => setAddFriendVisible(false)}
         onAdd={handleAddFriend}
+      />
+
+      <AddContactCelebration
+        visible={!!celebration}
+        alreadyConnected={celebration?.alreadyConnected ?? false}
+        name={celebDisplay.name}
+        picture={celebDisplay.picture}
+        onOpenProfile={handleCelebrationOpenProfile}
+        onDismiss={() => setCelebration(null)}
       />
 
       <SendSheet
