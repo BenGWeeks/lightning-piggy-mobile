@@ -243,12 +243,15 @@ const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
             <G opacity={cfg.opacity}>
               {cfg.motifs.map((m, i) => renderMotif(m, `m${i}`))}
               {cfg.motifs
-                .filter((m) => m.filledDotAt)
+                .filter(
+                  (m): m is MotifInstance & { filledDotAt: [number, number] } =>
+                    m.filledDotAt != null,
+                )
                 .map((m, i) => (
                   <Circle
                     key={`dot${i}`}
-                    cx={m.filledDotAt![0]}
-                    cy={m.filledDotAt![1]}
+                    cx={m.filledDotAt[0]}
+                    cy={m.filledDotAt[1]}
                     r={1.6}
                     fill={STROKE}
                   />
