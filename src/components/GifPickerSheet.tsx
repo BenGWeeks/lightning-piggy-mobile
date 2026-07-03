@@ -190,7 +190,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     return () => {
       cancelled = true;
     };
-  }, [visible, debouncedSearch, configured]);
+  }, [visible, debouncedSearch, configured, t]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -236,7 +236,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
         </TouchableOpacity>
       );
     },
-    [onSelect, tileWidth, visibleIds],
+    [onSelect, tileWidth, visibleIds, t],
   );
 
   return (
