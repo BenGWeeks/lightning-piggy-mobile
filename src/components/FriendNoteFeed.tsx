@@ -6,6 +6,7 @@ import NotePreview from './NotePreview';
 import { subscribeAuthorNotes, type RawAuthorNote } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 // Embeds a friend's recent kind-1 notes below the profile description
@@ -30,6 +31,7 @@ const FIRST_EVENT_GRACE_MS = 6000;
 
 const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30, reloadNonce = 0 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { relays } = useNostr();
   const [notes, setNotes] = useState<RawAuthorNote[]>([]);
@@ -136,14 +138,14 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30, reloadNonce
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Recent posts</Text>
+      <Text style={styles.heading}>{t('friendNoteFeed.recentPosts')}</Text>
       {loading && notes.length === 0 ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={colors.brandPink} />
         </View>
       ) : notes.length === 0 ? (
         <Text style={styles.emptyText} testID="contact-profile-feed-empty">
-          No posts yet
+          {t('friendNoteFeed.noPostsYet')}
         </Text>
       ) : (
         <FlashList

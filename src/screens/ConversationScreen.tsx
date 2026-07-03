@@ -24,9 +24,10 @@ import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts, subscribeDmMessages } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
@@ -54,6 +55,8 @@ import { extractSharedContact } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
+import { useResolvedDmDeliveries } from '../hooks/useDmDeliveryStatuses';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import {
   type Item,
@@ -61,6 +64,8 @@ import {
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
+import { useConversationLoader } from '../hooks/useConversationLoader';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -68,6 +73,7 @@ type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Con
 
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
@@ -92,13 +98,14 @@ const ConversationScreen: React.FC = () => {
   const {
     isLoggedIn,
     fetchConversation,
-    getCachedConversation,
+    loadInitialConversation,
+    persistDeliveryStatuses,
     signerType,
     pubkey: myPubkey,
     relays,
     profile,
-    armLiveDmSub,
   } = useNostr();
+  const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
   // Cover the deep-link path (notification → straight to ConversationScreen
   // without passing the Messages tab). Idempotent — no-op if already armed.
@@ -108,11 +115,15 @@ const ConversationScreen: React.FC = () => {
   const { wallets } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
-  const [messages, setMessages] = useState<
-    { id: string; fromMe: boolean; text: string; createdAt: number }[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // Thread data lifecycle — read-through paint, background relay top-up,
+  // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
+  const { messages, setMessages, loading, refreshing, handleRefresh } = useConversationLoader({
+    pubkey,
+    isLoggedIn,
+    fetchConversation,
+    loadInitialConversation,
+    persistDeliveryStatuses,
+  });
   const [draft, setDraft] = useState('');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
@@ -187,80 +198,16 @@ const ConversationScreen: React.FC = () => {
 
   const zapItems = useMemo<TimedItem[]>(() => buildZapItems(wallets, pubkey), [wallets, pubkey]);
 
+  // Resolve each sent bubble's delivery tick from the eventId-keyed store (#857)
+  // and re-render as statuses settle. Keyed by the stable rumor eventId, so the
+  // local- → echo swap + the 10s re-fetch can't strip the tick. The hook
+  // subscribes to the store, so `resolvedMessages` is a fresh array on every
+  // settle — which is what flows the updated tick into `items` below.
+  const resolvedMessages = useResolvedDmDeliveries(messages);
   const items = useMemo<Item[]>(
-    () => buildConversationItems(messages, zapItems),
-    [messages, zapItems],
+    () => buildConversationItems(resolvedMessages, zapItems),
+    [resolvedMessages, zapItems],
   );
-
-  // Mount/unmount tracker so the async `load()` below can bail when
-  // the user navigates back mid-fetch. Without this, every back-press
-  // during the 6-12 s cold fetchConversation still runs the full
-  // decrypt + persist chain on the unmounted component, wasting JS
-  // thread time that could have been responding to input.
-  // Declared BEFORE `load` because `load`'s body closes over it.
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  const load = useCallback(
-    async (showSpinner: boolean) => {
-      if (!isLoggedIn) {
-        setLoading(false);
-        return;
-      }
-      // Paint cached messages instantly if we have any — user sees a
-      // populated thread within one frame instead of "Loading…" for
-      // the 6-8 s relay round-trip. Arcade `db_only=true` pattern.
-      // Only show the spinner if the cache was empty (true cold open).
-      const cached = await getCachedConversation(pubkey);
-      if (isMountedRef.current && cached.length > 0) {
-        setMessages(cached);
-        setLoading(false);
-      } else if (isMountedRef.current && showSpinner) {
-        setLoading(true);
-      }
-      try {
-        const conv = await fetchConversation(pubkey);
-        // If the user navigated away while the fetch was in flight,
-        // don't fire state updates — those would either trigger a
-        // re-render on an unmounted component (React warning) or land
-        // on the *next* thread that inherits this instance. Check the
-        // ref and bail.
-        if (isMountedRef.current) {
-          setMessages(conv);
-        }
-      } finally {
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
-      }
-    },
-    [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
-  );
-
-  useEffect(() => {
-    load(true);
-  }, [load]);
-
-  // Live updates: NostrContext fires `subscribeDmMessages` after a
-  // kind-1059 wrap arrives via the long-lived relay sub and decrypts
-  // to a 1:1 rumor for this thread's peer (#349). Re-fetching the
-  // conversation is cheap because the new wrap is now in the
-  // persistent NIP-17 cache, so fetchConversation short-circuits the
-  // relay round-trip and the thread re-renders within one tick.
-  useEffect(() => {
-    if (!pubkey) return;
-    const target = pubkey.toLowerCase();
-    const unsubscribe = subscribeDmMessages((partnerPubkey) => {
-      if (partnerPubkey !== target) return;
-      load(false);
-    });
-    return unsubscribe;
-  }, [pubkey, load]);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -370,15 +317,6 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await load(false);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [load]);
-
   // Append an optimistic local- message to BOTH React state (instant
   // paint) AND the per-conversation cache on disk (survives back-then-
   // reopen before the NIP-17 self-wrap echo arrives). The merge-side
@@ -390,6 +328,7 @@ const ConversationScreen: React.FC = () => {
     sharingLocation,
     uploadingVoice,
     appendOptimisticLocal,
+    resendText,
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
@@ -408,6 +347,17 @@ const ConversationScreen: React.FC = () => {
     setGifPickerOpen,
     setVoiceSheetOpen,
   });
+
+  // Tap a bubble → message-info sheet (#856), for sent + received. Logic lives
+  // in useMessageInfoSheet to keep the screen under the size cap. Declared
+  // after the composer hook because it needs its `resendText` for Re-publish.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -434,31 +384,37 @@ const ConversationScreen: React.FC = () => {
       setLiveLocationPickerOpen(false);
       const result = await startShare(pubkey, durationMs);
       if (!result.ok) {
-        Alert.alert('Could not start live share', result.error);
+        Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
         return;
       }
       // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
       appendOptimisticLocal(result.markerText);
     },
-    [pubkey, startShare, appendOptimisticLocal],
+    [pubkey, startShare, appendOptimisticLocal, t],
   );
 
   const handleStopLive = useCallback(
     async (sessionId: string) => {
       const result = await stopShare(sessionId);
       if (!result.ok) {
-        Alert.alert('Could not stop live share', result.error);
+        Alert.alert(t('conversationScreen.couldNotStopLiveShareTitle'), result.error);
       }
     },
-    [stopShare],
+    [stopShare, t],
   );
 
-  const openLocation = useCallback((loc: SharedLocation) => {
-    const url = buildOsmViewUrl(loc);
-    Linking.openURL(url).catch(() => {
-      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
-    });
-  }, []);
+  const openLocation = useCallback(
+    (loc: SharedLocation) => {
+      const url = buildOsmViewUrl(loc);
+      Linking.openURL(url).catch(() => {
+        Alert.alert(
+          t('conversationScreen.couldNotOpenLinkTitle'),
+          t('conversationScreen.couldNotOpenLinkBody'),
+        );
+      });
+    },
+    [t],
+  );
 
   // My live position for the location-card mini-maps (#206) — the blue
   // "me" dot + accuracy halo. Shared GPS subscription, retained for this
@@ -521,6 +477,7 @@ const ConversationScreen: React.FC = () => {
         myAvatarUri={profile?.picture ?? null}
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
+        onShowInfo={handleShowInfo}
       />
     ),
     [
@@ -530,6 +487,7 @@ const ConversationScreen: React.FC = () => {
       openSharedContact,
       handlePayInvoice,
       handleToggleSecretMode,
+      handleShowInfo,
       liveLocationLatest,
       liveLocationBubbleStatus,
       liveLocationBubbleRemaining,
@@ -578,7 +536,7 @@ const ConversationScreen: React.FC = () => {
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
-          accessibilityLabel="Go back"
+          accessibilityLabel={t('conversationScreen.goBack')}
           testID="conversation-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -606,7 +564,7 @@ const ConversationScreen: React.FC = () => {
               source: 'nostr',
             });
           }}
-          accessibilityLabel={`Open ${name}'s profile`}
+          accessibilityLabel={t('conversationScreen.openProfile', { name })}
           testID="chat-header-open-profile"
         >
           {avatarNode}
@@ -636,7 +594,7 @@ const ConversationScreen: React.FC = () => {
           {loading ? (
             <View style={styles.loading}>
               <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.loadingText}>Loading messages…</Text>
+              <Text style={styles.loadingText}>{t('conversationScreen.loadingMessages')}</Text>
             </View>
           ) : (
             <FlatList
@@ -665,9 +623,11 @@ const ConversationScreen: React.FC = () => {
               windowSize={10}
               ListEmptyComponent={
                 <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>
                   <Text style={styles.emptySubtitle}>
-                    Say hi{lightningAddress ? ' — or send a zap.' : '.'}
+                    {lightningAddress
+                      ? t('conversationScreen.sayHiZap')
+                      : t('conversationScreen.sayHi')}
                   </Text>
                 </View>
               }
@@ -699,7 +659,7 @@ const ConversationScreen: React.FC = () => {
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={closeAttachPanel}
-              accessibilityLabel="Close attachment panel"
+              accessibilityLabel={t('conversationScreen.closeAttachPanel')}
               testID="conversation-attach-backdrop"
             />
           ) : null}
@@ -709,7 +669,7 @@ const ConversationScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.scrollToBottomFab}
                 onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-                accessibilityLabel="Scroll to most recent message"
+                accessibilityLabel={t('conversationScreen.scrollToRecent')}
                 testID="conversation-scroll-to-bottom"
               >
                 <ArrowDown size={20} color={colors.white} />
@@ -735,7 +695,7 @@ const ConversationScreen: React.FC = () => {
           attachDisabled={sharingLocation || uploadingImage}
           attachLoading={sharingLocation || uploadingImage}
           onInputFocus={closeAttachPanel}
-          placeholder="Message"
+          placeholder={t('conversationScreen.messagePlaceholder')}
           // 1:1 ships the compact lucide Send icon (40x40) + a light-grey
           // attach button background. Defaults match this so we keep the
           // shipped 1:1 visuals byte-for-byte.
@@ -757,7 +717,7 @@ const ConversationScreen: React.FC = () => {
                 setSendSheetOpen(true);
               }}
               zapDisabled={!lightningAddress}
-              zapAccessibilityLabel="Send a zap (unavailable — peer has no Lightning Address)"
+              zapAccessibilityLabel={t('conversationScreen.zapUnavailable')}
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);
@@ -813,7 +773,7 @@ const ConversationScreen: React.FC = () => {
         <Pressable
           style={styles.fullscreenBackdrop}
           onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel="Close full-screen GIF"
+          accessibilityLabel={t('conversationScreen.closeFullscreenGif')}
           testID="conversation-gif-fullscreen"
         >
           {fullscreenGifUrl ? (
@@ -837,8 +797,8 @@ const ConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
-        title={`Share a contact with ${name}`}
-        subtitle="They'll see it as a Nostr profile card they can open."
+        title={t('conversationScreen.shareContactTitle', { name })}
+        subtitle={t('conversationScreen.shareContactSubtitle')}
       />
       <ReceiveSheet
         visible={invoiceSheetOpen}
@@ -913,6 +873,11 @@ const ConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );

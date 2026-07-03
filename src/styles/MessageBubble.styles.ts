@@ -34,6 +34,17 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       borderBottomRightRadius: 4,
     },
+    // Legacy NIP-04 (kind 4) SENT bubble — brand violet instead of the NIP-17
+    // pink so the user can tell legacy DMs apart at a glance (#856 follow-up).
+    bubbleMeNip04: {
+      backgroundColor: colors.brandPurple,
+    },
+    // Legacy NIP-04 RECEIVED bubble — surface bg kept (matches NIP-17), but a
+    // violet left edge marks it as legacy on the incoming side too.
+    bubbleThemNip04: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPurple,
+    },
     bubbleText: {
       fontSize: 15,
       color: colors.textBody,
@@ -61,6 +72,39 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
+    },
+    // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
+    // Right-aligned to sit under the bubble tail, same edge as the bare time.
+    bubbleFooterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
+      gap: 4,
+    },
+    // The time inside the footer row drops its own marginTop (the row owns it)
+    // and gains a small gap before the tick. It carries no colour of its own so
+    // the composed timeStyle wins — bubbleTimeMe (white) on a sent pink bubble,
+    // bubbleTime (supplementary grey) on a received surface bubble. (#864)
+    bubbleFooterTime: {
+      fontSize: 10,
+      marginRight: 4,
+      // Zero the standalone bubbleTime top margin so the tick sits level with
+      // the timestamp in the footer row (the row owns vertical spacing). (#858)
+      marginTop: 0,
+    },
+    // Delivery tick (#856). Ticks only ever render on a sent (pink) bubble, so
+    // they use white for contrast — green read poorly on the brand pink (#864).
+    // Glyph alone carries the meaning: single Check = delivered to ≥1 relay,
+    // double CheckCheck = all relays, Clock = pending, AlertCircle = failed.
+    deliveryTickDelivered: {
+      color: colors.white,
+    },
+    deliveryTickPending: {
+      color: 'rgba(255,255,255,0.7)',
+    },
+    deliveryTickFailed: {
+      color: colors.red,
     },
     invoiceCard: {
       width: 240,
@@ -372,6 +416,21 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     imageBubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
+    },
+    // Muted placeholder bubble for an unrenderable inner event kind. Subdued
+    // surface + dashed border + italic supplementary text so it reads as a
+    // system/placeholder note rather than a real chat bubble.
+    unsupportedBubble: {
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderStyle: 'dashed',
+      borderColor: colors.divider,
+    },
+    unsupportedText: {
+      fontSize: 13,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+      lineHeight: 18,
     },
   });
 

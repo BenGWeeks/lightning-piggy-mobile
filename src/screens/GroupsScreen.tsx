@@ -15,9 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import GroupAvatar, { type ContactInfo } from '../components/GroupAvatar';
 import type { RootStackParamList } from '../navigation/types';
@@ -26,6 +27,7 @@ import type { Group } from '../types/groups';
 type GroupsNavigation = NativeStackNavigationProp<RootStackParamList, 'Groups'>;
 
 const GroupsScreen: React.FC = () => {
+  const t = useTranslation();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
@@ -36,7 +38,8 @@ const GroupsScreen: React.FC = () => {
   // shim — `followingOnly` is now derived from `effectiveWotTier !== 'all'`
   // and `setFollowingOnly` writes back via `setWotTier`).
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
-  const { isLoggedIn, refreshDmInbox, pubkey: myPubkey } = useNostr();
+  const { isLoggedIn, pubkey: myPubkey } = useNostr();
+  const { refreshDmInbox } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
 
   // Built once per render and shared by every row's GroupAvatar so we
@@ -144,15 +147,15 @@ const GroupsScreen: React.FC = () => {
   const handleLongPress = useCallback(
     (group: Group) => {
       Alert.alert(group.name, undefined, [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('groupsScreen.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('groupsScreen.delete'),
           style: 'destructive',
           onPress: () => deleteGroup(group.id),
         },
       ]);
     },
-    [deleteGroup],
+    [deleteGroup, t],
   );
 
   const renderItem = useCallback(
@@ -164,7 +167,7 @@ const GroupsScreen: React.FC = () => {
           onPress={() => openGroup(item)}
           onLongPress={() => handleLongPress(item)}
           activeOpacity={0.6}
-          accessibilityLabel={`Open group ${item.name}`}
+          accessibilityLabel={t('groupsScreen.openGroup', { name: item.name })}
           testID={`group-row-${item.id}`}
         >
           <GroupAvatar
@@ -178,13 +181,15 @@ const GroupsScreen: React.FC = () => {
               {item.name}
             </Text>
             <Text style={styles.subtitle} numberOfLines={1}>
-              {pubkeys.length} member{pubkeys.length === 1 ? '' : 's'}
+              {pubkeys.length === 1
+                ? t('groupsScreen.memberCountOne', { count: pubkeys.length })
+                : t('groupsScreen.memberCountOther', { count: pubkeys.length })}
             </Text>
           </View>
         </TouchableOpacity>
       );
     },
-    [openGroup, handleLongPress, styles, contactInfoMap, groupAvatarInputs],
+    [openGroup, handleLongPress, styles, contactInfoMap, groupAvatarInputs, t],
   );
 
   return (
@@ -199,7 +204,7 @@ const GroupsScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back"
+            accessibilityLabel={t('groupsScreen.back')}
             testID="groups-back"
           >
             <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -212,12 +217,12 @@ const GroupsScreen: React.FC = () => {
               />
             </Svg>
           </TouchableOpacity>
-          <Text style={styles.title}>Groups</Text>
+          <Text style={styles.title}>{t('groupsScreen.title')}</Text>
           <View style={{ flex: 1 }} />
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => setCreateVisible(true)}
-            accessibilityLabel="Create group"
+            accessibilityLabel={t('groupsScreen.createGroup')}
             testID="create-group-button"
           >
             <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -240,8 +245,8 @@ const GroupsScreen: React.FC = () => {
               onPress={() => setFollowingOnly(!followingOnly)}
               accessibilityLabel={
                 followingOnly
-                  ? 'Following-only filter on. Tap to show all groups.'
-                  : 'Following-only filter off. Tap to filter to followed members only.'
+                  ? t('groupsScreen.followingFilterOnA11y')
+                  : t('groupsScreen.followingFilterOffA11y')
               }
               accessibilityRole="button"
               testID="groups-follows-toggle"
@@ -251,33 +256,31 @@ const GroupsScreen: React.FC = () => {
                 color={followingOnly ? colors.brandPink : colors.textSupplementary}
               />
               <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
-                {followingOnly ? 'Following only' : 'All groups (dev)'}
+                {followingOnly ? t('groupsScreen.followingOnly') : t('groupsScreen.allGroupsDev')}
               </Text>
             </TouchableOpacity>
           ) : (
             <View
               style={styles.filterChip}
-              accessibilityLabel="Showing groups with at least one followed member"
+              accessibilityLabel={t('groupsScreen.followingIndicatorA11y')}
               testID="groups-follows-indicator"
             >
               <Users size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Following only</Text>
+              <Text style={styles.filterChipText}>{t('groupsScreen.followingOnly')}</Text>
             </View>
           )}
         </View>
         {visibleGroups.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No groups yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Create a group to chat with multiple friends at once.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('groupsScreen.noGroupsYet')}</Text>
+            <Text style={styles.emptySubtitle}>{t('groupsScreen.noGroupsSubtitle')}</Text>
             <TouchableOpacity
               style={styles.emptyButton}
               onPress={() => setCreateVisible(true)}
-              accessibilityLabel="Create your first group"
+              accessibilityLabel={t('groupsScreen.createFirstGroupA11y')}
               testID="create-first-group"
             >
-              <Text style={styles.emptyButtonText}>Create Group</Text>
+              <Text style={styles.emptyButtonText}>{t('groupsScreen.createGroupButton')}</Text>
             </TouchableOpacity>
           </View>
         ) : (

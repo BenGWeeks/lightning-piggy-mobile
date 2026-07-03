@@ -1,0 +1,9 @@
+# Maestro workspace configuration
+# https://docs.maestro.dev/api-reference/configuration/workspace-configuration
+
+# Disable system animations to reduce settle-wait time between commands
+# (≈ Developer Options → Animation scale = 0x). Does NOT affect custom
+# animations (Reanimated/Lottie). A key speed trick for the flow suite.
+platform:
+  android:
+    disableAnimations: true

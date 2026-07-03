@@ -4,6 +4,7 @@ import { ChevronUp, ChevronDown, ArrowBigRight, Bitcoin } from 'lucide-react-nat
 import { walletLabel } from '../types/wallet';
 import type { WalletState } from '../types/wallet';
 import type { Palette } from '../styles/palettes';
+import { useTranslation } from '../contexts/LocaleContext';
 
 interface Props {
   // Lightning-capable wallets only (walletType === 'nwc'); parent filters before passing them in.
@@ -23,6 +24,7 @@ const PrizeWalletPicker: React.FC<Props> = ({
   onAddWallet,
   colors,
 }) => {
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
 
@@ -30,19 +32,19 @@ const PrizeWalletPicker: React.FC<Props> = ({
     () => lightningWallets.find((w) => w.id === selectedWalletId) ?? null,
     [lightningWallets, selectedWalletId],
   );
-  const selectedName = selected ? walletLabel(selected) : 'Wallet';
+  const selectedName = selected ? walletLabel(selected) : t('prizeWalletPicker.wallet');
 
   if (lightningWallets.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>You need a Lightning wallet to claim prizes.</Text>
+        <Text style={styles.emptyText}>{t('prizeWalletPicker.needWalletToClaim')}</Text>
         <TouchableOpacity
           style={styles.addButton}
           onPress={onAddWallet}
-          accessibilityLabel="Add wallet"
+          accessibilityLabel={t('prizeWalletPicker.addWallet')}
           testID="prize-add-wallet"
         >
-          <Text style={styles.addButtonText}>Add wallet</Text>
+          <Text style={styles.addButtonText}>{t('prizeWalletPicker.addWallet')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -58,7 +60,7 @@ const PrizeWalletPicker: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.dropdown}
           onPress={() => setOpen((o) => !o)}
-          accessibilityLabel="Choose prize wallet"
+          accessibilityLabel={t('prizeWalletPicker.choosePrizeWallet')}
           testID="prize-wallet-picker"
         >
           <Text style={styles.dropdownText} numberOfLines={1}>
@@ -80,7 +82,9 @@ const PrizeWalletPicker: React.FC<Props> = ({
                   onSelect(w.id);
                   setOpen(false);
                 }}
-                accessibilityLabel={`Prize wallet ${walletLabel(w)}`}
+                accessibilityLabel={t('prizeWalletPicker.prizeWalletNamed', {
+                  name: walletLabel(w),
+                })}
                 testID={`prize-wallet-option-${i}`}
               >
                 <Text

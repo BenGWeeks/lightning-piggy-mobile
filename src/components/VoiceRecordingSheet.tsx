@@ -27,6 +27,7 @@ import {
 import { getInfoAsync } from 'expo-file-system/legacy';
 import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -105,11 +106,15 @@ const Waveform: React.FC<{
    *  right, reaching full width at the 60 s cap. */
   barCount?: number;
 }> = ({ data, progress, colors, barCount = WAVEFORM_BARS }) => {
+  const t = useTranslation();
   const bars = useMemo(() => bucketMetering(data, barCount), [data, barCount]);
   if (bars.length === 0) return null;
   const played = Math.round(progress * bars.length);
   return (
-    <View style={waveStyles.row} accessibilityLabel="Voice note waveform">
+    <View
+      style={waveStyles.row}
+      accessibilityLabel={t('voiceRecordingSheet.waveformAccessibility')}
+    >
       {bars.map((v, i) => (
         <View
           key={i}
@@ -163,6 +168,7 @@ const fmtTime = (totalSeconds: number) => {
  */
 const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sending = false }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   // No explicit snapPoints — gorhom v5 defaults `enableDynamicSizing` to
@@ -303,11 +309,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     if (current.granted) return true;
     if (!current.canAskAgain) {
       Alert.alert(
-        'Microphone access needed',
-        'Lightning Piggy needs microphone permission to record voice notes. Open Settings to grant it.',
+        t('voiceRecordingSheet.micAccessNeededTitle'),
+        t('voiceRecordingSheet.micAccessNeededSettings'),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          { text: t('voiceRecordingSheet.cancel'), style: 'cancel' },
+          { text: t('voiceRecordingSheet.openSettings'), onPress: () => Linking.openSettings() },
         ],
       );
       return false;
@@ -325,19 +331,22 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       // how to recover. On Android the second prompt also auto-flips
       // canAskAgain to false; iOS only ever shows the OS prompt once.
       Alert.alert(
-        'Microphone access needed',
-        'Voice notes need microphone access. You can grant it any time from system Settings.',
+        t('voiceRecordingSheet.micAccessNeededTitle'),
+        t('voiceRecordingSheet.micAccessNeededGrant'),
         result.canAskAgain
-          ? [{ text: 'OK', style: 'cancel' }]
+          ? [{ text: t('voiceRecordingSheet.ok'), style: 'cancel' }]
           : [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: t('voiceRecordingSheet.cancel'), style: 'cancel' },
+              {
+                text: t('voiceRecordingSheet.openSettings'),
+                onPress: () => Linking.openSettings(),
+              },
             ],
       );
       return false;
     }
     return true;
-  }, []);
+  }, [t]);
 
   const handleStart = useCallback(async () => {
     if (sending || requesting || isRecording) return;
@@ -374,11 +383,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     } catch (err) {
       console.warn('[VoiceRecordingSheet] start failed', err);
       Alert.alert(
-        'Recording failed',
-        err instanceof Error ? err.message : 'Could not start the microphone.',
+        t('voiceRecordingSheet.recordingFailedTitle'),
+        err instanceof Error ? err.message : t('voiceRecordingSheet.recordingFailedMessage'),
       );
     }
-  }, [ensurePermission, isRecording, recorder, requesting, sending, player]);
+  }, [ensurePermission, isRecording, recorder, requesting, sending, player, t]);
 
   const handleStop = useCallback(async () => {
     if (cutoffTimerRef.current) {
@@ -476,8 +485,8 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
         if (sizeBytes > MAX_VOICE_NOTE_SIZE_BYTES) {
           const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
           Alert.alert(
-            'Voice note too large',
-            `Voice note too large (${sizeMb} MB). Maximum is 5 MB. Try recording a shorter clip.`,
+            t('voiceRecordingSheet.tooLargeTitle'),
+            t('voiceRecordingSheet.tooLargeMessage', { size: sizeMb }),
           );
           // Failed fast — let the user retry; clear the guard so a
           // subsequent tap can proceed.
@@ -502,7 +511,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     // reset the ref on the next open. Holding it true in the meantime
     // prevents a third tap from racing in if the user happens to keep
     // jabbing the button while the sheet is animating away.
-  }, [recordedUri, sending, onSend, player]);
+  }, [recordedUri, sending, onSend, player, t]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -544,12 +553,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   const elapsedLabel = fmtTime(elapsedSeconds);
 
   const hint = isRecording
-    ? `Recording... tap stop when you're done (max ${MAX_RECORDING_SECONDS}s)`
+    ? t('voiceRecordingSheet.hintRecording', { max: MAX_RECORDING_SECONDS })
     : isFinalised
-      ? 'Tap play to listen back, then Send'
+      ? t('voiceRecordingSheet.hintFinalised')
       : didStart
-        ? 'Tap the mic to record again'
-        : 'Tap the mic to start recording';
+        ? t('voiceRecordingSheet.hintRecordAgain')
+        : t('voiceRecordingSheet.hintStart');
 
   return (
     <BottomSheetModal
@@ -566,10 +575,9 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       stackBehavior="push"
     >
       <BottomSheetView style={styles.content} testID="voice-recording-sheet">
-        <Text style={styles.title}>Voice note</Text>
+        <Text style={styles.title}>{t('voiceRecordingSheet.title')}</Text>
         <Text style={styles.encryptionNote} testID="voice-encryption-note">
-          End-to-end encrypted (AES-256-GCM): the audio is encrypted on your device before upload,
-          so only you and the recipient can play it.
+          {t('voiceRecordingSheet.encryptionNote')}
         </Text>
 
         {!isFinalised && (
@@ -588,7 +596,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             style={[styles.micButton, { backgroundColor: colors.brandPink }]}
             onPress={handleToggle}
             disabled={sending || requesting}
-            accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
+            accessibilityLabel={
+              isRecording
+                ? t('voiceRecordingSheet.stopRecording')
+                : t('voiceRecordingSheet.startRecording')
+            }
             accessibilityState={{ disabled: sending || requesting }}
             testID="voice-record-toggle"
           >
@@ -621,7 +633,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             <TouchableOpacity
               style={styles.playButton}
               onPress={handlePlayToggle}
-              accessibilityLabel={isPlaying ? 'Pause playback' : 'Play voice note'}
+              accessibilityLabel={
+                isPlaying
+                  ? t('voiceRecordingSheet.pausePlayback')
+                  : t('voiceRecordingSheet.playVoiceNote')
+              }
               testID="voice-play-toggle"
             >
               {isPlaying ? (
@@ -644,12 +660,14 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             style={[styles.actionButton, styles.cancelButton, sending && styles.sendButtonDisabled]}
             onPress={handleCancel}
             disabled={sending}
-            accessibilityLabel="Cancel voice note"
+            accessibilityLabel={t('voiceRecordingSheet.cancelVoiceNote')}
             accessibilityState={{ disabled: sending }}
             testID="voice-cancel-button"
           >
             <X size={18} color={colors.textBody} />
-            <Text style={[styles.actionLabel, { color: colors.textBody }]}>Cancel</Text>
+            <Text style={[styles.actionLabel, { color: colors.textBody }]}>
+              {t('voiceRecordingSheet.cancel')}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -659,13 +677,13 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
             ]}
             onPress={handleSend}
             disabled={!isFinalised || sending}
-            accessibilityLabel="Send voice note"
+            accessibilityLabel={t('voiceRecordingSheet.sendVoiceNote')}
             accessibilityState={{ disabled: !isFinalised || sending }}
             testID="voice-send-button"
           >
             <Send size={18} color={colors.white} />
             <Text style={[styles.actionLabel, { color: colors.white }]}>
-              {sending ? 'Sending...' : 'Send'}
+              {sending ? t('voiceRecordingSheet.sending') : t('voiceRecordingSheet.send')}
             </Text>
           </TouchableOpacity>
         </View>

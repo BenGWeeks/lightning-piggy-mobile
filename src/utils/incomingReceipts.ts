@@ -59,6 +59,25 @@ export function shouldSeedBaseline(
   return existingBaseline === undefined;
 }
 
+// A new receipt tagged with which wallet (and label) it belongs to — the unit
+// the receive detector picks a single winner from across all wallets.
+export interface AnnouncedReceipt extends NewReceipt {
+  walletId: string;
+  walletLabel: string;
+}
+
+// Pick the newer of two candidate receipts deterministically (latest
+// settledAt wins). The overlay shows ONE payment per render, so when several
+// wallets each surface a fresh receive in the same tick we announce only the
+// most recent — extracted so the tie-break is unit-testable (#859, #828).
+export function pickNewerReceipt(
+  current: AnnouncedReceipt | null,
+  candidate: AnnouncedReceipt,
+): AnnouncedReceipt {
+  if (!current || candidate.settledAt > current.settledAt) return candidate;
+  return current;
+}
+
 // All payment_hashes of settled incoming txns (well-formed only) — used to seed
 // the seen-set on first sight of a wallet (silent baseline: no launch re-announce).
 export function settledIncomingHashes(transactions: readonly WalletTransaction[]): Set<string> {

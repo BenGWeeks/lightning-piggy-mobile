@@ -17,6 +17,7 @@ import {
 import { Unlock, AlertCircle } from 'lucide-react-native';
 import { cancelNfcOperation, isNfcEnabled, unlockHuntTag } from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { hexToBytes } from '../utils/nfc/ntag21xLock';
 import type { Palette } from '../styles/palettes';
 
@@ -60,6 +61,7 @@ const NfcUnlockSheet: React.FC<Props> = ({
   onUnlocked,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<UnlockState>('ready');
   const [errorMessage, setErrorMessage] = useState('');
@@ -83,8 +85,8 @@ const NfcUnlockSheet: React.FC<Props> = ({
         setState('error');
         setErrorMessage(
           Platform.OS === 'android'
-            ? 'NFC is turned off. Please enable NFC in your device settings.'
-            : 'NFC is turned off. Go to Settings to enable NFC.',
+            ? t('nfcUnlockSheet.nfcOffAndroid')
+            : t('nfcUnlockSheet.nfcOffIos'),
         );
       }
       return;
@@ -108,10 +110,12 @@ const NfcUnlockSheet: React.FC<Props> = ({
     } catch (err) {
       if (mountedRef.current) {
         setState('error');
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to unlock tag');
+        setErrorMessage(
+          err instanceof Error ? err.message : t('nfcUnlockSheet.unlockFailedGeneric'),
+        );
       }
     }
-  }, [onUnlocked, packHex, pwdHex, tagUid]);
+  }, [onUnlocked, packHex, pwdHex, tagUid, t]);
 
   useEffect(() => {
     if (visible) {
@@ -158,31 +162,28 @@ const NfcUnlockSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Unlock the Piglet tag</Text>
+        <Text style={styles.title}>{t('nfcUnlockSheet.title')}</Text>
 
         {state === 'ready' && (
           <View style={styles.stateContainer}>
             <View style={styles.iconContainer}>
               <Unlock size={64} color={colors.brandPink} strokeWidth={2} />
             </View>
-            <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
-            <Text style={styles.description}>
-              This sends the PIN to the tag and removes the rewrite lock. After unlocking, the tag
-              accepts a fresh write from any NFC writer.
-            </Text>
+            <Text style={styles.instruction}>{t('nfcUnlockSheet.holdPiglet')}</Text>
+            <Text style={styles.description}>{t('nfcUnlockSheet.readyDesc')}</Text>
             <ActivityIndicator
               size="small"
               color={colors.brandPink}
               style={styles.waitingIndicator}
             />
-            <Text style={styles.waitingText}>Waiting for the tag…</Text>
+            <Text style={styles.waitingText}>{t('nfcUnlockSheet.waitingForTag')}</Text>
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={handleClose}
-              accessibilityLabel="Cancel NFC unlock"
+              accessibilityLabel={t('nfcUnlockSheet.cancelUnlock')}
               testID="nfc-unlock-cancel"
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('nfcUnlockSheet.cancel')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -190,7 +191,7 @@ const NfcUnlockSheet: React.FC<Props> = ({
         {state === 'unlocking' && (
           <View style={styles.stateContainer}>
             <ActivityIndicator size="large" color={colors.brandPink} />
-            <Text style={styles.instruction}>Unlocking tag…</Text>
+            <Text style={styles.instruction}>{t('nfcUnlockSheet.unlockingTag')}</Text>
           </View>
         )}
 
@@ -199,18 +200,15 @@ const NfcUnlockSheet: React.FC<Props> = ({
             <View style={[styles.iconContainer, styles.successIcon]}>
               <Text style={styles.checkmark}>&#10003;</Text>
             </View>
-            <Text style={styles.instruction}>Tag unlocked</Text>
-            <Text style={styles.description}>
-              The tag is rewriteable again. Run the Hide-a-Piglet wizard if you want to repoint it
-              to a new Piggy.
-            </Text>
+            <Text style={styles.instruction}>{t('nfcUnlockSheet.tagUnlocked')}</Text>
+            <Text style={styles.description}>{t('nfcUnlockSheet.successDesc')}</Text>
             <TouchableOpacity
               style={styles.doneButton}
               onPress={handleClose}
-              accessibilityLabel="Close NFC unlock sheet"
+              accessibilityLabel={t('nfcUnlockSheet.closeSheet')}
               testID="nfc-unlock-done"
             >
-              <Text style={styles.doneButtonText}>Done</Text>
+              <Text style={styles.doneButtonText}>{t('nfcUnlockSheet.done')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -223,24 +221,24 @@ const NfcUnlockSheet: React.FC<Props> = ({
                 <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
               </View>
             </View>
-            <Text style={styles.instruction}>Unlock failed</Text>
+            <Text style={styles.instruction}>{t('nfcUnlockSheet.unlockFailed')}</Text>
             <Text style={styles.description}>{errorMessage}</Text>
             <View style={styles.errorButtons}>
               <TouchableOpacity
                 style={styles.retryButton}
                 onPress={() => startUnlock()}
-                accessibilityLabel="Retry NFC unlock"
+                accessibilityLabel={t('nfcUnlockSheet.retryUnlock')}
                 testID="nfc-unlock-retry"
               >
-                <Text style={styles.retryButtonText}>Try Again</Text>
+                <Text style={styles.retryButtonText}>{t('nfcUnlockSheet.tryAgain')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={handleClose}
-                accessibilityLabel="Cancel NFC unlock"
+                accessibilityLabel={t('nfcUnlockSheet.cancelUnlock')}
                 testID="nfc-unlock-error-cancel"
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>{t('nfcUnlockSheet.cancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>

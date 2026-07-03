@@ -40,7 +40,7 @@ account so they can drive a deterministic path:
 |===
 
 If your testing seed uses different names, `sed -i` the YAML files in
-`tests/e2e/keyboard-audit/` to match — every flow that needs fixture
+`.maestro/keyboard-audit/` to match — every flow that needs fixture
 data has a single anchored `text:` selector at the top.
 
 == Run
@@ -111,6 +111,6 @@ multi-step:
 * `NostrLoginSheet` (nsec input)
 * `GroupConversationScreen` message input (audit covers 1:1 only)
 
-Add new flows to `tests/e2e/keyboard-audit/` and an entry to the
+Add new flows to `.maestro/keyboard-audit/` and an entry to the
 `FLOWS=()` array in `scripts/keyboard-screenshot-audit.sh` to extend
 coverage.

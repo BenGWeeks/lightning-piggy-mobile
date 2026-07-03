@@ -106,47 +106,57 @@ Ensure the app is built and running on a connected device or emulator before run
 
 [source,bash]
 ----
-# Run a single test
-maestro test tests/e2e/test-login.yaml
+# Run a single flow
+maestro test .maestro/authentication/flow-006-login.yaml
 
-# Run all tests
-maestro test tests/e2e/
+# Run a whole feature area (numbered flows only)
+maestro test .maestro/payments/
+
+# Run the curated wallet/transfer suite (skips the un-numbered helpers
+# under common/ and the perf flows, which aren't standalone-runnable)
+source .env && bash .maestro/reporting/run-all.sh
 ----
+
+NOTE: Don't run `maestro test .maestro/` over the whole tree — that
+sweeps in the shared building blocks under `.maestro/common/` (and the
+`perf/` flows), which are designed to be pulled in via `runFlow:` and
+fail when executed on their own. Target a feature-area folder, a single
+flow, or the `run-all.sh` runner instead.
 
 ==== Test Inventory
 
+A representative slice (the full, authoritative list — organised one
+folder deep by feature area — lives in `.maestro/README.adoc`):
+
 [cols="2,3", options="header"]
 |===
-| Test File | Coverage
+| Flow | Coverage
 
-| `test-login.yaml`
+| `authentication/flow-006-login.yaml`
 | nsec login flow — enter key, verify login state
 
-| `test-logout.yaml`
+| `authentication/flow-007-logout.yaml`
 | Logout and state cleanup verification
 
-| `test-create-account.yaml`
+| `authentication/flow-002-create-account.yaml`
 | Generate new Nostr keypair, set display name, backup nsec
 
-| `test-edit-profile.yaml`
+| `profile/flow-097-edit-profile.yaml`
 | Edit name, picture, banner, and lightning address
 
-| `test-follow-unfollow.yaml`
+| `friends/flow-014-follow-unfollow.yaml`
 | Follow 6 contacts via the Add Friend sheet
 
-| `test-unfollow.yaml`
-| Unfollow a contact via the profile sheet
-
-| `test-search.yaml`
+| `friends/flow-018-search.yaml`
 | Search contacts by name on the Friends screen
 
-| `test-alphabet-m.yaml`
+| `friends/flow-013-alphabet-m.yaml`
 | Alphabet sidebar navigation (M, S, A sections)
 
-| `test-keyboard-sheet.yaml`
+| `messaging/flow-068-keyboard-sheet.yaml`
 | Bottom sheet slides up correctly when keyboard opens
 
-| `test-login-perf.yaml`
+| `authentication/flow-005-login-perf.yaml`
 | Login to Friends tab responsiveness timing
 
 |===
@@ -175,22 +185,22 @@ If a component is missing an accessibility label, add one to the source code rat
 
 ===== Composable Subflows
 
-Subflows are reusable Maestro flows whose filenames are prefixed with an underscore (e.g. `_subflow-login-as.yaml`). They aren't picked up by `maestro test tests/e2e/` directly — callers `runFlow:` them as a step inside a regular test flow. Use them whenever multiple tests share a setup walk.
+Subflows are reusable Maestro flows that live un-numbered in `.maestro/common/` (e.g. `common/login-as.yaml`). They aren't standalone tests — callers `runFlow:` them (via a relative path, e.g. `../common/login-as.yaml`) as a step inside a regular flow, so they're skipped by a feature-area run and must never be run on their own. Use them whenever multiple flows share a setup walk.
 
-Available subflows:
+Available subflows (all under `.maestro/common/`):
 
 [cols="2,3", options="header"]
 |===
 | Subflow | Purpose
 
-| `_subflow-login-as.yaml`
+| `common/login-as.yaml`
 | Force-stop the app, sign out any prior session, then sign in via the nsec passed in `MAESTRO_NSEC_BIG`. Used by every multi-actor flow.
 
-| `_subflow-seed-test-wallet.yaml`
+| `common/seed-test-wallet.yaml`
 | Walk the AddWalletWizard to seed a test wallet so wallet-conditional tests (Send, Receive, Transfer, cached-tx, etc.) don't have to re-implement the wizard inline. Picks the wallet type based on which env var is non-empty:
 
 `MAESTRO_TEST_NWC` → Lightning (NWC) wallet via connection string. +
-`MAESTRO_TEST_MNEMONIC` → On-chain hot wallet via 12/24-word seed phrase. *Requires dev mode enabled in the app* — run `test-dev-mode.yaml` once first.
+`MAESTRO_TEST_MNEMONIC` → On-chain hot wallet via 12/24-word seed phrase. *Requires dev mode enabled in the app* — run `authentication/flow-004-login-dev.yaml` once first.
 
 Required `WALLET_NAME` sets the alias shown on the wallet card. The flow asserts that alias appears in the carousel before returning. Maestro's `${VAR}` interpolation has no robust default-fallback across versions, so an unset value leaves the literal `${WALLET_NAME}` in the alias field and the visibility assertion never matches — pass it explicitly via `runFlow.env`.
 
@@ -200,9 +210,9 @@ Example invocation from a wallet-conditional test:
 
 [source,yaml]
 ----
-- runFlow: _subflow-login-as.yaml
+- runFlow: ../common/login-as.yaml
 - runFlow:
-    file: _subflow-seed-test-wallet.yaml
+    file: ../common/seed-test-wallet.yaml
     env:
       MAESTRO_TEST_NWC: ${MAESTRO_NWC1}
       WALLET_NAME: "Seeded NWC"

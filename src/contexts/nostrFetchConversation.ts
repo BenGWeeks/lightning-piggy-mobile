@@ -1,24 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { touchNip17CacheEntry } from '../utils/nip17Cache';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { SignerType } from '../types/nostr';
+import { unwrapWrapNsec, unwrapWrapViaNip44, type DecodedRumor } from '../utils/nip17Unwrap';
 import {
-  partnerFromRumor,
-  unwrapWrapNsec,
-  unwrapWrapViaNip44,
-  textForRumor,
-} from '../utils/nip17Unwrap';
-import { perAccountKey } from '../services/perAccountStorage';
+  getConversationMessages,
+  hasStoredWraps,
+  upsertDmMessages,
+  type DmMessageRow,
+} from '../services/dmDb';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
-import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { yieldToEventLoop, DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
 import {
-  AMBER_NIP17_CACHE_KEY_BASE,
-  NSEC_NIP17_CACHE_KEY_BASE,
-  type Nip17CacheEntry,
-  safeParseRecord,
-  writeNip17Cache,
   DM_CONV_CAP,
   inboxLastSeenKey,
   convCacheKey,
@@ -27,6 +20,8 @@ import {
   loadLastSeen,
   mergeConversationMessages,
 } from './nostrDmCache';
+import { ingestInboxWraps } from './dmWrapIngest';
+import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { ConversationMessage } from './nostrContextTypes';
 
 /**
@@ -34,8 +29,9 @@ import type { ConversationMessage } from './nostrContextTypes';
  * standalone async function (#703) — `useDmInbox` threads in the active
  * identity (`pubkey`, `isLoggedIn`, `signerType`), the relay resolver
  * (`getReadRelays`), and the per-signer NIP-04 decrypt closure
- * (`decryptNip04ViaSigner`). No logic / ordering changed; the function
- * returns the merged message list exactly as the inline version did.
+ * (`decryptNip04ViaSigner`). The NIP-17 portion of a thread is served from
+ * the encrypted DM store's indexed (owner, conversation, created_at) slice
+ * (#848) — the plaintext wrap-cache file this used to scan is retired.
  */
 export interface FetchConversationParams {
   pubkey: string | null;
@@ -44,20 +40,38 @@ export interface FetchConversationParams {
   getReadRelays: () => string[];
   decryptNip04ViaSigner: (counterpartyPubkey: string, ciphertext: string) => Promise<string | null>;
   otherPubkey: string;
+  // Cancels the relay fetch + decrypt loop when the user navigates away (#868).
+  // Mirrors refreshDmInbox's opts.signal: the loop bails at its yield points so
+  // a back-press mid-fetch stops chewing the JS thread, and re-entering can
+  // abort-and-replace an in-flight fetch instead of stacking a second loop.
+  signal?: AbortSignal;
 }
 
 export async function fetchConversationFor(
   params: FetchConversationParams,
 ): Promise<ConversationMessage[]> {
-  const { pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner, otherPubkey } =
-    params;
+  const {
+    pubkey,
+    isLoggedIn,
+    signerType,
+    getReadRelays,
+    decryptNip04ViaSigner,
+    otherPubkey,
+    signal,
+  } = params;
   if (!pubkey || !isLoggedIn) return [];
+  if (signal?.aborted) return [];
   const normalized = otherPubkey.trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
 
+  // One-time plaintext→encrypted store migration (#848) — memoised, so this
+  // is a Map lookup after the first call. A notification deep-link can open
+  // a thread before any inbox refresh ran, so the trigger lives here too.
+  await ensureDmStoreMigrated(pubkey);
+
   // Perf instrumentation — unconditional (not __DEV__ gated) so we
   // can grep the same line out of logcat on a production APK to
-  // compare cold-cache vs warm-cache thread opens. Numbers are
+  // compare cold-store vs warm-store thread opens. Numbers are
   // counts-only — no plaintext / pubkey logged beyond a short id.
   const perfStart = performance.now();
   let nip17CacheHits = 0;
@@ -130,6 +144,10 @@ export async function fetchConversationFor(
     ev: (typeof kind4Events)[0];
   } | null)[] = [];
   for (let i = 0; i < freshDecryptTargets.length; i += DECRYPT_YIELD_EVERY) {
+    // Bail between batches once the caller aborts (#868) — same yield-point
+    // cancellation refreshDmInbox/ingestInboxWraps already do. Stops a back-
+    // press mid-fetch from draining the rest of the decrypt loop.
+    if (signal?.aborted) break;
     const batch = freshDecryptTargets.slice(i, i + DECRYPT_YIELD_EVERY);
     const batchResults = await Promise.all(
       batch.map(async (t) => {
@@ -146,6 +164,27 @@ export async function fetchConversationFor(
     freshResults.push(...batchResults);
     if (i + DECRYPT_YIELD_EVERY < freshDecryptTargets.length) await yieldToEventLoop();
   }
+  // Persist fresh NIP-04 decrypts to the encrypted store (#848) so the next
+  // open of ANY surface is decrypt-once — the RAM LRU dies with the session.
+  const k4Rows: DmMessageRow[] = [];
+  for (const r of freshResults) {
+    if (!r) continue;
+    k4Rows.push({
+      owner: pubkey,
+      eventId: r.ev.id,
+      conversation: normalized,
+      createdAt: r.ev.created_at,
+      sender: r.fromMe ? pubkey : normalized,
+      content: r.text,
+      fromMe: r.fromMe,
+      wireKind: 4,
+    });
+  }
+  if (k4Rows.length > 0) {
+    await upsertDmMessages(k4Rows).catch((e) => {
+      if (__DEV__) console.warn('[DmStore] thread kind-4 upsert failed:', e);
+    });
+  }
   // Merge cached + fresh preserving original event order.
   const orderedByIndex = new Array<ConversationMessage | null>(kind4Events.length).fill(null);
   for (const c of cachedPlaintexts) {
@@ -154,6 +193,7 @@ export async function fetchConversationFor(
       fromMe: c.fromMe,
       text: c.text,
       createdAt: c.ev.created_at,
+      wireKind: 4, // these are kind-4 NIP-04 events
     };
   }
   for (const r of freshResults) {
@@ -163,189 +203,105 @@ export async function fetchConversationFor(
       fromMe: r.fromMe,
       text: r.text,
       createdAt: r.ev.created_at,
+      wireKind: 4,
     };
   }
   for (const m of orderedByIndex) if (m !== null) decrypted.push(m);
 
-  // NIP-17 — partner pubkey is hidden inside the encrypted rumor,
-  // so we can't peer-scope at the relay. `refreshDmInbox` (which
-  // the Messages tab fires on focus with a 30s TTL) already
-  // decrypts every wrap addressed to us and writes the plaintext
-  // keyed by wrap id to the persistent cache. Serve the NIP-17
-  // portion of THIS thread from that cache first — if the cache
-  // has ANY entries, we skip the expensive inbox-wide relay
-  // fetch entirely (#190).
+  // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
+  // we can't peer-scope at the relay. The encrypted DM store memoises
+  // every wrap the inbox ever decrypted (#848), so serve THIS thread's
+  // slice straight from the indexed (owner, conversation, created_at)
+  // read — and if the store holds ANY wraps (an inbox-wide ingest has
+  // run before), skip the expensive inbox-wide relay fetch entirely
+  // (#190).
   //
-  // Cold-cache fallback: if the cache has no entries at all (first
-  // app run post-login, or just-logged-out-logged-back-in) we
-  // still hit the relay so the thread renders even before any
-  // refreshDmInbox has fired. Subsequent opens short-circuit.
+  // Cold-store fallback: if the store has no wraps at all (first app
+  // run post-login, or just-logged-out-logged-back-in) we still hit
+  // the relay so the thread renders even before any refreshDmInbox has
+  // fired. Subsequent opens short-circuit.
   //
   // Staleness tradeoff: a wrap that arrived in the last <30s and
   // hasn't been pulled by refreshDmInbox yet won't show until the
   // next tab focus. For a chat UX that's a non-issue.
-  const signerWrapCacheKey =
-    signerType === 'nsec'
-      ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey)
-      : signerType === 'amber'
-        ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey)
-        : null;
-  const wrapCacheRaw = signerWrapCacheKey ? await safeGetDmCacheItem(signerWrapCacheKey) : null;
-  const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapCacheRaw);
-  const cachedWrapEntries = Object.values(wrapCache);
   let skippedInboxFetch = false;
-  let fastPathTouched = 0;
-  if (cachedWrapEntries.length > 0) {
-    // Cache populated — serve peer-matching wraps directly, skip relay fetch.
-    for (const entry of cachedWrapEntries) {
-      nip17CacheHits++;
-      if (entry.partnerPubkey !== normalized) continue;
-      // LRU touch (#193) — opening this thread is a "use" of these entries; without the touch they age out FIFO and a thread the user re-opens regularly can be evicted just because newer wraps arrived first.
-      touchNip17CacheEntry(wrapCache, entry.wrapId);
-      fastPathTouched++;
+  try {
+    const threadRows = await getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
+    for (const r of threadRows) {
+      if (r.wireKind === 4) nip04CacheHits++;
+      else nip17CacheHits++;
       decrypted.push({
-        id: entry.wrapId,
-        fromMe: entry.fromMe,
-        text: entry.text,
-        createdAt: entry.createdAt,
+        id: r.eventId,
+        fromMe: r.fromMe,
+        text: r.content,
+        createdAt: r.createdAt,
+        wireKind: r.wireKind,
       });
     }
-    skippedInboxFetch = true;
+    skippedInboxFetch = await hasStoredWraps(pubkey);
+  } catch (e) {
+    // Store unavailable — fall back to the relay path below.
+    if (__DEV__) console.warn('[DmStore] thread slice read failed:', e);
   }
-  // Persist the touched-cache so LRU order survives restarts.
-  if (fastPathTouched > 0 && signerWrapCacheKey) {
-    await writeNip17Cache(signerWrapCacheKey, wrapCache);
-  }
-  const inboxLastSeenForWraps = skippedInboxFetch
+  // Aborted mid-fetch (back-press during the kind-4 decrypt) — skip the
+  // inbox-wide wrap fetch entirely and return what the store already gave us
+  // (#868). The store rows above are already pushed into `decrypted`.
+  const skipWrapFetch = skippedInboxFetch || (signal?.aborted ?? false);
+  const inboxLastSeenForWraps = skipWrapFetch
     ? undefined
     : await loadLastSeen(inboxLastSeenKey(pubkey));
-  const { kind1059 } = skippedInboxFetch
+  const { kind1059 } = skipWrapFetch
     ? {
         kind1059: [] as Awaited<ReturnType<typeof nostrService.fetchInboxDmEvents>>['kind1059'],
       }
     : await nostrService.fetchInboxDmEvents(pubkey, readRelays, {
         since: inboxLastSeenForWraps,
       });
-  if (kind1059.length > 0) {
+  if (kind1059.length > 0 && (signerType === 'nsec' || signerType === 'amber')) {
     const onSkip = (reason: string, wrapId: string) => {
       if (__DEV__) console.warn(`[Nostr] NIP-17 thread unwrap skip (${wrapId}): ${reason}`);
     };
+    let unwrap: ((wrap: (typeof kind1059)[0]) => Promise<DecodedRumor | null> | DecodedRumor | null) | null = null; // prettier-ignore
     if (signerType === 'nsec') {
       const secretKey = await getMemoisedSecretKey(pubkey);
-      if (secretKey) {
-        // Reuse the persistent wrap-id cache populated by
-        // refreshDmInbox (#176). For wraps that aren't cached yet
-        // (typically arrived between the last inbox refresh and
-        // this thread open), we decrypt AND write them back so the
-        // next thread open across ANY conversation can short-circuit
-        // without waiting for the next inbox refresh.
-        const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey);
-        const raw = await safeGetDmCacheItem(nsecCacheKey);
-        const cache = safeParseRecord<Nip17CacheEntry>(raw);
-        const newlyCached: Nip17CacheEntry[] = [];
-        let nip17Decrypted = 0;
-        let threadTouched = 0;
-        for (const wrap of kind1059) {
-          const cached = cache[wrap.id];
-          if (cached) {
-            nip17CacheHits++;
-            if (cached.partnerPubkey !== normalized) continue;
-            // LRU touch (#193) — see fast-path above for rationale.
-            touchNip17CacheEntry(cache, wrap.id);
-            threadTouched++;
-            decrypted.push({
-              id: wrap.id,
-              fromMe: cached.fromMe,
-              text: cached.text,
-              createdAt: cached.createdAt,
-            });
-            continue;
-          }
-          nip17FreshDecrypts++;
-          const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
-          if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
-          if (!rumor) continue;
-          // If this is a multi-recipient group rumor, route it to
-          // the group store and skip 1:1 caching. Opening a DM
-          // thread shouldn't backfill group rumors into the 1:1
-          // cache — they belong to GroupConversationScreen.
-          const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
-          if (routeResult.kind !== 'not-group') continue;
-          const partnership = partnerFromRumor(rumor, pubkey);
-          if (!partnership) continue;
-          // Cache every successfully decrypted wrap, even if it
-          // belongs to a different thread — cache is keyed by wrap
-          // id, not by thread, so later opens of OTHER threads
-          // benefit too. Filter to this thread's partner only for
-          // the render-side `decrypted` array.
-          const entry: Nip17CacheEntry = {
-            id: wrap.id,
-            wrapId: wrap.id,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: textForRumor(rumor),
-            wireKind: rumor.kind,
-          };
-          cache[wrap.id] = entry;
-          newlyCached.push(entry);
-          if (partnership.partnerPubkey !== normalized) continue;
-          decrypted.push({
-            id: wrap.id,
-            fromMe: partnership.fromMe,
-            text: textForRumor(rumor),
-            createdAt: rumor.created_at,
-          });
-        }
-        if (newlyCached.length > 0 || threadTouched > 0) {
-          await writeNip17Cache(nsecCacheKey, cache);
-        }
-      }
-    } else if (signerType === 'amber') {
-      const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey);
-      const raw = await safeGetDmCacheItem(amberCacheKey);
-      const cache = safeParseRecord<Nip17CacheEntry>(raw);
-      let threadTouched = 0;
-      for (const wrap of kind1059) {
-        const cached = cache[wrap.id];
-        if (cached) {
-          nip17CacheHits++;
-          if (cached.partnerPubkey !== normalized) continue;
-          touchNip17CacheEntry(cache, wrap.id);
-          threadTouched++;
-          decrypted.push({
-            id: wrap.id,
-            fromMe: cached.fromMe,
-            text: cached.text,
-            createdAt: cached.createdAt,
-          });
-          continue;
-        }
-        nip17FreshDecrypts++;
-        // Thread view falls back to the Intent dialog if the silent path rejects — the user has actively opened this thread, one approval prompt per wrap is fine. Inbox refresh uses the silent-only path to avoid the flood; cached entries cover the hot path.
-        try {
-          const rumor = await unwrapWrapViaNip44(
-            wrap,
-            (ct, cp) => amberService.requestNip44Decrypt(ct, cp, pubkey),
-            onSkip,
-          );
-          if (!rumor) continue;
-          const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
-          if (routeResult.kind !== 'not-group') continue;
-          const partnership = partnerFromRumor(rumor, pubkey);
-          if (!partnership || partnership.partnerPubkey !== normalized) continue;
-          decrypted.push({
-            id: wrap.id,
-            fromMe: partnership.fromMe,
-            text: textForRumor(rumor),
-            createdAt: rumor.created_at,
-          });
-        } catch (error) {
-          if (__DEV__) console.warn('[Nostr] Amber NIP-17 thread unwrap failed:', error);
-        }
-      }
-      if (threadTouched > 0) {
-        await writeNip17Cache(amberCacheKey, cache);
+      if (secretKey) unwrap = (wrap) => unwrapWrapNsec(wrap, secretKey, onSkip);
+    } else {
+      // Thread view falls back to the Intent dialog if the silent path
+      // rejects — the user has actively opened this thread, one approval
+      // prompt per wrap is fine. Inbox refresh uses the silent-only path to
+      // avoid the flood; stored rows cover the hot path.
+      unwrap = (wrap) =>
+        unwrapWrapViaNip44(wrap, (ct, cp) => amberService.requestNip44Decrypt(ct, cp, pubkey), onSkip); // prettier-ignore
+    }
+    if (unwrap) {
+      // Same decrypt-once engine as refreshDmInbox (#848): DB known-id gate,
+      // group routing, batched upsert. Differences preserved from the old
+      // thread loop: every successfully decrypted 1:1 rumor is stored even if
+      // it belongs to a different thread or a non-followed sender (the user
+      // explicitly opened a conversation; inbox surfaces stay follow-gated at
+      // read time), and the #743 skip-set is neither consulted nor written.
+      const r = await ingestInboxWraps({
+        owner: pubkey,
+        wraps: kind1059,
+        unwrap,
+        passesFollowGate: () => true,
+        onSkip,
+        signal,
+      });
+      nip17CacheHits += r.alreadyKnown;
+      nip17FreshDecrypts += r.misses;
+      // Render-side filter to this thread's partner only — the rest were
+      // stored for later opens of their own threads.
+      for (const e of r.entries) {
+        if (e.partnerPubkey !== normalized) continue;
+        decrypted.push({
+          id: e.id,
+          fromMe: e.fromMe,
+          text: e.text,
+          createdAt: e.createdAt,
+          wireKind: e.wireKind,
+          rumorId: e.rumorId,
+        });
       }
     }
   }
@@ -355,10 +311,19 @@ export async function fetchConversationFor(
   // Map semantics so re-ordered or edited events (rare) land right.
   const merged = mergeConversationMessages(cachedConv, decrypted, DM_CONV_CAP);
 
+  // Aborted mid-fetch (Copilot #869): the kind-4 decrypt loop bails between
+  // batches, so `decrypted` may omit events the abort skipped — but
+  // `kind4Events` still holds them all. Persisting `convLastSeen` from the full
+  // `kind4Events` set would advance the per-peer `since` cursor PAST those
+  // never-decrypted events, permanently skipping them on the next open. Return
+  // the store-backed `merged` (already painted) WITHOUT any cache/cursor write,
+  // so an aborted run has no durable side effects.
+  if (signal?.aborted) return merged;
+
   // Single-line perf summary — grep `[Perf] fetchConversation` out
-  // of logcat to compare cold-cache vs warm-cache thread opens.
-  // Cold cache shows `hits=0, fresh=N` — whole inbox decrypted.
-  // Warm cache shows `hits≈N, fresh=0` — all cache short-circuits.
+  // of logcat to compare cold-store vs warm-store thread opens.
+  // Cold store shows `hits=0, fresh=N` — whole inbox decrypted.
+  // Warm store shows `hits≈N, fresh=0` — all store short-circuits.
   console.log(
     `[Perf] fetchConversation(${normalized.slice(0, 8)}): ` +
       `${(performance.now() - perfStart).toFixed(0)}ms, ` +

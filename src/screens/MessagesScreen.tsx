@@ -11,7 +11,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Clock, Search, X, Zap } from 'lucide-react-native';
@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -37,6 +37,7 @@ import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   buildConversationSummaries,
   buildDmSummaries,
@@ -44,6 +45,10 @@ import {
   mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
+// __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
+// __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
+// runtime in a release build (the module may still be present in the bundle).
+import { seedDevOrderConversation } from '../utils/devSeedOrders';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 import type { NostrProfile } from '../types/nostr';
@@ -55,6 +60,7 @@ type MessagesNavigation = CompositeNavigationProp<
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
   const messagesRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -65,16 +71,8 @@ const MessagesScreen: React.FC = () => {
   const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const {
-    isLoggedIn,
-    profile,
-    refreshProfile,
-    dmInbox,
-    refreshDmInbox,
-    armLiveDmSub,
-    fetchProfilesForPubkeys,
-    pubkey,
-  } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, fetchProfilesForPubkeys, pubkey } = useNostr();
+  const { dmInbox, refreshDmInbox, armLiveDmSub } = useNostrDmInbox();
   const { contacts, refreshContacts } = useNostrContacts();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();
@@ -635,6 +633,22 @@ const MessagesScreen: React.FC = () => {
     setPickerVisible(true);
   }, []);
 
+  // __DEV__-only: seed a marketplace payment-request + receipt conversation and
+  // open it, so Maestro / manual QA can exercise the order-card Pay / QR
+  // affordance without a live market relay. This branch is __DEV__-gated and the
+  // helper is a no-op outside __DEV__, so it never runs in a release build.
+  const handleSeedDevOrder = useCallback(async () => {
+    if (!__DEV__ || !pubkey) return;
+    const seeded = await seedDevOrderConversation(pubkey);
+    if (!seeded) return;
+    navigation.navigate('Conversation', {
+      pubkey: seeded.pubkey,
+      name: seeded.name,
+      picture: null,
+      lightningAddress: null,
+    });
+  }, [navigation, pubkey]);
+
   const handlePickerSelect = useCallback(
     (friend: PickedFriend) => {
       setPickerVisible(false);
@@ -705,8 +719,11 @@ const MessagesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
-      <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
+      <BrandPatternBackground variant="messages-weave" />
+      <TabHeader
+        title={t('messagesScreen.title')}
+        icon={<MessageCircle size={20} color={colors.brandPink} />}
+      />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (
@@ -715,13 +732,13 @@ const MessagesScreen: React.FC = () => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search conversations..."
+                placeholder={t('messagesScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-input"
               />
               <TouchableOpacity
@@ -730,7 +747,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(false);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('messagesScreen.closeSearch')}
                 testID="messages-close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -745,7 +762,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(true);
                   setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-toggle"
               >
                 <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
@@ -769,12 +786,14 @@ const MessagesScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
-              accessibilityLabel={`Window: last ${windowDays} days. Tap to change.`}
+              accessibilityLabel={t('messagesScreen.windowToggleA11y', { days: windowDays })}
               accessibilityRole="button"
               testID="messages-window-toggle"
             >
               <Clock size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Last {windowDays} days</Text>
+              <Text style={styles.filterChipText}>
+                {t('messagesScreen.lastDays', { days: windowDays })}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={
@@ -785,34 +804,46 @@ const MessagesScreen: React.FC = () => {
               onPress={toggleShowZapCounterparties}
               accessibilityLabel={
                 showZapCounterparties
-                  ? 'Hide zap counterparties from the inbox'
-                  : 'Show zap counterparties in the inbox'
+                  ? t('messagesScreen.hideZapCounterparties')
+                  : t('messagesScreen.showZapCounterparties')
               }
               accessibilityRole="button"
               accessibilityState={{ selected: showZapCounterparties }}
               testID="messages-zaps-toggle"
             >
               <Zap size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Zaps</Text>
+              <Text style={styles.filterChipText}>{t('messagesScreen.zaps')}</Text>
             </TouchableOpacity>
             {/* Hidden marker so Maestro can assert WHICH state the toggle is in (chip is always visible regardless), without relying on accessibilityState which RN exposes inconsistently across Android versions. */}
             <View
               testID={`messages-zaps-toggle-${showZapCounterparties ? 'on' : 'off'}`}
               accessibilityElementsHidden
             />
+            {__DEV__ && (
+              // Dev-only fixture launcher for the marketplace order cards. Never
+              // present in release builds (see handleSeedDevOrder).
+              <TouchableOpacity
+                style={styles.filterChipInteractive}
+                onPress={handleSeedDevOrder}
+                accessibilityLabel="Seed a dev marketplace order conversation"
+                accessibilityRole="button"
+                testID="messages-dev-seed-order"
+              >
+                <Zap size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Dev order</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Connect Nostr</Text>
-            <Text style={styles.emptySubtitle}>
-              Connect your Nostr identity to see your conversations here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>
+            <Text style={styles.emptySubtitle}>{t('messagesScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
-              <Text style={styles.connectButtonText}>Go to Account</Text>
+              <Text style={styles.connectButtonText}>{t('messagesScreen.goToAccount')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -829,10 +860,12 @@ const MessagesScreen: React.FC = () => {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>
-                  {search ? 'No matches' : 'No conversations yet'}
+                  {search ? t('messagesScreen.noMatches') : t('messagesScreen.noConversationsYet')}
                 </Text>
                 <Text style={styles.emptySubtitle}>
-                  {search ? 'Try a different search term.' : 'Zap a friend or tap + to start one.'}
+                  {search
+                    ? t('messagesScreen.tryDifferentSearch')
+                    : t('messagesScreen.noConversationsSubtitle')}
                 </Text>
               </View>
             }
@@ -844,7 +877,7 @@ const MessagesScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.fab}
             onPress={handleStartConversation}
-            accessibilityLabel="Start new conversation"
+            accessibilityLabel={t('messagesScreen.startNewConversation')}
             testID="start-conversation-button"
             activeOpacity={0.85}
           >
@@ -859,7 +892,7 @@ const MessagesScreen: React.FC = () => {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         onSelect={handlePickerSelect}
-        title="Start a conversation"
+        title={t('messagesScreen.startConversationTitle')}
         onNewGroup={() => {
           setPickerVisible(false);
           setCreateGroupVisible(true);

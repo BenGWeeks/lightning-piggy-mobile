@@ -9,6 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { UserPlus, UserRound, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
@@ -53,6 +54,7 @@ interface MemberRow {
  */
 const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMemberTap }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
   const { pubkey: selfPubkey, profile: selfProfile } = useNostr();
@@ -131,12 +133,12 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
     (m: MemberRow) => {
       if (!groupId) return;
       BrandedAlert.alert(
-        'Remove member?',
-        `${m.name} will no longer be in this group. They'll keep any messages they've already received.`,
+        t('groupMembersSheet.removeTitle'),
+        t('groupMembersSheet.removeMessage', { name: m.name }),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('groupMembersSheet.cancel'), style: 'cancel' },
           {
-            text: 'Remove',
+            text: t('groupMembersSheet.remove'),
             style: 'destructive',
             onPress: () => {
               removeMemberFromGroup(groupId, m.pubkey).catch((e) => {
@@ -147,7 +149,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
         ],
       );
     },
-    [groupId, removeMemberFromGroup],
+    [groupId, removeMemberFromGroup, t],
   );
 
   const handlePickerSelect = useCallback(
@@ -181,14 +183,19 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
         >
           <View style={styles.headerRow}>
             <Text style={styles.title}>
-              {members.length} member{members.length === 1 ? '' : 's'}
+              {t(
+                members.length === 1
+                  ? 'groupMembersSheet.memberCountOne'
+                  : 'groupMembersSheet.memberCountOther',
+                { count: members.length },
+              )}
             </Text>
             <TouchableOpacity
               onPress={onClose}
-              accessibilityLabel="Done"
+              accessibilityLabel={t('groupMembersSheet.done')}
               testID="group-members-done"
             >
-              <Text style={styles.doneText}>Done</Text>
+              <Text style={styles.doneText}>{t('groupMembersSheet.done')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -200,7 +207,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
                 onMemberTap && m.pubkey !== selfPubkey ? () => onMemberTap(m.pubkey) : undefined
               }
               activeOpacity={onMemberTap && m.pubkey !== selfPubkey ? 0.6 : 1}
-              accessibilityLabel={`View ${m.name}'s profile`}
+              accessibilityLabel={t('groupMembersSheet.viewProfile', { name: m.name })}
               testID={`group-member-row-${m.pubkey.slice(0, 12)}`}
             >
               <View style={styles.avatar}>
@@ -218,13 +225,15 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
               </View>
               <Text style={styles.rowName} numberOfLines={1}>
                 {m.name}
-                {m.pubkey === selfPubkey ? <Text style={styles.youTag}> · you</Text> : null}
+                {m.pubkey === selfPubkey ? (
+                  <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
+                ) : null}
               </Text>
               {m.pubkey !== selfPubkey ? (
                 <TouchableOpacity
                   style={styles.removeButton}
                   onPress={() => handleRemove(m)}
-                  accessibilityLabel={`Remove ${m.name}`}
+                  accessibilityLabel={t('groupMembersSheet.removeMember', { name: m.name })}
                   testID={`group-member-remove-${m.pubkey.slice(0, 12)}`}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
@@ -237,11 +246,11 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => setPickerOpen(true)}
-            accessibilityLabel="Add members"
+            accessibilityLabel={t('groupMembersSheet.addMembers')}
             testID="group-members-add"
           >
             <UserPlus size={20} color={colors.brandPink} strokeWidth={2} />
-            <Text style={styles.addButtonText}>Add members</Text>
+            <Text style={styles.addButtonText}>{t('groupMembersSheet.addMembers')}</Text>
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheetModal>
@@ -250,8 +259,8 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
         onSelect={handlePickerSelect}
-        title="Add members"
-        subtitle="Pick a friend to add to this group"
+        title={t('groupMembersSheet.addMembers')}
+        subtitle={t('groupMembersSheet.pickFriendSubtitle')}
         excludePubkeys={group.memberPubkeys}
       />
     </>

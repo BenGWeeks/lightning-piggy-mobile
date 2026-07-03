@@ -1,5 +1,6 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { orderPreviewFromContent } from '../utils/orderEvents';
 
 // The read seam between the encrypted DM store (dmDb) and the Messages UI
 // (#695 step 3b). NostrContext delegates here instead of walking a giant
@@ -18,7 +19,10 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   partnerPubkey: r.conversation,
   fromMe: r.fromMe,
   createdAt: r.createdAt,
-  text: r.content,
+  // A kind-16/17 order row stores order JSON in `content`; surface a readable
+  // one-line summary in the preview instead of the raw blob. Other rows pass
+  // their plaintext through unchanged (#market).
+  text: orderPreviewFromContent(r.content, r.wireKind),
   wireKind: r.wireKind,
 });
 
@@ -27,15 +31,16 @@ export function rowsToInboxEntries(rows: readonly DmMessageRow[]): DmInboxEntry[
   return rows.map(rowToInboxEntry);
 }
 
-/** The inbox list: latest message per conversation, newest-first. */
-export async function loadInboxEntries(): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getInboxLatest());
+/** The inbox list: latest message per conversation for `owner`, newest-first. */
+export async function loadInboxEntries(owner: string): Promise<DmInboxEntry[]> {
+  return rowsToInboxEntries(await getInboxLatest(owner));
 }
 
 /** One conversation's messages, newest-first, paginated (load-older via opts). */
 export async function loadConversationEntries(
+  owner: string,
   partnerPubkey: string,
   opts?: { limit?: number; beforeCreatedAt?: number },
 ): Promise<DmInboxEntry[]> {
-  return rowsToInboxEntries(await getConversationMessages(partnerPubkey, opts));
+  return rowsToInboxEntries(await getConversationMessages(owner, partnerPubkey, opts));
 }

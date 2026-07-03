@@ -42,6 +42,23 @@ export const lightPalette = {
   // #9B40FF -> #7A30F3 gradient). Used by the offline banner so it reads
   // as the brand's Nostr violet rather than the hot-pink alert colour.
   brandPurple: '#9B40FF',
+  // Secondary UI accent — the brand violet promoted to a SEMANTIC role so
+  // pink-heavy surfaces (Settings, Messages) can share the visual load.
+  // Distinct token (not raw `brandPurple`) so the "secondary accent" intent
+  // is explicit at the call-site and the value can diverge from the Nostr
+  // violet later if needed. Used for: outlined secondary buttons, selected/
+  // active states, switch tracks, and decorative section-header icons.
+  accentSecondary: '#9B40FF',
+  // Tinted surface that pairs with `accentSecondary` for selected rows —
+  // the purple analogue of `brandPinkLight`. Pale lilac in light mode.
+  accentSecondaryLight: '#F3EAFF',
+  // Mid-point bridge colour for the brand pink -> purple banner gradient
+  // (`BrandGradientBackground`). A vivid magenta-violet that sits just off
+  // the straight pink->purple line so the hue arc stays saturated through
+  // the middle (no muddy/grey midpoint) and the fade reads as one smooth
+  // sweep rather than two flat zones. Same value in both themes since
+  // `brandPink`/`brandPurple` are theme-invariant.
+  brandGradientMid: '#C42BD6',
 };
 
 // Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
@@ -84,6 +101,15 @@ export const darkPalette: typeof lightPalette = {
   eventViolet: '#5B3AFF',
   // Same brand violet in both themes — reads well on light and dark.
   brandPurple: '#9B40FF',
+  // Secondary UI accent — same brand violet; reads well on both themes.
+  accentSecondary: '#9B40FF',
+  // Deep aubergine tint for selected rows in dark mode — the purple analogue
+  // of dark `brandPinkLight` (#3A1028), keeping selected states subtle.
+  accentSecondaryLight: '#2A1A3E',
+  // Same magenta-violet bridge as the light palette — the gradient endpoints
+  // (`brandPink`/`brandPurple`) are identical across themes, so the mid-point
+  // is too. See the light-palette note for why it sits off the straight line.
+  brandGradientMid: '#C42BD6',
 };
 
 export type Palette = typeof lightPalette;

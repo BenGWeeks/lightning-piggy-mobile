@@ -126,6 +126,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // breakdown.
     './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-localization — reads the device's locale list at startup so
+    // LocaleContext can default the in-app language to it (#137). No
+    // permissions/options needed; just links the native module.
+    'expo-localization',
     // expo-notifications config plugin sets the Android notification
     // small icon + colour, and is a no-op on iOS beyond linking the native
     // module. The small icon is a white PiggyBank silhouette (lucide
@@ -195,6 +199,28 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // it twice makes the second config win silently, so keep the single
     // entry above. No FCM / no remote push — all fired on-device.
     'expo-task-manager',
+    // expo-build-properties — inject R8/proguard keep rules into the CNG
+    // prebuild output. Production builds run R8 minification, which strips
+    // expo-camera's MLKit barcode classes (loaded dynamically), so the QR
+    // scanner previews but never decodes in release. Editing
+    // android/proguard-rules.pro directly would be wiped by prebuild, so the
+    // keeps live here. See the linked bug for the full root cause.
+    [
+      'expo-build-properties',
+      {
+        android: {
+          extraProguardRules: [
+            '# Keep MLKit barcode scanning (expo-camera QR scanner) from R8 stripping',
+            '-keep class com.google.mlkit.** { *; }',
+            '-keep class com.google.android.gms.internal.mlkit_vision_** { *; }',
+            '-dontwarn com.google.mlkit.**',
+            '-keep class com.google.android.gms.vision.** { *; }',
+            '# Keep expo-camera native module',
+            '-keep class expo.modules.camera.** { *; }',
+          ].join('\n'),
+        },
+      },
+    ],
   ],
   android: {
     adaptiveIcon: {

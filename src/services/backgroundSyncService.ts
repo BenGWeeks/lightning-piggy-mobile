@@ -34,6 +34,7 @@ import { getUserRelays } from './nostrRelayStorage';
 import { fireMessageNotification, fireCacheNotification } from './notificationService';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
+import { isOrderEvent } from '../utils/orderEvents';
 
 // Persisted ids we've already accounted for, so repeated wakes never
 // re-ping the same arrival. Bounded (insertion-ordered; oldest dropped
@@ -131,7 +132,10 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
   };
 }
 
-/** DM detect-and-ping pass — kind-1059 + kind-4 addressed to the viewer. */
+/**
+ * DM detect-and-ping pass — kind-1059 + kind-4 + kind-16/17 (marketplace
+ * order/receipt) addressed to the viewer.
+ */
 async function runDmDetectAndPing(
   activePubkey: string,
   readRelays: string[],
@@ -140,12 +144,12 @@ async function runDmDetectAndPing(
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_SEC;
 
   try {
-    // kind-1059 = NIP-17 gift wraps, kind-4 = legacy NIP-04 DMs, both
-    // addressed to us via a `#p` tag.
+    // kind-1059 = NIP-17 gift wraps, kind-4 = legacy NIP-04 DMs, kind-16/17 =
+    // plaintext marketplace order/receipt — all addressed to us via a `#p` tag.
     const events = await pool.querySync(
       readRelays,
       {
-        kinds: [1059, 4],
+        kinds: [1059, 4, 16, 17],
         '#p': [activePubkey],
         since,
       },
@@ -156,10 +160,17 @@ async function runDmDetectAndPing(
     // kind-4 echoes (real author === us). kind-1059 wrap authors are
     // ephemeral throwaway keys, so we can't distinguish a received wrap from
     // our own sent-copy without decrypting — we accept the rare false ping
-    // (the app reconciles exactly on open).
-    const fresh = events.filter(
-      (e) => !seen.has(e.id) && !(e.kind === 4 && e.pubkey === activePubkey),
-    );
+    // (the app reconciles exactly on open). kind-16 also carries NIP-18
+    // reposts, so we only ping for events that actually parse as a market
+    // order (and aren't our own authored event).
+    const fresh = events.filter((e) => {
+      if (seen.has(e.id)) return false;
+      if (e.kind === 4 && e.pubkey === activePubkey) return false;
+      if (e.kind === 16 || e.kind === 17) {
+        return e.pubkey !== activePubkey && isOrderEvent(e);
+      }
+      return true;
+    });
 
     // Record everything we saw so the next wake won't reconsider it.
     for (const e of events) seen.add(e.id);

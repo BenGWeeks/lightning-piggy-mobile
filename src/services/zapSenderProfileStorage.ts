@@ -102,6 +102,22 @@ export async function getMany(pubkeys: string[]): Promise<Map<string, CachedZapS
 }
 
 /**
+ * Synchronous peek into the in-memory mirror — used to SEED a consumer's
+ * initial state so a warm profile (its avatar URL) paints on the FIRST frame
+ * instead of after the async `get` resolves (the "avatars load late" symptom).
+ * Returns null until the mirror has been loaded once this session (`get` /
+ * `getMany` populate it — the common case, since the surfaces using this peek
+ * also call `get`). TTL-aware, same as `get`.
+ */
+export function peekSync(pubkey: string): CachedZapSenderProfile | null {
+  if (!pubkey || !memoryCache) return null;
+  const entry = memoryCache[pubkey];
+  if (!entry) return null;
+  if (Date.now() - entry.savedAt > TTL_MS) return null;
+  return entry.profile;
+}
+
+/**
  * Write-through after a successful relay resolution. Evicts the
  * oldest entries when the cache crosses `MAX_ENTRIES`.
  */

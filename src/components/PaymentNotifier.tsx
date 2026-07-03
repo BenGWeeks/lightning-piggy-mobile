@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { firePaymentNotification } from '../services/notificationService';
 
 /**
@@ -24,7 +24,8 @@ import { firePaymentNotification } from '../services/notificationService';
 const TX_SETTLE_GRACE_MS = 5000;
 
 export default function PaymentNotifier(): null {
-  const { wallets, lastIncomingPayment } = useWallet();
+  const { wallets } = useWallet();
+  const { lastIncomingPayment } = useWalletLive();
   // Hashes we've already fired for — guarantees once-per-payment across both
   // the immediate path and the deferred (tx-arrived / timeout) paths.
   const announced = useRef<Set<string>>(new Set());

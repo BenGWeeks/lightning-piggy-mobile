@@ -27,7 +27,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Gift, PartyPopper } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import {
   LnurlWithdrawError,
   LnurlWithdrawParams,
@@ -43,6 +43,7 @@ import { AmountSlider } from './AmountSlider';
 import PrizeWalletPicker from './PrizeWalletPicker';
 import AddWalletWizard from './AddWalletWizard';
 import { createLnurlWithdrawSheetStyles } from '../styles/LnurlWithdrawSheet.styles';
+import { useTranslation } from '../contexts/LocaleContext';
 
 // Imperative open — mirrors the BrandedAlert host pattern so the global
 // deep-link handler can pop the sheet without a screen in scope.
@@ -57,11 +58,6 @@ export function openLnurlWithdrawSheet(lnurl: string): boolean {
   return false;
 }
 
-// Fallback copy when a cooldown carries no parseable time hint (budget
-// exhausted) — the live countdown can't run, so show static text instead.
-const COOLDOWN_NO_HINT =
-  'Cooldown is still running, or the sats budget is used up. Try again later.';
-
 type Stage =
   | { kind: 'idle' }
   | { kind: 'resolving' }
@@ -74,9 +70,10 @@ type Stage =
 
 export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, btcPrice, currency, expectPayment, lastIncomingPayment } =
-    useWallet();
+  const { wallets, makeInvoiceForWallet, currency, expectPayment } = useWallet();
+  const { btcPrice, lastIncomingPayment } = useWalletLive();
 
   const sheetRef = useRef<BottomSheetModal>(null);
   // Untyped like NostrLoginSheet's scrollRef — the gorhom ScrollView ref methods
@@ -152,7 +149,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
       if (!selectedWalletId) {
         setStage({
           kind: 'error',
-          reason: 'No Lightning wallet connected — add one first, then try again.',
+          reason: t('lnurlWithdrawSheet.noLightningWallet'),
         });
         return;
       }
@@ -245,7 +242,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         if (hi < lo) {
           setStage({
             kind: 'error',
-            reason: "This voucher's amount can't be claimed in whole sats.",
+            reason: t('lnurlWithdrawSheet.cantClaimWholeSats'),
           });
           return;
         }
@@ -265,7 +262,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         const reason =
           e instanceof LnurlWithdrawError
             ? e.message
-            : `Could not resolve LNURL: ${(e as Error).message}`;
+            : t('lnurlWithdrawSheet.couldNotResolveLnurl', { message: (e as Error).message });
         setStage({ kind: 'error', reason });
       }
     })();
@@ -383,10 +380,12 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <View style={styles.iconWrap}>
                 <Gift size={56} color={colors.brandPink} strokeWidth={2} />
               </View>
-              <Text style={styles.title}>Claim funds</Text>
+              <Text style={styles.title}>{t('lnurlWithdrawSheet.claimFunds')}</Text>
               <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 4 }} />
               <Text style={styles.fineprint}>
-                {stage.kind === 'resolving' ? 'Looking up this voucher…' : 'Claiming sats…'}
+                {stage.kind === 'resolving'
+                  ? t('lnurlWithdrawSheet.lookingUpVoucher')
+                  : t('lnurlWithdrawSheet.claimingSats')}
               </Text>
             </>
           )}
@@ -396,7 +395,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <View style={styles.iconWrap}>
                 <Gift size={56} color={colors.brandPink} strokeWidth={2} />
               </View>
-              <Text style={styles.title}>Claim funds</Text>
+              <Text style={styles.title}>{t('lnurlWithdrawSheet.claimFunds')}</Text>
               {stage.params.defaultDescription ? (
                 <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
               ) : null}
@@ -415,9 +414,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
                     if (amountSats < minSats) setAmountSats(minSats);
                   }}
                   testID="lnurl-withdraw-amount-input"
-                  accessibilityLabel="Claim amount in sats"
+                  accessibilityLabel={t('lnurlWithdrawSheet.claimAmountInSats')}
                 />
-                <Text style={styles.amountUnit}>sats</Text>
+                <Text style={styles.amountUnit}>{t('lnurlWithdrawSheet.satsUnit')}</Text>
               </View>
               {fiatLabel ? <Text style={styles.amountFiat}>{fiatLabel}</Text> : null}
               <AmountSlider
@@ -427,11 +426,13 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 onChange={setAmountSats}
                 colors={colors}
                 testID="lnurl-withdraw-amount-slider"
-                accessibilityLabel="Claim amount in sats"
+                accessibilityLabel={t('lnurlWithdrawSheet.claimAmountInSats')}
               />
               <View style={styles.rangeRow}>
                 <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
-                <Text style={styles.rangeText}>{maxSats.toLocaleString()} max</Text>
+                <Text style={styles.rangeText}>
+                  {t('lnurlWithdrawSheet.maxLabel', { amount: maxSats.toLocaleString() })}
+                </Text>
               </View>
               {/* Destination-wallet chooser (reused from the geo-cache prize flow). */}
               <View style={styles.pickerWrap}>
@@ -453,12 +454,12 @@ export function LnurlWithdrawHost(): React.ReactElement {
                 // below-min until blur, and the issuer would reject it (Archie).
                 disabled={!selectedWalletId || amountSats < minSats || amountSats > maxSats}
                 onPress={() => lnurl && handleClaim(stage.params, amountSats, lnurl)}
-                accessibilityLabel={`Claim ${amountSats} sats`}
+                accessibilityLabel={t('lnurlWithdrawSheet.claimSats', { amount: amountSats })}
                 testID="lnurl-withdraw-claim-button"
               >
                 <Gift size={20} color={colors.white} strokeWidth={2.5} />
                 <Text style={styles.primaryButtonText}>
-                  Redeem {amountSats.toLocaleString()} sats
+                  {t('lnurlWithdrawSheet.redeemSats', { amount: amountSats.toLocaleString() })}
                 </Text>
               </TouchableOpacity>
             </>
@@ -469,16 +470,16 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <View style={styles.iconWrapSuccess}>
                 <PartyPopper size={56} color={colors.green} strokeWidth={2} />
               </View>
-              <Text style={styles.title}>{stage.sats.toLocaleString()} sats inbound!</Text>
-              <Text style={styles.memo}>
-                Sent to your wallet — the celebration fires when they land.
+              <Text style={styles.title}>
+                {t('lnurlWithdrawSheet.satsInbound', { amount: stage.sats.toLocaleString() })}
               </Text>
+              <Text style={styles.memo}>{t('lnurlWithdrawSheet.sentToWallet')}</Text>
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={close}
                 testID="lnurl-withdraw-done-button"
               >
-                <Text style={styles.primaryButtonText}>Done</Text>
+                <Text style={styles.primaryButtonText}>{t('lnurlWithdrawSheet.done')}</Text>
               </TouchableOpacity>
             </>
           )}
@@ -488,28 +489,25 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <View style={styles.iconWrap}>
                 <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
               </View>
-              <Text style={styles.title}>On cooldown</Text>
+              <Text style={styles.title}>{t('lnurlWithdrawSheet.onCooldown')}</Text>
               {stage.remaining !== null && stage.remaining > 0 ? (
                 <>
                   <Text style={styles.countdown} testID="lnurl-withdraw-cooldown">
                     {formatCountdown(stage.remaining)}
                   </Text>
-                  <Text style={styles.memo}>
-                    This voucher was claimed recently — it unlocks when the timer hits zero. Scan
-                    again then.
-                  </Text>
+                  <Text style={styles.memo}>{t('lnurlWithdrawSheet.voucherClaimedRecently')}</Text>
                 </>
               ) : stage.remaining === 0 ? (
-                <Text style={styles.memo}>Unlocked — scan again to claim.</Text>
+                <Text style={styles.memo}>{t('lnurlWithdrawSheet.unlocked')}</Text>
               ) : (
-                <Text style={styles.memo}>{COOLDOWN_NO_HINT}</Text>
+                <Text style={styles.memo}>{t('lnurlWithdrawSheet.cooldownNoHint')}</Text>
               )}
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={close}
                 testID="lnurl-withdraw-close-button"
               >
-                <Text style={styles.secondaryButtonText}>Close</Text>
+                <Text style={styles.secondaryButtonText}>{t('lnurlWithdrawSheet.close')}</Text>
               </TouchableOpacity>
             </>
           )}
@@ -519,14 +517,14 @@ export function LnurlWithdrawHost(): React.ReactElement {
               <View style={styles.iconWrap}>
                 <Gift size={56} color={colors.textSupplementary} strokeWidth={1.5} />
               </View>
-              <Text style={styles.title}>Couldn&rsquo;t claim</Text>
+              <Text style={styles.title}>{t('lnurlWithdrawSheet.couldntClaim')}</Text>
               <Text style={styles.memo}>{stage.reason}</Text>
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={close}
                 testID="lnurl-withdraw-close-button"
               >
-                <Text style={styles.secondaryButtonText}>Close</Text>
+                <Text style={styles.secondaryButtonText}>{t('lnurlWithdrawSheet.close')}</Text>
               </TouchableOpacity>
             </>
           )}

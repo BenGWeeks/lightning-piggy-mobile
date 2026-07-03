@@ -20,6 +20,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import AlphabetBar from './AlphabetBar';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -74,13 +75,15 @@ const FriendPickerSheet: React.FC<Props> = ({
   visible,
   onClose,
   onSelect,
-  title = 'Send to friend',
+  title,
   subtitle,
   onNewGroup,
   excludePubkeys,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const resolvedTitle = title ?? t('friendPickerSheet.sendToFriend');
   const sheetRef = useRef<BottomSheetModal>(null);
   // BottomSheetFlatList's ref exposes the wrapped FlatList's scrollToIndex
   // (and other imperative helpers). Typing it precisely runs into @gorhom's
@@ -244,7 +247,7 @@ const FriendPickerSheet: React.FC<Props> = ({
         style={styles.row}
         onPress={() => onSelect(item)}
         activeOpacity={0.6}
-        accessibilityLabel={`Send to ${item.name}`}
+        accessibilityLabel={t('friendPickerSheet.sendToName', { name: item.name })}
         testID={`friend-picker-${item.pubkey.slice(0, 8)}`}
       >
         <View style={styles.avatar}>
@@ -282,7 +285,7 @@ const FriendPickerSheet: React.FC<Props> = ({
     // `styles` and `colors` are theme-derived; without them the callback
     // closes over a stale theme after a light/dark switch and rows render
     // with the previous palette until the list remounts.
-    [onSelect, styles, colors],
+    [onSelect, styles, colors, t],
   );
 
   return (
@@ -317,13 +320,13 @@ const FriendPickerSheet: React.FC<Props> = ({
         <View style={styles.header}>
           <View style={styles.titleRow}>
             <View style={styles.titleText}>
-              <Text style={styles.title}>{title}</Text>
+              <Text style={styles.title}>{resolvedTitle}</Text>
               {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
             </View>
           </View>
           <BottomSheetTextInput
             style={styles.searchInput}
-            placeholder="Search friends"
+            placeholder={t('friendPickerSheet.searchFriends')}
             placeholderTextColor={colors.textSupplementary}
             value={search}
             onChangeText={setSearch}
@@ -357,14 +360,14 @@ const FriendPickerSheet: React.FC<Props> = ({
                   <TouchableOpacity
                     style={styles.row}
                     onPress={onNewGroup}
-                    accessibilityLabel="Create a new group"
+                    accessibilityLabel={t('friendPickerSheet.createNewGroup')}
                     testID="friend-picker-new-group"
                   >
                     <View style={styles.newGroupIcon}>
                       <UsersRound size={28} color={colors.brandPink} />
                     </View>
                     <View style={styles.info}>
-                      <Text style={styles.newGroupName}>New group</Text>
+                      <Text style={styles.newGroupName}>{t('friendPickerSheet.newGroup')}</Text>
                     </View>
                   </TouchableOpacity>
                 ) : null
@@ -394,10 +397,10 @@ const FriendPickerSheet: React.FC<Props> = ({
                 <View style={styles.empty}>
                   <Text style={styles.emptyText}>
                     {contacts.length === 0
-                      ? 'You don’t follow anyone on Nostr yet.'
+                      ? t('friendPickerSheet.noFollowsYet')
                       : search
-                        ? 'No friends match your search.'
-                        : 'No contacts with resolved profiles to send to.'}
+                        ? t('friendPickerSheet.noSearchMatch')
+                        : t('friendPickerSheet.noResolvedProfiles')}
                   </Text>
                 </View>
               }

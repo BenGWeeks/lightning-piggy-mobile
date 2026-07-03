@@ -21,6 +21,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import Svg, { Path } from 'react-native-svg';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -31,6 +32,7 @@ interface Props {
 
 const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
@@ -105,7 +107,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     if (success) {
       onClose();
     } else {
-      setScanError('Invalid npub or public key');
+      setScanError(t('addFriendSheet.invalidNpub'));
     }
   };
 
@@ -113,7 +115,10 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) {
-        Alert.alert('Permission needed', 'Camera permission is required to scan QR codes.');
+        Alert.alert(
+          t('addFriendSheet.permissionNeededTitle'),
+          t('addFriendSheet.permissionNeededMessage'),
+        );
         return;
       }
     }
@@ -138,7 +143,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Add Nostr Friend</Text>
+        <Text style={styles.title}>{t('addFriendSheet.title')}</Text>
 
         {/* Mode toggle */}
         <View style={styles.toggleRow}>
@@ -147,7 +152,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
             onPress={() => setMode('paste')}
           >
             <Text style={[styles.toggleText, mode === 'paste' && styles.toggleTextActive]}>
-              Paste npub
+              {t('addFriendSheet.pasteTab')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -155,7 +160,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
             onPress={handleScanMode}
           >
             <Text style={[styles.toggleText, mode === 'scan' && styles.toggleTextActive]}>
-              Scan QR
+              {t('addFriendSheet.scanTab')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -171,7 +176,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
                 onChangeText={setInputValue}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="npub input"
+                accessibilityLabel={t('addFriendSheet.npubInputA11y')}
                 testID="npub-input"
               />
               <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
@@ -197,13 +202,13 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
               ]}
               onPress={handleAdd}
               disabled={!inputValue.trim() || loading}
-              accessibilityLabel="Add Friend"
+              accessibilityLabel={t('addFriendSheet.addFriend')}
               testID="add-friend-submit"
             >
               {loading ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.addButtonText}>Add Friend</Text>
+                <Text style={styles.addButtonText}>{t('addFriendSheet.addFriend')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -212,7 +217,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
             {loading ? (
               <View style={styles.scanLoading}>
                 <ActivityIndicator size="large" color={colors.brandPink} />
-                <Text style={styles.scanLoadingText}>Adding friend...</Text>
+                <Text style={styles.scanLoadingText}>{t('addFriendSheet.addingFriend')}</Text>
               </View>
             ) : scanError ? (
               <View style={styles.scanLoading}>
@@ -224,7 +229,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
                     setScanError(null);
                   }}
                 >
-                  <Text style={styles.scanAgainText}>Scan Again</Text>
+                  <Text style={styles.scanAgainText}>{t('addFriendSheet.scanAgain')}</Text>
                 </TouchableOpacity>
               </View>
             ) : (

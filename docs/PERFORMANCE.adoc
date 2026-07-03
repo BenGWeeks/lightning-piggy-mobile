@@ -1,8 +1,8 @@
 = Performance measurement
 
 This guide covers how to measure Lightning Piggy's runtime perf, what the
-output means, and how to feed it to Stev.ie (the project's perf agent —
-`.claude/agents/stevie.md`).
+output means, and how to feed it to Stevie (the perf agent — *Stevie the
+Speedster* from the T-Minus-15 plugin; see "Stevie's project notes" below).
 
 Scope: **dev-time only.** Lightning Piggy targets privacy-centric users
 (GrapheneOS / degoogled Android) so we never ship commercial telemetry —
@@ -304,10 +304,9 @@ the freeze is real or a Maestro artefact.
 
 == Methodology
 
-Stev.ie owns the deeper methodology — see `.claude/agents/stevie.md`
-for the 12-category audit (JS-thread blocking, per-event setState,
-context re-render cascades, subscription lifecycle, etc.). The short
-version:
+Stevie owns the deeper methodology — the T-Minus-15 plugin agent carries
+the 12-category audit (JS-thread blocking, per-event setState, context
+re-render cascades, subscription lifecycle, etc.). The short version:
 
 1. **Measure** before changing anything. Wall-clock + gfxinfo + a
    Perfetto trace = three independent angles on the same problem.
@@ -395,3 +394,25 @@ real behaviour.
   let us capture JS-thread flame graphs without Perfetto.
 - CI-driven regression gating is *out of scope* for now per #611's revised
   dev-only scope.
+
+== Stevie's project notes (plugin agent)
+
+The performance-audit agent *Stevie the Speedster* now ships generically in
+the T-Minus-15 plugin (`T-Minus-15/claude-plugins`); the project-local
+`.claude/agents/stevie.md` was retired in its favour. The generic agent
+reads this document before measuring — these are the Lightning Piggy
+specifics it needs:
+
+- *Canonical per-event-burst fix*: `src/utils/useCoalescedMap.ts` — any
+  relay subscription callback calling `setState` per event should adopt it
+  (the formalisation of the old DM-inbox `pendingInboxEntries` pattern).
+- *Measurement stack*: `scripts/perf-*.sh` + `scripts/lib/perf-stats.sh`
+  (min/p50/p95/p99/max/mean, gfxinfo jank, Perfetto start/stop) + Maestro
+  flows. The gfxinfo `janky` % and p99 frame time are the headline metrics.
+- *Perf log markers in preview builds*: `EXPO_PUBLIC_KEEP_PERF_LOGS=1` is
+  set on the `preview` profile in `eas.json` — markers gated on it fire in
+  preview but not production. Don't gate on `__DEV__` alone.
+- *Telemetry constraints*: privacy-centric GrapheneOS-first audience — no
+  Play-Services-dependent collection, no commercial telemetry (Sentry /
+  Firebase Performance / Datadog). Everything measured runs on-device or
+  on our own infrastructure.

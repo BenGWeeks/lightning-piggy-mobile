@@ -126,6 +126,25 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
   return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
 }
 
+/**
+ * Derive the NIP-17 wire kind for a group message from its stored text.
+ *
+ * Group sends split two ways (see `useGroupComposerActions`): a text/chat
+ * message goes out as kind-14, while a voice/image file goes out as an
+ * encrypted kind-15 (`createGroupFileRumor`) whose payload is folded into the
+ * message text as an `#lpe=1` encrypted-file URL. So a stored group message
+ * whose text parses as an *encrypted* file is kind-15; everything else
+ * (including plain audio/image URLs pasted as chat text) is kind-14.
+ *
+ * The info sheet uses this instead of a hard-coded 14 so it reports the real
+ * kind for kind-15 file bubbles.
+ */
+export function deriveGroupWireKind(text: string): 14 | 15 {
+  const isEncryptedFile =
+    parseVoiceNote(text)?.encrypted === true || parseImageMessage(text)?.encrypted === true;
+  return isEncryptedFile ? 15 : 14;
+}
+
 export interface ParsedImageMessage {
   /** Fetch URL with the fragment stripped. */
   url: string;
@@ -256,7 +275,13 @@ export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
   | { kind: 'location'; location: SharedLocation }
-  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker };
+  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker }
+  // Generic, future-proof fallback for an inner Nostr event whose kind the app
+  // doesn't render (now or in future). `rawKind` is the numeric Nostr kind so
+  // the bubble can say "Unsupported message type (kind N)" instead of leaving a
+  // blank bubble. Produced by the normalizer (buildConversationItems) when a
+  // stored message's wireKind isn't one we know how to display.
+  | { kind: 'unsupported'; rawKind: number };
 
 export function classifyMessageContent(text: string): BubbleContent {
   const gifUrl = extractGifUrl(text);

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useDeferredValue, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import TabHeader from '../components/TabHeader';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses, type Course } from '../data/learnContent';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../services/learnProgressService';
 import { Check, ChevronLeft, Search, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createLearnScreenStyles } from '../styles/LearnScreen.styles';
 
 import { ExploreNavigation } from '../navigation/types';
@@ -38,6 +40,7 @@ const courseMatches = (course: Course, lowerQuery: string): boolean => {
 
 const LessonsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for the Lessons sub-screen reached via tab-explore → ExploreHome → Lessons.
   const lessonsRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -86,17 +89,12 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.headerBackground}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <TabHeader
-          title="Lessons"
+          title={t('lessonsScreen.title')}
           icon={<ChevronLeft size={20} color={colors.brandPink} strokeWidth={2.5} />}
           onIconPress={() => navigation.goBack()}
-          iconAccessibilityLabel="Back to Explore"
+          iconAccessibilityLabel={t('lessonsScreen.backToExplore')}
         />
         <View style={styles.headerExtras}>
           {searchExpanded ? (
@@ -105,19 +103,19 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search courses..."
+                placeholder={t('lessonsScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search courses"
+                accessibilityLabel={t('lessonsScreen.searchCourses')}
                 testID="learn-search-input"
               />
               <TouchableOpacity
                 onPress={closeSearch}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('lessonsScreen.closeSearch')}
                 testID="learn-close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -131,7 +129,7 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
                   setSearchExpanded(true);
                   setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                accessibilityLabel="Search courses"
+                accessibilityLabel={t('lessonsScreen.searchCourses')}
                 testID="learn-search-toggle"
               >
                 <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
@@ -146,16 +144,16 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
         {filteredCourses.length === 0 ? (
           <View style={styles.emptyState} testID="learn-empty-state">
             <Text style={styles.emptyTitle}>
-              No courses match &ldquo;{deferredSearch.trim()}&rdquo;
+              {t('lessonsScreen.noCoursesMatch', { query: deferredSearch.trim() })}
             </Text>
-            <Text style={styles.emptySubtitle}>Try a different search term.</Text>
+            <Text style={styles.emptySubtitle}>{t('lessonsScreen.tryDifferentTerm')}</Text>
             <TouchableOpacity
               style={styles.clearSearchButton}
               onPress={closeSearch}
-              accessibilityLabel="Clear search"
+              accessibilityLabel={t('lessonsScreen.clearSearch')}
               testID="learn-clear-search"
             >
-              <Text style={styles.clearSearchButtonText}>Clear search</Text>
+              <Text style={styles.clearSearchButtonText}>{t('lessonsScreen.clearSearch')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -183,21 +181,23 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.courseTitle} numberOfLines={2}>
                   {course.title}
                 </Text>
-                <Text style={styles.courseMeta}>{total} missions</Text>
+                <Text style={styles.courseMeta}>
+                  {t('lessonsScreen.missionsCount', { count: total })}
+                </Text>
                 <View style={styles.chipSpacer} />
                 {allDone ? (
                   <View style={styles.chipEarned}>
-                    <Text style={styles.chipEarnedText}>Completed</Text>
+                    <Text style={styles.chipEarnedText}>{t('lessonsScreen.completed')}</Text>
                   </View>
                 ) : completed > 0 ? (
                   <View style={styles.chipProgress}>
                     <Text style={styles.chipProgressText}>
-                      {completed}/{total} done
+                      {t('lessonsScreen.progressDone', { completed, total })}
                     </Text>
                   </View>
                 ) : (
                   <View style={styles.chipNew}>
-                    <Text style={styles.chipNewText}>Start</Text>
+                    <Text style={styles.chipNewText}>{t('lessonsScreen.start')}</Text>
                   </View>
                 )}
               </TouchableOpacity>

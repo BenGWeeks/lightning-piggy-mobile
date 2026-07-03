@@ -12,15 +12,17 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useWallet } from '../contexts/WalletContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
@@ -29,10 +31,12 @@ import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/ic
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
 import { perfLog } from '../utils/perfLog';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-home.
   const homeRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -50,10 +54,10 @@ const HomeScreen: React.FC = () => {
     refreshActiveBalance,
     fetchTransactionsForWallet,
     setActiveWallet,
-    btcPrice,
     currency,
     requestBalancePoll,
   } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
@@ -206,6 +210,13 @@ const HomeScreen: React.FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
+    // Also retry any pending Boltz swap claims — recovery otherwise only runs
+    // at app startup, so a swap parked mid-session (e.g. an ambiguous pay that
+    // resolved later) would stay unclaimed until a full restart. Fire-and-
+    // forget; the single-flight guard dedupes against a startup pass.
+    swapRecoveryService.recoverPendingSwaps().catch((e) => {
+      console.warn('[Home] pull-to-refresh swap recovery failed:', e);
+    });
     // Explicit pull-to-refresh — force a full zap-resolver pass.
     await fetchData({ force: true });
     setRefreshing(false);
@@ -268,10 +279,24 @@ const HomeScreen: React.FC = () => {
   // Transfer needs at least two wallets (a source + destination).
   const isTransferDisabled = walletsHydrated && wallets.length < 2;
 
+  // Render the (virtualized) TransactionList only on the real-wallet branch:
+  // a wallet is selected, we're not on the carousel's "Add wallet" card, and
+  // the first-load spinner has finished. The other branches stay in a
+  // ScrollView (see below) so pull-to-refresh still works on empty states.
+  const showTransactionList =
+    hasWallets &&
+    !addCardActive &&
+    activeWalletId !== null &&
+    !(loadingTransactions && transactions.length === 0);
+
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
       <View style={styles.headerBackground}>
+        {/* Pink→purple brand fade behind the wallet card, matching the
+            Messages/Friends header treatment. Sits below the faded pig
+            and the header content (both render after it). */}
+        <BrandGradientBackground />
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
@@ -279,7 +304,7 @@ const HomeScreen: React.FC = () => {
         />
 
         <TabHeader
-          title={`Hello${greetingName ? `, ${greetingName}` : ''}!`}
+          title={t('homeScreen.greeting', { name: greetingName })}
           // Keep Home's greeting at its pre-#139 lighter weight + smaller
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
@@ -304,25 +329,25 @@ const HomeScreen: React.FC = () => {
             style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
             onPress={() => setReceiveOpen(true)}
             disabled={isReceiveDisabled}
-            accessibilityLabel="Receive"
+            accessibilityLabel={t('homeScreen.receive')}
             testID="btn-receive"
           >
             <View style={styles.actionCircle}>
               <ArrowDownIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Receive</Text>
+            <Text style={styles.actionText}>{t('homeScreen.receive')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
             onPress={() => setTransferOpen(true)}
             disabled={isTransferDisabled}
-            accessibilityLabel="Transfer"
+            accessibilityLabel={t('homeScreen.transfer')}
             testID="btn-transfer"
           >
             <View style={styles.actionCircle}>
               <ArrowLeftRightIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Transfer</Text>
+            <Text style={styles.actionText}>{t('homeScreen.transfer')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
@@ -331,46 +356,55 @@ const HomeScreen: React.FC = () => {
               setSendOpen(true);
             }}
             disabled={isSendDisabled}
-            accessibilityLabel="Send"
+            accessibilityLabel={t('homeScreen.send')}
             testID="btn-send"
           >
             <View style={styles.actionCircle}>
               <ArrowUpIcon size={24} strokeWidth={3} />
             </View>
-            <Text style={styles.actionText}>Send</Text>
+            <Text style={styles.actionText}>{t('homeScreen.send')}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Transaction list */}
+      {/* Transaction list. The list branch renders TransactionList's FlatList
+          directly as the scroller (passing the RefreshControl through), so the
+          list virtualizes properly. The non-list branches (welcome / add-wallet
+          / first-load spinner) stay in a ScrollView so pull-to-refresh keeps
+          working on them too. */}
       <View style={styles.transactionsWrapper}>
-        <ScrollView
-          style={styles.transactionsContainer}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-        >
-          {!hasWallets ? (
-            <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
-          ) : addCardActive || activeWalletId === null ? (
-            // On the "Add wallet" card (or no active wallet) show an add-wallet
-            // prompt rather than the previous wallet's transactions (#666).
-            <View style={styles.emptyState}>
-              <TouchableOpacity
-                onPress={() => setWizardOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Add a wallet"
-                testID="home-add-wallet-empty"
-              >
-                <Text style={styles.addWalletText}>+ Add a Wallet</Text>
-              </TouchableOpacity>
-            </View>
-          ) : loadingTransactions && transactions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color="#EC008C" />
-            </View>
-          ) : (
-            <TransactionList transactions={transactions} />
-          )}
-        </ScrollView>
+        {showTransactionList ? (
+          <TransactionList
+            transactions={transactions}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          />
+        ) : (
+          <ScrollView
+            style={styles.transactionsContainer}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          >
+            {!hasWallets ? (
+              <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
+            ) : addCardActive || activeWalletId === null ? (
+              // On the "Add wallet" card (or no active wallet) show an add-wallet
+              // prompt rather than the previous wallet's transactions (#666).
+              <View style={styles.emptyState}>
+                <TouchableOpacity
+                  onPress={() => setWizardOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('homeScreen.addWallet')}
+                  testID="home-add-wallet-empty"
+                >
+                  <Text style={styles.addWalletText}>{t('homeScreen.addWalletText')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <ActivityIndicator size="small" color="#EC008C" />
+              </View>
+            )}
+          </ScrollView>
+        )}
       </View>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />

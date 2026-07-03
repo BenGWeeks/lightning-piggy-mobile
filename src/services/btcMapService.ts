@@ -183,9 +183,11 @@ export interface BtcMapPlace {
    */
   osm_url?: string | null;
   /**
-   * BTC Map's curated category list (e.g. `["cafe", "restaurant"]`).
-   * Comes back empty for many listings — BTC Map only populates this
-   * when their taxonomy team has classified the merchant.
+   * Curated category list (e.g. `["cafe", "restaurant"]`). The v4
+   * `/v4/places/search` endpoint no longer returns an explicit
+   * `categories` field, so `reshape` falls back to the single `icon`
+   * token (the v4 category/type indicator) — `["restaurant"]` etc.
+   * Null only when the place has neither categories nor an icon.
    */
   categories?: string[] | null;
   /**
@@ -354,9 +356,26 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
       : osmIdMatch
         ? `https://www.openstreetmap.org/${osmIdMatch[1].toLowerCase()}/${osmIdMatch[2]}`
         : null;
-  const categories = Array.isArray(raw['categories'])
-    ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
-    : null;
+  // BTC Map's v4 `/v4/places/search` endpoint stopped returning `categories`
+  // (the field is absent on every record now) — verified live against the API.
+  // It does return a single `icon` token (`restaurant`, `cafe`, `diamond`…) as
+  // the v4 category/type indicator. Fall back to deriving categories from that
+  // icon when `categories` is missing/empty, so the Explore/Map/Places filter
+  // populates again (#860). Keep using `categories` verbatim if the API ever
+  // restores it — fall back, don't replace.
+  // Normalize each token the same way other string fields are (trim + drop
+  // empty/whitespace-only) so blank tokens can't leak into `place.categories`
+  // and become blank filter chips / unstable `key={cat}` + testIDs downstream.
+  const normalizeTokens = (tokens: string[]): string[] =>
+    tokens.map((t) => t.trim()).filter((t) => t.length > 0);
+  const explicitCategories = Array.isArray(raw['categories'])
+    ? normalizeTokens(
+        (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string'),
+      )
+    : [];
+  const iconCategories = icon ? normalizeTokens([icon]) : [];
+  const derivedCategories = explicitCategories.length > 0 ? explicitCategories : iconCategories;
+  const categories = derivedCategories.length > 0 ? derivedCategories : null;
   // Curated top-level fields > OSM-prefixed tag fallbacks. BTC Map
   // ships these only when their team or the OSM tag has them populated;
   // an empty string is normalised to null so the UI can branch cleanly.
@@ -552,17 +571,46 @@ export const peekCachedPlacesSync = (): BtcMapPlace[] => lastResult;
 // persist) or when the cached blob predates the v1 envelope shape.
 export const peekCachedAnchorSync = (): { lat: number; lon: number } | null => lastAnchor;
 
+// Unix-ms timestamp of the last successful fetch, read off the in-memory
+// mirror. Lets a cache-first screen decide whether its synchronously-
+// seeded snapshot is stale (and so worth a visible background refresh)
+// without an async round-trip. Null until a fetch has succeeded this
+// session or the persisted envelope (which may predate the field) has
+// hydrated.
+export const peekCachedFetchedAtSync = (): number | null => lastFetchedAtMs;
+
 /**
- * Fetch merchants for a viewport. Converts the caller's `bbox` to a
- * centre + radius and hits BTC Map's `/v4/places/search` endpoint —
- * the one their docs recommend calling "every time user moves the
- * map". ~16 KB / ~0.2 s for a 50 km radius.
+ * Outcome of a viewport fetch that distinguishes a *genuine* result from
+ * a fallback-to-cache. `fetchPlacesInBbox` collapses errors into the last
+ * cached array, so its return value alone can't tell "0 places in this
+ * area" (authoritative empty) from "the network blipped" (stale cache).
+ * Cache-first callers (the Places screen's reconciliation) need that
+ * distinction so a real empty area can legitimately clear the list while
+ * a transient failure keeps whatever was on screen.
+ *
+ *   - `ok: true`  — the search endpoint responded; `places` is its
+ *     authoritative result (which may legitimately be `[]`).
+ *   - `ok: false` — the fetch failed/aborted; `places` is the stale
+ *     fallback (in-memory mirror or hydrated disk cache, possibly `[]`).
+ */
+export interface FetchPlacesResult {
+  ok: boolean;
+  places: BtcMapPlace[];
+}
+
+/**
+ * Fetch merchants for a viewport, returning a {@link FetchPlacesResult}
+ * that distinguishes an authoritative response (`ok: true`, even when
+ * empty) from an offline/error fallback to cache (`ok: false`). Converts
+ * the caller's `bbox` to a centre + radius and hits BTC Map's
+ * `/v4/places/search` endpoint — the one their docs recommend calling
+ * "every time user moves the map". ~16 KB / ~0.2 s for a 50 km radius.
  *
  * The result is cached in memory (`lastResult`) and persisted to disk.
  * On a network failure we fall back to whatever's cached so the rail
  * isn't empty offline. Callers should still debounce map-pan / zoom.
  */
-export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
+export const fetchPlacesInBboxResult = async (bbox: Bbox): Promise<FetchPlacesResult> => {
   evictLegacyCache();
   const { lat, lon, radiusKm } = bboxToSearch(bbox);
   const controller = new AbortController();
@@ -587,16 +635,31 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
     lastAnchor = { lat, lon };
     lastFetchedAtMs = Date.now();
     persistLastResult(places, lastAnchor, lastFetchedAtMs);
-    return places;
+    // Authoritative — an empty `places` here means "no merchants in this
+    // viewport", not "the request failed".
+    return { ok: true, places };
   } catch {
     // Offline / timeout / server error — fall back to the last cached
-    // result (in memory, or hydrated from disk on a cold start).
+    // result (in memory, or hydrated from disk on a cold start). Flagged
+    // `ok: false` so cache-first callers keep the shown list rather than
+    // treating the fallback as an authoritative empty.
     if (lastResult.length === 0) await hydrateLastResult();
-    return lastResult;
+    return { ok: false, places: lastResult };
   } finally {
     clearTimeout(timer);
   }
 };
+
+/**
+ * Fetch merchants for a viewport, returning just the place array. Thin
+ * wrapper over {@link fetchPlacesInBboxResult} that drops the `ok` flag —
+ * on a network failure the array is the last cached result, so callers
+ * that don't need to distinguish empty-vs-error (Map, Explore rail,
+ * geofence) stay unchanged. Cache-first callers should prefer
+ * {@link fetchPlacesInBboxResult} so a genuine empty area can clear.
+ */
+export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> =>
+  (await fetchPlacesInBboxResult(bbox)).places;
 
 // Single-radius shot at `/v4/places/search`. Returns null on a network
 // failure so the caller can decide whether to widen, retry, or fall

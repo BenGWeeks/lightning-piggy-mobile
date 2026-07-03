@@ -8,6 +8,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Sparkles } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 
 const WelcomeWalletPrompt: React.FC<Props> = ({ onGetStarted }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
@@ -23,18 +25,16 @@ const WelcomeWalletPrompt: React.FC<Props> = ({ onGetStarted }) => {
       <View style={styles.iconBubble}>
         <Sparkles size={32} color={colors.brandPink} strokeWidth={2.5} />
       </View>
-      <Text style={styles.title}>Welcome to Lightning Piggy</Text>
-      <Text style={styles.subtitle}>
-        Add a Lightning wallet to start sending and receiving sats.
-      </Text>
+      <Text style={styles.title}>{t('welcomeWalletPrompt.title')}</Text>
+      <Text style={styles.subtitle}>{t('welcomeWalletPrompt.subtitle')}</Text>
 
       <TouchableOpacity
         style={styles.primaryButton}
         onPress={onGetStarted}
         testID="welcome-get-started"
-        accessibilityLabel="Get started — add a wallet"
+        accessibilityLabel={t('welcomeWalletPrompt.getStartedA11y')}
       >
-        <Text style={styles.primaryButtonText}>Get Started</Text>
+        <Text style={styles.primaryButtonText}>{t('welcomeWalletPrompt.getStarted')}</Text>
       </TouchableOpacity>
     </View>
   );
