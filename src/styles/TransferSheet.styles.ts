@@ -180,100 +180,14 @@ export const createTransferSheetStyles = (colors: Palette) =>
       textAlign: 'center',
       fontWeight: '600',
     },
-    // --- Progress / Buttons ---
-    progressView: {
-      alignItems: 'center',
-      gap: 16,
-      paddingVertical: 24,
-    },
-    progressSummary: {
-      fontSize: 28,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    progressRoute: {
-      fontSize: 16,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    progressContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 10,
-      paddingVertical: 16,
-      paddingHorizontal: 20,
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      marginTop: 8,
-    },
-    progressText: {
-      fontSize: 14,
-      color: colors.textBody,
-      fontWeight: '500',
-      textAlign: 'center',
-      flex: 1,
-    },
-    // --- Step list (issue #62) ---
-    stepList: {
-      alignSelf: 'stretch',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 20,
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      marginTop: 8,
-    },
-    stepRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    stepIcon: {
-      width: 24,
-      height: 24,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stepLabel: {
-      fontSize: 15,
-      color: colors.textBody,
-      fontWeight: '600',
-      flex: 1,
-    },
-    stepLabelPending: {
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    stepLabelFailed: {
-      color: colors.red,
-    },
+    // --- Buttons ---
+    // Progress-view styles (step list, close/retry buttons) live in
+    // TransferProgress.styles.ts alongside the TransferProgress component.
     buttonRow: {
       flexDirection: 'row',
       gap: 20,
       marginTop: 8,
       justifyContent: 'center',
-    },
-    closeButton: {
-      backgroundColor: colors.brandPink,
-      height: 48,
-      paddingHorizontal: 40,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 8,
-    },
-    closeButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    closeButtonDisabled: {
-      backgroundColor: colors.textSupplementary,
-      opacity: 0.5,
-    },
-    closeButtonTextDisabled: {
-      color: colors.white,
     },
     cancelButton: {
       backgroundColor: colors.surface,

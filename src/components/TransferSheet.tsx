@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   BackHandler,
   Image,
   Keyboard,
@@ -38,14 +37,14 @@ import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
 import * as nip19 from 'nostr-tools/nip19';
 import AmountEntryScreen from './AmountEntryScreen';
-import { Check, Circle, X as XIcon } from 'lucide-react-native';
+import TransferProgress from './TransferProgress';
 import {
-  TransferProgress,
   advanceTransfer,
   completeTransfer,
   failTransfer,
   idleProgress,
   startTransfer,
+  type TransferProgress as TransferProgressState,
 } from '../utils/transferPhase';
 
 interface Props {
@@ -105,7 +104,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // showing which step is active / done / failed. The legacy
   // `progressMsg` is preserved as a sublabel under the active row so
   // the rich Boltz "swap underway" copy still reaches the user.
-  const [progress, setProgress] = useState<TransferProgress>(() => idleProgress());
+  const [progress, setProgress] = useState<TransferProgressState>(() => idleProgress());
   // true once the foreground work is done and the background task has the
   // swap — the sheet becomes a "done, safe to close" confirmation state.
   const [handedOff, setHandedOff] = useState(false);
@@ -946,6 +945,49 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     [onClose],
   );
 
+  // Retry handler for the "Retry now" button in the progress view. Kept
+  // in the sheet (not TransferProgress) because it orchestrates
+  // component state + refs: a synchronous re-entrancy guard so a fast
+  // double-tap can't fire two concurrent recoverPendingSwaps() calls
+  // before React applies `disabled`, and the session token so a late
+  // callback can't paint state onto a subsequent transfer.
+  const handleRetryRecovery = useCallback(async () => {
+    if (retryInFlightRef.current) return;
+    retryInFlightRef.current = true;
+    const retrySession = sessionRef.current;
+    setRetryingRecovery(true);
+    try {
+      await swapRecoveryService.recoverPendingSwaps();
+      Toast.show({
+        type: 'info',
+        text1: 'Retry kicked off',
+        text2: 'Any claimable swaps are being re-broadcast.',
+        position: 'top',
+        visibilityTime: 6000,
+      });
+      if (sessionRef.current === retrySession) {
+        // Keep `backgroundError` set so the spinner stays suppressed;
+        // flip `recoveryAcked` to swap the message + hide the Retry button.
+        setRecoveryAcked(true);
+        setProgressMsg('Recovery retried — check transaction history for the final status.');
+      }
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      Toast.show({
+        type: 'error',
+        text1: 'Retry failed',
+        text2: m,
+        position: 'top',
+        visibilityTime: 8000,
+      });
+    } finally {
+      retryInFlightRef.current = false;
+      if (sessionRef.current === retrySession) {
+        setRetryingRecovery(false);
+      }
+    }
+  }, []);
+
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
@@ -1055,142 +1097,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             {/* Source wallet selector */}
             {sending ? (
               /* Progress view — replaces form while transfer is executing */
-              <View style={styles.progressView}>
-                <Text style={styles.progressSummary}>{currentSats.toLocaleString()} sats</Text>
-                <Text style={styles.progressRoute}>
-                  {source?.alias} → {dest?.alias}
-                </Text>
-                {feeEstimate && (
-                  <Text style={styles.feeText}>
-                    Fee: {feeEstimate.split('\u00B7')[0].trim()}
-                    {feeEstimate.includes('\u00B7')
-                      ? ` · ${feeEstimate.split('\u00B7')[1].trim()}`
-                      : ''}
-                  </Text>
-                )}
-                {/* Step-by-step status (issue #62). Walks the steps for the
-                    current transferType and renders ✓ / spinner / ○ per row.
-                    The legacy `progressMsg` becomes a sublabel under the
-                    active row so the rich Boltz "swap underway / safe to
-                    close" copy still surfaces. */}
-                <View style={styles.stepList} testID="transfer-step-list">
-                  {progress.steps.map((s, idx) => {
-                    const isComplete = progress.phase === 'done' || idx < progress.activeIndex;
-                    const isFailed = progress.phase === 'failed' && idx === progress.activeIndex;
-                    const isActive =
-                      progress.phase === 'in-progress' &&
-                      idx === progress.activeIndex &&
-                      backgroundError === null;
-                    const status: 'complete' | 'failed' | 'active' | 'pending' = isComplete
-                      ? 'complete'
-                      : isFailed
-                        ? 'failed'
-                        : isActive
-                          ? 'active'
-                          : 'pending';
-                    return (
-                      <View
-                        key={s.id}
-                        style={styles.stepRow}
-                        testID={`transfer-step-${s.id}`}
-                        accessibilityLabel={`${s.label} ${status}`}
-                      >
-                        <View style={styles.stepIcon}>
-                          {status === 'complete' ? (
-                            <Check size={20} color={colors.brandPink} />
-                          ) : status === 'failed' ? (
-                            <XIcon size={20} color={colors.red} />
-                          ) : status === 'active' ? (
-                            <ActivityIndicator size="small" color={colors.brandPink} />
-                          ) : (
-                            <Circle size={20} color={colors.textSupplementary} />
-                          )}
-                        </View>
-                        <Text
-                          style={[
-                            styles.stepLabel,
-                            status === 'pending' && styles.stepLabelPending,
-                            status === 'failed' && styles.stepLabelFailed,
-                          ]}
-                        >
-                          {s.label}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-                {progressMsg && (
-                  <Text style={styles.progressText} testID="transfer-progress-msg">
-                    {progressMsg}
-                  </Text>
-                )}
-                {backgroundError !== null && !recoveryAcked && (
-                  <TouchableOpacity
-                    style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
-                    onPress={async () => {
-                      // Synchronous re-entrancy guard. A fast double-tap
-                      // can fire two onPress callbacks before React
-                      // applies setRetryingRecovery(true) + the disabled
-                      // prop — the ref check + set is atomic in JS, so
-                      // the second tap returns immediately.
-                      if (retryInFlightRef.current) return;
-                      retryInFlightRef.current = true;
-                      const retrySession = sessionRef.current;
-                      setRetryingRecovery(true);
-                      try {
-                        await swapRecoveryService.recoverPendingSwaps();
-                        Toast.show({
-                          type: 'info',
-                          text1: 'Retry kicked off',
-                          text2: 'Any claimable swaps are being re-broadcast.',
-                          position: 'top',
-                          visibilityTime: 6000,
-                        });
-                        if (sessionRef.current === retrySession) {
-                          // Keep `backgroundError` set so the spinner
-                          // stays suppressed; flip `recoveryAcked` to
-                          // swap the message + hide the Retry button.
-                          setRecoveryAcked(true);
-                          setProgressMsg(
-                            'Recovery retried — check transaction history for the final status.',
-                          );
-                        }
-                      } catch (err) {
-                        const m = err instanceof Error ? err.message : String(err);
-                        Toast.show({
-                          type: 'error',
-                          text1: 'Retry failed',
-                          text2: m,
-                          position: 'top',
-                          visibilityTime: 8000,
-                        });
-                      } finally {
-                        retryInFlightRef.current = false;
-                        if (sessionRef.current === retrySession) {
-                          setRetryingRecovery(false);
-                        }
-                      }
-                    }}
-                    disabled={retryingRecovery}
-                    accessibilityLabel="Retry swap recovery"
-                    testID="transfer-retry-now"
-                  >
-                    {retryingRecovery ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.closeButtonText}>Retry now</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={onClose}
-                  accessibilityLabel="Close"
-                  testID="transfer-progress-close"
-                >
-                  <Text style={styles.closeButtonText}>Close</Text>
-                </TouchableOpacity>
-              </View>
+              <TransferProgress
+                amountSats={currentSats}
+                sourceAlias={source?.alias}
+                destAlias={dest?.alias}
+                feeEstimate={feeEstimate}
+                progress={progress}
+                progressMsg={progressMsg}
+                backgroundError={backgroundError}
+                recoveryAcked={recoveryAcked}
+                retryingRecovery={retryingRecovery}
+                onRetry={handleRetryRecovery}
+                onClose={onClose}
+              />
             ) : (
               <>
                 <Text style={styles.sectionLabel}>From</Text>
