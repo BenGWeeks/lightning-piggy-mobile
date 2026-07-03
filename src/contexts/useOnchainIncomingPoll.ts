@@ -53,23 +53,41 @@ export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInStat
   useEffect(() => {
     if (onchainWalletCount === 0) return;
 
-    const refreshAll = () => {
-      // Re-read through walletsRef so additions/removals between the
-      // effect run and this tick are honoured without re-arming the
-      // entire poll.
-      const onchain = walletsRef.current.filter((w) => w.walletType === 'onchain');
-      for (const w of onchain) {
-        onchainService
-          .getBalance(w.id)
-          .then((b) => {
-            if (b !== null) updateWalletInState(w.id, { balance: b });
-          })
-          .catch(() => {
-            // Transient Electrum / Esplora failures are routine; the
-            // next tick will retry. Log only in dev so we don't spam
-            // production with noise from a flaky third-party service.
-            if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
-          });
+    // Guards against overlapping sweeps: a foreground-resume refresh
+    // and the 2-minute interval (or two resumes in quick succession)
+    // could otherwise kick off concurrent BDK/Electrum syncs for the
+    // same wallet. If a sweep is still in flight, later triggers are
+    // dropped — the next tick catches up.
+    let inFlight = false;
+
+    const refreshAll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        // Re-read through walletsRef so additions/removals between the
+        // effect run and this tick are honoured without re-arming the
+        // entire poll.
+        const onchain = walletsRef.current.filter((w) => w.walletType === 'onchain');
+        await Promise.all(
+          onchain.map((w) =>
+            onchainService
+              .getBalance(w.id)
+              .then((b) => {
+                // Only commit when the balance actually changed — an
+                // unchanged write still costs an AsyncStorage round-trip
+                // (and needlessly re-runs the receive detector).
+                if (b !== null && b !== w.balance) updateWalletInState(w.id, { balance: b });
+              })
+              .catch(() => {
+                // Transient Electrum / Esplora failures are routine; the
+                // next tick will retry. Log only in dev so we don't spam
+                // production with noise from a flaky third-party service.
+                if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
+              }),
+          ),
+        );
+      } finally {
+        inFlight = false;
       }
     };
 
