@@ -11,33 +11,13 @@ import { useThemeColors } from '../contexts/ThemeContext';
 // so it avoids the 754 KB bitmap decode implicated in the cold-tab GPU stall
 // (issue #245) and stays crisp at every density.
 
-export type PatternVariant =
-  | 'messages-grid'
-  | 'messages-weave'
-  | 'messages-marquee'
-  | 'friends-grid'
-  | 'friends-rotated'
-  | 'friends-scatter'
-  | 'explore-compass';
-
-// Dev-only: set to a variant id to force it on both tabs while capturing
-// option screenshots, then set back to null. Only honoured under __DEV__, so a
-// stray value can't leak a forced variant into a production build.
-const CAPTURE_VARIANT: PatternVariant | null = null;
+export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
 
 // How much of the gradient sits over the monogram. Lower = pattern reads
 // stronger. Tuned on-device.
 const FADE_OPACITY = 0.82;
 
-type MotifName =
-  | 'messageCircle'
-  | 'messageSquare'
-  | 'zap'
-  | 'users'
-  | 'heart'
-  | 'userRound'
-  | 'compass'
-  | 'map';
+type MotifName = 'messageSquare' | 'heart' | 'userRound' | 'compass' | 'map';
 
 interface MotifInstance {
   name: MotifName;
@@ -61,23 +41,13 @@ const MOTIF_PATHS: Record<
   MotifName,
   { paths?: string[]; circles?: [number, number, number][]; polygon?: string }
 > = {
-  messageCircle: { paths: ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z'] },
   messageSquare: { paths: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'] },
-  zap: { polygon: '13 2 3 14 12 14 11 22 21 10 12 10 13 2' },
   heart: {
     paths: [
       'M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z',
     ],
   },
   userRound: { paths: ['M20 21a8 8 0 0 0-16 0'], circles: [[12, 8, 5]] },
-  users: {
-    paths: [
-      'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
-      'M22 21v-2a4 4 0 0 0-3-3.87',
-      'M16 3.13a4 4 0 0 1 0 7.75',
-    ],
-    circles: [[9, 7, 4]],
-  },
   // Lucide "compass" — outer ring + the two-tone needle as a hairline diamond.
   compass: {
     circles: [[12, 12, 10]],
@@ -91,14 +61,7 @@ const MOTIF_PATHS: Record<
 };
 
 const VARIANTS: Record<PatternVariant, VariantConfig> = {
-  // Messages — orderly upright grid of speech bubbles.
-  'messages-grid': {
-    tileW: 52,
-    tileH: 52,
-    opacity: 0.7,
-    motifs: [{ name: 'messageCircle', x: 13, y: 13, size: 26 }],
-  },
-  // Messages — square bubbles + sat-dot on a diagonal.
+  // Messages — square bubbles + sat-dot on a diagonal ("Diagonal Weave").
   'messages-weave': {
     tileW: 54,
     tileH: 54,
@@ -106,25 +69,7 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     opacity: 0.66,
     motifs: [{ name: 'messageSquare', x: 5, y: 5, size: 26, filledDotAt: [42, 39] }],
   },
-  // Messages — bubble + lightning bolt, skewed italic.
-  'messages-marquee': {
-    tileW: 56,
-    tileH: 76,
-    transform: 'skewX(-14)',
-    opacity: 0.7,
-    motifs: [
-      { name: 'messageCircle', x: 6, y: 6, size: 30 },
-      { name: 'zap', x: 34, y: 42, size: 18 },
-    ],
-  },
-  // Friends — orderly upright grid of people marks.
-  'friends-grid': {
-    tileW: 56,
-    tileH: 56,
-    opacity: 0.7,
-    motifs: [{ name: 'users', x: 13, y: 16, size: 30 }],
-  },
-  // Friends — figure + heart alternating on a gentle rotation.
+  // Friends — figure + heart alternating on a gentle rotation ("Rotated Monogram").
   'friends-rotated': {
     tileW: 58,
     tileH: 58,
@@ -133,17 +78,6 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     motifs: [
       { name: 'userRound', x: 5, y: 5, size: 22 },
       { name: 'heart', x: 34, y: 34, size: 17 },
-    ],
-  },
-  // Friends — two sizes of people mark, wide airy tile, counter-rotated.
-  'friends-scatter': {
-    tileW: 96,
-    tileH: 58,
-    transform: 'rotate(-8)',
-    opacity: 0.68,
-    motifs: [
-      { name: 'users', x: 6, y: 8, size: 34 },
-      { name: 'users', x: 62, y: 30, size: 22 },
     ],
   },
   // Explore — compass + folded map alternating on a gentle counter-rotation,
@@ -220,11 +154,8 @@ interface Props {
 
 const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
   const colors = useThemeColors();
-  // CAPTURE_VARIANT only overrides in dev builds — a stray value can never
-  // ship a forced variant to production.
-  const active = (__DEV__ && CAPTURE_VARIANT) || variant;
-  const cfg = VARIANTS[active];
-  const patternId = `bp-${active}`;
+  const cfg = VARIANTS[variant];
+  const patternId = `bp-${variant}`;
 
   return (
     <View
