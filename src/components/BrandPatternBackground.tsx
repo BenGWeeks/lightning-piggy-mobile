@@ -7,9 +7,9 @@ import { useThemeColors } from '../contexts/ThemeContext';
 // Tone-on-tone monogram background for the Messages / Friends tabs. The mark
 // is drawn INTO a solid brand ground, then the pink->purple fade washes over
 // it at ~82% so it reads as Louis-Vuitton-style canvas texture rather than
-// icons printed on top ("under the fade"). Pure vector via react-native-svg —
-// no 754 KB bitmap decode, so the ~5 s cold-tab GPU stall (issue #245) is gone
-// and it stays crisp at every density.
+// icons printed on top ("under the fade"). Pure vector via react-native-svg,
+// so it avoids the 754 KB bitmap decode implicated in the cold-tab GPU stall
+// (issue #245) and stays crisp at every density.
 
 export type PatternVariant =
   | 'messages-grid'
@@ -20,7 +20,8 @@ export type PatternVariant =
   | 'friends-scatter';
 
 // Dev-only: set to a variant id to force it on both tabs while capturing
-// option screenshots, then set back to null before shipping.
+// option screenshots, then set back to null. Only honoured under __DEV__, so a
+// stray value can't leak a forced variant into a production build.
 const CAPTURE_VARIANT: PatternVariant | null = null;
 
 // How much of the gradient sits over the monogram. Lower = pattern reads
@@ -80,11 +81,11 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
   },
   // Messages — square bubbles + sat-dot on a diagonal.
   'messages-weave': {
-    tileW: 64,
-    tileH: 64,
+    tileW: 54,
+    tileH: 54,
     transform: 'rotate(18)',
     opacity: 0.66,
-    motifs: [{ name: 'messageSquare', x: 6, y: 6, size: 30, filledDotAt: [50, 46] }],
+    motifs: [{ name: 'messageSquare', x: 5, y: 5, size: 26, filledDotAt: [42, 39] }],
   },
   // Messages — bubble + lightning bolt, skewed italic.
   'messages-marquee': {
@@ -106,13 +107,13 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
   },
   // Friends — figure + heart alternating on a gentle rotation.
   'friends-rotated': {
-    tileW: 68,
-    tileH: 68,
+    tileW: 58,
+    tileH: 58,
     transform: 'rotate(14)',
     opacity: 0.68,
     motifs: [
-      { name: 'userRound', x: 6, y: 6, size: 26 },
-      { name: 'heart', x: 40, y: 40, size: 20 },
+      { name: 'userRound', x: 5, y: 5, size: 22 },
+      { name: 'heart', x: 34, y: 34, size: 17 },
     ],
   },
   // Friends — two sizes of people mark, wide airy tile, counter-rotated.
@@ -188,7 +189,9 @@ interface Props {
 
 const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
   const colors = useThemeColors();
-  const active = CAPTURE_VARIANT ?? variant;
+  // CAPTURE_VARIANT only overrides in dev builds — a stray value can never
+  // ship a forced variant to production.
+  const active = (__DEV__ && CAPTURE_VARIANT) || variant;
   const cfg = VARIANTS[active];
   const patternId = `bp-${active}`;
 
