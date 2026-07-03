@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Linking,
   RefreshControl,
-  Image,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -38,6 +37,7 @@ import { shouldShowEmptyState } from '../utils/placesCache';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
@@ -280,12 +280,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="places-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -544,13 +539,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

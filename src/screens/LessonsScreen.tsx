@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useDeferredValue, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import TabHeader from '../components/TabHeader';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses, type Course } from '../data/learnContent';
 import {
@@ -86,12 +87,7 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.headerBackground}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <TabHeader
           title="Lessons"
           icon={<ChevronLeft size={20} color={colors.brandPink} strokeWidth={2.5} />}

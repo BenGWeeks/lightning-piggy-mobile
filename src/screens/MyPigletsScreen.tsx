@@ -14,6 +14,7 @@ import type { VerifiedEvent } from 'nostr-tools';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -382,12 +383,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="my-piglets-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -665,11 +661,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: { ...StyleSheet.absoluteFillObject },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     headerTitle: {
