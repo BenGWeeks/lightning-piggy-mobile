@@ -128,8 +128,14 @@ describe('vendorHasNostr', () => {
 });
 
 describe('MARKET_VENDORS directory', () => {
-  it('exposes a Nostr identity for exactly the three npub vendors', () => {
-    const onNostr = MARKET_VENDORS.filter(vendorHasNostr).map((v) => v.name);
+  it('exposes a Nostr identity for exactly the three production npub vendors', () => {
+    // In DEV builds MARKET_VENDORS is prepended with __DEV__-gated "(TEST)"
+    // pig sellers (Big/Little Piggy) that carry npubs so a pig-to-pig NIP-17
+    // order can be exercised end-to-end. Jest runs with __DEV__ === true, so
+    // exclude those dev-only entries and assert on the real, shipped directory.
+    const onNostr = MARKET_VENDORS.filter(
+      (v) => vendorHasNostr(v) && !v.name.includes('(TEST)'),
+    ).map((v) => v.name);
     expect(onNostr.sort()).toEqual(['BitcoinStuffStore', 'Robotechy', 'SatoshiStore.io'].sort());
   });
 
