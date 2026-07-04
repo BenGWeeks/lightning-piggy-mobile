@@ -1394,6 +1394,7 @@
     "toRecipient": "to {{name}}",
     "receivedTitle": "Payment received!",
     "sentTitle": "Payment sent!",
+    "onchainHint": "On-chain · 1 confirmation pending",
     "amountFromRecipient": "{{amount}} from {{name}}",
     "amountToRecipient": "{{amount}} to {{name}}",
     "connectionLostTitle": "Connection lost",

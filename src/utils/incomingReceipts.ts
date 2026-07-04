@@ -64,6 +64,11 @@ export function shouldSeedBaseline(
 export interface AnnouncedReceipt extends NewReceipt {
   walletId: string;
   walletLabel: string;
+  // Which rail delivered this credit (#134). Optional so the pure
+  // dedup/tie-break helpers (and their tests) don't need to supply it;
+  // the receive detector always populates it before it reaches the
+  // celebration overlay.
+  source?: 'lightning' | 'onchain';
 }
 
 // Pick the newer of two candidate receipts deterministically (latest
