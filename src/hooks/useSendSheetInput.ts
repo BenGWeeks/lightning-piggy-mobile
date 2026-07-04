@@ -182,10 +182,14 @@ export function useSendSheetInput(opts: {
   };
 
   const handlePaste = async () => {
-    const clip = await Clipboard.getStringAsync();
-    if (clip) {
-      applyPasteText(clip);
-      processInput(clip);
+    try {
+      const clip = await Clipboard.getStringAsync();
+      if (clip) {
+        applyPasteText(clip);
+        processInput(clip);
+      }
+    } catch {
+      // Clipboard read can fail silently on cold start; nothing user-actionable.
     }
   };
 
