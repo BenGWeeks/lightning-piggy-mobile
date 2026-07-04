@@ -202,14 +202,20 @@ export function buildVoteRumor(input: {
 export function parsePollRumor(rumor: PollRumor): DisplayPoll | null {
   if (rumor.kind !== POLL_KIND) return null;
   if (!Array.isArray(rumor.tags)) return null;
-  const question = typeof rumor.content === 'string' ? rumor.content.trim() : '';
-  if (!question) return null;
+  const rawQuestion = typeof rumor.content === 'string' ? rumor.content.trim() : '';
+  if (!rawQuestion) return null;
+  // Truncate (never reject) an over-long question from a foreign client, so a
+  // peer can't bust the POLL_MAX_QUESTION_LENGTH cap that the message bubble +
+  // inbox-preview render paths rely on (mirrors the legacy text parser and the
+  // option-count clamp below).
+  const question = rawQuestion.slice(0, POLL_MAX_QUESTION_LENGTH);
   const options: PollOption[] = [];
   const seen = new Set<string>();
   for (const t of rumor.tags) {
     if (t[0] !== 'option') continue;
     const id = typeof t[1] === 'string' ? t[1] : undefined;
-    const label = typeof t[2] === 'string' ? t[2].trim() : '';
+    // Clamp the label to POLL_MAX_OPTION_LENGTH on parse (truncate, don't drop).
+    const label = typeof t[2] === 'string' ? t[2].trim().slice(0, POLL_MAX_OPTION_LENGTH) : '';
     if (!id || !label) continue; // drop malformed options rather than crashing
     if (seen.has(id)) continue; // dedup by id — a stale client can't double a row
     seen.add(id);
@@ -235,11 +241,17 @@ export function parseVoteRumor(rumor: PollRumor): { pollId: string; optionIds: s
   const pollId = firstTagValue(rumor.tags, 'e');
   if (!pollId) return null;
   const optionIds: string[] = [];
+  const seen = new Set<string>();
   for (const t of rumor.tags) {
     if (t[0] !== 'response') continue;
-    if (typeof t[1] === 'string' && t[1].length > 0 && !optionIds.includes(t[1])) {
-      optionIds.push(t[1]);
-    }
+    const v = t[1];
+    if (typeof v !== 'string' || v.length === 0 || seen.has(v)) continue;
+    seen.add(v);
+    optionIds.push(v);
+    // Clamp to POLL_MAX_OPTIONS unique responses — the app caps polls at 6
+    // options, so a vote referencing more is malformed/malicious. The Set +
+    // early break avoids the O(n²) includes() scan on a huge `response` list.
+    if (optionIds.length >= POLL_MAX_OPTIONS) break;
   }
   if (optionIds.length === 0) return null;
   return { pollId, optionIds };

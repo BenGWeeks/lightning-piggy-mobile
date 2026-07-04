@@ -2,6 +2,9 @@ import { getEventHash } from 'nostr-tools/pure';
 import {
   POLL_KIND,
   VOTE_KIND,
+  POLL_MAX_OPTIONS,
+  POLL_MAX_QUESTION_LENGTH,
+  POLL_MAX_OPTION_LENGTH,
   buildPollRumor,
   buildVoteRumor,
   parsePollRumor,
@@ -117,6 +120,23 @@ describe('nip88Poll — poll rumor build/parse', () => {
       }),
     ).toBeNull(); // <2 options
   });
+
+  it('parsePollRumor truncates an over-long incoming question + option labels to their caps', () => {
+    const parsed = parsePollRumor({
+      pubkey: A,
+      kind: POLL_KIND,
+      created_at: 1,
+      tags: [
+        ['option', '1', 'x'.repeat(POLL_MAX_OPTION_LENGTH + 40)],
+        ['option', '2', 'ok'],
+      ],
+      content: 'q'.repeat(POLL_MAX_QUESTION_LENGTH + 100),
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.question).toHaveLength(POLL_MAX_QUESTION_LENGTH);
+    expect(parsed!.options[0].label).toHaveLength(POLL_MAX_OPTION_LENGTH);
+    expect(parsed!.options[1].label).toBe('ok');
+  });
 });
 
 describe('nip88Poll — vote rumor build/parse', () => {
@@ -159,6 +179,23 @@ describe('nip88Poll — vote rumor build/parse', () => {
       content: '',
     });
     expect(multi).toEqual({ pollId: 'p1', optionIds: ['1', '2'] });
+  });
+
+  it('parseVoteRumor clamps to POLL_MAX_OPTIONS unique responses', () => {
+    const many = parseVoteRumor({
+      pubkey: B,
+      kind: VOTE_KIND,
+      created_at: 1,
+      tags: [
+        ['e', 'p1'],
+        // 10 distinct responses — a well-formed vote can reference at most 6.
+        ...Array.from({ length: 10 }, (_, i) => ['response', `opt${i}`]),
+      ],
+      content: '',
+    });
+    expect(many).not.toBeNull();
+    expect(many!.optionIds).toHaveLength(POLL_MAX_OPTIONS);
+    expect(many!.optionIds[0]).toBe('opt0');
   });
 });
 
