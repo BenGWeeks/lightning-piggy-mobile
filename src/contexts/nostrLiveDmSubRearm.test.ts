@@ -183,6 +183,29 @@ describe('startLiveDmSubscription — self-re-arm on drop / resume (#934)', () =
     expect(mockSubscribe).toHaveBeenCalledTimes(2);
   });
 
+  it('debounces rapid foreground/background churn — re-arms once, then again after the window (#986)', async () => {
+    startLiveDmSubscription(makeParams());
+    await flush();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+
+    // First resume re-arms immediately (leading edge).
+    appStateHandler!('active');
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+
+    // Rapid churn within the debounce window (flicking between apps) is
+    // coalesced — the socket a moment ago opened is still healthy.
+    appStateHandler!('background');
+    appStateHandler!('active');
+    appStateHandler!('background');
+    appStateHandler!('active');
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+
+    // Once the debounce window elapses, a genuine resume re-arms again.
+    jest.advanceTimersByTime(2_000);
+    appStateHandler!('active');
+    expect(mockSubscribe).toHaveBeenCalledTimes(3);
+  });
+
   it('a close after teardown never re-arms even once cancelled', async () => {
     const teardown = startLiveDmSubscription(makeParams());
     await flush();

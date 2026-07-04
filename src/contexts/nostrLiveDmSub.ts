@@ -62,6 +62,12 @@ const LIVE_SUB_RECONNECT_MAX_DELAY_MS = 5 * 60_000;
 // having been healthy — its next drop retries from the base delay; a
 // rapid-fail (offline) keeps climbing the exponential backoff ladder.
 const LIVE_SUB_HEALTHY_MIN_LIFETIME_MS = 60_000;
+// Leading-edge debounce for the AppState `active` re-arm: the first resume
+// re-arms immediately, but rapid foreground/background churn within this window
+// is coalesced (the socket a moment-ago resume opened is still healthy, so
+// re-subscribing again is wasted churn). A real Doze resume is far apart from
+// the prior one, so it always clears this window and re-arms.
+const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
 
 /**
  * Snapshot + live-dependency bundle the live-DM subscription closes over.
@@ -161,6 +167,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   let armGeneration = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Wall-clock ms of the last AppState-resume-triggered re-arm, for the
+  // leading-edge debounce below (rapid foreground/background churn coalesces).
+  let lastResumeArmMs = 0;
   // True once the initial async arm (which seeds knownWrapIds + loads the
   // kind-4 `since` cursor) has opened the first sub. The AppState-resume
   // re-arm no-ops before this so it can't race ahead of the seed.
@@ -801,6 +810,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const appStateSub = AppState.addEventListener('change', (next) => {
     if (cancelled || !initialArmed) return;
     if (next === 'active') {
+      // Debounce rapid foreground/background churn (#986 review): re-arming on
+      // every resume re-subscribes repeatedly when the user flicks between
+      // apps, even though a socket opened a second ago is still healthy. A
+      // genuine Doze resume is always far past this window, so it still re-arms.
+      const now = Date.now();
+      if (now - lastResumeArmMs < LIVE_SUB_RESUME_DEBOUNCE_MS) return;
+      lastResumeArmMs = now;
       reconnectAttempt = 0;
       armSub();
     }
