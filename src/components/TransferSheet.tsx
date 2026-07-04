@@ -871,7 +871,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
-        setProgressMsg('Sending on-chain transaction...');
+        setProgressMsg('Broadcasting on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
         setProgress((p) => advanceTransfer(p)); // broadcast → refresh
