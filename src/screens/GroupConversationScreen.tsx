@@ -54,15 +54,14 @@ import {
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { buildPollMessage, buildVoteMessage, parsePoll, parseVote } from '../utils/pollMessage';
 import {
-  aggregateVotes,
-  buildVoteMessage,
-  parsePoll,
-  parseVote,
-  type ParsedPoll,
-  type PollAggregate,
-  type PollVoteRecord,
-} from '../utils/pollMessage';
+  legacyPollToStored,
+  tallyPoll,
+  type PollTally,
+  type StoredPoll,
+  type VoteRecord,
+} from '../utils/nip88Poll';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
@@ -414,17 +413,19 @@ const GroupConversationScreen: React.FC = () => {
     [messages],
   );
 
-  // Per-poll aggregates over the entire group history. Group messages
-  // carry a real `senderPubkey` (unlike 1:1 where we have to synthesise
-  // a per-direction voter id), so the aggregator gets accurate
-  // last-write-wins per member out of the box.
-  const pollAggregates = useMemo<Map<string, PollAggregate>>(() => {
-    const polls: { id: string; poll: ParsedPoll }[] = [];
-    const votes: PollVoteRecord[] = [];
+  // Per-poll aggregates over the entire group history. Group messages carry a
+  // real `senderPubkey` (unlike 1:1 where we synthesise a per-direction voter
+  // id), so the tally gets accurate last-write-wins per member. Groups keep the
+  // TEXT-encoded poll format (the group message store is text-only — no inner
+  // wireKind/tags column), so structured NIP-88 is 1:1-only for now (#203);
+  // legacy polls are adapted to the shared display/tally shape here.
+  const pollAggregates = useMemo<Map<string, PollTally>>(() => {
+    const polls: StoredPoll[] = [];
+    const votes: VoteRecord[] = [];
     for (const m of messages) {
       const p = parsePoll(m.text);
       if (p) {
-        polls.push({ id: m.id, poll: p });
+        polls.push(legacyPollToStored(m.id, p));
         continue;
       }
       const v = parseVote(m.text);
@@ -432,29 +433,38 @@ const GroupConversationScreen: React.FC = () => {
         votes.push({
           pollId: v.pollId,
           voter: m.senderPubkey,
-          optionId: v.optionId,
+          optionIds: [String(v.optionId)],
           createdAt: m.createdAt,
         });
       }
     }
-    return aggregateVotes(polls, votes, myPubkey ?? null);
+    const out = new Map<string, PollTally>();
+    for (const poll of polls) out.set(poll.pollId, tallyPoll(poll, votes, myPubkey ?? null));
+    return out;
   }, [messages, myPubkey]);
 
-  // Poll attach handlers — composer body comes back already-serialised
-  // via PollComposerSheet, then we hand off to sendText (the same path
-  // the GIF / location / contact-share attachments use). Vote sends use
-  // sendText too so the optimistic local-append behaviour is identical.
+  // Poll attach handlers — the composer returns the validated question +
+  // options; groups serialise them to the text body and hand off to sendText
+  // (the same path the GIF / location / contact-share attachments use). Vote
+  // sends use sendText too so the optimistic local-append behaviour matches.
   const handleSendPoll = useCallback(
-    async (pollBody: string): Promise<boolean> => {
-      const ok = await sendText(pollBody);
-      return ok;
+    async (question: string, options: string[]): Promise<boolean> => {
+      let body: string;
+      try {
+        body = buildPollMessage(question, options);
+      } catch (err) {
+        Alert.alert('Could not send poll', err instanceof Error ? err.message : 'Invalid poll.');
+        return false;
+      }
+      return sendText(body);
     },
     [sendText],
   );
 
   const handleVotePoll = useCallback(
-    async (pollId: string, optionId: number) => {
-      const payload = buildVoteMessage(pollId, optionId);
+    async (pollId: string, optionId: string) => {
+      const optNum = Number(optionId);
+      const payload = buildVoteMessage(pollId, Number.isFinite(optNum) ? optNum : 0);
       const ok = await sendText(payload);
       if (!ok) {
         Alert.alert('Vote failed', 'Could not record your vote.');

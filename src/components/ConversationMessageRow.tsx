@@ -207,7 +207,7 @@ function ConversationMessageRow({
       : item.kind === 'location'
         ? ({ kind: 'location', location: item.location } as const)
         : item.kind === 'poll'
-          ? ({ kind: 'poll', poll: item.poll } as const)
+          ? ({ kind: 'poll', poll: item.poll, pollId: item.pollId } as const)
           : item.kind === 'liveLocationMarker'
             ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
             : item.kind === 'unsupported'

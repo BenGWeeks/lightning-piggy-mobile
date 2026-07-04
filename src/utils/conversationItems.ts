@@ -3,7 +3,7 @@ import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
-import type { ParsedPoll } from './pollMessage';
+import { POLL_KIND, VOTE_KIND, parseStoredPoll, type DisplayPoll } from './nip88Poll';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
 import {
@@ -90,7 +90,12 @@ export type Item =
       kind: 'poll';
       id: string;
       fromMe: boolean;
-      poll: ParsedPoll;
+      // Correlation id — the vote target + tally key. For a structured NIP-88
+      // poll it's the poll rumor event id; for a legacy text poll it's the
+      // message id (`dm-…`). Kept separate from `id` (the React/FlatList key)
+      // so the two don't have to coincide.
+      pollId: string;
+      poll: DisplayPoll;
       createdAt: number;
     }
   | {
@@ -167,7 +172,7 @@ export function buildZapItems(wallets: WalletState[], pubkey: string): TimedItem
 // inner event of a kind we don't display — surfaced as the `unsupported`
 // placeholder rather than a blank bubble. Plain text rows carry no wireKind
 // (`undefined`), so they never hit the fallback.
-const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17]);
+const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17, POLL_KIND, VOTE_KIND]);
 
 /**
  * Suppress a kind-14 chat-note that merely re-delivers an order's Lightning
@@ -248,11 +253,48 @@ export function buildConversationItems(
         },
       ];
     }
+    // Structured NIP-88 poll (kind 1068) — stored as canonical poll JSON
+    // (#203). Render as a poll card keyed by the embedded poll rumor id so
+    // votes (which reference that id) correlate. A corrupt/unparseable row
+    // falls back to the muted placeholder rather than leaking JSON.
+    if (m.wireKind === POLL_KIND) {
+      const stored = parseStoredPoll(m.text);
+      if (stored) {
+        const poll: DisplayPoll = {
+          question: stored.question,
+          options: stored.options,
+          pollType: stored.pollType,
+          endsAt: stored.endsAt,
+        };
+        return [
+          {
+            kind: 'poll',
+            id: `dm-${m.id}`,
+            pollId: stored.pollId,
+            fromMe: m.fromMe,
+            poll,
+            createdAt: m.createdAt,
+          },
+        ];
+      }
+      return [
+        {
+          kind: 'unsupported',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          rawKind: m.wireKind,
+          createdAt: m.createdAt,
+        },
+      ];
+    }
+    // Structured NIP-88 vote (kind 1018) — never a bubble; it's aggregated into
+    // the referenced poll's tally by the screen's poll hook. Drop from the list.
+    if (m.wireKind === VOTE_KIND) return [];
     // Generic, future-proof fallback: a stored message whose wireKind we don't
     // render (an inner Nostr event of an unhandled kind) becomes a muted
     // placeholder rather than a blank text bubble. Only fires for a defined
     // wireKind outside the renderable set — plain rows (no wireKind) and the
-    // 4/14/15/16/17 kinds handled above/below are unaffected.
+    // 4/14/15/16/17/1068/1018 kinds handled above/below are unaffected.
     if (m.wireKind !== undefined && !RENDERABLE_WIRE_KINDS.has(m.wireKind)) {
       return [
         {
@@ -296,10 +338,13 @@ export function buildConversationItems(
       ];
     }
     if (classified.kind === 'poll') {
+      // Legacy text-encoded poll: correlation id IS the message id (votes were
+      // keyed by it in the MVP), so pollId === id here.
       return [
         {
           kind: 'poll',
           id: `dm-${m.id}`,
+          pollId: `dm-${m.id}`,
           fromMe: m.fromMe,
           poll: classified.poll,
           createdAt: m.createdAt,

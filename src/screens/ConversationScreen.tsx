@@ -103,6 +103,7 @@ const ConversationScreen: React.FC = () => {
     isLoggedIn,
     fetchConversation,
     sendDirectMessage,
+    sendDirectRumor,
     loadInitialConversation,
     persistDeliveryStatuses,
     signerType,
@@ -226,6 +227,7 @@ const ConversationScreen: React.FC = () => {
     myPubkey,
     pubkey,
     sendDirectMessage,
+    sendDirectRumor,
     setMessages,
   });
 

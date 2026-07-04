@@ -21,25 +21,25 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import {
-  buildPollMessage,
+  buildPollRumor,
   POLL_MAX_OPTIONS,
   POLL_MAX_OPTION_LENGTH,
   POLL_MAX_QUESTION_LENGTH,
   POLL_MIN_OPTIONS,
-} from '../utils/pollMessage';
+} from '../utils/nip88Poll';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   /**
-   * Called with the serialised poll body (the same string the renderer
-   * later parses with `parsePoll`). The parent owns the actual send via
-   * its existing `sendDirectMessage` / `sendGroupMessage` path so polls
-   * inherit the same retry / Toast / optimistic-append behaviour as
-   * other attachment types. Returns `true` on a successful send so we
-   * know to dismiss the sheet (vs. staying open on failure for retry).
+   * Called with the validated question + option strings. The parent owns the
+   * actual send: 1:1 threads emit a structured NIP-88 kind-1068 poll rumor
+   * gift-wrapped via NIP-17; group threads keep the text-encoded body. Either
+   * way polls inherit the same retry / optimistic-append behaviour as other
+   * attachment types. Returns `true` on a successful send so we know to dismiss
+   * the sheet (vs. staying open on failure for retry).
    */
-  onSend: (pollBody: string) => Promise<boolean>;
+  onSend: (question: string, options: string[]) => Promise<boolean>;
 }
 
 /**
@@ -145,16 +145,24 @@ const PollComposerSheet: React.FC<Props> = ({ visible, onClose, onSend }) => {
 
   const handleSend = useCallback(async () => {
     if (!canSend) return;
-    let body: string;
+    // Validate the shape up front via the same builder the send path uses, so a
+    // paste-and-send race that slips past `canSend` still surfaces a clear
+    // error instead of a malformed rumor. We discard the rumor — the parent
+    // rebuilds it (it owns the sender pubkey + recipients).
     try {
-      body = buildPollMessage(question, options);
+      buildPollRumor({
+        senderPubkey: 'f'.repeat(64),
+        recipientPubkeys: ['f'.repeat(64)],
+        question,
+        options,
+      });
     } catch (err) {
       Alert.alert('Could not send poll', err instanceof Error ? err.message : 'Invalid poll.');
       return;
     }
     setSending(true);
     try {
-      const ok = await onSend(body);
+      const ok = await onSend(question, options);
       if (ok) {
         onClose();
       }

@@ -25,7 +25,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
-import type { PollAggregate } from '../utils/pollMessage';
+import type { PollTally } from '../utils/nip88Poll';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
@@ -108,10 +108,10 @@ interface Props {
   // `aggregateVotes` over the conversation history once per messages
   // update; the bubble looks up its own row by `id`. When `undefined`,
   // poll bubbles still render but with zero counts (cold start).
-  pollAggregates?: Map<string, PollAggregate>;
+  pollAggregates?: Map<string, PollTally>;
   // Tap an option row on a poll → parent sends the vote message.
   // Optional: omit on read-only contexts (none currently).
-  onVotePoll?: (pollId: string, optionId: number) => void;
+  onVotePoll?: (pollId: string, optionId: string) => void;
   // Tapping the "Toggle Secret Mode" button on the magic-trigger card
   // (when the message body is exactly "secretthreewords"). Parent
   // owns the secretMode setter + celebration overlay so a list of
@@ -606,12 +606,16 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   if (content.kind === 'poll') {
+    // Vote target / tally key: the structured poll rumor id when present
+    // (set by the 1:1 item mapping), else the message id (legacy text polls +
+    // groups, whose votes were keyed by the message id in the text MVP).
+    const pollKey = content.pollId ?? id;
     return (
       <PollBubble
         poll={content.poll}
-        agg={pollAggregates?.get(id)}
+        agg={pollAggregates?.get(pollKey)}
         fromMe={fromMe}
-        id={id}
+        id={pollKey}
         createdAt={createdAt}
         onVotePoll={onVotePoll}
         testIdPrefix={testIdPrefix}

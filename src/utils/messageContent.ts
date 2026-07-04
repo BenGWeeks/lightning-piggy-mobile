@@ -2,7 +2,8 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
-import { isPollVoteMessage, parsePoll, type ParsedPoll } from './pollMessage';
+import { isPollVoteMessage, parsePoll } from './pollMessage';
+import { legacyPollToStored, type DisplayPoll } from './nip88Poll';
 import { parseLiveLocationMarker, type LiveLocationMarker } from '../services/liveLocationService';
 import { isBitcoinAddress } from '../services/boltzService';
 import { parseBip21, ParsedBip21 } from './bip21';
@@ -276,7 +277,11 @@ export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
   | { kind: 'location'; location: SharedLocation }
-  | { kind: 'poll'; poll: ParsedPoll }
+  // `pollId` is the vote target / tally key. Set for a structured NIP-88 poll
+  // (the poll rumor id, supplied by the item mapping); undefined for a legacy
+  // text poll and for group polls, where the renderer falls back to the
+  // message id (votes keyed by it in the text MVP).
+  | { kind: 'poll'; poll: DisplayPoll; pollId?: string }
   // Vote messages render as nothing in the conversation list — they're
   // already aggregated into the referenced poll's tally. Marking the kind
   // explicitly (rather than dropping at the items level) lets the parent
@@ -297,7 +302,23 @@ export function classifyMessageContent(text: string): BubbleContent {
   // a poll body that happens to mention a GIF URL or `geo:` link to
   // re-route into a different bubble variant.
   const poll = parsePoll(text);
-  if (poll) return { kind: 'poll', poll };
+  // Legacy text-encoded poll (the #203 MVP, still read for back-compat): adapt
+  // to the shared display shape so one PollBubble renders both wire formats.
+  // Structured NIP-88 polls (kind 1068) are routed by wireKind upstream, never
+  // through this text classifier. The correlation id (`pollId`) is supplied by
+  // the caller — legacy polls key their tally by the message id.
+  if (poll) {
+    const stored = legacyPollToStored('', poll);
+    return {
+      kind: 'poll',
+      poll: {
+        question: stored.question,
+        options: stored.options,
+        pollType: stored.pollType,
+        endsAt: stored.endsAt,
+      },
+    };
+  }
   if (isPollVoteMessage(text)) return { kind: 'pollVote' };
   const gifUrl = extractGifUrl(text);
   if (gifUrl) return { kind: 'gif', url: gifUrl };

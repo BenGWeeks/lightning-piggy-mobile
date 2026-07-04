@@ -143,6 +143,56 @@ describe('textForRumor (kind-15 → bubble text)', () => {
       textForRumor({ pubkey: PK_A, created_at: 0, kind: 14, content: 'hi there', tags: [] }),
     ).toBe('hi there');
   });
+
+  it('serializes a kind-1068 poll rumor to stored poll JSON with the rumor id', () => {
+    const rumor: DecodedRumor = {
+      pubkey: PK_A,
+      created_at: 100,
+      kind: 1068,
+      content: 'Dinner?',
+      tags: [
+        ['p', 'c'.repeat(64)],
+        ['option', '1', 'Pasta'],
+        ['option', '2', 'Curry'],
+        ['polltype', 'singlechoice'],
+      ],
+    };
+    const out = JSON.parse(textForRumor(rumor));
+    expect(out.question).toBe('Dinner?');
+    expect(out.pollId).toMatch(/^[0-9a-f]{64}$/);
+    expect(out.author).toBe(PK_A);
+    expect(out.options).toEqual([
+      { id: '1', label: 'Pasta' },
+      { id: '2', label: 'Curry' },
+    ]);
+  });
+
+  it('serializes a kind-1018 vote rumor capturing the voter + poll ref', () => {
+    const rumor: DecodedRumor = {
+      pubkey: PK_A,
+      created_at: 200,
+      kind: 1018,
+      content: '',
+      tags: [
+        ['e', 'poll-abc'],
+        ['p', 'c'.repeat(64)],
+        ['response', '2'],
+      ],
+    };
+    const out = JSON.parse(textForRumor(rumor));
+    expect(out).toEqual({ pollId: 'poll-abc', voter: PK_A, optionIds: ['2'], createdAt: 200 });
+  });
+
+  it('falls back to plain content for a malformed poll rumor', () => {
+    const rumor: DecodedRumor = {
+      pubkey: PK_A,
+      created_at: 0,
+      kind: 1068,
+      content: 'no options here',
+      tags: [['option', '1', 'only-one']],
+    };
+    expect(textForRumor(rumor)).toBe('no options here');
+  });
 });
 
 /**
