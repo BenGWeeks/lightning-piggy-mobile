@@ -17,6 +17,11 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
 </p>
 
 <p align="center">
+  <a href="https://testflight.apple.com/join/bzfvEecu"><img alt="Download on TestFlight (iOS)" src="https://img.shields.io/badge/iOS-TestFlight-0D96F6?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/BenGWeeks/lightning-piggy-mobile/releases/latest"><img alt="Download APK (Android)" src="https://img.shields.io/badge/Android-Download%20APK-3DDC84?logo=android&logoColor=white"></a>
+</p>
+
+<p align="center">
   <a href="https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&m=dev&scaling=scale-down&page-id=0%3A1&starting-point-node-id=19%3A519&show-proto-sidebar=1&t=P3MkR2W1YVSwtmIQ-1">View the Figma prototype</a>
 </p>
 
