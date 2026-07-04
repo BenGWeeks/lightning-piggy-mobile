@@ -54,6 +54,12 @@ export async function fetchProfilesBatch(
     };
     sub = pool.subscribeMany(relays, { kinds: [0], authors } as Filter, {
       onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
+        // Ignore unsolicited pubkeys. A misbehaving relay could send a kind-0
+        // for an author outside our `authors` filter; counting it toward
+        // `best.size` would let the early-exit condition (best.size >=
+        // wanted.size) fire before every REQUESTED pubkey has answered,
+        // closing the sub too soon. Only events we actually asked for count.
+        if (!wanted.has(ev.pubkey)) return;
         // Keep only the newest kind-0 per pubkey — Nostr clients can
         // re-publish kind-0 with edits and we want the latest.
         const prev = best.get(ev.pubkey);

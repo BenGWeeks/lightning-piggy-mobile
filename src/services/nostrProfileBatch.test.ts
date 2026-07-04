@@ -111,6 +111,34 @@ describe('fetchProfilesBatch early-resolve (#852)', () => {
     expect(m.close).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores unsolicited pubkeys — an out-of-filter kind-0 does not count toward early-exit', async () => {
+    const PK_C = 'c'.repeat(64);
+    const m = mockSubscribeMany();
+    const onEvent = jest.fn();
+    const promise = fetchProfilesBatch([PK_A, PK_B], RELAYS, SOFT_TIMEOUT, onEvent);
+
+    // One requested pubkey answers, then a misbehaving relay sends a kind-0
+    // for a pubkey we never asked for. Without the guard that unsolicited
+    // event would push best.size to 2 and close the sub before PK_B arrives.
+    m.emit(PK_A);
+    m.emit(PK_C);
+
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(m.close).not.toHaveBeenCalled();
+    // The unsolicited event was dropped before onEvent.
+    expect(onEvent).toHaveBeenCalledTimes(1);
+
+    // Only the genuinely-requested PK_B completes the set.
+    m.emit(PK_B);
+    await expect(promise).resolves.toBeUndefined();
+    expect(m.close).toHaveBeenCalledTimes(1);
+  });
+
   it('resolves immediately for an empty pubkey list (no sub opened)', async () => {
     const m = mockSubscribeMany();
     await expect(fetchProfilesBatch([], RELAYS, SOFT_TIMEOUT, jest.fn())).resolves.toBeUndefined();
