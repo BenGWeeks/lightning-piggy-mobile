@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -30,6 +30,7 @@ import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import type { MessageReactionState } from '../utils/reactions';
 import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
@@ -123,6 +124,19 @@ interface Props {
     deliveryStatus?: DeliveryStatus;
     resendText: string;
   }) => void;
+  // Long-press handler (#205) — opens the parent's MessageActionsSheet for
+  // per-message reactions + zap. Optional; when omitted the long-press is a
+  // no-op rather than falling back to system text-select.
+  onLongPress?: () => void;
+  // NIP-25 reaction state for THIS message id, or undefined if the parent
+  // hasn't fetched any reactions yet. Renders a compact pill row beneath the
+  // bubble: e.g. "❤️ 2  🔥 1". Tapping a pill toggles the viewer's own
+  // reaction. Pulled from the parent's `reactionsByTarget` map (#205).
+  reactions?: MessageReactionState;
+  // Tap handler for a reaction pill. Receives the emoji and (when the viewer
+  // has already reacted) the existing reaction event id so the parent can
+  // NIP-09 delete. Optional — when omitted the pills are display-only.
+  onToggleReaction?: (emoji: string, existingReactionId: string | null) => void;
 }
 
 type Styles = MessageBubbleStyles;
@@ -140,11 +154,24 @@ const ImageBubble: React.FC<{
   fromMe: boolean;
   senderLabel: React.ReactNode;
   onOpenImageFullscreen?: (url: string) => void;
+  // Long-press → parent's MessageActionsSheet (#205). Kept firing even when
+  // there's no fullscreen tap handler, so the pressable is only disabled when
+  // BOTH the tap and the long-press are absent.
+  onLongPress?: () => void;
   testID: string;
   // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
   // the tick like every other variant.
   footer: React.ReactNode;
-}> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
+}> = ({
+  styles,
+  image,
+  fromMe,
+  senderLabel,
+  onOpenImageFullscreen,
+  onLongPress,
+  testID,
+  footer,
+}) => {
   const t = useTranslation();
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
@@ -156,12 +183,17 @@ const ImageBubble: React.FC<{
       <TouchableOpacity
         activeOpacity={0.85}
         onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
+        onLongPress={onLongPress}
+        delayLongPress={350}
         style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
         accessibilityLabel={
           fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
         }
-        accessibilityRole={canOpen ? 'imagebutton' : 'image'}
-        disabled={!canOpen}
+        // Announce as an image-button whenever it's interactive — either it can
+        // open fullscreen (tap) OR it can open the actions sheet (long-press).
+        // Only a purely-static image announces as a plain 'image'.
+        accessibilityRole={canOpen || onLongPress ? 'imagebutton' : 'image'}
+        disabled={!canOpen && !onLongPress}
         testID={testID}
       >
         {senderLabel}
@@ -210,6 +242,9 @@ const MessageBubble: React.FC<Props> = ({
   deliveryStatus,
   wireKind,
   onShowInfo,
+  onLongPress,
+  reactions,
+  onToggleReaction,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
@@ -219,6 +254,63 @@ const MessageBubble: React.FC<Props> = ({
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // Reaction pill row (#205) — rendered beneath every variant by wrapping the
+  // bubble row in a column so the pills sit on the same axis as the bubble
+  // (left for incoming, right for outgoing). Null when there are no reactions,
+  // so the no-op render path stays identical to before #205.
+  const reactionEmojis = reactions ? Object.keys(reactions.byEmoji) : [];
+  const ReactionRow =
+    reactionEmojis.length > 0 ? (
+      <View
+        style={[styles.reactionRow, fromMe ? styles.reactionRowRight : styles.reactionRowLeft]}
+        testID={`${testIdPrefix}-reactions-${id}`}
+      >
+        {reactionEmojis.map((emoji) => {
+          const reactors = reactions!.byEmoji[emoji];
+          const myReactionId = reactions!.myReactions[emoji] ?? null;
+          const mine = myReactionId !== null;
+          return (
+            <TouchableOpacity
+              key={emoji}
+              activeOpacity={0.7}
+              disabled={!onToggleReaction}
+              onPress={() => onToggleReaction?.(emoji, myReactionId)}
+              style={[styles.reactionPill, mine && styles.reactionPillMine]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !onToggleReaction }}
+              accessibilityLabel={
+                mine
+                  ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })
+                  : t('messageBubble.reactionAdd', { emoji, count: reactors.length })
+              }
+              testID={`${testIdPrefix}-reaction-${id}-${emoji}`}
+            >
+              <Text style={styles.reactionPillEmoji}>{emoji}</Text>
+              {reactors.length > 1 ? (
+                <Text style={[styles.reactionPillCount, mine && styles.reactionPillCountMine]}>
+                  {reactors.length}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    ) : null;
+
+  // Wrap a variant's bubble row in a small column so the reaction row can sit
+  // immediately under it without breaking the row's left/right alignment. Only
+  // wraps when there are reactions to render — otherwise returns the bubble
+  // unchanged so the render path is byte-identical to pre-#205.
+  const wrapWithReactionRow = (bubble: React.ReactElement): React.ReactElement =>
+    ReactionRow ? (
+      <View>
+        {bubble}
+        {ReactionRow}
+      </View>
+    ) : (
+      bubble
+    );
 
   // Legacy NIP-04 (kind 4) messages are coloured purple so the user can tell
   // them apart from the encrypted NIP-17 (kind 14/15) pink ones at a glance
@@ -266,11 +358,13 @@ const MessageBubble: React.FC<Props> = ({
   );
 
   if (content.kind === 'gif') {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenGifFullscreen?.(content.url)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
           accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
           accessibilityRole="imagebutton"
@@ -287,7 +381,7 @@ const MessageBubble: React.FC<Props> = ({
           />
           {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -362,11 +456,13 @@ const MessageBubble: React.FC<Props> = ({
         ? t('messageBubble.hoursLeft', { hours })
         : t('messageBubble.hoursMinsLeft', { hours, mins: remMin });
     })();
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => displayLocation && onOpenLocation(displayLocation)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={
             fromMe
@@ -437,7 +533,7 @@ const MessageBubble: React.FC<Props> = ({
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -454,11 +550,13 @@ const MessageBubble: React.FC<Props> = ({
       !fromMe && peerAvatarUri !== undefined
         ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
         : null;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenLocation(location)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={
             fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationReceived')
@@ -508,7 +606,7 @@ const MessageBubble: React.FC<Props> = ({
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -543,16 +641,17 @@ const MessageBubble: React.FC<Props> = ({
   // Both render through the same bubble; DecryptedImage owns the decrypt path.
   const image = parseImageMessage(text);
   if (image) {
-    return (
+    return wrapWithReactionRow(
       <ImageBubble
         styles={styles}
         image={image}
         fromMe={fromMe}
         senderLabel={SenderLabel}
         onOpenImageFullscreen={onOpenImageFullscreen}
+        onLongPress={onLongPress}
         testID={`${testIdPrefix}-image-${id}`}
         footer={renderFooter([styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe])}
-      />
+      />,
     );
   }
 
@@ -561,7 +660,7 @@ const MessageBubble: React.FC<Props> = ({
   // so the Blossom `.mp4` URL renders as a player, not a bare link.
   const voice = parseVoiceNote(text);
   if (voice) {
-    return (
+    return wrapWithReactionRow(
       <VoiceNotePlayer
         url={voice.url}
         encrypted={voice.encrypted}
@@ -577,7 +676,7 @@ const MessageBubble: React.FC<Props> = ({
             ? renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])
             : undefined
         }
-      />
+      />,
     );
   }
 
@@ -589,9 +688,14 @@ const MessageBubble: React.FC<Props> = ({
   // landed, but only the receiver can usefully tap the button —
   // sender's button is harmless (toggles their own mode).
   if (isSecretModeTrigger(text)) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-secret-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {t('messageBubble.secretMode')}
@@ -613,8 +717,8 @@ const MessageBubble: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -629,9 +733,14 @@ const MessageBubble: React.FC<Props> = ({
       bitcoinUri.address.length > 16
         ? `${bitcoinUri.address.slice(0, 8)}…${bitcoinUri.address.slice(-6)}`
         : bitcoinUri.address;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-bitcoin-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
@@ -657,8 +766,8 @@ const MessageBubble: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -669,9 +778,14 @@ const MessageBubble: React.FC<Props> = ({
       invoice.paymentHash !== null &&
       isInvoicePaid !== undefined &&
       isInvoicePaid(invoice.paymentHash, fromMe);
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-invoice-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
@@ -725,8 +839,8 @@ const MessageBubble: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -735,11 +849,13 @@ const MessageBubble: React.FC<Props> = ({
     const loaded = sharedProfiles ? sharedContact.pubkey in sharedProfiles : false;
     const prof = sharedProfiles?.[sharedContact.pubkey] ?? null;
     const displayName = prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => onOpenContact(sharedContact.pubkey, prof)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
           accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
@@ -784,15 +900,20 @@ const MessageBubble: React.FC<Props> = ({
           </View>
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
   const lnAddress = extractLightningAddress(text);
   if (lnAddress) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-lnaddr-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
@@ -812,8 +933,8 @@ const MessageBubble: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -828,9 +949,11 @@ const MessageBubble: React.FC<Props> = ({
     return null;
   })();
 
-  return (
+  return wrapWithReactionRow(
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View
+      <Pressable
+        onLongPress={onLongPress}
+        delayLongPress={350}
         style={[
           styles.bubble,
           fromMe ? styles.bubbleMe : styles.bubbleThem,
@@ -839,7 +962,7 @@ const MessageBubble: React.FC<Props> = ({
           // distinguishable on both sides (#856 follow-up).
           isNip04 && (fromMe ? styles.bubbleMeNip04 : styles.bubbleThemNip04),
         ]}
-        testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : undefined}
+        testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : `${testIdPrefix}-text-${id}`}
       >
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
@@ -868,8 +991,8 @@ const MessageBubble: React.FC<Props> = ({
         </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-      </View>
-    </View>
+      </Pressable>
+    </View>,
   );
 };
 

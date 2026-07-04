@@ -26,6 +26,10 @@ export type Item =
       deliveryStatus?: DeliveryStatus;
       // Wire protocol (4 = NIP-04, 14/15 = NIP-17) for the message-info sheet.
       wireKind?: number;
+      // Cross-peer-stable id (NIP-17 inner rumor id / NIP-04 wire id) used as
+      // the target for per-message NIP-25 reactions + zaps (#205). Undefined
+      // for optimistic-local sends and warm-cache rows without a rumor id.
+      rumorId?: string;
     }
   | {
       kind: 'zap';
@@ -42,6 +46,8 @@ export type Item =
       fromMe: boolean;
       location: SharedLocation;
       createdAt: number;
+      // Reaction/zap target (#205) — see the `message` variant.
+      rumorId?: string;
     }
   | {
       kind: 'liveLocationMarker';
@@ -56,6 +62,8 @@ export type Item =
       fromMe: boolean;
       url: string;
       createdAt: number;
+      // Reaction/zap target (#205) — see the `message` variant.
+      rumorId?: string;
     }
   | {
       // Marketplace order / receipt card (#market) — a kind-16/17 event a
@@ -253,6 +261,7 @@ export function buildConversationItems(
         fromMe: m.fromMe,
         url: classified.url,
         createdAt: m.createdAt,
+        rumorId: m.rumorId,
       };
     }
     if (classified.kind === 'location') {
@@ -262,6 +271,7 @@ export function buildConversationItems(
         fromMe: m.fromMe,
         location: classified.location,
         createdAt: m.createdAt,
+        rumorId: m.rumorId,
       };
     }
     if (classified.kind === 'liveLocationMarker') {
@@ -283,6 +293,7 @@ export function buildConversationItems(
       createdAt: m.createdAt,
       deliveryStatus: m.deliveryStatus,
       wireKind: m.wireKind,
+      rumorId: m.rumorId,
     };
   });
   // Drop any kind-14 chat-note that just re-delivers an order's invoice when

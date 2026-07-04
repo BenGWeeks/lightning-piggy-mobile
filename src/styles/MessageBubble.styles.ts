@@ -11,6 +11,45 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     bubbleRowLeft: { justifyContent: 'flex-start' },
     bubbleRowRight: { justifyContent: 'flex-end' },
+    // Reaction pills (#205) sit just under the bubble on the same axis
+    // (incoming → left, outgoing → right). A slight negative top margin pulls
+    // them closer to the bubble's bottom edge so the pill reads as attached.
+    reactionRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      marginTop: -4,
+      marginBottom: 4,
+      paddingHorizontal: 4,
+    },
+    reactionRowLeft: { justifyContent: 'flex-start' },
+    reactionRowRight: { justifyContent: 'flex-end' },
+    reactionPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+    },
+    reactionPillMine: {
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPink + '22',
+    },
+    reactionPillEmoji: {
+      fontSize: 13,
+    },
+    reactionPillCount: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    reactionPillCountMine: {
+      color: colors.brandPink,
+    },
     senderLabel: {
       fontSize: 11,
       fontWeight: '700',

@@ -35,6 +35,7 @@ import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
+import MessageActionsSheet from '../components/MessageActionsSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
 import TransactionDetailSheet, {
@@ -64,6 +65,7 @@ import {
   buildZapItems,
   buildConversationItems,
 } from '../utils/conversationItems';
+import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
@@ -104,6 +106,10 @@ const ConversationScreen: React.FC = () => {
     pubkey: myPubkey,
     relays,
     profile,
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
@@ -453,6 +459,29 @@ const ConversationScreen: React.FC = () => {
   const { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining } =
     useConversationLiveLocation({ items, isLoggedIn, myPubkey, pubkey, signerType, relays });
 
+  // Per-message reactions + long-press action state (#205) — kind-7 fetch /
+  // reduce, optimistic publish/retract toggle, and the actioned-message
+  // descriptor — live in a hook so this screen stays composition.
+  const {
+    reactionsByTarget,
+    actionsForMessage,
+    closeMessageActions,
+    handleToggleReaction,
+    handleZapMessage,
+    reactionsForItem,
+    buildOnLongPress,
+    buildOnToggleReaction,
+  } = useConversationReactions({
+    messages,
+    myPubkey,
+    peerPubkey: pubkey,
+    fetchReactionsForMessages,
+    publishReaction,
+    deleteReaction,
+    fetchReactionDeletions: fetchReactionDeletionsForReactions,
+    onZapMessage: () => setSendSheetOpen(true),
+  });
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => (
       <ConversationMessageRow
@@ -478,6 +507,9 @@ const ConversationScreen: React.FC = () => {
         peerAvatarUri={picture ?? null}
         onOpenMap={onOpenMap}
         onShowInfo={handleShowInfo}
+        onLongPress={buildOnLongPress(item)}
+        reactions={reactionsForItem(item)}
+        onToggleReaction={buildOnToggleReaction(item)}
       />
     ),
     [
@@ -498,6 +530,9 @@ const ConversationScreen: React.FC = () => {
       onOpenMap,
       styles,
       colors,
+      reactionsForItem,
+      buildOnLongPress,
+      buildOnToggleReaction,
     ],
   );
 
@@ -839,6 +874,24 @@ const ConversationScreen: React.FC = () => {
           setDetailTx(null);
           presentContactSheet(contact);
         }}
+      />
+      <MessageActionsSheet
+        visible={actionsForMessage !== null}
+        onClose={closeMessageActions}
+        myReactions={
+          actionsForMessage
+            ? (reactionsByTarget.get(actionsForMessage.targetId)?.myReactions ?? {})
+            : {}
+        }
+        onToggleReaction={handleToggleReaction}
+        // Zap is only meaningful for an incoming bubble whose author has a
+        // lightning route. Hidden for our own outgoing bubbles (zapping
+        // yourself is a no-op) and when the peer has no lud16.
+        onZap={
+          actionsForMessage && !actionsForMessage.fromMe && lightningAddress
+            ? handleZapMessage
+            : undefined
+        }
       />
       <ContactProfileSheet
         visible={profileSheetVisible}
