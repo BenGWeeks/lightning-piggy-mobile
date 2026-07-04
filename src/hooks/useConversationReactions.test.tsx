@@ -22,6 +22,13 @@ jest.mock('../components/BrandedAlert', () => ({
   Alert: { alert: jest.fn() },
 }));
 
+// The hook localizes its failure alert via `useTranslation()`; stub it with a
+// passthrough so tests stay context-free (return the key, interpolating params).
+jest.mock('../contexts/LocaleContext', () => ({
+  __esModule: true,
+  useTranslation: () => (key: string) => key,
+}));
+
 const MY_PK = '0'.repeat(64);
 const PEER_PK = 'b'.repeat(64);
 const TARGET = '1'.repeat(64);
