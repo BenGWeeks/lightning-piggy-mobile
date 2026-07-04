@@ -13,7 +13,17 @@ export type CardTheme =
   | 'primal'
   | 'coinos'
   | 'revolut'
-  | 'xapo';
+  | 'xapo'
+  // Sports-themed cards (#102). Each renders a graffiti illustration over
+  // its gradient — `backgroundImage` + `backgroundImageStyle` live on the
+  // entry in `src/themes/cardThemes.ts`, with the per-theme `bgStyle`
+  // registered in `src/themes/cards/index.ts`.
+  | 'tennis'
+  | 'football'
+  | 'basketball'
+  | 'f1'
+  // Deep-space nebula card with a graffiti rocket illustration.
+  | 'spaceship';
 
 export type WalletType = 'nwc' | 'onchain';
 

@@ -35,6 +35,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import { createLiveLocationPingEvent } from '../services/nostrLiveLocation';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import { useNostr } from './NostrContext';
 import {
   DEFAULT_PING_INTERVAL_MS,
@@ -170,6 +171,34 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             content: ciphertext,
           };
           const { event: signedJson } = await amberService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedJson) return false;
+          const signed = JSON.parse(signedJson);
+          await nostrService.publishSignedEvent(signed, writeRelays);
+          return true;
+        }
+        if (signerType === 'nip46') {
+          // Same Encrypt → SignEvent → Publish shape as the Amber path,
+          // over the bunker relay round-trip.
+          const ciphertext = await nostrConnectService.requestNip04Encrypt(
+            json,
+            session.recipientPubkey,
+            pubkey,
+          );
+          if (!ciphertext) return false;
+          const event = {
+            kind: LIVE_LOCATION_PING_KIND,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+              ['p', session.recipientPubkey],
+              ['d', session.sessionId],
+            ],
+            content: ciphertext,
+          };
+          const { event: signedJson } = await nostrConnectService.requestEventSignature(
             JSON.stringify(event),
             '',
             pubkey,
