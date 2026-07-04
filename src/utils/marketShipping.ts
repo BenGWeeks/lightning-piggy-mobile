@@ -81,8 +81,9 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
     typeof priceTag?.[2] === 'string' && priceTag[2].trim() ? priceTag[2].trim().toUpperCase() : '';
 
   // Normalise every value to alpha-2: merchants publish a mix of alpha-2 and
-  // alpha-3 (Robotechy's live 30406s carry GBR/IRL/DEU…) — matching must be
-  // on validated codes, never string luck.
+  // alpha-3 (Robotechy's live 30406s carry GBR/IRL/DEU…) — toAlpha2 maps known
+  // alpha-3 → alpha-2 and upper-cases anything else, so matching is on
+  // normalised codes rather than string luck.
   const countries = new Set<string>();
   for (const t of ev.tags) {
     if (t[0] !== 'country') continue;

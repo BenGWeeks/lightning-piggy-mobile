@@ -49,11 +49,7 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
   const dimension = { width: size, height: size, borderRadius: size / 2 };
 
   return (
-    <View
-      style={[styles.container, dimension]}
-      testID={testID}
-      accessibilityLabel={`${vendor.name} seller logo`}
-    >
+    <View style={[styles.container, dimension]} testID={testID} accessibilityLabel={vendor.name}>
       {uri ? (
         <Image
           source={{ uri }}
