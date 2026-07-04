@@ -35,15 +35,27 @@ import type { SignerType, Nip46Connection } from '../types/nostr';
  * the SecureStore writes `useNip46Login` makes on sign-in.
  */
 export async function restoreNip46Session(): Promise<string | null> {
-  const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
   const storedConnRaw = await SecureStore.getItemAsync(NIP46_CONNECTION_KEY);
-  if (!storedPubkey || !storedConnRaw) return null;
+  if (!storedConnRaw) {
+    // signer-type says nip46 but the connection object is gone (partial wipe)
+    // — clear the stale slot so we don't repeat this no-op on every cold start.
+    await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
+    return null;
+  }
   try {
     const conn = JSON.parse(storedConnRaw) as Nip46Connection;
     await nostrConnectService.setActiveConnection(conn);
-    return storedPubkey;
+    // `conn.userPubkey` is the source of truth (Copilot review): if the legacy
+    // PUBKEY_KEY slot ever diverged (partial write, migration, manual edit),
+    // the bunker would sign as conn.userPubkey while state pointed elsewhere.
+    return conn.userPubkey;
   } catch (e) {
     if (__DEV__) console.warn('[Nostr] NIP-46 connection hydrate failed:', e);
+    // Corrupt blob — clear the nip46 slots so a bad SecureStore state
+    // self-heals on next cold start rather than looping the same bad hydrate.
+    await SecureStore.deleteItemAsync(NIP46_CONNECTION_KEY);
+    await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
+    await nostrConnectService.setActiveConnection(null).catch(() => {});
     return null;
   }
 }

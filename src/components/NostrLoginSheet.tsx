@@ -262,7 +262,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     setMode('nip46-pair');
     setNip46Pairing(true);
     try {
-      const { connection } = await nostrConnectService.awaitBunkerPair({
+      const { signer, connection } = await nostrConnectService.awaitBunkerPair({
         clientSecretKey,
         clientPubkey,
         relay: NIP46_DEFAULT_RELAY,
@@ -270,23 +270,31 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
         perms: NIP46_PERMS,
         name: 'Lightning Piggy',
         maxWaitSeconds: 120,
+        signal: abort.signal,
       });
-      // Bail out if the user dismissed the sheet between scan and ack.
+      // Bail out if the user dismissed the sheet between scan and ack. The
+      // service closes the orphaned signer on abort, so nothing to clean up.
       if (abort.signal.aborted) return;
+      // Adopt the live signer (reuses its open subscription — no second
+      // connect round-trip) now that we're committing to the login.
+      nostrConnectService.adoptPairedSigner(connection, signer);
       const result = await loginWithNip46(connection);
       if (result.success) {
         setNip46Pairing(false);
         onClose();
       } else {
+        // Login failed after adopt — tear down the live subscription so it
+        // doesn't linger under a half-logged-in identity.
+        await nostrConnectService.setActiveConnection(null).catch(() => {});
         setNip46Pairing(false);
-        setError(result.error || 'NIP-46 login failed');
+        setError(result.error || t('nostrLoginSheet.nip46LoginFailed'));
         setMode('login');
       }
     } catch (e) {
       if (abort.signal.aborted) return; // user cancelled — silent
       setNip46Pairing(false);
-      const msg = e instanceof Error ? e.message : 'NIP-46 pairing failed';
-      setError(msg.includes('subscription closed') ? 'Pairing took too long — try again' : msg);
+      const msg = e instanceof Error ? e.message : t('nostrLoginSheet.nip46PairingFailed');
+      setError(msg.includes('subscription closed') ? t('nostrLoginSheet.nip46TookTooLong') : msg);
       setMode('login');
     } finally {
       nip46AbortRef.current = null;
@@ -306,7 +314,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleCopyNip46Uri = async () => {
     if (nip46Uri) {
       await Clipboard.setStringAsync(nip46Uri);
-      Alert.alert('Copied', 'Pairing URI copied. Paste it into your bunker app.');
+      Alert.alert(t('nostrLoginSheet.nip46CopiedTitle'), t('nostrLoginSheet.nip46CopiedMessage'));
     }
   };
 
@@ -409,13 +417,13 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               style={styles.amberButton}
               onPress={handleNip46}
               disabled={isLoggingIn}
-              accessibilityLabel="Use NIP-46 Signer"
+              accessibilityLabel={t('nostrLoginSheet.useNip46A11y')}
               testID="nip46-button"
             >
               <Text style={styles.amberButtonText}>
                 {Platform.OS === 'ios'
-                  ? 'Use NIP-46 Signer (Clave / Aegis / nsec.app)'
-                  : 'Use NIP-46 Signer (Aegis / Nowser / nsec.app)'}
+                  ? t('nostrLoginSheet.useNip46Ios')
+                  : t('nostrLoginSheet.useNip46Android')}
               </Text>
             </TouchableOpacity>
 
@@ -484,13 +492,11 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         {mode === 'nip46-pair' && (
           <>
-            <Text style={styles.title}>Connect via NIP-46</Text>
+            <Text style={styles.title}>{t('nostrLoginSheet.nip46Title')}</Text>
             <Text style={styles.subtitle}>
-              Open your bunker app
               {Platform.OS === 'ios'
-                ? ' (Clave, Aegis, nsec.app)'
-                : ' (Aegis, Nowser, nsec.app)'}{' '}
-              and scan this QR. We'll wait up to 2 minutes for the connection.
+                ? t('nostrLoginSheet.nip46SubtitleIos')
+                : t('nostrLoginSheet.nip46SubtitleAndroid')}
             </Text>
 
             {/* Black-on-white QR for max scan reliability across themes
@@ -504,7 +510,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             {nip46Pairing && (
               <View style={styles.nip46WaitingRow}>
                 <ActivityIndicator color={colors.brandPink} />
-                <Text style={styles.nip46WaitingText}>Waiting for bunker…</Text>
+                <Text style={styles.nip46WaitingText}>{t('nostrLoginSheet.nip46Waiting')}</Text>
               </View>
             )}
 
@@ -513,19 +519,19 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             <TouchableOpacity
               style={styles.copyButton}
               onPress={handleCopyNip46Uri}
-              accessibilityLabel="Copy pairing URI"
+              accessibilityLabel={t('nostrLoginSheet.nip46CopyUri')}
               testID="copy-nip46-uri"
             >
-              <Text style={styles.copyButtonText}>Copy pairing URI</Text>
+              <Text style={styles.copyButtonText}>{t('nostrLoginSheet.nip46CopyUri')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.backLink}
               onPress={handleCancelNip46}
-              accessibilityLabel="Cancel NIP-46 pairing"
+              accessibilityLabel={t('nostrLoginSheet.nip46CancelA11y')}
               testID="cancel-nip46"
             >
-              <Text style={styles.backLinkText}>Cancel</Text>
+              <Text style={styles.backLinkText}>{t('nostrLoginSheet.nip46Cancel')}</Text>
             </TouchableOpacity>
           </>
         )}

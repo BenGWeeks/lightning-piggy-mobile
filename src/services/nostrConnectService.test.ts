@@ -236,8 +236,29 @@ describe('awaitBunkerPair', () => {
       clientSecretKeyHex: '01020304',
       perms: 'sign_event,nip44_decrypt',
     });
-    // The live signer is cached, so a follow-up call reuses it (no new build).
+    // Copilot #1: awaitBunkerPair does NOT mutate module globals — the caller
+    // adopts the live signer explicitly after it has committed to the login.
+    expect(svc.getActiveConnection()).toBeNull();
+    svc.adoptPairedSigner(result.connection, result.signer);
+    // After adopt, a follow-up call reuses the live signer (no fromBunker rebuild).
     await svc.requestPublicKey();
     expect(mockFromBunker).not.toHaveBeenCalled();
+  });
+
+  it('does not cache the signer/connection until the caller adopts it', async () => {
+    const result = await svc.awaitBunkerPair({
+      clientSecretKey: new Uint8Array([9]),
+      clientPubkey: 'clientpub',
+      relay: 'wss://relay.example',
+      secret: 'deadbeef',
+      perms: ['sign_event'],
+      name: 'Lightning Piggy',
+      maxWaitSeconds: 60,
+    });
+    // Globals untouched pre-adopt (a cancelled/failed login must not leave a
+    // live subscription cached under an identity we never logged into).
+    expect(svc.getActiveConnection()).toBeNull();
+    svc.adoptPairedSigner(result.connection, result.signer);
+    expect(svc.getActiveConnection()).toEqual(result.connection);
   });
 });

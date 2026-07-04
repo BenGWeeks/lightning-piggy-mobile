@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { decodeLivePingPayload, type LivePingPayload } from './liveLocationService';
 import { decodeNsec, decryptNip04WithSecret } from './nostrService';
 import * as amberService from './amberService';
+import * as nostrConnectService from './nostrConnectService';
 
 // Receive-side decrypt for kind-20069 live-location pings (#206). Shared by
 // the per-conversation viewer (useConversationLiveLocation) and the
@@ -30,6 +31,12 @@ export async function decryptIncomingLivePing(input: {
       plaintext = await decryptNip04WithSecret(secretKey, input.senderPubkey, input.content);
     } else if (input.signerType === 'amber') {
       plaintext = await amberService.requestNip04Decrypt(
+        input.content,
+        input.senderPubkey,
+        input.viewerPubkey,
+      );
+    } else if (input.signerType === 'nip46') {
+      plaintext = await nostrConnectService.requestNip04Decrypt(
         input.content,
         input.senderPubkey,
         input.viewerPubkey,

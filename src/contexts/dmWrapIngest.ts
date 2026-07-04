@@ -69,7 +69,15 @@ export interface InboxWrapIngestResult {
 const isPermissionNotGranted = (error: unknown): boolean => {
   const code = (error as { code?: string })?.code;
   const message = (error as Error)?.message ?? '';
-  return code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message);
+  return (
+    code === 'PERMISSION_NOT_GRANTED' ||
+    /PERMISSION_NOT_GRANTED/.test(message) ||
+    // NIP-46 bunkers: the service normalises permission rejections to
+    // `NIP-46 signer denied <method>` (nostrConnectService.wrapPermissionError).
+    // Match it so a bunker that denied nip44_decrypt drains-and-stops like
+    // Amber rather than re-trying every wrap on every refresh.
+    /NIP-46 signer denied/i.test(message)
+  );
 };
 
 /**

@@ -39,6 +39,14 @@ import type { Nip46Connection } from '../types/nostr';
  *  connection changes (login / logout / re-pair). */
 let _activeSigner: BunkerSigner | null = null;
 let _activeConnection: Nip46Connection | null = null;
+/** In-flight `getSigner()` connect, memoised so a burst of concurrent
+ *  requests (e.g. the inbox refresh decrypting a batch of wraps in
+ *  parallel right after auto-login, when `_activeSigner` is still null)
+ *  shares ONE `connect()` round-trip instead of each building its own
+ *  BunkerSigner and leaking N-1 relay subscriptions. Cleared whenever the
+ *  active signer is reset (setActiveConnection / adoptPairedSigner) or the
+ *  connect rejects. */
+let _signerPromise: Promise<BunkerSigner> | null = null;
 
 /** Heuristic for "the bunker rejected this method because the user
  *  didn't grant the corresponding perm". Bunker error shapes vary
@@ -96,6 +104,7 @@ export async function setActiveConnection(connection: Nip46Connection | null): P
     }
     _activeSigner = null;
   }
+  _signerPromise = null;
   _activeConnection = connection;
 }
 
@@ -114,32 +123,45 @@ export function getActiveConnection(): Nip46Connection | null {
  */
 async function getSigner(): Promise<BunkerSigner> {
   if (_activeSigner) return _activeSigner;
+  // Coalesce concurrent first-callers onto one connect (see _signerPromise).
+  if (_signerPromise) return _signerPromise;
   if (!_activeConnection) {
     throw new Error('NIP-46 signer not connected');
   }
-  const pointer: BunkerPointer = {
-    pubkey: _activeConnection.remoteSignerPubkey,
-    relays: _activeConnection.relays,
-    secret: null,
-  };
-  const clientSecretKey = hexToBytes(_activeConnection.clientSecretKeyHex);
-  const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
-  // `connect()` is the explicit handshake — it sends a `connect`
-  // request through the relay so the bunker registers this session
-  // before we start firing signEvent / nip44_encrypt at it. Subsequent
-  // requests reuse the subscription opened here.
+  const connection = _activeConnection;
+  _signerPromise = (async () => {
+    const pointer: BunkerPointer = {
+      pubkey: connection.remoteSignerPubkey,
+      relays: connection.relays,
+      secret: null,
+    };
+    const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
+    const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
+    // `connect()` is the explicit handshake — it sends a `connect`
+    // request through the relay so the bunker registers this session
+    // before we start firing signEvent / nip44_encrypt at it. Subsequent
+    // requests reuse the subscription opened here.
+    try {
+      await signer.connect();
+    } catch (e) {
+      // If the bunker can't be reached (relay down, bunker app closed,
+      // user revoked the connection) surface a clear error rather than
+      // letting per-method calls each fail with their own opaque message.
+      throw new Error(
+        `NIP-46 signer could not connect: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    _activeSigner = signer;
+    return signer;
+  })();
   try {
-    await signer.connect();
+    return await _signerPromise;
   } catch (e) {
-    // If the bunker can't be reached (relay down, bunker app closed,
-    // user revoked the connection) surface a clear error rather than
-    // letting per-method calls each fail with their own opaque message.
-    throw new Error(
-      `NIP-46 signer could not connect: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    // Failed connect: drop the memo so the next call retries a fresh
+    // connect rather than re-awaiting the same rejected promise forever.
+    _signerPromise = null;
+    throw e;
   }
-  _activeSigner = signer;
-  return signer;
 }
 
 /**
@@ -286,8 +308,7 @@ export async function requestNip44DecryptSilent(
  *   nostrconnect://<client-pub>?relay=<url>&secret=<hex>&perms=<csv>&name=<urlenc>
  *
  * Multiple `relay=` params can be repeated — we keep one for now
- * (the pairing flow in `NostrLoginSheet` passes `wss://relay.nsec.app`,
- * the relay nsec.app / Aegis-style bunkers listen on by default).
+ * (the caller's default is `wss://relay.nsec.app`; see NostrLoginSheet).
  */
 export function buildPairingUri(input: {
   clientPubkey: string;
@@ -324,6 +345,18 @@ export function buildPairingUri(input: {
  * `maxWaitSeconds` defaults to 120 — enough for a slow user to switch
  * apps, find Clave, scan the QR, and tap Approve. Longer than that we
  * give up and the user can retap the button.
+ *
+ * Pass `signal` to make the wait abortable: cancelling the sheet rejects
+ * the pairing promptly, and if the bunker acks *after* the abort the
+ * orphaned signer is closed so its relay subscription doesn't leak.
+ *
+ * This function deliberately does NOT cache the signer/connection into the
+ * module globals (Copilot review): mutating them before the caller has
+ * persisted the connection + committed to the login would leave a live
+ * subscription cached under an identity the app never logged into (e.g.
+ * the user cancels, or `loginWithNip46` fails, after the ack). The caller
+ * adopts the live signer via `adoptPairedSigner` once it has decided to
+ * proceed — reusing the open subscription without a second `connect()`.
  */
 export async function awaitBunkerPair(input: {
   clientSecretKey: Uint8Array;
@@ -333,6 +366,7 @@ export async function awaitBunkerPair(input: {
   perms: string[];
   name: string;
   maxWaitSeconds?: number;
+  signal?: AbortSignal;
 }): Promise<{ signer: BunkerSigner; connection: Nip46Connection; userPubkey: string }> {
   const uri = buildPairingUri({
     clientPubkey: input.clientPubkey,
@@ -341,13 +375,33 @@ export async function awaitBunkerPair(input: {
     perms: input.perms,
     name: input.name,
   });
+  const { signal } = input;
+  if (signal?.aborted) throw makeAbortError();
   const maxWait = (input.maxWaitSeconds ?? 120) * 1000;
-  const signer = await BunkerSigner.fromURI(input.clientSecretKey, uri, undefined, maxWait);
+
+  // BunkerSigner.fromURI has no AbortSignal input of its own, so race the
+  // pairing promise against the abort. On abort we reject immediately and,
+  // if the bunker acks late, close the orphaned signer rather than leak it.
+  const pairPromise = BunkerSigner.fromURI(input.clientSecretKey, uri, undefined, maxWait);
+  const signer = await raceAbort(pairPromise, signal, (late) => {
+    late.close().catch(() => {});
+  });
+
   // The bunker's pubkey is now in `signer.bp.pubkey`. Resolve the
   // user's signing pubkey too — on multi-account bunkers (nsec.app,
   // etc.) the bunker pubkey and signing pubkey differ, and the
   // signing pubkey is what NostrContext stores as the logged-in user.
-  const userPubkey = await signer.getPublicKey();
+  // getPublicKey is another relay round-trip, so race it against abort
+  // too — a cancel here rejects immediately instead of blocking on it.
+  let userPubkey: string;
+  try {
+    userPubkey = await raceAbort(signer.getPublicKey(), signal, () => {});
+  } catch (e) {
+    // Aborted mid-round-trip (or getPublicKey failed) — close the signer we
+    // opened via fromURI so its subscription doesn't leak.
+    await signer.close().catch(() => {});
+    throw e;
+  }
   const connection: Nip46Connection = {
     remoteSignerPubkey: signer.bp.pubkey,
     userPubkey,
@@ -355,11 +409,73 @@ export async function awaitBunkerPair(input: {
     clientSecretKeyHex: bytesToHexLocal(input.clientSecretKey),
     perms: input.perms.join(','),
   };
-  // Hand the live signer to the cache so the caller doesn't pay a
-  // second `connect()` round-trip on its first signEvent.
+  return { signer, connection, userPubkey };
+}
+
+/**
+ * Adopt a signer that `awaitBunkerPair` already connected, reusing its open
+ * relay subscription so the first signEvent doesn't pay a second `connect()`
+ * round-trip. Closes any previously-active signer. Call this only after the
+ * caller has committed to the login (persisted the connection) — the pairing
+ * helper intentionally leaves the globals untouched until then.
+ */
+export function adoptPairedSigner(connection: Nip46Connection, signer: BunkerSigner): void {
+  if (_activeSigner && _activeSigner !== signer) {
+    _activeSigner.close().catch(() => {});
+  }
+  _signerPromise = null;
   _activeConnection = connection;
   _activeSigner = signer;
-  return { signer, connection, userPubkey };
+}
+
+/**
+ * Hermes has no `DOMException`, so build a plain Error tagged like the DOM
+ * `AbortError` — callers can still branch on `err.name === 'AbortError'`.
+ */
+function makeAbortError(): Error {
+  const e = new Error('NIP-46 pairing aborted');
+  e.name = 'AbortError';
+  return e;
+}
+
+/**
+ * Await `promise`, but reject early if `signal` aborts. If the promise
+ * settles *after* an abort, `onLateResolve` receives the resolved value so
+ * the caller can dispose of it (close the orphaned signer). A late rejection
+ * after abort is swallowed — the abort already rejected the returned promise.
+ */
+function raceAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  onLateResolve: (value: T) => void,
+): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      reject(makeAbortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        if (settled) {
+          onLateResolve(value);
+          return;
+        }
+        settled = true;
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        if (settled) return;
+        settled = true;
+        reject(err);
+      },
+    );
+  });
 }
 
 /**
