@@ -29,11 +29,16 @@ jest.mock('../services/backgroundDmService', () => ({
   syncBackgroundDmWatchFromPreference: jest.fn(),
 }));
 
+// Realistic fixture: the pubkeys + client secret must be 64-char hex — the
+// restore path validates their shape before trusting the blob (isValidNip46Connection).
+const BUNKER_PK = 'b'.repeat(64);
+const USER_PK = 'c'.repeat(64);
+const CLIENT_SK = 'a'.repeat(64);
 const connection = {
-  remoteSignerPubkey: 'bunker',
-  userPubkey: 'user',
+  remoteSignerPubkey: BUNKER_PK,
+  userPubkey: USER_PK,
   relays: ['wss://r'],
-  clientSecretKeyHex: 'aa',
+  clientSecretKeyHex: CLIENT_SK,
   perms: 'sign_event',
 };
 
@@ -41,8 +46,20 @@ beforeEach(() => jest.clearAllMocks());
 
 it('restores the connection and returns conn.userPubkey (the source of truth)', async () => {
   mockGetItemAsync.mockResolvedValueOnce(JSON.stringify(connection)); // NIP46_CONNECTION_KEY
-  await expect(restoreNip46Session()).resolves.toBe('user');
+  await expect(restoreNip46Session()).resolves.toBe(USER_PK);
   expect(mockSetActiveConnection).toHaveBeenCalledWith(connection);
+});
+
+it('self-heals when the blob parses but has an invalid shape (non-hex secret)', async () => {
+  // JSON-parsable but wrong-shape (e.g. a partial / corrupted write) must be
+  // rejected up front rather than installing an all-undefined connection.
+  mockGetItemAsync.mockResolvedValueOnce(JSON.stringify({ clientSecretKeyHex: 'zz' }));
+  await expect(restoreNip46Session()).resolves.toBeNull();
+  // Treated exactly like a corrupt blob: slots cleared + connection released,
+  // and we never adopt the bad object as the active connection.
+  expect(mockSetActiveConnection).not.toHaveBeenCalledWith({ clientSecretKeyHex: 'zz' });
+  expect(mockSetActiveConnection).toHaveBeenCalledWith(null);
+  expect(mockDeleteItemAsync).toHaveBeenCalled();
 });
 
 it('clears the stale signer-type slot and returns null when the connection blob is missing', async () => {
