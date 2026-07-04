@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction } from 'react';
+import { type Dispatch, type RefObject, type SetStateAction } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -31,7 +31,11 @@ import type { NfcTagContent } from '../services/nfcService';
  */
 export function useSendSheetInput(opts: {
   scanned: boolean;
-  pasteText: string;
+  // Ref (not a plain value) holding the freshest paste-field string. The field is
+  // uncontrolled, so its onChangeText writes the native text into this ref
+  // synchronously; reading `.current` at submit time avoids the one-render lag a
+  // `pasteText` value prop would carry (#873 tradeoff mitigation).
+  pasteTextRef: RefObject<string>;
   activePubkey?: string;
   recipientName?: string;
   // Programmatic paste-field setter that bumps the uncontrolled input's remount
@@ -55,7 +59,7 @@ export function useSendSheetInput(opts: {
 } {
   const {
     scanned,
-    pasteText,
+    pasteTextRef,
     activePubkey,
     recipientName,
     applyPasteText,
@@ -186,8 +190,9 @@ export function useSendSheetInput(opts: {
   };
 
   const handlePasteSubmit = () => {
-    if (pasteText.trim()) {
-      processInput(pasteText.trim());
+    const submitted = (pasteTextRef.current ?? '').trim();
+    if (submitted) {
+      processInput(submitted);
     }
   };
 

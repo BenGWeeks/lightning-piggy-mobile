@@ -261,6 +261,18 @@ const SendSheet: React.FC<Props> = ({
   pasteTextRef.current = pasteText;
   const invoiceDataRef = useRef(invoiceData);
   invoiceDataRef.current = invoiceData;
+  // Freshest-value refs for the two uncontrolled inputs. Because the fields are
+  // uncontrolled (`defaultValue`) the native text can momentarily run ahead of
+  // React state under JS-thread load — the accepted tradeoff of the #873 fix. To
+  // stop any *consumer* reading a stale value, onChangeText also writes the
+  // native string into these refs synchronously (below), and the submit paths
+  // (`handlePasteSubmit`, `handleSend`) read the ref, not the state. The
+  // render-time assignments above/here keep the refs correct for *programmatic*
+  // sets (applyPasteText/applyMemo), which don't fire onChangeText. Reading the
+  // ref is therefore never staler than reading state — strictly a belt-and-
+  // suspenders improvement that doesn't reintroduce the keystroke race.
+  const memoRef = useRef(memo);
+  memoRef.current = memo;
 
   // Fix-in-place recovery (#871): return to the paste/input step with the bad
   // value RETAINED (unlike handleReset, which blanks it) so a one-char typo
@@ -317,7 +329,7 @@ const SendSheet: React.FC<Props> = ({
   const { processInput, handleBarCodeScanned, handleNfcContent, handlePaste, handlePasteSubmit } =
     useSendSheetInput({
       scanned,
-      pasteText,
+      pasteTextRef,
       activePubkey,
       recipientName,
       applyPasteText,
@@ -334,6 +346,10 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSend = async () => {
     if (!invoiceData) return;
+    // Read the memo from its ref, not state: the memo field is uncontrolled and
+    // sits right next to the Send button, so a type-then-immediately-Send can
+    // outrun the state flush. The ref is written synchronously in onChangeText.
+    const submittedMemo = memoRef.current;
     // High-value confirmation gate (issue #82). Prompt the user before we
     // touch the abort controller / spinner / progress overlay so a Cancel
     // tap leaves the form exactly as it was. The amount used here matches
@@ -448,7 +464,7 @@ const SendSheet: React.FC<Props> = ({
             const zapRequestJson = await signZapRequest(
               activePubkey,
               currentSats,
-              memo,
+              submittedMemo,
               zapEventId,
             );
             if (zapRequestJson) {
@@ -468,8 +484,8 @@ const SendSheet: React.FC<Props> = ({
         }
 
         // LNURL-pay comment (for non-zap or if server supports comments)
-        if (memo && lnurlParams.commentAllowed > 0) {
-          invoiceOptions.comment = memo.slice(0, lnurlParams.commentAllowed);
+        if (submittedMemo && lnurlParams.commentAllowed > 0) {
+          invoiceOptions.comment = submittedMemo.slice(0, lnurlParams.commentAllowed);
         }
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
@@ -503,7 +519,7 @@ const SendSheet: React.FC<Props> = ({
                   picture: p?.picture ?? activePicture ?? null,
                   nip05: p?.nip05 ?? null,
                 },
-                comment: memo,
+                comment: submittedMemo,
                 anonymous: false,
               };
               await recordOutgoingCounterparty(paymentHash, counterparty);
@@ -524,7 +540,7 @@ const SendSheet: React.FC<Props> = ({
                 addPendingTransaction(walletId, {
                   type: 'outgoing',
                   amount: currentSats,
-                  description: memo || undefined,
+                  description: submittedMemo || undefined,
                   created_at: nowSec,
                   settled_at: nowSec,
                   paymentHash,
@@ -869,7 +885,14 @@ const SendSheet: React.FC<Props> = ({
                       placeholder={t('sendSheet.pastePlaceholder')}
                       placeholderTextColor={colors.textSupplementary}
                       defaultValue={pasteText}
-                      onChangeText={setPasteText}
+                      onChangeText={(v) => {
+                        // Keep the freshest native string in the ref synchronously
+                        // (submit reads the ref, not state) while leaving the state
+                        // setter a bare setPasteText with NO key bump — feeding
+                        // native typing back through a remount is the #873 race.
+                        pasteTextRef.current = v;
+                        setPasteText(v);
+                      }}
                       multiline
                       autoCapitalize="none"
                       autoCorrect={false}
@@ -1002,7 +1025,13 @@ const SendSheet: React.FC<Props> = ({
                       }
                       placeholderTextColor={colors.textSupplementary}
                       defaultValue={memo}
-                      onChangeText={setMemo}
+                      onChangeText={(v) => {
+                        // Same as the paste field: mirror native text into memoRef
+                        // synchronously so handleSend (which sits next to Send and
+                        // can fire before state flushes) reads the freshest value.
+                        memoRef.current = v;
+                        setMemo(v);
+                      }}
                       maxLength={lnurlParams?.commentAllowed || 150}
                       autoCorrect
                       testID="sendsheet-memo-input"
