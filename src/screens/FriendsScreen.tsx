@@ -132,9 +132,28 @@ const ContactRow = React.memo(
     );
   },
   (prev, next) =>
+    // The row's output is a pure function of the `item` fields ContactRow
+    // actually reads to render (id → testID, name, picture, lightningAddress,
+    // hasLightningAddress → showZap, pubkey → canMessage/handleMessage), the
+    // two row-level gates (hasWallets, zapDisabledReason), and the callbacks.
+    // Compare each so a contact whose display data changes under the same id
+    // re-renders instead of showing stale UI. The callbacks/navigation are
+    // stable references (parent memoises them), so comparing them by identity
+    // closes the stale-handler gap without costing the scroll-perf win — they
+    // stay equal frame-to-frame. Fields ListItem carries but this row never
+    // renders (banner, nip05, source) are intentionally omitted: they can't
+    // change the output, so including them would only cause needless re-renders.
     prev.item.id === next.item.id &&
+    prev.item.name === next.item.name &&
+    prev.item.picture === next.item.picture &&
+    prev.item.lightningAddress === next.item.lightningAddress &&
+    prev.item.hasLightningAddress === next.item.hasLightningAddress &&
+    prev.item.pubkey === next.item.pubkey &&
     prev.hasWallets === next.hasWallets &&
-    prev.zapDisabledReason === next.zapDisabledReason,
+    prev.zapDisabledReason === next.zapDisabledReason &&
+    prev.onContactPress === next.onContactPress &&
+    prev.onZapPress === next.onZapPress &&
+    prev.navigation === next.navigation,
 );
 ContactRow.displayName = 'ContactRow';
 
@@ -315,10 +334,13 @@ const FriendsScreen: React.FC = () => {
     }
 
     // Sort by firstAlpha bucket first, then by collator within the bucket —
-    // matches FriendPickerSheet / CreateGroupSheet. Keeps '#' (non-Latin
-    // initials: emoji, symbols, digits) as one contiguous group at the top so
-    // the alphabet sidebar highlight doesn't jump between Z and # during
-    // scroll.
+    // matches FriendPickerSheet / CreateGroupSheet. firstAlpha() buckets a
+    // name by the FIRST A–Z letter found ANYWHERE in it (after NFKD +
+    // uppercase), so a leading emoji/symbol/digit is skipped over to the first
+    // Latin letter (e.g. "🎉Alice" → 'A'). A name lands in '#' only when it
+    // has no A–Z at all (all-emoji, CJK-only, digits/symbols). Keeping '#' as
+    // one contiguous group at the top stops the alphabet sidebar highlight
+    // jumping between Z and # during scroll.
     items.sort((a, b) => {
       const alphaA = firstAlpha(a.name);
       const alphaB = firstAlpha(b.name);
