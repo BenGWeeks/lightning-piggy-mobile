@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import { createGroupFileRumor } from '../services/nostrFileMessage';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
@@ -162,6 +163,47 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           return { success: true, wrapsPublished: result.wrapsPublished };
         }
 
+        if (signerType === 'nip46') {
+          // NIP-46 group send. Mirrors the Amber path's shape exactly —
+          // including the partial-send-as-failure semantics — but routes
+          // per-recipient nip44_encrypt + seal-sign calls through the
+          // bunker instead of an Android Intent. Each recipient costs 2
+          // bunker round-trips, so a large group can take several
+          // seconds; the composer shows a spinner while this runs.
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: input.memberPubkeys,
+            relays: targetRelays,
+            signerNip44Encrypt: (plaintext, recipientPubkey) =>
+              nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              wrapsPublished: result.wrapsPublished,
+              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+            };
+          }
+          return { success: true, wrapsPublished: result.wrapsPublished };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send group message';
@@ -209,6 +251,21 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           );
           if (!signedEventJson) {
             return { success: false, error: 'Amber returned empty event' };
+          }
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+          return { success: true };
+        }
+
+        if (signerType === 'nip46') {
+          // Single signEvent — one bunker round-trip, no fan-out.
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) {
+            return { success: false, error: 'NIP-46 signer returned empty event' };
           }
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);

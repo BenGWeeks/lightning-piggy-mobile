@@ -57,6 +57,14 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## Signers
+
+The app supports three Nostr signers, branched on `signerType` in `NostrContext.tsx`:
+
+- `nsec` — local key (`src/services/nostrService.ts`)
+- `amber` (NIP-55) — Android only via Intent IPC (`src/services/amberService.ts`)
+- `nip46` (NIP-46 / "Nostr Connect") — cross-platform, relay-based; works with Clave (iOS), Aegis, nsec.app (`src/services/nostrConnectService.ts`). See `docs/nip46-clave.adoc` for the pairing flow + the silent-decrypt batch trade-off.
+
 ## File size and modularity
 
 - **Aim for elegant, well-organised code — the line cap is a symptom, not the goal.** When a file is too big, the fix is to find the *right* seams and give each module a single, nameable responsibility, NOT to shuffle lines around until the number drops. A split is only worth doing if the result reads better than the original: a reviewer should be able to say what each new file is *for* in one phrase (presentation / pure data-shaping / one sub-view / one set of actions). If an extraction doesn't make the code clearer, it's line-golf — don't do it. Getting under 1,000 lines should fall out of organising the code well.

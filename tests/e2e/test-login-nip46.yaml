@@ -1,0 +1,82 @@
+appId: com.lightningpiggy.app.dev
+name: Nostr Login via NIP-46 (Nostr Connect / bunker)
+---
+# Tests reaching the NIP-46 pairing screen in Lightning Piggy. The
+# actual scan + bunker ack happens in another app (Clave / Aegis /
+# nsec.app), which Maestro can't drive end-to-end yet — this scaffold
+# exercises everything up to and including the QR being rendered.
+#
+# To extend to a full pair: stand up a desktop bunker (e.g.
+# `nostr-tools-cli connect`), scrape the URI from the QR via
+# `assertVisible` + screenshot OCR, paste it into the bunker, then
+# `extendedWaitUntil` for the post-pair logged-in state.
+#
+# Run: maestro test tests/e2e/test-login-nip46.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open the account drawer
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Sign out first if already logged in, to make this script idempotent.
+- tapOn:
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    text: 'Sign Out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Re-open drawer → Profile
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Open the Nostr login sheet
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap "Use NIP-46 Signer (Clave / nsec.app)" — this generates the per-
+# app keypair, builds the nostrconnect:// URI, and renders the QR.
+- tapOn:
+    id: 'nip46-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# We should now be on the pairing screen. Verify the cancel button is
+# reachable (which means the QR rendered + the BunkerSigner.fromURI
+# subscription is open and waiting).
+- assertVisible:
+    id: 'cancel-nip46'
+- assertVisible:
+    id: 'copy-nip46-uri'
+
+# Tap Cancel — proves the abort path works without leaking the
+# subscription. Without a desktop bunker on standby we can't drive
+# the actual pair completion in CI.
+- tapOn:
+    id: 'cancel-nip46'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Back on the login mode — the original nsec input should be visible
+# again. (Idempotency: rerunning this test from any state should land
+# us here.)
+- assertVisible:
+    id: 'nsec-input'

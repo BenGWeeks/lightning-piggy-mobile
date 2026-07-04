@@ -2,6 +2,7 @@ import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -254,6 +255,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             );
           } else if (activeSigner === 'amber') {
             plaintext = await amberService.requestNip04Decrypt(
+              ev.content,
+              partnerPubkey,
+              viewerPubkey,
+            );
+          } else if (activeSigner === 'nip46') {
+            plaintext = await nostrConnectService.requestNip04Decrypt(
               ev.content,
               partnerPubkey,
               viewerPubkey,
@@ -525,6 +532,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           return;
         }
         if (__DEV__) console.warn('[Nostr] live Amber NIP-17 unwrap failed:', error);
+        return;
+      }
+    } else if (activeSigner === 'nip46') {
+      // NIP-46 live unwrap. No silent-batch path (the silent variant
+      // throws), so use the plain per-wrap decrypt over the bunker.
+      // No PERMISSION_NOT_GRANTED concept, so no permission flag flip.
+      try {
+        rumor = await unwrapWrapViaNip44(
+          wrap,
+          (ct, cp) => nostrConnectService.requestNip44Decrypt(ct, cp, viewerPubkey),
+          onSkip,
+        );
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] live NIP-46 NIP-17 unwrap failed:', error);
         return;
       }
     }

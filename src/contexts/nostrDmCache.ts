@@ -35,6 +35,7 @@ export const AMBER_NIP17_ENABLED_KEY_LEGACY = 'amber_nip17_enabled';
 // Cap matches the positive cache to prevent unbounded growth.
 export const NSEC_NIP17_SKIP_KEY_BASE = 'nsec_nip17_skip_v1';
 export const AMBER_NIP17_SKIP_KEY_BASE = 'amber_nip17_skip_v1';
+export const NIP46_NIP17_SKIP_KEY_BASE = 'nip46_nip17_skip_v1';
 export const NIP17_SKIP_CAP = 50_000;
 
 /** Load and parse the skip-set from its file, returning an empty Set on

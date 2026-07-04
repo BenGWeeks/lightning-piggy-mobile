@@ -6,6 +6,7 @@ import {
   NSEC_NIP17_CACHE_KEY_BASE,
   AMBER_NIP17_SKIP_KEY_BASE,
   NSEC_NIP17_SKIP_KEY_BASE,
+  NIP46_NIP17_SKIP_KEY_BASE,
   wrapCacheFileName,
 } from './nostrDmCache';
 import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
@@ -33,6 +34,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
     NSEC_NIP17_CACHE_KEY_BASE,
     AMBER_NIP17_SKIP_KEY_BASE,
     NSEC_NIP17_SKIP_KEY_BASE,
+    NIP46_NIP17_SKIP_KEY_BASE,
   ]) {
     try {
       const f = new File(Paths.document, wrapCacheFileName(perAccountKey(base, pubkey)));
