@@ -45,6 +45,7 @@ import {
   mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
+import { useStableRowIdentity } from '../utils/stableRowIdentity';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
 // __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
 // runtime in a release build (the module may still be present in the bundle).
@@ -501,11 +502,18 @@ const MessagesScreen: React.FC = () => {
     if (!showZapCounterparties) return null;
     return buildConversationSummaries(wallets, deferredContacts);
   }, [wallets, deferredContacts, showZapCounterparties]);
-  const conversationSummaries = useMemo(() => {
+  const mergedSummaries = useMemo(() => {
     // #147: by default the inbox shows DMs only — zap-only counterparties (rows derived purely from wallet zap history with no decoded NIP-04/NIP-17 message) are hidden. The "Show zap counterparties" chip re-unions them when the user opts in.
     if (!zapSummaries) return dmSummaries;
     return mergeSummaries(zapSummaries, dmSummaries);
   }, [dmSummaries, zapSummaries]);
+  // Identity-stabilise the rows across contact/profile churn (#854): while a
+  // cold-start fetchProfiles stream is landing, every profile batch rebuilds
+  // the summaries with all-new object references, defeating ConversationRow's
+  // React.memo for every visible row on every batch — the list-wide re-render
+  // thrash behind the blank-cells-while-scrolling symptom. Value-identical
+  // rows keep their previous reference so memo'd rows bail out.
+  const conversationSummaries = useStableRowIdentity(mergedSummaries);
 
   // The trust gate is on by default (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
