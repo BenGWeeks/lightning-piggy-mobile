@@ -2,10 +2,10 @@
 // but never indexed OR read, so a crash mid-swap stranded the on-chain funds
 // with no UI. These tests cover the index + recovery branch, and the funding
 // gate that stops the "needs attention / contact Boltz" alert from nagging for
-// swaps that were created but never funded (nothing to recover).
+// swaps that were created but never funded (nothing to recover) — while never
+// retiring a genuinely funded swap on a transient Boltz/network failure.
 const mockStore = new Map<string, string>();
 const mockFetchWithTimeout = jest.fn();
-const mockGetSubmarineSwapLockup = jest.fn();
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn((k: string) => Promise.resolve(mockStore.get(k) ?? null)),
@@ -21,7 +21,6 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('./boltzService', () => ({
   claimSwap: jest.fn(),
   fetchWithTimeout: (...a: unknown[]) => mockFetchWithTimeout(...a),
-  getSubmarineSwapLockup: (...a: unknown[]) => mockGetSubmarineSwapLockup(...a),
 }));
 jest.mock('../components/BrandedToast', () => ({
   __esModule: true,
@@ -30,6 +29,7 @@ jest.mock('../components/BrandedToast', () => ({
 jest.mock('../utils/lockupTx', () => ({ extractLockupFromTxHex: jest.fn() }));
 
 import Toast from '../components/BrandedToast';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
 import {
   recoverPendingSwaps,
   registerPendingSubmarineSwap,
@@ -38,12 +38,10 @@ import {
 } from './swapRecoveryService';
 
 const mockToastShow = Toast.show as jest.Mock;
+const mockExtractLockup = extractLockupFromTxHex as jest.Mock;
 
 const SWAP_ID = 's-swap-1';
 const KEY = `submarine_swap_${SWAP_ID}`;
-
-// A lockup the funding gate treats as "funds locked on-chain".
-const FUNDED_LOCKUP = { txId: 'aa'.repeat(32), vout: 0, amount: 50_000 };
 
 function seed(over: Partial<PersistedSubmarineSwap> = {}): void {
   mockStore.set(
@@ -62,25 +60,43 @@ function seed(over: Partial<PersistedSubmarineSwap> = {}): void {
   );
 }
 
-const status = (s: string) =>
-  Promise.resolve({
+// The recovery pass hits two endpoints per submarine swap: the main status
+// (`/swap/{id}`) and — on a failure — the lockup-transaction probe
+// (`/swap/submarine/{id}/transaction`). Route by URL so each test can set the
+// status and the funding outcome independently.
+const mainStatus = (s: string) =>
+  ({ ok: true, status: 200, json: () => Promise.resolve({ status: s }) }) as unknown as Response;
+const lockupFound = () =>
+  ({
     ok: true,
     status: 200,
-    json: () => Promise.resolve({ status: s }),
-  } as unknown as Response);
+    json: () => Promise.resolve({ id: 'lock-tx', hex: 'deadbeef' }),
+  }) as unknown as Response;
+const httpErr = (code: number) =>
+  ({ ok: false, status: code, json: () => Promise.resolve({}) }) as unknown as Response;
+
+/** Wire fetch: main endpoint → `status`; the lockup probe → `probe`. */
+function route(status: string, probe: () => Response = lockupFound): void {
+  mockFetchWithTimeout.mockImplementation((url: string) =>
+    Promise.resolve(url.includes('/transaction') ? probe() : mainStatus(status)),
+  );
+}
 
 beforeEach(async () => {
   jest.clearAllMocks();
   mockStore.clear();
   setSubmarineRefundHandler(null);
-  // Default: funds ARE locked on-chain, so the funding gate lets the fail
-  // branch proceed. Tests exercising the unfunded path override this to null.
-  mockGetSubmarineSwapLockup.mockResolvedValue(FUNDED_LOCKUP);
+  // Default: a lockup output is parseable ⇒ the probe reads "funded". Tests
+  // exercising the unfunded/indeterminate paths override the probe response.
+  mockExtractLockup.mockReturnValue({ vout: 0, amount: 50_000 });
   // Empty the reverse index so runRecoveryPass reaches the submarine branch.
   mockStore.set('boltz_swap_index', JSON.stringify([]));
   seed();
   await registerPendingSubmarineSwap(SWAP_ID);
 });
+
+const attentionToasts = () =>
+  mockToastShow.mock.calls.filter((c) => c[0]?.text1 === 'Swap needs attention');
 
 describe('submarine swap recovery', () => {
   it('registers submarine swaps in their own index', async () => {
@@ -90,7 +106,7 @@ describe('submarine swap recovery', () => {
   it('invokes the refund handler on a funded terminal failure and keeps the record', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     setSubmarineRefundHandler(handler);
-    mockFetchWithTimeout.mockImplementation(() => status('invoice.failedToPay'));
+    route('invoice.failedToPay');
 
     await recoverPendingSwaps();
 
@@ -103,7 +119,7 @@ describe('submarine swap recovery', () => {
   it('re-surfaces the interactive refund prompt on every pass (not once-only)', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     setSubmarineRefundHandler(handler);
-    mockFetchWithTimeout.mockImplementation(() => status('invoice.failedToPay'));
+    route('invoice.failedToPay');
 
     await recoverPendingSwaps();
     await recoverPendingSwaps();
@@ -112,7 +128,7 @@ describe('submarine swap recovery', () => {
   });
 
   it('cleans up on a terminal success', async () => {
-    mockFetchWithTimeout.mockImplementation(() => status('invoice.settled'));
+    route('invoice.settled');
     await recoverPendingSwaps();
     expect(mockStore.has(KEY)).toBe(false);
     expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
@@ -121,7 +137,7 @@ describe('submarine swap recovery', () => {
   it('leaves a still-pending swap untouched', async () => {
     const handler = jest.fn();
     setSubmarineRefundHandler(handler);
-    mockFetchWithTimeout.mockImplementation(() => status('transaction.mempool'));
+    route('transaction.mempool');
     await recoverPendingSwaps();
     expect(handler).not.toHaveBeenCalled();
     expect(mockStore.has(KEY)).toBe(true);
@@ -131,9 +147,8 @@ describe('submarine swap recovery', () => {
     it('retires an unfunded expired swap silently — no handler, no toast, record removed', async () => {
       const handler = jest.fn();
       setSubmarineRefundHandler(handler);
-      // No on-chain lockup was ever made — nothing to recover.
-      mockGetSubmarineSwapLockup.mockResolvedValue(null);
-      mockFetchWithTimeout.mockImplementation(() => status('swap.expired'));
+      // The lockup probe 404s ⇒ Boltz has no lockup tx ⇒ never funded.
+      route('swap.expired', () => httpErr(404));
 
       await recoverPendingSwaps();
 
@@ -143,21 +158,41 @@ describe('submarine swap recovery', () => {
       expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
     });
 
-    it('retires an unfunded swap silently even when the lockup lookup throws', async () => {
-      mockGetSubmarineSwapLockup.mockRejectedValue(new Error('network'));
-      mockFetchWithTimeout.mockImplementation(() => status('swap.expired'));
+    it('DEFERS (keeps the record, no toast) when the probe fails transiently — 5xx', async () => {
+      const handler = jest.fn();
+      setSubmarineRefundHandler(handler);
+      // A 500 must NOT be read as unfunded — that would delete refund material.
+      route('swap.expired', () => httpErr(500));
+
+      await recoverPendingSwaps();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockToastShow).not.toHaveBeenCalled();
+      expect(mockStore.has(KEY)).toBe(true);
+      expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([SWAP_ID]);
+    });
+
+    it('DEFERS when the probe throws (network error) — record survives', async () => {
+      mockFetchWithTimeout.mockImplementation((url: string) =>
+        url.includes('/transaction')
+          ? Promise.reject(new Error('network'))
+          : Promise.resolve(mainStatus('swap.expired')),
+      );
 
       await recoverPendingSwaps();
 
       expect(mockToastShow).not.toHaveBeenCalled();
-      expect(mockStore.has(KEY)).toBe(false);
+      expect(mockStore.has(KEY)).toBe(true);
     });
 
-    it('retires a refunded swap silently (already resolved on-chain)', async () => {
-      mockFetchWithTimeout.mockImplementation(() => status('transaction.refunded'));
-      // transaction.refunded is short-circuited before the lockup lookup.
+    it('retires a refunded swap silently (already resolved on-chain), without probing', async () => {
+      route('transaction.refunded');
       await recoverPendingSwaps();
-      expect(mockGetSubmarineSwapLockup).not.toHaveBeenCalled();
+      // transaction.refunded is short-circuited before the lockup probe.
+      const probed = mockFetchWithTimeout.mock.calls.some((c) =>
+        String(c[0]).includes('/transaction'),
+      );
+      expect(probed).toBe(false);
       expect(mockStore.has(KEY)).toBe(false);
       expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
     });
@@ -171,29 +206,23 @@ describe('submarine swap recovery', () => {
     });
 
     it('alerts exactly once and keeps the record', async () => {
-      mockFetchWithTimeout.mockImplementation(() => status('invoice.failedToPay'));
+      route('invoice.failedToPay');
 
       await recoverPendingSwaps();
 
-      const attentionCalls = mockToastShow.mock.calls.filter(
-        (c) => c[0]?.text1 === 'Swap needs attention',
-      );
-      expect(attentionCalls).toHaveLength(1);
+      expect(attentionToasts()).toHaveLength(1);
       expect(mockStore.has(KEY)).toBe(true);
       const persisted = JSON.parse(mockStore.get(KEY)!) as PersistedSubmarineSwap;
       expect(persisted.notifiedUnrecoverable).toBe(true);
     });
 
     it('does not re-alert on a second recovery pass', async () => {
-      mockFetchWithTimeout.mockImplementation(() => status('invoice.failedToPay'));
+      route('invoice.failedToPay');
 
       await recoverPendingSwaps();
       await recoverPendingSwaps();
 
-      const attentionCalls = mockToastShow.mock.calls.filter(
-        (c) => c[0]?.text1 === 'Swap needs attention',
-      );
-      expect(attentionCalls).toHaveLength(1);
+      expect(attentionToasts()).toHaveLength(1);
       expect(mockStore.has(KEY)).toBe(true);
     });
   });
