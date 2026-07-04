@@ -594,13 +594,13 @@ const ReceiveSheet: React.FC<Props> = ({
                             key={w.id}
                             testID={`receive-wallet-option-${w.id}`}
                             accessibilityRole="button"
-                            accessibilityState={{ selected: capturedWalletId === w.id }}
+                            accessibilityState={{ selected: selectedWalletId === w.id }}
                             accessibilityLabel={t('receiveSheet.selectWalletA11y', {
                               wallet: walletLabel(w),
                             })}
                             style={[
                               styles.walletDropdownItem,
-                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                              selectedWalletId === w.id && styles.walletDropdownItemActive,
                             ]}
                             onPress={() => {
                               setCapturedWalletId(w.id);
@@ -610,7 +610,7 @@ const ReceiveSheet: React.FC<Props> = ({
                             <Text
                               style={[
                                 styles.walletDropdownItemText,
-                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                                selectedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
                             >
                               {walletLabel(w)}

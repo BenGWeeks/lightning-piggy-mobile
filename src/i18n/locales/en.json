@@ -1515,7 +1515,7 @@
     "receive": "Receive",
     "to": "To:",
     "toWallet": "To: {{wallet}}",
-    "selectWalletA11y": "{{wallet}}, receive to this wallet",
+    "selectWalletA11y": "{{wallet}}, receive into this wallet",
     "enterAmountForQr": "Enter an amount to generate QR code",
     "noLightningAddress": "No lightning address set",
     "enterAmountForInvoice": "Enter an amount to generate invoice",
