@@ -1,4 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { InteractionManager } from 'react-native';
+
+import { perAccountKey } from '../services/perAccountStorage';
+import type { NostrProfile } from '../types/nostr';
 
 // Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
 // at every call site (#288). The legacy un-suffixed keys are migrated on
@@ -47,4 +51,29 @@ export async function readCachedWithTtl<T>(
   } catch {
     return { value: null, ageMs: Infinity };
   }
+}
+
+/**
+ * Merge freshly-fetched profiles on top of the existing on-disk profile
+ * cache (so contacts we didn't refetch keep their known profile) and bump
+ * the cache timestamp. Deferred behind InteractionManager so the writes
+ * don't compete with an in-progress render/gesture.
+ */
+export function persistMergedProfileCache(
+  pk: string,
+  existing: Record<string, NostrProfile>,
+  fetched: Map<string, NostrProfile>,
+): void {
+  InteractionManager.runAfterInteractions(() => {
+    const merged: Record<string, NostrProfile> = { ...existing };
+    fetched.forEach((v, k) => {
+      merged[k] = v;
+    });
+    AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)).catch(
+      () => {},
+    );
+    AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()).catch(
+      () => {},
+    );
+  });
 }
