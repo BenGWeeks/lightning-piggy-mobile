@@ -664,7 +664,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         kind: 'dm',
         threadId: partnership.partnerPubkey,
         title: 'New message',
-        body: rumor.content,
+        // Use the already-redacted preview, not raw `rumor.content`: a
+        // structured rumor (order JSON, or an NWC wallet-share bearer
+        // connection string) must never surface its payload in a push body.
+        body: inboxEntry.text,
         data: { conversationPubkey: partnership.partnerPubkey },
       });
     }

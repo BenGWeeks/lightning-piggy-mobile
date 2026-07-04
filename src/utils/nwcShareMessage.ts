@@ -60,8 +60,11 @@ export function isNwcConnectionUrl(url: string): boolean {
  * as `undefined` rather than an empty string.
  */
 export function serializeNwcShare(card: NwcShareCard): string {
+  // Normalise both fields so the stored/echoed JSON is deterministic and
+  // `parseNwcShare(serializeNwcShare(card))` round-trips byte-for-byte.
+  const nwcUrl = card.nwcUrl.trim();
   const name = card.walletName?.trim();
-  return JSON.stringify(name ? { nwcUrl: card.nwcUrl, walletName: name } : { nwcUrl: card.nwcUrl });
+  return JSON.stringify(name ? { nwcUrl, walletName: name } : { nwcUrl });
 }
 
 /**
