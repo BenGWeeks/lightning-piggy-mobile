@@ -43,6 +43,8 @@ import {
   Share,
   ActivityIndicator,
   BackHandler,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
@@ -112,9 +114,36 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   // `handleSheetChange` / `enablePanDownToClose` below for why (#92).
   const swapInFlight = creating || swap !== null;
   // Mirror into a ref so the (stable) sheet-change callback always reads the
-  // current value without being re-created on every render.
+  // current value without being re-created on every render. `handleConfirmAmount`
+  // also sets this synchronously *before* its state updates so there's no
+  // render-timing window where the sheet-change callback reads a stale `false`
+  // mid-create (#92).
   const swapInFlightRef = useRef(false);
   swapInFlightRef.current = swapInFlight;
+
+  // Track soft-keyboard visibility. A keyboard show/hide resize can momentarily
+  // collapse a dynamically-sized gorhom sheet to snap index -1 — e.g. a residual
+  // keyboard from the previously-open sheet animating away as this one presents.
+  // That collapse must NOT be mistaken for a deliberate dismiss (see
+  // `handleSheetChange`). Seeded from the live keyboard state because the
+  // keyboard may already be up when this sheet mounts (its `keyboardDidShow`
+  // having fired before our listener attached).
+  const keyboardVisibleRef = useRef(Keyboard.isVisible());
+  useEffect(() => {
+    keyboardVisibleRef.current = Keyboard.isVisible();
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      keyboardVisibleRef.current = true;
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      keyboardVisibleRef.current = false;
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Reset / present the sheet when `visible` flips. Mirrors ReceiveSheet.
   useEffect(() => {
@@ -251,6 +280,12 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const handleConfirmAmount = useCallback(
     async (sats: number) => {
       if (!walletId || !wallet) return;
+      // Mark the flow in-flight *synchronously*, before the state updates below
+      // schedule a re-render. `swapInFlightRef` is otherwise refreshed only
+      // during render, so without this there's a brief window where a stray
+      // gorhom collapse to -1 (keyboard/resize timing) would be read as "not in
+      // flight" and dismiss the sheet mid-create, losing the lockup QR (#92).
+      swapInFlightRef.current = true;
       setAmountSats(sats);
       setStep('qr');
       setCreating(true);
@@ -392,17 +427,24 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      // Only a genuine, user-initiated collapse should close the sheet.
-      // While a swap is being created or is awaiting/processing the on-chain
-      // payment we must keep the lockup-QR + status view mounted: an
-      // incidental gorhom collapse to -1 (e.g. the keyboard blurring as we
-      // leave the amount step while the multi-second NWC/Boltz round-trip is
-      // in flight, combined with the dynamic-content resize) would otherwise
-      // tear the sheet down, unmount it (`if (!visible) return null`) and
-      // lose the address the external sender still needs to pay. The user
-      // leaves this view only via the explicit Cancel/Done/Close control,
-      // which drives `onClose` directly (#92).
-      if (index === -1 && !swapInFlightRef.current) onClose();
+      // Close ONLY on a deliberate, user-initiated collapse. Two incidental
+      // sources of `index === -1` must be ignored, or the sheet unmounts
+      // (`if (!visible) return null`) and the external sender loses the lockup
+      // address they still need to pay (#92):
+      //   1. A swap in flight — the create round-trip, or a live swap awaiting/
+      //      processing the on-chain payment. Guarded via `swapInFlightRef`,
+      //      which `handleConfirmAmount` now sets synchronously so there's no
+      //      render-timing window right after the user confirms an amount.
+      //   2. A soft-keyboard show/hide resize — dynamic content sizing can
+      //      momentarily collapse the sheet to -1 while the keyboard (or a
+      //      residual one from the previously-open sheet) animates. This is the
+      //      "closes on open" race on the amount step, where no swap exists yet.
+      // Deliberate closes go through the explicit Back/Cancel/Done/Close
+      // controls (which call `onClose` directly) or a genuine pan-down/backdrop
+      // tap taken while neither guard is active.
+      if (index === -1 && !swapInFlightRef.current && !keyboardVisibleRef.current) {
+        onClose();
+      }
     },
     [onClose],
   );

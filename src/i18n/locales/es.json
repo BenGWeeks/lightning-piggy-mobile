@@ -1538,7 +1538,7 @@
     "enterAnAmount": "Introduce un importe",
     "sendInvoiceToFriend": "Enviar factura a un amigo",
     "friendPickerSubtitle": "Recibirán un mensaje privado cifrado de Nostr con un botón de Pagar.",
-    "receiveOnchainBoltz": "Recibir on-chain (vía swap de Boltz)  ₿",
+    "receiveOnchainBoltz": "Recibir on-chain (vía swap de Boltz) ₿",
     "receiveOnchainBoltzA11y": "Recibir on-chain vía swap de Boltz"
   },
   "renameGroupSheet": {
