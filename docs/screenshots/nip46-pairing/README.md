@@ -24,7 +24,8 @@ untranslated English inside an otherwise-Spanish UI).
 
 - `ios-01-login-sheet.png` — the Connect Nostr sheet on iOS with the Clave-first NIP-46 button.
 - `ios-02-pairing-qr.png` — the "Connect via NIP-46" QR screen ("Open your bunker app
-  (Clave, Aegis, nsec.app) and scan this QR…"), `nostrconnect://` QR + "Waiting for bunker…".
+  (Clave, Aegis, nsec.app) and scan this QR…"), `nostrconnect://` QR + "Waiting for bunker…",
+  with the **"Open in bunker app"** button (same-device deep-link hand-off) above Copy/Cancel.
 - `ios-03-pairing-timeout.png` — the localized "Pairing took too long — try again" error.
 
 ### iOS test outcome
