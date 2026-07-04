@@ -723,7 +723,12 @@ const ConversationScreen: React.FC = () => {
             wrapper, animated paddingBottom, and attach-panel placement
             can't drift again the way they did between v22 and v26. */}
         {isPeerTyping && (
-          <Text style={styles.typingIndicator} testID="peer-typing-indicator">
+          <Text
+            style={styles.typingIndicator}
+            testID="peer-typing-indicator"
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={t('conversationScreen.typing')}
+          >
             {t('conversationScreen.typing')}
           </Text>
         )}

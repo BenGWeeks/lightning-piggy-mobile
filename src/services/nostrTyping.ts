@@ -66,7 +66,9 @@ export async function publishTypingIndicator(input: {
 
 /**
  * Subscribe to typing events the peer sends *to me*. Calls `onTyping` for each
- * one. `since: now` so we don't replay stale pings on (re)subscribe. Returns an
+ * one. `since` is `now - TYPING_SINCE_LOOKBACK_SECONDS` — a small lookback so a
+ * sender-clock skew doesn't drop a live ping, without replaying stale ones
+ * (ephemeral events aren't stored, so there's nothing to replay). Returns an
  * unsubscribe function.
  */
 export function subscribeTyping(input: {
