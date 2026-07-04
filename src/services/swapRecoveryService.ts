@@ -471,6 +471,11 @@ export interface PersistedSubmarineSwap {
   sourceWalletId?: string;
   createdAt?: number;
   notFoundCount?: number;
+  /** Set once we've surfaced the funded-but-unrecoverable "needs attention"
+   *  alert for this swap, so it isn't re-shown on every recovery pass / app
+   *  resume. Only ever set for swaps whose on-chain funds were confirmed
+   *  locked (see the funding gate in `recoverSubmarineSwaps`). */
+  notifiedUnrecoverable?: boolean;
 }
 
 // The refund path needs BDK (a fresh on-chain address) + a branded prompt —
@@ -780,22 +785,66 @@ async function recoverSubmarineSwaps(): Promise<void> {
         continue;
       }
       if (SUBMARINE_FAIL_STATUSES.has(status)) {
-        console.warn(`[SwapRecovery] Submarine swap ${swapId} failed (${status}) — refund path`);
-        if (submarineRefundHandler) {
-          // The handler surfaces the refund prompt; it owns record deletion
-          // once the refund is broadcast. Leave the record + index entry so a
-          // dismissed prompt re-surfaces on the next pass.
+        // `transaction.refunded` is already resolved on-chain — the funds are
+        // back in the user's wallet. Retire the record silently.
+        if (status === 'transaction.refunded') {
+          await SecureStore.deleteItemAsync(`submarine_swap_${swapId}`);
+          await unregisterPendingSubmarineSwap(swapId);
+          continue;
+        }
+
+        // Funding gate: a failed submarine swap only warrants recovery — or a
+        // "needs attention" alert — if funds were actually locked on-chain.
+        // Swaps that were created but never funded (a lockup address was
+        // reserved, then the user abandoned the receive, or an expired test
+        // swap) have nothing to recover, so telling the user to "contact
+        // Boltz support" is misleading noise — and it re-fired on every
+        // recovery pass / app resume. The lockup-transaction endpoint is
+        // authoritative: no lockup tx ⇒ never funded ⇒ retire silently.
+        let lockup: Awaited<ReturnType<typeof boltzService.getSubmarineSwapLockup>> = null;
+        try {
+          lockup = await boltzService.getSubmarineSwapLockup(swapId, swap.address);
+        } catch (e) {
+          console.warn(`[SwapRecovery] Submarine lockup lookup failed for ${swapId}:`, e);
+        }
+        if (!lockup) {
+          console.log(
+            `[SwapRecovery] Submarine swap ${swapId} failed (${status}) but was never funded — retiring silently`,
+          );
+          await SecureStore.deleteItemAsync(`submarine_swap_${swapId}`);
+          await unregisterPendingSubmarineSwap(swapId);
+          continue;
+        }
+
+        console.warn(
+          `[SwapRecovery] Submarine swap ${swapId} failed (${status}) with on-chain lockup — refund path`,
+        );
+        const refundable = !!(swap.swapTree && swap.sourceWalletId);
+        if (refundable && submarineRefundHandler) {
+          // Funded + refundable: the handler surfaces the interactive refund
+          // prompt; it owns record deletion once the refund is broadcast.
+          // Leave the record + index entry so a dismissed prompt re-surfaces
+          // on the next pass (this interactive prompt is intentionally NOT
+          // once-only — the user must act on it).
           await submarineRefundHandler(swap).catch((e) =>
             console.warn(`[SwapRecovery] Submarine refund handler failed for ${swapId}:`, e),
           );
-        } else {
+        } else if (!swap.notifiedUnrecoverable) {
+          // Funded but we can't auto-refund it (older record missing the
+          // refund material, or no handler registered). This genuinely needs
+          // manual action — but alert ONCE, not on every pass. Persist the
+          // acknowledged flag so a stuck swap surfaces a single time.
           Toast.show({
             type: 'error',
             text1: 'Swap needs attention',
-            text2: 'A pending on-chain→Lightning swap failed. Reopen the app to recover it.',
+            text2: `A pending swap (${swapId.slice(0, 8)}…) with on-chain funds couldn't be auto-refunded. Contact Boltz support with this ID.`,
             position: 'top',
-            visibilityTime: 10000,
+            visibilityTime: 12000,
           });
+          await SecureStore.setItemAsync(
+            `submarine_swap_${swapId}`,
+            JSON.stringify({ ...swap, notFoundCount: undefined, notifiedUnrecoverable: true }),
+          );
         }
         continue;
       }
