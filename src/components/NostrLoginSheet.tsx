@@ -73,6 +73,12 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [creating, setCreating] = useState(false);
   const [nip46Uri, setNip46Uri] = useState<string | null>(null);
   const [nip46Pairing, setNip46Pairing] = useState(false);
+  /** True once the bunker has acked and we're finalising the login
+   *  (adopt signer → loginWithNip46). Cancel is hidden in this window: the
+   *  flow has committed and `loginWithNip46` already mutates NostrContext
+   *  state, so a late Cancel can't cleanly roll it back — better to prevent
+   *  it than to race it (Copilot review). */
+  const [nip46Finalizing, setNip46Finalizing] = useState(false);
   /** Abort signal for an in-flight bunker pairing — set so dismissing
    *  the sheet (or tapping Cancel) aborts the BunkerSigner.fromURI
    *  promise instead of leaving a relay subscription hanging. */
@@ -88,6 +94,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       setGeneratedNsec('');
       setNip46Uri(null);
       setNip46Pairing(false);
+      setNip46Finalizing(false);
       setError(null);
       sheetRef.current?.present();
     } else {
@@ -276,6 +283,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       // Bail out if the user dismissed the sheet between scan and ack. The
       // service closes the orphaned signer on abort, so nothing to clean up.
       if (abort.signal.aborted) return;
+      // Bunker acked — we're now committing to login. Hide Cancel for this
+      // window (see nip46Finalizing) so a late tap can't race the login that
+      // has already started mutating NostrContext state.
+      setNip46Finalizing(true);
       // Adopt the live signer (reuses its open subscription — no second
       // connect round-trip) now that we're committing to the login.
       nostrConnectService.adoptPairedSigner(connection, signer);
@@ -299,6 +310,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       setMode('login');
     } finally {
       nip46AbortRef.current = null;
+      setNip46Finalizing(false);
     }
   };
 
@@ -308,6 +320,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       nip46AbortRef.current = null;
     }
     setNip46Pairing(false);
+    setNip46Finalizing(false);
     setNip46Uri(null);
     setMode('login');
   };
@@ -525,44 +538,55 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               ) : null}
             </View>
 
-            {nip46Pairing && (
+            {(nip46Pairing || nip46Finalizing) && (
               <View style={styles.nip46WaitingRow}>
                 <ActivityIndicator color={colors.brandPink} />
-                <Text style={styles.nip46WaitingText}>{t('nostrLoginSheet.nip46Waiting')}</Text>
+                <Text style={styles.nip46WaitingText}>
+                  {nip46Finalizing
+                    ? t('nostrLoginSheet.nip46Finalizing')
+                    : t('nostrLoginSheet.nip46Waiting')}
+                </Text>
               </View>
             )}
 
             {error && <Text style={styles.error}>{error}</Text>}
 
-            {/* Same-device primary action: hand the URI straight to an
-                installed bunker via its nostrconnect:// scheme. QR (cross-
-                device) + Copy (web bunkers like nsec.app) remain below. */}
-            <TouchableOpacity
-              style={styles.loginButton}
-              onPress={handleOpenInBunker}
-              accessibilityLabel={t('nostrLoginSheet.nip46OpenBunker')}
-              testID="open-nip46-bunker"
-            >
-              <Text style={styles.loginButtonText}>{t('nostrLoginSheet.nip46OpenBunker')}</Text>
-            </TouchableOpacity>
+            {/* Once the bunker has acked we're committing to login — hide the
+                pairing actions (Open / Copy / Cancel) so a late tap can't race
+                the finalizing login (Copilot review). */}
+            {!nip46Finalizing && (
+              <>
+                {/* Same-device primary action: hand the URI straight to an
+                    installed bunker via its nostrconnect:// scheme. QR (cross-
+                    device) + Copy (web bunkers like nsec.app) remain below. */}
+                <TouchableOpacity
+                  style={styles.loginButton}
+                  onPress={handleOpenInBunker}
+                  accessibilityLabel={t('nostrLoginSheet.nip46OpenBunker')}
+                  testID="open-nip46-bunker"
+                >
+                  <Text style={styles.loginButtonText}>{t('nostrLoginSheet.nip46OpenBunker')}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.copyButton}
-              onPress={handleCopyNip46Uri}
-              accessibilityLabel={t('nostrLoginSheet.nip46CopyUri')}
-              testID="copy-nip46-uri"
-            >
-              <Text style={styles.copyButtonText}>{t('nostrLoginSheet.nip46CopyUri')}</Text>
-            </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.copyButton}
+                  onPress={handleCopyNip46Uri}
+                  accessibilityLabel={t('nostrLoginSheet.nip46CopyUri')}
+                  testID="copy-nip46-uri"
+                >
+                  <Text style={styles.copyButtonText}>{t('nostrLoginSheet.nip46CopyUri')}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.backLink}
-              onPress={handleCancelNip46}
-              accessibilityLabel={t('nostrLoginSheet.nip46CancelA11y')}
-              testID="cancel-nip46"
-            >
-              <Text style={styles.backLinkText}>{t('nostrLoginSheet.nip46Cancel')}</Text>
-            </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.backLink}
+                  onPress={handleCancelNip46}
+                  accessibilityLabel={t('nostrLoginSheet.nip46CancelA11y')}
+                  testID="cancel-nip46"
+                >
+                  <Text style={styles.backLinkText}>{t('nostrLoginSheet.nip46Cancel')}</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </>
         )}
 

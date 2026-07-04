@@ -1303,6 +1303,7 @@
     "nip46SubtitleIos": "Open your bunker app (Clave, Aegis, nsec.app) and scan this QR. We'll wait up to 2 minutes for the connection.",
     "nip46SubtitleAndroid": "Open your bunker app (Aegis, Nowser, nsec.app) and scan this QR. We'll wait up to 2 minutes for the connection.",
     "nip46Waiting": "Waiting for bunker…",
+    "nip46Finalizing": "Signing in…",
     "nip46OpenBunker": "Open in bunker app",
     "nip46NoBunker": "No bunker app found — scan the QR from another device, or install one (e.g. Clave).",
     "nip46CopyUri": "Copy pairing URI",
