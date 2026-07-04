@@ -1185,7 +1185,14 @@
     "republishBody": "Vuelve a emitir la publicación a los relés con una nueva caducidad. Tu LNURL secreto permanece en el dispositivo.",
     "cancel": "Cancelar",
     "piggyRepublished": "Piggy republicado 🐷",
-    "republishFailed": "Fallo al republicar"
+    "republishFailed": "Fallo al republicar",
+    "deleteA11y": "Eliminar Piglet",
+    "deleteTitle": "¿Eliminar este Piglet?",
+    "deleteBody": "Esto caduca la publicación ahora — ocultándola en todas partes — y luego pide a los relés que la eliminen. Esto no se puede deshacer. Tu LNURL secreto permanece en el dispositivo.",
+    "deleteDraftBody": "Este Piglet está guardado solo en este dispositivo y nunca se publicó. Al eliminarlo desaparece para siempre: esto no se puede deshacer.",
+    "delete": "Eliminar",
+    "pigletDeleted": "Piglet eliminado",
+    "deleteFailed": "Fallo al eliminar"
   },
   "nearbyScreen": {
     "title": "Comercios cercanos",

@@ -1185,7 +1185,14 @@
     "republishBody": "Re-emits the listing to relays with a fresh expiration. Your secret LNURL stays on-device.",
     "cancel": "Cancel",
     "piggyRepublished": "Piggy republished 🐷",
-    "republishFailed": "Republish failed"
+    "republishFailed": "Republish failed",
+    "deleteA11y": "Delete Piglet",
+    "deleteTitle": "Delete this Piglet?",
+    "deleteBody": "This expires the listing now — hiding it everywhere — then asks relays to remove it. This can't be undone. Your secret LNURL stays on-device.",
+    "deleteDraftBody": "This Piglet is saved only on this device and was never published. Deleting removes it for good — this can't be undone.",
+    "delete": "Delete",
+    "pigletDeleted": "Piglet deleted",
+    "deleteFailed": "Delete failed"
   },
   "nearbyScreen": {
     "title": "Nearby merchants",
