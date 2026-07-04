@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Modal, Pressable, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MapPin, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { DURATION_OPTIONS } from '../services/liveLocationService';
 
@@ -31,6 +32,7 @@ const LiveLocationDurationPicker: React.FC<Props> = ({
   onChooseLive,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
@@ -41,37 +43,43 @@ const LiveLocationDurationPicker: React.FC<Props> = ({
       onRequestClose={onClose}
       testID="live-location-picker-modal"
     >
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Dismiss">
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityLabel={t('liveLocationDurationPicker.dismiss')}
+      >
         <Pressable style={styles.card} onPress={() => undefined}>
-          <Text style={styles.title}>Share location</Text>
-          <Text style={styles.body}>
-            Send your current spot once, or share live updates for a set time.
-          </Text>
+          <Text style={styles.title}>{t('liveLocationDurationPicker.title')}</Text>
+          <Text style={styles.body}>{t('liveLocationDurationPicker.body')}</Text>
 
           <TouchableOpacity
             style={styles.row}
             onPress={onChooseSnapshot}
-            accessibilityLabel="Send current location"
+            accessibilityLabel={t('liveLocationDurationPicker.sendCurrentLocation')}
             testID="live-location-choose-snapshot"
           >
             <View style={styles.iconCircle}>
               <MapPin size={20} color={colors.white} />
             </View>
             <View style={styles.rowBody}>
-              <Text style={styles.rowTitle}>Send current location</Text>
-              <Text style={styles.rowSub}>One-shot snapshot — same as before.</Text>
+              <Text style={styles.rowTitle}>
+                {t('liveLocationDurationPicker.sendCurrentLocation')}
+              </Text>
+              <Text style={styles.rowSub}>{t('liveLocationDurationPicker.snapshotSub')}</Text>
             </View>
           </TouchableOpacity>
 
           <View style={styles.divider} />
 
-          <Text style={styles.sectionLabel}>Share live location for…</Text>
+          <Text style={styles.sectionLabel}>{t('liveLocationDurationPicker.shareLiveFor')}</Text>
           {DURATION_OPTIONS.map((opt) => (
             <TouchableOpacity
               key={opt.id}
               style={styles.row}
               onPress={() => onChooseLive(opt.ms)}
-              accessibilityLabel={`Share live location for ${opt.label}`}
+              accessibilityLabel={t('liveLocationDurationPicker.shareLiveForLabel', {
+                label: opt.label,
+              })}
               testID={`live-location-choose-${opt.id}`}
             >
               <View style={[styles.iconCircle, styles.iconCircleAlt]}>
@@ -79,25 +87,20 @@ const LiveLocationDurationPicker: React.FC<Props> = ({
               </View>
               <View style={styles.rowBody}>
                 <Text style={styles.rowTitle}>{opt.label}</Text>
-                <Text style={styles.rowSub}>
-                  Auto-stops at the end. You can stop earlier from the bubble.
-                </Text>
+                <Text style={styles.rowSub}>{t('liveLocationDurationPicker.liveSub')}</Text>
               </View>
             </TouchableOpacity>
           ))}
 
-          <Text style={styles.footnote}>
-            Sharing live location uses extra battery. End-to-end encrypted. Recipient sees a map
-            that updates every ~30 seconds.
-          </Text>
+          <Text style={styles.footnote}>{t('liveLocationDurationPicker.footnote')}</Text>
 
           <TouchableOpacity
             style={styles.cancel}
             onPress={onClose}
-            accessibilityLabel="Cancel"
+            accessibilityLabel={t('liveLocationDurationPicker.cancel')}
             testID="live-location-picker-cancel"
           >
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('liveLocationDurationPicker.cancel')}</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>

@@ -1,17 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import {
-  Zap,
-  MapPin,
-  UserRound,
-  Radio,
-  Check,
-  CheckCheck,
-  Clock,
-  AlertCircle,
-} from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   createMessageBubbleStyles,
   type MessageBubbleStyles,
@@ -34,14 +26,16 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import { summariseDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
 import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import type { MessageReactionState } from '../utils/reactions';
 import MessageLinkPreview from './MessageLinkPreview';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
 import LibreMiniMap from './LibreMiniMap';
+import { BubbleFooter } from './MessageBubbleFooter';
 
 // Stable empty arrays for the location-card mini-maps — LibreMiniMap
 // requires merchants/caches/events, but DM cards never plot any. Module
@@ -130,126 +124,22 @@ interface Props {
     deliveryStatus?: DeliveryStatus;
     resendText: string;
   }) => void;
+  // Long-press handler (#205) — opens the parent's MessageActionsSheet for
+  // per-message reactions + zap. Optional; when omitted the long-press is a
+  // no-op rather than falling back to system text-select.
+  onLongPress?: () => void;
+  // NIP-25 reaction state for THIS message id, or undefined if the parent
+  // hasn't fetched any reactions yet. Renders a compact pill row beneath the
+  // bubble: e.g. "❤️ 2  🔥 1". Tapping a pill toggles the viewer's own
+  // reaction. Pulled from the parent's `reactionsByTarget` map (#205).
+  reactions?: MessageReactionState;
+  // Tap handler for a reaction pill. Receives the emoji and (when the viewer
+  // has already reacted) the existing reaction event id so the parent can
+  // NIP-09 delete. Optional — when omitted the pills are display-only.
+  onToggleReaction?: (emoji: string, existingReactionId: string | null) => void;
 }
 
-/**
- * Delivery indicator for a sent DM (#856, design approved 2026-06-12).
- * WhatsApp-style single/double coverage in the payment-success green:
- *   - pending (no relay acked yet) → faint Clock
- *   - delivered to ≥1 but not all target relays → single green Check
- *   - delivered to ALL target relays → double green CheckCheck
- *   - failed (every relay rejected) → red AlertCircle
- * Single→double is computed from the per-relay `relayResults`; the exact
- * "Sent to N of M relays" breakdown lives behind a long-press (recipient relay
- * lists run to 11, so one glyph per relay would be noise). Retry/outbox for the
- * failed state is #857 — this only renders the distinct visual.
- */
-const DeliveryTick: React.FC<{
-  styles: Styles;
-  status: DeliveryStatus;
-  testID: string;
-}> = ({ styles, status, testID }) => {
-  const { ok, total } = summariseDelivery(status);
-  // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
-  // node Maestro can resolve — testIDs on lucide-react-native icons don't
-  // reliably surface in the accessibility tree.
-
-  // Still in flight — the optimistic bubble before any relay has settled (#857).
-  // Keyed off the explicit `pending` flag, not `total === 0`, so a settled
-  // all-failed send (zero relays accepted) renders the red glyph below instead.
-  if (status.pending) {
-    return (
-      <View testID={testID} accessibilityLabel="Message sending">
-        <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
-      </View>
-    );
-  }
-
-  // No relay accepted (every relay rejected, or a hard pre-publish error) →
-  // failed. The bubble's tap opens the info sheet with a Re-publish action.
-  if (ok === 0) {
-    return (
-      <View testID={testID} accessibilityLabel="Send failed">
-        <AlertCircle
-          size={13}
-          color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
-        />
-      </View>
-    );
-  }
-
-  const green = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
-  // All target relays acked → double tick; otherwise ≥1 → single tick.
-  if (ok === total) {
-    return (
-      <View testID={testID} accessibilityLabel="Sent to all relays">
-        <CheckCheck size={14} strokeWidth={2.5} color={green} />
-      </View>
-    );
-  }
-  return (
-    <View testID={testID} accessibilityLabel={`Sent to ${ok} of ${total} relays`}>
-      <Check size={13} strokeWidth={2.5} color={green} />
-    </View>
-  );
-};
-
 type Styles = MessageBubbleStyles;
-
-/**
- * Shared time-row footer for every bubble variant (#856). Renders the
- * timestamp and, on a sent (`fromMe`) bubble that carries a tracked
- * `deliveryStatus`, the delivery tick beside it — long-pressable to open the
- * per-relay breakdown. Received bubbles and untracked sends fall back to the
- * bare timestamp, so this is a drop-in for each variant's old `<Text>` time.
- *
- * `timeStyle` is the variant's existing time text style (e.g. `gifTime`,
- * `imageBubbleTime`, `bubbleTime`) so each card keeps its own ink/placement;
- * only the tick is appended.
- */
-const BubbleFooter: React.FC<{
-  styles: Styles;
-  // Per-message id so the footer/tick testIDs are unique within a thread that
-  // has many bubbles (Copilot #858) — Maestro can still match the bare prefix.
-  messageId: string;
-  fromMe: boolean;
-  createdAt: number;
-  timeStyle: object | (object | undefined)[];
-  deliveryStatus?: DeliveryStatus;
-  // Opens the message-info sheet (tap or long-press) for sent AND received.
-  onOpenInfo?: () => void;
-}> = ({ styles, messageId, fromMe, createdAt, timeStyle, deliveryStatus, onOpenInfo }) => {
-  const showTick = fromMe && !!deliveryStatus;
-  // No info handler and no tick → plain timestamp (e.g. a legacy row).
-  if (!onOpenInfo && !showTick) {
-    return <Text style={timeStyle}>{formatTime(createdAt)}</Text>;
-  }
-  return (
-    <TouchableOpacity
-      style={styles.bubbleFooterRow}
-      activeOpacity={onOpenInfo ? 0.6 : 1}
-      // Tap AND long-press both open the info sheet — tap is discoverable and
-      // reachable by screen readers (long-press alone isn't). (Copilot #858)
-      onPress={onOpenInfo}
-      onLongPress={onOpenInfo}
-      accessibilityRole="button"
-      accessibilityLabel={fromMe ? 'Delivery status' : 'Message info'}
-      accessibilityHint="Opens message details"
-      testID={`dm-bubble-delivery-footer-${messageId}`}
-    >
-      {/* Footer-row time zeroes the standalone bubbleTime top margin so the
-          tick sits level with the timestamp (Copilot #858). */}
-      <Text style={[timeStyle, styles.bubbleFooterTime]}>{formatTime(createdAt)}</Text>
-      {showTick ? (
-        <DeliveryTick
-          styles={styles}
-          status={deliveryStatus as DeliveryStatus}
-          testID={`dm-bubble-delivery-tick-${messageId}`}
-        />
-      ) : null}
-    </TouchableOpacity>
-  );
-};
 
 /**
  * Image bubble (#688). Lives in its own component because the encrypted
@@ -264,11 +154,25 @@ const ImageBubble: React.FC<{
   fromMe: boolean;
   senderLabel: React.ReactNode;
   onOpenImageFullscreen?: (url: string) => void;
+  // Long-press → parent's MessageActionsSheet (#205). Kept firing even when
+  // there's no fullscreen tap handler, so the pressable is only disabled when
+  // BOTH the tap and the long-press are absent.
+  onLongPress?: () => void;
   testID: string;
   // Shared time + delivery-tick footer (#856). Passed in so a sent image shows
   // the tick like every other variant.
   footer: React.ReactNode;
-}> = ({ styles, image, fromMe, senderLabel, onOpenImageFullscreen, testID, footer }) => {
+}> = ({
+  styles,
+  image,
+  fromMe,
+  senderLabel,
+  onOpenImageFullscreen,
+  onLongPress,
+  testID,
+  footer,
+}) => {
+  const t = useTranslation();
   // For plain images the fetchable URL is the display source; for encrypted
   // ones DecryptedImage resolves a data: URI, which it reports back here so
   // the fullscreen tap shows the decrypted image, not the ciphertext blob.
@@ -279,10 +183,17 @@ const ImageBubble: React.FC<{
       <TouchableOpacity
         activeOpacity={0.85}
         onPress={() => displayUri && onOpenImageFullscreen?.(displayUri)}
+        onLongPress={onLongPress}
+        delayLongPress={350}
         style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
-        accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
-        accessibilityRole={canOpen ? 'imagebutton' : 'image'}
-        disabled={!canOpen}
+        accessibilityLabel={
+          fromMe ? t('messageBubble.imageSent') : t('messageBubble.imageReceived')
+        }
+        // Announce as an image-button whenever it's interactive — either it can
+        // open fullscreen (tap) OR it can open the actions sheet (long-press).
+        // Only a purely-static image announces as a plain 'image'.
+        accessibilityRole={canOpen || onLongPress ? 'imagebutton' : 'image'}
+        disabled={!canOpen && !onLongPress}
         testID={testID}
       >
         {senderLabel}
@@ -293,7 +204,7 @@ const ImageBubble: React.FC<{
           nonceHex={image.nonceHex}
           mime={image.mime}
           style={styles.imageBubbleImage}
-          accessibilityLabel="Shared image"
+          accessibilityLabel={t('messageBubble.sharedImage')}
           onResolved={image.encrypted ? setDisplayUri : undefined}
         />
         {footer}
@@ -331,14 +242,80 @@ const MessageBubble: React.FC<Props> = ({
   deliveryStatus,
   wireKind,
   onShowInfo,
+  onLongPress,
+  reactions,
+  onToggleReaction,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createMessageBubbleStyles(colors), [colors]);
+  const t = useTranslation();
 
   // Sender label only renders on group bubbles for incoming messages —
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // Reaction pill row (#205) — rendered beneath every variant by wrapping the
+  // bubble row in a column so the pills sit on the same axis as the bubble
+  // (left for incoming, right for outgoing). Null when there are no reactions,
+  // so the no-op render path stays identical to before #205.
+  const reactionEmojis = reactions ? Object.keys(reactions.byEmoji) : [];
+  const ReactionRow =
+    reactionEmojis.length > 0 ? (
+      <View
+        style={[styles.reactionRow, fromMe ? styles.reactionRowRight : styles.reactionRowLeft]}
+        testID={`${testIdPrefix}-reactions-${id}`}
+      >
+        {reactionEmojis.map((emoji) => {
+          const reactors = reactions!.byEmoji[emoji];
+          const myReactionId = reactions!.myReactions[emoji] ?? null;
+          const mine = myReactionId !== null;
+          return (
+            <TouchableOpacity
+              key={emoji}
+              activeOpacity={0.7}
+              disabled={!onToggleReaction}
+              onPress={() => onToggleReaction?.(emoji, myReactionId)}
+              style={[styles.reactionPill, mine && styles.reactionPillMine]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !onToggleReaction }}
+              accessibilityLabel={
+                mine
+                  ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })
+                  : t('messageBubble.reactionAdd', { emoji, count: reactors.length })
+              }
+              testID={`${testIdPrefix}-reaction-${id}-${emoji}`}
+            >
+              <Text style={styles.reactionPillEmoji}>{emoji}</Text>
+              {reactors.length > 1 ? (
+                <Text style={[styles.reactionPillCount, mine && styles.reactionPillCountMine]}>
+                  {reactors.length}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    ) : null;
+
+  // Wrap a variant's bubble row in a small column so the reaction row can sit
+  // immediately under it without breaking the row's left/right alignment. Only
+  // wraps when there are reactions to render — otherwise returns the bubble
+  // unchanged so the render path is byte-identical to pre-#205.
+  const wrapWithReactionRow = (bubble: React.ReactElement): React.ReactElement =>
+    ReactionRow ? (
+      <View>
+        {bubble}
+        {ReactionRow}
+      </View>
+    ) : (
+      bubble
+    );
+
+  // Legacy NIP-04 (kind 4) messages are coloured purple so the user can tell
+  // them apart from the encrypted NIP-17 (kind 14/15) pink ones at a glance
+  // (#856 follow-up). Plain text only — NIP-04 never carries gift-wrapped media.
+  const isNip04 = wireKind === 4;
 
   // Raw payload to hand the Re-publish action (#856). For text bubbles it's the
   // message text; for GIF it's the URL (re-sending re-publishes the same GIF).
@@ -360,6 +337,10 @@ const MessageBubble: React.FC<Props> = ({
         })
     : undefined;
 
+  // Shield-affordance tint: white on a coloured (sent) bubble, supplementary
+  // grey on a surface (received) one — readable on either background (#856).
+  const infoTint = fromMe ? colors.white : colors.textSupplementary;
+
   // Reusable footer (time + delivery tick) shared by every bubble variant so a
   // sent GIF / image / voice note / location / invoice all show the tick, not
   // just plain text (#856). Each variant passes its own time style.
@@ -372,17 +353,20 @@ const MessageBubble: React.FC<Props> = ({
       timeStyle={timeStyle}
       deliveryStatus={deliveryStatus}
       onOpenInfo={openInfo}
+      infoTint={infoTint}
     />
   );
 
   if (content.kind === 'gif') {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenGifFullscreen?.(content.url)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
-          accessibilityLabel={fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'}
+          accessibilityLabel={fromMe ? t('messageBubble.gifSent') : t('messageBubble.gifReceived')}
           accessibilityRole="imagebutton"
           testID={`${testIdPrefix}-gif-${id}`}
         >
@@ -397,7 +381,7 @@ const MessageBubble: React.FC<Props> = ({
           />
           {renderFooter([styles.gifTime, fromMe && styles.gifTimeMe])}
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -437,47 +421,57 @@ const MessageBubble: React.FC<Props> = ({
     const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
     const titleText =
       status === 'ended' || status === 'expired'
-        ? 'Live location ended'
+        ? t('messageBubble.liveLocationEnded')
         : status === 'paused'
           ? fromMe
-            ? 'Live location paused'
-            : 'Live location · paused'
+            ? t('messageBubble.liveLocationPaused')
+            : t('messageBubble.liveLocationPausedThem')
           : fromMe
-            ? 'Sharing live location'
-            : 'Live location';
+            ? t('messageBubble.sharingLiveLocation')
+            : t('messageBubble.liveLocation');
     const subtitleText: string | null = (() => {
       if (status === 'ended' || status === 'expired') {
-        return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
+        return latest
+          ? t('messageBubble.lastUpdate', { time: formatTime(Math.floor(latest.ts / 1000)) })
+          : null;
       }
       if (latest) {
         const ageMs = Math.max(0, Date.now() - latest.ts);
         const mins = Math.floor(ageMs / 60_000);
         const secs = Math.floor((ageMs % 60_000) / 1000);
-        if (mins >= 1) return `Updated ${mins}m ago`;
-        return `Updated ${secs}s ago`;
+        if (mins >= 1) return t('messageBubble.updatedMinsAgo', { mins });
+        return t('messageBubble.updatedSecsAgo', { secs });
       }
-      return 'Waiting for first update…';
+      return t('messageBubble.waitingForFirstUpdate');
     })();
     const remainingLabel: string | null = (() => {
       if (status === 'ended' || status === 'expired') return null;
       if (remaining === null) return null;
-      if (remaining <= 0) return 'Ending…';
+      if (remaining <= 0) return t('messageBubble.ending');
       const mins = Math.ceil(remaining / 60_000);
-      if (mins < 60) return `${mins} min left`;
+      if (mins < 60) return t('messageBubble.minsLeft', { mins });
       const hours = Math.floor(mins / 60);
       const remMin = mins % 60;
-      return remMin === 0 ? `${hours}h left` : `${hours}h ${remMin}m left`;
+      return remMin === 0
+        ? t('messageBubble.hoursLeft', { hours })
+        : t('messageBubble.hoursMinsLeft', { hours, mins: remMin });
     })();
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => displayLocation && onOpenLocation(displayLocation)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={
             fromMe
-              ? `Sharing live location with peer, ${remainingLabel ?? 'no time remaining'}`
-              : `Receiving live location, ${subtitleText ?? 'waiting'}`
+              ? t('messageBubble.sharingLiveLocationA11y', {
+                  remaining: remainingLabel ?? t('messageBubble.noTimeRemaining'),
+                })
+              : t('messageBubble.receivingLiveLocationA11y', {
+                  status: subtitleText ?? t('messageBubble.waiting'),
+                })
           }
           testID={`${testIdPrefix}-live-location-${id}`}
         >
@@ -530,16 +524,16 @@ const MessageBubble: React.FC<Props> = ({
               <TouchableOpacity
                 style={styles.liveStopButton}
                 onPress={() => onStopLiveLocation?.(marker.sessionId)}
-                accessibilityLabel="Stop sharing live location"
+                accessibilityLabel={t('messageBubble.stopSharingLiveLocation')}
                 testID={`${testIdPrefix}-live-location-stop-${id}`}
               >
-                <Text style={styles.invoicePayText}>Stop sharing</Text>
+                <Text style={styles.invoicePayText}>{t('messageBubble.stopSharing')}</Text>
               </TouchableOpacity>
             ) : null}
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -556,13 +550,17 @@ const MessageBubble: React.FC<Props> = ({
       !fromMe && peerAvatarUri !== undefined
         ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
         : null;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenLocation(location)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
-          accessibilityLabel={fromMe ? 'Location sent' : 'Location received'}
+          accessibilityLabel={
+            fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationReceived')
+          }
           testID={`${testIdPrefix}-location-${id}`}
         >
           {SenderLabel}
@@ -590,7 +588,7 @@ const MessageBubble: React.FC<Props> = ({
                 color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
               />
               <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
-                {fromMe ? 'Location sent' : 'Location'}
+                {fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationLabel')}
               </Text>
             </View>
             <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
@@ -598,7 +596,7 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
             {location.accuracyMeters !== null ? (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
-                ± {location.accuracyMeters} m · OpenStreetMap
+                {t('messageBubble.accuracyOsm', { meters: location.accuracyMeters })}
               </Text>
             ) : (
               <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
@@ -608,7 +606,7 @@ const MessageBubble: React.FC<Props> = ({
             {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
           </View>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -622,12 +620,12 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View
           style={[styles.bubble, styles.unsupportedBubble]}
-          accessibilityLabel={`Unsupported message type, kind ${content.rawKind}`}
+          accessibilityLabel={t('messageBubble.unsupportedA11y', { kind: content.rawKind })}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
           {SenderLabel}
           <Text style={styles.unsupportedText}>
-            Unsupported message type (kind {content.rawKind})
+            {t('messageBubble.unsupportedText', { kind: content.rawKind })}
           </Text>
           {renderFooter([styles.bubbleTime])}
         </View>
@@ -643,16 +641,17 @@ const MessageBubble: React.FC<Props> = ({
   // Both render through the same bubble; DecryptedImage owns the decrypt path.
   const image = parseImageMessage(text);
   if (image) {
-    return (
+    return wrapWithReactionRow(
       <ImageBubble
         styles={styles}
         image={image}
         fromMe={fromMe}
         senderLabel={SenderLabel}
         onOpenImageFullscreen={onOpenImageFullscreen}
+        onLongPress={onLongPress}
         testID={`${testIdPrefix}-image-${id}`}
         footer={renderFooter([styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe])}
-      />
+      />,
     );
   }
 
@@ -661,7 +660,7 @@ const MessageBubble: React.FC<Props> = ({
   // so the Blossom `.mp4` URL renders as a player, not a bare link.
   const voice = parseVoiceNote(text);
   if (voice) {
-    return (
+    return wrapWithReactionRow(
       <VoiceNotePlayer
         url={voice.url}
         encrypted={voice.encrypted}
@@ -677,7 +676,7 @@ const MessageBubble: React.FC<Props> = ({
             ? renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])
             : undefined
         }
-      />
+      />,
     );
   }
 
@@ -689,30 +688,37 @@ const MessageBubble: React.FC<Props> = ({
   // landed, but only the receiver can usefully tap the button —
   // sender's button is harmless (toggles their own mode).
   if (isSecretModeTrigger(text)) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-secret-${id}`}
+        >
           {SenderLabel}
-          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>Secret Mode</Text>
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {t('messageBubble.secretMode')}
+          </Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
             {fromMe
-              ? 'Lightning Piggy will offer the recipient a button to toggle Secret Mode.'
-              : 'Unlocks dev / power-user surfaces in Lightning Piggy.'}
+              ? t('messageBubble.secretModeSenderMemo')
+              : t('messageBubble.secretModeReceiverMemo')}
           </Text>
           {!fromMe && onToggleSecretMode && (
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={onToggleSecretMode}
               accessibilityRole="button"
-              accessibilityLabel="Toggle Secret Mode"
+              accessibilityLabel={t('messageBubble.toggleSecretMode')}
               testID={`${testIdPrefix}-secret-mode-toggle-${id}`}
             >
-              <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.toggleSecretMode')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -727,16 +733,21 @@ const MessageBubble: React.FC<Props> = ({
       bitcoinUri.address.length > 16
         ? `${bitcoinUri.address.slice(0, 8)}…${bitcoinUri.address.slice(-6)}`
         : bitcoinUri.address;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-bitcoin-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'On-chain address sent' : 'On-chain address'}
+            {fromMe ? t('messageBubble.onchainAddressSent') : t('messageBubble.onchainAddress')}
           </Text>
           {bitcoinUri.amountSats !== null ? (
             <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
-              {bitcoinUri.amountSats.toLocaleString()} sats
+              {t('messageBubble.satsAmount', { amount: bitcoinUri.amountSats.toLocaleString() })}
             </Text>
           ) : null}
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
@@ -747,16 +758,16 @@ const MessageBubble: React.FC<Props> = ({
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(bitcoinUri.raw)}
               accessibilityRole="link"
-              accessibilityLabel="Pay this on-chain address"
+              accessibilityLabel={t('messageBubble.payOnchainAddress')}
               testID={`${testIdPrefix}-bitcoin-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -767,17 +778,22 @@ const MessageBubble: React.FC<Props> = ({
       invoice.paymentHash !== null &&
       isInvoicePaid !== undefined &&
       isInvoicePaid(invoice.paymentHash, fromMe);
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-invoice-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Invoice sent' : 'Invoice received'}
+            {fromMe ? t('messageBubble.invoiceSent') : t('messageBubble.invoiceReceived')}
           </Text>
           <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
             {invoice.amountSats !== null
-              ? `${invoice.amountSats.toLocaleString()} sats`
-              : 'Any amount'}
+              ? t('messageBubble.satsAmount', { amount: invoice.amountSats.toLocaleString() })
+              : t('messageBubble.anyAmount')}
           </Text>
           {invoice.description ? (
             <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={2}>
@@ -788,23 +804,25 @@ const MessageBubble: React.FC<Props> = ({
             {paid ? (
               <View
                 style={[styles.invoiceTag, styles.invoiceTagPaid]}
-                accessibilityLabel="Invoice paid"
+                accessibilityLabel={t('messageBubble.invoicePaid')}
                 testID={`${testIdPrefix}-paid-badge-${id}`}
               >
-                <Text style={styles.invoiceTagPaidText}>Paid</Text>
+                <Text style={styles.invoiceTagPaidText}>{t('messageBubble.paid')}</Text>
               </View>
             ) : expired ? (
               <View style={[styles.invoiceTag, styles.invoiceTagExpired]}>
-                <Text style={styles.invoiceTagExpiredText}>Expired</Text>
+                <Text style={styles.invoiceTagExpiredText}>{t('messageBubble.expired')}</Text>
               </View>
             ) : fromMe ? (
               <View style={[styles.invoiceTag, styles.invoiceTagUnpaid]}>
-                <Text style={styles.invoiceTagUnpaidText}>Unpaid</Text>
+                <Text style={styles.invoiceTagUnpaidText}>{t('messageBubble.unpaid')}</Text>
               </View>
             ) : null}
             {!paid && !expired && invoice.expiresAt !== null ? (
               <Text style={[styles.invoiceExpiry, fromMe && styles.invoiceExpiryMe]}>
-                expires {formatRelativeFuture(invoice.expiresAt * 1000)}
+                {t('messageBubble.expiresIn', {
+                  time: formatRelativeFuture(invoice.expiresAt * 1000),
+                })}
               </Text>
             ) : null}
           </View>
@@ -813,16 +831,16 @@ const MessageBubble: React.FC<Props> = ({
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(invoice.raw)}
               accessibilityRole="link"
-              accessibilityLabel="Pay this invoice"
+              accessibilityLabel={t('messageBubble.payInvoice')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -831,18 +849,20 @@ const MessageBubble: React.FC<Props> = ({
     const loaded = sharedProfiles ? sharedContact.pubkey in sharedProfiles : false;
     const prof = sharedProfiles?.[sharedContact.pubkey] ?? null;
     const displayName = prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => onOpenContact(sharedContact.pubkey, prof)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
-          accessibilityLabel={`Shared contact ${displayName}`}
+          accessibilityLabel={t('messageBubble.sharedContactA11y', { name: displayName })}
           testID={`${testIdPrefix}-contact-${id}`}
         >
           {SenderLabel}
           <Text style={[styles.contactLabel, fromMe && styles.contactLabelMe]}>
-            {fromMe ? 'Contact shared' : 'Contact'}
+            {fromMe ? t('messageBubble.contactShared') : t('messageBubble.contact')}
           </Text>
           <View style={styles.contactBodyRow}>
             {/* Always render the silhouette as the base layer so it shows
@@ -865,7 +885,7 @@ const MessageBubble: React.FC<Props> = ({
             </View>
             <View style={styles.contactInfo}>
               <Text style={[styles.contactName, fromMe && styles.contactNameMe]} numberOfLines={1}>
-                {loaded ? displayName : 'Loading…'}
+                {loaded ? displayName : t('messageBubble.loading')}
               </Text>
               {prof?.lud16 ? (
                 <Text style={[styles.contactLn, fromMe && styles.contactLnMe]} numberOfLines={1}>
@@ -880,18 +900,23 @@ const MessageBubble: React.FC<Props> = ({
           </View>
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
   const lnAddress = extractLightningAddress(text);
   if (lnAddress) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-lnaddr-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
-            {fromMe ? 'Address sent' : 'Lightning address'}
+            {fromMe ? t('messageBubble.addressSent') : t('messageBubble.lightningAddress')}
           </Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
             {lnAddress}
@@ -900,16 +925,16 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayLightningAddress(lnAddress)}
-              accessibilityLabel="Pay this lightning address"
+              accessibilityLabel={t('messageBubble.payLightningAddress')}
               testID={`${testIdPrefix}-pay-${id}`}
             >
               <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>Pay</Text>
+              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
             </TouchableOpacity>
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -924,9 +949,21 @@ const MessageBubble: React.FC<Props> = ({
     return null;
   })();
 
-  return (
+  return wrapWithReactionRow(
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+      <Pressable
+        onLongPress={onLongPress}
+        delayLongPress={350}
+        style={[
+          styles.bubble,
+          fromMe ? styles.bubbleMe : styles.bubbleThem,
+          // NIP-04 (kind 4): purple sent bubble (vs pink NIP-17); a purple
+          // left-edge on the received surface bubble so legacy DMs are
+          // distinguishable on both sides (#856 follow-up).
+          isNip04 && (fromMe ? styles.bubbleMeNip04 : styles.bubbleThemNip04),
+        ]}
+        testID={isNip04 ? `${testIdPrefix}-nip04-bubble-${id}` : `${testIdPrefix}-text-${id}`}
+      >
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
           {hasLink(text)
@@ -941,7 +978,7 @@ const MessageBubble: React.FC<Props> = ({
                       void Linking.openURL(seg.url as string).catch(() => {});
                     }}
                     accessibilityRole="link"
-                    accessibilityLabel={`Open link ${seg.url}`}
+                    accessibilityLabel={t('messageBubble.openLink', { url: seg.url })}
                     testID={`${testIdPrefix}-link-${id}-${i}`}
                   >
                     {seg.text}
@@ -954,8 +991,8 @@ const MessageBubble: React.FC<Props> = ({
         </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-      </View>
-    </View>
+      </Pressable>
+    </View>,
   );
 };
 

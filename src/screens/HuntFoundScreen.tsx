@@ -22,7 +22,10 @@ import {
 import { recordClaim } from '../services/claimHistoryService';
 import { formatFiatApprox } from '../utils/fiat';
 import { SLEEPING_PATTERN } from '../utils/lnurlCooldown';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t } from '../i18n';
 import type { RouteProp } from '@react-navigation/native';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 
 // LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
 // Neutral about who triggered the cooldown — anyone could have just
@@ -32,19 +35,25 @@ const friendlyCooldownReason = (raw: string): string => {
   const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
   const total = m ? Number(m[1]) : 0;
   if (!Number.isFinite(total) || total <= 0) {
-    return 'Cooldown is still running, or the sats budget is used up. Try again later.';
+    return t('huntFoundScreen.cooldownNoHint');
   }
   let pretty: string;
-  if (total < 30) pretty = 'a few seconds';
-  else if (total < 90) pretty = 'about a minute';
+  if (total < 30) pretty = t('huntFoundScreen.fewSeconds');
+  else if (total < 90) pretty = t('huntFoundScreen.aboutMinute');
   else if (total < 3600) {
     const minutes = Math.round(total / 60);
-    pretty = `about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+    pretty =
+      minutes === 1
+        ? t('huntFoundScreen.aboutMinute')
+        : t('huntFoundScreen.aboutMinutes', { count: minutes });
   } else {
     const hours = Math.round(total / 3600);
-    pretty = `about ${hours} hour${hours === 1 ? '' : 's'}`;
+    pretty =
+      hours === 1
+        ? t('huntFoundScreen.aboutHour')
+        : t('huntFoundScreen.aboutHours', { count: hours });
   }
-  return `Another finder claimed recently — try again in ${pretty}.`;
+  return t('huntFoundScreen.claimedRecently', { pretty });
 };
 
 interface Props {
@@ -82,6 +91,7 @@ type Stage =
  */
 const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { lnurl, coord } = route.params;
   const { activeWalletId, makeInvoice, currency } = useWallet();
@@ -121,7 +131,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
       if (!activeWalletId) {
         setStage({
           kind: 'error',
-          reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+          reason: t('huntFoundScreen.noWalletConnected'),
         });
         return;
       }
@@ -171,7 +181,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!activeWalletId) {
           setStage({
             kind: 'error',
-            reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+            reason: t('huntFoundScreen.noWalletConnected'),
           });
           return;
         }
@@ -181,7 +191,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         const lo = Math.ceil(params.minWithdrawable / 1000);
         const hi = Math.floor(params.maxWithdrawable / 1000);
         if (hi < lo) {
-          setStage({ kind: 'error', reason: "This prize can't be claimed in whole sats." });
+          setStage({ kind: 'error', reason: t('huntFoundScreen.cantClaimWholeSats') });
           return;
         }
         if (lo < hi) {
@@ -195,7 +205,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         const reason =
           e instanceof LnurlWithdrawError
             ? e.message
-            : `Could not resolve LNURL: ${(e as Error).message}`;
+            : t('huntFoundScreen.couldNotResolveLnurl', { message: (e as Error).message });
         setStage({ kind: 'error', reason });
       }
     })();
@@ -209,15 +219,16 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <View style={styles.container} testID="hunt-found-screen">
       <View style={styles.header}>
+        <BrandPatternBackground variant="explore-compass" />
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          accessibilityLabel="Close"
+          accessibilityLabel={t('huntFoundScreen.close')}
           testID="hunt-found-back-button"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Hunt</Text>
+        <Text style={styles.headerTitle}>{t('huntFoundScreen.hunt')}</Text>
         <View style={styles.headerRightSpacer} />
       </View>
 
@@ -228,14 +239,16 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
               <PiggyBank size={88} color={colors.brandPink} strokeWidth={2} />
             </View>
             <Text style={styles.title} testID="piggy-found-celebration-screen">
-              You found a Piggy!
+              {t('huntFoundScreen.foundPiggy')}
             </Text>
             {stage.kind === 'claiming' && stage.params.defaultDescription ? (
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
             <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 8 }} />
             <Text style={styles.fineprint}>
-              {stage.kind === 'resolving' ? 'Looking up this Piggy…' : 'Claiming sats…'}
+              {stage.kind === 'resolving'
+                ? t('huntFoundScreen.lookingUpPiggy')
+                : t('huntFoundScreen.claimingSats')}
             </Text>
           </>
         )}
@@ -245,12 +258,12 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={styles.bigPiggy}>
               <PiggyBank size={88} color={colors.brandPink} strokeWidth={2} />
             </View>
-            <Text style={styles.title}>You found a Piggy!</Text>
+            <Text style={styles.title}>{t('huntFoundScreen.foundPiggy')}</Text>
             {stage.params.defaultDescription ? (
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
             <Text style={styles.amountValue} testID="hunt-found-amount-sats">
-              {amountSats.toLocaleString()} sats
+              {t('huntFoundScreen.satsAmount', { amount: amountSats.toLocaleString() })}
             </Text>
             {fiatLabel ? <Text style={styles.amountFiat}>{fiatLabel}</Text> : null}
             <Slider
@@ -267,7 +280,9 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             />
             <View style={styles.rangeRow}>
               <Text style={styles.rangeText}>{minSats.toLocaleString()}</Text>
-              <Text style={styles.rangeText}>{maxSats.toLocaleString()} max</Text>
+              <Text style={styles.rangeText}>
+                {t('huntFoundScreen.maxLabel', { amount: maxSats.toLocaleString() })}
+              </Text>
             </View>
             <View style={styles.amountInputRow}>
               <TextInput
@@ -281,18 +296,20 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
                   );
                 }}
                 testID="hunt-found-amount-input"
-                accessibilityLabel="Claim amount in sats"
+                accessibilityLabel={t('huntFoundScreen.claimAmountInSats')}
               />
-              <Text style={styles.amountInputUnit}>sats</Text>
+              <Text style={styles.amountInputUnit}>{t('huntFoundScreen.satsUnit')}</Text>
             </View>
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => handleClaim(stage.params, amountSats)}
-              accessibilityLabel={`Claim ${amountSats} sats`}
+              accessibilityLabel={t('huntFoundScreen.claimSats', { amount: amountSats })}
               testID="hunt-found-claim-button"
             >
               <Gift size={20} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.primaryButtonText}>Claim {amountSats.toLocaleString()} sats</Text>
+              <Text style={styles.primaryButtonText}>
+                {t('huntFoundScreen.claimSats', { amount: amountSats.toLocaleString() })}
+              </Text>
             </TouchableOpacity>
           </>
         )}
@@ -302,10 +319,10 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={[styles.bigPiggy, { backgroundColor: colors.greenLight }]}>
               <PartyPopper size={88} color={colors.green} strokeWidth={2} />
             </View>
-            <Text style={styles.title}>{stage.sats.toLocaleString()} sats inbound!</Text>
-            <Text style={styles.memo}>
-              Sent to your active wallet — the celebration toast fires the moment they land.
+            <Text style={styles.title}>
+              {t('huntFoundScreen.satsInbound', { amount: stage.sats.toLocaleString() })}
             </Text>
+            <Text style={styles.memo}>{t('huntFoundScreen.sentToActiveWallet')}</Text>
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => {
@@ -323,14 +340,14 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
               testID="hunt-found-drop-log-button"
             >
               <Gift size={20} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.primaryButtonText}>Drop a find-log</Text>
+              <Text style={styles.primaryButtonText}>{t('huntFoundScreen.dropFindLog')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => navigation.popToTop()}
               testID="hunt-found-done-button"
             >
-              <Text style={styles.secondaryButtonText}>Done</Text>
+              <Text style={styles.secondaryButtonText}>{t('huntFoundScreen.done')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -338,14 +355,14 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         {stage.kind === 'sleeping' && (
           <>
             <PiggyBank size={88} color={colors.textSupplementary} strokeWidth={1.5} />
-            <Text style={styles.title}>This Piggy is sleeping</Text>
+            <Text style={styles.title}>{t('huntFoundScreen.piggySleeping')}</Text>
             <Text style={styles.memo}>{stage.reason}</Text>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => navigation.goBack()}
               testID="hunt-found-back-button-2"
             >
-              <Text style={styles.secondaryButtonText}>Back</Text>
+              <Text style={styles.secondaryButtonText}>{t('huntFoundScreen.back')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -353,14 +370,14 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         {stage.kind === 'error' && (
           <>
             <PiggyBank size={88} color={colors.textSupplementary} strokeWidth={1.5} />
-            <Text style={styles.title}>Couldn&apos;t claim</Text>
+            <Text style={styles.title}>{t('huntFoundScreen.couldntClaim')}</Text>
             <Text style={styles.memo}>{stage.reason}</Text>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => navigation.goBack()}
               testID="hunt-found-back-button-3"
             >
-              <Text style={styles.secondaryButtonText}>Back</Text>
+              <Text style={styles.secondaryButtonText}>{t('huntFoundScreen.back')}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -379,6 +396,7 @@ const createStyles = (colors: Palette) =>
       paddingTop: 48,
       paddingBottom: 16,
       backgroundColor: colors.brandPink,
+      overflow: 'hidden',
     },
     headerTitle: {
       flex: 1,

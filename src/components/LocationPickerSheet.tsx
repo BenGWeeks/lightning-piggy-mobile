@@ -19,6 +19,7 @@ import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 
@@ -50,6 +51,7 @@ const LocationPickerSheet: React.FC<Props> = ({
   onConfirm,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   // Live user position for the dot on the picker map — separate from
@@ -242,14 +244,14 @@ const LocationPickerSheet: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.closeButton}
           onPress={onClose}
-          accessibilityLabel="Close location picker"
+          accessibilityLabel={t('locationPickerSheet.closeLocationPicker')}
           testID="location-picker-close"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <X size={20} color={colors.textSupplementary} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={styles.title}>Where did you hide it?</Text>
-        <Text style={styles.subtitle}>Drag the pin — or tap the map — to mark the exact spot.</Text>
+        <Text style={styles.title}>{t('locationPickerSheet.whereDidYouHideIt')}</Text>
+        <Text style={styles.subtitle}>{t('locationPickerSheet.dragPinToMark')}</Text>
 
         <View style={[styles.mapWrap, { height: mapHeight }]}>
           {resolvedStart === null ? (
@@ -310,7 +312,7 @@ const LocationPickerSheet: React.FC<Props> = ({
               {picked.lat.toFixed(5)}, {picked.lon.toFixed(5)}
             </Text>
           ) : (
-            <Text style={styles.coordPlaceholder}>Tap or drag the pin to mark a location</Text>
+            <Text style={styles.coordPlaceholder}>{t('locationPickerSheet.tapOrDragToMark')}</Text>
           )}
         </View>
 
@@ -319,11 +321,11 @@ const LocationPickerSheet: React.FC<Props> = ({
           onPress={handleConfirm}
           disabled={!userMoved}
           testID="location-picker-confirm"
-          accessibilityLabel="Use this location"
+          accessibilityLabel={t('locationPickerSheet.useThisLocation')}
           accessibilityState={{ disabled: !userMoved }}
         >
           <Check size={18} color={colors.white} strokeWidth={2.5} />
-          <Text style={styles.confirmButtonText}>Use this location</Text>
+          <Text style={styles.confirmButtonText}>{t('locationPickerSheet.useThisLocation')}</Text>
         </TouchableOpacity>
       </BottomSheetView>
     </BottomSheetModal>

@@ -8,7 +8,17 @@
 
 A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
 
-[![Figma Designs](image.png)](https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&m=dev&scaling=scale-down&page-id=0%3A1&starting-point-node-id=19%3A519&show-proto-sidebar=1&t=P3MkR2W1YVSwtmIQ-1)
+<p align="center">
+  <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
+  <img alt="Map" src="docs/images/app-hero-03-map.webp" width="19%">
+  <img alt="Home" src="docs/images/app-hero-01-wallet.webp" width="19%">
+  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
+  <img alt="Geo-caches" src="docs/images/app-hero-04-hunt.webp" width="19%">
+</p>
+
+<p align="center">
+  <a href="https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&m=dev&scaling=scale-down&page-id=0%3A1&starting-point-node-id=19%3A519&show-proto-sidebar=1&t=P3MkR2W1YVSwtmIQ-1">View the Figma prototype</a>
+</p>
 
 ## Features
 
@@ -111,6 +121,51 @@ Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the sc
 | [LNURL / LUD-16](https://github.com/lnurl/luds/blob/luds/16.md)                  | Lightning Address Protocol (`user@domain`) |
 
 On top of these, Lightning Piggy Mobile uses the [Boltz v2](https://docs.boltz.exchange) submarine swap API for trustless Lightning ↔ on-chain transfers.
+
+## Architecture
+
+Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.83) that runs from a **custom dev-client** — it ships custom native modules, so Expo Go is not used. Lightning payments ride on **Nostr Wallet Connect (NWC)**; the social layer is **Nostr** (encrypted DMs, zaps, contacts, geo-caches). A fuller write-up lives in [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc).
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Screens & Components  (src/screens, src/components)         │
+│  Home · Messages · Explore · Friends + Account drawer        │
+├─────────────────────────────────────────────────────────────┤
+│  Navigation  (src/navigation/AppNavigator.tsx)              │
+│  4 tabs → Explore stack · account drawer · root stack        │
+├─────────────────────────────────────────────────────────────┤
+│  Contexts  (src/contexts)          Hooks  (src/hooks)        │
+│  WalletContext · NostrContext ·    UI-facing per-feature     │
+│  Groups · TrustGraph · LiveLoc     logic                     │
+├─────────────────────────────────────────────────────────────┤
+│  Services  (src/services) — by domain                        │
+│  Nostr (nostrService, dm*, places) · Wallet (nwcService,     │
+│  onchainService/BDK, lnurl, boltz) · location/geofence ·     │
+│  media upload · NFC · notifications                          │
+├─────────────────────────────────────────────────────────────┤
+│  Persistence                                                 │
+│  SQLCipher DM store (op-sqlite) · expo-secure-store (keys) · │
+│  AsyncStorage caches (per-account namespaced)                │
+├─────────────────────────────────────────────────────────────┤
+│  Native  (modules/, plugins/)                                │
+│  amber-signer (NIP-55 IPC) — the only native module ·        │
+│  Expo config plugins (NFC, Amber queries, fg-service perms)  │
+└─────────────────────────────────────────────────────────────┘
+        │                    │                     │
+   Nostr relays        NWC wallet svc        Electrum / Boltz
+   (DMs, zaps,         (pay_invoice,         (on-chain sync,
+    contacts, caches)   get_balance)          LN↔on-chain swaps)
+```
+
+**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. One Android-only **native module** (`amber-signer`, the NIP-55 Amber IPC bridge — the only Expo native module that ships) and a set of **Expo config plugins** round out the stack. Background DM delivery rides `expo-background-task` (Android WorkManager / iOS BGTaskScheduler), not a persistent native service.
+
+**Key data flows.**
+
+- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping — it notices new inbound traffic and fires a generic notification without decrypting; a persistent realtime relay foreground service is only scaffolded (manifest permissions via `withForegroundService.js`) and not yet implemented. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc).
+- **Paying over NWC** — a scanned invoice (or an LNURL-pay / Lightning address resolved to a BOLT-11) is sent to the wallet service as an encrypted NIP-47 `pay_invoice` request over the NWC relay; the encrypted response updates balance and history. Zaps (kind 9734 request → 9735 receipt) ride the same rail.
+- **Publishing a geo-cache ("Piglet")** — a NIP-GC listing (kind 37516) is published with a NIP-32 payout label and a stable `d` tag; the LNURL-withdraw bearer stays on the physical NFC tag / QR and in the hider's secure store, never on the public event. Claims record a found-log (kind 7516).
+
+See [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc) for the module map, the full Nostr event-kind reference, signer options (nsec / Amber; NIP-46 planned), and persistence detail.
 
 ## Getting Started
 

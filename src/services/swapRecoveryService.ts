@@ -8,18 +8,12 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import * as bitcoin from 'bitcoinjs-lib';
-import * as ecc from '@bitcoinerlab/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { extractLockupFromTxHex } from '../utils/lockupTx';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
-
-// Required for bitcoinjs-lib to derive output scripts from taproot (bech32m)
-// addresses — lockup addresses are taproot, so without this toOutputScript
-// throws "No ECC Library provided".
-bitcoin.initEccLib(ecc);
 
 /** Shape of the transaction-row data this module needs to classify a row as
  *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
@@ -344,33 +338,8 @@ export async function recordSubmarineSwapLegs(
   await recordSwapMeta(lnPaymentHash, swapId, 'submarine');
 }
 
-/**
- * Boltz v2 /swap/{id} returns only transaction.id + transaction.hex — not
- * vout/onchainAmount. Parse the raw tx to find the output that matches our
- * lockup address.
- */
-function extractLockupFromTxHex(
-  txHex: string,
-  lockupAddress: string,
-): { vout: number; amount: number } | null {
-  try {
-    const tx = bitcoin.Transaction.fromHex(txHex);
-    const expectedScript = bitcoin.address.toOutputScript(lockupAddress);
-    for (let i = 0; i < tx.outs.length; i++) {
-      const script = tx.outs[i].script;
-      if (
-        script.length === expectedScript.length &&
-        script.every((b, j) => b === expectedScript[j])
-      ) {
-        return { vout: i, amount: Number(tx.outs[i].value) };
-      }
-    }
-    return null;
-  } catch (e) {
-    console.warn('[SwapRecovery] Failed to parse lockup tx hex:', e);
-    return null;
-  }
-}
+// Lockup-output parsing moved to utils/lockupTx (shared with boltzService's
+// submarine refund lookup without an import cycle).
 
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
@@ -385,7 +354,15 @@ interface PersistedReverseSwap {
     claimLeaf: { version: number; output: string };
     refundLeaf: { version: number; output: string };
   };
+  /** Consecutive 404s from the status endpoint — see the tolerance gate. */
+  notFoundCount?: number;
 }
+
+// A single 404 must not destroy claim secrets: a transient API/routing
+// misbehaviour would delete the preimage + claim key while Boltz's lockup may
+// still be claimable. Require this many CONSECUTIVE 404s (counter persisted
+// in the swap record so it survives restarts) before cleaning up.
+const SWAP_404_DELETE_THRESHOLD = 3;
 
 /**
  * List all persisted reverse swap IDs from SecureStore by trying common
@@ -393,6 +370,12 @@ interface PersistedReverseSwap {
  * track keys ourselves. We use a separate index key for this.
  */
 const SWAP_INDEX_KEY = 'boltz_swap_index';
+// Submarine swaps (on-chain → LN) index separately: their recovery is a
+// refund path, not a claim, and the record shape differs. Previously
+// submarine records were persisted (TransferSheet) but never indexed OR
+// read, so a crash mid-swap left the on-chain funds unrecoverable with no
+// UI (swap audit finding, 2026-07-02).
+const SUBMARINE_INDEX_KEY = 'boltz_submarine_index';
 
 // Serialise read-modify-write of the swap index so two concurrent callers
 // (e.g. two swaps created back-to-back) cannot clobber each other's entries.
@@ -439,6 +422,26 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
   });
 }
 
+async function mutateIndex(key: string, mutate: (ids: string[]) => string[]): Promise<void> {
+  return withIndexLock(async () => {
+    try {
+      const existing = await SecureStore.getItemAsync(key);
+      const ids = existing ? (JSON.parse(existing) as string[]) : [];
+      await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
+    } catch (e) {
+      console.warn(`[SwapRecovery] Failed to mutate ${key}:`, e);
+    }
+  });
+}
+
+export async function registerPendingSubmarineSwap(swapId: string): Promise<void> {
+  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => (ids.includes(swapId) ? ids : [...ids, swapId]));
+}
+
+export async function unregisterPendingSubmarineSwap(swapId: string): Promise<void> {
+  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId));
+}
+
 /**
  * Attempt to finish all pending reverse swaps. Fires from several triggers —
  * app startup, pull-to-refresh, and the in-flight overlay's "Continue in
@@ -455,6 +458,41 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
 // same swap and double-broadcast. Concurrent callers share the in-flight
 // promise; a fresh pass only starts once the previous one settles.
 let recoveryInFlight: Promise<void> | null = null;
+
+/** A persisted submarine (on-chain → LN) swap awaiting refund recovery. */
+export interface PersistedSubmarineSwap {
+  id: string;
+  address: string;
+  expectedAmount: number;
+  refundPrivateKey: string;
+  claimPublicKey: string;
+  timeoutBlockHeight: number;
+  swapTree?: unknown;
+  sourceWalletId?: string;
+  createdAt?: number;
+  notFoundCount?: number;
+}
+
+// The refund path needs BDK (a fresh on-chain address) + a branded prompt —
+// both UI/app-layer concerns this leaf service must not import. The app root
+// registers a handler once; the recovery pass calls it when a submarine swap
+// has reached a terminal FAILURE status (funds may be refundable on-chain).
+// Mirrors the deferred-replay injection used by the live DM sub.
+type SubmarineRefundHandler = (swap: PersistedSubmarineSwap) => Promise<void>;
+let submarineRefundHandler: SubmarineRefundHandler | null = null;
+
+export function setSubmarineRefundHandler(handler: SubmarineRefundHandler | null): void {
+  submarineRefundHandler = handler;
+}
+
+const SUBMARINE_FAIL_STATUSES = new Set([
+  'swap.expired',
+  'transaction.refunded',
+  'transaction.failed',
+  'transaction.lockupFailed',
+  'invoice.failedToPay',
+]);
+const SUBMARINE_SUCCESS_STATUSES = new Set(['invoice.settled', 'transaction.claimed']);
 
 export function recoverPendingSwaps(): Promise<void> {
   if (recoveryInFlight) return recoveryInFlight;
@@ -473,37 +511,46 @@ async function runRecoveryPass(): Promise<void> {
   // need attention, and the `finally` block fires a single `notifyAttention`
   // so subscribers see one coherent update per pass.
   attentionPaymentHashes.clear();
+  // Reverse and submarine recovery are INDEPENDENT — each in its own guard so a
+  // failure in one (e.g. a corrupt reverse index) can't skip the other. The
+  // `finally` fires a single attention notify per pass regardless (Copilot #961).
   try {
     const index = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-    if (!index) return;
-    const ids = JSON.parse(index) as string[];
-    if (ids.length === 0) return;
-    console.log(`[SwapRecovery] Checking ${ids.length} pending swap(s)`);
-    Toast.show({
-      type: 'info',
-      text1: 'Checking pending swaps',
-      text2: `${ids.length} swap${ids.length === 1 ? '' : 's'} to verify…`,
-      position: 'top',
-      visibilityTime: 8000,
-    });
+    const ids = index ? (JSON.parse(index) as string[]) : [];
+    if (ids.length > 0) {
+      console.log(`[SwapRecovery] Checking ${ids.length} pending swap(s)`);
+      Toast.show({
+        type: 'info',
+        text1: 'Checking pending swaps',
+        text2: `${ids.length} swap${ids.length === 1 ? '' : 's'} to verify…`,
+        position: 'top',
+        visibilityTime: 8000,
+      });
 
-    for (const swapId of ids) {
-      try {
-        await recoverSwap(swapId);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[SwapRecovery] Failed to recover swap ${swapId}:`, e);
-        Toast.show({
-          type: 'error',
-          text1: 'Swap recovery failed',
-          text2: msg,
-          position: 'top',
-          visibilityTime: 10000,
-        });
+      for (const swapId of ids) {
+        try {
+          await recoverSwap(swapId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[SwapRecovery] Failed to recover swap ${swapId}:`, e);
+          Toast.show({
+            type: 'error',
+            text1: 'Swap recovery failed',
+            text2: msg,
+            position: 'top',
+            visibilityTime: 10000,
+          });
+        }
       }
     }
   } catch (e) {
-    console.warn('[SwapRecovery] Failed to load swap index:', e);
+    console.warn('[SwapRecovery] Failed to load reverse swap index:', e);
+  }
+
+  try {
+    await recoverSubmarineSwaps();
+  } catch (e) {
+    console.warn('[SwapRecovery] Submarine recovery pass failed:', e);
   } finally {
     // Single notify after the batch so subscribers (TransactionList) re-render
     // once per recovery pass instead of once per swap.
@@ -522,19 +569,41 @@ async function recoverSwap(swapId: string): Promise<void> {
   const swap = JSON.parse(raw) as PersistedReverseSwap;
   const paymentHash = swap.preimage ? paymentHashFromPreimage(swap.preimage) : null;
 
-  // Query Boltz status
-  const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
+  // Query Boltz status. Timed fetch — the recovery pass is single-flight, so
+  // a hung request here would block every future recovery trigger (startup,
+  // pull-to-refresh, retry) for the whole session.
+  const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
   if (!res.ok) {
     console.warn(`[SwapRecovery] Boltz returned ${res.status} for ${swapId}`);
     if (res.status === 404) {
-      await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
-      await unregisterPendingSwap(swapId);
-      if (paymentHash) attentionPaymentHashes.delete(paymentHash);
+      // Tolerate transient 404s: only delete the claim secrets after
+      // SWAP_404_DELETE_THRESHOLD consecutive misses (counter persisted in
+      // the record). A single flaky response must not destroy the preimage
+      // and claim key while the lockup may still be claimable.
+      const misses = (swap.notFoundCount ?? 0) + 1;
+      if (misses >= SWAP_404_DELETE_THRESHOLD) {
+        console.warn(`[SwapRecovery] Swap ${swapId} gone (${misses}×404) — cleaning up`);
+        await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
+        await unregisterPendingSwap(swapId);
+        if (paymentHash) attentionPaymentHashes.delete(paymentHash);
+      } else {
+        await SecureStore.setItemAsync(
+          `boltz_swap_${swapId}`,
+          JSON.stringify({ ...swap, notFoundCount: misses }),
+        );
+      }
     }
     return;
   }
   const data = await res.json();
   console.log(`[SwapRecovery] Swap ${swapId} status: ${data.status}`);
+  // The swap exists again — a stale 404 streak is no longer consecutive.
+  if (swap.notFoundCount) {
+    await SecureStore.setItemAsync(
+      `boltz_swap_${swapId}`,
+      JSON.stringify({ ...swap, notFoundCount: undefined }),
+    );
+  }
 
   // Terminal success states — cleanup
   if (data.status === 'invoice.settled' || data.status === 'transaction.claimed') {
@@ -650,4 +719,89 @@ async function recoverSwap(swapId: string): Promise<void> {
   }
 
   // Still pending (swap.created, invoice.set, etc.) — leave for next check
+}
+
+/**
+ * Check every persisted submarine (on-chain → LN) swap. On a terminal SUCCESS
+ * status, drop the record. On a terminal FAILURE, invoke the registered
+ * refund handler (app layer — BDK + branded prompt) so the user can reclaim
+ * their on-chain funds; the handler owns deletion once refunded. Still-pending
+ * swaps are left for the next pass. Transient 404s are tolerated the same way
+ * reverse swaps are, so a flaky response can't strand the refund keys.
+ */
+async function recoverSubmarineSwaps(): Promise<void> {
+  let ids: string[];
+  try {
+    const raw = await SecureStore.getItemAsync(SUBMARINE_INDEX_KEY);
+    if (!raw) return;
+    ids = JSON.parse(raw) as string[];
+  } catch (e) {
+    console.warn('[SwapRecovery] Failed to load submarine index:', e);
+    return;
+  }
+  if (ids.length === 0) return;
+
+  for (const swapId of ids) {
+    try {
+      const raw = await SecureStore.getItemAsync(`submarine_swap_${swapId}`);
+      if (!raw) {
+        await unregisterPendingSubmarineSwap(swapId);
+        continue;
+      }
+      const swap = JSON.parse(raw) as PersistedSubmarineSwap;
+      const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          const misses = (swap.notFoundCount ?? 0) + 1;
+          if (misses >= SWAP_404_DELETE_THRESHOLD) {
+            await SecureStore.deleteItemAsync(`submarine_swap_${swapId}`);
+            await unregisterPendingSubmarineSwap(swapId);
+          } else {
+            await SecureStore.setItemAsync(
+              `submarine_swap_${swapId}`,
+              JSON.stringify({ ...swap, notFoundCount: misses }),
+            );
+          }
+        }
+        continue;
+      }
+      const data = await res.json();
+      const status: string = data.status ?? 'unknown';
+      if (swap.notFoundCount) {
+        await SecureStore.setItemAsync(
+          `submarine_swap_${swapId}`,
+          JSON.stringify({ ...swap, notFoundCount: undefined }),
+        );
+      }
+
+      if (SUBMARINE_SUCCESS_STATUSES.has(status)) {
+        await SecureStore.deleteItemAsync(`submarine_swap_${swapId}`);
+        await unregisterPendingSubmarineSwap(swapId);
+        continue;
+      }
+      if (SUBMARINE_FAIL_STATUSES.has(status)) {
+        console.warn(`[SwapRecovery] Submarine swap ${swapId} failed (${status}) — refund path`);
+        if (submarineRefundHandler) {
+          // The handler surfaces the refund prompt; it owns record deletion
+          // once the refund is broadcast. Leave the record + index entry so a
+          // dismissed prompt re-surfaces on the next pass.
+          await submarineRefundHandler(swap).catch((e) =>
+            console.warn(`[SwapRecovery] Submarine refund handler failed for ${swapId}:`, e),
+          );
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: 'Swap needs attention',
+            text2: 'A pending on-chain→Lightning swap failed. Reopen the app to recover it.',
+            position: 'top',
+            visibilityTime: 10000,
+          });
+        }
+        continue;
+      }
+      // Still pending — leave for the next pass.
+    } catch (e) {
+      console.warn(`[SwapRecovery] Failed to check submarine swap ${swapId}:`, e);
+    }
+  }
 }

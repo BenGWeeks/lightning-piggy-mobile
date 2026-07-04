@@ -101,6 +101,15 @@ function walletListKey(): string {
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
+// Per-account: this points at a wallet id from `wallet_list`, which is
+// itself namespaced per identity (see `walletListKey`). A global default
+// would let one identity's choice clobber the other's, so mirror the
+// same `perAccountKey(...)` scheme. New key (no shipped global value to
+// migrate), so it's namespaced inline without a migration step.
+const DEFAULT_ONCHAIN_WALLET_ID_KEY_BASE = 'default_onchain_wallet_id_v1';
+function defaultOnchainWalletIdKey(): string {
+  return perAccountKey(DEFAULT_ONCHAIN_WALLET_ID_KEY_BASE, _activePubkey);
+}
 const BLOSSOM_SERVER_KEY = 'blossom_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
@@ -242,6 +251,39 @@ export async function deleteMnemonic(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
 }
 
+// Best-effort AsyncStorage.multiRemove: if the batch rejects (a transient
+// storage error), log once and fall back to per-key removeItem so one bad key
+// can't strand the whole set — and the caller's wipe can still finish. Backs
+// privacy wipes, so failures are never swallowed silently. Absent keys no-op.
+export async function bestEffortMultiRemove(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  try {
+    await AsyncStorage.multiRemove(keys);
+  } catch (err) {
+    console.warn(`bestEffortMultiRemove: multiRemove failed (${keys.length} keys), per-key`, err);
+    const results = await Promise.allSettled(keys.map((k) => AsyncStorage.removeItem(k)));
+    // Surface any per-key failures too — a swallowed reject here could leave
+    // sensitive residue on disk, defeating the point of the fallback.
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.warn(`bestEffortMultiRemove: removeItem failed for ${keys[i]}`, r.reason);
+      }
+    });
+  }
+}
+
+// Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
+// receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
+// no balance or transaction residue behind — a privacy concern on shared
+// devices.
+export async function deleteWalletCaches(walletId: string): Promise<void> {
+  await bestEffortMultiRemove([
+    `balance_${walletId}`,
+    `txs_${walletId}`,
+    `seenReceipts_${walletId}`,
+  ]);
+}
+
 // --- Electrum / block-explorer server ---
 
 export async function getElectrumServer(): Promise<string> {
@@ -251,6 +293,20 @@ export async function getElectrumServer(): Promise<string> {
 
 export async function setElectrumServer(url: string): Promise<void> {
   await AsyncStorage.setItem(ELECTRUM_SERVER_KEY, url);
+}
+
+// --- Default on-chain wallet (for Boltz refunds + future on-chain destinations) ---
+
+export async function getDefaultOnchainWalletId(): Promise<string | null> {
+  return AsyncStorage.getItem(defaultOnchainWalletIdKey());
+}
+
+export async function setDefaultOnchainWalletId(walletId: string | null): Promise<void> {
+  if (walletId === null) {
+    await AsyncStorage.removeItem(defaultOnchainWalletIdKey());
+  } else {
+    await AsyncStorage.setItem(defaultOnchainWalletIdKey(), walletId);
+  }
 }
 
 // --- Blossom media server ---

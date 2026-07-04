@@ -13,17 +13,6 @@ export const createExploreHomeScreenStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       overflow: 'hidden',
     },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    // Pink->purple brand gradient wash over the header photo. Replaces the
-    // former flat 65%-pink fill so the Explore header carries the same
-    // rebalanced gradient as Messages while the photo still shows through.
-    // Opacity (not per-stop alpha) keeps the wash at the old 0.65 strength.
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      opacity: 0.65,
-    },
     headerExtras: {
       paddingHorizontal: 20,
       paddingTop: 6,

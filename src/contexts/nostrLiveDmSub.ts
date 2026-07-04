@@ -24,6 +24,7 @@ import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
+import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
 import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
@@ -182,7 +183,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (cancelled) return;
     queueInboxEntry(item.entry);
     notifyDmMessage(item.partnerPubkey);
-    if (item.notify) {
+    // claimWrapNotification: the background watch (same JS context, no follow
+    // gate) may have already notified for this wrap — never post twice (#279).
+    if (item.notify && claimWrapNotification(item.entry.id)) {
       void fireMessageNotification({
         kind: 'dm',
         threadId: item.partnerPubkey,
@@ -543,7 +546,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // skip my own, and suppressed when the user is viewing this group.
       if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
         const sender = routeResult.message.senderPubkey;
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase()) {
+        // claimWrapNotification: dedupe vs the background watch (#279).
+        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrap.id)) {
           void fireMessageNotification({
             kind: 'group',
             threadId: routeResult.group.id,
@@ -654,8 +658,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     notifyDmMessage(partnership.partnerPubkey);
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
-    // suppressed when the user is viewing this thread.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
+    // suppressed when the user is viewing this thread. claimWrapNotification
+    // dedupes vs the background watch running in the same JS context.
+    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrap.id)) {
       void fireMessageNotification({
         kind: 'dm',
         threadId: partnership.partnerPubkey,
