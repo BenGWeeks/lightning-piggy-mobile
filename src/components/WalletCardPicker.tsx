@@ -64,6 +64,18 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
     }
   }, [foundIndex, selectedTheme, onSelect]);
 
+  // `defaultIndex` only positions the carousel on mount. When the parent
+  // changes `selectedTheme` *after* mount (e.g. WalletSettingsSheet sets it in
+  // a useEffect once the wallet loads), scroll the carousel to the new card so
+  // the centred card, dots and label stay in sync with parent state.
+  // `scrollTo` no-ops when the target equals the current index, so this can't
+  // fight an in-progress user swipe (which already leaves them equal).
+  useEffect(() => {
+    if (foundIndex >= 0) {
+      carouselRef.current?.scrollTo({ index: foundIndex, animated: false });
+    }
+  }, [foundIndex]);
+
   const initialIndex = Math.max(0, foundIndex);
   // When `selectedTheme` isn't in `themeList` the carousel falls back to index
   // 0, so derive the label/active state from the actually-centred card rather
