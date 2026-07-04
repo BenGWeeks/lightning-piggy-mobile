@@ -53,9 +53,18 @@ const OnChainScreen: React.FC = () => {
 
   const handlePickDefault = async (walletId: string) => {
     // Toggle off if tapping the active default — falls back to first-onchain heuristic.
+    const prev = defaultOnchainId;
     const next = defaultOnchainId === walletId ? null : walletId;
     setDefaultOnchainIdState(next);
-    await setDefaultOnchainWalletId(next);
+    try {
+      await setDefaultOnchainWalletId(next);
+    } catch (err) {
+      // AsyncStorage write can reject (corruption/full disk). Don't let it
+      // surface as an unhandled rejection, and revert the optimistic UI state
+      // so we don't show a selection that wasn't actually persisted.
+      console.warn('Failed to persist default on-chain wallet id', err);
+      setDefaultOnchainIdState(prev);
+    }
   };
 
   const handleElectrumSave = async () => {

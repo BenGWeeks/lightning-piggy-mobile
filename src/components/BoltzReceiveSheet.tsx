@@ -274,8 +274,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
    */
   const pickRefundDestination = useCallback(async (): Promise<string | null> => {
     // Honour the user's chosen default first; fall back to the first
-    // on-chain wallet if the default is unset / no longer exists.
-    const defaultId = await getDefaultOnchainWalletId();
+    // on-chain wallet if the default is unset / no longer exists. The default
+    // ID is only a hint, so treat an AsyncStorage read failure (full disk /
+    // corruption) as "no default" (null) rather than letting it break
+    // refund-destination selection — the first-on-chain fallback below still
+    // applies.
+    let defaultId: string | null = null;
+    try {
+      defaultId = await getDefaultOnchainWalletId();
+    } catch (e) {
+      console.warn('[BoltzReceive] Failed to read default on-chain wallet id', e);
+    }
     const onchainWallets = wallets.filter((w) => w.walletType === 'onchain');
     const onchainWallet =
       onchainWallets.find((w) => w.id === defaultId) ?? onchainWallets[0] ?? null;
