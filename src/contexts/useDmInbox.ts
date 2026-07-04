@@ -9,16 +9,13 @@ import { perAccountKey } from '../services/perAccountStorage';
 import {
   selectKnownEventIds,
   upsertDmMessages,
+  updateDmDeliveryStatuses,
   hasStoredWraps,
   getConversationMessages,
   type DmMessageRow,
 } from '../services/dmDb';
 import { loadInboxEntries } from '../services/dmInbox';
-import {
-  nip04PlaintextCache,
-  appendLocalDmChains,
-  getMemoisedSecretKey,
-} from './nostrSecretKeyCache';
+import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { yieldToEventLoop, DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
 import {
   AMBER_NIP17_SKIP_KEY_BASE,
@@ -26,11 +23,7 @@ import {
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   DM_CONV_CAP,
-  inboxCacheKey,
   inboxLastSeenKey,
-  convCacheKey,
-  safeGetDmCacheItem,
-  loadDmInboxFromCache,
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
@@ -85,10 +78,10 @@ export interface UseDmInboxResult {
     otherPubkey: string,
     opts?: { signal?: AbortSignal },
   ) => Promise<ConversationMessage[]>;
-  getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
-  // Read-through (#868): the instant-paint set for a thread open — the union of
-  // the per-conversation cache and the SAME encrypted-store rows the inbox
-  // preview is built from. Guarantees the thread is never behind the preview.
+  // Read-through (#868, single-sourced in #850): the instant-paint set for a
+  // thread open — the SAME encrypted-store rows the inbox preview is built
+  // from (the plaintext per-conversation blob is retired). Guarantees the
+  // thread is never behind the preview.
   loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   persistDeliveryStatuses: (
@@ -147,7 +140,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
-  // they don't race on the skip-set file + inbox summary blob.
+  // they don't race on the skip-set file + encrypted-store writes.
   const dmInboxInFlight = useRef<{
     promise: Promise<void>;
     includeNonFollows: boolean;
@@ -158,18 +151,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
   /** Eagerly hydrate `dmInbox` so the Messages tab paints conversations on
    * cold start instead of staying blank for the relay-fetch + decrypt loop
-   * (~3-5 s). Sources: the encrypted DM store's indexed latest-per-
-   * conversation read (#848) unioned with the persisted inbox-summary blob
-   * (which still covers kind-4-only threads predating the store). Called
-   * from session-restore + post-login flows; refreshDmInbox handles its own
-   * cache read separately for the delta-fetch path. */
+   * (~3-5 s). Single source (#850): the encrypted DM store's indexed
+   * latest-per-conversation read — the plaintext inbox-summary blob is
+   * retired. The one-time migration runs first (memoised; a Map lookup once
+   * done) so a just-updated install hydrates the pre-#848 kind-4-only
+   * threads its blobs held. Called from session-restore + post-login flows. */
   const hydrateDmInboxFromCache = useCallback(async (pk: string) => {
-    const [cached, dbLatest] = await Promise.all([
-      loadDmInboxFromCache(pk),
-      loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]),
-    ]);
-    const merged = mergeInboxEntries(dbLatest, cached, DM_INBOX_CAP);
-    if (merged.length > 0) setDmInbox(merged);
+    await ensureDmStoreMigrated(pk);
+    const dbLatest = await loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]);
+    if (dbLatest.length > 0) setDmInbox(dbLatest);
   }, []);
 
   /**
@@ -216,126 +206,59 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [pubkey],
   );
 
-  const getCachedConversation = useCallback(
-    async (otherPubkey: string): Promise<ConversationMessage[]> => {
-      if (!pubkey) return [];
-      const normalized = otherPubkey.trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
-      try {
-        const raw = await safeGetDmCacheItem(convCacheKey(pubkey, normalized));
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    },
-    [pubkey],
-  );
-
+  // Persist the optimistic local- send row into the ENCRYPTED store (#850 —
+  // formerly a plaintext AsyncStorage blob write). The row carries the
+  // delivery tick (#856) + rumorId (#857); when the relay echo lands,
+  // upsertDmMessages retires the local- row and carries both onto the echo.
+  // Atomic by (owner, event_id), so the pre-#850 read-modify-write clobber
+  // hazard (Copilot review #509) no longer needs a serialization chain.
   const appendLocalDmMessage = useCallback(
     async (otherPubkey: string, msg: ConversationMessage): Promise<void> => {
       if (!pubkey) return;
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return;
-      // Serialize concurrent appends to the same conversation. Without
-      // this, two rapid sends could both read the same `existing` array,
-      // each merge their msg, both write back — last write wins, the
-      // earlier optimistic row is silently lost. Per Copilot review #509.
-      const chainKey = `${pubkey}:${normalized}`;
-      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
-      const next = prev.then(async () => {
-        try {
-          const key = convCacheKey(pubkey, normalized);
-          const raw = await AsyncStorage.getItem(key);
-          const existing: ConversationMessage[] = raw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
-          // Dedup on id (same key would arise from a double-tap retry).
-          const map = new Map<string, ConversationMessage>();
-          for (const m of existing) map.set(m.id, m);
-          map.set(msg.id, msg);
-          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-          const capped =
-            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
-          await AsyncStorage.setItem(key, JSON.stringify(capped));
-        } catch {
-          // Swallow — the in-memory setMessages above already painted
-          // the bubble. The remount-after-back regression is precisely
-          // what this method exists to fix, so a write failure is
-          // unfortunate but not destructive (next relay echo will
-          // repopulate the cache).
-        }
-      });
-      // `.catch` on the chain entry so a single failure doesn't poison
-      // every subsequent append on this conversation.
-      appendLocalDmChains.set(
-        chainKey,
-        next.catch(() => {}),
-      );
-      await next;
+      try {
+        await upsertDmMessages([
+          {
+            owner: pubkey,
+            eventId: msg.id,
+            conversation: normalized,
+            createdAt: msg.createdAt,
+            sender: msg.fromMe ? pubkey : normalized,
+            content: msg.text,
+            fromMe: msg.fromMe,
+            wireKind: msg.wireKind ?? 14,
+            deliveryStatus: msg.deliveryStatus,
+            rumorId: msg.rumorId,
+          },
+        ]);
+      } catch (e) {
+        // Swallow — the in-memory setMessages already painted the bubble; a
+        // write failure is unfortunate but not destructive (the next relay
+        // echo repopulates the store).
+        if (__DEV__) console.warn('[DmStore] optimistic append failed:', e);
+      }
     },
     [pubkey],
   );
 
-  // Durably attach delivery status (#856) to persisted conv rows, keyed by row
-  // id. The optimistic `local-` row's tick is otherwise lost across a cold
-  // restart: when the relay echo replaces it, the on-disk merge can miss the
-  // carry-over (the local- write may not have committed before the echo's
-  // fetch read the cache), so the persisted real-id row has no tick. After the
-  // in-memory reconcile re-attaches the tick to the real-id row, this writes
-  // that back so the next cold start reads it. Shares the per-conversation
-  // chain lock so it can't race the append/echo writes.
+  // Durably attach delivery status (#856) to stored rows, keyed by row id —
+  // now a fill-only UPDATE on the encrypted store (#850). The optimistic
+  // `local-` row's tick is otherwise lost across a cold restart when the
+  // relay echo replaces it before the tick settled; after the in-memory
+  // reconcile re-attaches it to the real-id row, this writes it back so the
+  // next cold start reads it.
   const persistDeliveryStatuses = useCallback(
-    async (otherPubkey: string, statusById: Record<string, DeliveryStatus>): Promise<void> => {
+    async (_otherPubkey: string, statusById: Record<string, DeliveryStatus>): Promise<void> => {
       if (!pubkey) return;
-      const normalized = otherPubkey.trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
       if (Object.keys(statusById).length === 0) return;
-      const chainKey = `${pubkey}:${normalized}`;
-      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
-      const next = prev.then(async () => {
-        try {
-          const key = convCacheKey(pubkey, normalized);
-          const raw = await AsyncStorage.getItem(key);
-          if (!raw) return;
-          const existing: ConversationMessage[] = (() => {
-            try {
-              const parsed = JSON.parse(raw);
-              return Array.isArray(parsed) ? parsed : [];
-            } catch {
-              return [];
-            }
-          })();
-          let changed = false;
-          const updated = existing.map((m) => {
-            const s = statusById[m.id];
-            // Only write when it actually adds/changes a tick — avoids a
-            // needless rewrite (and keeps an existing richer status if equal).
-            if (s && !m.deliveryStatus) {
-              changed = true;
-              return { ...m, deliveryStatus: s };
-            }
-            return m;
-          });
-          if (changed) await AsyncStorage.setItem(key, JSON.stringify(updated));
-        } catch {
-          // Non-fatal — the in-memory tick already shows; worst case the next
-          // send/echo cycle re-persists it.
-        }
-      });
-      appendLocalDmChains.set(
-        chainKey,
-        next.catch(() => {}),
-      );
-      await next;
+      try {
+        await updateDmDeliveryStatuses(pubkey, statusById);
+      } catch (e) {
+        // Non-fatal — the in-memory tick already shows; worst case the next
+        // send/echo cycle re-persists it.
+        if (__DEV__) console.warn('[DmStore] delivery-status persist failed:', e);
+      }
     },
     [pubkey],
   );
@@ -357,15 +280,16 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
 
-  // Read-through (#868): paint the thread from the union of the per-conversation
-  // cache and the encrypted store BEFORE the relay fetch resolves, so a DM the
-  // inbox already ingested shows immediately and the thread is never behind the
-  // preview. Reads the SAME rows the inbox list is built from (getInboxLatest /
-  // getConversationMessages both read dm_messages), so they can't disagree.
+  // Read-through (#868, single-sourced in #850): paint the thread from the
+  // encrypted store BEFORE the relay fetch resolves, so a DM the inbox
+  // already ingested shows immediately and the thread is never behind the
+  // preview. Reads the SAME rows the inbox list is built from (getInboxLatest
+  // / getConversationMessages both read dm_messages), so they can't disagree
+  // — and the rows now carry the optimistic local- sends + delivery ticks the
+  // retired plaintext blob used to.
   const loadInitialConversation = useCallback(
     (otherPubkey: string): Promise<ConversationMessage[]> =>
       loadInitialConversationFor(otherPubkey, {
-        getCachedConversation,
         getStoredRows: (peer) => {
           if (!pubkey) return Promise.resolve([] as DmMessageRow[]);
           const normalized = peer.trim().toLowerCase();
@@ -373,7 +297,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           return getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
         },
       }),
-    [pubkey, getCachedConversation],
+    [pubkey],
   );
 
   // Stable self-reference so the cold-start backfill can re-invoke
@@ -487,29 +411,22 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Pacing yields the ingest performed this refresh (#532/#788).
           let nip17YieldCount = 0;
 
-          // PR B: load persisted inbox + last-seen so we can (a) paint
-          // cached entries before the relay round-trip finishes and
-          // (b) only fetch events newer than the last one we saw.
-          const [cachedInboxRaw, lastSeen] = await Promise.all([
-            safeGetDmCacheItem(inboxCacheKey(refreshForPubkey)),
+          // Load the store's inbox + the last-seen cursor so we can (a) paint
+          // stored entries before the relay round-trip finishes and (b) only
+          // fetch events newer than the last one we saw. Single source
+          // (#850): the encrypted store's indexed latest-per-conversation
+          // read — the plaintext inbox blob is retired (the migration above
+          // already folded any legacy blob into the store).
+          const [storedInbox, lastSeen] = await Promise.all([
+            loadInboxEntries(refreshForPubkey).catch(() => [] as DmInboxEntry[]),
             loadLastSeen(inboxLastSeenKey(refreshForPubkey)),
           ]);
-          const cachedInbox: DmInboxEntry[] = cachedInboxRaw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(cachedInboxRaw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
-          // Render the cached entries immediately so the Messages tab
+          // Render the stored entries immediately so the Messages tab
           // isn't blank while the relay fetches the delta. The followers
-          // set may have changed since the cache was written; re-apply
+          // set may have changed since the rows were written; re-apply
           // the filter here so unfollowed senders don't resurrect.
-          if (cachedInbox.length > 0) {
-            const filteredCache = cachedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
+          if (storedInbox.length > 0) {
+            const filteredCache = storedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
             setDmInbox(filteredCache);
           }
 
@@ -730,20 +647,17 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const persistedFreshRows = nip17Stored > 0 || k4Rows.length > 0;
           if (effectiveSignal?.aborted && !persistedFreshRows) return;
 
-          // Merge sources for the inbox (#848): the encrypted store's
-          // indexed latest-per-conversation read (DB-known wraps / kind-4
-          // no longer re-emit per-event entries), the persisted summary
-          // blob (kind-4-only threads predating the store), and this
-          // refresh's fresh decrypts. Keep at most DM_INBOX_CAP entries
-          // (newest-first), then persist + update last-seen.
+          // Merge sources for the inbox (#848/#850): the encrypted store's
+          // indexed latest-per-conversation read (re-read AFTER the ingest so
+          // it includes this refresh's persisted rows; DB-known wraps /
+          // kind-4 no longer re-emit per-event entries) plus this refresh's
+          // fresh decrypts (which carry rumorId etc. the projection lacks).
+          // The plaintext summary blob is gone — the store is the only
+          // at-rest source. Keep at most DM_INBOX_CAP entries (newest-first).
           const dbLatest = await loadInboxEntries(refreshForPubkey).catch(
             () => [] as DmInboxEntry[],
           );
-          const merged = mergeInboxEntries(
-            mergeInboxEntries(dbLatest, cachedInbox, DM_INBOX_CAP),
-            entries,
-            DM_INBOX_CAP,
-          );
+          const merged = mergeInboxEntries(dbLatest, entries, DM_INBOX_CAP);
           const filteredFinal = merged.filter((e) => passesFollowGate(e.partnerPubkey));
 
           // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
@@ -772,11 +686,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
           setDmInbox(filteredFinal);
 
-          // Persist the FILTERED list + new last-seen — `merged` may hold
-          // non-followed senders' plaintext (B1 thread-open rows surface via
-          // loadInboxEntries), which must stay off plaintext AsyncStorage
-          // (Archie review W2 on #849; matches the live-sub invariant).
-          // Only kind-4 contributes
+          // Advance the kind-4 last-seen cursor (a bare unix timestamp — no
+          // plaintext; the decrypted content itself persists ONLY in the
+          // encrypted store now, #850). Only kind-4 contributes
           // here — NIP-59 wraps have randomized timestamps (~2 days in
           // either direction of the real publish time) for plausible
           // deniability, so wrap.created_at can't be used as a
@@ -785,19 +697,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // forward-dated ts, then cause subsequent kind-4 since-filters
           // to drop legitimate recent NIP-04 messages. fetchInboxDmEvents
           // already drops the `since` filter for kind-1059 entirely (see
-          // the matching comment there); the cache dedupes wraps by id.
+          // the matching comment there); the store dedupes wraps by id.
           const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
-          await Promise.all([
-            AsyncStorage.setItem(
-              inboxCacheKey(refreshForPubkey),
-              JSON.stringify(filteredFinal),
-            ).catch(() => {}),
-            newLastSeen > (lastSeen ?? 0)
-              ? AsyncStorage.setItem(inboxLastSeenKey(refreshForPubkey), String(newLastSeen)).catch(
-                  () => {},
-                )
-              : Promise.resolve(),
-          ]);
+          if (newLastSeen > (lastSeen ?? 0)) {
+            await AsyncStorage.setItem(
+              inboxLastSeenKey(refreshForPubkey),
+              String(newLastSeen),
+            ).catch(() => {});
+          }
           // A cold rebuild (effectiveSignal undefined) that reached here
           // finished its backlog → claim the full cursor stamp. A WARM
           // productive-but-aborted sweep painted from the DB but did NOT finish
@@ -975,7 +882,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     dmInboxLoading,
     refreshDmInbox,
     fetchConversation,
-    getCachedConversation,
     loadInitialConversation,
     appendLocalDmMessage,
     persistDeliveryStatuses,

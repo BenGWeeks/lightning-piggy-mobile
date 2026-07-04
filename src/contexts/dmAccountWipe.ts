@@ -34,11 +34,19 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
     AMBER_NIP17_SKIP_KEY_BASE,
     NSEC_NIP17_SKIP_KEY_BASE,
   ]) {
-    try {
-      const f = new File(Paths.document, wrapCacheFileName(perAccountKey(base, pubkey)));
-      if (f.exists) f.delete();
-    } catch {
-      // best-effort — non-fatal
+    for (const key of [
+      perAccountKey(base, pubkey),
+      // Pre-#288 UNSUFFIXED remnant (N9, #850) — a wrap-cache/skip file
+      // written before per-account keys. Not attributable to an owner, so
+      // any account's wipe removes it (content is re-fetchable from relays).
+      base,
+    ]) {
+      try {
+        const f = new File(Paths.document, wrapCacheFileName(key));
+        if (f.exists) f.delete();
+      } catch {
+        // best-effort — non-fatal
+      }
     }
   }
   // Await any in-flight migration first — wiping under it would let a late

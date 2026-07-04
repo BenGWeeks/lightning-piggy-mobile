@@ -1,4 +1,9 @@
-import { mergeConversationMessages, reconcileDeliveryStatus, DM_CONV_CAP } from './nostrDmCache';
+import {
+  mergeConversationMessages,
+  reconcileDeliveryStatus,
+  dedupeLocalEchoes,
+  DM_CONV_CAP,
+} from './nostrDmCache';
 import type { ConversationMessage } from './nostrContextTypes';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
@@ -104,6 +109,28 @@ describe('reconcileDeliveryStatus — in-memory carry-over (#856)', () => {
     const next: ConversationMessage[] = [{ id: 'r', fromMe: false, text: 'hi', createdAt: 5 }];
     const out = reconcileDeliveryStatus(prev, next);
     expect(out[0].deliveryStatus).toBeUndefined();
+  });
+});
+
+describe('dedupeLocalEchoes — single-list read-side dedup (#850)', () => {
+  it('collapses a local- row and its echo from ONE store read into one bubble with the tick', () => {
+    // Both rows can coexist in the encrypted store briefly (append/echo race);
+    // a single read must still render one bubble carrying the local- tick.
+    const out = dedupeLocalEchoes([local('gm', 1000), echo('gm', 1001)]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('real-1001');
+    expect(out[0].deliveryStatus).toEqual(delivery);
+  });
+
+  it('keeps a pending local- row that has no echo', () => {
+    const out = dedupeLocalEchoes([local('unsent', 1000)]);
+    expect(out.map((m) => m.id)).toEqual(['local-1000']);
+  });
+
+  it('sorts ascending and leaves unrelated rows alone', () => {
+    const recv: ConversationMessage = { id: 'r1', fromMe: false, text: 'hi', createdAt: 999 };
+    const out = dedupeLocalEchoes([echo('later', 1500), recv]);
+    expect(out.map((m) => m.id)).toEqual(['r1', 'real-1500']);
   });
 });
 

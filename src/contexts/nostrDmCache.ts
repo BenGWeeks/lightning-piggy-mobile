@@ -2,7 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { LOCAL_DM_ID_PREFIX, LOCAL_DM_ECHO_WINDOW_SECS } from '../services/dmDb';
 import type { ConversationMessage } from './nostrContextTypes';
+
+// Re-export the echo-window constant from its single source of truth (dmDb —
+// the store-level echo retire and this in-memory merge must agree, #850).
+export { LOCAL_DM_ECHO_WINDOW_SECS };
 
 // Legacy keys for the plaintext NIP-17 wrap caches (#176/#687/#689 — RETIRED
 // in #848). Decrypted rumors now persist as rows in the encrypted SQLCipher
@@ -117,15 +122,19 @@ export const DM_INBOX_REFRESH_TTL_MS = 30_000;
 export const COLD_INITIAL_WRAP_LIMIT = 200;
 
 /**
- * Persisted inbox + per-peer message caches (PR B).
+ * LEGACY plaintext inbox + per-peer conversation blobs — RETIRED in #850.
  *
- * Key shape: `<prefix>_<userPubkeyHex>` — per-user so multiple nsec
- * identities on the same device don't share or overwrite each other.
- * On logout the three blobs are removed via `AsyncStorage.multiRemove`
- * alongside the NIP-17 wrap caches.
+ * `nostr_dm_inbox_v1_*` and `nostr_dm_conv_v1_*` held decrypted DM plaintext
+ * (up to DM_INBOX_CAP summaries / DM_CONV_CAP messages per peer) in
+ * UNENCRYPTED AsyncStorage, duplicating what the SQLCipher store protects.
+ * Nothing writes them any more: conversations + inbox serve purely from the
+ * encrypted store (dmDb), which now also carries deliveryStatus / rumorId /
+ * optimistic local- rows. The key constants remain so the one-time migration
+ * (dmBlobMigrationRunner) can import + delete an existing install's blobs,
+ * and so logout wipes clean up stragglers.
  *
- * Storage cap: `DM_INBOX_CAP` keeps the serialised JSON under ~400 KB
- * even with verbose messages (≈1000 entries × ~400 bytes each).
+ * The `*_last_seen_*` cursor keys stay LIVE — they hold only a unix
+ * timestamp (no plaintext) and still drive the kind-4 `since` delta fetch.
  */
 export const DM_INBOX_CACHE_PREFIX = 'nostr_dm_inbox_v1_';
 export const DM_INBOX_LAST_SEEN_PREFIX = 'nostr_dm_inbox_last_seen_v1_';
@@ -203,28 +212,6 @@ export async function safeGetDmCacheItem(key: string): Promise<string | null> {
   }
 }
 
-/** Read the persisted DM inbox for a user. Used during session restore /
- * post-login so the Messages tab paints from cache on cold start instead
- * of waiting for the relay round-trip + NIP-17 decrypt loop (3-5 s). The
- * shape mirrors what `refreshDmInbox` already writes at the end of every
- * successful refresh — so this is purely a read-side hoist of work that
- * was already happening, just earlier in the lifecycle.
- *
- * No follow-list filter is applied here. The next `refreshDmInbox` call
- * (fires via Messages-tab focus) re-applies the filter against current
- * follows, so a since-last-session unfollow never persists to the UI for
- * more than the brief render window before that re-filter happens. */
-export async function loadDmInboxFromCache(pubkey: string): Promise<DmInboxEntry[]> {
-  try {
-    const raw = await safeGetDmCacheItem(inboxCacheKey(pubkey));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 export async function loadLastSeen(key: string): Promise<number | undefined> {
   const raw = await AsyncStorage.getItem(key);
   if (!raw) return undefined;
@@ -263,12 +250,6 @@ export function mergeInboxEntries(
   }
   return result;
 }
-
-// Window in seconds to match a fresh real-id message against a pending
-// optimistic local- echo (same fromMe + same text). Mirrors
-// appendGroupMessage's LOCAL_ECHO_MATCH_WINDOW_SECS so the same UX
-// invariant — one bubble per send, not two — holds across 1:1 + group.
-export const LOCAL_DM_ECHO_WINDOW_SECS = 30;
 
 export function mergeConversationMessages(
   cached: ConversationMessage[],
@@ -337,6 +318,24 @@ export function mergeConversationMessages(
     result = result.slice(drop);
   }
   return result;
+}
+
+/**
+ * Read-side echo dedup for a single store read (#850). `upsertDmMessages`
+ * retires a matched local- row when its echo lands, but the two writes can
+ * race (optimistic append vs live-sub echo), so a read may still see both
+ * rows. Splitting the list into local- vs real and merging real OVER local
+ * reuses `mergeConversationMessages`' exact pairing (fromMe + text + echo
+ * window) — one bubble per send, ticks/rumorId inherited — without a second
+ * implementation of the rule.
+ */
+export function dedupeLocalEchoes(
+  messages: ConversationMessage[],
+  cap: number = DM_CONV_CAP,
+): ConversationMessage[] {
+  const locals = messages.filter((m) => m.id.startsWith(LOCAL_DM_ID_PREFIX));
+  const reals = messages.filter((m) => !m.id.startsWith(LOCAL_DM_ID_PREFIX));
+  return mergeConversationMessages(locals, reals, cap);
 }
 
 /**

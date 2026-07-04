@@ -36,7 +36,7 @@ The app uses two storage mechanisms with different security levels:
 
 ==== AsyncStorage (Unencrypted)
 
-`@react-native-async-storage/async-storage` stores mostly non-sensitive data — the keys below contain pubkeys, settings, and public profile metadata. The notable exception is decrypted DM + group-message plaintext, which the app caches under additional keys to power cold-start rendering; see <<Decrypted DM Plaintext at Rest (Threat Model)>> for the full inventory and rationale.
+`@react-native-async-storage/async-storage` stores mostly non-sensitive data — the keys below contain pubkeys, settings, and public profile metadata. Decrypted *1:1 DM* plaintext no longer lives here: as of #848/#850 it persists exclusively in the SQLCipher-encrypted local DB (see <<Message Content at Rest (Threat Model)>>). The remaining known exception is decrypted *group-chat* plaintext (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`) — see the residual-risk note in that section.
 
 [cols="2,3", options="header"]
 |===
@@ -62,7 +62,7 @@ The app uses two storage mechanisms with different security levels:
 
 |===
 
-NOTE: The app also stores **decrypted DM and group-message plaintext** in AsyncStorage to power cold-start rendering of both the Messages tab (DM + group previews) and `GroupConversationScreen` (per-group thread log under `group_messages_<groupId>`). See <<Decrypted DM Plaintext at Rest (Threat Model)>> below for the full inventory, threat model, and mitigation analysis.
+NOTE: The app still stores **decrypted group-message plaintext** in AsyncStorage to power `GroupConversationScreen` and the group previews on the Messages tab (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`). This is the known at-rest residual — 1:1 DM plaintext moved to the encrypted DB in #848/#850. See <<Message Content at Rest (Threat Model)>> below.
 
 === NWC URL Security
 
@@ -146,94 +146,51 @@ Cached contact data in AsyncStorage is also cleared.
 * Image uploads to nostr.build use HTTPS
 * LNURL-pay callbacks use HTTPS
 
-=== Decrypted DM Plaintext at Rest (Threat Model)
+=== Message Content at Rest (Threat Model)
 
-This section documents the threat model around decrypted direct-message and group-message plaintext that the app persists in AsyncStorage to power cold-start rendering, follow-up to issue #192.
+This section documents where decrypted Nostr message content lives on disk and what an adversary with the device can recover. It supersedes the original "document + accept" analysis (#192): the plaintext-in-AsyncStorage design it described was retired in #848/#850 in favour of app-level encryption at rest (the option-4 outcome that analysis recommended, delivered as a SQLCipher store rather than per-blob AES). The design threat model is a **seized device** — e.g. border control taking the phone for forensic imaging.
 
-==== What is stored, where, and how much
-
-Decrypted Nostr message plaintext lands on disk in six distinct AsyncStorage namespaces. None of these are encrypted at rest.
+==== Where message content lives now
 
 [cols="3,3,2", options="header"]
 |===
-| Key shape | Contents | Cap
+| Data | Where | At-rest protection
 
-| `amber_nip17_cache_v1`
-| `Record<wrapId, { wrapId, partnerPubkey, fromMe, createdAt, text, wireKind }>` — the plaintext of every NIP-17 gift-wrap (kind 1059) the Amber-signer path has decrypted from a followed sender.
-| 5000 entries (≈1–2 MB JSON blob worst-case)
+| 1:1 DM plaintext (NIP-17 rumors + legacy NIP-04), incl. delivery ticks, rumor ids and optimistic unsent rows
+| `dm_messages` table in `lightningpiggy.db` (op-sqlite + SQLCipher)
+| **Whole-file SQLCipher encryption**; 256-bit key held only in the OS keystore (`expo-secure-store`, `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, excluded from backups). Every open asserts `PRAGMA cipher_version` and refuses a plaintext fallback.
 
-| `nsec_nip17_cache_v1`
-| Same shape as above, populated by the nsec-signer path. Both keys exist so that switching signer on one device doesn't leak plaintext between identities.
-| 5000 entries
+| Legacy plaintext DM caches (`amber_nip17_cache_v1*`, `nsec_nip17_cache_v1*` files; `nostr_dm_inbox_v1_*`, `nostr_dm_conv_v1_*` AsyncStorage blobs)
+| **Retired.** One-time migrations (#848 `dmStoreMigrationRunner`, #850 `dmBlobMigration`) import each cache into the encrypted DB, then delete it with verification (populate → delete → verify → flag; the flag is never set while plaintext survives). Pre-#288 unsuffixed remnants are deleted too.
+| n/a after migration — nothing writes these keys any more
 
-| `nostr_dm_inbox_v1_<userPubkey>`
-| Per-user inbox rollup of `DmInboxEntry` (`{ id, partnerPubkey, fromMe, createdAt, text, wireKind }`) — used to paint Messages from cache on cold start before the relay/decrypt round-trip resolves.
-| 1000 entries (~400 KB)
+| Group-chat plaintext (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`)
+| AsyncStorage (unencrypted)
+| **Known residual.** App sandbox + OS file-based encryption only. Wiped on logout/account-wipe (#944); moving it into the encrypted store is the tracked follow-up.
 
-| `nostr_dm_conv_v1_<userPubkey>_<peerPubkey>`
-| Per-conversation message log; one key per peer the user has opened a thread with.
-| 500 messages per peer (~150 KB)
-
-| `group_messages_<groupId>`
-| Per-group thread log (`GroupMessage[]` — `{ id, senderPubkey, text, createdAt }`).
-| 500 messages per group
-
-| `nostr_group_activity_<userPubkey>`
-| Per-user rollup of `GroupActivity` — most recently `lastText` (decrypted preview shown on the Messages tab list).
-| Bounded by group count
+| Last-seen cursors (`*_last_seen_*`)
+| AsyncStorage
+| Bare unix timestamps — no content.
 |===
 
-Aggregate worst-case footprint for a power user with a saturated cache: a few megabytes of decrypted DM and group-message plaintext, persisted indefinitely under the app's private data directory.
+==== Threat model: seized device (border control)
 
-==== Threat model
+What the design protects:
 
-In scope (what the current design protects against):
+* **Forensic imaging of the flash (device off or locked).** The DM store is SQLCipher ciphertext — content *and* metadata. The DB key is wrapped by the hardware keystore and is not present in any file an imaging tool can lift; it is also excluded from cloud/device-migration backups, so a backup-restore of the app data yields an unopenable ciphertext file (the app detects this and re-syncs from relays rather than shipping a key in the backup).
+* **Casual physical access / other apps.** Unchanged from before: app sandbox, no export UI.
+* **Cross-account leak on a shared install.** Logout wipes the signed-out owner's DB rows, every legacy cache key (suffixed *and* unsuffixed), the group-chat blobs, and — on last-identity logout — deletes the DB file *and* its keystore key (`wipeLocalDmStore`). A lone key or a lone ciphertext file is never left behind.
 
-* **Casual physical access.** Picking up an unlocked phone and tapping around the app does not expose stored plaintext beyond what's already on screen — the data lives in private app storage and isn't surfaced through any export UI.
-* **Other apps on the same device.** Android sandbox + iOS app-private container prevents arbitrary apps from reading another app's `databases/` or `Application Support/` directories.
-* **Cross-account leak on the same install.** Logout (`NostrContext.logout`) explicitly multi-removes every cache listed above, so signing in as another identity cannot read the previous identity's history. The single-blob NIP-17 caches, the per-user-keyed inbox/conv/activity caches, and every `group_messages_<groupId>` blob (collected via an `AsyncStorage.getAllKeys()` prefix scan) are all enumerated and cleared.
+What it cannot protect against (out of scope at the app layer):
 
-Out of scope (what the current design does **not** protect against):
+* **Compelled or observed device unlock.** After first unlock the keystore will serve the DB key to the app; an adversary who can compel the passcode (or seize the phone unlocked and keep it powered) operates as the user. Raising this bar needs an *app-level* lock that gates the DB-key read behind a separate credential/biometric, plus optionally a panic-wipe — tracked as follow-ups, deliberately not bundled into the storage migration.
+* **Rooted device with the app running.** Decrypted rows transit RAM while rendered.
+* **Group-chat residual.** Until group messages get the same treatment, `group_messages_*` is readable from an unlocked seized device.
+* **Relay-side copies.** At-rest encryption protects the device only; NIP-17 wraps remain on relays and are re-fetchable by anyone holding the nsec.
 
-* **Rooted / jailbroken device.** Any process running with root can read `/data/data/app.lightningpiggy/databases/RKStorage` (Android) or the equivalent iOS sandbox path. All stored DM plaintext is exposed.
-* **Forensic extraction.** Tools like Cellebrite, Magnet AXIOM, or `adb backup` against a debug-buildable device can pull AsyncStorage SQLite files even from a powered-off phone (depending on lock state and OS version). Plaintext is recoverable.
-* **Malicious OEM firmware / supply-chain compromise.** A compromised platform that bypasses sandbox enforcement reads plaintext.
-* **Stolen device with known passcode / no passcode.** File-system encryption keys derive from device credentials; an attacker with the passcode bypasses encryption-at-rest of the app sandbox.
-* **Lost device, no logout.** The cache lives on disk for the lifetime of the install. Most users never log out, so the cache accumulates indefinitely. Remote-wipe (e.g. Find My Device) is the only mitigation today.
+==== Rules for new code
 
-==== Mitigation options considered
-
-The four mitigations below were evaluated against the constraint that `expo-secure-store` (Keychain on iOS, EncryptedSharedPreferences backed by Android Keystore) is the natural target for hardware-backed encryption.
-
-[cols="1,3,2", options="header"]
-|===
-| Option | Approach | Verdict
-
-| 1. Document + accept
-| Keep AsyncStorage. Document threat model (this section). Rely on logout to clear caches; encourage users to set a strong device passcode.
-| **Recommended for now.** Honest framing. Zero migration risk.
-
-| 2. Move whole cache to SecureStore
-| Replace `AsyncStorage.{get,set}Item` with `SecureStore.{getItemAsync,setItemAsync}` for all six key shapes above.
-| **Not feasible as a single blob.** iOS Keychain items are intended for small secrets (Apple's guidance: keep entries small; performance and reliability suffer beyond a few KB). The 1–2 MB NIP-17 cache plus the 400 KB inbox blob would not write reliably across all iOS versions. Per-entry sharding into 5000+ Keychain items has its own performance and OS-limit concerns.
-
-| 3. Split storage: index in AsyncStorage, plaintext in SecureStore
-| Keep `wrapId → partnerPubkey` mapping in AsyncStorage (cheap to enumerate during inbox refresh). Store only the `text` field per wrap in SecureStore, keyed by `nip17_text_<wrapId>`.
-| **Possible but expensive.** Adds one SecureStore round-trip per cache probe during the refresh-inbox hot path (5000 reads on a saturated cache). Migration helper would have to copy and verify per-entry, then delete the AsyncStorage source. Per-entry SecureStore items are well within Keychain limits but the IO amplification is significant.
-
-| 4. Encrypt-at-rest with key in SecureStore
-| Generate a per-install AES-256 key, store the key in SecureStore, AES-GCM-encrypt every cache blob before `AsyncStorage.setItem`. Decrypt on read.
-| **Best long-term option.** Single SecureStore item (the key, ~32 bytes — well within all platform limits). Cache stays in AsyncStorage so existing IO patterns and size are unchanged. Hardware-backed key isolation provides similar protection to option 2 against forensic extraction. Cost: ~5–20 ms per cache load/save for crypto + a one-shot migration helper that decrypts the legacy plaintext blobs and re-writes them encrypted. Nsec-only signer can derive the key from `nsec`; Amber signer needs a randomly-generated key (Amber doesn't expose the secret key).
-|===
-
-==== Recommendation
-
-Adopt **option 1 (document + accept)** as the immediate response. The current design's protection — app sandbox + logout-clears-everything — is consistent with how most messaging apps on Android/iOS handle DM history at rest, and matches the threat model the user base experiences (single-user device with a passcode, app isn't installed on rooted dev hardware). Migrating to SecureStore speculatively pays a real performance and complexity cost for a threat model the typical user is not in.
-
-File **option 4 (encrypt-at-rest with SecureStore-held key)** as a follow-up issue and pull the trigger on it when any of the following change:
-
-* The user base expands into a regulated or enterprise context.
-* A concrete report surfaces of a Lightning Piggy install on a rooted / forensically-imaged device.
-* Threat-model survey data shows users routinely sharing devices.
-
-Logout-as-mitigation should also be made more discoverable. Consider a follow-up to surface a "Clear DM cache" action in the Messages tab settings that runs the same `multiRemove` logic the logout path uses, but without signing the user out — a low-cost lever for a paranoid user that doesn't require migration.
+* Decrypted DM/group content, or anything derived from it (previews, search indexes), goes in the encrypted DB — **never** AsyncStorage or a plain file.
+* Keys/credentials go in `expo-secure-store`; bulk data never does (Keychain items must stay small).
+* Any migration off a plaintext store must follow the `dmStoreMigration` ordering: populate the encrypted copy, delete the plaintext, **verify** it is gone, only then set the migrated flag.
+* Every wipe path (logout, account removal) must cover new keys — add them to `wipeAccountCaches` / `wipeDmStoresForAccount` in the same PR that introduces them.
