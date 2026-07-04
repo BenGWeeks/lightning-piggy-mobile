@@ -21,10 +21,17 @@ interface Props {
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 // The full card size in the cover-flow (centre item). Neighbours are scaled
-// down by the parallax config so a slice of each peeks in.
-const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.52);
+// down by the parallax config so a slice of each peeks in. A smaller card +
+// tighter centre-to-centre spacing lets 4–5 cards show at once (was 0.52,
+// which left only ~3 with big gaps).
+const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.4);
 const CF_CARD_HEIGHT = Math.round(CF_CARD_WIDTH / CARD_ASPECT);
 const CF_VIEWPORT_HEIGHT = CF_CARD_HEIGHT + 24;
+// Centre-to-centre distance between adjacent cards. The parallax layout places
+// neighbour n at ±n·(SCREEN_WIDTH − parallaxScrollingOffset), so this constant
+// IS that spacing and the offset is derived from it. Smaller ⇒ cards sit closer
+// and the 2nd neighbours slide onto the screen (more cards, less white space).
+const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.8);
 
 /**
  * Shared wallet card-design picker. Extracted from the byte-identical grids
@@ -85,8 +92,8 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
         mode="parallax"
         modeConfig={{
           parallaxScrollingScale: 0.9,
-          parallaxScrollingOffset: SCREEN_WIDTH - CF_CARD_WIDTH - 24,
-          parallaxAdjacentItemScale: 0.74,
+          parallaxScrollingOffset: SCREEN_WIDTH - CF_CARD_SPACING,
+          parallaxAdjacentItemScale: 0.82,
         }}
         onSnapToItem={(index) => onSelect(themeList[index].id)}
         renderItem={({ item, index }) => (
