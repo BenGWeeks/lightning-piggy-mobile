@@ -129,7 +129,7 @@ async function getSigner(): Promise<BunkerSigner> {
     throw new Error('NIP-46 signer not connected');
   }
   const connection = _activeConnection;
-  _signerPromise = (async () => {
+  const promise = (async () => {
     const pointer: BunkerPointer = {
       pubkey: connection.remoteSignerPubkey,
       relays: connection.relays,
@@ -151,15 +151,31 @@ async function getSigner(): Promise<BunkerSigner> {
         `NIP-46 signer could not connect: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
+    // Guard against a mid-flight `setActiveConnection` (logout / re-pair):
+    // if the active connection changed while this handshake was in flight,
+    // this signer belongs to the OLD identity. Caching it would leave a
+    // stale signer/subscription under the wrong connection and re-enable
+    // signing after logout. Close it and fail this attempt instead.
+    if (_activeConnection !== connection) {
+      try {
+        await signer.close();
+      } catch {
+        // Best-effort — we're discarding this signer regardless.
+      }
+      throw new Error('NIP-46 connection changed during connect');
+    }
     _activeSigner = signer;
     return signer;
   })();
+  _signerPromise = promise;
   try {
-    return await _signerPromise;
+    return await promise;
   } catch (e) {
-    // Failed connect: drop the memo so the next call retries a fresh
-    // connect rather than re-awaiting the same rejected promise forever.
-    _signerPromise = null;
+    // Drop the memo so the next call retries a fresh connect rather than
+    // re-awaiting the same rejected promise forever — but ONLY if it still
+    // points at THIS attempt. A concurrent setActiveConnection + getSigner
+    // may have already installed a newer promise we must not clobber.
+    if (_signerPromise === promise) _signerPromise = null;
     throw e;
   }
 }

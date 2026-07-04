@@ -102,6 +102,11 @@ export async function ingestInboxNip17ForSigner(args: {
       bypassSkipSet,
       isColdStart,
       signal,
+      // Mirror the Amber branch: if the bunker denies `nip44_decrypt`, stop
+      // after the first denial rather than firing a round-trip per wrap on
+      // every refresh. `isPermissionNotGranted` matches the normalised
+      // `NIP-46 signer denied …` message (dmWrapIngest.ts).
+      stopOnPermissionDenied: true,
       onSkip,
     });
   }
