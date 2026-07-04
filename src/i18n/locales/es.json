@@ -1991,6 +1991,7 @@
       "submit": "Enviar reseña",
       "submitUpdate": "Actualizar reseña",
       "empty": "Aún no hay reseñas. ¡Sé el primero en reseñar este producto!",
+      "loadError": "No se pudieron cargar las reseñas",
       "count": {
         "one": "{{count}} reseña",
         "other": "{{count}} reseñas"
@@ -2000,7 +2001,8 @@
       "placeholder": "Añade un comentario",
       "post": "Publicar comentario",
       "signIn": "Inicia sesión para comentar",
-      "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!"
+      "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!",
+      "loadError": "No se pudieron cargar los comentarios"
     },
     "checkout": {
       "orderPlaced": "Pedido realizado",
@@ -2021,7 +2023,15 @@
       "websiteFallback": "¿Prefieres la web? Abre {{seller}}",
       "openWebsiteAccessibility": "Abrir la web de {{seller}}",
       "toastPlaced": "Pedido realizado",
-      "toastPlacedBody": "Esperando a que {{seller}} envíe una factura…"
+      "toastPlacedBody": "Esperando a que {{seller}} envíe una factura…",
+      "errors": {
+        "notSignedIn": "Inicia sesión para realizar un pedido",
+        "noSellerIdentity": "Este vendedor no tiene identidad Nostr para hacerle un pedido",
+        "signingKeyMissing": "No se encontró tu clave de firma. Vuelve a iniciar sesión.",
+        "unsupportedSigner": "Este firmante aún no puede realizar pedidos.",
+        "relayUnreachable": "No se pudo contactar con un relay para realizar tu pedido. Inténtalo de nuevo.",
+        "generic": "Algo salió mal al realizar tu pedido. Inténtalo de nuevo."
+      }
     },
     "shipping": {
       "label": "Envío",
@@ -2029,6 +2039,11 @@
       "loadError": "No se pudieron cargar las opciones de envío.",
       "retry": "Reintentar",
       "retryAccessibility": "Reintentar cargar las opciones de envío",
+      "shipToTitle": "Enviar a",
+      "searchCountries": "Buscar países",
+      "searchCountriesPlaceholder": "Buscar países…",
+      "shipToCountry": "Enviar a {{country}}",
+      "noCountriesMatch": "Ningún país coincide con «{{query}}»",
       "shipTo": "Enviar a {{country}} — cambiar país",
       "chooseCountry": "Elegir país",
       "chooseCountryPlaceholder": "Elegir país…",

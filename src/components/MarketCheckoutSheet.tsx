@@ -167,12 +167,13 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     ? (costSatsByCoordinate.get(selectedOption.coordinate) ?? null)
     : null;
 
-  // Submit gate (spec §6): while options are loading/unloadable we can't know
-  // whether shipping is required, so block; once options exist, require a
-  // country + a compatible option with a priceable sats cost.
+  // Submit gate (spec §6): until shipping has settled to `ready` we can't know
+  // whether shipping is required, so block for every non-ready state —
+  // `idle` (the initial render before the load effect fires), `loading`, and
+  // `error` alike. Once ready, only require a country + a compatible option
+  // with a priceable sats cost when the merchant actually has options.
   const shippingBlocksSubmit =
-    shipping.status === 'loading' ||
-    shipping.status === 'error' ||
+    shipping.status !== 'ready' ||
     (hasShipping && (!countryCode || !selectedOption || selectedShippingSats === null));
 
   const renderBackdrop = useCallback(

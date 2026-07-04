@@ -112,7 +112,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       )}
 
       {error ? (
-        <Text style={styles.state}>{error}</Text>
+        <Text style={styles.state}>{t('market.comments.loadError')}</Text>
       ) : loading && topLevel.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : topLevel.length === 0 ? (

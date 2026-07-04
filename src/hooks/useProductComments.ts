@@ -20,7 +20,12 @@ export interface UseProductComments {
   /** Direct replies to a given comment id, oldest-first. */
   getDirectReplies: (parentId: string) => NostrEvent[];
   loading: boolean;
-  error: string | null;
+  /**
+   * True when the relay query failed. The user-facing copy is localized at the
+   * render layer (`market.comments.loadError`) rather than baked in here, so
+   * the message follows the app's selected locale.
+   */
+  error: boolean;
   refetch: () => void;
 }
 
@@ -33,7 +38,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   const { relays } = useNostr();
   const [events, setEvents] = useState<NostrEvent[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 
@@ -50,12 +55,12 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     if (!root) {
       setEvents([]);
       setLoading(false);
-      setError(null);
+      setError(false);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
-    setError(null);
+    setError(false);
     querySyncAbortable(pool, readRelays, commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), {
       maxWait: 5000,
       signal: controller.signal,
@@ -64,7 +69,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
         if (!controller.signal.aborted) setEvents(evs);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError('Failed to load comments');
+        if (!controller.signal.aborted) setError(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);

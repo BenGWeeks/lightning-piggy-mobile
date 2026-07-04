@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useNostr } from '../contexts/NostrContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import { NSEC_KEY } from '../contexts/nostrAuthKeys';
@@ -9,6 +10,31 @@ import {
   type MarketOrderLine,
   type OrderShippingInput,
 } from '../utils/marketOrder';
+
+/**
+ * Stable, translatable reason a checkout failed. The raw Error thrown alongside
+ * each code keeps a developer-facing message for logs/diagnostics; the UI copy
+ * is looked up from `market.checkout.errors.<code>` so it follows the app's
+ * locale rather than surfacing raw English.
+ */
+export type CheckoutErrorCode =
+  | 'notSignedIn'
+  | 'noSellerIdentity'
+  | 'signingKeyMissing'
+  | 'unsupportedSigner'
+  | 'relayUnreachable'
+  | 'generic';
+
+/** Error carrying a {@link CheckoutErrorCode} so the hook can map it to copy. */
+class CheckoutError extends Error {
+  constructor(
+    readonly code: CheckoutErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CheckoutError';
+  }
+}
 
 // In-app Market checkout orchestration (#market). The PURE order-building lives
 // in utils/marketOrder (unit-tested); this thin hook adds the signer + relay
@@ -59,8 +85,14 @@ export interface UseMarketCheckout {
 
 export function useMarketCheckout(): UseMarketCheckout {
   const { pubkey, isLoggedIn, signerType, relays } = useNostr();
+  const t = useTranslation();
   const [status, setStatus] = useState<CheckoutStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  const messageForCode = useCallback(
+    (code: CheckoutErrorCode): string => t(`market.checkout.errors.${code}`),
+    [t],
+  );
 
   const reset = useCallback(() => {
     setStatus('idle');
@@ -69,23 +101,26 @@ export function useMarketCheckout(): UseMarketCheckout {
 
   const placeOrder = useCallback(
     async (input: PlaceOrderInput): Promise<PlaceOrderResult> => {
-      if (!pubkey || !isLoggedIn) {
-        throw new Error('Sign in to place an order');
-      }
-      const vendorPubkey = input.vendorPubkey.trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(vendorPubkey)) {
-        throw new Error('This seller has no Nostr identity to order from');
-      }
-
-      // Union the user's write relays with the defaults (publish uses
-      // Promise.any, so one responsive relay is enough) — same relay policy as
-      // the DM composer.
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
-
-      setStatus('placing');
       setError(null);
       try {
+        if (!pubkey || !isLoggedIn) {
+          throw new CheckoutError('notSignedIn', 'Sign in to place an order');
+        }
+        const vendorPubkey = input.vendorPubkey.trim().toLowerCase();
+        if (!/^[0-9a-f]{64}$/.test(vendorPubkey)) {
+          throw new CheckoutError(
+            'noSellerIdentity',
+            'This seller has no Nostr identity to order from',
+          );
+        }
+
+        // Union the user's write relays with the defaults (publish uses
+        // Promise.any, so one responsive relay is enough) — same relay policy
+        // as the DM composer.
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+
+        setStatus('placing');
         // Build the order INSIDE the guarded section: if construction throws
         // synchronously (e.g. crypto/RNG unavailable, or an unexpected input
         // shape), the catch below reliably flips status to 'error' and surfaces
@@ -109,7 +144,7 @@ export function useMarketCheckout(): UseMarketCheckout {
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) throw new Error('Signing key not found');
+          if (!nsec) throw new CheckoutError('signingKeyMissing', 'Signing key not found');
           const { secretKey } = nostrService.decodeNsec(nsec);
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
@@ -142,23 +177,28 @@ export function useMarketCheckout(): UseMarketCheckout {
           delivered = result.delivery.delivered;
           sendError = result.errors[0];
         } else {
-          throw new Error('Unsupported signer — cannot place order');
+          throw new CheckoutError('unsupportedSigner', 'Unsupported signer — cannot place order');
         }
 
         if (!delivered) {
-          throw new Error(sendError ?? 'Could not reach a relay to place the order');
+          throw new CheckoutError(
+            'relayUnreachable',
+            sendError ?? 'Could not reach a relay to place the order',
+          );
         }
 
         setStatus('sent');
         return { orderId, totalSats };
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Failed to place order';
+        // Keep the raw Error for diagnostics/logs; show localized copy in the UI.
+        if (__DEV__) console.warn('[market] place order failed:', e);
+        const code: CheckoutErrorCode = e instanceof CheckoutError ? e.code : 'generic';
         setStatus('error');
-        setError(message);
-        throw e instanceof Error ? e : new Error(message);
+        setError(messageForCode(code));
+        throw e instanceof Error ? e : new Error('Failed to place order');
       }
     },
-    [pubkey, isLoggedIn, signerType, relays],
+    [pubkey, isLoggedIn, signerType, relays, messageForCode],
   );
 
   return {

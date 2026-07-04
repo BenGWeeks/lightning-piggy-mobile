@@ -9,6 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createCountryPickerSheetStyles } from '../styles/CountryPickerSheet.styles';
 import { COUNTRIES, type Country } from '../data/countries';
 
@@ -29,6 +30,7 @@ interface Props {
  */
 const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, onSelect }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createCountryPickerSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const [search, setSearch] = useState('');
@@ -75,7 +77,7 @@ const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, o
           style={styles.row}
           onPress={() => handlePick(item.code)}
           accessibilityRole="button"
-          accessibilityLabel={`Ship to ${item.name}`}
+          accessibilityLabel={t('market.shipping.shipToCountry', { country: item.name })}
           testID={`country-picker-row-${item.code}`}
         >
           <Text style={[styles.rowName, isSelected && styles.rowNameSelected]} numberOfLines={1}>
@@ -89,7 +91,7 @@ const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, o
         </TouchableOpacity>
       );
     },
-    [styles, colors, selectedCode, handlePick],
+    [styles, colors, selectedCode, handlePick, t],
   );
 
   return (
@@ -107,16 +109,16 @@ const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, o
       onDismiss={onClose}
     >
       <View style={styles.container} testID="country-picker-sheet">
-        <Text style={styles.title}>Ship to</Text>
+        <Text style={styles.title}>{t('market.shipping.shipToTitle')}</Text>
         <BottomSheetTextInput
           style={styles.searchInput}
-          placeholder="Search countries…"
+          placeholder={t('market.shipping.searchCountriesPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={search}
           onChangeText={setSearch}
           autoCorrect={false}
           autoCapitalize="none"
-          accessibilityLabel="Search countries"
+          accessibilityLabel={t('market.shipping.searchCountries')}
           testID="country-picker-search"
         />
         <BottomSheetFlatList
@@ -127,7 +129,9 @@ const CountryPickerSheet: React.FC<Props> = ({ visible, onClose, selectedCode, o
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No countries match “{deferredSearch.trim()}”</Text>
+              <Text style={styles.emptyText}>
+                {t('market.shipping.noCountriesMatch', { query: deferredSearch.trim() })}
+              </Text>
             </View>
           }
         />

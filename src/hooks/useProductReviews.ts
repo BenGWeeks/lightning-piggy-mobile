@@ -15,7 +15,12 @@ export interface UseProductReviews {
   reviews: ParsedReview[];
   aggregate: ReviewAggregate;
   loading: boolean;
-  error: string | null;
+  /**
+   * True when the relay query failed. The user-facing copy is localized at the
+   * render layer (`market.reviews.loadError`) rather than baked in here, so the
+   * message follows the app's selected locale.
+   */
+  error: boolean;
   refetch: () => void;
 }
 
@@ -29,7 +34,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
   const { relays } = useNostr();
   const [events, setEvents] = useState<NostrEvent[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [tick, setTick] = useState(0);
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 
@@ -42,12 +47,12 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     if (!coord) {
       setEvents([]);
       setLoading(false);
-      setError(null);
+      setError(false);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
-    setError(null);
+    setError(false);
     querySyncAbortable(
       pool,
       readRelays,
@@ -58,7 +63,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         if (!controller.signal.aborted) setEvents(evs);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError('Failed to load reviews');
+        if (!controller.signal.aborted) setError(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);

@@ -203,7 +203,7 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       />
 
       {error ? (
-        <Text style={styles.state}>{error}</Text>
+        <Text style={styles.state}>{t('market.reviews.loadError')}</Text>
       ) : loading && reviews.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : reviews.length === 0 ? (

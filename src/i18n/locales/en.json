@@ -1991,6 +1991,7 @@
       "submit": "Submit review",
       "submitUpdate": "Update review",
       "empty": "No reviews yet. Be the first to review this product!",
+      "loadError": "Failed to load reviews",
       "count": {
         "one": "{{count}} review",
         "other": "{{count}} reviews"
@@ -2000,7 +2001,8 @@
       "placeholder": "Add a comment",
       "post": "Post comment",
       "signIn": "Sign in to comment",
-      "empty": "No comments yet. Be the first to start the discussion!"
+      "empty": "No comments yet. Be the first to start the discussion!",
+      "loadError": "Failed to load comments"
     },
     "checkout": {
       "orderPlaced": "Order placed",
@@ -2021,7 +2023,15 @@
       "websiteFallback": "Prefer the website? Open {{seller}}",
       "openWebsiteAccessibility": "Open {{seller}} website instead",
       "toastPlaced": "Order placed",
-      "toastPlacedBody": "Waiting for {{seller}} to send an invoice…"
+      "toastPlacedBody": "Waiting for {{seller}} to send an invoice…",
+      "errors": {
+        "notSignedIn": "Sign in to place an order",
+        "noSellerIdentity": "This seller has no Nostr identity to order from",
+        "signingKeyMissing": "Couldn't find your signing key. Please sign in again.",
+        "unsupportedSigner": "This signer can't place orders yet.",
+        "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
+        "generic": "Something went wrong placing your order. Please try again."
+      }
     },
     "shipping": {
       "label": "Shipping",
@@ -2029,6 +2039,11 @@
       "loadError": "Couldn't load shipping options.",
       "retry": "Retry",
       "retryAccessibility": "Retry loading shipping options",
+      "shipToTitle": "Ship to",
+      "searchCountries": "Search countries",
+      "searchCountriesPlaceholder": "Search countries…",
+      "shipToCountry": "Ship to {{country}}",
+      "noCountriesMatch": "No countries match “{{query}}”",
       "shipTo": "Ship to {{country}} — change country",
       "chooseCountry": "Choose country",
       "chooseCountryPlaceholder": "Choose country…",
