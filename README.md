@@ -8,7 +8,17 @@
 
 A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via Nostr Wallet Connect (NWC) with Nostr social features.
 
-[![Figma Designs](image.png)](https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&m=dev&scaling=scale-down&page-id=0%3A1&starting-point-node-id=19%3A519&show-proto-sidebar=1&t=P3MkR2W1YVSwtmIQ-1)
+<p align="center">
+  <img alt="Explore" src="docs/images/app-hero-02-explore.webp" width="19%">
+  <img alt="Map" src="docs/images/app-hero-03-map.webp" width="19%">
+  <img alt="Home" src="docs/images/app-hero-01-wallet.webp" width="19%">
+  <img alt="Piglet detail" src="docs/images/app-hero-05-piglet.webp" width="19%">
+  <img alt="Geo-caches" src="docs/images/app-hero-04-hunt.webp" width="19%">
+</p>
+
+<p align="center">
+  <a href="https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&m=dev&scaling=scale-down&page-id=0%3A1&starting-point-node-id=19%3A519&show-proto-sidebar=1&t=P3MkR2W1YVSwtmIQ-1">View the Figma prototype</a>
+</p>
 
 ## Features
 
