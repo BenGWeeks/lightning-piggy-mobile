@@ -132,12 +132,15 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
   // then delete the local- row so the store never shows two bubbles for one
   // send. Only sent rows can match (local- rows are always fromMe).
   if (m.fromMe && !m.eventId.startsWith(LOCAL_DM_ID_PREFIX)) {
+    // BETWEEN (not ABS(created_at - ?)) keeps the time-window predicate
+    // sargable, so the (owner, conversation, created_at) index narrows the
+    // scan as the table grows. Same ±LOCAL_DM_ECHO_WINDOW_SECS rule.
     const res = await tx.execute(
       `SELECT event_id, delivery_status, rumor_id, created_at FROM dm_messages
         WHERE owner = ? AND conversation = ? AND from_me = 1 AND content = ?
           AND event_id LIKE '${LOCAL_DM_ID_PREFIX}%'
-          AND ABS(created_at - ?) <= ${LOCAL_DM_ECHO_WINDOW_SECS};`,
-      [m.owner, m.conversation, m.content, m.createdAt],
+          AND created_at BETWEEN ? - ${LOCAL_DM_ECHO_WINDOW_SECS} AND ? + ${LOCAL_DM_ECHO_WINDOW_SECS};`,
+      [m.owner, m.conversation, m.content, m.createdAt, m.createdAt],
     );
     const candidates = res.rows ?? [];
     if (candidates.length > 0) {
