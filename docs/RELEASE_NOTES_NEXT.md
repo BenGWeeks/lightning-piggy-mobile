@@ -22,6 +22,10 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - **Publish a cache with no prize.** You can now publish a geo-cache without attaching a Lightning reward.
 - **See your swap on-chain.** Boltz swap details now link out to the mempool.space block explorer so you can follow confirmations.
 
+### Fixed
+
+- Typing fast into the Send address field no longer drops or duplicates characters.
+
 ### Improved
 
 - Transaction history now scrolls smoothly through long histories instead of a "show all" button.

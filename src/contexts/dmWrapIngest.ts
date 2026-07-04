@@ -172,10 +172,22 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         // order JSON below so the thread renderer + dmInbox projection re-derive
         // from it. Plain DM rumors pass through unchanged.
         const preview = orderPreviewFromContent(text, rumor.kind);
-        // Inner rumor id (#857) — the delivery-store key, stable across wraps
-        // and matching the sender's send-time eventId. Computed only for our own
-        // sent rows (fromMe); a received row never carries a delivery tick.
-        const rumorId = partnership.fromMe ? rumorEventId(rumor) : undefined;
+        // Inner rumor id — the cross-peer-stable id BOTH sides see for the
+        // same logical message. For our own sent rows (fromMe) it's the
+        // delivery-store key (#857); for received rows it's the NIP-25
+        // reaction / per-message zap target (#205). Computed for both
+        // directions now — the delivery reconcile is gated on `fromMe`
+        // (useDmDeliveryStatuses), so a received row carrying a rumorId
+        // never picks up a spurious delivery tick. Hashing is defensive: a
+        // malformed rumor (bad/short pubkey) degrades to no rumorId — the
+        // message just won't be reaction-targetable — rather than aborting
+        // the whole decrypt batch.
+        let rumorId: string | undefined;
+        try {
+          rumorId = rumorEventId(rumor);
+        } catch {
+          rumorId = undefined;
+        }
         entries.push({
           id: wrap.id,
           partnerPubkey: partnership.partnerPubkey,

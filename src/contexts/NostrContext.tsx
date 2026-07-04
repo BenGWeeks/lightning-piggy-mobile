@@ -33,6 +33,7 @@ import {
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
 import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
+import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
@@ -73,7 +74,10 @@ export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './
 // `useNostr` / `useNostrContacts`.
 export { useNostrDmInbox } from './DmInboxContext';
 
-interface NostrContextType {
+// Per-message reaction methods (#205) come straight from `useReactionActions`
+// (publish kind-7 / retract kind-5 / fetch reactions / fetch kind-5 deletions);
+// extend its result type rather than re-declaring the four signatures here.
+interface NostrContextType extends UseReactionActionsResult {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
   /** Logged-in user's hex pubkey, or null when logged out. */
@@ -222,6 +226,7 @@ interface NostrContextType {
     tags: string[][];
     content: string;
   }) => Promise<SignedEvent | null>;
+  // (reaction methods provided via `extends UseReactionActionsResult` above)
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -1723,6 +1728,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType],
   );
 
+  // Per-message reactions (#205) — publish / retract / fetch. Composed from a
+  // hook (file-size cap) that wires in the signer + relay state owned here.
+  const {
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
+  } = useReactionActions({
+    pubkey,
+    isLoggedIn,
+    signEvent,
+    relays,
+    getReadRelays,
+  });
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -1754,6 +1774,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       appendLocalDmMessage,
       persistDeliveryStatuses,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     }),
     [
       isLoggedIn,
@@ -1785,6 +1809,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       appendLocalDmMessage,
       persistDeliveryStatuses,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     ],
   );
 

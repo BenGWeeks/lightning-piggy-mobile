@@ -43,6 +43,12 @@ export interface ConversationMessageRowProps {
   // Tap a bubble → parent presents the message-info sheet (sent OR received,
   // #856). Passed straight through to MessageBubble.
   onShowInfo: BubbleProps['onShowInfo'];
+  // Per-message reactions + long-press → action sheet (#205). The screen
+  // builds these per-item (only for message/gif/location rows with a stable
+  // rumor id) and passes them straight through to the bubble.
+  onLongPress: BubbleProps['onLongPress'];
+  reactions: BubbleProps['reactions'];
+  onToggleReaction: BubbleProps['onToggleReaction'];
 }
 
 /**
@@ -74,6 +80,9 @@ function ConversationMessageRow({
   peerAvatarUri,
   onOpenMap,
   onShowInfo,
+  onLongPress,
+  reactions,
+  onToggleReaction,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -225,6 +234,9 @@ function ConversationMessageRow({
       deliveryStatus={item.kind === 'message' ? item.deliveryStatus : undefined}
       wireKind={item.kind === 'message' ? item.wireKind : undefined}
       onShowInfo={onShowInfo}
+      onLongPress={onLongPress}
+      reactions={reactions}
+      onToggleReaction={onToggleReaction}
       testIdPrefix="conversation"
     />
   );
