@@ -217,8 +217,26 @@ describe('nip88Poll — storage bridge', () => {
       }),
     )!;
     expect(pollPreviewFromContent(pollJson, POLL_KIND)).toBe('📊 Poll: Dinner?');
-    expect(pollPreviewFromContent('{}', VOTE_KIND)).toBe('📊 Voted on a poll');
+    const voteJson = serializeVoteFromRumor(
+      buildVoteRumor({
+        senderPubkey: A,
+        recipientPubkeys: [PEER],
+        pollId: 'poll-1',
+        optionIds: ['a'],
+      }),
+    )!;
+    expect(pollPreviewFromContent(voteJson, VOTE_KIND)).toBe('📊 Voted on a poll');
     expect(pollPreviewFromContent('hi', 14)).toBeNull();
+  });
+
+  it('pollPreviewFromContent does not claim a vote for corrupt vote content', () => {
+    // Row is a vote wireKind but the body doesn't parse as a vote — the inbox
+    // must fall back to a generic label rather than asserting a vote happened.
+    expect(pollPreviewFromContent('{}', VOTE_KIND)).toBe('📊 Poll');
+    expect(pollPreviewFromContent('not json', VOTE_KIND)).toBe('📊 Poll');
+    expect(pollPreviewFromContent(JSON.stringify({ pollId: 'x', optionIds: [] }), VOTE_KIND)).toBe(
+      '📊 Poll',
+    );
   });
 
   it('parseStoredPoll/Vote reject corrupt JSON', () => {

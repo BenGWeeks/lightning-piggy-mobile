@@ -46,10 +46,12 @@ interface Props {
  * Composer for in-conversation polls (#203). Mirrors RenameGroupSheet's
  * structure for keyboard handling + backdrop + Android back routing.
  *
- * Validation lives in `buildPollMessage` (single source of truth). The
- * sheet's own `canSend` predicate is just a UX gate for the Send button;
- * builder errors still surface as a BrandedAlert in case the user sneaks
- * past it (e.g. paste-and-send racing the validation tick).
+ * Canonical validation lives in the builders the parent calls on send:
+ * `buildPollRumor` for 1:1 (structured NIP-88 kind-1068) and
+ * `buildPollMessage` for the group text path. The sheet's own `canSend`
+ * predicate is just a UX gate for the Send button; builder errors still
+ * surface as a BrandedAlert in case the user sneaks past it (e.g.
+ * paste-and-send racing the validation tick).
  */
 const PollComposerSheet: React.FC<Props> = ({ visible, onClose, onSend }) => {
   const colors = useThemeColors();

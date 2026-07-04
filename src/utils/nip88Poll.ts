@@ -358,7 +358,10 @@ export function pollPreviewFromContent(content: string, wireKind: number): strin
     return poll ? `📊 Poll: ${poll.question}` : '📊 Poll';
   }
   if (wireKind === VOTE_KIND) {
-    return '📊 Voted on a poll';
+    // Only claim a vote happened when the stored content actually parses as a
+    // vote — a corrupt / non-vote body falls back to a generic poll label so
+    // the inbox never asserts a vote the row can't be interpreted as.
+    return parseStoredVote(content) ? '📊 Voted on a poll' : '📊 Poll';
   }
   return null;
 }
