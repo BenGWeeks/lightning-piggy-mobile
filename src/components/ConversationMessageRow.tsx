@@ -3,10 +3,12 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
 import OrderPaymentActions from './OrderPaymentActions';
+import NwcShareCard from './NwcShareCard';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
 import type { Item } from '../utils/conversationItems';
+import type { NwcShareCard as NwcShareCardData } from '../utils/nwcShareMessage';
 import { formatTime } from '../utils/messageContent';
 import { orderCardHeader, shortOrderId } from '../utils/orderEvents';
 
@@ -49,6 +51,9 @@ export interface ConversationMessageRowProps {
   onLongPress: BubbleProps['onLongPress'];
   reactions: BubbleProps['reactions'];
   onToggleReaction: BubbleProps['onToggleReaction'];
+  // Recipient taps Add on a shared-NWC card → parent re-confirms the trust
+  // warning and runs the NWC import path.
+  onAddNwc: (card: NwcShareCardData) => void;
 }
 
 /**
@@ -83,6 +88,7 @@ function ConversationMessageRow({
   onLongPress,
   reactions,
   onToggleReaction,
+  onAddNwc,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -191,6 +197,21 @@ function ConversationMessageRow({
           <Text style={styles.bubbleTime}>{formatTime(item.createdAt)}</Text>
         </View>
       </View>
+    );
+  }
+  // "Add NWC Wallet" card (#431) — a peer shared an NWC wallet over an encrypted
+  // NIP-17 DM. Structured, non-text, and carries a bearer secret, so it renders
+  // as its own QR-plus-warning card (like the zap / order cards) rather than a
+  // MessageBubble.
+  if (item.kind === 'nwcShare') {
+    return (
+      <NwcShareCard
+        card={item.card}
+        fromMe={item.fromMe}
+        createdAt={item.createdAt}
+        colors={colors}
+        onAdd={onAddNwc}
+      />
     );
   }
   // Map the local Item shape to MessageBubble's `BubbleContent`. The Items

@@ -74,6 +74,7 @@ import {
   textForRumor,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import {
   startForegroundService,
@@ -327,10 +328,12 @@ async function handleWrap(input: {
 
   const senderName = await resolveSenderName(partnership.partnerPubkey, readRelays);
   // textForRumor folds kind-15 file messages into a renderable URL; for a
-  // notification body we want the human-facing text. The notificationService
-  // redacts to generic copy when the user has lock-screen content disabled,
-  // so passing the plaintext here is safe.
-  const preview = textForRumor(rumor);
+  // notification body we want the human-facing text. `dmRowPreview` then redacts
+  // a structured rumor (order JSON, or an NWC wallet-share bearer connection
+  // string) to a secret-free summary — a plain chat message passes through
+  // unchanged. The notificationService additionally swaps in generic copy when
+  // the user has lock-screen content disabled.
+  const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
   const notifId = await fireMessageNotification({
     kind: 'dm',
     threadId: partnership.partnerPubkey,

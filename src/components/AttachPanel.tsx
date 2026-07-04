@@ -9,6 +9,7 @@ import {
   Camera,
   Smile,
   Mic,
+  Wallet,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -34,6 +35,11 @@ interface Props {
   onSendImage?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
+  /**
+   * Opens the NWC wallet picker to share a connected wallet with the peer
+   * (#431). Omitted in builds/contexts without wallet sharing.
+   */
+  onShareWallet?: () => void;
   /**
    * Opens the voice-note recording sheet (#235). Same surface as
    * Image / Camera / GIF / Location — the sheet records a clip and
@@ -73,6 +79,7 @@ const AttachPanel: React.FC<Props> = ({
   onTakePhoto,
   onSendGif,
   onSendVoiceNote,
+  onShareWallet,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -151,6 +158,14 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onShareContact,
         testID: 'attach-share-contact',
         accessibilityLabel: "Share a contact's profile",
+      },
+      onShareWallet && {
+        key: 'wallet',
+        label: 'Wallet',
+        icon: <Wallet size={26} color={colors.white} />,
+        onPress: onShareWallet,
+        testID: 'attach-share-wallet',
+        accessibilityLabel: 'Share a connected NWC wallet',
       },
     ] as (Tile | false | undefined)[]
   ).filter((t): t is Tile => Boolean(t));

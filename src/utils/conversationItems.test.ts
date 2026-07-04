@@ -18,6 +18,7 @@ import {
   type ConversationMessageInput,
   type TimedItem,
 } from './conversationItems';
+import { NWC_SHARE_KIND } from './nwcShareMessage';
 import type { WalletState, ZapCounterpartyInfo } from '../types/wallet';
 
 const PEER = 'a'.repeat(64);
@@ -87,6 +88,35 @@ describe('buildConversationItems', () => {
       [],
     );
     expect(items.find((i) => i.kind === 'gif')).toMatchObject({ kind: 'gif', id: 'dm-g' });
+  });
+
+  it('builds an nwcShare card from an NWC-share row, or unsupported when corrupt', () => {
+    const nwcUrl =
+      'nostr+walletconnect://b0e2c8f9b0e2c8f9b0e2c8f9b0e2c8f9b0e2c8f9b0e2c8f9b0e2c8f9b0e2c8f9' +
+      '?relay=wss%3A%2F%2Frelay.example.com&secret=abcdef0123456789abcdef0123456789';
+    const items = buildConversationItems(
+      [
+        {
+          id: 'w',
+          fromMe: false,
+          text: JSON.stringify({ nwcUrl, walletName: 'Pocket money' }),
+          createdAt: DAY2,
+          wireKind: NWC_SHARE_KIND,
+        },
+        // A corrupt NWC-share row must NOT leak its content as a bubble.
+        { id: 'bad', fromMe: false, text: 'not json', createdAt: DAY1, wireKind: NWC_SHARE_KIND },
+      ],
+      [],
+    );
+    expect(items.find((i) => i.kind === 'nwcShare')).toMatchObject({
+      kind: 'nwcShare',
+      id: 'dm-w',
+      card: { nwcUrl, walletName: 'Pocket money' },
+    });
+    expect(items.find((i) => i.id === 'dm-bad')).toMatchObject({
+      kind: 'unsupported',
+      rawKind: NWC_SHARE_KIND,
+    });
   });
 
   it('merges zap items in with messages by timestamp', () => {

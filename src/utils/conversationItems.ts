@@ -11,6 +11,7 @@ import {
   payableBolt11,
   type ParsedOrderEvent,
 } from './orderEvents';
+import { NWC_SHARE_KIND, parseNwcShare, type NwcShareCard } from './nwcShareMessage';
 
 // The row variants ConversationScreen's FlatList renders. Extracted from the
 // screen (with the pure build logic below) to keep the screen file under the
@@ -72,6 +73,16 @@ export type Item =
       id: string;
       fromMe: boolean;
       order: ParsedOrderEvent;
+      createdAt: number;
+    }
+  | {
+      // "Add NWC Wallet" card — an NWC wallet a peer shared over an encrypted
+      // NIP-17 DM (inner kind NWC_SHARE_KIND). Carries the bearer connection
+      // string, rendered as a QR + trust warning + Add button (never a bubble).
+      kind: 'nwcShare';
+      id: string;
+      fromMe: boolean;
+      card: NwcShareCard;
       createdAt: number;
     }
   | {
@@ -228,6 +239,29 @@ export function buildConversationItems(
       // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
       // placeholder rather than leaking the raw JSON blob into the thread
       // (mirrors `orderPreviewFromContent` in the inbox preview).
+      return {
+        kind: 'unsupported',
+        id: `dm-${m.id}`,
+        fromMe: m.fromMe,
+        rawKind: m.wireKind,
+        createdAt: m.createdAt,
+      };
+    }
+    // NWC wallet share (inner kind NWC_SHARE_KIND) — the row's `text` is the
+    // card JSON (bearer connection string + optional name). Render an "Add NWC
+    // Wallet" card. An unparseable / corrupt row falls back to the muted
+    // placeholder rather than leaking the raw connection string as a bubble.
+    if (m.wireKind === NWC_SHARE_KIND) {
+      const card = parseNwcShare(m.text);
+      if (card) {
+        return {
+          kind: 'nwcShare',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          card,
+          createdAt: m.createdAt,
+        };
+      }
       return {
         kind: 'unsupported',
         id: `dm-${m.id}`,

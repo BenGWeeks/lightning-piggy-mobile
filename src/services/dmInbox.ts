@@ -1,6 +1,6 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { orderPreviewFromContent } from '../utils/orderEvents';
+import { dmRowPreview } from '../utils/dmRowPreview';
 
 // The read seam between the encrypted DM store (dmDb) and the Messages UI
 // (#695 step 3b). NostrContext delegates here instead of walking a giant
@@ -22,7 +22,7 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   // A kind-16/17 order row stores order JSON in `content`; surface a readable
   // one-line summary in the preview instead of the raw blob. Other rows pass
   // their plaintext through unchanged (#market).
-  text: orderPreviewFromContent(r.content, r.wireKind),
+  text: dmRowPreview(r.content, r.wireKind),
   wireKind: r.wireKind,
 });
 

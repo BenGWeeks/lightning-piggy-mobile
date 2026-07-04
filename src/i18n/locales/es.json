@@ -289,6 +289,32 @@
     "shareContactTitle": "Compartir un contacto con {{name}}",
     "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir."
   },
+  "nwcShareSheet": {
+    "title": "Compartir una cartera",
+    "subtitle": "Elige una cartera conectada para compartir. El destinatario podrá gastar desde ella.",
+    "empty": "No tienes carteras NWC conectadas para compartir.",
+    "shareNamed": "Compartir {{name}}",
+    "noneTitle": "No hay cartera para compartir",
+    "noneBody": "Conecta primero una cartera NWC (Nostr Wallet Connect) y luego podrás compartirla.",
+    "confirmTitle": "¿Compartir esta cartera?",
+    "confirmBody": "{{name}} obtendrá acceso completo a «{{wallet}}»: cualquiera con la conexión puede gastar sus fondos. Compártela solo con personas de confianza.",
+    "confirmShare": "Compartir",
+    "missingUrl": "No se pudo leer la conexión de esta cartera.",
+    "sentToast": "Cartera compartida",
+    "cancel": "Cancelar"
+  },
+  "nwcShareCard": {
+    "title": "Añadir cartera NWC",
+    "trustWarning": "Añade conexiones NWC solo de personas de confianza. Quien tenga esta conexión puede gastar desde la cartera.",
+    "youShared": "Compartiste esta cartera",
+    "add": "Añadir",
+    "addConfirmTitle": "¿Añadir esta cartera?",
+    "addConfirmBody": "Podrás gastar desde la cartera que compartió {{name}}. Continúa solo si confías en esa persona: cualquiera con esta conexión puede gastar sus fondos.",
+    "addFailedTitle": "No se pudo añadir la cartera",
+    "addFailedBody": "Comprueba la conexión e inténtalo de nuevo.",
+    "defaultAlias": "Cartera compartida",
+    "addedToast": "Cartera añadida"
+  },
   "courseDetailScreen": {
     "courseNotFound": "Curso no encontrado",
     "goBack": "Volver",

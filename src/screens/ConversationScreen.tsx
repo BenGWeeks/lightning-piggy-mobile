@@ -35,6 +35,7 @@ import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
+import NwcWalletShareSheet from '../components/NwcWalletShareSheet';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
@@ -53,6 +54,7 @@ import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 import { extractSharedContact } from '../utils/messageContent';
+import { useNwcShareActions } from '../hooks/useNwcShareActions';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
@@ -118,7 +120,7 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     armLiveDmSub();
   }, [armLiveDmSub]);
-  const { wallets } = useWallet();
+  const { wallets, addNwcWallet } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
   // Thread data lifecycle — read-through paint, background relay top-up,
@@ -342,6 +344,7 @@ const ConversationScreen: React.FC = () => {
     handleShareContactPicked,
     handleSendGif,
     handleSendVoiceNote,
+    shareNwcWallet,
   } = useConversationComposerActions({
     pubkey,
     name,
@@ -452,6 +455,25 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
+  // Share an NWC wallet (#431) — sender picker + recipient Add flows, both
+  // gated behind an access warning. Extracted to keep this screen under the
+  // size cap; the bearer connection string only ever moves inside the
+  // encrypted NIP-17 DM.
+  const {
+    nwcWallets,
+    nwcPickerOpen,
+    openNwcSharePicker,
+    closeNwcPicker,
+    shareToWallet,
+    addSharedWallet,
+  } = useNwcShareActions({
+    wallets,
+    addNwcWallet,
+    shareNwcWallet,
+    peerName: name,
+    onCloseAttachPanel: closeAttachPanel,
+  });
+
   // Receive-side live-location plumbing (#206): the kind-20069 coordinate
   // subscription + per-session status/remaining read models the bubble
   // renders + a 1 Hz tick for the relative-time labels. Extracted to a hook
@@ -510,6 +532,7 @@ const ConversationScreen: React.FC = () => {
         onLongPress={buildOnLongPress(item)}
         reactions={reactionsForItem(item)}
         onToggleReaction={buildOnToggleReaction(item)}
+        onAddNwc={addSharedWallet}
       />
     ),
     [
@@ -518,6 +541,7 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      addSharedWallet,
       handleToggleSecretMode,
       handleShowInfo,
       liveLocationLatest,
@@ -762,6 +786,7 @@ const ConversationScreen: React.FC = () => {
                 // panel until the user actually picks (or cancels).
                 setContactPickerOpen(true);
               }}
+              onShareWallet={openNwcSharePicker}
               onSendGif={
                 isGifConfigured()
                   ? () => {
@@ -834,6 +859,12 @@ const ConversationScreen: React.FC = () => {
         onSelect={handleShareContactPicked}
         title={t('conversationScreen.shareContactTitle', { name })}
         subtitle={t('conversationScreen.shareContactSubtitle')}
+      />
+      <NwcWalletShareSheet
+        visible={nwcPickerOpen}
+        onClose={closeNwcPicker}
+        wallets={nwcWallets}
+        onSelect={shareToWallet}
       />
       <ReceiveSheet
         visible={invoiceSheetOpen}
