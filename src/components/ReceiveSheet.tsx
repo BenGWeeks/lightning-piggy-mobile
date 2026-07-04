@@ -31,6 +31,7 @@ import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
@@ -100,6 +101,10 @@ const ReceiveSheet: React.FC<Props> = ({
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
+  // On-chain → Lightning via Boltz forward submarine swap (issue #92).
+  // Only ever opens for an LN (NWC) wallet — gated by `isOnchainWallet`
+  // checks at the render call site below.
+  const [boltzReceiveOpen, setBoltzReceiveOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { sendDirectMessage } = useNostr();
   const { contacts } = useNostrContacts();
@@ -480,9 +485,16 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      // Presenting the Boltz receive sheet (a second BottomSheetModal) on top
+      // collapses THIS sheet to index -1. That collapse is not a user dismiss —
+      // and closing here calls onClose() → the parent sets visible=false → this
+      // component returns null and unmounts, taking the still-open
+      // <BoltzReceiveSheet> child (rendered in this tree) down with it. That
+      // stranded the Boltz lockup QR the instant it opened (#92). Only treat a
+      // genuine collapse to -1 as a dismiss when no child sheet is open.
+      if (index === -1 && !boltzReceiveOpen) onClose();
     },
-    [onClose],
+    [onClose, boltzReceiveOpen],
   );
 
   const renderBackdrop = useCallback(
@@ -821,6 +833,26 @@ const ReceiveSheet: React.FC<Props> = ({
                   <Text style={styles.enterAmountText}>{t('receiveSheet.enterAnAmount')}</Text>
                 </TouchableOpacity>
               ) : null}
+
+              {/* Issue #92 — on-chain → Lightning via Boltz forward
+               *  submarine swap. Symmetric to the LN→on-chain path that
+               *  TransferSheet already exposes. Only meaningful when the
+               *  selected wallet is a connected NWC wallet (on-chain
+               *  wallets already display a native receive address; the
+               *  preset DM/group flows have a single-purpose CTA already).
+               *  Tapping opens BoltzReceiveSheet on top of this one. */}
+              {!presetFriend && !presetGroup && !isOnchainWallet && selectedWallet?.isConnected ? (
+                <TouchableOpacity
+                  style={styles.secondaryActionButton}
+                  onPress={() => setBoltzReceiveOpen(true)}
+                  testID="receive-via-onchain-boltz"
+                  accessibilityLabel={t('receiveSheet.receiveOnchainBoltzA11y')}
+                >
+                  <Text style={styles.secondaryActionText}>
+                    {t('receiveSheet.receiveOnchainBoltz')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </BottomSheetView>
@@ -831,6 +863,19 @@ const ReceiveSheet: React.FC<Props> = ({
         onSelect={handleFriendPicked}
         title={t('receiveSheet.sendInvoiceToFriend')}
         subtitle={t('receiveSheet.friendPickerSubtitle')}
+      />
+      <BoltzReceiveSheet
+        visible={boltzReceiveOpen}
+        // Opening this sheet collapsed the parent ReceiveSheet's own sheet to
+        // -1 (see handleSheetChange); with the self-dismiss now guarded, that
+        // parent stays mounted-but-hidden behind. Closing Boltz therefore also
+        // closes ReceiveSheet so we return cleanly to Home instead of leaving
+        // an invisible, un-re-presentable ReceiveSheet stuck open (#92).
+        onClose={() => {
+          setBoltzReceiveOpen(false);
+          onClose();
+        }}
+        walletId={selectedWalletId}
       />
     </>
   );
