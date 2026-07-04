@@ -35,8 +35,14 @@ describe('cardThemes registry', () => {
     }
   });
 
-  it('exposes themeList in the same order as Object.values(cardThemes)', () => {
-    expect(themeList.map((t) => t.id)).toEqual(Object.values(cardThemes).map((t) => t.id));
+  it('exposes themeList alphabetically by display name (picker order)', () => {
+    const names = themeList.map((t) => t.name);
+    const sorted = [...names].sort((a, b) => a.localeCompare(b));
+    expect(names).toEqual(sorted);
+  });
+
+  it('includes every registered theme in themeList', () => {
+    expect(themeList.map((t) => t.id).sort()).toEqual(Object.keys(cardThemes).sort());
   });
 
   describe('sports themes (#102)', () => {

@@ -21,7 +21,9 @@ export type CardTheme =
   | 'tennis'
   | 'football'
   | 'basketball'
-  | 'f1';
+  | 'f1'
+  // Deep-space nebula card with a graffiti rocket illustration.
+  | 'spaceship';
 
 export type WalletType = 'nwc' | 'onchain';
 

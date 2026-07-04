@@ -20,6 +20,7 @@ import { bgStyle as tennisStyle } from './tennis';
 import { bgStyle as footballStyle } from './football';
 import { bgStyle as basketballStyle } from './basketball';
 import { bgStyle as f1Style } from './f1';
+import { bgStyle as spaceshipStyle } from './spaceship';
 
 // Typed as `Record<CardTheme | 'default', ...>` so adding a new theme
 // to the `CardTheme` union forces a corresponding entry here at
@@ -47,6 +48,7 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   football: footballStyle.full,
   basketball: basketballStyle.full,
   f1: f1Style.full,
+  spaceship: spaceshipStyle.full,
 };
 
 export function getCardBgStyle(styleName: CardTheme | undefined, _mini: boolean): ImageStyle {
