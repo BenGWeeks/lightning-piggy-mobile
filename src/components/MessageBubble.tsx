@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
+import { Zap, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import {
@@ -25,6 +25,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import type { PollTally } from '../utils/nip88Poll';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
@@ -36,6 +37,8 @@ import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
 import LibreMiniMap from './LibreMiniMap';
 import { BubbleFooter } from './MessageBubbleFooter';
+import { PollBubble } from './PollBubble';
+import { LocationBubble } from './LocationBubble';
 
 // Stable empty arrays for the location-card mini-maps — LibreMiniMap
 // requires merchants/caches/events, but DM cards never plot any. Module
@@ -101,6 +104,14 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Pre-aggregated poll tally keyed by poll-message id. The parent runs
+  // `aggregateVotes` over the conversation history once per messages
+  // update; the bubble looks up its own row by `id`. When `undefined`,
+  // poll bubbles still render but with zero counts (cold start).
+  pollAggregates?: Map<string, PollTally>;
+  // Tap an option row on a poll → parent sends the vote message.
+  // Optional: omit on read-only contexts (none currently).
+  onVotePoll?: (pollId: string, optionId: string) => void;
   // Tapping the "Toggle Secret Mode" button on the magic-trigger card
   // (when the message body is exactly "secretthreewords"). Parent
   // owns the secretMode setter + celebration overlay so a list of
@@ -237,6 +248,8 @@ const MessageBubble: React.FC<Props> = ({
   onOpenMap,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  pollAggregates,
+  onVotePoll,
   onToggleSecretMode,
   testIdPrefix,
   deliveryStatus,
@@ -538,75 +551,24 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   if (content.kind === 'location') {
-    const { location } = content;
-    const haveMine = typeof myLat === 'number' && typeof myLon === 'number';
-    // My blue dot only on a received static card — not on my own share
-    // (a static share is a single point, my live position is irrelevant).
-    const showMyDot = !fromMe && haveMine;
-    // Peer avatar marker only on a received card, at the shared point.
-    // `peerAvatarUri !== undefined` scopes the chip to the 1:1 path —
-    // group bubbles pass no avatar plumbing (#206 group follow-up).
-    const peerMarker =
-      !fromMe && peerAvatarUri !== undefined
-        ? { lat: location.lat, lon: location.lon, avatarUri: peerAvatarUri ?? null }
-        : null;
     return wrapWithReactionRow(
-      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => onOpenLocation(location)}
-          onLongPress={onLongPress}
-          delayLongPress={350}
-          style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
-          accessibilityLabel={
-            fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationReceived')
-          }
-          testID={`${testIdPrefix}-location-${id}`}
-        >
-          {SenderLabel}
-          <View style={styles.locationMap}>
-            <LibreMiniMap
-              lat={location.lat}
-              lon={location.lon}
-              merchants={EMPTY_MERCHANTS}
-              caches={EMPTY_CACHES}
-              events={EMPTY_EVENTS}
-              fill
-              defaultZoom={15}
-              userLat={showMyDot ? (myLat ?? null) : null}
-              userLon={showMyDot ? (myLon ?? null) : null}
-              userAccuracyMetres={showMyDot ? (myAccuracyMetres ?? null) : null}
-              userAvatarUri={showMyDot ? (myAvatarUri ?? null) : null}
-              profileMarker={peerMarker}
-              onTapMap={onOpenMap}
-            />
-          </View>
-          <View style={styles.locationBody}>
-            <View style={styles.locationLabelRow}>
-              <MapPin
-                size={14}
-                color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
-              />
-              <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
-                {fromMe ? t('messageBubble.locationSent') : t('messageBubble.locationLabel')}
-              </Text>
-            </View>
-            <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
-              {formatCoordsForDisplay(location)}
-            </Text>
-            {location.accuracyMeters !== null ? (
-              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
-                {t('messageBubble.accuracyOsm', { meters: location.accuracyMeters })}
-              </Text>
-            ) : (
-              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
-                OpenStreetMap
-              </Text>
-            )}
-            {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
-          </View>
-        </TouchableOpacity>
-      </View>,
+      <LocationBubble
+        location={content.location}
+        fromMe={fromMe}
+        id={id}
+        testIdPrefix={testIdPrefix}
+        styles={styles}
+        senderLabel={SenderLabel}
+        footer={renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
+        myLat={myLat}
+        myLon={myLon}
+        myAccuracyMetres={myAccuracyMetres}
+        myAvatarUri={myAvatarUri}
+        peerAvatarUri={peerAvatarUri}
+        onOpenLocation={onOpenLocation}
+        onOpenMap={onOpenMap}
+        onLongPress={onLongPress}
+      />,
     );
   }
 
@@ -630,6 +592,35 @@ const MessageBubble: React.FC<Props> = ({
           {renderFooter([styles.bubbleTime])}
         </View>
       </View>
+    );
+  }
+
+  if (content.kind === 'pollVote') {
+    // Vote events are an internal protocol message — they're rolled up into
+    // the referenced poll's tally by the parent's `tallyPoll` call, so the
+    // in-app conversation never shows them as bubbles. (Structured kind-1018
+    // votes are dropped even earlier, at the item-build layer.)
+    return null;
+  }
+
+  if (content.kind === 'poll') {
+    // Vote target / tally key: the structured poll rumor id when present
+    // (set by the 1:1 item mapping), else the message id (legacy text polls +
+    // groups, whose votes were keyed by the message id in the text MVP).
+    const pollKey = content.pollId ?? id;
+    return (
+      <PollBubble
+        poll={content.poll}
+        agg={pollAggregates?.get(pollKey)}
+        fromMe={fromMe}
+        id={pollKey}
+        createdAt={createdAt}
+        onVotePoll={onVotePoll}
+        testIdPrefix={testIdPrefix}
+        styles={styles}
+        colors={colors}
+        senderLabel={SenderLabel}
+      />
     );
   }
 
