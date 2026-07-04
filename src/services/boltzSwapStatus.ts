@@ -123,18 +123,32 @@ export async function waitForSwapStatus(
 
       ws.onmessage = (event) => {
         if (settled) return;
+        // Parse the frame first. A malformed / non-JSON frame is not a swap
+        // failure — ignore it and keep listening.
+        let data: any;
         try {
           const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
-          if (msg.channel === 'swap.update' && msg.args?.[0]) {
-            const data = msg.args[0];
-            console.log(`[Boltz] WS swap ${swapId} status: ${data.status}`);
-            if (isTerminal(data.status, data)) {
-              settled = true;
-              teardown();
-              resolve(data);
-            }
+          if (msg.channel !== 'swap.update' || !msg.args?.[0]) return;
+          data = msg.args[0];
+        } catch {
+          return;
+        }
+        // `isTerminal` may intentionally throw (e.g. waitForLockup rejects on a
+        // Boltz fail status). Let that propagate to a reject — mirroring the
+        // polling path — instead of swallowing it, which would leave callers
+        // hanging until the timeout on WS updates (#92).
+        try {
+          console.log(`[Boltz] WS swap ${swapId} status: ${data.status}`);
+          if (isTerminal(data.status, data)) {
+            settled = true;
+            teardown();
+            resolve(data);
           }
-        } catch {}
+        } catch (err) {
+          settled = true;
+          teardown();
+          reject(err);
+        }
       };
 
       ws.onerror = () => {

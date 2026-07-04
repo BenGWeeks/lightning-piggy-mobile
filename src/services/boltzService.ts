@@ -759,7 +759,14 @@ export function buildBoltzBip21Uri(lockupAddress: string, expectedAmountSats: nu
   if (!Number.isFinite(expectedAmountSats) || expectedAmountSats <= 0) {
     throw new Error('expectedAmountSats must be a positive number');
   }
-  const btc = (expectedAmountSats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+  // Format BTC from integer sats with integer math — never floating-point.
+  // A `sats / 1e8` + `toFixed(8)` round-trip can land a sat off due to IEEE-754
+  // representation, and an off-by-one amount baked into the QR is exactly the
+  // under-/over-payment footgun this helper exists to prevent (#92).
+  const sats = Math.round(expectedAmountSats);
+  const whole = Math.floor(sats / 100_000_000);
+  const frac = (sats % 100_000_000).toString().padStart(8, '0');
+  const btc = `${whole}.${frac}`.replace(/0+$/, '').replace(/\.$/, '');
   return `bitcoin:${lockupAddress}?amount=${btc}`;
 }
 
