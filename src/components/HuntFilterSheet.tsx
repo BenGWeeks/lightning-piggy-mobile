@@ -9,6 +9,7 @@ import {
   Pressable,
 } from 'react-native';
 import { ChevronDown, ChevronUp, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -61,6 +62,7 @@ const HuntFilterSheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // The WoT picker is owned by `WebOfTrustBottomSheet` — this sheet
   // surfaces the *current* tier via `WebOfTrustChip` and opens the
@@ -103,7 +105,16 @@ const HuntFilterSheet: React.FC<Props> = ({
           through. Keep the View mounted (just visually hidden + pointer-
           inert) so the WoT modal's state remains intact. */}
       <View
-        style={[styles.sheet, wotSheetVisible && styles.sheetHidden]}
+        style={[
+          styles.sheet,
+          // navigationBarTranslucent draws this bottom-anchored sheet behind
+          // the Android nav bar; pad the base 28 by the bottom safe-area inset
+          // so the Done button stays clear of 3-button navigation (0 under
+          // gesture nav, so edge-to-edge is preserved there). The nested WoT
+          // sheet applies the same rule in its own component.
+          { paddingBottom: 28 + insets.bottom },
+          wotSheetVisible && styles.sheetHidden,
+        ]}
         pointerEvents={wotSheetVisible ? 'none' : 'auto'}
         testID="hunt-filter-sheet"
       >

@@ -9,6 +9,7 @@ import {
   Pressable,
 } from 'react-native';
 import { X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -50,6 +51,7 @@ const EventsFilterSheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // The WoT tier lives in TrustGraphContext; the picker UI is the shared
   // `WebOfTrustBottomSheet`. This sheet just renders the current-tier
@@ -107,7 +109,15 @@ const EventsFilterSheet: React.FC<Props> = ({
           Done button doesn't peek out below — see matching note in
           HuntFilterSheet. */}
       <View
-        style={[styles.sheet, wotSheetVisible && styles.sheetHidden]}
+        style={[
+          styles.sheet,
+          // navigationBarTranslucent draws this bottom-anchored sheet behind
+          // the Android nav bar; pad the base 28 by the bottom safe-area inset
+          // so the Done button stays clear of 3-button navigation (0 under
+          // gesture nav, so edge-to-edge is preserved there).
+          { paddingBottom: 28 + insets.bottom },
+          wotSheetVisible && styles.sheetHidden,
+        ]}
         pointerEvents={wotSheetVisible ? 'none' : 'auto'}
         testID="events-filter-sheet"
       >

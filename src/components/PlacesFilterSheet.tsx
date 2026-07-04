@@ -9,6 +9,7 @@ import {
   Pressable,
 } from 'react-native';
 import { X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
@@ -37,6 +38,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
 }) => {
   const t = useTranslation();
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const toggleCategory = (cat: string): void => {
@@ -58,7 +60,14 @@ const PlacesFilterSheet: React.FC<Props> = ({
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose} testID="places-filter-backdrop" />
-      <View style={styles.sheet} testID="places-filter-sheet">
+      {/* navigationBarTranslucent draws this bottom-anchored sheet behind
+          the Android nav bar; pad the base 28 by the bottom safe-area inset
+          so the Done button stays clear of 3-button navigation (0 under
+          gesture nav, so edge-to-edge is preserved there). */}
+      <View
+        style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}
+        testID="places-filter-sheet"
+      >
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
           <Text style={styles.title}>{t('placesFilterSheet.filters')}</Text>
