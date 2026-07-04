@@ -54,26 +54,31 @@ beforeEach(() => {
 describe('useTypingIndicator — receive', () => {
   it('flips isPeerTyping on a ping and auto-clears after the timeout', () => {
     jest.useFakeTimers();
-    setNostr();
-    let onTyping = () => {};
-    mockedSubscribe.mockImplementation((input) => {
-      onTyping = input.onTyping;
-      return () => {};
-    });
+    try {
+      setNostr();
+      let onTyping = () => {};
+      mockedSubscribe.mockImplementation((input) => {
+        onTyping = input.onTyping;
+        return () => {};
+      });
 
-    const { result } = renderHook(() => useTypingIndicator(PEER_PK));
-    expect(result.current.isPeerTyping).toBe(false);
+      const { result } = renderHook(() => useTypingIndicator(PEER_PK));
+      expect(result.current.isPeerTyping).toBe(false);
 
-    act(() => onTyping());
-    expect(result.current.isPeerTyping).toBe(true);
+      act(() => onTyping());
+      expect(result.current.isPeerTyping).toBe(true);
 
-    // Still typing just before the timeout…
-    act(() => jest.advanceTimersByTime(5999));
-    expect(result.current.isPeerTyping).toBe(true);
-    // …and cleared once 6s of silence elapse.
-    act(() => jest.advanceTimersByTime(1));
-    expect(result.current.isPeerTyping).toBe(false);
-    jest.useRealTimers();
+      // Still typing just before the timeout…
+      act(() => jest.advanceTimersByTime(5999));
+      expect(result.current.isPeerTyping).toBe(true);
+      // …and cleared once 6s of silence elapse.
+      act(() => jest.advanceTimersByTime(1));
+      expect(result.current.isPeerTyping).toBe(false);
+    } finally {
+      // Guarantee real timers are restored even if an assertion throws,
+      // so fake timers can't leak into later tests.
+      jest.useRealTimers();
+    }
   });
 
   it('does not subscribe when there is no peer', () => {
@@ -96,21 +101,26 @@ describe('useTypingIndicator — receive', () => {
 describe('useTypingIndicator — send', () => {
   it('throttles publishes to one per SEND_THROTTLE_MS', async () => {
     jest.useFakeTimers();
-    setNostr();
-    const { result } = renderHook(() => useTypingIndicator(PEER_PK));
+    try {
+      setNostr();
+      const { result } = renderHook(() => useTypingIndicator(PEER_PK));
 
-    await act(async () => {
-      result.current.notifyTyping();
-      result.current.notifyTyping(); // within the window — throttled
-    });
-    await waitFor(() => expect(mockedPublish).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        result.current.notifyTyping();
+        result.current.notifyTyping(); // within the window — throttled
+      });
+      await waitFor(() => expect(mockedPublish).toHaveBeenCalledTimes(1));
 
-    await act(async () => {
-      jest.advanceTimersByTime(4001);
-      result.current.notifyTyping(); // window elapsed — publishes again
-    });
-    await waitFor(() => expect(mockedPublish).toHaveBeenCalledTimes(2));
-    jest.useRealTimers();
+      await act(async () => {
+        jest.advanceTimersByTime(4001);
+        result.current.notifyTyping(); // window elapsed — publishes again
+      });
+      await waitFor(() => expect(mockedPublish).toHaveBeenCalledTimes(2));
+    } finally {
+      // Guarantee real timers are restored even if an assertion throws,
+      // so fake timers can't leak into later tests.
+      jest.useRealTimers();
+    }
   });
 
   it('never publishes for a non-nsec signer (Amber / NIP-46 receive-only)', async () => {
