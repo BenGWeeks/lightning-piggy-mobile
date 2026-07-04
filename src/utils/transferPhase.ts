@@ -54,11 +54,11 @@ export const STEPS_BY_TYPE: Record<TransferType, TransferStep[]> = {
   'ln-to-ln': [
     { id: 'invoice', label: 'Creating invoice' },
     { id: 'pay', label: 'Sending payment' },
-    { id: 'refresh', label: 'Updating balances' },
+    { id: 'refresh', label: 'Refreshing wallets' },
   ],
   'onchain-to-onchain': [
     { id: 'broadcast', label: 'Broadcasting on-chain transaction' },
-    { id: 'refresh', label: 'Updating balances' },
+    { id: 'refresh', label: 'Refreshing wallets' },
   ],
   'ln-to-onchain': [
     { id: 'swap', label: 'Creating Boltz swap' },
