@@ -1189,6 +1189,7 @@
     "deleteA11y": "Eliminar Piglet",
     "deleteTitle": "¿Eliminar este Piglet?",
     "deleteBody": "Esto caduca la publicación ahora — ocultándola en todas partes — y luego pide a los relés que la eliminen. Esto no se puede deshacer. Tu LNURL secreto permanece en el dispositivo.",
+    "deleteNoLocalBody": "Esto pide a los relés que eliminen la publicación. Se publicó desde otro dispositivo, así que puede seguir apareciendo allí hasta que también la elimines en ese dispositivo. Esto no se puede deshacer.",
     "deleteDraftBody": "Este Piglet está guardado solo en este dispositivo y nunca se publicó. Al eliminarlo desaparece para siempre: esto no se puede deshacer.",
     "delete": "Eliminar",
     "pigletDeleted": "Piglet eliminado",

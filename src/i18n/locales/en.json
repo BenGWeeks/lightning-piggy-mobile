@@ -1189,6 +1189,7 @@
     "deleteA11y": "Delete Piglet",
     "deleteTitle": "Delete this Piglet?",
     "deleteBody": "This expires the listing now — hiding it everywhere — then asks relays to remove it. This can't be undone. Your secret LNURL stays on-device.",
+    "deleteNoLocalBody": "This asks relays to remove the listing. It was published from another device, so it may keep showing there until you delete it there too. This can't be undone.",
     "deleteDraftBody": "This Piglet is saved only on this device and was never published. Deleting removes it for good — this can't be undone.",
     "delete": "Delete",
     "pigletDeleted": "Piglet deleted",

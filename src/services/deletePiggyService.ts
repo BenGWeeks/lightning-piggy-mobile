@@ -43,12 +43,24 @@ type SignEvent = (template: UnsignedEventTemplate) => Promise<SignedEventLike | 
  * replacement, the app's `expiresAt <= now` filter drops the Piglet
  * from every surface regardless of whether the relay honours NIP-09.
  *
+ * `created_at` is also pinned to `nowSec` (overriding `buildCacheListing`'s
+ * internal `Date.now()` stamp) so it never drifts a second past the kind-5
+ * deletion — which stamps `nowSec` too. If the listing ended up *newer*
+ * than the deletion, NIP-09 relays that ignore a deletion older than its
+ * target could leave the replacement standing. Equal timestamps keep the
+ * deletion's `created_at <= target` covering the replacement we just made.
+ *
  * The LNURL bearer never reaches the wire — `buildCacheListing` is the
  * single chokepoint that enforces that invariant (asserted in
  * `nostrPlacesService.test.ts`).
  */
-export const buildExpireNowListing = (piggy: HiddenPiggy, nowSec: number): UnsignedEventTemplate =>
-  buildCacheListing({ ...piggy, expiresAt: nowSec });
+export const buildExpireNowListing = (
+  piggy: HiddenPiggy,
+  nowSec: number,
+): UnsignedEventTemplate => ({
+  ...buildCacheListing({ ...piggy, expiresAt: nowSec }),
+  created_at: nowSec,
+});
 
 /**
  * Pure — step 2's payload. Build the NIP-09 kind-5 deletion request for

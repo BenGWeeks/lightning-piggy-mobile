@@ -36,11 +36,14 @@ const basePiggy = (over: Partial<HiddenPiggy> = {}): HiddenPiggy => ({
 const COORD = `${GC_LISTING_KIND}:abc123pubkey:piggy-1`;
 
 describe('buildExpireNowListing', () => {
-  it('pins the NIP-40 expiration tag to nowSec, under the same d', () => {
+  it('pins the NIP-40 expiration tag AND created_at to nowSec, under the same d', () => {
     const ev = buildExpireNowListing(basePiggy(), NOW);
     expect(ev.kind).toBe(GC_LISTING_KIND);
     expect(ev.tags).toContainEqual(['expiration', String(NOW)]);
     expect(ev.tags).toContainEqual(['d', 'piggy-1']);
+    // created_at pinned to nowSec (not buildCacheListing's Date.now()) so the
+    // listing never ends up newer than the kind-5 deletion that follows.
+    expect(ev.created_at).toBe(NOW);
   });
 
   it('never leaks the LNURL bearer onto the published listing', () => {

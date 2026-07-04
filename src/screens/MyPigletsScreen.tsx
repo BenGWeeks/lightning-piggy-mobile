@@ -407,47 +407,53 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const handleDelete = useCallback(
     (cache: ParsedCache, isDraft: boolean) => {
       const piggy = piggiesById.get(cache.d);
-      Alert.alert(
-        t('myPigletsScreen.deleteTitle'),
-        isDraft ? t('myPigletsScreen.deleteDraftBody') : t('myPigletsScreen.deleteBody'),
-        [
-          { text: t('myPigletsScreen.cancel'), style: 'cancel' },
-          {
-            text: t('myPigletsScreen.delete'),
-            style: 'destructive',
-            onPress: async () => {
-              if (deletingCoord) return;
-              setDeletingCoord(cache.coord);
-              try {
-                if (!isDraft) {
-                  const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-                  await deletePiggy({ coord: cache.coord, piggy, signEvent, writeRelays });
-                }
-                // Drop the local bearer record so a stale copy can't be
-                // re-published or resurface as a draft row.
-                await removePiggy(cache.d);
-                // Optimistic local removal from both mirrors so the row
-                // disappears before any relay round-trip lands.
-                setAllCaches((prev) => prev.filter((c) => c.coord !== cache.coord));
-                setPiggiesById((prev) => {
-                  const next = new Map(prev);
-                  next.delete(cache.d);
-                  return next;
-                });
-                Toast.show({ type: 'success', text1: t('myPigletsScreen.pigletDeleted') });
-              } catch (e) {
-                Toast.show({
-                  type: 'error',
-                  text1: t('myPigletsScreen.deleteFailed'),
-                  text2: (e as Error).message,
-                });
-              } finally {
-                setDeletingCoord(null);
+      // Match the copy to what will actually run: a draft is a local-only
+      // removal; a published row WITH its local record gets the full
+      // belt+suspenders; a published row WITHOUT the local record (published
+      // from another device) can only send the kind-5 deletion, so don't
+      // promise the expire-now belt step there.
+      const body = isDraft
+        ? t('myPigletsScreen.deleteDraftBody')
+        : piggy
+          ? t('myPigletsScreen.deleteBody')
+          : t('myPigletsScreen.deleteNoLocalBody');
+      Alert.alert(t('myPigletsScreen.deleteTitle'), body, [
+        { text: t('myPigletsScreen.cancel'), style: 'cancel' },
+        {
+          text: t('myPigletsScreen.delete'),
+          style: 'destructive',
+          onPress: async () => {
+            if (deletingCoord) return;
+            setDeletingCoord(cache.coord);
+            try {
+              if (!isDraft) {
+                const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+                await deletePiggy({ coord: cache.coord, piggy, signEvent, writeRelays });
               }
-            },
+              // Drop the local bearer record so a stale copy can't be
+              // re-published or resurface as a draft row.
+              await removePiggy(cache.d);
+              // Optimistic local removal from both mirrors so the row
+              // disappears before any relay round-trip lands.
+              setAllCaches((prev) => prev.filter((c) => c.coord !== cache.coord));
+              setPiggiesById((prev) => {
+                const next = new Map(prev);
+                next.delete(cache.d);
+                return next;
+              });
+              Toast.show({ type: 'success', text1: t('myPigletsScreen.pigletDeleted') });
+            } catch (e) {
+              Toast.show({
+                type: 'error',
+                text1: t('myPigletsScreen.deleteFailed'),
+                text2: (e as Error).message,
+              });
+            } finally {
+              setDeletingCoord(null);
+            }
           },
-        ],
-      );
+        },
+      ]);
     },
     [piggiesById, relays, deletingCoord, signEvent, t],
   );
