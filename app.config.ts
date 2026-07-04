@@ -40,6 +40,21 @@ const getIconPath = () => {
   return './assets/icon.png';
 };
 
+// Android adaptive-icon background load-fallback colour (each gradient's
+// approximate midtone) per variant: dev blue, preview purple, production pink.
+const getAdaptiveIconBackgroundColor = () => {
+  if (IS_DEV) return '#3F86C9';
+  if (IS_PREVIEW) return '#8B5CF6';
+  return '#D6007E';
+};
+
+// Android adaptive-icon radial-gradient background image per variant.
+const getAdaptiveIconBackgroundImage = () => {
+  if (IS_DEV) return './assets/android-icon-background-dev.png';
+  if (IS_PREVIEW) return './assets/android-icon-background-preview.png';
+  return './assets/android-icon-background.png';
+};
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
@@ -155,13 +170,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // bolt is the shared foreground layer. `backgroundColor` is only the
       // load fallback (each gradient's approximate midtone). Regenerate all of
       // these with `bash scripts/generate-app-icons.sh`.
-      backgroundColor: IS_DEV ? '#3F86C9' : IS_PREVIEW ? '#8B5CF6' : '#D6007E',
+      backgroundColor: getAdaptiveIconBackgroundColor(),
       foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: IS_DEV
-        ? './assets/android-icon-background-dev.png'
-        : IS_PREVIEW
-          ? './assets/android-icon-background-preview.png'
-          : './assets/android-icon-background.png',
+      backgroundImage: getAdaptiveIconBackgroundImage(),
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
