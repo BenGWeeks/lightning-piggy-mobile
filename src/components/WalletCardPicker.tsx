@@ -95,7 +95,12 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
           parallaxScrollingOffset: SCREEN_WIDTH - CF_CARD_SPACING,
           parallaxAdjacentItemScale: 0.82,
         }}
-        onSnapToItem={(index) => onSelect(themeList[index].id)}
+        onSnapToItem={(index) => {
+          // Guard the lookup: a future refactor could empty themeList or the
+          // carousel could report an out-of-range index — don't throw on `.id`.
+          const snapped = themeList[index];
+          if (snapped) onSelect(snapped.id);
+        }}
         renderItem={({ item, index }) => (
           <View style={styles.coverflowItem}>
             <MiniWalletCard
