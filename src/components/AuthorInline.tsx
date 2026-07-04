@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import * as nip19 from 'nostr-tools/nip19';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { createAuthorInlineStyles } from '../styles/AuthorInline.styles';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 
@@ -30,6 +31,7 @@ function shortNpub(pubkey: string): string {
  */
 const AuthorInline: React.FC<Props> = ({ pubkey, size = 28, testID }) => {
   const colors = useThemeColors();
+  const styles = useMemo(() => createAuthorInlineStyles(colors), [colors]);
   const { name, picture } = usePubkeyProfile(pubkey);
   const display = name && name.trim().length > 0 ? name : shortNpub(pubkey);
   const uri = picture && isSupportedImageUrl(picture) ? picture : null;
@@ -39,7 +41,7 @@ const AuthorInline: React.FC<Props> = ({ pubkey, size = 28, testID }) => {
 
   return (
     <View style={styles.row} testID={testID}>
-      <View style={[styles.avatar, dimension, { borderColor: colors.surface }]}>
+      <View style={[styles.avatar, dimension]}>
         {uri ? (
           <Image
             source={{ uri }}
@@ -50,44 +52,16 @@ const AuthorInline: React.FC<Props> = ({ pubkey, size = 28, testID }) => {
             contentFit="cover"
           />
         ) : (
-          <View style={[styles.fallback, dimension, { backgroundColor: colors.brandPinkLight }]}>
-            <Text style={[styles.fallbackText, { color: colors.brandPink, fontSize: size * 0.45 }]}>
-              {initial}
-            </Text>
+          <View style={[styles.fallback, dimension]}>
+            <Text style={[styles.fallbackText, { fontSize: size * 0.45 }]}>{initial}</Text>
           </View>
         )}
       </View>
-      <Text style={[styles.name, { color: colors.textHeader }]} numberOfLines={1}>
+      <Text style={styles.name} numberOfLines={1}>
         {display}
       </Text>
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 1,
-  },
-  avatar: {
-    overflow: 'hidden',
-    borderWidth: 1,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  fallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fallbackText: {
-    fontWeight: '800',
-  },
-  name: {
-    fontSize: 13,
-    fontWeight: '700',
-    flexShrink: 1,
-  },
-});
 
 export default AuthorInline;

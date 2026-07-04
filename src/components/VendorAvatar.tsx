@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { createVendorAvatarStyles } from '../styles/VendorAvatar.styles';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { vendorNostrPubkey } from '../utils/marketVendors';
@@ -31,6 +32,7 @@ interface Props {
  */
 const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
   const colors = useThemeColors();
+  const styles = useMemo(() => createVendorAvatarStyles(colors), [colors]);
   // Only the vendors with an npub resolve a pubkey; the rest pass null, which
   // makes usePubkeyProfile a no-op (no relay round-trip).
   const pubkey = useMemo(() => vendorNostrPubkey(vendor), [vendor]);
@@ -48,7 +50,7 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
 
   return (
     <View
-      style={[styles.container, dimension, { borderColor: colors.surface }]}
+      style={[styles.container, dimension]}
       testID={testID}
       accessibilityLabel={`${vendor.name} seller logo`}
     >
@@ -62,8 +64,8 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
           contentFit="cover"
         />
       ) : (
-        <View style={[styles.fallback, dimension, { backgroundColor: colors.brandPinkLight }]}>
-          <Text style={[styles.fallbackText, { color: colors.brandPink, fontSize: size * 0.45 }]}>
+        <View style={[styles.fallback, dimension]}>
+          <Text style={[styles.fallbackText, { fontSize: size * 0.45 }]}>
             {vendor.name.charAt(0).toUpperCase()}
           </Text>
         </View>
@@ -71,20 +73,5 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    backgroundColor: 'rgba(127,127,127,0.12)',
-  },
-  fallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fallbackText: {
-    fontWeight: '800',
-  },
-});
 
 export default VendorAvatar;

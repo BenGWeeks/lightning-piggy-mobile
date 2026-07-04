@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
-import { View, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { Star } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { createStarRatingStyles } from '../styles/StarRating.styles';
 import { STARS_MAX } from '../utils/productReviews';
+
+// Layout-only styles (no palette dependency) — built once at module scope.
+const styles = createStarRatingStyles();
 
 interface StarRatingProps {
   /** Rating in stars (0..STARS_MAX); may be fractional. */
@@ -113,27 +117,5 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  starRow: {
-    flexDirection: 'row',
-    position: 'relative',
-  },
-  overlay: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  inputStar: {
-    padding: 2,
-  },
-});
 
 export default StarRating;

@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -14,7 +7,10 @@ import { useProductComments } from '../hooks/useProductComments';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
 import type { CommentRoot } from '../utils/productComments';
-import type { Palette } from '../styles/palettes';
+import {
+  createProductCommentsStyles,
+  type ProductCommentsStyles as Styles,
+} from '../styles/ProductComments.styles';
 import AuthorInline from './AuthorInline';
 
 interface Props {
@@ -44,7 +40,7 @@ const CommentItem: React.FC<{ comment: NostrEvent; styles: Styles }> = ({ commen
 const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
   const { topLevel, loading, error, refetch } = useProductComments(root);
   const { publishComment, publishing, canPublish } = usePublishProductFeedback();
   const [content, setContent] = useState('');
@@ -127,67 +123,5 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
     </View>
   );
 };
-
-type Styles = ReturnType<typeof createStyles>;
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    form: {
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 14,
-      gap: 10,
-      marginBottom: 16,
-    },
-    input: {
-      minHeight: 56,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      padding: 10,
-      color: colors.textBody,
-      textAlignVertical: 'top',
-      fontSize: 14,
-    },
-    submit: {
-      backgroundColor: colors.brandPink,
-      borderRadius: 999,
-      paddingVertical: 10,
-      alignItems: 'center',
-    },
-    submitDisabled: { opacity: 0.6 },
-    submitText: { color: colors.white, fontWeight: '800', fontSize: 14 },
-    signInCard: {
-      borderWidth: 1,
-      borderStyle: 'dashed',
-      borderColor: colors.divider,
-      borderRadius: 12,
-      paddingVertical: 18,
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-    signInText: { color: colors.brandPink, fontWeight: '700', fontSize: 14 },
-    item: {
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 12,
-      gap: 6,
-      marginBottom: 10,
-    },
-    itemHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    when: { fontSize: 12, color: colors.textSupplementary },
-    itemText: { fontSize: 14, color: colors.textBody, lineHeight: 20 },
-    state: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      paddingVertical: 20,
-    },
-    loading: { paddingVertical: 24 },
-  });
 
 export default ProductComments;
