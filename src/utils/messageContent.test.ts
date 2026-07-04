@@ -26,6 +26,7 @@ import {
   parseVoiceNote,
   parseImageMessage,
   encodeEncryptedFileUrl,
+  deriveGroupWireKind,
 } from './messageContent';
 
 describe('isSecretModeTrigger', () => {
@@ -281,5 +282,44 @@ describe('parseImageMessage (NIP-17 kind 15, #688)', () => {
     expect(parseImageMessage('hello world')).toBeNull();
     expect(parseImageMessage('https://example.com/clip.m4a')).toBeNull();
     expect(parseImageMessage('')).toBeNull();
+  });
+});
+
+describe('deriveGroupWireKind (NIP-17 group kind 14 chat vs kind 15 file)', () => {
+  it('returns 15 for an encrypted voice-note (kind-15 file) payload', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://blossom.primal.net/voice.bin',
+      mime: 'audio/mp4',
+      keyHex: 'aa'.repeat(32),
+      nonceHex: 'bb'.repeat(12),
+    });
+    expect(deriveGroupWireKind(encoded)).toBe(15);
+  });
+
+  it('returns 15 for an encrypted image (kind-15 file) payload', () => {
+    const encoded = encodeEncryptedFileUrl({
+      url: 'https://blossom.primal.net/pic.bin',
+      mime: 'image/jpeg',
+      keyHex: 'aa'.repeat(32),
+      nonceHex: 'bb'.repeat(12),
+    });
+    expect(deriveGroupWireKind(encoded)).toBe(15);
+  });
+
+  it('returns 14 for a plain chat text message', () => {
+    expect(deriveGroupWireKind('gm everyone')).toBe(14);
+    expect(deriveGroupWireKind('')).toBe(14);
+  });
+
+  it('returns 14 for a plain (unencrypted) media URL pasted as chat text', () => {
+    // A plain URL is sent as a kind-14 chat message, not a kind-15 encrypted
+    // file — only our `#lpe=1` encrypted payloads are kind-15.
+    expect(deriveGroupWireKind('https://example.com/cat.jpg')).toBe(14);
+    expect(deriveGroupWireKind('https://blossom.example/abc.m4a')).toBe(14);
+  });
+
+  it('returns 14 for a malformed lpe fragment (falls back to chat)', () => {
+    // Missing key/nonce → not a valid encrypted file → treated as kind-14.
+    expect(deriveGroupWireKind('https://s/x.bin#lpe=1&m=audio%2Fmp4')).toBe(14);
   });
 });

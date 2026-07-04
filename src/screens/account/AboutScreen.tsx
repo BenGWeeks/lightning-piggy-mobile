@@ -30,6 +30,7 @@ import { fetchProfile, DEFAULT_RELAYS } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useGroups } from '../../contexts/GroupsContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
@@ -41,6 +42,7 @@ const LEGACY_TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 
 const AboutScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
@@ -234,7 +236,7 @@ const AboutScreen: React.FC = () => {
   };
 
   return (
-    <AccountScreenLayout title="About">
+    <AccountScreenLayout title={t('aboutScreen.title')}>
       <View style={styles.teamCard}>
         {teamProfileLoading ? (
           <ActivityIndicator size="small" color={colors.brandPink} style={{ padding: 20 }} />
@@ -278,36 +280,35 @@ const AboutScreen: React.FC = () => {
                 <TouchableOpacity
                   style={styles.zapButton}
                   onPress={() => setZapSheetOpen(true)}
-                  accessibilityLabel="Zap Lightning Piggy"
+                  accessibilityLabel={t('aboutScreen.zapLightningPiggy')}
                   testID="zap-team-button"
                 >
-                  <Text style={styles.zapButtonText}>{'⚡'} Zap the Team</Text>
+                  <Text style={styles.zapButtonText}>
+                    {'⚡'} {t('aboutScreen.zapTheTeam')}
+                  </Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity
                 style={styles.feedbackButton}
                 onPress={() => setFeedbackSheetOpen(true)}
-                accessibilityLabel="Send Feedback"
+                accessibilityLabel={t('aboutScreen.sendFeedback')}
                 testID="feedback-button"
               >
-                <Text style={styles.feedbackButtonText}>Send Feedback</Text>
+                <Text style={styles.feedbackButtonText}>{t('aboutScreen.sendFeedback')}</Text>
               </TouchableOpacity>
             </View>
           </>
         ) : (
-          <Text style={styles.teamFallbackText}>Could not load team profile</Text>
+          <Text style={styles.teamFallbackText}>{t('aboutScreen.couldNotLoadTeamProfile')}</Text>
         )}
       </View>
 
       <View style={[sharedAccountStyles.card, { marginTop: 16 }]}>
         <Text style={styles.aboutTitle}>Lightning Piggy</Text>
-        <Text style={styles.aboutBody}>
-          A Lightning wallet + Nostr client built for families. Connect your wallets, message
-          friends, and zap them over Lightning.
-        </Text>
+        <Text style={styles.aboutBody}>{t('aboutScreen.aboutBody')}</Text>
         <TouchableOpacity
           onPress={() => Linking.openURL('https://www.lightningpiggy.com')}
-          accessibilityLabel="Open lightningpiggy.com"
+          accessibilityLabel={t('aboutScreen.openWebsite')}
           testID="about-website-link"
         >
           <Text style={styles.websiteLink}>www.lightningpiggy.com</Text>
@@ -363,7 +364,7 @@ const AboutScreen: React.FC = () => {
       <TouchableOpacity
         onPress={handleVersionTap}
         activeOpacity={1}
-        accessibilityLabel={`App version ${displayVersionLabel}`}
+        accessibilityLabel={t('aboutScreen.appVersion', { version: displayVersionLabel })}
       >
         <Text style={styles.versionText} testID="version-text">
           v{displayVersionLabel}

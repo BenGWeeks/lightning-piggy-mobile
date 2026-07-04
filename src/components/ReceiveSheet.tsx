@@ -25,6 +25,7 @@ import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
 import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
@@ -70,6 +71,7 @@ const ReceiveSheet: React.FC<Props> = ({
   onSent,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createReceiveSheetStyles(colors), [colors]);
   const {
     makeInvoiceForWallet,
@@ -111,7 +113,9 @@ const ReceiveSheet: React.FC<Props> = ({
     () => wallets.find((w) => w.id === selectedWalletId) ?? null,
     [wallets, selectedWalletId],
   );
-  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
+  const walletName = selectedWallet
+    ? walletLabel(selectedWallet)
+    : t('receiveSheet.walletFallback');
   // Lightning Address is a per-wallet field (#169). Each NWC wallet can
   // carry its own lud16 (either parsed from the NWC URL or set manually
   // in Wallet Settings) — the Receive flow must read the *selected*
@@ -134,7 +138,7 @@ const ReceiveSheet: React.FC<Props> = ({
         const inv = await makeInvoiceForWallet(
           wId,
           sats,
-          memo?.trim() || 'Sent with Lightning Piggy',
+          memo?.trim() || t('receiveSheet.defaultMemo'),
         );
         setInvoice(inv);
 
@@ -172,7 +176,7 @@ const ReceiveSheet: React.FC<Props> = ({
         const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
         Toast.show({
           type: 'error',
-          text1: "Couldn't generate invoice",
+          text1: t('receiveSheet.invoiceGenerateFailed'),
           text2: message.slice(0, 120),
           position: 'top',
           visibilityTime: 4000,
@@ -379,8 +383,8 @@ const ReceiveSheet: React.FC<Props> = ({
         if (!result.success) {
           Toast.show({
             type: 'error',
-            text1: 'Send failed',
-            text2: result.error ?? 'Could not send to friend.',
+            text1: t('receiveSheet.sendFailed'),
+            text2: result.error ?? t('receiveSheet.couldNotSendToFriend'),
             position: 'top',
             visibilityTime: 4000,
           });
@@ -389,8 +393,8 @@ const ReceiveSheet: React.FC<Props> = ({
         Toast.show({
           type: 'success',
           text1: sharedAddress
-            ? `Lightning address sent to ${friend.name}`
-            : `Invoice sent to ${friend.name}`,
+            ? t('receiveSheet.lightningAddressSentTo', { name: friend.name })
+            : t('receiveSheet.invoiceSentTo', { name: friend.name }),
           position: 'top',
           visibilityTime: 2500,
         });
@@ -441,8 +445,8 @@ const ReceiveSheet: React.FC<Props> = ({
       if (!result.success) {
         Toast.show({
           type: 'error',
-          text1: 'Send failed',
-          text2: result.error ?? 'Could not send to group.',
+          text1: t('receiveSheet.sendFailed'),
+          text2: result.error ?? t('receiveSheet.couldNotSendToGroup'),
           position: 'top',
           visibilityTime: 4000,
         });
@@ -451,7 +455,7 @@ const ReceiveSheet: React.FC<Props> = ({
       onSent?.(payload);
       Toast.show({
         type: 'success',
-        text1: `Invoice sent to ${presetGroup.name}`,
+        text1: t('receiveSheet.invoiceSentTo', { name: presetGroup.name }),
         position: 'top',
         visibilityTime: 2500,
       });
@@ -522,12 +526,12 @@ const ReceiveSheet: React.FC<Props> = ({
               // Receive flow keeps the generic "Custom amount".
               title={
                 presetFriend
-                  ? `Request from ${presetFriend.name}`
+                  ? t('receiveSheet.requestFrom', { name: presetFriend.name })
                   : presetGroup
-                    ? `Request from ${presetGroup.name}`
-                    : 'Custom amount'
+                    ? t('receiveSheet.requestFrom', { name: presetGroup.name })
+                    : t('receiveSheet.customAmount')
               }
-              confirmLabel="Generate invoice"
+              confirmLabel={t('receiveSheet.generateInvoice')}
               // Memo only makes sense for an amount-bound bolt11 (it's
               // the bolt11 `description` field), and only when there's
               // a clear "what's it for" context — i.e. requesting a
@@ -557,12 +561,12 @@ const ReceiveSheet: React.FC<Props> = ({
             />
           ) : (
             <View style={styles.innerContent}>
-              <Text style={styles.title}>Receive</Text>
+              <Text style={styles.title}>{t('receiveSheet.receive')}</Text>
 
               {/* Wallet selector */}
               {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
                 <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>To:</Text>
+                  <Text style={styles.walletLabel}>{t('receiveSheet.to')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
                       style={styles.walletDropdown}
@@ -606,7 +610,9 @@ const ReceiveSheet: React.FC<Props> = ({
                   </View>
                 </View>
               ) : (
-                <Text style={styles.walletLabel}>To: {walletName}</Text>
+                <Text style={styles.walletLabel}>
+                  {t('receiveSheet.toWallet', { wallet: walletName })}
+                </Text>
               )}
 
               {/* QR Code */}
@@ -621,7 +627,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     )}
                   </View>
                 ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
-                  <Text style={styles.noInvoice}>Enter an amount to generate QR code</Text>
+                  <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
                 ) : mode === 'address' && lightningAddress ? (
                   <View>
                     <QRCode value={`lightning:${lightningAddress}`} size={200} />
@@ -645,8 +651,8 @@ const ReceiveSheet: React.FC<Props> = ({
                 ) : (
                   <Text style={styles.noInvoice}>
                     {mode === 'address'
-                      ? 'No lightning address set'
-                      : 'Enter an amount to generate invoice'}
+                      ? t('receiveSheet.noLightningAddress')
+                      : t('receiveSheet.enterAmountForInvoice')}
                   </Text>
                 )}
               </View>
@@ -662,12 +668,12 @@ const ReceiveSheet: React.FC<Props> = ({
                   mode === 'amount' && currentSats > 0 ? (
                     `${currentSats.toLocaleString()} sats`
                   ) : (
-                    'Loading address...'
+                    t('receiveSheet.loadingAddress')
                   )
                 ) : mode === 'address' ? (
                   lightningAddress
                 ) : (
-                  'Lightning invoice'
+                  t('receiveSheet.lightningInvoice')
                 )}
               </Text>
               {mode === 'amount' && invoice && memoValue ? (
@@ -705,7 +711,9 @@ const ReceiveSheet: React.FC<Props> = ({
                       // misconfiguration as a disabled button instead.
                       (!!presetGroup && !onSendToGroup)
                     }
-                    accessibilityLabel={`Send to ${presetFriend?.name ?? presetGroup?.name}`}
+                    accessibilityLabel={t('receiveSheet.sendTo', {
+                      name: presetFriend?.name ?? presetGroup?.name,
+                    })}
                     testID="receive-send-to-friend"
                   >
                     {sendingToFriend ? (
@@ -714,7 +722,9 @@ const ReceiveSheet: React.FC<Props> = ({
                       <>
                         <Send size={20} color={colors.white} />
                         <Text style={[styles.actionButtonText, styles.actionButtonTextPrimary]}>
-                          Send to {presetFriend?.name ?? presetGroup?.name}
+                          {t('receiveSheet.sendTo', {
+                            name: presetFriend?.name ?? presetGroup?.name,
+                          })}
                         </Text>
                       </>
                     )}
@@ -728,14 +738,14 @@ const ReceiveSheet: React.FC<Props> = ({
                     disabled={!copyValue}
                   >
                     <Copy size={20} color={colors.brandPink} />
-                    <Text style={styles.actionButtonText}>Copy</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.copy')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                     onPress={handleShare}
                     disabled={!copyValue}
                   >
-                    <Text style={styles.actionButtonText}>Share</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.share')}</Text>
                     <Share2 size={20} color={colors.brandPink} />
                   </TouchableOpacity>
                   <Pressable
@@ -749,12 +759,12 @@ const ReceiveSheet: React.FC<Props> = ({
                       handleSendToFriend();
                     }}
                     disabled={!friendShareValue}
-                    accessibilityLabel="Send to a friend"
+                    accessibilityLabel={t('receiveSheet.sendToFriend')}
                     testID={
                       isOnchainWallet ? 'receive-friend-share-onchain' : 'receive-send-to-friend'
                     }
                   >
-                    <Text style={styles.actionButtonText}>Friend</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.friend')}</Text>
                     <Send size={20} color={colors.brandPink} />
                   </Pressable>
                 </View>
@@ -764,20 +774,22 @@ const ReceiveSheet: React.FC<Props> = ({
                 <View style={styles.amountSummary}>
                   <View style={styles.amountSummaryLine}>
                     <Text style={styles.amountSummaryValue}>{currentSats.toLocaleString()}</Text>
-                    <Text style={styles.amountSummaryUnit}>SATS</Text>
+                    <Text style={styles.amountSummaryUnit}>{t('receiveSheet.satsUnit')}</Text>
                   </View>
                   {btcPrice ? (
                     <Text style={styles.amountSummaryFiat}>
-                      Aprox {formatFiat(satsToFiat(currentSats, btcPrice), currency)}
+                      {t('receiveSheet.approxFiat', {
+                        value: formatFiat(satsToFiat(currentSats, btcPrice), currency),
+                      })}
                     </Text>
                   ) : null}
                   <TouchableOpacity
                     style={styles.changeAmountButton}
                     onPress={() => setStep('amount')}
                     testID="receive-change-amount"
-                    accessibilityLabel="Change amount"
+                    accessibilityLabel={t('receiveSheet.changeAmount')}
                   >
-                    <Text style={styles.changeAmountText}>Change amount</Text>
+                    <Text style={styles.changeAmountText}>{t('receiveSheet.changeAmount')}</Text>
                   </TouchableOpacity>
                   {!isOnchainWallet && !presetGroup && lightningAddress ? (
                     <TouchableOpacity
@@ -788,9 +800,11 @@ const ReceiveSheet: React.FC<Props> = ({
                         setMode('address');
                       }}
                       testID="receive-show-address"
-                      accessibilityLabel="Show lightning address"
+                      accessibilityLabel={t('receiveSheet.showLightningAddress')}
                     >
-                      <Text style={styles.secondaryActionText}>Show my address</Text>
+                      <Text style={styles.secondaryActionText}>
+                        {t('receiveSheet.showMyAddress')}
+                      </Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -802,9 +816,9 @@ const ReceiveSheet: React.FC<Props> = ({
                     setStep('amount');
                   }}
                   testID="receive-enter-custom-amount"
-                  accessibilityLabel="Enter an amount"
+                  accessibilityLabel={t('receiveSheet.enterAnAmount')}
                 >
-                  <Text style={styles.enterAmountText}>Enter an amount</Text>
+                  <Text style={styles.enterAmountText}>{t('receiveSheet.enterAnAmount')}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -815,8 +829,8 @@ const ReceiveSheet: React.FC<Props> = ({
         visible={friendPickerOpen}
         onClose={() => setFriendPickerOpen(false)}
         onSelect={handleFriendPicked}
-        title="Send invoice to a friend"
-        subtitle="They'll get an encrypted Nostr DM with a Pay button."
+        title={t('receiveSheet.sendInvoiceToFriend')}
+        subtitle={t('receiveSheet.friendPickerSubtitle')}
       />
     </>
   );

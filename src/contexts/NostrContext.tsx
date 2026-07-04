@@ -12,6 +12,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
+import {
+  rearmBackgroundDmWatchForActiveIdentity,
+  stopBackgroundDmWatch,
+  syncBackgroundDmWatchFromPreference,
+} from '../services/backgroundDmService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -27,34 +32,17 @@ import {
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
 import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
-import {
-  setActivePubkeyForWalletStorage,
-  deleteNwcUrl,
-  deleteXpub,
-  deleteMnemonic,
-  deleteWalletCaches,
-  bestEffortMultiRemove,
-} from '../services/walletStorageService';
+import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
+import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
 import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
-import {
-  AMBER_NIP17_CACHE_KEY_BASE,
-  NSEC_NIP17_CACHE_KEY_BASE,
-  AMBER_NIP17_ENABLED_KEY_LEGACY,
-  DM_CONV_CACHE_PREFIX,
-  DM_CONV_LAST_SEEN_PREFIX,
-  inboxCacheKey,
-  inboxLastSeenKey,
-} from './nostrDmCache';
-import { wipeDmStoresForAccount } from './dmAccountWipe';
-import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
+import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
+import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
-import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
-import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging } from './useGroupMessaging';
@@ -83,7 +71,10 @@ export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './
 // `useNostr` / `useNostrContacts`.
 export { useNostrDmInbox } from './DmInboxContext';
 
-interface NostrContextType {
+// Per-message reaction methods (#205) come straight from `useReactionActions`
+// (publish kind-7 / retract kind-5 / fetch reactions / fetch kind-5 deletions);
+// extend its result type rather than re-declaring the four signatures here.
+interface NostrContextType extends UseReactionActionsResult {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
   /** Logged-in user's hex pubkey, or null when logged out. */
@@ -230,6 +221,7 @@ interface NostrContextType {
     tags: string[][];
     content: string;
   }) => Promise<SignedEvent | null>;
+  // (reaction methods provided via `extends UseReactionActionsResult` above)
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -427,9 +419,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     relays,
   });
 
-  // Find-log notifications (#740) — live kind-1111 sub against the
-  // viewer's cache coordinates. Sibling to `useDmInbox`'s live sub;
-  // fires `fireCacheNotification` per fresh arrival.
+  // Cache-activity notifications (#740, #945) — live subs against the
+  // viewer's owned cache coords: kind-1111 comments AND kind-7516 found-logs.
+  // Fires `fireCacheNotification` per fresh arrival + fans found-logs out on
+  // the in-app event bus (`notifyFoundLog`). See useCacheNotifications.
   useCacheNotifications({ pubkey, getReadRelays });
 
   const loadProfile = useCallback(
@@ -1029,6 +1022,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggedIn(true);
         setIsLoggingIn(false);
 
+        // Restart the background DM watch if the user has it enabled — a
+        // full logout stopped it, and the launch-time sync has already run,
+        // so without this the toggle would read ON with nothing watching
+        // until the next app relaunch (#279).
+        void syncBackgroundDmWatchFromPreference().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
+        });
+
         // First-launch migration for this identity — idempotent flag
         // means this is a no-op once the user has migrated on any
         // previous login.
@@ -1090,6 +1091,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsLoggedIn(true);
       setIsLoggingIn(false);
 
+      // Mirror the nsec login: restart the watch if enabled — see the
+      // comment there (#279). Amber identities get contentless alerts.
+      void syncBackgroundDmWatchFromPreference().catch((e) => {
+        if (__DEV__) console.warn('[Nostr] post-login watch sync failed:', e);
+      });
+
       try {
         await migrateToPerAccountStorage(pk);
       } catch (e) {
@@ -1125,80 +1132,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Wipe every per-account AsyncStorage entry for `loggedOutPubkey`.
   // Extracted so the multi-account sign-out path can call it without
   // coupling to the active-identity teardown logic (#288).
-  const wipeAccountCaches = useCallback(async (loggedOutPubkey: string | null) => {
-    if (!loggedOutPubkey) return;
-    // Read the per-account wallet list FIRST so we can delete the
-    // per-wallet secrets that live in SecureStore (NWC URLs, xpubs,
-    // mnemonics) and the per-wallet AsyncStorage tx caches. Without
-    // this, signing out of an identity leaves orphaned credentials
-    // and tx caches under their walletIds — a real privacy concern
-    // on shared devices and what Copilot flagged on #442.
-    const walletListKey = `wallet_list_${loggedOutPubkey}`;
-    let walletIds: string[] = [];
-    try {
-      const json = await AsyncStorage.getItem(walletListKey);
-      if (json) {
-        const list = JSON.parse(json) as Array<{ id: string }>;
-        if (Array.isArray(list)) walletIds = list.map((w) => w.id).filter(Boolean);
-      }
-    } catch {
-      // Corrupted wallet list — nothing we can clean per-wallet,
-      // but the AsyncStorage.multiRemove below still kills the list
-      // entry itself so a future load won't surface it.
-    }
-    // Per-wallet secret cleanup. Each delete is best-effort; an
-    // already-absent key is a no-op in expo-secure-store, so we
-    // can fan out concurrently without sequencing.
-    await Promise.allSettled(
-      walletIds.flatMap((id) => [deleteNwcUrl(id), deleteXpub(id), deleteMnemonic(id)]),
-    );
-
-    const toRemove: string[] = [
-      // Per-account namespaced caches (#288 storage refactor)
-      perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
-      perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, loggedOutPubkey),
-      perAccountKey(PROFILES_CACHE_KEY_BASE, loggedOutPubkey),
-      perAccountKey(CACHE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
-      perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, loggedOutPubkey),
-      perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
-      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, loggedOutPubkey),
-      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
-      perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
-      perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
-      // DM-store migration flag (#848) — a future re-login re-runs the
-      // (then no-op) migration check instead of trusting a stale flag.
-      dmStoreMigratedKey(loggedOutPubkey),
-      // Pre-existing per-pubkey caches (already namespaced before #288)
-      inboxCacheKey(loggedOutPubkey),
-      inboxLastSeenKey(loggedOutPubkey),
-      `nostr_group_activity_${loggedOutPubkey}`,
-      `nostr_groups_${loggedOutPubkey}`,
-      `groups_following_only_${loggedOutPubkey}`,
-      walletListKey,
-    ];
-    const allKeys = await AsyncStorage.getAllKeys();
-    const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
-    const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
-    for (const k of allKeys) {
-      if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
-      // group_messages_* holds decrypted group-chat plaintext keyed by random
-      // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
-      // content must not survive logout / account wipe, so remove every blob.
-      if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
-    }
-    // Best-effort so a transient multiRemove rejection can't abort the wipe below.
-    await bestEffortMultiRemove(toRemove);
-    await Promise.all(walletIds.map((id) => deleteWalletCaches(id)));
-    // Decrypted DM plaintext must not survive logout / account wipe (#689
-    // review / #690): delete the file-backed wrap + skip-set caches and this
-    // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
-    await wipeDmStoresForAccount(loggedOutPubkey);
-    // Nostr places cache is device-global and not pubkey-namespaced, yet holds
-    // this identity's own by-author Piglets — wipe it on logout / switch so
-    // pins don't leak across accounts (the next live sub repopulates it).
-    await clearNostrPlacesCache();
-  }, []);
-
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
@@ -1255,9 +1188,26 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           loadRelays,
           loadProfile,
         });
+        // Same staleness as switchIdentity: the watch is still subscribed
+        // for the signed-out pubkey — swap it to the successor (#279).
+        void rearmBackgroundDmWatchForActiveIdentity().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] post-sign-out watch re-arm failed:', e);
+        });
         return;
       }
     }
+
+    // Last identity gone — a still-running watch would keep receiving (and
+    // notifying for) DMs to an account the user just signed out of. Stop the
+    // service + subscription and dismiss the chip; the preference itself is
+    // kept (device-level, like user relay overrides) so the next login's
+    // sync re-arms it.
+    // Awaited (not fire-and-forget) so the watch is deterministically dead
+    // BEFORE the identity state below is cleared — otherwise there's a
+    // window where it could still notify for the just-signed-out account.
+    await stopBackgroundDmWatch().catch((e) => {
+      if (__DEV__) console.warn('[Nostr] post-logout watch stop failed:', e);
+    });
 
     setPubkey(null);
     setProfile(null);
@@ -1278,7 +1228,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     nostrService.cleanup();
   }, [
     pubkey,
-    wipeAccountCaches,
     loadContactsFromCache,
     loadProfileFromCache,
     loadRelays,
@@ -1338,6 +1287,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSignerType(target.signerType);
       setIsLoggedIn(true);
 
+      // Re-arm the background DM watch for the new identity — the running
+      // watch was subscribed for the previous pubkey and would keep
+      // notifying for it until the next app relaunch (#279).
+      void rearmBackgroundDmWatchForActiveIdentity().catch((e) => {
+        if (__DEV__) console.warn('[Nostr] post-switch watch re-arm failed:', e);
+      });
+
       // Eagerly hydrate from persisted per-account caches. The next
       // tab focus / pull-to-refresh will fan out to relays.
       await loadContactsFromCache(target.pubkey);
@@ -1384,7 +1340,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const blob = await removeIdentityFromStore(targetPubkey);
       setIdentities(blob.identities);
     },
-    [pubkey, logout, wipeAccountCaches],
+    [pubkey, logout],
   );
 
   const refreshProfile = useCallback(
@@ -1725,6 +1681,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType],
   );
 
+  // Per-message reactions (#205) — publish / retract / fetch. Composed from a
+  // hook (file-size cap) that wires in the signer + relay state owned here.
+  const {
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
+  } = useReactionActions({
+    pubkey,
+    isLoggedIn,
+    signEvent,
+    relays,
+    getReadRelays,
+  });
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -1755,6 +1726,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       appendLocalDmMessage,
       persistDeliveryStatuses,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     }),
     [
       isLoggedIn,
@@ -1785,6 +1760,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       appendLocalDmMessage,
       persistDeliveryStatuses,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     ],
   );
 

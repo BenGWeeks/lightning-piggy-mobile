@@ -45,6 +45,14 @@ export function subscribeInboxDmsForViewer(input: {
   // arrive live after EOSE regardless of this cap, and the deeper backlog is
   // covered by refreshDmInbox's deferred full backfill.
   wrapsLimit?: number;
+  // Fires when the kind-1059 wrap subscription has CLOSED on every relay
+  // (nostr-tools aggregates per-relay closes and calls once with the
+  // reasons) — i.e. the caller has gone deaf to new wraps. Added for the
+  // background DM watch's self-re-arm (#958): the pool deliberately does
+  // NOT auto-reconnect (enableReconnect stays default-false app-wide), so
+  // a long-lived caller must react to this itself. NB it also fires on an
+  // intentional close via the returned cleanup — callers must guard.
+  onWrapsClose?: (reasons: string[]) => void;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
@@ -99,6 +107,7 @@ export function subscribeInboxDmsForViewer(input: {
           maybeEose();
         }
       },
+      onclose: input.onWrapsClose,
     },
   );
   // Marketplace order / receipt events (kinds 16 & 17) addressed to the viewer

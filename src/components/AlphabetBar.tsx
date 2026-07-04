@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, GestureResponderEvent } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -49,6 +50,7 @@ const FULL_ALPHABET = [
 const AlphabetBar: React.FC<Props> = React.memo(
   ({ letters, currentLetter, onLetterPress }) => {
     const colors = useThemeColors();
+    const t = useTranslation();
     const styles = useMemo(() => createStyles(colors), [colors]);
     const [tapped, setTapped] = useState<string | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,7 +139,7 @@ const AlphabetBar: React.FC<Props> = React.memo(
         ref={barRef}
         style={styles.alphabetBar}
         accessibilityRole="list"
-        accessibilityLabel="Alphabet index"
+        accessibilityLabel={t('alphabetBar.alphabetIndex')}
         onLayout={(e) => {
           barLayout.current.height = e.nativeEvent.layout.height;
         }}
@@ -157,7 +159,11 @@ const AlphabetBar: React.FC<Props> = React.memo(
               onPress={() => enabled && handlePress(letter)}
               disabled={!enabled}
               accessibilityRole="button"
-              accessibilityLabel={enabled ? `Jump to ${letter}` : `${letter} (no contacts)`}
+              accessibilityLabel={
+                enabled
+                  ? t('alphabetBar.jumpTo', { letter })
+                  : t('alphabetBar.noContacts', { letter })
+              }
               accessibilityState={{ disabled: !enabled }}
               testID={`alphabet-${letter}`}
             >

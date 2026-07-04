@@ -42,17 +42,55 @@ export interface DeliveryStatus {
   pending?: boolean;
 }
 
-// Status for an optimistic bubble that's still publishing (#857): no relay has
-// settled yet, so the tick renders the faint pending Clock.
-export function pendingDelivery(meta?: { eventId?: string; kind?: number }): DeliveryStatus {
-  return { delivered: false, relayResults: {}, pending: true, ...meta };
+// Build the seed `relayResults` for a not-yet-settled send from the target relay
+// list — every target marked `failed` until a real settle upgrades it. This is
+// what lets the message-info sheet list the relays a send was ATTEMPTED against
+// even while it's pending or after an all-failed/hung timeout, instead of an
+// empty breakdown (the missing-relays bug). Empty for callers with no relay list
+// (legacy / tests) — those fall back to the bare "Not tracked" metadata.
+function seedRelayResults(relays?: string[]): Record<string, RelayDeliveryResult> {
+  const out: Record<string, RelayDeliveryResult> = {};
+  for (const url of relays ?? []) out[url] = 'failed';
+  return out;
 }
 
-// Status for a send that produced NO delivery at all — a hard error before the
-// publish stage (not logged in, signer cancelled, invalid key). The bubble
-// shows the red failed glyph; `relayResults` is empty because nothing landed.
-export function failedDelivery(meta?: { eventId?: string; kind?: number }): DeliveryStatus {
-  return { delivered: false, relayResults: {}, ...meta };
+// Status for an optimistic bubble that's still publishing (#857): no relay has
+// settled yet, so the tick renders the faint pending Clock. `meta.relays` (the
+// send's target relay set) pre-seeds `relayResults` so the info sheet can list
+// every relay the send is going out to even before any has acked.
+export function pendingDelivery(meta?: {
+  eventId?: string;
+  kind?: number;
+  relays?: string[];
+}): DeliveryStatus {
+  const { relays, ...rest } = meta ?? {};
+  return {
+    delivered: false,
+    relayResults: seedRelayResults(relays),
+    targetRelayCount: relays?.length,
+    pending: true,
+    ...rest,
+  };
+}
+
+// Status for a send that produced NO settled delivery — a hard error before the
+// publish stage (not logged in, signer cancelled) OR a send that hung past the
+// watchdog without any relay settling. The bubble shows the red failed glyph.
+// `meta.relays` (the attempted target set) seeds `relayResults` as all-failed so
+// the info sheet still lists the relays the send tried — without it the sheet
+// showed no relays at all on a failed/hung send (the missing-relays bug).
+export function failedDelivery(meta?: {
+  eventId?: string;
+  kind?: number;
+  relays?: string[];
+}): DeliveryStatus {
+  const { relays, ...rest } = meta ?? {};
+  return {
+    delivered: false,
+    relayResults: seedRelayResults(relays),
+    targetRelayCount: relays?.length,
+    ...rest,
+  };
 }
 
 // Everything the message-info sheet needs for ONE message — sent or received

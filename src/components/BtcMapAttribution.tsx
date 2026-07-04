@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { BtcMapLogoSvg } from './BtcMapLogoSvg';
 
 interface Props {
@@ -10,13 +11,14 @@ interface Props {
 
 const BtcMapAttribution: React.FC<Props> = ({ variant = 'inline', testID }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const wrapStyle = variant === 'badge' ? styles.badge : styles.inline;
   return (
     <TouchableOpacity
       onPress={() => Linking.openURL('https://btcmap.org/')}
       activeOpacity={0.7}
       testID={testID ?? 'btcmap-attribution'}
-      accessibilityLabel="Powered by BTC Map — opens btcmap.org"
+      accessibilityLabel={t('btcMapAttribution.a11yLabel')}
       style={wrapStyle}
     >
       {/* Official BTC Map brand mark, rendered as a React Native SVG so
@@ -25,7 +27,9 @@ const BtcMapAttribution: React.FC<Props> = ({ variant = 'inline', testID }) => {
           around the pin's blue/cyan inner stripes. Source SVG: copied
           verbatim from btcmap.org/images/logo.svg. */}
       <BtcMapLogoSvg width={17} height={22} />
-      <Text style={[styles.text, { color: colors.textSupplementary }]}>Powered by BTC Map</Text>
+      <Text style={[styles.text, { color: colors.textSupplementary }]}>
+        {t('btcMapAttribution.poweredBy')}
+      </Text>
     </TouchableOpacity>
   );
 };

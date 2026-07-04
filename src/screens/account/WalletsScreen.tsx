@@ -7,10 +7,12 @@ import { createSharedAccountStyles } from './sharedStyles';
 import AddWalletWizard from '../../components/AddWalletWizard';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 
 const WalletsScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
@@ -20,12 +22,15 @@ const WalletsScreen: React.FC = () => {
   ).length;
 
   return (
-    <AccountScreenLayout title="Wallets">
+    <AccountScreenLayout title={t('walletsScreen.title')}>
       <View style={sharedAccountStyles.card}>
         <Text style={styles.walletSummary}>
           {wallets.length === 0
-            ? 'No wallets connected. Add one to get started.'
-            : `${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} (${connectedCount} connected)`}
+            ? t('walletsScreen.noWallets')
+            : t('walletsScreen.walletCount', {
+                count: wallets.length,
+                connected: connectedCount,
+              })}
         </Text>
         {wallets.map((w, index) => (
           <View key={w.id} style={styles.walletRow}>
@@ -46,13 +51,13 @@ const WalletsScreen: React.FC = () => {
             />
             <Text style={styles.walletName} numberOfLines={1}>
               {w.alias}
-              {w.walletType === 'onchain' ? ' (on-chain)' : ''}
+              {w.walletType === 'onchain' ? t('walletsScreen.onChainSuffix') : ''}
             </Text>
             <Text style={styles.walletBalance}>
               {w.hideBalance
                 ? '***'
                 : w.balance !== null
-                  ? `${w.balance.toLocaleString()} sats`
+                  ? t('walletsScreen.satsAmount', { amount: w.balance.toLocaleString() })
                   : '---'}
             </Text>
             <View style={styles.walletActions}>
@@ -60,7 +65,7 @@ const WalletsScreen: React.FC = () => {
                 onPress={() => reorderWallet(w.id, 'up')}
                 disabled={index === 0}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={`Move ${w.alias} up`}
+                accessibilityLabel={t('walletsScreen.moveUp', { alias: w.alias })}
               >
                 <ChevronUp size={18} color={colors.white} opacity={index === 0 ? 0.3 : 0.8} />
               </TouchableOpacity>
@@ -68,7 +73,7 @@ const WalletsScreen: React.FC = () => {
                 onPress={() => reorderWallet(w.id, 'down')}
                 disabled={index === wallets.length - 1}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={`Move ${w.alias} down`}
+                accessibilityLabel={t('walletsScreen.moveDown', { alias: w.alias })}
               >
                 <ChevronDown
                   size={18}
@@ -80,7 +85,9 @@ const WalletsScreen: React.FC = () => {
                 onPress={() => updateWalletSettings(w.id, { hideBalance: !w.hideBalance })}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityLabel={
-                  w.hideBalance ? `Show ${w.alias} balance` : `Hide ${w.alias} balance`
+                  w.hideBalance
+                    ? t('walletsScreen.showBalance', { alias: w.alias })
+                    : t('walletsScreen.hideBalance', { alias: w.alias })
                 }
               >
                 {w.hideBalance ? (
@@ -92,12 +99,12 @@ const WalletsScreen: React.FC = () => {
               <TouchableOpacity
                 onPress={() =>
                   Alert.alert(
-                    'Remove Wallet',
-                    `Remove "${w.alias}"? This will disconnect the wallet.`,
+                    t('walletsScreen.removeWalletTitle'),
+                    t('walletsScreen.removeWalletMessage', { alias: w.alias }),
                     [
-                      { text: 'Cancel', style: 'cancel' },
+                      { text: t('walletsScreen.cancel'), style: 'cancel' },
                       {
-                        text: 'Remove',
+                        text: t('walletsScreen.remove'),
                         style: 'destructive',
                         onPress: () => removeWallet(w.id),
                       },
@@ -105,7 +112,7 @@ const WalletsScreen: React.FC = () => {
                   )
                 }
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={`Remove ${w.alias}`}
+                accessibilityLabel={t('walletsScreen.removeWalletA11y', { alias: w.alias })}
               >
                 <Trash2 size={18} color={colors.white} opacity={0.8} />
               </TouchableOpacity>
@@ -115,11 +122,11 @@ const WalletsScreen: React.FC = () => {
         <TouchableOpacity
           style={styles.addWalletButton}
           onPress={() => setWizardOpen(true)}
-          accessibilityLabel="Add wallet"
+          accessibilityLabel={t('walletsScreen.addWalletA11y')}
           testID="add-wallet-button"
         >
           <Plus size={18} color={colors.accentSecondary} />
-          <Text style={styles.addWalletText}>Add Wallet</Text>
+          <Text style={styles.addWalletText}>{t('walletsScreen.addWallet')}</Text>
         </TouchableOpacity>
       </View>
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />

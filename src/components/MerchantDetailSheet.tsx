@@ -23,6 +23,7 @@ import {
   type BtcMapPlace,
 } from '../services/btcMapService';
 import { useDismissibleSheet } from '../hooks/useDismissibleSheet';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createSheetStyles } from '../styles/sheetStyles';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from './SocialIcon';
@@ -37,6 +38,7 @@ interface Props {
 
 export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, onViewDetails }) => {
   const styles = useMemo(() => createSheetStyles(colors), [colors]);
+  const t = useTranslation();
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const days = daysSinceVerified(place);
   const lud16 = lightningAddressOf(place);
@@ -44,10 +46,10 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
     days === null
       ? null
       : days === 0
-        ? 'Verified today via OSM'
+        ? t('merchantDetailSheet.verifiedToday')
         : days === 1
-          ? 'Verified 1 day ago via OSM'
-          : `Verified ${days} days ago via OSM`;
+          ? t('merchantDetailSheet.verifiedOneDayAgo')
+          : t('merchantDetailSheet.verifiedDaysAgo', { days });
   const CategoryIcon = btcMapIconComponent(place.icon);
 
   return (
@@ -57,7 +59,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
         onPress={onClose}
         activeOpacity={1}
         accessibilityRole="button"
-        accessibilityLabel="Close merchant details"
+        accessibilityLabel={t('merchantDetailSheet.closeMerchantDetails')}
         testID="merchant-detail-tap-away"
       />
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
@@ -69,7 +71,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
             <CategoryIcon size={18} color={colors.brandPink} strokeWidth={2.5} />
           </View>
           <Text style={styles.sheetTitle} testID="merchant-detail-name">
-            {place.tags.name ?? 'Unnamed merchant'}
+            {place.tags.name ?? t('merchantDetailSheet.unnamedMerchant')}
           </Text>
         </View>
         <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
@@ -77,18 +79,18 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
           {isBoosted(place) && (
             <View style={styles.sheetChipFeatured} testID="merchant-detail-featured">
               <Sparkles size={12} color={colors.textHeader} strokeWidth={2.5} />
-              <Text style={styles.sheetChipFeaturedText}>Featured</Text>
+              <Text style={styles.sheetChipFeaturedText}>{t('merchantDetailSheet.featured')}</Text>
             </View>
           )}
           {acceptsLightning(place) && (
             <View style={styles.sheetChipPink}>
               <Zap size={12} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.sheetChipPinkText}>Lightning</Text>
+              <Text style={styles.sheetChipPinkText}>{t('merchantDetailSheet.lightning')}</Text>
             </View>
           )}
           {acceptsOnchain(place) && (
             <View style={styles.sheetChipOrange}>
-              <Text style={styles.sheetChipOrangeText}>On-chain</Text>
+              <Text style={styles.sheetChipOrangeText}>{t('merchantDetailSheet.onchain')}</Text>
             </View>
           )}
         </View>
@@ -118,11 +120,11 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.tags['contact:website']!)}
                 testID="merchant-detail-website"
-                accessibilityLabel="Open website"
+                accessibilityLabel={t('merchantDetailSheet.openWebsite')}
               >
                 <Globe size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Website
+                  {t('merchantDetailSheet.website')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -131,7 +133,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
                 testID="merchant-detail-phone"
-                accessibilityLabel={`Call ${place.phone}`}
+                accessibilityLabel={t('merchantDetailSheet.callPhone', { phone: place.phone })}
               >
                 <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -144,11 +146,11 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`mailto:${place.email!}`)}
                 testID="merchant-detail-email"
-                accessibilityLabel={`Email ${place.email}`}
+                accessibilityLabel={t('merchantDetailSheet.emailContact', { email: place.email })}
               >
                 <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Email
+                  {t('merchantDetailSheet.email')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -157,7 +159,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
                 testID="merchant-detail-facebook"
-                accessibilityLabel="Open Facebook page"
+                accessibilityLabel={t('merchantDetailSheet.openFacebook')}
               >
                 <SocialIcon network="facebook" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -170,7 +172,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
                 testID="merchant-detail-x"
-                accessibilityLabel="Open X profile"
+                accessibilityLabel={t('merchantDetailSheet.openX')}
               >
                 <SocialIcon network="x" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -183,7 +185,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
                 testID="merchant-detail-instagram"
-                accessibilityLabel="Open Instagram"
+                accessibilityLabel={t('merchantDetailSheet.openInstagram')}
               >
                 <SocialIcon network="instagram" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -206,18 +208,24 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
               // adds the lud16 entry-path on the Home tab.
             }}
             testID="merchant-detail-pay-button"
-            accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
+            accessibilityLabel={
+              lud16
+                ? t('merchantDetailSheet.payAddress', { address: lud16 })
+                : t('merchantDetailSheet.noLightningAddress')
+            }
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.sheetButtonText}>Pay</Text>
+            <Text style={styles.sheetButtonText}>{t('merchantDetailSheet.pay')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
             onPress={onViewDetails}
             testID="merchant-detail-view-button"
-            accessibilityLabel="Open place detail"
+            accessibilityLabel={t('merchantDetailSheet.openPlaceDetail')}
           >
-            <Text style={styles.sheetButtonSecondaryText}>View details</Text>
+            <Text style={styles.sheetButtonSecondaryText}>
+              {t('merchantDetailSheet.viewDetails')}
+            </Text>
           </TouchableOpacity>
         </View>
         {btcMapVerifyUrl(place) || btcMapMerchantUrl(place) ? (
@@ -227,10 +235,10 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
                 testID="merchant-detail-verify"
-                accessibilityLabel="Verify this listing on BTC Map"
+                accessibilityLabel={t('merchantDetailSheet.verifyOnBtcMap')}
               >
                 <ShieldCheck size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetBtcMapActionText}>Verify</Text>
+                <Text style={styles.sheetBtcMapActionText}>{t('merchantDetailSheet.verify')}</Text>
               </TouchableOpacity>
             ) : null}
             {btcMapMerchantUrl(place) ? (
@@ -238,9 +246,11 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
                 testID="merchant-detail-suggest-edit"
-                accessibilityLabel="Suggest an edit on BTC Map"
+                accessibilityLabel={t('merchantDetailSheet.suggestEditOnBtcMap')}
               >
-                <Text style={styles.sheetBtcMapActionText}>Suggest an edit →</Text>
+                <Text style={styles.sheetBtcMapActionText}>
+                  {t('merchantDetailSheet.suggestEdit')}
+                </Text>
               </TouchableOpacity>
             ) : null}
           </View>

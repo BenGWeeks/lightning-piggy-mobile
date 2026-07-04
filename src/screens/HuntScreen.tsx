@@ -20,10 +20,12 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
@@ -61,6 +63,7 @@ interface Props {
  */
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { pubkey, relays, profile } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
@@ -149,14 +152,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Write-through (debounced) so the next cold start has fresh data.
   useEffect(() => {
     if (caches.size === 0) return;
-    const t = setTimeout(
+    const persistTimer = setTimeout(
       // Strip prod-hidden (test-account) Piglets before persisting so prod
       // caches self-heal — stale Piggy entries age out of storage instead
       // of being re-saved forever (matches ExploreHomeScreen) (#917).
       () => saveCaches(stripHiddenForPersist([...caches.values()], (c) => c.hiderPubkey)),
       1500,
     );
-    return () => clearTimeout(t);
+    return () => clearTimeout(persistTimer);
   }, [caches]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -221,8 +224,8 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // path.
   useEffect(() => {
     if (pos) return;
-    const t = setTimeout(() => setLoading(false), 10_000);
-    return () => clearTimeout(t);
+    const settleTimer = setTimeout(() => setLoading(false), 10_000);
+    return () => clearTimeout(settleTimer);
   }, [pos]);
 
   // Cache subscription — kicks off once we have a fix, but only while
@@ -345,32 +348,27 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="geocaches-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('huntScreen.backToExplore')}
             testID="hunt-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Geo-caches</Text>
+          <Text style={styles.headerTitle}>{t('huntScreen.geocaches')}</Text>
           <TouchableOpacity
             onPress={() => navigation.navigate('MyPiglets')}
-            accessibilityLabel="My Piglets"
+            accessibilityLabel={t('huntScreen.myPiglets')}
             testID="hunt-my-piglets-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <PiggyBank size={22} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>
+        <Text style={styles.headerTagline}>{t('huntScreen.tagline')}</Text>
       </View>
 
       {/* Inline interactive map — lives OUTSIDE the FlatList rather
@@ -430,7 +428,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search geo-caches…"
+                placeholder={t('huntScreen.searchPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -442,7 +440,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 style={styles.filterIconButton}
                 onPress={() => setFilterSheetOpen(true)}
                 testID="hunt-filter-button"
-                accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                accessibilityLabel={
+                  activeFilterCount > 0
+                    ? t('huntScreen.filtersActive', { count: activeFilterCount })
+                    : t('huntScreen.filters')
+                }
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
@@ -469,20 +471,20 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           loading ? (
             <View style={styles.center} testID="hunt-discover-loading">
               <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.subtle}>Looking for geo-caches near you…</Text>
+              <Text style={styles.subtle}>{t('huntScreen.lookingForCaches')}</Text>
             </View>
           ) : searchQuery.trim() !== '' ? (
             <Text style={styles.emptySearchText}>
-              Nothing matches “{searchQuery.trim()}”. Try a cache type, size, or location keyword.
+              {t('huntScreen.noMatch', { query: searchQuery.trim() })}
             </Text>
           ) : (
             <View style={styles.center} testID="hunt-discover-empty-state">
               <PiggyBank size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-              <Text style={styles.emptyTitle}>No geo-caches nearby yet</Text>
+              <Text style={styles.emptyTitle}>{t('huntScreen.noCachesNearby')}</Text>
               <Text style={styles.subtle}>
-                We searched a ~5 km area. Tap{' '}
-                <Text style={{ fontWeight: '700', color: colors.brandPink }}>+</Text> above to hide
-                the first Piglet.
+                {t('huntScreen.emptyPrefix')}
+                <Text style={{ fontWeight: '700', color: colors.brandPink }}>+</Text>
+                {t('huntScreen.emptySuffix')}
               </Text>
             </View>
           )
@@ -544,44 +546,47 @@ const CacheRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
-}> = ({ cache, distance, index, colors, styles, onPress }) => (
-  <TouchableOpacity
-    style={styles.row}
-    onPress={onPress}
-    testID={`hunt-discover-row-${cache.d}`}
-    accessibilityLabel={cache.name}
-  >
-    <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
-    <View style={styles.iconContainer}>
-      {cache.imageUrl ? (
-        <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-      ) : (
-        <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
-          {cache.isLpPiggy ? (
-            <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-          ) : (
-            <MapPin size={22} color={colors.white} strokeWidth={2} />
-          )}
-        </View>
-      )}
-      <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
-    </View>
-    <View style={styles.rowMain}>
-      <Text style={styles.rowTitle} numberOfLines={1}>
-        {cache.name}
-      </Text>
-      <Text style={styles.rowMeta} numberOfLines={1}>
-        {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-        {cache.cacheType ? ` · ${cache.cacheType}` : ''}
-        {cache.size ? ` · ${cache.size}` : ''}
-        {cache.difficulty ? ` · D${cache.difficulty}` : ''}
-        {cache.terrain ? ` / T${cache.terrain}` : ''}
-      </Text>
-    </View>
-    <ChevronRight size={20} color={colors.textSupplementary} />
-  </TouchableOpacity>
-);
+}> = ({ cache, distance, index, colors, styles, onPress }) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={onPress}
+      testID={`hunt-discover-row-${cache.d}`}
+      accessibilityLabel={cache.name}
+    >
+      <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
+      <View style={styles.iconContainer}>
+        {cache.imageUrl ? (
+          <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
+        ) : (
+          <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
+            {cache.isLpPiggy ? (
+              <PiggyBank size={22} color={colors.white} strokeWidth={2} />
+            ) : (
+              <MapPin size={22} color={colors.white} strokeWidth={2} />
+            )}
+          </View>
+        )}
+        <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
+      </View>
+      <View style={styles.rowMain}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {cache.name}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {cache.isLpPiggy ? t('huntScreen.piglet') : t('huntScreen.nipGcCache')}
+          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+          {cache.cacheType ? ` · ${cache.cacheType}` : ''}
+          {cache.size ? ` · ${cache.size}` : ''}
+          {cache.difficulty ? ` · D${cache.difficulty}` : ''}
+          {cache.terrain ? ` / T${cache.terrain}` : ''}
+        </Text>
+      </View>
+      <ChevronRight size={20} color={colors.textSupplementary} />
+    </TouchableOpacity>
+  );
+};
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -593,13 +598,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

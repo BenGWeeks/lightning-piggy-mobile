@@ -4,6 +4,7 @@ import { satsToFiatString } from '../services/fiatService';
 import type { LnurlPayParams } from '../services/lnurlService';
 import { lnurlFixedAmountSats } from '../utils/sendSheetInput';
 import type { SendSheetStyles } from '../styles/SendSheet.styles';
+import { useTranslation } from '../contexts/LocaleContext';
 
 interface Props {
   needsAmount: boolean;
@@ -39,6 +40,7 @@ const SendAmountSection: React.FC<Props> = ({
   styles,
   spinnerColor,
 }) => {
+  const t = useTranslation();
   const lnurlFixedSats = lnurlFixedAmountSats(lnurlParams);
 
   if (needsAmount && lnurlFixedSats !== null) {
@@ -54,7 +56,7 @@ const SendAmountSection: React.FC<Props> = ({
             </Text>
           ) : null}
         </View>
-        <Text style={styles.rangeText}>Fixed amount</Text>
+        <Text style={styles.rangeText}>{t('sendAmountSection.fixedAmount')}</Text>
       </View>
     );
   }
@@ -69,7 +71,7 @@ const SendAmountSection: React.FC<Props> = ({
             style={styles.amountPickerRow}
             onPress={onEnterAmount}
             testID="send-amount-picker"
-            accessibilityLabel="Enter amount"
+            accessibilityLabel={t('sendAmountSection.enterAmount')}
           >
             {currentSats > 0 ? (
               <>
@@ -81,7 +83,9 @@ const SendAmountSection: React.FC<Props> = ({
                 ) : null}
               </>
             ) : (
-              <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
+              <Text style={styles.amountPickerPlaceholder}>
+                {t('sendAmountSection.enterAmount')}
+              </Text>
             )}
           </TouchableOpacity>
         ) : null}
@@ -107,7 +111,7 @@ const SendAmountSection: React.FC<Props> = ({
     );
   }
 
-  return <Text style={styles.amountValue}>Amount not specified</Text>;
+  return <Text style={styles.amountValue}>{t('sendAmountSection.amountNotSpecified')}</Text>;
 };
 
 export default SendAmountSection;

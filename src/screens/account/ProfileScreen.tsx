@@ -13,10 +13,12 @@ import { isNfcSupported } from '../../services/nfcService';
 import { nprofileEncode, buildOwnProfileRelayHints } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 
 const ProfileScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { isLoggedIn, profile, refreshProfile, pubkey, relays } = useNostr();
@@ -57,7 +59,7 @@ const ProfileScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title="Profile">
+    <AccountScreenLayout title={t('profileScreen.title')}>
       {isLoggedIn && profile ? (
         <View style={styles.profileSection}>
           {profile.banner && (
@@ -79,7 +81,7 @@ const ProfileScreen: React.FC = () => {
             )}
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
-                {profile.displayName || profile.name || 'Unknown'}
+                {profile.displayName || profile.name || t('profileScreen.unknown')}
               </Text>
               {profile.nip05 && <Text style={styles.profileNip05}>{profile.nip05}</Text>}
             </View>
@@ -106,26 +108,25 @@ const ProfileScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.editProfileButton}
             onPress={() => setEditProfileOpen(true)}
-            accessibilityLabel="Edit Profile"
+            accessibilityLabel={t('profileScreen.editProfile')}
             testID="edit-profile-button"
           >
-            <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+            <Text style={styles.editProfileButtonText}>{t('profileScreen.editProfile')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <TouchableOpacity
           style={styles.connectButton}
           onPress={() => setLoginSheetOpen(true)}
-          accessibilityLabel="Connect Nostr"
+          accessibilityLabel={t('profileScreen.connectNostr')}
           testID="connect-nostr"
         >
-          <Text style={styles.connectButtonText}>Connect Nostr</Text>
+          <Text style={styles.connectButtonText}>{t('profileScreen.connectNostr')}</Text>
         </TouchableOpacity>
       )}
 
       <Text style={[sharedAccountStyles.fieldHint, { marginTop: 16 }]}>
-        Your Nostr identity is how friends find you for zaps and messages. Sign out from the drawer
-        to disconnect.
+        {t('profileScreen.identityHint')}
       </Text>
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
@@ -136,7 +137,7 @@ const ProfileScreen: React.FC = () => {
           onClose={() => setNfcWriteVisible(false)}
           npub={profile.npub}
           nostrRef={nprofileRef}
-          displayName={profile.displayName || profile.name || 'You'}
+          displayName={profile.displayName || profile.name || t('profileScreen.you')}
         />
       )}
     </AccountScreenLayout>

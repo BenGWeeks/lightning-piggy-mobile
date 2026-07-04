@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface AddWalletCardProps {
@@ -10,6 +11,7 @@ interface AddWalletCardProps {
 
 const AddWalletCard: React.FC<AddWalletCardProps> = ({ onPress }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.cardContainer}>
@@ -18,10 +20,10 @@ const AddWalletCard: React.FC<AddWalletCardProps> = ({ onPress }) => {
         onPress={onPress}
         activeOpacity={0.7}
         testID="add-wallet-card"
-        accessibilityLabel="Add Wallet"
+        accessibilityLabel={t('addWalletCard.addWallet')}
       >
         <Text style={styles.plusIcon}>+</Text>
-        <Text style={styles.label}>Add Wallet</Text>
+        <Text style={styles.label}>{t('addWalletCard.addWallet')}</Text>
       </TouchableOpacity>
     </View>
   );
