@@ -4,9 +4,9 @@
  * malformed gradients, ID/key mismatch). Added with the sports themes
  * in #102 so the new placeholder entries don't quietly regress.
  *
- * Real artwork is a designer follow-up — these tests intentionally
- * tolerate missing `backgroundImage` so the gradient-only sports cards
- * pass while still being part of the same registry the picker iterates.
+ * Artwork landed in #102 — each sports theme now carries a graffiti
+ * `backgroundImage` + matching `backgroundImageStyle`, rendered over
+ * the gradient exactly like the animal cards.
  */
 
 import { cardThemes, themeList } from './cardThemes';
@@ -57,12 +57,12 @@ describe('cardThemes registry', () => {
       }
     });
 
-    it('does NOT register backgroundImage yet (placeholder gradients only)', () => {
-      // Real art is a designer follow-up; if this fails, either the
-      // asset has landed (great — delete this assertion) or someone
-      // accidentally pointed a sports theme at the wrong PNG.
+    it('registers a graffiti backgroundImage + matching backgroundImageStyle', () => {
+      // Artwork landed in #102 — each sports theme now renders its
+      // illustration over the gradient, like the animal cards.
       for (const id of SPORTS_THEMES) {
-        expect(cardThemes[id].backgroundImage).toBeUndefined();
+        expect(cardThemes[id].backgroundImage).toBeDefined();
+        expect(cardThemes[id].backgroundImageStyle).toBe(id);
       }
     });
   });

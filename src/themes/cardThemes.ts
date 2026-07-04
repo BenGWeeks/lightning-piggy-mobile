@@ -163,11 +163,9 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/xapo-logo.png'),
     backgroundImageStyle: 'xapo',
   },
-  // Sports-themed cards (#102). These are placeholder gradient-only
-  // entries so kids can pick a hobby-themed card today; real
-  // illustrations are a designer follow-up. When art lands, add
-  // `backgroundImage` + `backgroundImageStyle` here and the matching
-  // `bgStyle` in `src/themes/cards/index.ts`.
+  // Sports-themed cards (#102). Graffiti-style transparent illustrations
+  // sit over the sport's palette gradient, matching the animal cards.
+  // The per-theme positioning lives in `src/themes/cards/<sport>.ts`.
   tennis: {
     id: 'tennis',
     name: 'Tennis',
@@ -175,6 +173,8 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     gradientColors: ['#A8E063', '#56AB2F'],
     textColor: '#FFFFFF',
     accentColor: '#FFFFFF',
+    backgroundImage: require('../../assets/images/tennis.png'),
+    backgroundImageStyle: 'tennis',
   },
   football: {
     id: 'football',
@@ -183,6 +183,8 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     gradientColors: ['#1B5E20', '#2E7D32'],
     textColor: '#FFFFFF',
     accentColor: '#A5D6A7',
+    backgroundImage: require('../../assets/images/football.png'),
+    backgroundImageStyle: 'football',
   },
   basketball: {
     id: 'basketball',
@@ -191,6 +193,8 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     gradientColors: ['#F57C00', '#E65100'],
     textColor: '#FFFFFF',
     accentColor: '#212121',
+    backgroundImage: require('../../assets/images/basketball.png'),
+    backgroundImageStyle: 'basketball',
   },
   f1: {
     id: 'f1',
@@ -199,6 +203,8 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     gradientColors: ['#9E9E9E', '#212121'],
     textColor: '#FFFFFF',
     accentColor: '#E53935',
+    backgroundImage: require('../../assets/images/f1.png'),
+    backgroundImageStyle: 'f1',
   },
 };
 
