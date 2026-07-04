@@ -49,6 +49,10 @@ function isValidNip46Connection(v: unknown): v is Nip46Connection {
     HEX_64.test(c.userPubkey) &&
     typeof c.clientSecretKeyHex === 'string' &&
     HEX_64.test(c.clientSecretKeyHex) &&
+    // `perms` is a (possibly empty) comma-separated string persisted with the
+    // connection and compared by `setActiveConnection` — require the field to
+    // be a string so a blob missing it doesn't produce `undefined` mismatches.
+    typeof c.perms === 'string' &&
     Array.isArray(c.relays) &&
     c.relays.length > 0 &&
     c.relays.every((r) => typeof r === 'string' && r.length > 0)

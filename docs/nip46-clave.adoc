@@ -103,8 +103,8 @@ The relay default is `wss://relay.nsec.app`. Bunkers that subscribe to other rel
 | `nostr_nip46_connection` (SecureStore)
 | JSON `Nip46Connection` — `remoteSignerPubkey`, `userPubkey`, `relays`, `clientSecretKeyHex`, `perms`. **Sensitive** — anyone with this can impersonate the app session against the bunker.
 
-| `nip46_nip17_skip_v1` (AsyncStorage)
-| Skip-set of NIP-17 wrap ids that failed to unwrap (e.g. bunker denied `nip44_decrypt`), so a refresh doesn't re-attempt them every pass. Cleared on logout. Unlike the `nsec_`/`amber_` paths there is no `nip46_nip17_cache_v1` — decrypted rumors persist in the encrypted local DM store, not an AsyncStorage wrap-id → rumor cache.
+| `nip46_nip17_skip_v1` (expo-file-system, per-account file under `Paths.document`)
+| Skip-set of NIP-17 wrap ids that failed to unwrap (e.g. bunker denied `nip44_decrypt`), so a refresh doesn't re-attempt them every pass. Persisted as a per-account JSON file (`loadNip17SkipSet`/`writeNip17SkipSet` in `nostrDmCache.ts`), not an AsyncStorage row. Cleared on logout. Unlike the `nsec_`/`amber_` paths there is no `nip46_nip17_cache_v1` — decrypted rumors persist in the encrypted local DM store, not a wrap-id → rumor cache.
 |===
 
 == Files

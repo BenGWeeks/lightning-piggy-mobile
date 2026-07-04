@@ -1,4 +1,4 @@
-import { useCallback, startTransition } from 'react';
+import { useCallback, startTransition, type Dispatch, type SetStateAction } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
@@ -30,7 +30,7 @@ export interface UseContactActionsParams {
   signerType: SignerType | null;
   relays: RelayConfig[];
   contacts: NostrContact[];
-  setContacts: React.Dispatch<React.SetStateAction<NostrContact[]>>;
+  setContacts: Dispatch<SetStateAction<NostrContact[]>>;
   getReadRelays: () => string[];
   loadContacts: (pk: string, relayUrls: string[], opts?: { force?: boolean }) => Promise<void>;
 }
