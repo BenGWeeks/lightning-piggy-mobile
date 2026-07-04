@@ -85,7 +85,44 @@ export interface MarketVendorSource {
 /** Canonical website origin used to resolve site-relative asset/link paths. */
 export const LIGHTNING_PIGGY_SITE_ORIGIN = 'https://lightningpiggy.com';
 
+// Test-only sellers (#948 buy-flow validation) — DEV builds ONLY, never
+// shipped to production. Clearly marked "(TEST)". The `nostrUrl` npubs are the
+// Big / Little Piggy test identities so a pig-to-pig NIP-17 order can be
+// exercised end-to-end on a dev build; the products they sell live in
+// PIG_TEST_PRODUCTS in marketProducts.ts, priced at 21 sats.
+const PIG_TEST_VENDORS: MarketVendor[] = __DEV__
+  ? [
+      {
+        name: 'Big Piggy (TEST)',
+        country: 'Testland',
+        shippingRegions: ['Worldwide'],
+        shopType: 'online',
+        description: 'TEST seller — do not buy. NIP-17 order-flow validation only. ⚠️',
+        url: 'https://lightningpiggy.com',
+        logo: `${LIGHTNING_PIGGY_SITE_ORIGIN}/images/logos/danish-bacon.png`,
+        nostrUrl:
+          'https://njump.me/npub1enkml7dx7fsm8zq83dczyh06g9r7l2447p32wu32p5jn7qmqclns65f4st',
+        xUrl: '',
+        featured: false,
+      },
+      {
+        name: 'Little Piggy (TEST)',
+        country: 'Testland',
+        shippingRegions: ['Worldwide'],
+        shopType: 'online',
+        description: 'TEST seller — do not buy. NIP-17 order-flow validation only. ⚠️',
+        url: 'https://lightningpiggy.com',
+        logo: `${LIGHTNING_PIGGY_SITE_ORIGIN}/images/logos/danish-bacon.png`,
+        nostrUrl:
+          'https://njump.me/npub1mxen9q96wvexrk94t877p4nzkm9s0phrq7znzwsgdnw2j43eg4lqtqp265',
+        xUrl: '',
+        featured: false,
+      },
+    ]
+  : [];
+
 export const MARKET_VENDORS: MarketVendor[] = [
+  ...PIG_TEST_VENDORS,
   {
     name: 'Danish Bacon',
     country: 'Denmark',

@@ -75,7 +75,42 @@ const PRICE_SNAPSHOT_SATS_PER_GBP = Math.round(1 / 0.0006);
 // keeping the data table readable (one place defines the rate).
 const gbpToSats = (gbp: number): number => Math.round(gbp * PRICE_SNAPSHOT_SATS_PER_GBP);
 
+// Test-only products (#948 buy-flow validation) — DEV builds ONLY, never
+// shipped. Priced at 21 sats and sold by the Big/Little Piggy "(TEST)" sellers
+// (see PIG_TEST_VENDORS) so a pig-to-pig NIP-17 order can be exercised on a dev
+// build. Titles are clearly marked [TEST] so they can't be mistaken for real
+// listings.
+const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
+  ? [
+      {
+        id: 'test-big-piggy-21sat',
+        title: '[TEST] Big Piggy Test Item',
+        description: 'TEST product for NIP-17 order-flow validation — please do not buy. ⚠️',
+        priceSats: 21,
+        priceFiatLabel: '21 sats',
+        image:
+          'https://cdn.nostrcheck.me/d4a4687a0edb77f57bf30a53e4a886237058a52778c573deb0c63c94da1937fe.webp',
+        sellerName: 'Big Piggy (TEST)',
+        url: 'https://lightningpiggy.com',
+        featured: false,
+      },
+      {
+        id: 'test-little-piggy-21sat',
+        title: '[TEST] Little Piggy Test Item',
+        description: 'TEST product for NIP-17 order-flow validation — please do not buy. ⚠️',
+        priceSats: 21,
+        priceFiatLabel: '21 sats',
+        image:
+          'https://cdn.nostrcheck.me/d4a4687a0edb77f57bf30a53e4a886237058a52778c573deb0c63c94da1937fe.webp',
+        sellerName: 'Little Piggy (TEST)',
+        url: 'https://lightningpiggy.com',
+        featured: false,
+      },
+    ]
+  : [];
+
 export const MARKET_PRODUCTS: MarketProduct[] = [
+  ...PIG_TEST_PRODUCTS,
   {
     id: 'robotechy-lightning-piggy',
     title: 'Lightning Piggy',
