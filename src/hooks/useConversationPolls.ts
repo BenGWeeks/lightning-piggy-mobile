@@ -186,15 +186,16 @@ export function useConversationPolls({
           Alert.alert('Vote failed', result.error ?? 'Could not record your vote.');
           return;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            fromMe: true,
-            text: payload,
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        ]);
+        const optimistic: ConversationMessageInput = {
+          id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        };
+        setMessages((prev) => [...prev, optimistic]);
+        // Persist so the legacy vote survives navigate-away / reload before the
+        // relay echo lands (mirrors the structured-vote path's appendOptimistic).
+        void appendLocalDmMessage(pubkey, optimistic);
         return;
       }
       // Structured poll → cast a kind-1018 vote gift-wrapped back to the peer.
@@ -241,6 +242,7 @@ export function useConversationPolls({
       sendDirectMessage,
       sendDirectRumor,
       appendOptimistic,
+      appendLocalDmMessage,
       setMessages,
     ],
   );

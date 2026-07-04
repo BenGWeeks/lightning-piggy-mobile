@@ -10,6 +10,8 @@ import {
   POLL_HEADER,
   POLL_VOTE_PREFIX,
   POLL_MAX_OPTIONS,
+  POLL_MAX_QUESTION_LENGTH,
+  POLL_MAX_OPTION_LENGTH,
   aggregateVotes,
   buildPollMessage,
   buildVoteMessage,
@@ -102,6 +104,25 @@ describe('parsePoll', () => {
     const parsed = parsePoll(lines.join('\n'));
     expect(parsed?.options.length).toBe(POLL_MAX_OPTIONS);
     expect(parsed?.options[0].id).toBe(1);
+  });
+
+  it('truncates an over-long incoming question to POLL_MAX_QUESTION_LENGTH', () => {
+    // A malicious/buggy peer could send a huge question line; the parser must
+    // clamp it (not reject the poll) before it reaches the bubble + inbox
+    // preview — matching how the option-count cap clamps rather than dropping.
+    const longQ = 'Q'.repeat(POLL_MAX_QUESTION_LENGTH + 250);
+    const text = `${POLL_HEADER}\nquestion: ${longQ}\noption:1: a\noption:2: b`;
+    const parsed = parsePoll(text);
+    expect(parsed?.question.length).toBe(POLL_MAX_QUESTION_LENGTH);
+    expect(parsed?.options.length).toBe(2);
+  });
+
+  it('truncates over-long incoming option labels to POLL_MAX_OPTION_LENGTH', () => {
+    const longOpt = 'x'.repeat(POLL_MAX_OPTION_LENGTH + 120);
+    const text = `${POLL_HEADER}\nquestion: Q\noption:1: ${longOpt}\noption:2: b`;
+    const parsed = parsePoll(text);
+    expect(parsed?.options[0].text.length).toBe(POLL_MAX_OPTION_LENGTH);
+    expect(parsed?.options[1].text).toBe('b');
   });
 
   it('ignores duplicate option ids (first wins)', () => {

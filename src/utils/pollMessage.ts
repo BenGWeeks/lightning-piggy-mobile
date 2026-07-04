@@ -138,13 +138,23 @@ export function parsePoll(text: string): ParsedPoll | null {
       // Strip the leading `question:` (case-insensitive) and use the rest.
       // We lowercase only the prefix probe — never the value itself —
       // because question text is user content.
-      question = raw.slice(raw.indexOf(':') + 1).trim();
+      // Clamp to the cap — a malicious/buggy peer must not be able to push an
+      // arbitrarily long question into the bubble + inbox-preview render paths.
+      // Truncate (don't reject the whole poll), mirroring the option-COUNT cap
+      // below which also clamps rather than dropping the message.
+      question = raw
+        .slice(raw.indexOf(':') + 1)
+        .trim()
+        .slice(0, POLL_MAX_QUESTION_LENGTH);
       continue;
     }
     const optMatch = /^option:(\d+):\s?(.*)$/i.exec(line);
     if (optMatch) {
       const id = Number(optMatch[1]);
-      const optText = optMatch[2].trim();
+      // Clamp over-long option labels for the same reason as the question —
+      // this parser feeds render paths, so a pathological label is truncated
+      // rather than rendered whole (consistent with the option-count clamp).
+      const optText = optMatch[2].trim().slice(0, POLL_MAX_OPTION_LENGTH);
       // Drop empty / out-of-range / duplicate-id options. Better to silently
       // ignore than to crash the bubble on a malformed poll.
       if (!Number.isInteger(id) || id < 1) continue;
