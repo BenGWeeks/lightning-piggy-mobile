@@ -592,6 +592,12 @@ const ReceiveSheet: React.FC<Props> = ({
                         {receivableWallets.map((w) => (
                           <TouchableOpacity
                             key={w.id}
+                            testID={`receive-wallet-option-${w.id}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: capturedWalletId === w.id }}
+                            accessibilityLabel={t('receiveSheet.selectWalletA11y', {
+                              wallet: walletLabel(w),
+                            })}
                             style={[
                               styles.walletDropdownItem,
                               capturedWalletId === w.id && styles.walletDropdownItemActive,
