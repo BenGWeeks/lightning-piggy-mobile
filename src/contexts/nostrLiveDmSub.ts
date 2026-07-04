@@ -769,7 +769,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     });
     if (__DEV__) {
       console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-90d'}`,
+        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
       );
     }
   };
