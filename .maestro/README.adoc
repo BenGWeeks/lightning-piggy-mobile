@@ -32,6 +32,7 @@ on their own).
   groups/              flow-NNN  create/leave/rename/manage, 3-way Triad, amber
   hunt/                flow-NNN  geo-cache discover/detail/publish/found + captures
   map/                 flow-NNN  render, permission-denied, nearby merchants
+  market/              flow-NNN  grid, product detail, reviews/comments tabs
   messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode
   payments/            flow-NNN  send/receive/pay/transfer/swap/amount entry
   profile/             flow-NNN  edit profile/picture, appearance, account drawer
