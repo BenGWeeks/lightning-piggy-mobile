@@ -280,8 +280,8 @@ const MessageBubble: React.FC<Props> = ({
               accessibilityRole="button"
               accessibilityLabel={
                 mine
-                  ? `Remove your ${emoji} reaction (${reactors.length} total)`
-                  : `Add ${emoji} reaction (${reactors.length} so far)`
+                  ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })
+                  : t('messageBubble.reactionAdd', { emoji, count: reactors.length })
               }
               testID={`${testIdPrefix}-reaction-${id}-${emoji}`}
             >

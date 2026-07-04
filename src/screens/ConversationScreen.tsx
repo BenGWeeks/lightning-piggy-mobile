@@ -109,6 +109,7 @@ const ConversationScreen: React.FC = () => {
     publishReaction,
     deleteReaction,
     fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
   const { contacts } = useNostrContacts();
@@ -477,6 +478,7 @@ const ConversationScreen: React.FC = () => {
     fetchReactionsForMessages,
     publishReaction,
     deleteReaction,
+    fetchReactionDeletions: fetchReactionDeletionsForReactions,
     onZapMessage: () => setSendSheetOpen(true),
   });
 

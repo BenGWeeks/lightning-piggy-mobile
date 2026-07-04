@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import * as nostrService from '../services/nostrService';
-import { fetchReactions } from '../services/nostrReactions';
+import { fetchReactions, fetchReactionDeletions } from '../services/nostrReactions';
 import { buildReactionEvent, buildReactionDeletionEvent } from '../utils/reactions';
 import type { SignedEvent } from '../contexts/nostrContextTypes';
 
@@ -42,6 +42,14 @@ export interface UseReactionActionsResult {
       pubkey: string;
       kind: number;
       content: string;
+      created_at: number;
+      tags: string[][];
+    }[]
+  >;
+  fetchReactionDeletionsForReactions: (reactionEventIds: string[]) => Promise<
+    {
+      id: string;
+      pubkey: string;
       created_at: number;
       tags: string[][];
     }[]
@@ -122,5 +130,23 @@ export function useReactionActions({
     [getReadRelays],
   );
 
-  return { publishReaction, deleteReaction, fetchReactionsForMessages };
+  const fetchReactionDeletionsForReactions = useCallback(
+    async (reactionEventIds: string[]) => {
+      if (reactionEventIds.length === 0) return [];
+      try {
+        return await fetchReactionDeletions(reactionEventIds, getReadRelays());
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] fetchReactionDeletionsForReactions failed:', error);
+        return [];
+      }
+    },
+    [getReadRelays],
+  );
+
+  return {
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
+  };
 }

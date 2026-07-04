@@ -13,6 +13,9 @@ import {
   parseReactionEvent,
   reduceReactions,
   applyReactionDeletion,
+  isOptimisticReactionId,
+  makeOptimisticReactionId,
+  OPTIMISTIC_REACTION_PREFIX,
   type ReactionRecord,
 } from './reactions';
 
@@ -270,5 +273,63 @@ describe('applyReactionDeletion', () => {
   it('is a no-op when the deletion targets an unknown id', () => {
     const records = [rec(PK_A, '🔥', TARGET_1, 100, 'r1')];
     expect(applyReactionDeletion(records, 'r-unknown', PK_A)).toEqual(records);
+  });
+
+  // End-to-end of the RECEIVE path the hook wires up (#205 blocking): a peer's
+  // kind-7 is parsed + reduced into a pill, then their kind-5 retraction is
+  // parsed for its `e` tag + reactor pubkey and applied — and the pill vanishes.
+  it('drops a peer reaction from the reduced state once their kind-5 arrives', () => {
+    // 1. Peer's reaction lands and reduces into a visible ❤️ pill.
+    const reaction = parseReactionEvent({
+      id: 'peer-react-1',
+      pubkey: PK_B,
+      kind: 7,
+      content: '❤️',
+      created_at: 100,
+      tags: [
+        ['e', TARGET_1],
+        ['p', PK_ME],
+      ],
+    });
+    expect(reaction).not.toBeNull();
+    let records: ReactionRecord[] = [reaction!];
+    expect(reduceReactions(records, PK_ME).get(TARGET_1)?.byEmoji['❤️']).toEqual([PK_B]);
+
+    // 2. Peer retracts it: a kind-5 whose `e` tag names the reaction id and
+    //    whose author is the reactor. Applying it removes the record.
+    const deletion = { pubkey: PK_B, tags: [['e', 'peer-react-1']] };
+    for (const t of deletion.tags) {
+      records = applyReactionDeletion(records, t[1], deletion.pubkey);
+    }
+
+    // 3. The ❤️ pill is gone entirely.
+    expect(reduceReactions(records, PK_ME).get(TARGET_1)).toBeUndefined();
+  });
+
+  it('ignores a kind-5 whose author is not the reaction author (NIP-09) in the receive path', () => {
+    const records = [rec(PK_B, '❤️', TARGET_1, 100, 'peer-react-1')];
+    // A third party (PK_C) tries to retract PK_B's reaction — must be ignored.
+    const out = applyReactionDeletion(records, 'peer-react-1', PK_C);
+    expect(reduceReactions(out, PK_ME).get(TARGET_1)?.byEmoji['❤️']).toEqual([PK_B]);
+  });
+});
+
+describe('optimistic reaction ids', () => {
+  it('stamps the shared prefix and reports it as optimistic', () => {
+    const id = makeOptimisticReactionId(0);
+    expect(id.startsWith(OPTIMISTIC_REACTION_PREFIX)).toBe(true);
+    expect(isOptimisticReactionId(id)).toBe(true);
+  });
+
+  it('treats a real relay event id (64-hex) as NOT optimistic', () => {
+    // A published kind-7 id is a 64-char hex — the removal path deletes THIS
+    // for real, rather than deferring like it does for a `local-react-*` id.
+    expect(isOptimisticReactionId('e'.repeat(64))).toBe(false);
+  });
+
+  it('mints unique ids for same-millisecond taps (seq disambiguates)', () => {
+    const a = makeOptimisticReactionId(0);
+    const b = makeOptimisticReactionId(1);
+    expect(a).not.toBe(b);
   });
 });

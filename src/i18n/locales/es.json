@@ -1102,7 +1102,9 @@
     "addressSent": "Dirección enviada",
     "lightningAddress": "Dirección Lightning",
     "payLightningAddress": "Pagar esta dirección Lightning",
-    "openLink": "Abrir enlace {{url}}"
+    "openLink": "Abrir enlace {{url}}",
+    "reactionRemove": "Quitar tu reacción {{emoji}} ({{count}} en total)",
+    "reactionAdd": "Añadir reacción {{emoji}} ({{count}} hasta ahora)"
   },
   "messageBubbleFooter": {
     "messageSending": "Enviando mensaje",

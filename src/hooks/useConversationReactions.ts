@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import {
+  applyReactionDeletion,
+  isOptimisticReactionId,
+  makeOptimisticReactionId,
   parseReactionEvent,
   reduceReactions,
   type MessageReactionState,
@@ -37,6 +40,16 @@ export interface UseConversationReactionsParams {
     targetEventKind?: number;
   }) => Promise<string | null>;
   deleteReaction: (reactionEventId: string) => Promise<boolean>;
+  // Fetch NIP-09 (kind-5) retractions of the given reaction event ids, so a
+  // peer un-reacting is reflected locally instead of leaving a stale pill.
+  fetchReactionDeletions: (reactionEventIds: string[]) => Promise<
+    {
+      id: string;
+      pubkey: string;
+      created_at: number;
+      tags: string[][];
+    }[]
+  >;
   // Opens the SendSheet preset to the peer — the "Zap this message" action.
   onZapMessage: () => void;
 }
@@ -79,6 +92,7 @@ export function useConversationReactions({
   fetchReactionsForMessages,
   publishReaction,
   deleteReaction,
+  fetchReactionDeletions,
   onZapMessage,
 }: UseConversationReactionsParams): UseConversationReactionsResult {
   // `reactionRecords` is the flat list of every kind-7 seen for any message in
@@ -109,6 +123,27 @@ export function useConversationReactions({
     });
   }, []);
 
+  // Apply a batch of NIP-09 (kind-5) deletion events to the local record list.
+  // Each deletion's `e` tags name the reaction ids it retracts; NIP-09 only
+  // lets an event's own author delete it, so `applyReactionDeletion` drops a
+  // record only when the deleter pubkey matches the reactor's — a third party
+  // can't retract someone else's reaction. No-op (returns `prev`) when nothing
+  // actually matched, so an unrelated deletion batch doesn't force a re-render.
+  const applyDeletionEvents = useCallback((deletions: { pubkey: string; tags: string[][] }[]) => {
+    if (deletions.length === 0) return;
+    setReactionRecords((prev) => {
+      let next = prev;
+      for (const d of deletions) {
+        for (const t of d.tags) {
+          if (t[0] === 'e' && typeof t[1] === 'string' && t[1].length > 0) {
+            next = applyReactionDeletion(next, t[1].toLowerCase(), d.pubkey);
+          }
+        }
+      }
+      return next.length === prev.length ? prev : next;
+    });
+  }, []);
+
   // Fetch reactions for any new target ids (the cross-peer-stable rumor id).
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
   // get fetched once a decrypt supplies the id.
@@ -134,6 +169,14 @@ export function useConversationReactions({
         if (cancelled || events.length === 0) return;
         const fresh = events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r);
         mergeFreshRecords(fresh);
+        // Now that we know the reaction ids for these targets, pull any NIP-09
+        // retractions of them and apply them — so a peer who un-reacted before
+        // we loaded doesn't leave a stale pill rendered.
+        const reactionIds = fresh.map((r) => r.id);
+        if (reactionIds.length === 0) return;
+        const deletions = await fetchReactionDeletions(reactionIds);
+        if (cancelled) return;
+        applyDeletionEvents(deletions);
       } catch {
         settled = true;
       }
@@ -148,11 +191,27 @@ export function useConversationReactions({
         for (const id of targets) scheduled.delete(id);
       }
     };
-  }, [messages, fetchReactionsForMessages, mergeFreshRecords]);
+  }, [
+    messages,
+    fetchReactionsForMessages,
+    mergeFreshRecords,
+    fetchReactionDeletions,
+    applyDeletionEvents,
+  ]);
 
   // The currently-actioned message (long-pressed → MessageActionsSheet open).
   const [actionsForMessage, setActionsForMessage] = useState<ActionedMessage | null>(null);
   const closeMessageActions = useCallback(() => setActionsForMessage(null), []);
+
+  // Optimistic-publish bookkeeping for the removal-before-ack race. When the
+  // user un-reacts before `publishReaction` has returned the real kind-7 id,
+  // we can't yet delete the real event — so we record the optimistic id here.
+  // Once the publish resolves, the add path sees the id in this set and
+  // retracts the REAL id instead of leaking a reaction the user cancelled.
+  const cancelledOptimisticRef = useRef(new Set<string>());
+  // Monotonic counter feeding `makeOptimisticReactionId` so two taps in the
+  // same millisecond can't collide on an id (the cancel bookkeeping keys on it).
+  const optimisticSeqRef = useRef(0);
 
   // Core toggle: publish/delete a reaction for an EXPLICIT target descriptor.
   // Taking the target as an argument (rather than reading `actionsForMessage`)
@@ -167,6 +226,16 @@ export function useConversationReactions({
       closeMessageActions();
       if (existingReactionId) {
         setReactionRecords((prev) => prev.filter((r) => r.id !== existingReactionId));
+        // Removal-before-ack race: if the reaction is still an un-acked
+        // optimistic add, its real kind-7 id isn't known yet — a NIP-09 delete
+        // against the `local-react-*` placeholder is a no-op on relays, so the
+        // real event would later publish and resurface on the next load. Flag
+        // the pending publish as cancelled instead; the add path below retracts
+        // the REAL id once `publishReaction` resolves.
+        if (isOptimisticReactionId(existingReactionId)) {
+          cancelledOptimisticRef.current.add(existingReactionId);
+          return;
+        }
         const ok = await deleteReaction(existingReactionId);
         if (!ok) {
           // Reconcile via re-fetch if the deletion failed (optimistic remove
@@ -179,7 +248,7 @@ export function useConversationReactions({
       }
       // Optimistic add — synthesize a `local-…` record so the pill renders
       // immediately; replace with the real id once publish returns.
-      const optimisticId = `local-react-${Date.now()}`;
+      const optimisticId = makeOptimisticReactionId(optimisticSeqRef.current++);
       const optimistic: ReactionRecord = {
         id: optimisticId,
         reactorPubkey: myPubkey.toLowerCase(),
@@ -194,16 +263,31 @@ export function useConversationReactions({
         targetAuthorPubkey: target.authorPubkey,
         targetEventKind: target.targetKind,
       });
+      // Did the user un-react while the publish was in flight? (`delete` both
+      // reads and clears the flag in one shot.)
+      const cancelled = cancelledOptimisticRef.current.delete(optimisticId);
       if (realId) {
+        if (cancelled) {
+          // The reaction WAS published (real id now known) but the user has
+          // since removed it — retract the REAL kind-7 so it doesn't reappear
+          // on the next load. The optimistic record was already filtered out
+          // by the removal path above.
+          void deleteReaction(realId);
+          return;
+        }
         setReactionRecords((prev) =>
           prev.map((r) => (r.id === optimisticId ? { ...r, id: realId } : r)),
         );
       } else {
+        // Publish failed — nothing landed on a relay. Drop the placeholder and
+        // only warn if the user hadn't already cancelled the reaction.
         setReactionRecords((prev) => prev.filter((r) => r.id !== optimisticId));
-        Alert.alert(
-          'Reaction failed',
-          'Could not publish your reaction. Check your relays and try again.',
-        );
+        if (!cancelled) {
+          Alert.alert(
+            'Reaction failed',
+            'Could not publish your reaction. Check your relays and try again.',
+          );
+        }
       }
     },
     [

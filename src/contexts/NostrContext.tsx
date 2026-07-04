@@ -32,7 +32,7 @@ import {
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { perfLog } from '../utils/perfLog';
 import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
-import { useReactionActions } from '../hooks/useReactionActions';
+import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
@@ -71,7 +71,10 @@ export type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './
 // `useNostr` / `useNostrContacts`.
 export { useNostrDmInbox } from './DmInboxContext';
 
-interface NostrContextType {
+// Per-message reaction methods (#205) come straight from `useReactionActions`
+// (publish kind-7 / retract kind-5 / fetch reactions / fetch kind-5 deletions);
+// extend its result type rather than re-declaring the four signatures here.
+interface NostrContextType extends UseReactionActionsResult {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
   /** Logged-in user's hex pubkey, or null when logged out. */
@@ -218,28 +221,7 @@ interface NostrContextType {
     tags: string[][];
     content: string;
   }) => Promise<SignedEvent | null>;
-  // Per-message reactions (#205). See useReactionActions for the impl.
-  // publishReaction: NIP-25 kind-7 tagging a message (targetEventId = the
-  // cross-peer-stable rumor/wire id); returns the event id or null.
-  // deleteReaction: NIP-09 kind-5 retracting one of our own reactions.
-  // fetchReactionsForMessages: raw kind-7s for a set of message ids.
-  publishReaction: (input: {
-    emoji: string;
-    targetEventId: string;
-    targetAuthorPubkey: string;
-    targetEventKind?: number;
-  }) => Promise<string | null>;
-  deleteReaction: (reactionEventId: string) => Promise<boolean>;
-  fetchReactionsForMessages: (targetEventIds: string[]) => Promise<
-    {
-      id: string;
-      pubkey: string;
-      kind: number;
-      content: string;
-      created_at: number;
-      tags: string[][];
-    }[]
-  >;
+  // (reaction methods provided via `extends UseReactionActionsResult` above)
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -1701,7 +1683,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Per-message reactions (#205) — publish / retract / fetch. Composed from a
   // hook (file-size cap) that wires in the signer + relay state owned here.
-  const { publishReaction, deleteReaction, fetchReactionsForMessages } = useReactionActions({
+  const {
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
+    fetchReactionDeletionsForReactions,
+  } = useReactionActions({
     pubkey,
     isLoggedIn,
     signEvent,
@@ -1742,6 +1729,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishReaction,
       deleteReaction,
       fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     }),
     [
       isLoggedIn,
@@ -1775,6 +1763,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishReaction,
       deleteReaction,
       fetchReactionsForMessages,
+      fetchReactionDeletionsForReactions,
     ],
   );
 

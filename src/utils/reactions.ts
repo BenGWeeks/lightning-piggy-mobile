@@ -130,6 +130,28 @@ export const EMPTY_REACTION_STATE: MessageReactionState = Object.freeze({
 });
 
 /**
+ * Prefix stamped on an OPTIMISTIC reaction record's id — the placeholder we
+ * render immediately on tap, before `publishReaction` returns the real
+ * kind-7 event id. A record still carrying this prefix has NOT been acked by
+ * a relay, so its id is meaningless off-device: a NIP-09 delete against it is
+ * a no-op. Callers use `isOptimisticReactionId` to detect that case and defer
+ * the retraction until the real id is known.
+ */
+export const OPTIMISTIC_REACTION_PREFIX = 'local-react-';
+
+/** Mint a process-unique optimistic reaction id. `seq` guarantees uniqueness
+ * even when two taps land in the same millisecond (so the cancel/ack bookkeeping
+ * can key on it reliably). */
+export function makeOptimisticReactionId(seq: number): string {
+  return `${OPTIMISTIC_REACTION_PREFIX}${Date.now()}-${seq}`;
+}
+
+/** True when `id` is an un-acked optimistic placeholder (see the prefix doc). */
+export function isOptimisticReactionId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_REACTION_PREFIX);
+}
+
+/**
  * Normalize a NIP-25 reaction glyph for display + bucketing. Per spec an
  * empty content and "+" both mean "like" and "-" means "dislike". Clients
  * that send the bare "+"/"" like would otherwise render as a literal "+"
