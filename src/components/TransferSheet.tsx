@@ -102,8 +102,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // Issue #62: step-by-step progress display. While `progress.phase`
   // is anything other than 'idle' the form is replaced by a checklist
   // showing which step is active / done / failed. The legacy
-  // `progressMsg` is preserved as a sublabel under the active row so
-  // the rich Boltz "swap underway" copy still reaches the user.
+  // `progressMsg` is preserved as a block below the checklist (rendered
+  // in TransferProgress) so the rich Boltz "swap underway" copy still
+  // reaches the user.
   const [progress, setProgress] = useState<TransferProgressState>(() => idleProgress());
   // true once the foreground work is done and the background task has the
   // swap — the sheet becomes a "done, safe to close" confirmation state.

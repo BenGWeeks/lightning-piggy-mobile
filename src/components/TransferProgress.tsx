@@ -71,9 +71,9 @@ const TransferProgress: React.FC<Props> = ({
       )}
       {/* Step-by-step status (issue #62). Walks the steps for the
           current transferType and renders ✓ / spinner / ○ per row.
-          The legacy `progressMsg` becomes a sublabel under the
-          active row so the rich Boltz "swap underway / safe to
-          close" copy still surfaces. */}
+          The legacy `progressMsg` renders as a separate block below
+          the entire step list (see below) so the rich Boltz "swap
+          underway / safe to close" copy still surfaces. */}
       <View style={styles.stepList} testID="transfer-step-list">
         {progress.steps.map((s, idx) => {
           const isComplete = progress.phase === 'done' || idx < progress.activeIndex;
@@ -94,6 +94,7 @@ const TransferProgress: React.FC<Props> = ({
               key={s.id}
               style={styles.stepRow}
               testID={`transfer-step-${s.id}`}
+              accessible={true}
               accessibilityLabel={`${s.label} ${status}`}
             >
               <View style={styles.stepIcon}>
@@ -123,6 +124,15 @@ const TransferProgress: React.FC<Props> = ({
       {progressMsg && (
         <Text style={styles.progressText} testID="transfer-progress-msg">
           {progressMsg}
+        </Text>
+      )}
+      {/* On failure, `finally` has cleared `progressMsg`, so surface the
+          step model's `errorMessage` here (same spot) — otherwise the
+          sheet would show only an X on a step row with no explanation
+          once the alert is dismissed (issue #62). */}
+      {progress.phase === 'failed' && progress.errorMessage && (
+        <Text style={styles.errorText} testID="transfer-error-msg">
+          {progress.errorMessage}
         </Text>
       )}
       {backgroundError !== null && !recoveryAcked && (

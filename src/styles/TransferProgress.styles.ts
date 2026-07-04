@@ -37,6 +37,14 @@ export const createTransferProgressStyles = (colors: Palette) =>
       fontWeight: '500',
       textAlign: 'center',
     },
+    // Failure explanation shown in-sheet when phase === 'failed', in
+    // the same spot as progressText (which `finally` has cleared by then).
+    errorText: {
+      fontSize: 14,
+      color: colors.red,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
     // --- Step list (issue #62) ---
     stepList: {
       alignSelf: 'stretch',
