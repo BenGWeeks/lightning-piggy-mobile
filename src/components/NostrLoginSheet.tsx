@@ -8,6 +8,7 @@ import {
   Platform,
   BackHandler,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
@@ -318,6 +319,23 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
   };
 
+  /**
+   * Same-device hand-off: open the `nostrconnect://` URI directly in an
+   * installed bunker (Clave / Aegis / … all register the scheme), so the user
+   * doesn't have to scan the QR or copy-paste. The `awaitBunkerPair` relay
+   * subscription keeps running in the background — when the user approves in
+   * the bunker and returns, the `connect` ack completes the login. If no app
+   * handles the scheme, `openURL` rejects and we point the user at the QR.
+   */
+  const handleOpenInBunker = async () => {
+    if (!nip46Uri) return;
+    try {
+      await Linking.openURL(nip46Uri);
+    } catch {
+      setError(t('nostrLoginSheet.nip46NoBunker'));
+    }
+  };
+
   return (
     <BottomSheetModal
       ref={sheetRef}
@@ -515,6 +533,18 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             )}
 
             {error && <Text style={styles.error}>{error}</Text>}
+
+            {/* Same-device primary action: hand the URI straight to an
+                installed bunker via its nostrconnect:// scheme. QR (cross-
+                device) + Copy (web bunkers like nsec.app) remain below. */}
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={handleOpenInBunker}
+              accessibilityLabel={t('nostrLoginSheet.nip46OpenBunker')}
+              testID="open-nip46-bunker"
+            >
+              <Text style={styles.loginButtonText}>{t('nostrLoginSheet.nip46OpenBunker')}</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.copyButton}

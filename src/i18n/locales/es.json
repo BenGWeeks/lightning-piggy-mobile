@@ -1303,6 +1303,8 @@
     "nip46SubtitleIos": "Abre tu app de bunker (Clave, Aegis, nsec.app) y escanea este QR. Esperaremos hasta 2 minutos para la conexión.",
     "nip46SubtitleAndroid": "Abre tu app de bunker (Aegis, Nowser, nsec.app) y escanea este QR. Esperaremos hasta 2 minutos para la conexión.",
     "nip46Waiting": "Esperando al bunker…",
+    "nip46OpenBunker": "Abrir en app de bunker",
+    "nip46NoBunker": "No se encontró ninguna app de bunker — escanea el QR desde otro dispositivo o instala una (p. ej. Clave).",
     "nip46CopyUri": "Copiar URI de emparejamiento",
     "nip46Cancel": "Cancelar",
     "nip46CancelA11y": "Cancelar emparejamiento NIP-46",
