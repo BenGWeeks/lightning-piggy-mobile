@@ -1532,6 +1532,7 @@
     "receive": "Recibir",
     "to": "A:",
     "toWallet": "A: {{wallet}}",
+    "selectWalletA11y": "{{wallet}}, recibir en esta cartera",
     "enterAmountForQr": "Introduce un importe para generar el código QR",
     "noLightningAddress": "No hay dirección Lightning configurada",
     "enterAmountForInvoice": "Introduce un importe para generar la factura",
