@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { Check } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
-import { getElectrumServer, setElectrumServer } from '../../services/walletStorageService';
+import type { Palette } from '../../styles/palettes';
+import {
+  getElectrumServer,
+  setElectrumServer,
+  getDefaultOnchainWalletId,
+  setDefaultOnchainWalletId,
+} from '../../services/walletStorageService';
 import { disconnectElectrum } from '../../services/onchainService';
+import { useWallet } from '../../contexts/WalletContext';
 
 const DEFAULT_ELECTRUM = 'electrum.blockstream.info:50002';
 
@@ -13,8 +21,18 @@ const OnChainScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { wallets } = useWallet();
   const [electrumHostPort, setElectrumHostPort] = useState(DEFAULT_ELECTRUM);
   const [electrumSSL, setElectrumSSL] = useState(true);
+  const [defaultOnchainId, setDefaultOnchainIdState] = useState<string | null>(null);
+
+  // Onchain wallets the user could pick as default. Empty list = the section
+  // renders an empty-state hint prompting the user to add an on-chain wallet.
+  const onchainWallets = useMemo(
+    () => wallets.filter((w) => w.walletType === 'onchain'),
+    [wallets],
+  );
 
   useEffect(() => {
     getElectrumServer().then((server) => {
@@ -23,7 +41,31 @@ const OnChainScreen: React.FC = () => {
       setElectrumHostPort(parts.join(':'));
       setElectrumSSL(protocol === 's');
     });
+    getDefaultOnchainWalletId()
+      .then(setDefaultOnchainIdState)
+      .catch((err) => {
+        // AsyncStorage read can throw (corruption/full disk). Fall back to no
+        // default (null) rather than surfacing an unhandled promise rejection.
+        console.warn('Failed to read default on-chain wallet id', err);
+        setDefaultOnchainIdState(null);
+      });
   }, []);
+
+  const handlePickDefault = async (walletId: string) => {
+    // Toggle off if tapping the active default — falls back to first-onchain heuristic.
+    const prev = defaultOnchainId;
+    const next = defaultOnchainId === walletId ? null : walletId;
+    setDefaultOnchainIdState(next);
+    try {
+      await setDefaultOnchainWalletId(next);
+    } catch (err) {
+      // AsyncStorage write can reject (corruption/full disk). Don't let it
+      // surface as an unhandled rejection, and revert the optimistic UI state
+      // so we don't show a selection that wasn't actually persisted.
+      console.warn('Failed to persist default on-chain wallet id', err);
+      setDefaultOnchainIdState(prev);
+    }
+  };
 
   const handleElectrumSave = async () => {
     const hostPort = electrumHostPort.trim() || DEFAULT_ELECTRUM;
@@ -76,8 +118,76 @@ const OnChainScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.hint')}</Text>
+
+      <Text style={[sharedAccountStyles.sectionLabel, styles.sectionGap]}>
+        {t('onChainScreen.defaultWalletTitle')}
+      </Text>
+      {onchainWallets.length === 0 ? (
+        <Text style={[sharedAccountStyles.fieldHint, styles.emptyHint]}>
+          {t('onChainScreen.defaultWalletEmpty')}
+        </Text>
+      ) : (
+        <>
+          {onchainWallets.map((w) => {
+            const active = w.id === defaultOnchainId;
+            return (
+              <TouchableOpacity
+                key={w.id}
+                style={[styles.walletRow, active && styles.walletRowActive]}
+                onPress={() => handlePickDefault(w.id)}
+                testID={`default-onchain-row-${w.id}`}
+                accessibilityLabel={t('onChainScreen.defaultWalletRowA11y', {
+                  wallet: w.alias || t('onChainScreen.walletFallback'),
+                })}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={styles.walletName} numberOfLines={1}>
+                  {w.alias || w.id.slice(0, 8)}
+                </Text>
+                {active && <Check size={18} color={colors.brandPink} />}
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.defaultWalletHint')}</Text>
+        </>
+      )}
     </AccountScreenLayout>
   );
 };
+
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sectionGap: {
+      marginTop: 28,
+    },
+    walletRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+      marginBottom: 8,
+    },
+    walletRowActive: {
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPinkLight,
+    },
+    walletName: {
+      fontSize: 15,
+      color: colors.textHeader,
+      fontWeight: '500',
+      flex: 1,
+      marginRight: 8,
+    },
+    emptyHint: {
+      fontStyle: 'italic',
+      marginTop: 4,
+    },
+  });
 
 export default OnChainScreen;

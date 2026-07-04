@@ -21,7 +21,7 @@ export interface CardThemeConfig {
 export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   'lightning-piggy': {
     id: 'lightning-piggy',
-    name: 'Lightning Piggy',
+    name: 'Piggy',
     gradientColors: ['#9B40FF', '#7A30F3'],
     textColor: '#FFFFFF',
     accentColor: '#FFD700',
@@ -30,7 +30,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   'lightning-bee': {
     id: 'lightning-bee',
-    name: 'Lightning Bee',
+    name: 'Bee',
     gradientColors: ['#FFCA28', '#F9A825'],
     textColor: '#FFFFFF',
     accentColor: '#FFFFFF',
@@ -39,7 +39,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   'lightning-cat': {
     id: 'lightning-cat',
-    name: 'Lightning Cat',
+    name: 'Cat',
     gradientColors: ['#E65100', '#BF360C'],
     textColor: '#FFFFFF',
     accentColor: '#FFAB40',
@@ -58,7 +58,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   'lightning-cow': {
     id: 'lightning-cow',
-    name: 'Lightning Cow',
+    name: 'Cow',
     gradientColors: ['#2E7D32', '#1B5E20'],
     textColor: '#FFFFFF',
     accentColor: '#81C784',
@@ -67,7 +67,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   'lightning-goat': {
     id: 'lightning-goat',
-    name: 'Lightning Goat',
+    name: 'Goat',
     gradientColors: ['#1565C0', '#0D47A1'],
     textColor: '#FFFFFF',
     accentColor: '#64B5F6',
@@ -85,7 +85,7 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   },
   'lightning-whale': {
     id: 'lightning-whale',
-    name: 'Lightning Whale',
+    name: 'Whale',
     gradientColors: ['#0277BD', '#01579B'],
     textColor: '#FFFFFF',
     accentColor: '#4FC3F7',
@@ -163,9 +163,70 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/xapo-logo.png'),
     backgroundImageStyle: 'xapo',
   },
+  // Sports-themed cards (#102). Graffiti-style transparent illustrations
+  // sit over the sport's palette gradient, matching the animal cards.
+  // The per-theme positioning lives in `src/themes/cards/<sport>.ts`.
+  tennis: {
+    id: 'tennis',
+    name: 'Tennis',
+    // Lime-green court + crisp white line — classic tennis palette.
+    gradientColors: ['#A8E063', '#56AB2F'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFFFFF',
+    backgroundImage: require('../../assets/images/tennis.png'),
+    backgroundImageStyle: 'tennis',
+  },
+  football: {
+    id: 'football',
+    name: 'Football',
+    // Forest pitch + emerald grass — soccer feel without club IP.
+    gradientColors: ['#1B5E20', '#2E7D32'],
+    textColor: '#FFFFFF',
+    accentColor: '#A5D6A7',
+    backgroundImage: require('../../assets/images/football.png'),
+    backgroundImageStyle: 'football',
+  },
+  basketball: {
+    id: 'basketball',
+    name: 'Basketball',
+    // Orange ball + black seam contrast.
+    gradientColors: ['#F57C00', '#E65100'],
+    textColor: '#FFFFFF',
+    accentColor: '#212121',
+    backgroundImage: require('../../assets/images/basketball.png'),
+    backgroundImageStyle: 'basketball',
+  },
+  f1: {
+    id: 'f1',
+    name: 'Formula 1',
+    // Dark asphalt track surface — charcoal tarmac fading to near-black,
+    // with chequered-flag red accent.
+    gradientColors: ['#46494D', '#161719'],
+    textColor: '#FFFFFF',
+    accentColor: '#E53935',
+    backgroundImage: require('../../assets/images/f1.png'),
+    backgroundImageStyle: 'f1',
+  },
+  spaceship: {
+    id: 'spaceship',
+    name: 'Spaceship',
+    // Full-bleed graffiti nebula (rocket to the right). The gradient is only
+    // a fallback tint behind the art — deep violet cosmic cloud fading to the
+    // black of space, matching the nebula so any load gap isn't jarring.
+    gradientColors: ['#2B1055', '#080312'],
+    textColor: '#FFFFFF',
+    accentColor: '#7DE2FC',
+    backgroundImage: require('../../assets/images/spaceship.png'),
+    backgroundImageStyle: 'spaceship',
+    backgroundImageResizeMode: 'stretch',
+  },
 };
 
-export const themeList = Object.values(cardThemes);
+// Pickers (Add-wallet wizard + Wallet settings) render this list in order,
+// so present the cards alphabetically by display name. Sorting here (rather
+// than hand-ordering the map) keeps the map grouped logically while the UI
+// stays A→Z as new cards are added.
+export const themeList = Object.values(cardThemes).sort((a, b) => a.name.localeCompare(b.name));
 
 /**
  * Card design a wallet falls back to when it carries no explicit (or a

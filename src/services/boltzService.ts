@@ -25,9 +25,21 @@ import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
+import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
+import { waitForSwapStatus } from './boltzSwapStatus';
+
+// Re-exported for back-compat: the HTTP transport and the swap-status
+// subscription/classification layer now live in dedicated modules, but
+// existing callers (and Jest module mocks) still reach them through the
+// boltzService namespace.
+export { fetchWithTimeout } from './boltzApi';
+export {
+  watchSubmarineSwapStatus,
+  classifySubmarineSwapStatus,
+  type SubmarineSwapPhase,
+} from './boltzSwapStatus';
 
 const bip32 = BIP32Factory(ecc);
-const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
 // Boltz BTC swap limits (from API — these are fallback defaults)
 export const BOLTZ_MIN_SATS = 25_000;
@@ -119,24 +131,6 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
     privateKey: new Uint8Array(node.privateKey!),
     publicKey: new Uint8Array(node.publicKey),
   };
-}
-
-/** Fetch with a timeout to prevent hanging on slow/unreachable APIs.
- * Exported for swapRecoveryService — its recovery pass is single-flight, so
- * one bare `fetch` hanging there used to block every future recovery trigger
- * for the whole session (swap audit finding, 2026-07-02). */
-export async function fetchWithTimeout(
-  url: string,
-  init?: RequestInit,
-  timeoutMs = 10000,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -259,123 +253,6 @@ export async function createReverseSwap(
     preimage,
     claimPrivateKey: toHex(claimKeys.privateKey),
   };
-}
-
-const BOLTZ_WS = 'wss://api.boltz.exchange/v2/ws';
-
-/**
- * Subscribe to swap status updates via WebSocket, falling back to polling.
- * Calls onStatus for each status update until it returns true (terminal).
- */
-async function waitForSwapStatus(
-  swapId: string,
-  isTerminal: (status: string, data: any) => boolean,
-  timeoutMs: number,
-): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    // `fellBack` guards against onerror + onclose both starting a poller
-    // (which happens on every WebSocket error — onerror fires, then onclose
-    // fires a moment later). Track elapsed time properly from `start` so the
-    // fallback poller gets the correct remaining window; previously we used
-    // `timeoutMs - (Date.now() % timeoutMs)` which is wall-clock modulo and
-    // bore no relation to actual elapsed time, making the fallback either
-    // exit early or run far too long.
-    let fellBack = false;
-    const start = Date.now();
-    const remaining = () => Math.max(0, timeoutMs - (Date.now() - start));
-    const timer = setTimeout(() => {
-      settled = true;
-      reject(new Error(`Timeout waiting for swap ${swapId} after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-
-    const cleanup = (ws?: WebSocket) => {
-      clearTimeout(timer);
-      try {
-        ws?.close();
-      } catch {}
-    };
-
-    const fallbackToPoll = (ws?: WebSocket) => {
-      if (settled || fellBack) return;
-      fellBack = true;
-      cleanup(ws);
-      pollSwapStatus(swapId, isTerminal, remaining())
-        .then((data) => {
-          if (!settled) {
-            settled = true;
-            resolve(data);
-          }
-        })
-        .catch((err) => {
-          if (!settled) {
-            settled = true;
-            reject(err);
-          }
-        });
-    };
-
-    // Try WebSocket first
-    try {
-      const ws = new WebSocket(BOLTZ_WS);
-      let wsConnected = false;
-
-      ws.onopen = () => {
-        wsConnected = true;
-        ws.send(JSON.stringify({ op: 'subscribe', channel: 'swap.update', args: [swapId] }));
-        console.log(`[Boltz] WebSocket subscribed to swap ${swapId}`);
-      };
-
-      ws.onmessage = (event) => {
-        if (settled) return;
-        try {
-          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
-          if (msg.channel === 'swap.update' && msg.args?.[0]) {
-            const data = msg.args[0];
-            console.log(`[Boltz] WS swap ${swapId} status: ${data.status}`);
-            if (isTerminal(data.status, data)) {
-              settled = true;
-              cleanup(ws);
-              resolve(data);
-            }
-          }
-        } catch {}
-      };
-
-      ws.onerror = () => {
-        if (!wsConnected) {
-          console.warn('[Boltz] WebSocket failed, falling back to polling');
-          fallbackToPoll(ws);
-        }
-      };
-
-      ws.onclose = () => {
-        console.warn('[Boltz] WebSocket closed, falling back to polling');
-        fallbackToPoll(ws);
-      };
-    } catch {
-      // WebSocket constructor failed — fall back to polling
-      fallbackToPoll();
-    }
-  });
-}
-
-/** Polling fallback for swap status. */
-async function pollSwapStatus(
-  swapId: string,
-  isTerminal: (status: string, data: any) => boolean,
-  timeoutMs: number,
-): Promise<any> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
-    const data = await res.json();
-    console.log(`[Boltz] Poll swap ${swapId} status: ${data.status}`);
-    if (isTerminal(data.status, data)) return data;
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-  throw new Error(`Timeout polling swap ${swapId}`);
 }
 
 /**
@@ -859,6 +736,38 @@ export async function waitForSubmarineSwapComplete(
     },
     timeoutMs,
   );
+}
+
+// ─── Receive-side helpers (issue #92) ────────────────────────────────────────
+
+/**
+ * Build a BIP-21 payment URI from a Boltz submarine-swap lockup address +
+ * expected amount. Used by the Receive sheet so external senders get a QR
+ * that wallets parse with the amount pre-filled — under-/over-payment is
+ * the single biggest support footgun for forward swaps.
+ *
+ * Boltz fee includes a percentage charge on the input amount, so the
+ * `expectedAmount` returned by `createSubmarineSwapForward` is what we
+ * must hand to the sender — never the raw invoice amount.
+ *
+ * BIP-21 amount is denominated in BTC, encoded with up to 8 decimal places
+ * and trailing-zero stripped (per the spec; some wallets get confused by
+ * trailing zeros even though the spec allows them).
+ */
+export function buildBoltzBip21Uri(lockupAddress: string, expectedAmountSats: number): string {
+  if (!lockupAddress) throw new Error('lockupAddress required for BIP-21');
+  if (!Number.isFinite(expectedAmountSats) || expectedAmountSats <= 0) {
+    throw new Error('expectedAmountSats must be a positive number');
+  }
+  // Format BTC from integer sats with integer math — never floating-point.
+  // A `sats / 1e8` + `toFixed(8)` round-trip can land a sat off due to IEEE-754
+  // representation, and an off-by-one amount baked into the QR is exactly the
+  // under-/over-payment footgun this helper exists to prevent (#92).
+  const sats = Math.round(expectedAmountSats);
+  const whole = Math.floor(sats / 100_000_000);
+  const frac = (sats % 100_000_000).toString().padStart(8, '0');
+  const btc = `${whole}.${frac}`.replace(/0+$/, '').replace(/\.$/, '');
+  return `bitcoin:${lockupAddress}?amount=${btc}`;
 }
 
 // ─── Legacy alias for backward compatibility ──────────────────────────────────

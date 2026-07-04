@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import { nip46DecryptNip04 } from './nip46DmDecrypt';
+import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
-import { perAccountKey } from '../services/perAccountStorage';
 import {
   selectKnownEventIds,
   upsertDmMessages,
@@ -21,8 +21,6 @@ import {
 } from './nostrSecretKeyCache';
 import { yieldToEventLoop, DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
 import {
-  AMBER_NIP17_SKIP_KEY_BASE,
-  NSEC_NIP17_SKIP_KEY_BASE,
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   DM_CONV_CAP,
@@ -34,7 +32,6 @@ import {
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
-import { ingestInboxWraps } from './dmWrapIngest';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -192,6 +189,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         }
         if (signerType === 'amber') {
           return await amberService.requestNip04Decrypt(ciphertext, counterpartyPubkey, pubkey);
+        }
+        if (signerType === 'nip46') {
+          return await nip46DecryptNip04(ciphertext, counterpartyPubkey, pubkey);
         }
         return null;
       } catch (error) {
@@ -653,63 +653,38 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             if (__DEV__) console.warn(`[Nostr] NIP-17 inbox unwrap skip (${wrapId}): ${reason}`);
           };
 
-          if (refreshForSigner === 'nsec' && kind1059.length > 0) {
-            const secretKey = await getMemoisedSecretKey(refreshForPubkey);
-            if (secretKey) {
-              // Decrypt-once ingest into the encrypted store (#848). The
-              // engine (dmWrapIngest) owns the DB known-id gate, the #743
-              // skip-set, group routing, the B1 follow gate and the
-              // #532/#788 pacing — shared verbatim with the Amber branch
-              // below and the cold thread-open path.
-              const r = await ingestInboxWraps({
-                owner: refreshForPubkey,
-                wraps: kind1059,
-                unwrap: (wrap) => unwrapWrapNsec(wrap, secretKey, onSkip),
-                passesFollowGate,
-                skipKey: perAccountKey(NSEC_NIP17_SKIP_KEY_BASE, refreshForPubkey),
-                bypassSkipSet,
-                isColdStart,
-                signal: effectiveSignal,
-                onSkip,
-              });
-              // No early return on abort here: r.entries is already [] when
-              // aborted, but r.stored counts rows the ingest persisted before
-              // the abort (F1, #849), and we need it below to decide whether
-              // this aborted sweep was productive enough to paint from the DB.
-              entries.push(...r.entries);
-              nip17Hits = r.alreadyKnown;
-              nip17SkipHits = r.skipHits;
-              nip17Misses = r.misses;
-              nip17Stored = r.stored;
-              nip17YieldCount = r.yields;
-            }
-          } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
-            // Always run the unwrap loop — Amber's silent content-resolver
-            // path returns PERMISSION_NOT_GRANTED on the first wrap if the
-            // user hasn't granted nip44_decrypt yet, which we surface via
-            // setAmberNip44Permission('denied') so NostrScreen can show the
-            // one-shot "Grant permission in Amber" button. Closes #404.
-            const r = await ingestInboxWraps({
-              owner: refreshForPubkey,
-              wraps: kind1059,
-              unwrap: (wrap) => unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip),
-              passesFollowGate,
-              skipKey: perAccountKey(AMBER_NIP17_SKIP_KEY_BASE, refreshForPubkey),
-              bypassSkipSet,
-              isColdStart,
-              signal: effectiveSignal,
-              stopOnPermissionDenied: true,
-              onSkip,
-            });
-            // See the nsec branch: don't bail on abort, the counters (esp.
-            // r.stored) drive the productive-abort commit below (F1, #849).
-            entries.push(...r.entries);
-            nip17Hits = r.alreadyKnown;
-            nip17SkipHits = r.skipHits;
-            nip17Misses = r.misses;
-            nip17Stored = r.stored;
-            nip17YieldCount = r.yields;
-            setAmberNip44Permission(r.permissionDenied ? 'denied' : 'granted');
+          // Per-signer NIP-17 decrypt-once ingest lives in inboxNip17Ingest
+          // (#283) so this hook stays under the file-size cap. All three
+          // signers feed the same engine; the dispatcher returns null when
+          // there's nothing to do (no wraps / nsec key unavailable), leaving
+          // the counters untouched exactly as the old inline chain did.
+          const nip17 =
+            refreshForSigner === 'nsec' ||
+            refreshForSigner === 'amber' ||
+            refreshForSigner === 'nip46'
+              ? await ingestInboxNip17ForSigner({
+                  signerType: refreshForSigner,
+                  ownerPubkey: refreshForPubkey,
+                  wraps: kind1059,
+                  passesFollowGate,
+                  bypassSkipSet,
+                  isColdStart,
+                  signal: effectiveSignal,
+                  onSkip,
+                  amberNip44DecryptSilent,
+                })
+              : null;
+          if (nip17) {
+            // No early return on abort: entries is [] when aborted, but
+            // nip17Stored counts rows persisted before the abort (F1, #849)
+            // and drives the productive-abort commit below.
+            entries.push(...nip17.entries);
+            nip17Hits = nip17.alreadyKnown;
+            nip17SkipHits = nip17.skipHits;
+            nip17Misses = nip17.misses;
+            nip17Stored = nip17.stored;
+            nip17YieldCount = nip17.yields;
+            if (nip17.amberPermission) setAmberNip44Permission(nip17.amberPermission);
           }
 
           // Identity-change guard: if the user logged out or switched signer

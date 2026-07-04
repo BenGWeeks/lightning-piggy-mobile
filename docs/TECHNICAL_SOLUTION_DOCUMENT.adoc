@@ -39,6 +39,8 @@ include::TERMS.adoc[]
 
 :leveloffset: +1
 
+include::ARCHITECTURE.adoc[]
+
 include::SOLUTION_DESIGN.adoc[]
 
 :leveloffset: -1
