@@ -28,6 +28,28 @@ import type { SignerType, Nip46Connection } from '../types/nostr';
  * (`PUBKEY_KEY` + `NIP46_CONNECTION_KEY` + `SIGNER_TYPE_KEY`).
  */
 /**
+ * Runtime shape guard for a persisted `Nip46Connection` blob. SecureStore
+ * can hold a partially-written or hand-edited value; a bare `JSON.parse` cast
+ * would happily accept `{}`. Require every field the BunkerSigner actually
+ * needs so a malformed blob is rejected up front instead of installing an
+ * all-undefined connection.
+ */
+function isValidNip46Connection(v: unknown): v is Nip46Connection {
+  if (typeof v !== 'object' || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return (
+    typeof c.remoteSignerPubkey === 'string' &&
+    c.remoteSignerPubkey.length > 0 &&
+    typeof c.userPubkey === 'string' &&
+    c.userPubkey.length > 0 &&
+    typeof c.clientSecretKeyHex === 'string' &&
+    c.clientSecretKeyHex.length > 0 &&
+    Array.isArray(c.relays) &&
+    c.relays.every((r) => typeof r === 'string')
+  );
+}
+
+/**
  * Restore a persisted NIP-46 session on cold start: read the stored connection
  * from SecureStore, re-assert it as the active BunkerSigner, and return the
  * logged-in pubkey (or null if there's nothing to restore / the blob is
@@ -43,7 +65,15 @@ export async function restoreNip46Session(): Promise<string | null> {
     return null;
   }
   try {
-    const conn = JSON.parse(storedConnRaw) as Nip46Connection;
+    const parsed = JSON.parse(storedConnRaw) as unknown;
+    // Validate shape before trusting it — a partially-written or wrong-shape
+    // blob (e.g. `{}`) is JSON-parsable but would install a connection with
+    // undefined signer/relay fields and return `undefined` as the pubkey.
+    // Treat it exactly like a corrupt blob (self-heal in the catch below).
+    if (!isValidNip46Connection(parsed)) {
+      throw new Error('stored NIP-46 connection has an invalid shape');
+    }
+    const conn = parsed;
     await nostrConnectService.setActiveConnection(conn);
     // `conn.userPubkey` is the source of truth (Copilot review): if the legacy
     // PUBKEY_KEY slot ever diverged (partial write, migration, manual edit),

@@ -469,6 +469,10 @@ function raceAbort<T>(
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const onAbort = () => {
+      // `{ once: true }` already de-registers this on fire; remove it
+      // explicitly too so cleanup is symmetric with the settle branches
+      // below and doesn't depend on that option for correctness.
+      signal.removeEventListener('abort', onAbort);
       if (settled) return;
       settled = true;
       reject(makeAbortError());
