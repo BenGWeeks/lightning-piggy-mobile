@@ -140,7 +140,7 @@ const OnChainScreen: React.FC = () => {
                   wallet: w.alias || t('onChainScreen.walletFallback'),
                 })}
                 accessibilityRole="radio"
-                accessibilityState={{ checked: active }}
+                accessibilityState={{ selected: active }}
               >
                 <Text style={styles.walletName} numberOfLines={1}>
                   {w.alias || w.id.slice(0, 8)}
