@@ -3,7 +3,7 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState, WalletConnectionHealth } from '../types/wallet';
-import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
+import { CardThemeConfig, cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
@@ -248,10 +248,11 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
 
 const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
   // Defensive fallback: persisted wallets may carry a theme key that has
-  // been renamed/removed in subsequent releases. Without a fallback the
-  // app crashes on `theme.gradientColors` of undefined on boot — see the
-  // group-messaging branch test runs.
-  const theme = cardThemes[wallet.theme] ?? cardThemes['lightning-piggy'];
+  // been renamed/removed in subsequent releases (or none at all). Without a
+  // fallback the app crashes on `theme.gradientColors` of undefined on boot —
+  // see the group-messaging branch test runs. Fall back per wallet type:
+  // on-chain → Bitcoin (orange), Lightning/NWC → Lightning Piggy.
+  const theme = cardThemes[wallet.theme] ?? cardThemes[defaultCardThemeFor(wallet.walletType)];
   const t = useTranslation();
 
   return (

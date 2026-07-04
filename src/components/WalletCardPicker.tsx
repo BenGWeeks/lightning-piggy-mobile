@@ -10,69 +10,59 @@ import { createWalletCardPickerStyles } from '../styles/WalletCardPicker.styles'
 interface Props {
   selectedTheme: CardTheme;
   onSelect: (theme: CardTheme) => void;
-  /**
-   * `grid` — the original 2-up wrapping grid (used where vertical space is
-   * cheap; currently WalletSettingsSheet). `coverflow` — a flick-through
-   * carousel with the centre card full and neighbours peeking (currently the
-   * add-wallet theme step).
-   */
-  variant?: 'grid' | 'coverflow';
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-// The full card size in the cover-flow (centre item). Neighbours are scaled
-// down by the parallax config so a slice of each peeks in. A smaller card +
-// tighter centre-to-centre spacing lets 4–5 cards show at once (was 0.52,
-// which left only ~3 with big gaps).
-const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.4);
+
+// --- Cover-flow geometry -----------------------------------------------------
+// The centre (selected) card is drawn full-size and z-raised; its neighbours
+// are shrunk and packed with heavy overlap so ~9 cards fan across the viewport
+// at once (the centre plus ~4 peeking to each side). These are hand-tuned
+// constants — revisit them against fresh screenshots if the fan reads too
+// tight/loose or the centre doesn't stand out enough.
+const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.44); // centre card base width
 const CF_CARD_HEIGHT = Math.round(CF_CARD_WIDTH / CARD_ASPECT);
 const CF_VIEWPORT_HEIGHT = CF_CARD_HEIGHT + 24;
 // Centre-to-centre distance between adjacent cards. The parallax layout places
 // neighbour n at ±n·(SCREEN_WIDTH − parallaxScrollingOffset), so this constant
-// IS that spacing and the offset is derived from it. Smaller ⇒ cards sit closer
-// and the 2nd neighbours slide onto the screen (more cards, less white space).
-const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.8);
+// IS that spacing and the offset is derived from it. At ~0.25·cardWidth
+// (≈0.11·screen) the cards overlap heavily and ~9 fit across the viewport.
+const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.25);
+// Focused card at full size; neighbours notably smaller so the centre pops.
+const CF_CENTER_SCALE = 1.0;
+const CF_ADJACENT_SCALE = 0.72;
+// Mount every card so the fanned deck is fully populated — there are only a
+// handful of designs, so this is cheap, and anything beyond the viewport is
+// clipped by the carousel's overflow:hidden.
+const CF_WINDOW_SIZE = themeList.length;
 
 /**
- * Shared wallet card-design picker. Extracted from the byte-identical grids
- * that WalletSettingsSheet and AddWalletWizard used to each paste in (#703
- * pattern) so the design list, selection contract and layout live in one
- * place; the visual is a one-line `variant` prop.
+ * Shared wallet card-design picker — a flick-through cover-flow with the
+ * centre (selected) card enlarged and z-raised while neighbours fan out and
+ * peek on each side. Extracted from the byte-identical grids that
+ * WalletSettingsSheet and AddWalletWizard used to each paste in (#703 pattern)
+ * so the design list, selection contract and layout live in one place. Used in
+ * both the add-wallet wizard's theme step and the wallet-settings Design
+ * section — cover-flow everywhere; there is no longer a grid variant.
  */
-const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 'grid' }) => {
+const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createWalletCardPickerStyles(colors), [colors]);
   const carouselRef = useRef<ICarouselInstance>(null);
 
   const foundIndex = themeList.findIndex((t) => t.id === selectedTheme);
   // Persisted wallets may carry a theme key that no longer exists (see the
-  // WalletCard.tsx fallback note). In coverflow the carousel visually falls
-  // back to index 0, so normalise the parent's `selectedTheme` back to that
-  // shown card — otherwise parent state (and any Save/Next) keeps a stale key
-  // while a different card is centred. Guarded to only fire when they differ,
-  // so it can't loop (once synced, `foundIndex` resolves and the branch exits).
+  // WalletCard.tsx fallback note). The carousel visually falls back to index
+  // 0, so normalise the parent's `selectedTheme` back to that shown card —
+  // otherwise parent state (and any Save/Next) keeps a stale key while a
+  // different card is centred. Guarded to only fire when they differ, so it
+  // can't loop (once synced, `foundIndex` resolves and the branch exits).
   useEffect(() => {
-    if (variant !== 'coverflow') return;
     if (foundIndex === -1 && themeList.length > 0) {
       const fallback = themeList[0].id;
       if (fallback !== selectedTheme) onSelect(fallback);
     }
-  }, [variant, foundIndex, selectedTheme, onSelect]);
-
-  if (variant === 'grid') {
-    return (
-      <View style={styles.grid} testID="wallet-card-picker-grid">
-        {themeList.map((theme) => (
-          <MiniWalletCard
-            key={theme.id}
-            theme={theme}
-            selected={selectedTheme === theme.id}
-            onPress={() => onSelect(theme.id)}
-          />
-        ))}
-      </View>
-    );
-  }
+  }, [foundIndex, selectedTheme, onSelect]);
 
   const initialIndex = Math.max(0, foundIndex);
   // When `selectedTheme` isn't in `themeList` the carousel falls back to index
@@ -89,11 +79,12 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
         data={themeList}
         defaultIndex={initialIndex}
         loop={false}
+        windowSize={CF_WINDOW_SIZE}
         mode="parallax"
         modeConfig={{
-          parallaxScrollingScale: 0.9,
+          parallaxScrollingScale: CF_CENTER_SCALE,
           parallaxScrollingOffset: SCREEN_WIDTH - CF_CARD_SPACING,
-          parallaxAdjacentItemScale: 0.82,
+          parallaxAdjacentItemScale: CF_ADJACENT_SCALE,
         }}
         onSnapToItem={(index) => {
           // Guard the lookup: a future refactor could empty themeList or the

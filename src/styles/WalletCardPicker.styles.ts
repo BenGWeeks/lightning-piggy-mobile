@@ -3,13 +3,8 @@ import type { Palette } from './palettes';
 
 export const createWalletCardPickerStyles = (colors: Palette) =>
   StyleSheet.create({
-    // Grid variant — the original 2-up wrapping grid.
-    grid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 12,
-    },
-    // Cover-flow variant.
+    // Cover-flow — a flick-through carousel with the centre card enlarged and
+    // neighbours fanned/peeking on each side.
     coverflow: {
       alignItems: 'center',
       justifyContent: 'center',

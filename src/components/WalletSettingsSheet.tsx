@@ -13,6 +13,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
+import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import WalletCardPicker from './WalletCardPicker';
 import {
   getXpub,
@@ -65,7 +66,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
   const [alias, setAlias] = useState('');
   const [lnAddress, setLnAddress] = useState('');
-  const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
+  const [selectedTheme, setSelectedTheme] = useState<CardTheme>(defaultCardThemeFor('nwc'));
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
   // CoinOS managed-wallet recovery info (#287). Loaded eagerly when
@@ -118,7 +119,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     if (wallet) {
       setAlias(wallet.alias);
       setLnAddress(wallet.lightningAddress ?? '');
-      setSelectedTheme(wallet.theme);
+      // Fall back per wallet type when the stored theme is missing or a
+      // stale/unknown id (on-chain → Bitcoin, Lightning/NWC → Lightning Piggy).
+      setSelectedTheme(
+        cardThemes[wallet.theme] ? wallet.theme : defaultCardThemeFor(wallet.walletType),
+      );
 
       // Load xpub for on-chain wallets
       if (wallet.walletType === 'onchain' && walletId) {

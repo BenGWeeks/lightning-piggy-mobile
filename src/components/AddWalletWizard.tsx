@@ -24,6 +24,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { CardTheme, WalletType } from '../types/wallet';
+import { defaultCardThemeFor } from '../themes/cardThemes';
 import WalletCardPicker from './WalletCardPicker';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateOnchainImport } from '../services/onchainService';
@@ -50,7 +51,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [mnemonicInput, setMnemonicInput] = useState('');
   const [alias, setAlias] = useState('');
   const [secretMode, setSecretMode] = useState(false);
-  const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
+  const [selectedTheme, setSelectedTheme] = useState<CardTheme>(defaultCardThemeFor('nwc'));
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -72,7 +73,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     setXpub('');
     setMnemonicInput('');
     setAlias('');
-    setSelectedTheme('lightning-piggy');
+    setSelectedTheme(defaultCardThemeFor('nwc'));
     setError(null);
     setConnecting(false);
     setScanning(false);
@@ -87,18 +88,17 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const handleTypeSelect = (type: WalletType) => {
     setWalletType(type);
     setError(null);
+    setSelectedTheme(defaultCardThemeFor(type));
     if (type === 'nwc') {
-      setSelectedTheme('lightning-piggy');
       setStep('url');
     } else {
-      setSelectedTheme('bitcoin');
       setStep('xpub');
     }
   };
 
   const handleMnemonicSelect = () => {
     setWalletType('onchain');
-    setSelectedTheme('bitcoin');
+    setSelectedTheme(defaultCardThemeFor('onchain'));
     setError(null);
     setStep('mnemonic');
   };
@@ -617,11 +617,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
           {step === 'theme' && (
             <View style={styles.stepContent}>
               <Text style={styles.description}>{t('addWalletWizard.themeDescription')}</Text>
-              <WalletCardPicker
-                selectedTheme={selectedTheme}
-                onSelect={setSelectedTheme}
-                variant="coverflow"
-              />
+              <WalletCardPicker selectedTheme={selectedTheme} onSelect={setSelectedTheme} />
               {error && <Text style={styles.errorText}>{error}</Text>}
               <View style={styles.buttonRow}>
                 <TouchableOpacity
