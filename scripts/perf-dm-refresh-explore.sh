@@ -28,9 +28,9 @@ PKG="${PKG:-com.lightningpiggy.app.preview}"
 SAMPLES="${SAMPLES:-3}"
 METRO_RELOAD_URL="${METRO_RELOAD_URL:-http://localhost:8081/reload}"
 
-# Source flow lives in tests/e2e/. We rewrite the appId on-the-fly so
+# Source flow lives in .maestro/. We rewrite the appId on-the-fly so
 # PKG overrides work without editing the YAML.
-SRC_FLOW="tests/e2e/perf-dm-refresh-explore-mount.yaml"
+SRC_FLOW=".maestro/perf/perf-dm-refresh-explore-mount.yaml"
 if [ ! -f "$SRC_FLOW" ]; then
   echo "✗ flow not found: $SRC_FLOW" >&2
   exit 1

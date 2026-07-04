@@ -62,7 +62,7 @@ adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox
 adb shell pm disable-user --user 0 com.google.android.apps.maps
 # undo with: adb shell pm enable <package>
 ----
-*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `tests/e2e/_subflow-login-as-piggy.yaml` / `_subflow-seed-test-wallet.yaml`.
+*Cleanest long-term:* build the test AVD from a Google-free image — `sdkmanager "system-images;android-34;aosp_atd;x86_64"` (AOSP Automated Test Device: no Google apps, lighter and faster for Maestro + CI). Caveat: a new AVD has a fresh Android Keystore, so a SecureStore/SQLCipher data backup from the old AVD won't decrypt onto it — re-seed the test account via `.maestro/common/login-as-piggy.yaml` / `.maestro/common/seed-test-wallet.yaml`.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
@@ -209,10 +209,10 @@ The IME finishes composing each chunk before the next one starts. For nsec / npu
 source .env && echo -n "$MAESTRO_NWC1" | wl-copy   # Wayland
 # or
 echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
-maestro test tests/e2e/test-add-wallet-via-paste.yaml
+maestro test .maestro/wallets/flow-115-add-wallet-via-paste.yaml
 ----
 
-The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow. +
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `.maestro/wallets/flow-115-add-wallet-via-paste.yaml` for the flow. +
 
 *Why `pasteText` (Maestro's built-in) doesn't help:* Maestro's `pasteText` / `copyTextFrom` use an **internal shim clipboard** (not Android's `ClipboardManager`) and still synthesize key events under the hood — so they hit the exact same wrapper-targeting failure. Seeding the real device clipboard and tapping an in-app Paste button bypasses both the shim and the keystroke path. Confirmed via the Maestro docs (https://docs.maestro.dev/api-reference/commands/pastetext) and feature-request https://github.com/mobile-dev-inc/Maestro/issues/2029. Deep-link seeding (`app://.../path?value=...`) is the only other approach that bypasses text entry entirely — viable if a Paste button isn't desired in the UI.
 
@@ -239,12 +239,13 @@ The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead o
 *Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
 
 | NWC "reply timeout" after publish succeeds
-| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
-*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. A flaky / rate-limited relay (e.g. ln.coinos.io under a burst of requests) shows it intermittently — `get_balance` succeeds one moment and times out the next. +
+*Symptom seen on a claim:* an LNURL-withdraw / prize claim sticks on "Claiming sats…" then fails, because the claim calls `makeInvoice` to mint the receiving invoice. Originally `makeInvoice` was the **one** NWC method with no retry (unlike `getBalance` / `payInvoice` / `listTransactions`), so the claim path died on the first timeout while everything else recovered. +
+*Fix / workaround:* `makeInvoice` now wraps its call in `withRetry` + `recordRelayOutcome` like the other methods. If still persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin), and give a rate-limited relay a minute to settle (our own `relayCooldownUntil` parks a relay for 30s–5min after 3 timeouts, #656).
 
 | NWC relay intermittently drops WebSocket connections
 | The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
-*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, `listTransactions()`, and `makeInvoice()`.
 
 | App shows "Unable to load script" on physical device
 | The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.
@@ -417,8 +418,8 @@ This also hits `expo run:android` flows if the APK signatures don't match betwee
 
 | Location-share preview shows a blank rectangle (image never loads)
 | The `staticmap.openstreetmap.de` host (not an official OSM subdomain — it was a German community volunteer's stitcher) stopped resolving (NXDOMAIN) some time before 2026-04. There is no longer a no-API-key static-map stitching service on the `openstreetmap.org` namespace — the original `Static Maps API` was deprecated in 2012 per the https://wiki.openstreetmap.org/wiki/Static_map_images[OSM wiki]. Wikimedia Maps (`maps.wikimedia.org`) also returns 403 to third-party apps. +
-*Fix:* fetch a single slippy-map tile from the official OSMF tile server at `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, computed from (lat,lon,zoom) via the standard slippy-map formula. One 256×256 PNG per unique location, disk-cached by `expo-image` — fits the https://operations.osmfoundation.org/policies/tiles/[OSMF tile usage policy]'s "acceptable use" bar. Two required policy items: (1) cache aggressively (disk cache in expo-image), (2) send a specific identifying `User-Agent` via `source.headers` — the generic RN / OkHttp UA is not acceptable. See `buildStaticMapUrl()` + `USER_AGENT` in `src/services/locationService.ts`. +
-*Trade-off:* single tile = no centered marker (the point can be anywhere inside the tile). The location card's `MapPin` icon and coord text carry the "where" information; the image is scene-setting. If you need a centered marker later, switch `buildStaticMapUrl` to a keyed provider (MapTiler / Geoapify) behind the same interface.
+*Historical fix (superseded in #206):* the cards fetched a single slippy-map tile from `https://tile.openstreetmap.org/{z}/{x}/{y}.png` with a specific `User-Agent`, via `buildStaticMapUrl()` + `USER_AGENT` in `locationService.ts`. The trade-off was no centered marker (single tile = the point sits anywhere inside it), and hitting the OSMF tile server directly sits awkwardly against the https://operations.osmfoundation.org/policies/tiles/[tile usage policy] for a distributed app. +
+*Current state (#206):* both DM location cards now render the shared `LibreMiniMap` (native MapLibre, OpenFreeMap vector tiles — same renderer as every other map surface), which supports proper markers (the viewer's blue "me" dot + the other party's profile-circle) and sidesteps the OSMF tile-policy concern. `buildStaticMapUrl` / `USER_AGENT` / the slippy-map helpers were removed from `locationService.ts`. If a map ever renders blank now, debug it as a MapLibre/OpenFreeMap issue (style URL `tiles.openfreemap.org`, GL context), not a tile-fetch one.
 
 | `expo-location` `getCurrentPositionAsync` throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` on Android emulator even with location services on
 | On Android, `getCurrentPositionAsync` goes through `FusedLocationProviderClient`, which returns the *cached* fix and throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` if the cache is empty — it does not block waiting for a GNSS fix. On emulators the cache is empty until something is actively listening. +
@@ -692,7 +693,7 @@ done &
 2. **Use a real device** for any work that needs reliable foreground location (Map sub-screen, geofence settings, hub mini-map preview). The emulator-1080p (Medium_Phone API 36.1) profile is fine for everything *except* live-position UI. +
 3. **Mock-location app** like _Lockito_ on the emulator. Heavier but works for journey simulation as well as static fixes. +
 *Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
-*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`tests/e2e/screenshots-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
+*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`.maestro/ui/flow-104-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
 
 | Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
 never fires settlement, only the slow balance-diff fallback eventually

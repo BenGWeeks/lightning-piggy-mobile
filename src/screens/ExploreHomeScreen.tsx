@@ -19,15 +19,18 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { ContentRail } from '../components/ContentRail';
-import { LibreMiniMap } from '../components/LibreMiniMap';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import { orderFeaturedFirst } from '../utils/featuredPlaces';
 import { perfPageReady } from '../utils/perfLog';
+import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -60,8 +63,6 @@ import {
   loadCachedEvents,
   peekCachedCachesSync,
   peekCachedEventsSync,
-  saveCaches,
-  saveEvents,
 } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
@@ -70,6 +71,9 @@ import {
   geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
+import { isFutureEvent } from '../utils/futureEvent';
+import { isHiddenInProd, visibleCaches, visibleEvents } from '../utils/exploreContentFilter';
+import { usePersistCaches, usePersistEvents } from '../hooks/useExplorePlacesPersist';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
@@ -196,11 +200,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- BTC Map merchants ------------------------------------------------
 
-  // Seed from the in-memory mirror — `btcMapService` kicks hydrate()
-  // at module import, so by first render the cached search result is
-  // typically ready and the rail paints instantly. The live fetch
-  // below replaces it once `pos` lands. Mirrors the same idiom used
-  // for `caches` + `events` immediately below.
+  // Seed from the in-memory mirror. The disk hydration that fills it is
+  // kicked off the cold-start critical path (audit HIGH 1) — see
+  // `kickPlacesHydration` in btcMapService, invoked from App.tsx after
+  // first paint rather than at module import. The live fetch below
+  // replaces this once `pos` lands.
   const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
   // If we already have cached merchants on first render there's no
   // skeleton to show — flip merchantsLoading false so the rail paints
@@ -227,6 +231,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [legendVisible, setLegendVisible] = useState(false);
   const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
   const onOpenLegend = useCallback(() => setLegendVisible(true), []);
+  // Stable handlers so a parent re-render (e.g. a DM-inbox flush bubbling
+  // through useNostr()) doesn't hand ExploreMiniMap/ContentRail fresh function
+  // identities each time — inline arrows defeat LibreMiniMap's arePropsEqual
+  // memo (ExploreMiniMap renders LibreMiniMap when focused) and force a full
+  // MapLibre marker reconciliation on every render (#798).
+  const onSelectMerchant = useCallback((m: BtcMapPlace) => setSelectedMerchant(m), []);
+  const onSelectCache = useCallback((c: ParsedCache) => setSelectedCache(c), []);
+  const onSelectEvent = useCallback(
+    (e: ParsedEvent) => navigation.navigate('EventDetail', { coord: e.coord }),
+    [navigation],
+  );
+  const onSeeAllPlaces = useCallback(() => navigation.navigate('Places'), [navigation]);
+  const onSeeAllHunt = useCallback(() => navigation.navigate('Hunt'), [navigation]);
+  const onSeeAllEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const onSeeAllLessons = useCallback(() => navigation.navigate('Lessons'), [navigation]);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
   // the initial `merchants` state above; the live fetch below replaces
@@ -455,12 +474,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, []);
 
-  // Stable array projections of the caches/events Maps so React.memo on
-  // the consuming LibreMiniMap can short-circuit re-renders. Without
-  // these the parent's `[...caches.values()]` literal returns a fresh
-  // array reference every render and defeats the memo entirely.
-  const cachesArr = useMemo(() => [...caches.values()], [caches]);
-  const eventsArr = useMemo(() => [...events.values()], [events]);
+  // Stable array projections of the caches/events Maps so React.memo on the
+  // consuming LibreMiniMap can short-circuit re-renders (a fresh
+  // `[...caches.values()]` literal each render would defeat the memo). These
+  // feed the Explore hub mini-map, so they apply the SAME prod test-account
+  // hide (+ future-only for events) as the rails — cold-start items hydrated
+  // from AsyncStorage bypass the ingestion callback, so a hidden Piggy cache
+  // or past event would otherwise paint as a map marker (#917).
+  const cachesArr = useMemo(
+    () => visibleCaches([...caches.values()], (c) => c.hiderPubkey),
+    [caches],
+  );
+  const eventsArr = useMemo(
+    () =>
+      visibleEvents([...events.values()], (e) => e.organiserPubkey, Math.floor(Date.now() / 1000)),
+    [events],
+  );
 
   // Hydrate last-known caches + events from AsyncStorage so the rails
   // render instantly on cold start while the live relay subs backfill.
@@ -502,21 +531,26 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // nearby sub filters by geohash prefix, which excludes the user's
   // own listing if they hid it outside their current viewport OR if
   // the sub was paused (#557) at the moment the relay echoed back.
-  // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
-  // don't refire.
+  // One-shot per (pubkey, refreshKey) via the module-scoped
+  // `claimExploreByAuthorFetch` guard — re-runs on pull-to-refresh and
+  // pubkey change but never on unrelated re-renders, and is immune to the
+  // concurrent parallel-fire a component useRef suffered (#751 audit #4).
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
-  // Track the (pubkey, refreshKey) tuple that last triggered the fetch
-  // so we re-run on pull-to-refresh AND on pubkey change, but never on
-  // unrelated re-renders.
-  const byAuthorFetchedForRef = useRef<string | null>(null);
+  // The user's read-relay URLs, plus a content key that only changes when the
+  // URL *set* changes (sorted so a mere reorder doesn't) — not when useNostr()
+  // hands back a new array with the same URLs (cold-start cache→network churn),
+  // which used to double-fire the by-author fetch below (#798).
+  const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+  const readRelayKey = [...readRelays].sort().join(',');
   useEffect(() => {
     if (!signedInPubkey) return;
     const fetchKey = `${signedInPubkey}:${refreshKey}`;
-    if (byAuthorFetchedForRef.current === fetchKey) return;
-    byAuthorFetchedForRef.current = fetchKey;
     let cancelled = false;
-    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+    // Join an in-flight fetch so concurrent effect re-runs don't fire parallel
+    // requests, and the current run still merges on cancel (#752 Copilot).
+    joinExploreByAuthorFetch(fetchKey, () =>
+      fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined),
+    )
       .then((mine) => {
         if (cancelled) return;
         console.log(
@@ -546,21 +580,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [signedInPubkey, userRelays, refreshKey]);
+    // Depend on readRelayKey (the relay-URL *content*), not the userRelays array
+    // identity: a genuine relay-set change still re-fires the fetch (parity with
+    // MapScreen's by-author fetch), but the cold-start new-array-same-URLs churn
+    // no longer does — that double-fired a redundant ~20s query (#798).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedInPubkey, refreshKey, readRelayKey]);
 
-  // Write-through to AsyncStorage whenever the in-memory state grows
-  // so the next cold start has fresh content to hydrate from. Debounced
-  // via a slow useEffect — we don't need to persist on every event.
-  useEffect(() => {
-    if (caches.size === 0) return;
-    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
-    return () => clearTimeout(t);
-  }, [caches]);
-  useEffect(() => {
-    if (events.size === 0) return;
-    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
-    return () => clearTimeout(t);
-  }, [events]);
+  // Write-through to AsyncStorage (debounced) so the next cold start hydrates
+  // fresh content; both hooks self-heal prod caches (drop stale test items).
+  usePersistCaches(caches);
+  usePersistEvents(events);
   // Counts of events arriving from pubkeys outside the trust set.
   // Surfaced as "N hidden — from outside your trust graph" so users
   // know the filter is doing something.
@@ -640,6 +670,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     subsCloserRef.current.push(
       subscribeNearbyCaches(cachePrefixes, (c) => {
         if (cancelled) return;
+        // Hide test-account ("Piggy") Piglets in prod (kept in dev/preview).
+        if (isHiddenInProd(c.hiderPubkey)) return;
         // WoT filter: silently drop caches from pubkeys outside the
         // trust graph (an unverified cache could be a phishing LNURL
         // or, worse, a physical lure). Surfaced as a count instead so
@@ -666,8 +698,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     subsCloserRef.current.push(
       subscribeNearbyEvents(eventPrefixes, (e) => {
         if (cancelled) return;
-        // Skip events that already started > 1h ago.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+        // Hide test-account ("Piggy") events in prod; skip finished events.
+        if (isHiddenInProd(e.organiserPubkey)) return;
+        if (!isFutureEvent(e, Math.floor(Date.now() / 1000))) return;
         if (!isTrustedRef.current(e.organiserPubkey)) {
           setUntrustedEventCount((n) => n + 1);
           return;
@@ -739,36 +772,40 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         return m.distance <= cap;
       });
     }
-    return (
-      items
-        // Boosted merchants surface first on the rail (BTC Map's
-        // paid-feature mechanism); within the same boost-bucket we still
-        // sort by distance so the closest boosted / closest non-boosted
-        // sit at the front of each half. Honest visual: each boosted
-        // card gets a "Featured" badge so the user knows why it's
-        // prominent.
-        .sort((a, b) => {
-          const ab = isBoosted(a.place) ? 1 : 0;
-          const bb = isBoosted(b.place) ? 1 : 0;
-          if (ab !== bb) return bb - ab;
-          return a.distance - b.distance;
-        })
-        .slice(0, 12)
-    );
+    const byDistance = items.sort((a, b) => a.distance - b.distance);
+    // Pin up to 3 boosted ("Featured") merchants to the front of the rail
+    // even if a non-featured place is closer (BTC Map's paid-feature
+    // mechanism); the rest follow in distance order. Each pinned card gets
+    // a "Featured" badge so the user knows why it's prominent. Shared with
+    // the full Places list via `orderFeaturedFirst` so the 3-featured cap
+    // lives in one place.
+    return orderFeaturedFirst(byDistance, (item) => isBoosted(item.place)).slice(0, 12);
   }, [merchants, posLat, posLon, maxDistanceMetres]);
+
+  // Distinct merchant categories for the legend. Memoised so the
+  // flatMap + Set + spread over all merchants doesn't run on every render
+  // (and so LegendSheet gets a stable array reference) (#798).
+  const availableCategories = useMemo(
+    () => [...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean))],
+    [merchants],
+  );
 
   const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    let items = [...caches.values()].map((cache) => {
-      const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-      const distance =
-        haveFix && center
-          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
-      return { cache, distance, isOwn };
-    });
+    // Re-apply the prod test-account filter at render — cold-start caches
+    // hydrated from AsyncStorage bypass the ingestion callback.
+    let items = [...caches.values()]
+      .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
+      .map((cache) => {
+        const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+        return { cache, distance, isOwn };
+      });
     // Trace own-listing trajectory so a missing-own-cache regression
     // can be diagnosed from logcat alone (#73 follow-up).
     const ownItems = items.filter((c) => c.isOwn);
@@ -806,14 +843,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedEvents = useMemo(() => {
     const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
-    let items = [...events.values()].map((event) => {
-      const center = event.geohash ? decodeGeohash(event.geohash) : null;
-      const distance =
-        haveFix && center
-          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      return { event, distance };
-    });
+    // Re-apply future-only + prod test-account filters at render — a cached
+    // PAST event hydrated from AsyncStorage bypasses the ingestion callback.
+    const nowSec = Math.floor(Date.now() / 1000);
+    let items = [...events.values()]
+      .filter((event) => isFutureEvent(event, nowSec) && !isHiddenInProd(event.organiserPubkey))
+      .map((event) => {
+        const center = event.geohash ? decodeGeohash(event.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        return { event, distance };
+      });
     // Keep events with no `g` tag (distance = ∞) — most NIP-52 publishers
     // (OrangePillApp etc.) don't include one, so dropping them would leave
     // the rail mostly empty even when legitimate Bitcoin meetups exist.
@@ -836,12 +878,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.headerBackground}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <TabHeader title="Explore" icon={<Compass size={20} color={colors.brandPink} />} />
         <View style={styles.headerExtras}>
           <Text style={styles.tagline}>Find your way around Bitcoin</Text>
@@ -863,53 +900,29 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           />
         }
       >
-        {locationDenied ? (
-          <View style={localStyles.deniedCard}>
-            <MapPin size={20} color={colors.brandPink} strokeWidth={2.5} />
-            <View style={{ flex: 1 }}>
-              <Text style={localStyles.deniedTitle}>Allow location for nearby content</Text>
-              <Text style={localStyles.deniedSub}>
-                We use a coarse 5 km area to find merchants, caches, and meetups around you. Nothing
-                leaves your device beyond that.
-              </Text>
-            </View>
-          </View>
-        ) : (
-          <LibreMiniMap
-            // Mini-map is non-interactive (zoom-only, follows GPS) — so
-            // the camera anchor SHOULD track the live position, not
-            // the stale one-shot `pos` (which was seeded from a cached
-            // merchant-centroid anchor on cold start). Falls back to
-            // `pos` only while the live fix is still resolving.
-            lat={livePos?.lat ?? pos?.lat ?? null}
-            lon={livePos?.lon ?? pos?.lon ?? null}
-            userLat={livePos?.lat ?? null}
-            userLon={livePos?.lon ?? null}
-            // Cached anchor accuracy is only useful BEFORE a live fix
-            // arrives. Once livePos exists, trust its accuracy (even
-            // if null) so the halo never renders around live coords
-            // using stale data from a different measurement.
-            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
-            merchants={merchants}
-            caches={cachesArr}
-            events={eventsArr}
-            onTapMap={onTapMap}
-            onOpenLegend={onOpenLegend}
-            // Pin-tap handlers — open the same MerchantDetailSheet /
-            // CacheDetailSheet that MapScreen renders so the interaction
-            // shape is identical across surfaces (PR #630). Events have
-            // no dedicated sheet in MapScreen either, so the event tap
-            // navigates directly to EventDetail — consistent with the
-            // event rail card tap below.
-            onSelectMerchant={(m) => setSelectedMerchant(m)}
-            onSelectCache={(c) => setSelectedCache(c)}
-            onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
-            // Maestro flow test-explore-tab-rename.yaml asserts this
-            // testID — preserved across the MapLibre swap so the e2e
-            // smoke test doesn't need to be repointed.
-            testID="explore-minimap"
-          />
-        )}
+        <ExploreMiniMap
+          locationDenied={locationDenied}
+          // Mini-map is non-interactive (zoom-only, follows GPS) — so the
+          // camera anchor SHOULD track the live position, not the stale
+          // one-shot `pos` (seeded from a cached merchant-centroid anchor on
+          // cold start). Falls back to `pos` only while the live fix resolves.
+          lat={livePos?.lat ?? pos?.lat ?? null}
+          lon={livePos?.lon ?? pos?.lon ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          // Cached anchor accuracy is only useful BEFORE a live fix arrives.
+          // Once livePos exists, trust its accuracy (even if null) so the halo
+          // never renders around live coords using stale data.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          merchants={merchants}
+          caches={cachesArr}
+          events={eventsArr}
+          onTapMap={onTapMap}
+          onOpenLegend={onOpenLegend}
+          onSelectMerchant={onSelectMerchant}
+          onSelectCache={onSelectCache}
+          onSelectEvent={onSelectEvent}
+        />
 
         <ContentRail<{ place: BtcMapPlace; distance: number }>
           title="Places near you"
@@ -918,7 +931,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           loading={merchantsLoading && sortedMerchants.length === 0 && !!pos}
           // "See all" lands on the Places list (with map button in
           // its header); the dedicated Map view is one tap away.
-          onSeeAll={() => navigation.navigate('Places')}
+          onSeeAll={onSeeAllPlaces}
           seeAllTestId="explore-card-map"
           keyExtractor={(p) => String(p.place.id)}
           emptyState={
@@ -956,7 +969,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           // "See all" lands on the merged Geo-caches page (map + list
           // + [+] in header for the hider flow). Was a two-screen
           // Hunt/Discover split before the May 2026 UX merge.
-          onSeeAll={() => navigation.navigate('Hunt')}
+          onSeeAll={onSeeAllHunt}
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.cache.coord}
           emptyState={
@@ -997,7 +1010,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           }
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
-          onSeeAll={() => navigation.navigate('Events')}
+          onSeeAll={onSeeAllEvents}
           seeAllTestId="explore-card-events"
           keyExtractor={(e) => e.event.coord}
           emptyState={
@@ -1020,7 +1033,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           title="Lessons in progress"
           caption={`${progress.completedMissions.length} / ${courses.reduce((a, c) => a + c.missions.length, 0)} missions done`}
           items={courses}
-          onSeeAll={() => navigation.navigate('Lessons')}
+          onSeeAll={onSeeAllLessons}
           seeAllTestId="explore-card-lessons"
           keyExtractor={(c) => c.id}
           renderItem={(course) => (
@@ -1043,9 +1056,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         visible={legendVisible}
         onClose={onCloseLegend}
         placesVisible
-        availableCategories={[
-          ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
-        ]}
+        availableCategories={availableCategories}
       />
       {/* Mini-map pin-tap sheets — share the components with MapScreen
           so the interaction shape (drag-to-dismiss, tap-away, View
@@ -1331,27 +1342,6 @@ const createLocalStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
       lineHeight: 19,
-    },
-    deniedCard: {
-      flexDirection: 'row',
-      gap: 12,
-      backgroundColor: colors.surface,
-      marginHorizontal: 16,
-      marginBottom: 18,
-      padding: 14,
-      borderRadius: 12,
-      alignItems: 'flex-start',
-    },
-    deniedTitle: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    deniedSub: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      lineHeight: 17,
     },
   });
 

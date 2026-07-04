@@ -9,6 +9,7 @@ import {
 } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 /**
@@ -104,7 +105,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   onInputFocus,
   attachLoading = false,
   attachPanel,
-  placeholder = 'Message',
+  placeholder,
   disabled = false,
   sendButtonVariant = 'icon',
   attachButtonHasBackground = false,
@@ -113,6 +114,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   accessibilityLabels,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const insets = useSafeAreaInsets();
   const styles = useMemo(
     () =>
@@ -147,7 +149,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
           style={styles.attachButton}
           onPress={onAttachToggle}
           disabled={disabled || sending || attachDisabled}
-          accessibilityLabel={accessibilityLabels?.attach ?? 'Attach'}
+          accessibilityLabel={accessibilityLabels?.attach ?? t('conversationComposer.attach')}
           testID={testIDs?.attach}
         >
           {attachLoading ? (
@@ -158,21 +160,23 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
         </TouchableOpacity>
         <TextInput
           style={styles.input}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('conversationComposer.messagePlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={value}
           onChangeText={onChangeText}
           onFocus={onInputFocus}
           multiline
           editable={!inputDisabled}
-          accessibilityLabel={accessibilityLabels?.input ?? 'Message input'}
+          accessibilityLabel={accessibilityLabels?.input ?? t('conversationComposer.messageInput')}
           testID={testIDs?.input}
         />
         {showMic ? (
           <TouchableOpacity
             style={sendButtonVariant === 'paper-plane' ? styles.sendButtonLarge : styles.sendButton}
             onPress={onStartVoiceNote}
-            accessibilityLabel={accessibilityLabels?.voice ?? 'Record a voice note'}
+            accessibilityLabel={
+              accessibilityLabels?.voice ?? t('conversationComposer.recordVoiceNote')
+            }
             testID={testIDs?.voice ?? 'composer-voice'}
           >
             <Mic size={20} color={colors.white} />
@@ -182,7 +186,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             style={[styles.sendButtonLarge, sendDisabled && styles.sendButtonDisabled]}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? 'Send message'}
+            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
             testID={testIDs?.send}
           >
             {sending ? (
@@ -204,7 +208,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
             style={styles.sendButton}
             onPress={onSend}
             disabled={sendDisabled}
-            accessibilityLabel={accessibilityLabels?.send ?? 'Send message'}
+            accessibilityLabel={accessibilityLabels?.send ?? t('conversationComposer.sendMessage')}
             testID={testIDs?.send}
           >
             {sending ? (

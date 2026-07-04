@@ -4,11 +4,22 @@ import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption'
 import {
   createReplyTimeoutError,
   isConnectionError,
-  isReplyTimeoutError,
   throwIfAborted,
   abortableSleep,
   abortable,
 } from './nwcErrors';
+// Per-wallet relay-health bookkeeping (reply-timeout cooldown + rate-limit
+// back-off + the tri-state wallet health) lives in ./nwcRelayHealth so this
+// service stays under the file-size cap and the health signal is unit-testable
+// in isolation (#785/#786). The cooldown/health helpers are re-exported below
+// to preserve the public API — consumers (WalletContext, tests) still import
+// `isRelayInCooldown` from here.
+import {
+  isRateLimitError,
+  isRelayDead,
+  recordRateLimited,
+  recordRelayOutcome,
+} from './nwcRelayHealth';
 
 // Preserve the prior public API — these were defined + exported here before
 // moving to ./nwcErrors; consumers (e.g. SendSheet) still import them from here.
@@ -38,64 +49,8 @@ const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
 // gets a fresh response.
 const getBalancesInFlight = new Map<string, Promise<number | null>>();
 
-// Per-wallet count of consecutive NIP-47 requests that got no answer from the
-// relay (reply-timeout / connection error). A WebSocket can stay `connected`
-// while the relay hangs or the link dies (no clean close → TCP lingers in
-// ESTABLISHED for ~2h), so transport state alone reports a dead relay as
-// "Connected" (#654). isWalletConnected() treats a run of unanswered requests
-// as not-connected so the UI is honest and the reconnect path kicks in.
-const relayFailures = new Map<string, number>();
-// Per-wallet timestamp until which a dead/timing-out relay is "parked" — once it
-// looks dead we back off with an escalating cooldown instead of retrying every
-// reconnect/poll tick (the churn behind the lag when a relay goes offline, #656).
-const relayCooldownUntil = new Map<string, number>();
-const RELAY_DEAD_AFTER_FAILURES = 3;
-const RELAY_COOLDOWN_BASE_MS = 30_000;
-const RELAY_COOLDOWN_MAX_MS = 5 * 60_000;
-
-// Reset the failure count AND clear any cooldown — on a fresh connect or any
-// answered request.
-function markRelayResponsive(walletId: string): void {
-  relayFailures.set(walletId, 0);
-  relayCooldownUntil.delete(walletId);
-}
-
-// Record the outcome of a NIP-47 request against its relay-health counter.
-// Only a reply-timeout / connection error (the relay never answered) counts
-// toward "dead". ANY answer resets it — including a wallet-level error such as
-// "method not supported" (NWC wallets that don't implement `get_balance`) or
-// "insufficient funds". So this is capability-agnostic: it keys off whether the
-// relay *responded*, not which method succeeded, and never false-disconnects a
-// wallet that simply lacks a method (#654). Past the dead threshold, park the
-// relay with an escalating backoff (#656).
-function recordRelayOutcome(walletId: string, error?: unknown): void {
-  if (error !== undefined && (isReplyTimeoutError(error) || isConnectionError(error))) {
-    const failures = (relayFailures.get(walletId) ?? 0) + 1;
-    relayFailures.set(walletId, failures);
-    if (failures >= RELAY_DEAD_AFTER_FAILURES) {
-      const backoff = Math.min(
-        RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
-        RELAY_COOLDOWN_MAX_MS,
-      );
-      relayCooldownUntil.set(walletId, Date.now() + backoff);
-    }
-  } else {
-    markRelayResponsive(walletId);
-  }
-}
-
-// True while a dead/timing-out relay is parked: reconnect/poll callers should
-// skip it until the cooldown expires rather than hammering it every tick (#656).
-export function isRelayInCooldown(walletId: string): boolean {
-  const until = relayCooldownUntil.get(walletId);
-  if (until === undefined) return false;
-  if (Date.now() >= until) {
-    // Expired — drop the entry so the Map can't grow unbounded.
-    relayCooldownUntil.delete(walletId);
-    return false;
-  }
-  return true;
-}
+export { getWalletHealth, isRelayInCooldown } from './nwcRelayHealth';
+export type { WalletConnectionHealth } from './nwcRelayHealth';
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
 // to fast-fail pay_invoice when the relay is unreachable (see #175).
@@ -379,11 +334,28 @@ export async function makeInvoice(
 ): Promise<string> {
   const provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
-  const invoice = await provider.makeInvoice({
-    amount,
-    defaultMemo: memo || 'Sent with Lightning Piggy',
-  });
-  return invoice.paymentRequest;
+  try {
+    // Retry on a slow/flaky relay so a single ~10s reply-timeout doesn't sink a
+    // prize/voucher claim. makeInvoice was the one NWC method left bare —
+    // getBalance/payInvoice/listTransactions already retry + record relay health
+    // — so the claim path failed on the first timeout while everything else
+    // recovered (see TROUBLESHOOTING → "NWC reply timeout"). The SDK's own ~10s
+    // replyTimeout bounds each attempt; a retry may orphan an unpaid invoice on
+    // the wallet, which simply expires — harmless.
+    const invoice = await withRetry(
+      () =>
+        provider.makeInvoice({
+          amount,
+          defaultMemo: memo || 'Sent with Lightning Piggy',
+        }),
+      { label: `makeInvoice(${walletId})`, attempts: 2, delayMs: 1500 },
+    );
+    recordRelayOutcome(walletId);
+    return invoice.paymentRequest;
+  } catch (error) {
+    recordRelayOutcome(walletId, error);
+    throw error;
+  }
 }
 
 /**
@@ -415,9 +387,12 @@ function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void
               console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
               markPublishFailure(walletId);
               // A relay rejection (temp-ban / rate-limit / connectivity) should
-              // count toward the cooldown so we park the relay and stop
-              // publishing into a ban instead of looping on it (#737).
-              if (isConnectionError(err)) recordRelayOutcome(walletId, err);
+              // park the relay so we stop publishing into a ban instead of
+              // looping on it (#737). A `rate-limited` rejection gets its own
+              // publish-volume back-off that a lucky read can't reset (#785);
+              // otherwise a connection error feeds the reply-timeout cooldown.
+              if (isRateLimitError(err)) recordRateLimited(walletId);
+              else if (isConnectionError(err)) recordRelayOutcome(walletId, err);
             });
             return Promise.resolve(); // resolve immediately
           };
@@ -690,13 +665,15 @@ export async function payInvoice(
             );
             return { preimage: lookup.preimage };
           }
-          // No usable preimage. Either the lookup says unpaid/pending,
-          // or it's paid but the backend omitted preimage (LNbits has
-          // been seen to do this). Both are real-failure surfaces for
-          // pay_invoice; the caller re-throws and the swap is treated
-          // as unpaid until the next recovery pass.
+          // No usable preimage — BUT the lookup's paid=false is NOT a
+          // reliable "definitely failed" signal here. LNbits has been seen
+          // to report unpaid inside the same ~2500 ms window the payment
+          // actually settles (verified live in #891: the LN balance
+          // dropped 25k while this very branch logged paid=false). Treat
+          // this as status-UNKNOWN, not a failure — the throw below routes
+          // it to the "still in flight / check before retry" UX.
           console.warn(
-            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — treating as failure (paymentHash=${paymentHash.slice(0, 8)})`,
+            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — payment status UNKNOWN (paymentHash=${paymentHash.slice(0, 8)})`,
           );
         } catch (lookupErr) {
           // lookup itself threw — most ambiguous case. We don't know if
@@ -717,6 +694,17 @@ export async function payInvoice(
           `[NWC] pay_invoice "${msg}" + could not extract paymentHash from bolt11 — payment status unknown`,
         );
       }
+      // We hit the ambiguous Alby-SDK "unknown Error"/INTERNAL wrap and
+      // could NOT positively confirm the payment settled. The outcome is
+      // genuinely UNKNOWN — the lookup's paid=false above is unreliable in
+      // this window (#891). Surfacing it as a hard failure invites a
+      // double-pay (the user retries) and, for a Boltz reverse swap, the
+      // sats may already be locked up with recovery pending. Throw a
+      // ReplyTimeoutError so callers route to the "still in flight / check
+      // before retry" UX instead of "Payment failed" (#891, mirrors #648).
+      throw createReplyTimeoutError(
+        'Wallet returned an ambiguous response; the payment may have gone through. Check your balance before retrying.',
+      );
     }
     throw error;
   }
@@ -929,15 +917,23 @@ export async function lookupInvoice(
   }
 }
 
-export function isWalletConnected(walletId: string): boolean {
+/**
+ * Raw WebSocket transport state — is the relay socket actually open? Unlike
+ * `isWalletConnected`, this is NOT gated by relay-health, so a caller can tell
+ * "socket up but relay not answering" (→ amber `degraded`) apart from "socket
+ * down" (→ red `disconnected`). Feeds `getWalletHealth` (#786 review).
+ */
+export function isSocketConnected(walletId: string): boolean {
   const provider = providers.get(walletId);
   if (!provider) return false;
-  // Check the actual WebSocket connection state
   const client = (provider as any).client;
-  if (!(client?.connected ?? false)) return false;
+  return client?.connected ?? false;
+}
+
+export function isWalletConnected(walletId: string): boolean {
   // Transport "connected" can lie: a hung relay / dead link leaves the socket
   // in ESTABLISHED while nothing gets through. Treat a run of unanswered
   // requests as not-connected so the UI is honest and the 30s connection-check
   // triggers a reconnect (#654).
-  return (relayFailures.get(walletId) ?? 0) < RELAY_DEAD_AFTER_FAILURES;
+  return isSocketConnected(walletId) && !isRelayDead(walletId);
 }

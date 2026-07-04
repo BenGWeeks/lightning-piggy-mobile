@@ -1,4 +1,6 @@
 import type { WalletTransaction } from '../types/wallet';
+import { getSwapMeta } from '../services/swapRecoveryService';
+import { preserveOptimisticSwapRows } from './swapPendingMerge';
 
 // The subset of an NWC `list_transactions` row we read. Backends vary, so most
 // fields are optional / nullable and normalised to `undefined` on mapping.
@@ -41,20 +43,31 @@ export function mapNwcTransactions(
     }
   }
 
-  let txs: WalletTransaction[] = raw.map((tx) => ({
-    type: tx.type,
-    amount: tx.amount,
-    description: tx.description ?? undefined,
-    settled_at: tx.settled_at ?? undefined,
-    created_at: tx.created_at ?? undefined,
-    bolt11: tx.invoice,
-    invoice: tx.invoice,
-    paymentHash: tx.payment_hash,
-    preimage: tx.preimage,
-    // NWC reports fees in msats; surface as sats for display.
-    feesSats: typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
-    zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
-  }));
+  let txs: WalletTransaction[] = raw.map((tx) => {
+    // Tag the Lightning leg of a Boltz swap (by payment hash) so it badges as
+    // a swap rather than a generic Sent/Received (#895).
+    const meta = tx.payment_hash ? getSwapMeta(tx.payment_hash) : undefined;
+    return {
+      type: tx.type,
+      amount: tx.amount,
+      description: meta
+        ? meta.swapType === 'reverse'
+          ? 'Boltz swap — sent via Lightning'
+          : 'Boltz swap — received via Lightning'
+        : (tx.description ?? undefined),
+      settled_at: tx.settled_at ?? undefined,
+      created_at: tx.created_at ?? undefined,
+      bolt11: tx.invoice,
+      invoice: tx.invoice,
+      paymentHash: tx.payment_hash,
+      preimage: tx.preimage,
+      // NWC reports fees in msats; surface as sats for display.
+      feesSats: typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
+      zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
+      swapId: meta?.swapId,
+      swapType: meta?.swapType,
+    };
+  });
 
   const returnedKeys = new Set(
     txs.filter((t) => !!t.paymentHash).map((t) => `${t.type}:${t.paymentHash}`),
@@ -62,8 +75,12 @@ export function mapNwcTransactions(
   const stillPending = existing.filter(
     (t) => t.optimistic && t.paymentHash && !returnedKeys.has(`${t.type}:${t.paymentHash}`),
   );
-  if (stillPending.length > 0) {
-    txs = [...stillPending, ...txs].sort(
+  // #896: also keep optimistic Boltz-swap placeholder rows (which have no
+  // paymentHash) until the real swap leg of that direction settles.
+  const swapPending = preserveOptimisticSwapRows(txs, existing, Math.floor(Date.now() / 1000));
+  const carried = [...stillPending, ...swapPending];
+  if (carried.length > 0) {
+    txs = [...carried, ...txs].sort(
       (a, b) => (b.settled_at ?? b.created_at ?? 0) - (a.settled_at ?? a.created_at ?? 0),
     );
   }

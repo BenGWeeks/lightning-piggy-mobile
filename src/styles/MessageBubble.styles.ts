@@ -1,6 +1,8 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
+// Presentation for MessageBubble + its ImageBubble sub-component. Extracted
+// from the component (#703 size cap) — pure data, no state closure.
 export const createMessageBubbleStyles = (colors: Palette) =>
   StyleSheet.create({
     bubbleRow: {
@@ -9,6 +11,45 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     bubbleRowLeft: { justifyContent: 'flex-start' },
     bubbleRowRight: { justifyContent: 'flex-end' },
+    // Reaction pills (#205) sit just under the bubble on the same axis
+    // (incoming → left, outgoing → right). A slight negative top margin pulls
+    // them closer to the bubble's bottom edge so the pill reads as attached.
+    reactionRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      marginTop: -4,
+      marginBottom: 4,
+      paddingHorizontal: 4,
+    },
+    reactionRowLeft: { justifyContent: 'flex-start' },
+    reactionRowRight: { justifyContent: 'flex-end' },
+    reactionPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+    },
+    reactionPillMine: {
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPink + '22',
+    },
+    reactionPillEmoji: {
+      fontSize: 13,
+    },
+    reactionPillCount: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    reactionPillCountMine: {
+      color: colors.brandPink,
+    },
     senderLabel: {
       fontSize: 11,
       fontWeight: '700',
@@ -31,6 +72,17 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     bubbleMe: {
       backgroundColor: colors.brandPink,
       borderBottomRightRadius: 4,
+    },
+    // Legacy NIP-04 (kind 4) SENT bubble — brand violet instead of the NIP-17
+    // pink so the user can tell legacy DMs apart at a glance (#856 follow-up).
+    bubbleMeNip04: {
+      backgroundColor: colors.brandPurple,
+    },
+    // Legacy NIP-04 RECEIVED bubble — surface bg kept (matches NIP-17), but a
+    // violet left edge marks it as legacy on the incoming side too.
+    bubbleThemNip04: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPurple,
     },
     bubbleText: {
       fontSize: 15,
@@ -59,6 +111,39 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
+    },
+    // Footer row holds the timestamp + the delivery tick (sent bubbles, #856).
+    // Right-aligned to sit under the bubble tail, same edge as the bare time.
+    bubbleFooterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
+      gap: 4,
+    },
+    // The time inside the footer row drops its own marginTop (the row owns it)
+    // and gains a small gap before the tick. It carries no colour of its own so
+    // the composed timeStyle wins — bubbleTimeMe (white) on a sent pink bubble,
+    // bubbleTime (supplementary grey) on a received surface bubble. (#864)
+    bubbleFooterTime: {
+      fontSize: 10,
+      marginRight: 4,
+      // Zero the standalone bubbleTime top margin so the tick sits level with
+      // the timestamp in the footer row (the row owns vertical spacing). (#858)
+      marginTop: 0,
+    },
+    // Delivery tick (#856). Ticks only ever render on a sent (pink) bubble, so
+    // they use white for contrast — green read poorly on the brand pink (#864).
+    // Glyph alone carries the meaning: single Check = delivered to ≥1 relay,
+    // double CheckCheck = all relays, Clock = pending, AlertCircle = failed.
+    deliveryTickDelivered: {
+      color: colors.white,
+    },
+    deliveryTickPending: {
+      color: 'rgba(255,255,255,0.7)',
+    },
+    deliveryTickFailed: {
+      color: colors.red,
     },
     invoiceCard: {
       width: 240,
@@ -163,6 +248,19 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.white,
+    },
+    // Stop-share button sits on the pink (outgoing) live-location card — it can't reuse the brand-pink invoice button (pink-on-pink), so it gets a white border + subtle translucent fill to read as a button.
+    liveStopButton: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.7)',
+      backgroundColor: 'rgba(255,255,255,0.15)',
     },
     contactCard: {
       maxWidth: '85%',
@@ -479,6 +577,21 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     },
     pollFooterMe: {
       color: 'rgba(255,255,255,0.85)',
+    },
+    // Muted placeholder bubble for an unrenderable inner event kind. Subdued
+    // surface + dashed border + italic supplementary text so it reads as a
+    // system/placeholder note rather than a real chat bubble.
+    unsupportedBubble: {
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderStyle: 'dashed',
+      borderColor: colors.divider,
+    },
+    unsupportedText: {
+      fontSize: 13,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+      lineHeight: 18,
     },
   });
 

@@ -14,7 +14,9 @@ import {
   buildConversationItems,
   buildZapItems,
   formatDayHeader,
+  suppressDuplicateOrderInvoiceNotes,
   type ConversationMessageInput,
+  type TimedItem,
 } from './conversationItems';
 import type { WalletState, ZapCounterpartyInfo } from '../types/wallet';
 
@@ -148,6 +150,217 @@ describe('buildZapItems', () => {
       PEER,
     );
     expect(out).toHaveLength(0);
+  });
+});
+
+describe('buildConversationItems — unsupported message-kind fallback', () => {
+  it('maps a message whose wireKind we do not render to an `unsupported` item', () => {
+    const messages: ConversationMessageInput[] = [
+      // kind 30023 (long-form article) is not a renderable DM kind.
+      {
+        id: '1',
+        fromMe: false,
+        text: 'whatever the raw body is',
+        createdAt: DAY2,
+        wireKind: 30023,
+      },
+    ];
+    const items = buildConversationItems(messages, []).filter((i) => i.kind !== 'dayHeader');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'unsupported',
+      id: 'dm-1',
+      fromMe: false,
+      rawKind: 30023,
+      createdAt: DAY2,
+    });
+  });
+
+  it('does NOT mark plain text (no wireKind) as unsupported', () => {
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: 'hi', createdAt: DAY2 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('message');
+  });
+
+  it('does NOT mark renderable wire kinds (4/14/15) as unsupported', () => {
+    for (const wireKind of [4, 14, 15]) {
+      const items = buildConversationItems(
+        [{ id: '1', fromMe: false, text: 'hi', createdAt: DAY2, wireKind }],
+        [],
+      ).filter((i) => i.kind !== 'dayHeader');
+      expect(items[0].kind).toBe('message');
+    }
+  });
+
+  it('renders a valid kind-16 order as an order card, not unsupported', () => {
+    const orderJson = JSON.stringify({
+      kind: 16,
+      orderId: 'abc-123',
+      type: 'order',
+      items: [],
+      message: '',
+    });
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: orderJson, createdAt: DAY2, wireKind: 16 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('order');
+  });
+
+  it('maps an unparseable kind-16/17 row to `unsupported`, never a raw JSON bubble', () => {
+    // A non-order payload sharing the kind (e.g. a NIP-18 repost) or a corrupt row.
+    const notAnOrder = JSON.stringify({ kind: 1, id: 'abc', content: 'gm' });
+    const items = buildConversationItems(
+      [{ id: '1', fromMe: false, text: notAnOrder, createdAt: DAY2, wireKind: 16 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0].kind).toBe('unsupported');
+    expect(items[0].kind).not.toBe('message'); // never a raw text bubble
+  });
+});
+
+describe('buildConversationItems — duplicate order-invoice note dedup', () => {
+  // A bech32 data part comfortably over the {50,} floor the bolt11 regex
+  // shares with INVOICE_REGEX. Two distinct invoices for the no-match case.
+  const DATA = '210n1p' + 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'.repeat(2);
+  const INVOICE = `lnbc${DATA}`;
+  const OTHER_INVOICE = `lntb${DATA}`;
+
+  // kind-16 type-2 "Payment" order card JSON carrying `invoice` as its payable
+  // bolt11 — exactly what the order-service sends as the rich card.
+  const paymentOrderJson = (invoice: string, orderId = 'order-abc'): string =>
+    JSON.stringify({
+      kind: 16,
+      type: 'payment',
+      orderId,
+      items: [],
+      message: '',
+      payment: { method: 'lightning', value: invoice },
+    });
+
+  // The kind-14 chat-note fallback: a human-readable line + the SAME raw bolt11.
+  const noteText = (invoice: string): string =>
+    `New order — please pay ${invoice} to confirm. Thanks!`;
+
+  const cardMsg = (invoice: string): ConversationMessageInput => ({
+    id: 'card',
+    fromMe: false,
+    text: paymentOrderJson(invoice),
+    createdAt: DAY2 + 1,
+    wireKind: 16,
+  });
+  const noteMsg = (invoice: string): ConversationMessageInput => ({
+    id: 'note',
+    fromMe: false,
+    text: noteText(invoice),
+    createdAt: DAY2,
+    wireKind: 14,
+  });
+
+  const nonHeader = (msgs: ConversationMessageInput[]) =>
+    buildConversationItems(msgs, []).filter((i) => i.kind !== 'dayHeader');
+
+  it('suppresses the kind-14 note when a matching kind-16 order card exists', () => {
+    const items = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('order');
+    expect(items.some((i) => i.kind === 'message')).toBe(false);
+  });
+
+  it('suppresses regardless of arrival order (note before OR after the card)', () => {
+    const noteFirst = nonHeader([noteMsg(INVOICE), cardMsg(INVOICE)]);
+    const cardFirst = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
+    for (const items of [noteFirst, cardFirst]) {
+      expect(items).toHaveLength(1);
+      expect(items[0].kind).toBe('order');
+    }
+  });
+
+  it('shows the kind-14 note when no kind-16 order card is present (fallback)', () => {
+    const items = nonHeader([noteMsg(INVOICE)]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'message', id: 'dm-note' });
+  });
+
+  it('shows the note when the order card carries a DIFFERENT invoice', () => {
+    const items = nonHeader([cardMsg(OTHER_INVOICE), noteMsg(INVOICE)]);
+    expect(items.some((i) => i.kind === 'order')).toBe(true);
+    expect(items.some((i) => i.kind === 'message' && i.id === 'dm-note')).toBe(true);
+  });
+
+  it('never suppresses a non-order kind-14 chat message (no invoice)', () => {
+    const items = nonHeader([
+      cardMsg(INVOICE),
+      { id: 'chat', fromMe: false, text: 'gm, when does it ship?', createdAt: DAY2, wireKind: 14 },
+    ]);
+    expect(items.some((i) => i.kind === 'message' && i.id === 'dm-chat')).toBe(true);
+  });
+
+  it('does NOT suppress a non-kind-14 row (e.g. NIP-04 kind-4) sharing the invoice', () => {
+    // Only a kind-14 NIP-17 note is the order-invoice fallback; a kind-4 message
+    // that happens to quote the same invoice must stay.
+    const items = nonHeader([
+      cardMsg(INVOICE),
+      { id: 'nip04', fromMe: false, text: noteText(INVOICE), createdAt: DAY2, wireKind: 4 },
+    ]);
+    expect(items.some((i) => i.kind === 'message' && i.id === 'dm-nip04')).toBe(true);
+  });
+
+  it('does NOT suppress when the only card is a non-payable order (kind-16 type-1 placed)', () => {
+    // An order-placed card has no payable bolt11, so it can never shadow a note.
+    const placedJson = JSON.stringify({
+      kind: 16,
+      type: 'order',
+      orderId: 'order-abc',
+      items: [],
+      message: '',
+    });
+    const items = nonHeader([
+      { id: 'card', fromMe: false, text: placedJson, createdAt: DAY2 + 1, wireKind: 16 },
+      noteMsg(INVOICE),
+    ]);
+    expect(items.some((i) => i.kind === 'message' && i.id === 'dm-note')).toBe(true);
+  });
+
+  describe('suppressDuplicateOrderInvoiceNotes (unit)', () => {
+    const orderItem = (invoice: string): TimedItem => ({
+      kind: 'order',
+      id: 'dm-card',
+      fromMe: false,
+      createdAt: DAY2 + 1,
+      order: {
+        kind: 16,
+        type: 'payment',
+        orderId: 'order-abc',
+        items: [],
+        message: '',
+        payment: { method: 'lightning', value: invoice },
+      },
+    });
+    const messageItem = (text: string, wireKind = 14): TimedItem => ({
+      kind: 'message',
+      id: 'dm-note',
+      fromMe: false,
+      text,
+      createdAt: DAY2,
+      wireKind,
+    });
+
+    it('drops only the matching kind-14 message item', () => {
+      const out = suppressDuplicateOrderInvoiceNotes([
+        orderItem(INVOICE),
+        messageItem(noteText(INVOICE)),
+      ]);
+      expect(out).toHaveLength(1);
+      expect(out[0].kind).toBe('order');
+    });
+
+    it('is a no-op when there are no order cards', () => {
+      const input: TimedItem[] = [messageItem(noteText(INVOICE))];
+      expect(suppressDuplicateOrderInvoiceNotes(input)).toEqual(input);
+    });
   });
 });
 

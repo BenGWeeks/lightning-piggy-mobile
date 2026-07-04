@@ -1,0 +1,81 @@
+appId: com.lightningpiggy.app.dev
+name: Send — unresolvable address surfaces an error + stays editable in place (#871)
+---
+# Guards the #871 fix:
+#
+#   Before: pasting a mistyped / unreachable Lightning address left the Send
+#   sheet on `Pay to <bad address>` with no amount control and a disabled,
+#   greyed-out Send button — and NO error message. The only escape blanked
+#   the field, so a one-char typo meant retyping the whole address.
+#
+#   After: resolution failure (1) toasts a friendly error and (2) bounces the
+#   user back to the editable input with the bad value RETAINED, so the typo
+#   can be fixed in place. An explicit "Edit address" affordance also exists
+#   on the resolved details card for the same fix-in-place recovery.
+#
+# This flow pastes a deliberately-unresolvable lud16 (the reserved RFC-2606
+# `.invalid` TLD never resolves), asserts the error toast shows, and asserts
+# the paste field is pre-filled with the bad value so it's editable.
+#
+# Run: maestro test tests/e2e/test-send-address-resolve-error-edit.yaml
+
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open the Send sheet and switch to the paste/input tab.
+- tapOn:
+    id: 'btn-send'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'send-tab-input'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Paste a deliberately-unresolvable Lightning address and submit it.
+- tapOn:
+    id: 'send-paste-input'
+- inputText: 'piggy@nonexistent.invalid'
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'send-paste-go'
+
+# Resolution must fail and surface the branded error toast — not a silent,
+# greyed-out Send. (text1 of the error toast.)
+- extendedWaitUntil:
+    visible:
+      text: "Couldn't reach this Lightning address"
+    timeout: 15000
+
+# The fix-in-place guarantee: we are back on the editable input AND the bad
+# value is still there to be corrected (not blanked). If the dead-end or the
+# blanking regresses, one of these assertions fails.
+- assertVisible:
+    id: 'send-paste-input'
+- assertVisible:
+    text: 'piggy@nonexistent.invalid'
+
+# Sanity: the value really is editable — append a character and confirm it
+# round-trips (a disabled / non-focusable dead-end field would not).
+- tapOn:
+    id: 'send-paste-input'
+- inputText: 'x'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    text: 'piggy@nonexistent.invalidx'
+
+# Close the sheet cleanly so the next flow starts from a known state.
+- tapOn:
+    text: 'Cancel'
+- waitForAnimationToEnd:
+    timeout: 2000

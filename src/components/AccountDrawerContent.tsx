@@ -27,6 +27,7 @@ import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { Palette } from '../styles/palettes';
@@ -41,16 +42,16 @@ interface SectionRow {
   testID: string;
 }
 
-const buildSectionRows = (colors: Palette): SectionRow[] => [
+const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>): SectionRow[] => [
   {
     name: 'AccountProfile',
-    label: 'Profile',
+    label: t('accountDrawerContent.profile'),
     icon: <User size={22} color={colors.textBody} />,
     testID: 'drawer-row-profile',
   },
   {
     name: 'AccountWallets',
-    label: 'Wallets',
+    label: t('accountDrawerContent.wallets'),
     icon: <Wallet size={22} color={colors.textBody} />,
     testID: 'drawer-row-wallets',
   },
@@ -62,37 +63,37 @@ const buildSectionRows = (colors: Palette): SectionRow[] => [
   },
   {
     name: 'AccountOnChain',
-    label: 'On-chain',
+    label: t('accountDrawerContent.onChain'),
     icon: <LinkIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-onchain',
   },
   {
     name: 'AccountDisplay',
-    label: 'Currency',
+    label: t('accountDrawerContent.currency'),
     icon: <Coins size={22} color={colors.textBody} />,
     testID: 'drawer-row-display',
   },
   {
     name: 'AccountAppearance',
-    label: 'Appearance',
+    label: t('accountDrawerContent.appearance'),
     icon: <PaletteIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-appearance',
   },
   {
     name: 'AccountNearby',
-    label: 'Nearby merchants',
+    label: t('accountDrawerContent.nearbyMerchants'),
     icon: <Bell size={22} color={colors.textBody} />,
     testID: 'drawer-row-nearby',
   },
   {
     name: 'AccountSecurity',
-    label: 'Security',
+    label: t('accountDrawerContent.security'),
     icon: <ShieldCheck size={22} color={colors.textBody} />,
     testID: 'drawer-row-security',
   },
   {
     name: 'AccountAbout',
-    label: 'About',
+    label: t('accountDrawerContent.about'),
     icon: <Info size={22} color={colors.textBody} />,
     testID: 'drawer-row-about',
   },
@@ -105,8 +106,9 @@ const buildSectionRows = (colors: Palette): SectionRow[] => [
  */
 const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const sectionRows = useMemo(() => buildSectionRows(colors), [colors]);
+  const sectionRows = useMemo(() => buildSectionRows(colors, t), [colors, t]);
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile, logout, identities, pubkey, switchIdentity, relays } = useNostr();
   const [signingOut, setSigningOut] = useState(false);
@@ -124,6 +126,17 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
       .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
       .slice(0, 3);
   }, [identities, pubkey]);
+
+  // `nostr:nprofile1…` for the QR / NFC share of MY own profile (#755) —
+  // embeds my NIP-65 write (outbox) relays (capped 2) so a cold-contact
+  // scanner resolves me on niche relays. Falls back to app defaults when
+  // I have no published write relays.
+  const ownNprofileRef = useMemo(() => {
+    if (!pubkey) return undefined;
+    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+    const hints = nostrService.buildOwnProfileRelayHints(writeRelays, 2);
+    return `nostr:${nostrService.nprofileEncode(pubkey, hints)}`;
+  }, [pubkey, relays]);
 
   // Lazy-fetch kind-0 for the small switcher avatars. The active
   // identity already has its profile in `profile`; only the others
@@ -196,10 +209,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
   const handleSignOut = () => {
     if (!isLoggedIn) return;
-    Alert.alert('Sign Out', 'Disconnect your Nostr identity?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('accountDrawerContent.signOut'), t('accountDrawerContent.signOutConfirm'), [
+      { text: t('accountDrawerContent.cancel'), style: 'cancel' },
       {
-        text: 'Sign Out',
+        text: t('accountDrawerContent.signOut'),
         style: 'destructive',
         onPress: async () => {
           setSigningOut(true);
@@ -252,7 +265,12 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                       style={styles.avatarSmall}
                       onPress={() => handleSwitchTo(id.pubkey)}
                       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                      accessibilityLabel={`Switch to ${prof?.displayName || prof?.name || 'account'}`}
+                      accessibilityLabel={t('accountDrawerContent.switchToAccount', {
+                        name:
+                          prof?.displayName ||
+                          prof?.name ||
+                          t('accountDrawerContent.accountFallback'),
+                      })}
                       testID={`drawer-account-switch-${idPrefix}`}
                     >
                       {prof?.picture && isSupportedImageUrl(prof.picture) ? (
@@ -278,7 +296,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 style={styles.moreButton}
                 onPress={() => setSwitcherOpen(true)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Manage accounts"
+                accessibilityLabel={t('accountDrawerContent.manageAccounts')}
                 testID="account-switcher-button"
               >
                 <MoreHorizontal size={22} color={colors.textBody} />
@@ -302,7 +320,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                       setQrSheetOpen(true);
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityLabel="Show npub QR"
+                    accessibilityLabel={t('accountDrawerContent.showNpubQr')}
                     testID="drawer-npub-qr"
                   >
                     <QrCode size={28} color={colors.textSupplementary} />
@@ -322,10 +340,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 props.navigation.closeDrawer();
                 setLoginSheetOpen(true);
               }}
-              accessibilityLabel="Sign in or create account"
+              accessibilityLabel={t('accountDrawerContent.signInOrCreate')}
               testID="drawer-sign-in"
             >
-              <Text style={styles.signInButtonText}>Sign In / Create Account</Text>
+              <Text style={styles.signInButtonText}>{t('accountDrawerContent.signInButton')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -356,7 +374,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           style={[styles.row, (!isLoggedIn || signingOut) && styles.rowDisabled]}
           onPress={handleSignOut}
           disabled={!isLoggedIn || signingOut}
-          accessibilityLabel="Sign Out"
+          accessibilityLabel={t('accountDrawerContent.signOut')}
           testID="drawer-sign-out"
         >
           <View style={styles.rowIcon}>
@@ -365,7 +383,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           <Text
             style={[styles.rowLabel, { color: isLoggedIn ? colors.red : colors.textSupplementary }]}
           >
-            Sign Out
+            {t('accountDrawerContent.signOut')}
           </Text>
         </TouchableOpacity>
       </DrawerContentScrollView>
@@ -382,6 +400,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={profile.npub}
+          nostrRef={ownNprofileRef}
           lightningAddress={profile.lud16 ?? null}
           defaultMode="npub"
         />

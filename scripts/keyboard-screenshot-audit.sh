@@ -24,7 +24,7 @@ OUT_DIR="docs/screenshots/keyboard-states"
 mkdir -p "$OUT_DIR"
 
 # Hardcoded to match the appId in every YAML flow under
-# tests/e2e/keyboard-audit/. If you re-point at a release variant,
+# .maestro/keyboard-audit/. If you re-point at a release variant,
 # update both this constant AND the appId line in every flow file —
 # they have to stay in lockstep or `am force-stop` ends up killing
 # the wrong package while Maestro drives the original.
@@ -129,7 +129,7 @@ FLOWS=(
 FILTER="${FLOW:-}"
 for f in "${FLOWS[@]}"; do
   if [ -n "$FILTER" ] && [ "$f" != "$FILTER" ]; then continue; fi
-  run_flow "tests/e2e/keyboard-audit/${f}.yaml" "$f"
+  run_flow ".maestro/keyboard-audit/${f}.yaml" "$f"
   relaunch
 done
 

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -34,6 +35,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
   onChangeCategories,
   onClearAll,
 }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -52,20 +54,20 @@ const PlacesFilterSheet: React.FC<Props> = ({
       <View style={styles.sheet} testID="places-filter-sheet">
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Filters</Text>
+          <Text style={styles.title}>{t('placesFilterSheet.filters')}</Text>
           {anyActive ? (
             <TouchableOpacity
               onPress={onClearAll}
               testID="places-filter-clear-all"
-              accessibilityLabel="Clear all filters"
+              accessibilityLabel={t('placesFilterSheet.clearAllFiltersA11y')}
             >
-              <Text style={styles.clearText}>Clear all</Text>
+              <Text style={styles.clearText}>{t('placesFilterSheet.clearAll')}</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
             onPress={onClose}
             testID="places-filter-close"
-            accessibilityLabel="Close filters"
+            accessibilityLabel={t('placesFilterSheet.closeFilters')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <X size={20} color={colors.textHeader} strokeWidth={2.5} />
@@ -75,7 +77,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
           {availableCategories.length > 0 ? (
             <>
-              <Text style={styles.section}>Category</Text>
+              <Text style={styles.section}>{t('placesFilterSheet.category')}</Text>
               <View style={styles.chipRow}>
                 {availableCategories.map((cat) => {
                   const active = selectedCategories.has(cat);
@@ -85,7 +87,11 @@ const PlacesFilterSheet: React.FC<Props> = ({
                       style={[styles.chip, active ? styles.chipActive : null]}
                       onPress={() => toggleCategory(cat)}
                       testID={`places-filter-cat-${cat}`}
-                      accessibilityLabel={`${cat} category ${active ? 'on' : 'off'}`}
+                      accessibilityLabel={
+                        active
+                          ? t('placesFilterSheet.categoryOnA11y', { category: cat })
+                          : t('placesFilterSheet.categoryOffA11y', { category: cat })
+                      }
                     >
                       <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
                         {cat.replace(/_/g, ' ')}
@@ -96,9 +102,7 @@ const PlacesFilterSheet: React.FC<Props> = ({
               </View>
             </>
           ) : (
-            <Text style={styles.sectionHint}>
-              No categories available yet — merchants are still loading.
-            </Text>
+            <Text style={styles.sectionHint}>{t('placesFilterSheet.noCategories')}</Text>
           )}
         </ScrollView>
 
@@ -106,9 +110,9 @@ const PlacesFilterSheet: React.FC<Props> = ({
           style={styles.doneButton}
           onPress={onClose}
           testID="places-filter-done"
-          accessibilityLabel="Apply filters"
+          accessibilityLabel={t('placesFilterSheet.applyFilters')}
         >
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={styles.doneText}>{t('placesFilterSheet.done')}</Text>
         </TouchableOpacity>
       </View>
     </Modal>

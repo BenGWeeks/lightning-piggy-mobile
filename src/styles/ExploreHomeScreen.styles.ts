@@ -13,13 +13,6 @@ export const createExploreHomeScreenStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       overflow: 'hidden',
     },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
-    },
     headerExtras: {
       paddingHorizontal: 20,
       paddingTop: 6,

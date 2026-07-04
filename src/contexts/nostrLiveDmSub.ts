@@ -9,22 +9,28 @@ import {
   unwrapWrapNsec,
   unwrapWrapViaNip44,
   textForRumor,
+  rumorEventId,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
-import { perAccountKey } from '../services/perAccountStorage';
+import { selectDmWrapIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import {
+  parseOrderEvent,
+  serializeOrder,
+  orderPreviewText,
+  orderPreviewFromContent,
+} from '../utils/orderEvents';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
+import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
 import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
 import { yieldToEventLoop } from './nostrDecryptPacing';
+import { capKnownWrapIds } from './knownWrapIdsCap';
+import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
 import {
-  AMBER_NIP17_CACHE_KEY_BASE,
-  NSEC_NIP17_CACHE_KEY_BASE,
-  type Nip17CacheEntry,
-  safeParseRecord,
-  writeNip17Cache,
+  COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   inboxCacheKey,
   inboxLastSeenKey,
@@ -32,6 +38,7 @@ import {
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
+import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 
 /**
  * Snapshot + live-dependency bundle the live-DM subscription closes over.
@@ -48,6 +55,25 @@ import {
  * reading them through the bundle keeps the gate + dedup behaviour
  * byte-for-byte identical.
  */
+
+/**
+ * Parse the persisted inbox cache, dropping malformed entries. A corrupt cache
+ * (null entries, non-objects, or a missing `partnerPubkey`) must not crash the
+ * later `.some(...)` / `mergeInboxEntries` and break live order/DM ingest.
+ */
+function parseCachedInboxEntries(raw: string | null): DmInboxEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e) => e && typeof e === 'object' && typeof e.partnerPubkey === 'string',
+    ) as DmInboxEntry[];
+  } catch {
+    return [];
+  }
+}
+
 export interface LiveDmSubscriptionParams {
   viewerPubkey: string;
   activeSigner: SignerType;
@@ -58,6 +84,12 @@ export interface LiveDmSubscriptionParams {
   followPubkeysRef: React.MutableRefObject<Set<string>>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
+  // Follow-gate deferral buffer (#851 F2). Fresh inbound dropped while the
+  // post-switch follows list is still hydrating is buffered here; the hook
+  // calls `replayDeferredFollowGate` (registered via `setDeferredReplay`)
+  // when follows update, re-surfacing + re-notifying entries that now pass.
+  followGateBuffer: LiveSubFollowGateBuffer;
+  setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
 }
 
 /**
@@ -78,14 +110,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     followPubkeysRef,
     setDmInbox,
     setAmberNip44Permission,
+    followGateBuffer,
+    setDeferredReplay,
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
-  // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
-  // by `knownWrapIdsRef` so the Set survives this effect's re-runs
-  // (relay-list change → fresh effect instance). Seeded by union
-  // below from AsyncStorage's wrap cache, but does NOT replace any
-  // entries the prior sub instance added in-memory but the deferred
+  // In-memory mirror of the encrypted DM store's wrap-id index
+  // (#848). Backed by `knownWrapIdsRef` so the Set survives this
+  // effect's re-runs (relay-list change → fresh effect instance).
+  // Seeded by union below from the store + persisted group wrap ids,
+  // but does NOT replace any entries the prior sub instance added
+  // in-memory but the deferred
   // writeChain hasn't persisted yet. Per issue #505 — the relay
   // re-streams the backlog since the last `since` cursor, and on a
   // busy account that's 100+ wraps in ~12 s, almost all of which are
@@ -137,6 +172,31 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
 
+  // Replay the surface + notify side-effects of a fresh inbound that was
+  // deferred by the follow-gate during the post-switch hydration window
+  // (#851 F2). Called by the hook (via the registered ref) once follows
+  // hydrate and the buffered partner is confirmed followed — so we re-run
+  // the SAME surface path the original drop skipped. Persistence is left to
+  // the next refreshDmInbox (the drop was never skip-set-persisted), so this
+  // only recovers the live inbox update + the one-shot OS notification.
+  const replayDeferredFollowGate = (item: DeferredFollowGateEntry): void => {
+    if (cancelled) return;
+    queueInboxEntry(item.entry);
+    notifyDmMessage(item.partnerPubkey);
+    // claimWrapNotification: the background watch (same JS context, no follow
+    // gate) may have already notified for this wrap — never post twice (#279).
+    if (item.notify && claimWrapNotification(item.entry.id)) {
+      void fireMessageNotification({
+        kind: 'dm',
+        threadId: item.partnerPubkey,
+        title: item.notify.title,
+        body: item.notify.body,
+        data: { conversationPubkey: item.partnerPubkey },
+      });
+    }
+  };
+  setDeferredReplay(replayDeferredFollowGate);
+
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
     // Earliest-possible short-circuit for NIP-17 wraps we already
     // decrypted on a previous launch. Cost saved per backlog wrap:
@@ -154,7 +214,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the early-return because the Set hasn't been updated yet.
     // Set.add is idempotent so the trailing writeChain add becomes
     // a no-op. kind 4 has its own `seen` Set below.
-    if (ev.kind === 1059) knownWrapIds.add(ev.id);
+    if (ev.kind === 1059) {
+      knownWrapIds.add(ev.id);
+      capKnownWrapIds(knownWrapIds);
+    }
     if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
     if (cancelled) return;
     if (seen.has(ev.id)) {
@@ -219,6 +282,23 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           console.log(
             `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
           );
+        // Defer fresh inbound for replay once follows hydrate (#851 F2). Only
+        // genuinely-fresh arrivals carry a notification; older backlog stays
+        // silent. Persistence is intentionally skipped — see replay helper.
+        if (isFreshArrival(ev.created_at)) {
+          followGateBuffer.defer({
+            partnerPubkey,
+            entry: {
+              id: ev.id,
+              partnerPubkey,
+              fromMe,
+              createdAt: ev.created_at,
+              text: plaintext,
+              wireKind: 4,
+            },
+            notify: { title: 'New message', body: plaintext },
+          });
+        }
         return;
       }
 
@@ -230,21 +310,29 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         text: plaintext,
         wireKind: 4,
       };
-      // No wrap-id cache for kind-4 (plaintext lives in RAM-only LRU); only persist the inbox preview blob. Same writeChain as kind-1059 to serialize concurrent inbox writes. Also bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter advances and doesn't re-fetch already-seen events on the next refresh.
+      // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
+      // LRU dies with the session) plus the inbox preview blob. Same
+      // writeChain as kind-1059 to serialize concurrent inbox writes. Also
+      // bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter
+      // advances and doesn't re-fetch already-seen events on the next refresh.
+      const k4Row: DmMessageRow = {
+        owner: viewerPubkey,
+        eventId: ev.id,
+        conversation: partnerPubkey,
+        createdAt: ev.created_at,
+        sender: fromMe ? viewerPubkey : partnerPubkey,
+        content: plaintext,
+        fromMe,
+        wireKind: 4,
+      };
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
+          await upsertDmMessages([k4Row]).catch((e) => {
+            if (__DEV__) console.warn('[DmStore] live kind-4 upsert failed:', e);
+          });
           const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = inboxRaw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(inboxRaw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
+          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
           const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
           // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
           if (cancelled) return;
@@ -288,36 +376,116 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       return;
     }
 
+    // Marketplace order / receipt (kind-16 / kind-17) — PLAINTEXT events a
+    // Plebeian/Gamma-style market addresses to the buyer via a `#p` tag (#market).
+    // No decryption: `parseOrderEvent` both classifies the event and rejects
+    // NIP-18 reposts that share kind 16. These bypass the follow-gate — the
+    // user transacted with the market even though they don't "follow" it — and
+    // are stored with `wireKind` 16/17 so the conversation renderer shows an
+    // order card and the inbox derives a readable preview.
+    if (ev.kind === 16 || ev.kind === 17) {
+      const order = parseOrderEvent(ev);
+      if (!order) {
+        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} not-an-order`);
+        return;
+      }
+      const fromMe = ev.pubkey === viewerPubkey;
+      const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+      const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+      if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
+        if (__DEV__) console.log(`[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} no-partner`);
+        return;
+      }
+      const serialized = serializeOrder(order);
+      const preview = orderPreviewText(order);
+      const orderRow: DmMessageRow = {
+        owner: viewerPubkey,
+        eventId: ev.id,
+        conversation: partnerPubkey,
+        createdAt: ev.created_at,
+        sender: fromMe ? viewerPubkey : partnerPubkey,
+        content: serialized,
+        fromMe,
+        wireKind: ev.kind,
+      };
+      const orderInboxEntry: DmInboxEntry = {
+        id: ev.id,
+        partnerPubkey,
+        fromMe,
+        createdAt: ev.created_at,
+        text: preview,
+        wireKind: ev.kind,
+      };
+      // Anti-spam gate for the OS notification (Copilot #927). Orders bypass
+      // the follow-gate for STORAGE (a buyer transacted with the market even
+      // though they don't follow it), but the events are PLAINTEXT and addressed
+      // by `#p`, so any sender can craft an order-shaped kind-16/17 to the
+      // viewer. To avoid OS-level notification spam, only raise a push when the
+      // market is already trusted: followed, OR an existing conversation in the
+      // inbox cache. Unknown senders are still stored + surfaced in-app silently.
+      // (Follow-up: record markets the user actively ordered from — e.g. via the
+      // Explore Market checkout — into a trust set so a first legitimate order
+      // notifies too.) `partnerKnown` is read from the inbox BEFORE this event
+      // merges in, so the very first order from a stranger can't self-qualify.
+      const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
+      let partnerKnown = partnerFollowed;
+      writeChain = writeChain
+        .then(async () => {
+          if (cancelled) return;
+          await upsertDmMessages([orderRow]).catch((e) => {
+            if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
+          });
+          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
+          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
+          if (cachedInbox.some((e) => e.partnerPubkey === partnerPubkey)) partnerKnown = true;
+          const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
+          if (cancelled) return;
+          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+            () => {},
+          );
+        })
+        .catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
+        });
+      await writeChain;
+      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+      queueInboxEntry(orderInboxEntry);
+      notifyDmMessage(partnerPubkey);
+      if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
+        void fireMessageNotification({
+          kind: 'dm',
+          threadId: partnerPubkey,
+          title: 'Marketplace update',
+          body: preview,
+          data: { conversationPubkey: partnerPubkey },
+        });
+      }
+      if (__DEV__)
+        console.log(
+          `[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} surfaced (order=${order.orderId.slice(0, 8)}, partner=${partnerPubkey.slice(0, 8)})`,
+        );
+      return;
+    }
+
     // NIP-17 (kind-1059) — existing gift-wrap unwrap path. Local alias preserves original variable name without renaming through the body below.
     const wrap = ev;
 
-    // Cache short-circuit: if refreshDmInbox already decrypted this
-    // wrap and persisted it, the live sub has nothing to do — the
-    // event was either delivered before the sub opened or arrived
-    // via two paths (live + a near-simultaneous force-refresh).
-    const cacheKey =
-      activeSigner === 'nsec'
-        ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
-        : activeSigner === 'amber'
-          ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
-          : null;
-    if (!cacheKey) return;
     // knownWrapIds is seeded eagerly up-front below (before the
     // subscription opens) — the in-flow lazy-load was removed in
     // #505 because it (a) raced when many wraps arrived together
     // and each tried to seed the Set concurrently, and (b) made
     // dedup hits pay through a long per-event prologue before the
-    // check fired. The check for cached IDs now lives at the very
-    // top of this function for kind-1059 events. This line is only
-    // reached for genuinely new (not-yet-cached) wraps, OR — in
-    // the rare case the seed failed (see the catch in the sub-open
-    // block) — for wraps that should have been pre-known. In that
-    // case the wrap re-decrypts; the persistent `wrapCache` write
-    // below still guards against the on-disk cache filling
-    // unboundedly, but the `dmMessageListeners` may fire a second
-    // time for messages already shown in a previous session.
-    // Acceptable trade-off because the seed only fails on
-    // AsyncStorage I/O error which is extremely rare on Android.
+    // check fired. The check for known IDs lives at the very top of
+    // this function for kind-1059 events. This point is only reached
+    // for genuinely new (not-yet-stored) wraps, OR — in the rare
+    // case the seed failed (see the catch in the sub-open block) —
+    // for wraps that should have been pre-known. In that case the
+    // wrap re-decrypts; the encrypted-store upsert below is
+    // idempotent by (owner, event_id), but the `dmMessageListeners`
+    // may fire a second time for messages already shown in a
+    // previous session. Acceptable trade-off because the seed only
+    // fails on DB I/O error which is extremely rare.
 
     const onSkip = (reason: string, wrapId: string) => {
       if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
@@ -378,7 +546,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // skip my own, and suppressed when the user is viewing this group.
       if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
         const sender = routeResult.message.senderPubkey;
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase()) {
+        // claimWrapNotification: dedupe vs the background watch (#279).
+        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrap.id)) {
           void fireMessageNotification({
             kind: 'group',
             threadId: routeResult.group.id,
@@ -407,55 +576,72 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.log(
           `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
         );
+      // Defer fresh inbound for replay once follows hydrate (#851 F2). Skip my
+      // own echoes and historical backlog (silent); persistence is left to the
+      // next refreshDmInbox — see replayDeferredFollowGate.
+      if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
+        // For an order/receipt rumor (kind 16/17) `textForRumor` returns order
+        // JSON; surface a readable preview so a raw blob never leaks into the
+        // conversation list when the sender isn't followed (mirrors the
+        // non-deferred path below). Plain DM rumors pass through unchanged.
+        const deferredText = orderPreviewFromContent(textForRumor(rumor), rumor.kind);
+        followGateBuffer.defer({
+          partnerPubkey: partnership.partnerPubkey,
+          entry: {
+            id: wrap.id,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: deferredText,
+            wireKind: rumor.kind,
+          },
+          notify: { title: 'New message', body: rumor.content },
+        });
+      }
       return;
     }
 
-    const entry: Nip17CacheEntry = {
-      id: wrap.id,
-      wrapId: wrap.id,
-      partnerPubkey: partnership.partnerPubkey,
-      fromMe: partnership.fromMe,
+    const wrapText = textForRumor(rumor);
+    const wrapRow: DmMessageRow = {
+      owner: viewerPubkey,
+      eventId: wrap.id,
+      conversation: partnership.partnerPubkey,
       createdAt: rumor.created_at,
-      text: textForRumor(rumor),
+      sender: partnership.fromMe ? viewerPubkey : partnership.partnerPubkey,
+      content: wrapText,
+      fromMe: partnership.fromMe,
       wireKind: rumor.kind,
     };
     const inboxEntry: DmInboxEntry = {
-      id: entry.id,
-      partnerPubkey: entry.partnerPubkey,
-      fromMe: entry.fromMe,
-      createdAt: entry.createdAt,
-      text: entry.text,
-      wireKind: entry.wireKind,
+      id: wrap.id,
+      partnerPubkey: partnership.partnerPubkey,
+      fromMe: partnership.fromMe,
+      createdAt: rumor.created_at,
+      // For an order/receipt rumor (kind 16/17) `wrapText` is order JSON;
+      // surface a readable preview. Plain DM rumors pass through unchanged.
+      text: orderPreviewFromContent(wrapText, rumor.kind),
+      wireKind: rumor.kind,
+      // Inner rumor id (#857) — the delivery-store key for our own sent rows,
+      // stable across the optimistic bubble + this live echo.
+      rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
     };
 
-    // Serialise read→merge→write of wrap+inbox blobs so concurrent live wraps don't race each other.
+    // Serialise store-upsert + inbox-blob write so concurrent live wraps don't race each other.
     // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
     writeChain = writeChain
       .then(async () => {
         if (cancelled) return;
-        const wrapRaw = await AsyncStorage.getItem(cacheKey);
-        const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
-        if (wrapCache[wrap.id]) {
-          knownWrapIds?.add(wrap.id);
-          return;
-        }
-        wrapCache[wrap.id] = entry;
-        // Re-check after each await: logout may have multiRemove'd these keys while we were reading. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
-        if (cancelled) return;
-        await writeNip17Cache(cacheKey, wrapCache);
+        // Encrypted store write (#848) — idempotent by (owner, event_id), so
+        // a wrap delivered by both the live sub and a near-simultaneous
+        // refresh lands as one row (the old file read→merge→write dance and
+        // its #811 clobbering hazard are gone).
+        await upsertDmMessages([wrapRow]);
         knownWrapIds?.add(wrap.id);
 
+        // Re-check after each await: logout may have wiped these stores while we were writing. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
+        if (cancelled) return;
         const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-        const cachedInbox: DmInboxEntry[] = inboxRaw
-          ? (() => {
-              try {
-                const parsed = JSON.parse(inboxRaw);
-                return Array.isArray(parsed) ? parsed : [];
-              } catch {
-                return [];
-              }
-            })()
-          : [];
+        const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
         const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
         if (cancelled) return;
         await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
@@ -472,8 +658,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     notifyDmMessage(partnership.partnerPubkey);
     // OS notification (#279) — only genuinely-fresh inbound (backlog has
     // old rumor timestamps and stays silent), never my own echo;
-    // suppressed when the user is viewing this thread.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
+    // suppressed when the user is viewing this thread. claimWrapNotification
+    // dedupes vs the background watch running in the same JS context.
+    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrap.id)) {
       void fireMessageNotification({
         kind: 'dm',
         threadId: partnership.partnerPubkey,
@@ -494,63 +681,59 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
     const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
     if (cancelled) return;
-    // Pre-seed `knownWrapIds` from the persisted NIP-17 wrap-id
-    // cache. One JSON.parse here saves N inline AsyncStorage reads
-    // + parses inside `handleInboxEvent` when the relay re-streams
-    // the backlog. The early-return in `handleInboxEvent` (top)
-    // checks this Set as the very first thing and skips all
-    // downstream per-event work for cache hits. Per issue #505.
-    const wrapCacheKey =
-      activeSigner === 'nsec'
-        ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
-        : activeSigner === 'amber'
-          ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
-          : null;
-    if (wrapCacheKey) {
-      try {
-        const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
-        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
-        for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
-        // Also seed from persisted group messages — group-routed wraps
-        // never land in the 1:1 wrapCache (the tryRouteGroupRumor
-        // branch returns before the cache write). Without this union
-        // every cold start re-decrypts + re-routes the same group
-        // wraps the relay re-streams since the last `since` cursor.
-        const dmCount = knownWrapIds.size;
-        const groupWrapIds = await listPersistedGroupWrapIds();
-        for (const id of groupWrapIds) knownWrapIds.add(id);
-        if (__DEV__) {
-          console.log(
-            `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
-          );
-        }
-      } catch (e) {
-        // Seed-from-disk failed — leave knownWrapIds as the empty
-        // Set we initialised at outer-scope. Cached wraps re-stream
-        // through the full handler (decrypt, route, write-cache,
-        // queueInboxEntry, notifyDmMessage). Two observable side
-        // effects vs the pre-#505 in-flow dedup check:
-        //   1. `dmMessageListeners` registered for an open
-        //      conversation will re-fire for messages already
-        //      surfaced in a prior session.
-        //   2. The `unwrapWrapNsec` / `unwrapWrapViaNip44` call
-        //      runs unnecessarily for each cached wrap (1–3 ms each).
-        // The persistent on-disk wrapCache write is idempotent —
-        // it doesn't grow unboundedly. We accept this regression on
-        // the failure path because (a) AsyncStorage.getItem I/O
-        // errors are extremely rare on Android, and (b) the
-        // alternative (resurrecting the lazy-load inside the
-        // handler) would re-introduce the race + per-event prologue
-        // cost that motivated #505 in the first place.
-        if (__DEV__)
-          console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
+    // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
+    // (#848 — one indexed id-only query, no plaintext leaves the DB). The
+    // early-return in `handleInboxEvent` (top) checks this Set as the very
+    // first thing and skips all downstream per-event work for known wraps.
+    // Per issue #505. Runs after the one-time plaintext→DB migration so a
+    // just-migrated install seeds the full id set.
+    try {
+      await ensureDmStoreMigrated(viewerPubkey);
+      const storedWrapIds = await selectDmWrapIds(viewerPubkey);
+      for (const id of storedWrapIds) knownWrapIds.add(id);
+      // Also seed from persisted group messages — group-routed wraps
+      // never land in the DM store (the tryRouteGroupRumor branch
+      // returns before the row is built). Without this union every
+      // cold start re-decrypts + re-routes the same group wraps the
+      // relay re-streams since the last `since` cursor.
+      const dmCount = knownWrapIds.size;
+      const groupWrapIds = await listPersistedGroupWrapIds();
+      for (const id of groupWrapIds) knownWrapIds.add(id);
+      if (__DEV__) {
+        console.log(
+          `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
+        );
       }
+      capKnownWrapIds(knownWrapIds);
+    } catch (e) {
+      // Seed-from-DB failed — leave knownWrapIds as the empty Set we
+      // initialised at outer-scope. Known wraps re-stream through the
+      // full handler (decrypt, route, upsert, queueInboxEntry,
+      // notifyDmMessage). Two observable side effects vs the pre-#505
+      // in-flow dedup check:
+      //   1. `dmMessageListeners` registered for an open conversation
+      //      will re-fire for messages already surfaced in a prior
+      //      session.
+      //   2. The `unwrapWrapNsec` / `unwrapWrapViaNip44` call runs
+      //      unnecessarily for each known wrap (1–3 ms each).
+      // The encrypted-store upsert is idempotent — it doesn't grow
+      // unboundedly. We accept this regression on the failure path
+      // because (a) DB read failures are extremely rare, and (b) the
+      // alternative (resurrecting the lazy-load inside the handler)
+      // would re-introduce the race + per-event prologue cost that
+      // motivated #505 in the first place.
+      if (__DEV__)
+        console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled) return;
     unsubscribe = subscribeInboxDmsForViewer({
       viewerPubkey,
       relays: readRelays,
       sinceK4,
+      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
+      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
+      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
+      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
       onEvent: (ev) => {
         // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
         handleInboxEvent(ev).catch((e) => {
@@ -568,6 +751,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   return () => {
     cancelled = true;
     flushPendingInbox();
+    // Drop the follow-gate deferral buffer + unregister the replay hook
+    // atomically with sub teardown (#851 F2). A wipe / account switch tears
+    // the sub down, so buffered just-wiped wraps can never be replayed into
+    // the next identity's inbox.
+    setDeferredReplay(null);
+    followGateBuffer.clear();
     if (unsubscribe) unsubscribe();
   };
 }

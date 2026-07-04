@@ -155,5 +155,8 @@ export function useGroupComposerActions(params: {
 
   // `sendText` is also exposed so poll-share / poll-vote can post arbitrary
   // serialised bodies through the same optimistic-append path as the composer.
-  return { ...actions, sendText, handleSendInvoiceToGroup };
+  // It's additionally re-exposed as `resendText` for the message-info sheet's
+  // Re-publish (#856), mirroring the 1:1 hook — a re-publish is a fresh group
+  // send (publish + optimistic row).
+  return { ...actions, sendText, handleSendInvoiceToGroup, resendText: sendText };
 }

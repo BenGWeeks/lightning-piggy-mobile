@@ -15,6 +15,7 @@ import NostrLoginSheet from './NostrLoginSheet';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { Palette } from '../styles/palettes';
@@ -41,6 +42,7 @@ interface Props {
 // immediately with the npub-prefix as a fallback.
 const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const { identities, pubkey, switchIdentity, signOutIdentity, relays } = useNostr();
@@ -134,20 +136,24 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleSignOut = useCallback(
     (targetPubkey: string, displayName: string) => {
-      Alert.alert('Sign Out', `Sign out of ${displayName}? Other accounts stay signed in.`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => {
-            signOutIdentity(targetPubkey).catch((e) => {
-              if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
-            });
+      Alert.alert(
+        t('accountSwitcherSheet.signOutTitle'),
+        t('accountSwitcherSheet.signOutMessage', { displayName }),
+        [
+          { text: t('accountSwitcherSheet.cancel'), style: 'cancel' },
+          {
+            text: t('accountSwitcherSheet.signOut'),
+            style: 'destructive',
+            onPress: () => {
+              signOutIdentity(targetPubkey).catch((e) => {
+                if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
+              });
+            },
           },
-        },
-      ]);
+        ],
+      );
     },
-    [signOutIdentity],
+    [signOutIdentity, t],
   );
 
   const handleAddAccount = useCallback(() => {
@@ -175,10 +181,8 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
         enableDynamicSizing
       >
         <BottomSheetScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Accounts</Text>
-          <Text style={styles.subtitle}>
-            Tap an account to switch. All signed-in accounts stay warm so switching is instant.
-          </Text>
+          <Text style={styles.title}>{t('accountSwitcherSheet.accounts')}</Text>
+          <Text style={styles.subtitle}>{t('accountSwitcherSheet.subtitle')}</Text>
 
           {orderedIdentities.map((id) => {
             const prof = profileById[id.pubkey];
@@ -198,7 +202,7 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
                 <TouchableOpacity
                   style={styles.rowMain}
                   onPress={() => handleSwitch(id.pubkey)}
-                  accessibilityLabel={`Switch to ${display}`}
+                  accessibilityLabel={t('accountSwitcherSheet.switchTo', { display })}
                   testID={`account-switcher-row-${idPrefix}`}
                 >
                   <View style={styles.avatar}>
@@ -236,7 +240,7 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
                   style={styles.signOutButton}
                   onPress={() => handleSignOut(id.pubkey, display)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityLabel={`Sign out of ${display}`}
+                  accessibilityLabel={t('accountSwitcherSheet.signOutOf', { display })}
                   testID={`account-switcher-signout-${idPrefix}`}
                 >
                   <X size={18} color={colors.textSupplementary} />
@@ -250,25 +254,25 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
           <TouchableOpacity
             style={styles.actionRow}
             onPress={handleAddAccount}
-            accessibilityLabel="Add existing account"
+            accessibilityLabel={t('accountSwitcherSheet.addExistingAccount')}
             testID="account-switcher-add-existing"
           >
             <View style={styles.actionIcon}>
               <UserPlus size={22} color={colors.brandPink} />
             </View>
-            <Text style={styles.actionLabel}>Add existing account</Text>
+            <Text style={styles.actionLabel}>{t('accountSwitcherSheet.addExistingAccount')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.actionRow}
             onPress={handleAddAccount}
-            accessibilityLabel="Create new account"
+            accessibilityLabel={t('accountSwitcherSheet.createNewAccount')}
             testID="account-switcher-create-new"
           >
             <View style={styles.actionIcon}>
               <Plus size={22} color={colors.brandPink} />
             </View>
-            <Text style={styles.actionLabel}>Create new account</Text>
+            <Text style={styles.actionLabel}>{t('accountSwitcherSheet.createNewAccount')}</Text>
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheetModal>

@@ -1,8 +1,17 @@
+// Stub the swap-meta lookup so the test stays independent of the heavy
+// swapRecoveryService (bitcoinjs/secp256k1/SecureStore). Default: no swap.
+const mockGetSwapMeta = jest.fn();
+jest.mock('../services/swapRecoveryService', () => ({
+  getSwapMeta: (key: string) => mockGetSwapMeta(key),
+}));
+
 import { mapNwcTransactions, type NwcRawTransaction } from './nwcTransactions';
 import type { WalletTransaction } from '../types/wallet';
 
 const H1 = 'a'.repeat(64);
 const H2 = 'b'.repeat(64);
+
+beforeEach(() => mockGetSwapMeta.mockReset());
 
 const raw = (p: Partial<NwcRawTransaction>): NwcRawTransaction => ({
   type: 'incoming',
@@ -103,5 +112,27 @@ describe('mapNwcTransactions', () => {
       existing,
     );
     expect(result.some((t) => t.type === 'outgoing' && t.optimistic)).toBe(true);
+  });
+
+  describe('Boltz swap tagging (#895)', () => {
+    it('tags the LN leg when its payment hash is a known swap', () => {
+      mockGetSwapMeta.mockImplementation((k: string) =>
+        k === H1 ? { swapId: 'sw1', swapType: 'submarine' } : undefined,
+      );
+      const [r] = mapNwcTransactions([raw({ type: 'incoming', amount: 50, payment_hash: H1 })], []);
+      expect(r.swapId).toBe('sw1');
+      expect(r.swapType).toBe('submarine');
+      expect(r.description).toBe('Boltz swap — received via Lightning');
+    });
+
+    it('leaves a non-swap tx untagged with its original description', () => {
+      mockGetSwapMeta.mockReturnValue(undefined);
+      const [r] = mapNwcTransactions(
+        [raw({ type: 'incoming', amount: 50, payment_hash: H2, description: 'Received' })],
+        [],
+      );
+      expect(r.swapId).toBeUndefined();
+      expect(r.description).toBe('Received');
+    });
   });
 });

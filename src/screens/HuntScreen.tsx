@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import * as Location from 'expo-location';
 import {
   ChevronLeft,
   ChevronRight,
@@ -20,10 +20,12 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
@@ -40,6 +42,8 @@ import {
   geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -59,18 +63,33 @@ interface Props {
  */
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { pubkey, relays } = useNostr();
+  const { pubkey, relays, profile } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
   // Live position for the user dot — refreshes as the user walks
   // around without re-firing the nearby-cache subscription (which is
   // keyed on the initial `pos`).
-  const { pos: livePos } = useUserLocation();
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(
-    () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
-  );
+  const { pos: livePos, denied: locationDenied } = useUserLocation();
+  // Coalesce per-event setState bursts during the nearby-cache relay
+  // backfill into one commit per ~100 ms window (audit MED 4) — the
+  // naive `new Map(prev)` clone per event was O(N²) over a 50+ event
+  // cold-start burst. `shouldReplace` keeps the newest revision of a
+  // replaceable cache (and is re-applied in the flush against committed
+  // state, so a stale wrap can't clobber a fresher one). `enqueue` feeds
+  // the relay sub; `setCaches` covers the hydrate / refresh / by-author
+  // paths that aren't hot.
+  const {
+    map: caches,
+    setMap: setCaches,
+    enqueue: enqueueCache,
+    flush: flushCaches,
+  } = useCoalescedMap<ParsedCache>({
+    initial: () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
+    shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+  });
   // Pull-to-refresh: re-load the on-disk cache AND query relays for
   // every kind 37516 listing by the signed-in user, so the rail
   // includes the user's own historical Piggies even if the nearby
@@ -111,7 +130,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       clearTimeout(safetyTimer);
       setRefreshing(false);
     }
-  }, [pubkey, relays]);
+  }, [pubkey, relays, setCaches]);
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -129,12 +148,18 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setCaches]);
   // Write-through (debounced) so the next cold start has fresh data.
   useEffect(() => {
     if (caches.size === 0) return;
-    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
-    return () => clearTimeout(t);
+    const persistTimer = setTimeout(
+      // Strip prod-hidden (test-account) Piglets before persisting so prod
+      // caches self-heal — stale Piggy entries age out of storage instead
+      // of being re-saved forever (matches ExploreHomeScreen) (#917).
+      () => saveCaches(stripHiddenForPersist([...caches.values()], (c) => c.hiderPubkey)),
+      1500,
+    );
+    return () => clearTimeout(persistTimer);
   }, [caches]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -143,16 +168,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // true for the 'all' tier) and is applied at render time in
   // `sortedCaches`, so flipping the tier re-filters instantly.
   const { isTrusted, wotTier } = useTrustGraph();
-  // Visible bbox from the mini-map at the top of the screen. The list
-  // below filters to caches whose decoded geohash lies inside this
-  // bbox, so "zoom out → see more" emerges naturally and there's no
-  // distance chip row to bias the user.
-  const [mapBbox, setMapBbox] = useState<{
-    minLat: number;
-    maxLat: number;
-    minLon: number;
-    maxLon: number;
-  } | null>(null);
   // NIP-GC difficulty / terrain are integer 1-5 scales (geocaching
   // convention). Multi-select Sets so a user can pick e.g. D1 + D3
   // (skip the cunning level in the middle). Empty Set = no filter.
@@ -173,69 +188,87 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // to zero when a hider uses an unusual cache type.
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
-  // Location resolve.
+  // Seed the subscription anchor from the first live fix. `pos` is a
+  // capture-once anchor — deliberately NOT updated as the user walks —
+  // so `subscribeNearbyCaches` queries a stable set of geohash tiles
+  // instead of re-subscribing on every GPS step. `useUserLocation`
+  // already runs the foreground-permission check and delivers a fix
+  // (warm, via `getLastKnownPositionAsync`) carrying the same
+  // `accuracy` field, so deriving the anchor from `livePos` here avoids
+  // a second, redundant high-accuracy `getCurrentPositionAsync` native
+  // call on every HuntScreen mount (perf audit: duplicate GPS bridge
+  // call during the cold-start window). A precision-5 geohash tile + 8
+  // neighbours (~15 km of coverage) easily absorbs the small staleness
+  // of a last-known anchor.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        if (perm.status !== 'granted') {
-          setLoading(false);
-          return;
-        }
-        const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        if (!cancelled) {
-          // `coords.accuracy` is 1-σ horizontal accuracy in metres on
-          // expo-location; null on platforms that don't report it.
-          // Threaded through to ExploreMiniMap so the accuracy halo
-          // can render around the "you" dot (shared
-          // drawAccuracyCircle in src/utils/mapMeDot.ts).
-          setPos({
-            lat: fix.coords.latitude,
-            lon: fix.coords.longitude,
-            accuracy: typeof fix.coords.accuracy === 'number' ? fix.coords.accuracy : null,
-          });
-        }
-      } catch {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (pos || !livePos) return;
+    setPos({ lat: livePos.lat, lon: livePos.lon, accuracy: livePos.accuracy });
+  }, [livePos, pos]);
 
-  // Cache subscription — kicks off once we have a fix.
+  // Drop the spinner when location permission is denied. Without a fix
+  // we never seed `pos`, so the subscribe-settle timer below never arms
+  // — the spinner would otherwise hang forever on a denied device.
   useEffect(() => {
-    if (!pos) return;
-    // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
-    // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
-    // got the same treatment earlier in this branch. Pre-#631 the
-    // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
-    // returned only the user's own truncation, so a cache 500 m across
-    // a tile boundary stayed invisible.
-    const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
-    // Load every nearby cache regardless of trust — the WoT filter is
-    // applied at render time (sortedCaches), so flipping the tier
-    // re-filters instantly with no re-subscribe or relay round-trip.
-    const closer = subscribeNearbyCaches(prefixes, (c) => {
-      setCaches((prev) => {
-        const existing = prev.get(c.coord);
-        if (existing && existing.createdAt >= c.createdAt) return prev;
-        const next = new Map(prev);
-        next.set(c.coord, c);
-        return next;
-      });
-    });
-    // Drop the spinner after a beat — relays stream continuously, no EOSE wait.
-    const settleTimer = setTimeout(() => setLoading(false), 1500);
-    return () => {
-      closer();
-      clearTimeout(settleTimer);
-    };
+    if (locationDenied) setLoading(false);
+  }, [locationDenied]);
+
+  // Backstop: `useLiveUserLocation` swallows GPS errors WITHOUT flipping
+  // `denied` (e.g. permission granted but no last-known fix and both
+  // getCurrentPositionAsync/watchPositionAsync reject). In that case
+  // `pos` is never seeded and the subscribe-settle timer never arms, so
+  // the spinner would hang on "Looking for geo-caches near you…"
+  // forever. Mirror the resilience of the old getCurrentPositionAsync
+  // catch path: after a few seconds without a fix, drop the spinner so
+  // the empty state shows. Cleared early on the happy path (pos seeded →
+  // settle timer fires at ~1.5 s) — this only ever fires on the failure
+  // path.
+  useEffect(() => {
+    if (pos) return;
+    const settleTimer = setTimeout(() => setLoading(false), 10_000);
+    return () => clearTimeout(settleTimer);
   }, [pos]);
+
+  // Cache subscription — kicks off once we have a fix, but only while
+  // the screen is focused (audit MED 3). With `freezeOnBlur: true` on
+  // the tab navigator the Explore stack screens never unmount, so a
+  // bare `useEffect` left this relay sub streaming forever after the
+  // first visit. `useFocusEffect` opens it on focus and closes it on
+  // blur; the next focus re-opens (cheap — the SimplePool reuses the
+  // socket). `pos` is read inside via a ref-free closure because the
+  // focus callback re-runs whenever `pos` changes anyway (it's in deps).
+  useFocusEffect(
+    useCallback(() => {
+      if (!pos) return;
+      // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
+      // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
+      // got the same treatment earlier in this branch. Pre-#631 the
+      // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
+      // returned only the user's own truncation, so a cache 500 m across
+      // a tile boundary stayed invisible.
+      const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
+      // Load every nearby cache regardless of trust — the WoT filter is
+      // applied at render time (sortedCaches), so flipping the tier
+      // re-filters instantly with no re-subscribe or relay round-trip.
+      // Per-event work is just the coalescing enqueue (staleness drop +
+      // newest-wins live in the hook's `shouldReplace`).
+      const closer = subscribeNearbyCaches(prefixes, (c) => {
+        // Drop test-account Piglets in production at ingestion so they never
+        // enter the Map (and so can't reach the rail, mini-map, or persist).
+        // No-op in dev/preview. Mirrors ExploreHomeScreen's discover guard (#917).
+        if (isHiddenInProd(c.hiderPubkey)) return;
+        enqueueCache(c.coord, c);
+      });
+      // Drop the spinner after a beat — relays stream continuously, no EOSE wait.
+      const settleTimer = setTimeout(() => setLoading(false), 1500);
+      return () => {
+        closer();
+        clearTimeout(settleTimer);
+        // Drain the tail of the burst so events that arrived just before
+        // blur aren't stranded in the pending buffer until next focus.
+        flushCaches();
+      };
+    }, [pos, enqueueCache, flushCaches]),
+  );
 
   const sortedCaches = useMemo(() => {
     let items = [...caches.values()].map((cache) => {
@@ -251,21 +284,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     // keep serving them, so the client filters them out here.
     const nowSec = Date.now() / 1000;
     items = items.filter(({ cache }) => cache.expiresAt === null || cache.expiresAt > nowSec);
-    // Restrict to caches whose decoded position is inside the
-    // mini-map's visible bbox. As the user zooms out the bbox grows
-    // and more caches surface; no chip-row to set "within X km".
-    if (mapBbox) {
-      items = items.filter(({ cache }) => {
-        if (!cache.geohash) return false;
-        const c = decodeGeohash(cache.geohash);
-        return (
-          c.lat >= mapBbox.minLat &&
-          c.lat <= mapBbox.maxLat &&
-          c.lng >= mapBbox.minLon &&
-          c.lng <= mapBbox.maxLon
-        );
-      });
-    }
     if (selectedDifficulties.size > 0) {
       // A cache with no difficulty tag is treated as "1" — typical
       // hider convention for a trivial walk-up; otherwise filtering
@@ -283,8 +301,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     // Web-of-trust filter — drop caches from hiders outside the active
     // tier's trust graph. `isTrusted` short-circuits to true for 'all'.
     items = items.filter(({ cache }) => isTrusted(cache.hiderPubkey));
+    // Re-apply the prod test-account hide at render — cold-start caches
+    // hydrated from AsyncStorage bypass the ingestion guard above, so a
+    // stale Piggy entry could otherwise still paint here. No-op in
+    // dev/preview (mirrors ExploreHomeScreen's sortedCaches) (#917).
+    items = items.filter(({ cache }) => !isHiddenInProd(cache.hiderPubkey));
     return items;
-  }, [caches, pos, mapBbox, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
+  }, [caches, pos, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
 
   const activeFilterCount = useMemo(
     () =>
@@ -325,32 +348,27 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="geocaches-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('huntScreen.backToExplore')}
             testID="hunt-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Geo-caches</Text>
+          <Text style={styles.headerTitle}>{t('huntScreen.geocaches')}</Text>
           <TouchableOpacity
             onPress={() => navigation.navigate('MyPiglets')}
-            accessibilityLabel="My Piglets"
+            accessibilityLabel={t('huntScreen.myPiglets')}
             testID="hunt-my-piglets-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <PiggyBank size={22} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>
+        <Text style={styles.headerTagline}>{t('huntScreen.tagline')}</Text>
       </View>
 
       {/* Inline interactive map — lives OUTSIDE the FlatList rather
@@ -373,6 +391,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           lon={livePos?.lon ?? pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
+          userAvatarUri={profile?.picture ?? null}
           // Only fall back to the initial-fetch accuracy when there's
           // no live fix yet; once livePos exists, trust its accuracy
           // (including null) so we never render a halo around live
@@ -409,7 +428,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search geo-caches…"
+                placeholder={t('huntScreen.searchPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -421,7 +440,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 style={styles.filterIconButton}
                 onPress={() => setFilterSheetOpen(true)}
                 testID="hunt-filter-button"
-                accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                accessibilityLabel={
+                  activeFilterCount > 0
+                    ? t('huntScreen.filtersActive', { count: activeFilterCount })
+                    : t('huntScreen.filters')
+                }
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
@@ -448,20 +471,20 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           loading ? (
             <View style={styles.center} testID="hunt-discover-loading">
               <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.subtle}>Looking for geo-caches near you…</Text>
+              <Text style={styles.subtle}>{t('huntScreen.lookingForCaches')}</Text>
             </View>
           ) : searchQuery.trim() !== '' ? (
             <Text style={styles.emptySearchText}>
-              Nothing matches “{searchQuery.trim()}”. Try a cache type, size, or location keyword.
+              {t('huntScreen.noMatch', { query: searchQuery.trim() })}
             </Text>
           ) : (
             <View style={styles.center} testID="hunt-discover-empty-state">
               <PiggyBank size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-              <Text style={styles.emptyTitle}>No geo-caches nearby yet</Text>
+              <Text style={styles.emptyTitle}>{t('huntScreen.noCachesNearby')}</Text>
               <Text style={styles.subtle}>
-                We searched a ~5 km area. Tap{' '}
-                <Text style={{ fontWeight: '700', color: colors.brandPink }}>+</Text> above to hide
-                the first Piglet.
+                {t('huntScreen.emptyPrefix')}
+                <Text style={{ fontWeight: '700', color: colors.brandPink }}>+</Text>
+                {t('huntScreen.emptySuffix')}
               </Text>
             </View>
           )
@@ -523,44 +546,47 @@ const CacheRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
-}> = ({ cache, distance, index, colors, styles, onPress }) => (
-  <TouchableOpacity
-    style={styles.row}
-    onPress={onPress}
-    testID={`hunt-discover-row-${cache.d}`}
-    accessibilityLabel={cache.name}
-  >
-    <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
-    <View style={styles.iconContainer}>
-      {cache.imageUrl ? (
-        <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-      ) : (
-        <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
-          {cache.isLpPiggy ? (
-            <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-          ) : (
-            <MapPin size={22} color={colors.white} strokeWidth={2} />
-          )}
-        </View>
-      )}
-      <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
-    </View>
-    <View style={styles.rowMain}>
-      <Text style={styles.rowTitle} numberOfLines={1}>
-        {cache.name}
-      </Text>
-      <Text style={styles.rowMeta} numberOfLines={1}>
-        {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-        {cache.cacheType ? ` · ${cache.cacheType}` : ''}
-        {cache.size ? ` · ${cache.size}` : ''}
-        {cache.difficulty ? ` · D${cache.difficulty}` : ''}
-        {cache.terrain ? ` / T${cache.terrain}` : ''}
-      </Text>
-    </View>
-    <ChevronRight size={20} color={colors.textSupplementary} />
-  </TouchableOpacity>
-);
+}> = ({ cache, distance, index, colors, styles, onPress }) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={onPress}
+      testID={`hunt-discover-row-${cache.d}`}
+      accessibilityLabel={cache.name}
+    >
+      <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
+      <View style={styles.iconContainer}>
+        {cache.imageUrl ? (
+          <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
+        ) : (
+          <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
+            {cache.isLpPiggy ? (
+              <PiggyBank size={22} color={colors.white} strokeWidth={2} />
+            ) : (
+              <MapPin size={22} color={colors.white} strokeWidth={2} />
+            )}
+          </View>
+        )}
+        <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
+      </View>
+      <View style={styles.rowMain}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {cache.name}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {cache.isLpPiggy ? t('huntScreen.piglet') : t('huntScreen.nipGcCache')}
+          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+          {cache.cacheType ? ` · ${cache.cacheType}` : ''}
+          {cache.size ? ` · ${cache.size}` : ''}
+          {cache.difficulty ? ` · D${cache.difficulty}` : ''}
+          {cache.terrain ? ` / T${cache.terrain}` : ''}
+        </Text>
+      </View>
+      <ChevronRight size={20} color={colors.textSupplementary} />
+    </TouchableOpacity>
+  );
+};
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -572,13 +598,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

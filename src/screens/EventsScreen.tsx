@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -22,11 +23,14 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import EventsFilterSheet, {
   countActiveFilters,
   type EventsSortKey,
 } from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t as translate } from '../i18n';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import {
@@ -40,6 +44,9 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/nostrPlacesStorage';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { isFutureEvent } from '../utils/futureEvent';
+import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -56,11 +63,25 @@ interface Props {
  * Replaces the M1 "Coming soon" stub. Closes M7 of the Explore plan.
  */
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [events, setEvents] = useState<Map<string, ParsedEvent>>(
-    () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
-  );
+  // Coalesce per-event setState bursts during the nearby-event relay
+  // backfill into one commit per ~100 ms window (audit MED 4) — the
+  // naive `new Map(prev)` clone per event was O(N²) over a cold-start
+  // burst. `shouldReplace` keeps the newest revision of a replaceable
+  // event. `enqueue` feeds the relay sub; `setEvents` covers the
+  // hydrate / clear-on-reload paths.
+  const {
+    map: events,
+    setMap: setEvents,
+    enqueue: enqueueEvent,
+    flush: flushEvents,
+    reset: resetEvents,
+  } = useCoalescedMap<ParsedEvent>({
+    initial: () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
+    shouldReplace: (existing, incoming) => existing.startsAt !== incoming.startsAt,
+  });
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -78,10 +99,23 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setEvents]);
   useEffect(() => {
     if (events.size === 0) return;
-    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
+    const t = setTimeout(() => {
+      // Shed prod-hidden (test-account) AND past events before persisting so
+      // prod caches self-heal — stale Piggy/past entries seeded from earlier
+      // versions age out of storage instead of being re-saved forever and
+      // consuming MAX_ENTRIES slots. `stripHiddenForPersist` is a no-op in
+      // dev/preview; the future-only pass always applies (a past event is
+      // useless to re-show on any build). Mirrors ExploreHomeScreen (#917).
+      const nowSec = Math.floor(Date.now() / 1000);
+      const persistable = stripHiddenForPersist(
+        [...events.values()],
+        (e) => e.organiserPubkey,
+      ).filter((e) => isFutureEvent(e, nowSec));
+      saveEvents(persistable);
+    }, 1500);
     return () => clearTimeout(t);
   }, [events]);
   const [loading, setLoading] = useState(true);
@@ -109,6 +143,14 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const [sortBy, setSortBy] = useState<EventsSortKey>('date');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
+  // True only while the screen is focused — lets a manual reload (Retry /
+  // pull-to-refresh, which pass no explicit guard) abort if its async location
+  // resolve outlives the focus window, so it can't install a sub after blur.
+  const isFocusedRef = useRef(false);
+  // The "drop the spinner" settle timer, tracked so a reload / blur can cancel
+  // it — otherwise a stale timer from a prior subscription fires during the
+  // next reload and clears loading for the wrong sub.
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Post-#535: `wotTier` replaces the legacy `filterEnabled` boolean.
   // `isTrusted` is tier-aware (returns true for 'all') so callers no
@@ -119,68 +161,126 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     isTrustedRef.current = isTrusted;
   }, [isTrusted]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setEvents(new Map());
-    setUntrustedHidden(0);
-    closerRef.current?.();
-    try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
-        setError(
-          'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
-        );
-        setLoading(false);
-        return;
+  // `isCancelled` lets the focus effect abort a reload whose async location
+  // resolve outlived the focus window (blur-before-subscribe). Without it a
+  // reload kicked on focus could install a live relay sub AFTER blur — leaking
+  // exactly the stream this screen now scopes to focus. Button-triggered
+  // reloads pass nothing, so the guard is a no-op there.
+  const reload = useCallback(
+    async (isCancelled?: () => boolean) => {
+      // Manual reloads (Retry / pull-to-refresh) pass no guard — default to a
+      // focus check so a reload whose async location resolve outlives the focus
+      // window can't install a live relay sub after blur (Copilot review).
+      const cancelled = isCancelled ?? (() => !isFocusedRef.current);
+      // Cancel any in-flight settle timer from the previous sub so it can't fire
+      // mid-reload and clear the spinner for the sub we're about to replace.
+      if (loadingTimerRef.current) {
+        clearTimeout(loadingTimerRef.current);
+        loadingTimerRef.current = null;
       }
-      const liveFix = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      const lat = liveFix.coords.latitude;
-      const lon = liveFix.coords.longitude;
-      setPos({ lat, lon });
-      const myGh = encodeGeohash(lat, lon, 7);
-      // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
-      // in cities; rural users would otherwise see an empty feed.
-      // NIP-52 publishers conventionally emit g tags at every
-      // precision 3..9, so 3-char prefix is enough to catch them.
-      const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
-      const closer = subscribeNearbyEvents(prefixes, (e) => {
-        // De-dupe by coord — replaceable events; only keep the
-        // newest revision and skip past events.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) {
-          return;
-        }
-        // WoT filter — see `trustGraphService` for the threat model.
-        // `isTrusted` is tier-aware post-#535 (returns true for 'all').
-        if (!isTrustedRef.current(e.organiserPubkey)) {
-          setUntrustedHidden((n) => n + 1);
-          return;
-        }
-        setEvents((prev) => {
-          const existing = prev.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return prev;
-          const next = new Map(prev);
-          next.set(e.coord, e);
-          return next;
-        });
-      });
-      closerRef.current = closer;
-      setTimeout(() => setLoading(false), 1500);
-    } catch (e) {
-      setError((e as Error).message);
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-    return () => {
+      // Tear down the previous sub WITHOUT draining its buffer: `resetEvents`
+      // discards the staged tail (and clears the committed list) so a
+      // pull-to-refresh can't briefly repopulate the cleared list with the old
+      // subscription's buffered events (Copilot review).
       closerRef.current?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      closerRef.current = null;
+      resetEvents();
+      setLoading(true);
+      setError(null);
+      setUntrustedHidden(0);
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (cancelled()) return;
+        if (perm.status !== 'granted') {
+          setError(t('eventsScreen.locationPermissionRequired'));
+          setLoading(false);
+          return;
+        }
+        const liveFix = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        // Focus was lost while we awaited location — bail before opening a
+        // sub the cleanup already ran past.
+        if (cancelled()) return;
+        const lat = liveFix.coords.latitude;
+        const lon = liveFix.coords.longitude;
+        setPos({ lat, lon });
+        const myGh = encodeGeohash(lat, lon, 7);
+        // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
+        // in cities; rural users would otherwise see an empty feed.
+        // NIP-52 publishers conventionally emit g tags at every
+        // precision 3..9, so 3-char prefix is enough to catch them.
+        const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+        const closer = subscribeNearbyEvents(prefixes, (e) => {
+          // Hide the project's own test-account ("Piggy") events in the
+          // production app; dev/preview keep them for Maestro.
+          if (isHiddenInProd(e.organiserPubkey)) return;
+          // Skip events that have already finished (end, or start when no
+          // end / all-day). De-dupe by coord — replaceable events; only
+          // keep the newest revision.
+          if (!isFutureEvent(e, Math.floor(Date.now() / 1000))) return;
+          // WoT filter — see `trustGraphService` for the threat model.
+          // `isTrusted` is tier-aware post-#535 (returns true for 'all').
+          if (!isTrustedRef.current(e.organiserPubkey)) {
+            setUntrustedHidden((n) => n + 1);
+            return;
+          }
+          // Coalesced into one setState per flush window; the newest-wins
+          // replace rule (startsAt changed) lives in the hook's
+          // `shouldReplace`, re-applied against committed state on flush.
+          enqueueEvent(e.coord, e);
+        });
+        // If focus was lost in the same tick the sub opened, close it now
+        // rather than stranding it until the next blur. The focus cleanup
+        // owns draining the tail (flushEvents); a reload discards it.
+        if (cancelled()) {
+          closer();
+          return;
+        }
+        closerRef.current = closer;
+        loadingTimerRef.current = setTimeout(() => {
+          loadingTimerRef.current = null;
+          if (!cancelled()) setLoading(false);
+        }, 1500);
+      } catch (e) {
+        if (cancelled()) return;
+        setError((e as Error).message);
+        setLoading(false);
+      }
+    },
+    [resetEvents, enqueueEvent, t],
+  );
+
+  // Open the relay subscription only while the screen is focused (audit
+  // MED 3). With `freezeOnBlur: true` the Explore stack screens never
+  // unmount, so the previous bare `useEffect(reload)` left the NIP-52
+  // sub streaming forever after the first visit. `useFocusEffect` opens
+  // it on focus and closes (+ drains) it on blur; the next focus
+  // re-runs `reload`, which re-subscribes (cheap — SimplePool reuses the
+  // socket). Manual pull-to-refresh / retry still call `reload` directly
+  // while focused, swapping the closer in place.
+  useFocusEffect(
+    useCallback(() => {
+      isFocusedRef.current = true;
+      let active = true;
+      reload(() => !active);
+      return () => {
+        active = false;
+        isFocusedRef.current = false;
+        if (loadingTimerRef.current) {
+          clearTimeout(loadingTimerRef.current);
+          loadingTimerRef.current = null;
+        }
+        // Drain the tail of the burst into the visible list, THEN close the
+        // relay sub — so events that arrived just before blur aren't stranded
+        // in the staged buffer until next focus. (A reload, by contrast,
+        // discards the buffer via resetEvents.)
+        flushEvents();
+        closerRef.current?.();
+        closerRef.current = null;
+      };
+    }, [reload, flushEvents]),
+  );
 
   const sortedEvents = useMemo(() => {
     // Each row carries its precomputed distance so the badge text
@@ -188,14 +288,22 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     // by the user (sortBy = 'date' | 'distance'); the other key is the
     // tiebreaker so a 0-distance pair never randomly flips order between
     // renders.
-    const items = [...events.values()].map((event) => {
-      const center = event.geohash ? decodeGeohash(event.geohash) : null;
-      const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
-          : Number.POSITIVE_INFINITY;
-      return { event, distance };
-    });
+    // Re-apply the future-only filter at render time, not just at
+    // ingestion: events hydrated from the AsyncStorage mirror on cold
+    // start bypass the subscription callback, so a cached past event
+    // (e.g. last month's meetup) would otherwise paint until the live
+    // sub refreshes. `nowSec` is captured once per memo pass.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const items = [...events.values()]
+      .filter((event) => isFutureEvent(event, nowSec) && !isHiddenInProd(event.organiserPubkey))
+      .map((event) => {
+        const center = event.geohash ? decodeGeohash(event.geohash) : null;
+        const distance =
+          pos && center
+            ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        return { event, distance };
+      });
     items.sort((a, b) => {
       const startA = a.event.startsAt ?? Number.MAX_SAFE_INTEGER;
       const startB = b.event.startsAt ?? Number.MAX_SAFE_INTEGER;
@@ -251,12 +359,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     // affordance is discoverable and the door is propped open.
     Toast.show({
       type: 'info',
-      text1: 'Creating events lands soon',
-      text2:
-        'For now publish your meetup via Flockstr or Coracle — it shows up here automatically.',
+      text1: t('eventsScreen.creatingEventsSoonTitle'),
+      text2: t('eventsScreen.creatingEventsSoonBody'),
       visibilityTime: 5000,
     });
-  }, []);
+  }, [t]);
 
   const openInMaps = useCallback((event: ParsedEvent) => {
     const q = event.location ?? (event.geohash ? event.geohash : event.title);
@@ -270,32 +377,27 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="events-screen">
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-        <View style={styles.headerOverlay} />
+        <BrandPatternBackground variant="explore-compass" />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('eventsScreen.backToExplore')}
             testID="events-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Events</Text>
+          <Text style={styles.headerTitle}>{t('eventsScreen.events')}</Text>
           <TouchableOpacity
             onPress={onCreateEvent}
-            accessibilityLabel="Create event"
+            accessibilityLabel={t('eventsScreen.createEvent')}
             testID="events-create-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Plus size={20} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.headerTagline}>Bitcoin meetups and gatherings near you</Text>
+        <Text style={styles.headerTagline}>{t('eventsScreen.headerTagline')}</Text>
       </View>
 
       {/* Search bar — filters the loaded events client-side. Cheap, no
@@ -305,7 +407,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search events…"
+          placeholder={t('eventsScreen.searchPlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -317,7 +419,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.filterIconButton}
           onPress={() => setFilterSheetOpen(true)}
           testID="events-filter-button"
-          accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+          accessibilityLabel={
+            activeFilterCount > 0
+              ? t('eventsScreen.filtersActive', { count: activeFilterCount })
+              : t('eventsScreen.filters')
+          }
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
@@ -332,23 +438,20 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       {loading && events.size === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.brandPink} />
-          <Text style={styles.subtle}>Looking for Bitcoin events near you…</Text>
+          <Text style={styles.subtle}>{t('eventsScreen.lookingForEvents')}</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={reload}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => reload()}>
+            <Text style={styles.retryButtonText}>{t('eventsScreen.retry')}</Text>
           </TouchableOpacity>
         </View>
       ) : sortedEvents.length === 0 ? (
         <View style={styles.center} testID="events-empty-state">
           <CalendarDays size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>No upcoming events nearby</Text>
-          <Text style={styles.subtle}>
-            Bitcoin meetups, conferences and similar gatherings published as NIP-52 calendar events
-            show up here. Try widening your search by travelling — or organise one!
-          </Text>
+          <Text style={styles.emptyTitle}>{t('eventsScreen.noUpcomingEvents')}</Text>
+          <Text style={styles.subtle}>{t('eventsScreen.emptyStateBody')}</Text>
         </View>
       ) : (
         <>
@@ -356,7 +459,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             refreshControl={
               <RefreshControl
                 refreshing={loading && events.size > 0}
-                onRefresh={reload}
+                onRefresh={() => reload()}
                 tintColor={colors.brandPink}
                 colors={[colors.brandPink]}
               />
@@ -407,7 +510,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             ListEmptyComponent={
               searchQuery.trim() !== '' ? (
                 <Text style={styles.emptySearchText}>
-                  Nothing matches “{searchQuery.trim()}”. Try a city, hashtag, or organiser name.
+                  {t('eventsScreen.noSearchMatches', { query: searchQuery.trim() })}
                 </Text>
               ) : null
             }
@@ -437,7 +540,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 const formatDate = (ts: number | null): string => {
-  if (!ts) return 'Time TBA';
+  if (!ts) return translate('eventsScreen.timeTba');
   const d = new Date(ts * 1000);
   return d.toLocaleString(undefined, {
     weekday: 'short',
@@ -465,49 +568,52 @@ const EventHero: React.FC<{
   onOpenInMaps: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => (
-  <TouchableOpacity
-    style={styles.heroCard}
-    onPress={onPress}
-    activeOpacity={0.85}
-    testID={`event-hero-${event.d}`}
-    accessibilityLabel={`Next event: ${event.title}`}
-  >
-    {event.imageUrl ? (
-      <Image source={{ uri: event.imageUrl }} style={styles.heroImage} resizeMode="cover" />
-    ) : (
-      <View style={[styles.heroImage, styles.heroImageFallback]}>
-        <CalendarDays size={48} color={colors.brandPink} strokeWidth={1.5} />
-      </View>
-    )}
-    <View style={styles.heroBody}>
-      <Text style={styles.heroUpNext}>UP NEXT</Text>
-      <Text style={styles.heroTitle} numberOfLines={2}>
-        {event.title}
-      </Text>
-      <Text style={styles.heroMeta} numberOfLines={2}>
-        {formatDate(event.startsAt)}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-        {event.location ? ` · ${event.location}` : ''}
-      </Text>
-      {event.description ? (
-        <Text style={styles.heroDescription} numberOfLines={expanded ? 0 : 3}>
-          {event.description}
+}> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={styles.heroCard}
+      onPress={onPress}
+      activeOpacity={0.85}
+      testID={`event-hero-${event.d}`}
+      accessibilityLabel={t('eventsScreen.nextEvent', { title: event.title })}
+    >
+      {event.imageUrl ? (
+        <Image source={{ uri: event.imageUrl }} style={styles.heroImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.heroImage, styles.heroImageFallback]}>
+          <CalendarDays size={48} color={colors.brandPink} strokeWidth={1.5} />
+        </View>
+      )}
+      <View style={styles.heroBody}>
+        <Text style={styles.heroUpNext}>{t('eventsScreen.upNext')}</Text>
+        <Text style={styles.heroTitle} numberOfLines={2}>
+          {event.title}
         </Text>
-      ) : null}
-      {expanded && (event.location || event.geohash) ? (
-        <TouchableOpacity
-          style={styles.locationButton}
-          onPress={onOpenInMaps}
-          testID={`event-hero-${event.d}-open-in-maps`}
-        >
-          <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.locationButtonText}>Open in Maps</Text>
-        </TouchableOpacity>
-      ) : null}
-    </View>
-  </TouchableOpacity>
-);
+        <Text style={styles.heroMeta} numberOfLines={2}>
+          {formatDate(event.startsAt)}
+          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+          {event.location ? ` · ${event.location}` : ''}
+        </Text>
+        {event.description ? (
+          <Text style={styles.heroDescription} numberOfLines={expanded ? 0 : 3}>
+            {event.description}
+          </Text>
+        ) : null}
+        {expanded && (event.location || event.geohash) ? (
+          <TouchableOpacity
+            style={styles.locationButton}
+            onPress={onOpenInMaps}
+            testID={`event-hero-${event.d}-open-in-maps`}
+          >
+            <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
+            <Text style={styles.locationButtonText}>{t('eventsScreen.openInMaps')}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 const EventRow: React.FC<{
   event: ParsedEvent;
@@ -519,6 +625,7 @@ const EventRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+  const t = useTranslation();
   const { day, month } = dayLabel(event.startsAt);
   return (
     <TouchableOpacity
@@ -527,7 +634,7 @@ const EventRow: React.FC<{
       testID={`event-row-${event.d}`}
       accessibilityLabel={event.title}
     >
-      {upNext ? <Text style={styles.upNextChip}>UP NEXT</Text> : null}
+      {upNext ? <Text style={styles.upNextChip}>{t('eventsScreen.upNext')}</Text> : null}
       <View style={styles.dateBlock}>
         <Text style={styles.dateMonth}>{month}</Text>
         <Text style={styles.dateDay}>{day}</Text>
@@ -551,7 +658,7 @@ const EventRow: React.FC<{
             venue address; events without a geohash render an em-dash so
             the layout stays consistent row-to-row. */}
         <Text style={styles.rowDistance} numberOfLines={1}>
-          {Number.isFinite(distance) ? formatDistance(distance) : '— distance unknown'}
+          {Number.isFinite(distance) ? formatDistance(distance) : t('eventsScreen.distanceUnknown')}
         </Text>
       </View>
       <ChevronRight size={20} color={colors.textSupplementary} strokeWidth={2.5} />
@@ -569,13 +676,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       minHeight: 140,
       overflow: 'hidden',
-    },
-    headerImage: {
-      ...StyleSheet.absoluteFillObject,
-    },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

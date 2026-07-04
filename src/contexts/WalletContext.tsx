@@ -20,14 +20,18 @@ import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard
 import { singleFlight } from '../utils/singleFlight';
 import {
   pickNewReceipts,
+  pickNewerReceipt,
   settledIncomingHashes,
   shouldSeedBaseline,
+  type AnnouncedReceipt,
 } from '../utils/incomingReceipts';
 import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
+import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { WalletLiveContext } from './WalletLiveContext';
 import {
   CardTheme,
   WalletMetadata,
@@ -36,6 +40,9 @@ import {
   ZapCounterpartyInfo,
   walletLabel,
 } from '../types/wallet';
+import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
+import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
@@ -110,7 +117,6 @@ interface WalletContextType {
   // User prefs
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
-  btcPrice: number | null;
 
   // Wallet actions
   addNwcWallet: (
@@ -167,12 +173,6 @@ interface WalletContextType {
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
-  // Incoming payment event bus. Set whenever any connected wallet's
-  // balance goes UP; consumed by the app-root PaymentProgressOverlay
-  // so the celebration appears regardless of which screen is active.
-  lastIncomingPayment: IncomingPayment | null;
-  clearLastIncomingPayment: () => void;
-
   /**
    * Kick off aggressive 1 s polling for a specific NWC invoice for up
    * to `durationMs` (default 3 min). Called by ReceiveSheet when an
@@ -224,6 +224,10 @@ interface WalletContextType {
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
+
+// Live price/receive slices (#801) live in their own module; re-export the
+// consumer hook so the public surface stays at one path, like `useWallet`.
+export { useWalletLive } from './WalletLiveContext';
 
 // Persist a wallet's announced-receipt hashes so a payment is announced once,
 // EVER — not once per JS session. The in-memory set resets on every cold start
@@ -329,7 +333,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
-    setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+    // No-op bail-out (unchanged poll → same `wallets` identity) lives in mergeWalletUpdate.
+    setWallets((prev) => mergeWalletUpdate(prev, walletId, updates));
     // Persist fresh balance to disk so the next cold start can hydrate
     // it instantly (vs paying ~9 s BDK.Wallet.create + Electrum.sync to
     // re-derive it). Fire-and-forget; failure mode is "next boot shows
@@ -776,11 +781,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
           // Sync stored state to relay *responsiveness* (does it answer?), not
           // connect()'s socket-level success — so a dead relay stays
-          // Disconnected instead of flapping back to Connected (#654). Write
-          // only on change to avoid needless re-renders.
-          const responsive = nwcService.isWalletConnected(w.id);
-          if (responsive !== w.isConnected) {
-            updateWalletInState(w.id, { isConnected: responsive });
+          // Disconnected instead of flapping back to Connected (#654). Also
+          // surface the tri-state health so the card can show amber "Not
+          // responding" when the socket is up but the relay is parked /
+          // rate-limited (#786). Write only on change to avoid re-renders.
+          const isConnected = nwcService.isWalletConnected(w.id);
+          // getWalletHealth needs the SOCKET-only state to tell amber
+          // "Not responding" (socket up, relay parked) from red "Disconnected"
+          // (socket down) — isWalletConnected is already false for the degraded
+          // case, which would force red instead of amber (#786 review).
+          const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
+          if (isConnected !== w.isConnected || health !== w.connectionHealth) {
+            updateWalletInState(w.id, { isConnected, connectionHealth: health });
           }
         }
       } finally {
@@ -1085,6 +1097,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!wallet) return;
 
       try {
+        // Load swap-meta before mapping so swap legs tag on the first fetch
+        // after launch (getSwapMeta is sync), not a refresh later (#895/#898).
+        await swapRecoveryService.ensureSwapMetaLoaded();
         let txs: WalletTransaction[];
         if (wallet.walletType === 'onchain') {
           // Single sync for both balance + transactions (avoids double Electrum sync)
@@ -1092,15 +1107,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (result.balance !== null) {
             updateWalletInState(walletId, { balance: result.balance });
           }
-          txs = result.transactions.map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.confirmed ? (tx.type === 'incoming' ? 'Received' : 'Sent') : 'Pending',
-            settled_at: tx.timestamp,
-            created_at: tx.timestamp,
-            blockHeight: tx.blockHeight,
-            txid: tx.txid,
-          }));
+          // mapOnchainTransactions tags Boltz swap legs by txid (#895) and
+          // preserves optimistic swap placeholder rows across the refresh (#896).
+          const existingOnchain =
+            walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
+          txs = mapOnchainTransactions(result.transactions, existingOnchain);
         } else {
           const raw = await nwcService.listTransactions(walletId);
           // Carries forward resolved zap-counterparties + optimistic rows the
@@ -1125,9 +1136,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // transactions that haven't been resolved yet. `force` (set by
         // an explicit pull-to-refresh) bypasses the fingerprint skip so
         // the resolver always does a full pass — see resolveZapSenders.
-        resolveZapSendersRef
-          .current?.(walletId, { force: opts?.force })
-          .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        // Deferred one macrotask so the resolver's `mergeResolverResults`
+        // re-render burst can't land in the same event-loop tick as the
+        // `updateWalletInState` commit above — that tick is where the
+        // incoming-payment overlay's dismiss tap was getting queued (#828).
+        setTimeout(() => {
+          resolveZapSendersRef
+            .current?.(walletId, { force: opts?.force })
+            ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        }, 0);
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
@@ -1189,29 +1206,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       };
 
-      const userPubkey = nostrService.getCurrentUserPubkey();
-      // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
-      // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
-      // Self-hosted LNbits typically tags receipts with the server's pubkey,
-      // not the user's.
-      const recipients: string[] = [];
-      if (userPubkey) recipients.push(userPubkey);
-      const lud16s = new Set<string>();
-      const currentWallet = walletsRef.current.find((w) => w.id === walletId);
-      if (currentWallet?.lightningAddress) lud16s.add(currentWallet.lightningAddress);
-      for (const lud16 of lud16s) {
-        const pk = await resolveLud16ToNostrPubkey(lud16);
-        if (pk) recipients.push(pk);
-      }
-      if (recipients.length === 0) {
-        releaseController();
-        return;
-      }
-      if (signal.aborted) {
-        releaseController();
-        return;
-      }
-
       // Snapshot the pending list via a setter so we always read the latest
       // transactions without having to thread a ref through this callback.
       // We deliberately don't require `bolt11` — cached transactions from
@@ -1271,6 +1265,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
         releaseController();
       };
+
+      // Recipient pubkeys for the `#p` filter — resolved AFTER the pending/
+      // fingerprint short-circuits so the common no-op balance tick never pays
+      // the resolveLud16ToNostrPubkey round-trip. userPubkey reused below.
+      const userPubkey = nostrService.getCurrentUserPubkey();
+      const recipients = await collectZapRecipientPubkeys(
+        userPubkey,
+        walletsRef.current.find((w) => w.id === walletId)?.lightningAddress,
+        resolveLud16ToNostrPubkey,
+      );
+      if (recipients.length === 0 || signal.aborted) {
+        releaseController();
+        return;
+      }
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
@@ -1867,9 +1875,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // refresh here would be a redundant list_transactions round-trip. Only the
     // expectPayment path needs it (the list may not yet include the settle).
     if (lastIncomingPayment.fromTxList) return;
-    fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
-      // Non-fatal: next organic refresh will pick the tx up.
-    });
+    const walletId = lastIncomingPayment.walletId;
+    // Defer past the interaction frame so the overlay's dismiss tap is serviced
+    // before this heavy refresh runs on the JS thread (#859, #828).
+    const handle = deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId));
+    return () => handle.cancel();
     // Intentionally only fire on `lastIncomingPayment` changes; the
     // callback identity is stable enough across renders that adding it
     // would double-fetch on unrelated renders.
@@ -1891,15 +1901,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         AsyncStorage.removeItem(`seenReceipts_${id}`).catch(() => {});
       }
 
+    const handles: { cancel: () => void }[] = [];
     for (const wallet of wallets) {
       const bal = wallet.balance;
       if (bal === null || bal === undefined) continue;
       const prev = baselines.get(wallet.id);
       baselines.set(wallet.id, bal);
       if (prev !== undefined && bal > prev) {
-        void fetchTransactionsForWallet(wallet.id).catch(() => {});
+        // A balance bump is when the receive overlay pops — defer the refresh
+        // off the interaction path so the dismiss tap stays responsive (#859).
+        const walletId = wallet.id;
+        handles.push(deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId)));
       }
     }
+    return () => handles.forEach((h) => h.cancel());
     // fetchTransactionsForWallet is a stable useCallback; omitting it from deps
     // avoids re-running on unrelated renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1934,13 +1949,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // setLastIncomingPayment is one state value — calling it in a loop would
     // batch and keep only the last, dropping the rest (#655 review). Pick the
     // newest by settled_at, deterministically, across all wallets.
-    let newest: {
-      walletId: string;
-      amountSats: number;
-      paymentHash: string;
-      settledAt: number;
-    } | null = null;
-    let newestLabel = '';
+    let newest: AnnouncedReceipt | null = null;
     for (const wallet of wallets) {
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
@@ -1953,10 +1962,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);
         changed = true;
-        if (!newest || receipt.settledAt > newest.settledAt) {
-          newest = { walletId: wallet.id, ...receipt };
-          newestLabel = walletLabel(wallet);
-        }
+        newest = pickNewerReceipt(newest, {
+          ...receipt,
+          walletId: wallet.id,
+          walletLabel: walletLabel(wallet),
+        });
       }
       // Persist the moment a new receipt is seen so a reload before the next
       // write can't re-announce it.
@@ -1965,7 +1975,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (newest) {
       if (__DEV__)
         console.log(
-          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newestLabel} (${newest.paymentHash.slice(0, 12)}…)`,
+          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newest.walletLabel} (${newest.paymentHash.slice(0, 12)}…)`,
         );
       setLastIncomingPayment({
         walletId: newest.walletId,
@@ -2081,7 +2091,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2099,8 +2108,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
       isConnected,
@@ -2120,7 +2127,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2138,14 +2144,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
     ],
   );
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
+  // Sibling value carrying the high-frequency price/receive slices (#801).
+  // Memoised separately so a fiat-price poll or a settled receive rebuilds only
+  // this — not `contextValue` — and only `useWalletLive()` consumers re-render.
+  const walletLiveValue = useMemo(
+    () => ({ btcPrice, lastIncomingPayment, clearLastIncomingPayment }),
+    [btcPrice, lastIncomingPayment, clearLastIncomingPayment],
+  );
+
+  return (
+    <WalletContext.Provider value={contextValue}>
+      <WalletLiveContext.Provider value={walletLiveValue}>{children}</WalletLiveContext.Provider>
+    </WalletContext.Provider>
+  );
 };
 
 export function useWallet() {

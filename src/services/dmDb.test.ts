@@ -19,10 +19,16 @@ import {
   upsertDmMessages,
   getConversationMessages,
   getInboxLatest,
+  selectDmWrapIds,
+  hasStoredWraps,
+  deleteDmMessagesForOwner,
   type DmMessageRow,
 } from './dmDb';
 
+const OWNER = 'owner1';
+
 const row = (over: Partial<DmMessageRow> = {}): DmMessageRow => ({
+  owner: OWNER,
   eventId: 'e1',
   conversation: 'convA',
   createdAt: 100,
@@ -44,22 +50,22 @@ beforeEach(() => {
 describe('dmDb', () => {
   describe('selectKnownEventIds', () => {
     it('returns empty set (no query) for an empty input', async () => {
-      expect((await selectKnownEventIds([])).size).toBe(0);
+      expect((await selectKnownEventIds(OWNER, [])).size).toBe(0);
       expect(mockExecute).not.toHaveBeenCalled();
     });
 
-    it('returns the set of ids already stored', async () => {
+    it('returns the set of ids already stored, scoped to the owner', async () => {
       mockExecute.mockResolvedValueOnce(rowsResult([{ event_id: 'a' }, { event_id: 'c' }]));
-      const known = await selectKnownEventIds(['a', 'b', 'c']);
+      const known = await selectKnownEventIds(OWNER, ['a', 'b', 'c']);
       expect([...known].sort()).toEqual(['a', 'c']);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('WHERE event_id IN (?,?,?)');
-      expect(params).toEqual(['a', 'b', 'c']);
+      expect(sql).toContain('WHERE owner = ? AND event_id IN (?,?,?)');
+      expect(params).toEqual([OWNER, 'a', 'b', 'c']);
     });
 
     it('chunks large id lists under the SQLite variable limit', async () => {
       const ids = Array.from({ length: 1200 }, (_, i) => `id${i}`);
-      await selectKnownEventIds(ids);
+      await selectKnownEventIds(OWNER, ids);
       // 1200 / 500 → 3 chunked queries
       expect(mockExecute).toHaveBeenCalledTimes(3);
     });
@@ -77,7 +83,7 @@ describe('dmDb', () => {
       expect(mockExecute).toHaveBeenCalledTimes(2);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('INSERT OR REPLACE INTO dm_messages');
-      expect(params).toEqual(['e1', 'convA', 100, 's1', 'hi', 0, 14]);
+      expect(params).toEqual([OWNER, 'e1', 'convA', 100, 's1', 'hi', 0, 14]);
     });
   });
 
@@ -86,6 +92,7 @@ describe('dmDb', () => {
       mockExecute.mockResolvedValueOnce(
         rowsResult([
           {
+            owner: OWNER,
             event_id: 'e2',
             conversation: 'convA',
             created_at: 200,
@@ -96,9 +103,10 @@ describe('dmDb', () => {
           },
         ]),
       );
-      const out = await getConversationMessages('convA');
+      const out = await getConversationMessages(OWNER, 'convA');
       expect(out).toEqual([
         {
+          owner: OWNER,
           eventId: 'e2',
           conversation: 'convA',
           createdAt: 200,
@@ -109,31 +117,71 @@ describe('dmDb', () => {
         },
       ]);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('WHERE conversation = ?');
+      expect(sql).toContain('WHERE owner = ? AND conversation = ?');
       expect(sql).toContain('ORDER BY created_at DESC');
-      expect(params).toEqual(['convA', 50]);
+      expect(params).toEqual([OWNER, 'convA', 50]);
     });
 
     it('pages backwards with beforeCreatedAt', async () => {
-      await getConversationMessages('convA', { limit: 20, beforeCreatedAt: 150 });
+      await getConversationMessages(OWNER, 'convA', { limit: 20, beforeCreatedAt: 150 });
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('created_at < ?');
-      expect(params).toEqual(['convA', 150, 20]);
+      expect(params).toEqual([OWNER, 'convA', 150, 20]);
     });
   });
 
   describe('getInboxLatest', () => {
-    it('selects the latest row per conversation (MAX(created_at) join)', async () => {
+    it('selects the latest row per conversation (MAX(created_at) join), owner-scoped', async () => {
       mockExecute.mockResolvedValueOnce(
         rowsResult([
-          { event_id: 'e9', conversation: 'convB', created_at: 900, sender: 's', content: 'z' },
+          {
+            owner: OWNER,
+            event_id: 'e9',
+            conversation: 'convB',
+            created_at: 900,
+            sender: 's',
+            content: 'z',
+          },
         ]),
       );
-      const out = await getInboxLatest();
+      const out = await getInboxLatest(OWNER);
       expect(out[0].conversation).toBe('convB');
-      const [sql] = mockExecute.mock.calls[0];
+      const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('MAX(created_at)');
       expect(sql).toContain('GROUP BY conversation');
+      expect(sql).toContain('WHERE m.owner = ?');
+      expect(params).toEqual([OWNER, OWNER]);
+    });
+  });
+
+  describe('selectDmWrapIds', () => {
+    it('returns NIP-17 wrap ids only (kind-4 rows excluded)', async () => {
+      mockExecute.mockResolvedValueOnce(rowsResult([{ event_id: 'w1' }, { event_id: 'w2' }]));
+      const out = await selectDmWrapIds(OWNER);
+      expect(out).toEqual(['w1', 'w2']);
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toContain('wire_kind != 4');
+      expect(params).toEqual([OWNER]);
+    });
+  });
+
+  describe('hasStoredWraps', () => {
+    it('is false on an empty store and true once a wrap row exists', async () => {
+      expect(await hasStoredWraps(OWNER)).toBe(false);
+      mockExecute.mockResolvedValueOnce(rowsResult([{ present: 1 }]));
+      expect(await hasStoredWraps(OWNER)).toBe(true);
+      const [sql] = mockExecute.mock.calls[0];
+      expect(sql).toContain('LIMIT 1');
+      expect(sql).toContain('wire_kind != 4');
+    });
+  });
+
+  describe('deleteDmMessagesForOwner', () => {
+    it("deletes only the owner's rows", async () => {
+      await deleteDmMessagesForOwner(OWNER);
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
+      expect(params).toEqual([OWNER]);
     });
   });
 });

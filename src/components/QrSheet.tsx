@@ -16,6 +16,10 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   npub: string;
+  /** Optional `nostr:nprofile1…` (pubkey + relay hints) preferred over the
+   * bare npub when writing to an NFC tag, so a cold-contact scanner can
+   * resolve the profile on niche relays (#755). Falls back to npub. */
+  nostrRef?: string;
   displayName?: string;
   lightningAddress?: string | null;
   defaultMode?: 'npub' | 'lightning';
@@ -25,6 +29,7 @@ const QrSheet: React.FC<Props> = ({
   visible,
   onClose,
   npub,
+  nostrRef,
   displayName,
   lightningAddress,
   defaultMode = 'npub',
@@ -98,6 +103,7 @@ const QrSheet: React.FC<Props> = ({
         visible={nfcWriteVisible}
         onClose={() => setNfcWriteVisible(false)}
         npub={npub}
+        nostrRef={nostrRef}
         displayName={displayName ?? 'You'}
       />
     </>

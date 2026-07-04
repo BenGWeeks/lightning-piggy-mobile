@@ -65,6 +65,25 @@ describe('buildDmSummaries follow gate', () => {
   });
 });
 
+describe('buildDmSummaries malformed-pubkey filter (#849)', () => {
+  it('drops entries whose partner pubkey is not 64 hex chars (the dcc… junk rows)', () => {
+    // Pre-fix junk rows already in the store: short hex, non-hex, wrong length.
+    const result = buildDmSummaries(
+      [entry(FOLLOWED), entry('dcc123'), entry('z'.repeat(64)), entry('a'.repeat(63))],
+      [followedContact],
+      undefined,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].pubkey).toBe(FOLLOWED);
+  });
+
+  it('keeps a valid mixed-case pubkey (matched case-insensitively via lowercase key)', () => {
+    const result = buildDmSummaries([entry('C'.repeat(64))], [], undefined);
+    expect(result).toHaveLength(1);
+    expect(result[0].pubkey?.toLowerCase()).toBe('c'.repeat(64));
+  });
+});
+
 describe('buildDmSummaries non-followed profile resolution (#664)', () => {
   const evilProfile: NostrProfile = {
     pubkey: UNFOLLOWED,

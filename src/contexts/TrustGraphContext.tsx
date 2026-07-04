@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNostr } from './NostrContext';
+import { useNostr, useNostrContacts } from './NostrContext';
 import {
   DEFAULT_SEED_PUBKEYS,
   computeTrustSet,
@@ -96,7 +96,8 @@ interface ProviderProps {
 }
 
 export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
-  const { pubkey, contacts } = useNostr();
+  const { pubkey } = useNostr();
+  const { contacts } = useNostrContacts();
 
   // Direct follows (L1) — derived from NostrContext's contacts state.
   const l1Follows = useMemo(() => {
@@ -182,23 +183,30 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   // For 'all' tier we still compute a trust set (so the UI can show
   // "n hidden" counts symmetrically) but `isTrusted` short-circuits to
   // true below.
-  const trustSet = useMemo(() => {
-    const effectiveL2 = wotTier === 'fof' || wotTier === 'all' ? l2Follows : new Set<string>();
-    return computeTrustSet(pubkey, l1Follows, effectiveL2, true);
-  }, [pubkey, l1Follows, l2Follows, wotTier]);
+  //
+  // ALL tiers are memoised up front (not just the persisted one). The
+  // previous `trustSetForTier` only fast-pathed `tier === wotTier` and ran
+  // `computeTrustSet` per call otherwise — minting a fresh Set identity on
+  // every render of every caller. MessagesScreen evaluates the UI-effective
+  // tier (persisted 'all' clamps to 'friends' when secretMode is off — the
+  // DEFAULT configuration) and keys two O(inbox) memos on the returned set,
+  // so its whole memo chain re-ran every render. Building both sets here is
+  // O(follows) — cheap — and only on contacts/identity change.
+  const tierSets = useMemo(() => {
+    const friends = computeTrustSet(pubkey, l1Follows, new Set<string>(), true);
+    const widened = computeTrustSet(pubkey, l1Follows, l2Follows, true);
+    return { friends, fof: widened, all: widened } satisfies Record<WotTier, ReadonlySet<string>>;
+  }, [pubkey, l1Follows, l2Follows]);
+
+  const trustSet = tierSets[wotTier];
 
   // Tier-parameterised version of `trustSet`. Returns the set that
   // *would* apply if the requested tier were active, regardless of
-  // what's persisted. Hot path: when the requested tier equals the
-  // persisted one we hand back the memoised `trustSet` directly so
-  // we don't rebuild on every consumer call.
+  // what's persisted. Referentially stable per (pubkey, contacts) — see
+  // `tierSets` above.
   const trustSetForTier = useCallback(
-    (tier: WotTier): ReadonlySet<string> => {
-      if (tier === wotTier) return trustSet;
-      const effectiveL2 = tier === 'fof' || tier === 'all' ? l2Follows : new Set<string>();
-      return computeTrustSet(pubkey, l1Follows, effectiveL2, true);
-    },
-    [trustSet, wotTier, pubkey, l1Follows, l2Follows],
+    (tier: WotTier): ReadonlySet<string> => tierSets[tier],
+    [tierSets],
   );
 
   const isTrusted = useCallback(

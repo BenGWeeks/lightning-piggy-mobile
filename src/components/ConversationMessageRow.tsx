@@ -2,11 +2,13 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import MessageBubble from './MessageBubble';
+import OrderPaymentActions from './OrderPaymentActions';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import type { Palette } from '../styles/palettes';
 import type { ConversationStyles } from '../styles/ConversationScreen.styles';
 import type { Item } from '../utils/conversationItems';
 import { formatTime } from '../utils/messageContent';
+import { orderCardHeader, shortOrderId } from '../utils/orderEvents';
 
 // Reuse MessageBubble's own prop types so the pass-through handlers can never
 // drift from what the bubble expects.
@@ -26,6 +28,29 @@ export interface ConversationMessageRowProps {
   pollAggregates: BubbleProps['pollAggregates'];
   onVotePoll: BubbleProps['onVotePoll'];
   onShowTxDetail: (tx: TransactionDetailData) => void;
+  // Live-location pass-throughs (#206) — latest coords / status / countdown
+  // per session, plus the in-bubble "Stop" handler for the sender.
+  liveLocationLatest: BubbleProps['liveLocationLatest'];
+  liveLocationStatus: BubbleProps['liveLocationStatus'];
+  liveLocationRemainingMs: BubbleProps['liveLocationRemainingMs'];
+  onStopLiveLocation: BubbleProps['onStopLiveLocation'];
+  // Location-card mini-map plumbing (#206) — my live position (for the
+  // blue "me" dot + halo), the peer's avatar, and the Open-Map handler.
+  myLat: BubbleProps['myLat'];
+  myLon: BubbleProps['myLon'];
+  myAccuracyMetres: BubbleProps['myAccuracyMetres'];
+  myAvatarUri: BubbleProps['myAvatarUri'];
+  peerAvatarUri: BubbleProps['peerAvatarUri'];
+  onOpenMap: BubbleProps['onOpenMap'];
+  // Tap a bubble → parent presents the message-info sheet (sent OR received,
+  // #856). Passed straight through to MessageBubble.
+  onShowInfo: BubbleProps['onShowInfo'];
+  // Per-message reactions + long-press → action sheet (#205). The screen
+  // builds these per-item (only for message/gif/location rows with a stable
+  // rumor id) and passes them straight through to the bubble.
+  onLongPress: BubbleProps['onLongPress'];
+  reactions: BubbleProps['reactions'];
+  onToggleReaction: BubbleProps['onToggleReaction'];
 }
 
 /**
@@ -48,6 +73,20 @@ function ConversationMessageRow({
   pollAggregates,
   onVotePoll,
   onShowTxDetail,
+  liveLocationLatest,
+  liveLocationStatus,
+  liveLocationRemainingMs,
+  onStopLiveLocation,
+  myLat,
+  myLon,
+  myAccuracyMetres,
+  myAvatarUri,
+  peerAvatarUri,
+  onOpenMap,
+  onShowInfo,
+  onLongPress,
+  reactions,
+  onToggleReaction,
 }: ConversationMessageRowProps): React.ReactElement {
   if (item.kind === 'dayHeader') {
     return (
@@ -104,6 +143,60 @@ function ConversationMessageRow({
       </View>
     );
   }
+  // Marketplace order / receipt card (#market) — a kind-16/17 event a Nostr
+  // market addressed to the buyer. Rendered here (not in MessageBubble) for the
+  // same reason as the zap card: it's a structured, non-text Item the bubble
+  // doesn't model.
+  if (item.kind === 'order') {
+    const header = orderCardHeader(item.order.type);
+    const totalItems = item.order.items.reduce((sum, i) => sum + i.quantity, 0);
+    return (
+      <View style={[styles.orderRow, item.fromMe ? styles.orderRowRight : styles.orderRowLeft]}>
+        <View
+          style={styles.orderCard}
+          accessibilityLabel={`${header.label} for order ${shortOrderId(item.order.orderId)}`}
+          testID={`conversation-order-${item.id}`}
+        >
+          <View style={styles.orderCardHeaderRow}>
+            <Text style={styles.orderCardEmoji}>{header.emoji}</Text>
+            <Text style={styles.orderCardLabel}>{header.label}</Text>
+          </View>
+          <Text style={styles.orderCardId}>Order #{shortOrderId(item.order.orderId)}</Text>
+          {item.order.amountSats !== undefined ? (
+            <Text style={styles.orderCardAmount}>
+              {item.order.amountSats.toLocaleString()} sats
+            </Text>
+          ) : null}
+          {item.order.status ? (
+            <Text style={styles.orderCardMeta}>Status: {item.order.status}</Text>
+          ) : null}
+          {item.order.tracking ? (
+            <Text style={styles.orderCardMeta}>Tracking: {item.order.tracking}</Text>
+          ) : null}
+          {totalItems > 0 ? (
+            <Text style={styles.orderCardMeta}>
+              {totalItems} item{totalItems === 1 ? '' : 's'}
+            </Text>
+          ) : null}
+          {item.order.message ? (
+            <Text style={styles.orderCardMessage}>{item.order.message}</Text>
+          ) : null}
+          {/* Pay / QR affordance — a Pay button + QR + copy on a kind-16 type-2
+              payment request, or a "Paid ✓" badge on a kind-17 receipt (#925
+              follow-up). Renders nothing for other order types. */}
+          <OrderPaymentActions
+            order={item.order}
+            fromMe={item.fromMe}
+            isInvoicePaid={isInvoicePaid}
+            onPayInvoice={onPayInvoice}
+            testIdPrefix="conversation"
+            id={item.id}
+          />
+          <Text style={styles.bubbleTime}>{formatTime(item.createdAt)}</Text>
+        </View>
+      </View>
+    );
+  }
   // Map the local Item shape to MessageBubble's `BubbleContent`. The Items
   // array was already classified upstream (buildConversationItems calls
   // classifyMessageContent) so this is a flat re-tag — MessageBubble handles
@@ -115,7 +208,11 @@ function ConversationMessageRow({
         ? ({ kind: 'location', location: item.location } as const)
         : item.kind === 'poll'
           ? ({ kind: 'poll', poll: item.poll } as const)
-          : ({ kind: 'text', text: item.text } as const);
+          : item.kind === 'liveLocationMarker'
+            ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
+            : item.kind === 'unsupported'
+              ? ({ kind: 'unsupported', rawKind: item.rawKind } as const)
+              : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}
@@ -132,6 +229,22 @@ function ConversationMessageRow({
       onToggleSecretMode={onToggleSecretMode}
       pollAggregates={pollAggregates}
       onVotePoll={onVotePoll}
+      liveLocationLatest={liveLocationLatest}
+      liveLocationStatus={liveLocationStatus}
+      liveLocationRemainingMs={liveLocationRemainingMs}
+      onStopLiveLocation={onStopLiveLocation}
+      myLat={myLat}
+      myLon={myLon}
+      myAccuracyMetres={myAccuracyMetres}
+      myAvatarUri={myAvatarUri}
+      peerAvatarUri={peerAvatarUri}
+      onOpenMap={onOpenMap}
+      deliveryStatus={item.kind === 'message' ? item.deliveryStatus : undefined}
+      wireKind={item.kind === 'message' ? item.wireKind : undefined}
+      onShowInfo={onShowInfo}
+      onLongPress={onLongPress}
+      reactions={reactions}
+      onToggleReaction={onToggleReaction}
       testIdPrefix="conversation"
     />
   );

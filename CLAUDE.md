@@ -34,10 +34,11 @@
 
 ## Testing
 
-- E2E tests use Maestro and live in `tests/e2e/`
+- E2E tests use Maestro and live in `.maestro/`, organised one folder deep by feature area (`authentication/`, `wallets/`, `payments/`, `messaging/`, `groups/`, `friends/`, `hunt/`, `profile/`, `map/`, `ui/`, `cards/`). Composed flows are named `flow-NNN-<description>.yaml` (globally sequential); shared building blocks live un-numbered in `common/` and are pulled in via `runFlow` (never run on their own). `perf/` and `keyboard-audit/` are kept as their own sub-sections. See `.maestro/README.adoc` for the full layout + the relay/identity safety rules.
 - Install Maestro: `curl -Ls "https://get.maestro.mobile.dev" | bash`
-- Run tests: `maestro test tests/e2e/<test-file>.yaml`
-- **NEVER use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests or when interacting with the app** — coordinates are fragile and break across screen sizes, devices, and OS versions. Always add `accessibilityLabel` and/or `testID` props to components and use `id:` or `text:` selectors in Maestro instead.
+- Run one flow: `maestro test .maestro/<area>/flow-NNN-<name>.yaml` · Run the curated wallet/transfer suite: `source .env && bash .maestro/reporting/run-all.sh`
+- A **disabled** nightly Maestro Cloud workflow (`.github/workflows/maestro-nightly.yml`) is scaffolded — gated off behind `vars.ENABLE_MAESTRO_NIGHTLY`; enable only with a Maestro Cloud subscription.
+- **NEVER use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) for the app's own UI** — coordinates are fragile and break across screen sizes, devices, and OS versions. Always add `accessibilityLabel` and/or `testID` props to components and use `id:` or `text:` selectors in Maestro instead. The *only* exception is **OS-owned surfaces the app can't instrument** — the system photo picker / image crop, the camera, and third-party WebViews — which expose no testID or label to the app; there `point:` is a documented last resort (see the picker/crop taps in the `attach-*` and `profile-image` flows). If an element is in *our* UI, add a testID — never reach for coordinates.
 - If a component is missing an accessibility label, add one to the source code rather than using coordinates as a workaround
 - All interactive elements (buttons, tabs, alphabet letters, etc.) must have `accessibilityLabel` and/or `testID` props
 - Tab bar buttons use `tabBarButtonTestID` (e.g., `tab-friends`) and `tabBarAccessibilityLabel` (e.g., `Friends tab`)
@@ -67,7 +68,7 @@
   - **Contexts** → extract per-responsibility hooks/services. E.g. `NostrContext` → `useDmInbox` / `useProfiles` / `useRelays` (+ the `src/services/dm*` data layer), each its own file; the context just composes them.
   - **Screens** → lift sub-views into components, and non-UI logic into hooks/utils (`useXScreenState`, `src/utils/…`). Styles → `src/styles/<Name>.styles.ts` (see above).
   - **Services** → split by domain (`nostrService` → `nostrRelay` / `nostrDm` / `nostrProfile`).
-- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015), `nwcService.ts` (1,009). The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
+- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015). (`nwcService.ts` dropped under the cap in #785 once its relay-health layer moved to `src/services/nwcRelayHealth.ts` — baseline entry removed.) The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
 
 ## Unit tests
 

@@ -1,9 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
-import { Check, ShieldCheck, Link2, BellRing } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Switch,
+  Platform,
+} from 'react-native';
+import { Check, ShieldCheck, Link2, BellRing, Radio } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
@@ -14,22 +23,38 @@ import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/lin
 import {
   getLockScreenContentEnabled,
   setLockScreenContentEnabled,
+  requestNotificationPermission,
 } from '../../services/notificationService';
+import {
+  loadBackgroundDmEnabled,
+  setBackgroundDmEnabled,
+} from '../../services/backgroundDmPreference';
+import { startBackgroundDmWatch, stopBackgroundDmWatch } from '../../services/backgroundDmService';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
-const PRESETS: { value: number | null; label: string; sublabel: string }[] = [
-  { value: null, label: 'Off', sublabel: 'Never confirm — every send is one-tap' },
-  { value: 1_000, label: '1,000 sats', sublabel: '~£0.50 — confirm at or above this' },
+// Labels/sublabels are i18n keys resolved at render time (see below).
+const PRESETS: { value: number | null; labelKey: string; sublabelKey: string }[] = [
+  { value: null, labelKey: 'securityScreen.presetOff', sublabelKey: 'securityScreen.presetOffSub' },
+  {
+    value: 1_000,
+    labelKey: 'securityScreen.preset1k',
+    sublabelKey: 'securityScreen.preset1kSub',
+  },
   {
     value: DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
-    label: '10,000 sats',
-    sublabel: '~£5 — default; confirm at or above this',
+    labelKey: 'securityScreen.preset10k',
+    sublabelKey: 'securityScreen.preset10kSub',
   },
-  { value: 100_000, label: '100,000 sats', sublabel: '~£50 — confirm at or above this' },
+  {
+    value: 100_000,
+    labelKey: 'securityScreen.preset100k',
+    sublabelKey: 'securityScreen.preset100kSub',
+  },
 ];
 
 const SecurityScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [threshold, setThresholdState] = useState<number | null>(
@@ -38,6 +63,9 @@ const SecurityScreen: React.FC = () => {
   const [customDraft, setCustomDraft] = useState<string>('');
   const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
+  // Background DM watch is Android-only (iOS can't hold a background socket).
+  const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
+  const isAndroid = Platform.OS === 'android';
 
   useEffect(() => {
     getSendThreshold().then((t) => {
@@ -48,7 +76,8 @@ const SecurityScreen: React.FC = () => {
     });
     getLinkPreviewEnabled().then(setLinkPreviewOn);
     getLockScreenContentEnabled().then(setLockScreenContentOn);
-  }, []);
+    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
+  }, [isAndroid]);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
@@ -58,6 +87,26 @@ const SecurityScreen: React.FC = () => {
   const handleToggleLockScreenContent = async (next: boolean) => {
     setLockScreenContentOn(next);
     await setLockScreenContentEnabled(next);
+  };
+
+  const handleToggleBackgroundDm = async (next: boolean) => {
+    if (next) {
+      // Turning ON needs notification permission for the persistent chip +
+      // per-message alerts. If the user denies, leave the toggle off rather
+      // than running a watch that can never surface anything.
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        setBackgroundDmOn(false);
+        return;
+      }
+      setBackgroundDmOn(true);
+      await setBackgroundDmEnabled(true);
+      await startBackgroundDmWatch();
+    } else {
+      setBackgroundDmOn(false);
+      await setBackgroundDmEnabled(false);
+      await stopBackgroundDmWatch();
+    }
   };
 
   const handlePickPreset = async (value: number | null) => {
@@ -76,17 +125,14 @@ const SecurityScreen: React.FC = () => {
   const customActive = threshold !== null && !PRESETS.some((p) => p.value === threshold);
 
   return (
-    <AccountScreenLayout title="Security">
+    <AccountScreenLayout title={t('securityScreen.title')}>
       <View style={styles.headerRow}>
-        <ShieldCheck size={22} color={colors.brandPink} />
+        <ShieldCheck size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          Confirm large sends
+          {t('securityScreen.confirmLargeSends')}
         </Text>
       </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        Show an "Are you sure?" prompt before dispatching a Lightning payment or wallet transfer at
-        or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.
-      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
 
       <View style={styles.optionList}>
         {PRESETS.map((opt) => {
@@ -96,87 +142,103 @@ const SecurityScreen: React.FC = () => {
               key={String(opt.value)}
               style={[styles.optionRow, selected && styles.optionRowSelected]}
               onPress={() => handlePickPreset(opt.value)}
-              accessibilityLabel={opt.label}
+              accessibilityLabel={t(opt.labelKey)}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
               testID={`security-threshold-${opt.value === null ? 'off' : opt.value}`}
             >
               <View style={styles.optionTextBlock}>
-                <Text style={styles.optionLabel}>{opt.label}</Text>
-                <Text style={styles.optionSublabel}>{opt.sublabel}</Text>
+                <Text style={styles.optionLabel}>{t(opt.labelKey)}</Text>
+                <Text style={styles.optionSublabel}>{t(opt.sublabelKey)}</Text>
               </View>
-              {selected && <Check size={18} color={colors.brandPink} />}
+              {selected && <Check size={18} color={colors.accentSecondary} />}
             </TouchableOpacity>
           );
         })}
 
         <View style={[styles.optionRow, customActive && styles.optionRowSelected]}>
           <View style={styles.optionTextBlock}>
-            <Text style={styles.optionLabel}>Custom</Text>
+            <Text style={styles.optionLabel}>{t('securityScreen.custom')}</Text>
             <View style={styles.customInputRow}>
               <TextInput
                 style={styles.customInput}
                 value={customDraft}
                 onChangeText={setCustomDraft}
                 onBlur={handleCustomSave}
-                placeholder="e.g. 25000"
+                placeholder={t('securityScreen.customPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 keyboardType="numeric"
                 testID="security-threshold-custom-input"
-                accessibilityLabel="Custom threshold in sats"
+                accessibilityLabel={t('securityScreen.customThresholdLabel')}
               />
-              <Text style={styles.customSatsLabel}>sats</Text>
+              <Text style={styles.customSatsLabel}>{t('securityScreen.sats')}</Text>
             </View>
           </View>
-          {customActive && <Check size={18} color={colors.brandPink} />}
+          {customActive && <Check size={18} color={colors.accentSecondary} />}
         </View>
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <Link2 size={22} color={colors.brandPink} />
+        <Link2 size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          Link previews in messages
+          {t('securityScreen.linkPreviews')}
         </Text>
       </View>
-      <Text style={sharedAccountStyles.fieldHint}>
-        When ON, your phone fetches a preview card (title, image, summary) for any URL shared in a
-        message — automatically, as the message renders, even if you never tap it. The fetch tells
-        the URL's host that someone is previewing the page. Turn OFF if you'd rather keep that
-        traffic private. Default: ON.
-      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.linkPreviewsHint')}</Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.optionLabel}>Show link previews</Text>
+        <Text style={styles.optionLabel}>{t('securityScreen.showLinkPreviews')}</Text>
         <Switch
           value={linkPreviewOn}
           onValueChange={handleToggleLinkPreview}
-          accessibilityLabel="Show link previews in messages"
+          accessibilityLabel={t('securityScreen.showLinkPreviewsA11y')}
           testID="security-link-preview-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
         />
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <BellRing size={22} color={colors.brandPink} />
+        <BellRing size={22} color={colors.accentSecondary} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
-          Notification content
+          {t('securityScreen.notificationContent')}
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>
-        When OFF, notifications tell you a message or payment arrived but never include the details
-        — you'll see "New message" rather than the text, and "Payment received" rather than the
-        amount, both on the lock screen and in the notification shade. Turn ON to include the full
-        content. Default: OFF.
+        {t('securityScreen.notificationContentHint')}
       </Text>
       <View style={styles.toggleRow}>
-        <Text style={styles.optionLabel}>Show message & payment details</Text>
+        <Text style={styles.optionLabel}>{t('securityScreen.showMessagePaymentDetails')}</Text>
         <Switch
           value={lockScreenContentOn}
           onValueChange={handleToggleLockScreenContent}
-          accessibilityLabel="Show message and payment details in notifications"
+          accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
           testID="security-lockscreen-content-toggle"
-          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
         />
       </View>
+
+      {isAndroid && (
+        <>
+          <View style={[styles.headerRow, styles.sectionGap]}>
+            <Radio size={22} color={colors.brandPink} />
+            <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
+              {t('securityScreen.backgroundNotifications')}
+            </Text>
+          </View>
+          <Text style={sharedAccountStyles.fieldHint}>
+            {t('securityScreen.backgroundNotificationsHint')}
+          </Text>
+          <View style={styles.toggleRow}>
+            <Text style={styles.optionLabel}>{t('securityScreen.watchForMessages')}</Text>
+            <Switch
+              value={backgroundDmOn}
+              onValueChange={handleToggleBackgroundDm}
+              accessibilityLabel={t('securityScreen.watchForMessages')}
+              testID="security-background-dm-toggle"
+              trackColor={{ false: colors.divider, true: colors.brandPink }}
+            />
+          </View>
+        </>
+      )}
     </AccountScreenLayout>
   );
 };
@@ -211,8 +273,10 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     optionRowSelected: {
-      borderColor: colors.brandPink,
-      backgroundColor: colors.brandPinkLight,
+      // Selected radio row — purple accent + tint, matching the selected/
+      // active state convention across Settings.
+      borderColor: colors.accentSecondary,
+      backgroundColor: colors.accentSecondaryLight,
     },
     optionTextBlock: {
       flex: 1,

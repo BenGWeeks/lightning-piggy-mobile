@@ -207,6 +207,53 @@ describe('createYieldScheduler', () => {
     cancelRafSpy.mockRestore();
   });
 
+  it('coldStart yields via setTimeout(0) macro-task, not requestAnimationFrame (#788)', async () => {
+    // Cold start: RAF starves while the Choreographer is still settling, so the
+    // scheduler must hand control back via a macro-task instead.
+    const rafSpy = jest.spyOn(global, 'requestAnimationFrame');
+    const timeoutSpy = jest.spyOn(global, 'setTimeout');
+    const scheduler = createYieldScheduler({
+      safetyEvery: 1,
+      budgetMs: DECRYPT_FRAME_BUDGET_MS,
+      coldStart: true,
+    });
+
+    // safetyEvery=1 → the first iteration yields.
+    const p = scheduler.maybeYield();
+    // Drain the macro-task that the cold-start path queued.
+    jest.runOnlyPendingTimers();
+    await p;
+    scheduler.dispose();
+
+    expect(timeoutSpy).toHaveBeenCalled();
+    expect(rafSpy).not.toHaveBeenCalled();
+    expect(scheduler.yieldCount).toBe(1);
+
+    rafSpy.mockRestore();
+    timeoutSpy.mockRestore();
+  });
+
+  it('coldStart yield resolves early on abort without flushing the timer (#788)', async () => {
+    const ctrl = new AbortController();
+    const scheduler = createYieldScheduler({
+      safetyEvery: 1,
+      coldStart: true,
+      signal: ctrl.signal,
+    });
+
+    let settled = false;
+    const p = scheduler.maybeYield().then(() => {
+      settled = true;
+    });
+
+    // Abort without running timers — the macro-task yield must still resolve.
+    ctrl.abort();
+    await p;
+
+    expect(settled).toBe(true);
+    scheduler.dispose();
+  });
+
   it('increments yieldCount only for actual yields', async () => {
     const nowSpy = jest.spyOn(performance, 'now').mockReturnValue(0);
     const scheduler = createYieldScheduler({ safetyEvery: 5, budgetMs: 9999 });

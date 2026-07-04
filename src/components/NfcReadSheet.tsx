@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   BackHandler,
   ActivityIndicator,
   AppState,
@@ -25,11 +24,13 @@ import {
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
+import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useWallet } from '../contexts/WalletContext';
-import type { Palette } from '../styles/palettes';
+import { useTranslation } from '../contexts/LocaleContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { createNfcReadSheetStyles } from '../styles/NfcReadSheet.styles';
 import PrizeWalletPicker from './PrizeWalletPicker';
-import ScanRingSpinner from './ScanRingSpinner';
+import NfcScanIndicator from './NfcScanIndicator';
 import AddWalletWizard from './AddWalletWizard';
 
 interface Props {
@@ -50,39 +51,12 @@ interface Props {
 // log composer already in view) the moment they dismiss.
 type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'error';
 
-// LNbits' withdraw endpoint returns 'Wait N seconds.' verbatim; older
-// versions / other backends use 'wait_time: N' or 'cooldown'. Match
-// any of those forms (and the budget-exhausted variants) — \bwait\b
-// catches the LNbits shape that the previous narrower regex was
-// missing, dropping the user into the red 'Couldn't claim' state
-// instead of the friendlier sleeping countdown.
-const SLEEPING_PATTERN = /\bwait\b|cooldown|budget|sleeping|exhausted|already used/i;
-
-// Parse the LNURLw's 'Wait N seconds' / 'wait_time: N' / 'cooldown Ns'
-// shape into the integer N — used to drive a live countdown in the
-// sleeping state. Returns null when the server's response doesn't
-// carry a time hint (budget exhausted, generic 'already used', etc.).
-const parseCooldownSeconds = (raw: string): number | null => {
-  const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
-  if (!m) return null;
-  const total = Number(m[1]);
-  if (!Number.isFinite(total) || total <= 0) return null;
-  return Math.round(total);
-};
-
-// Format a remaining-seconds count as either 'M:SS' (for ≥ 60 s) or
-// just 'Ns' so the countdown reads naturally as time runs down.
-const formatCountdown = (seconds: number): string => {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-};
-
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, lastIncomingPayment, expectPayment } = useWallet();
+  const t = useTranslation();
+  const styles = useMemo(() => createNfcReadSheetStyles(colors), [colors]);
+  const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
+  const { lastIncomingPayment } = useWalletLive();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
@@ -189,19 +163,13 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         },
       });
       if (result.coord && expectedCoord && result.coord !== expectedCoord) {
-        throw new Error(
-          "This tag belongs to a different Piglet. Make sure you're scanning the right one.",
-        );
+        throw new Error(t('nfcReadSheet.wrongPiglet'));
       }
       if (!result.lnurl) {
-        throw new Error(
-          'No prize link on this tag. The hider may have written a tag without an LNURL.',
-        );
+        throw new Error(t('nfcReadSheet.noPrizeLink'));
       }
       if (!selectedWalletId) {
-        throw new Error(
-          'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
-        );
+        throw new Error(t('nfcReadSheet.noWalletConnected'));
       }
       if (!mountedRef.current) return;
       setStage('claiming');
@@ -271,7 +239,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     } catch (err) {
       if (mountedRef.current) {
         setStage('error');
-        const raw = err instanceof Error ? err.message : 'Failed to read NFC tag';
+        const raw = err instanceof Error ? err.message : t('nfcReadSheet.failedToReadTag');
         // Map nfcService's `NFC unavailable on this device` (raised by
         // ensureNfcStarted when NfcManager.start() rejected, which is
         // the disabled-NFC path on Android) to the same friendlier
@@ -280,12 +248,10 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         // user with a bare "NFC unavailable" message inconsistent with
         // the other sheets in the family.
         const isDisabled = /NFC unavailable on this device/i.test(raw);
-        setErrorMessage(
-          isDisabled ? 'NFC is turned off. Please enable NFC in your device settings.' : raw,
-        );
+        setErrorMessage(isDisabled ? t('nfcReadSheet.nfcTurnedOff') : raw);
       }
     }
-  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment]);
+  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment, t]);
 
   useEffect(() => {
     if (visible) {
@@ -412,23 +378,16 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         handleIndicatorStyle={styles.handleIndicator}
       >
         <BottomSheetView style={styles.content}>
-          <Text style={styles.title}>Try the prize</Text>
+          <Text style={styles.title}>{t('nfcReadSheet.title')}</Text>
 
           {stage === 'ready' && (
             <View style={styles.stateContainer}>
-              <View style={styles.iconContainer}>
-                <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
-                {lightningWallets.length > 0 && (
-                  // Armed and waiting for a tag — a thin ring at the faded-circle diameter spins around the NFC icon to read as "scanning".
-                  <View style={styles.scanRing} pointerEvents="none">
-                    <ScanRingSpinner size={100} color={colors.brandPink} strokeWidth={3} />
-                  </View>
-                )}
+              {/* Shared with SendSheet's NFC mode — ring spins only while armed. */}
+              <View style={styles.readyIndicator}>
+                <NfcScanIndicator spinning={lightningWallets.length > 0} />
               </View>
-              <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
-              <Text style={styles.description}>
-                We'll read the tag and try to claim the sats prize automatically.
-              </Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.holdPiglet')}</Text>
+              <Text style={styles.description}>{t('nfcReadSheet.willReadTag')}</Text>
               <PrizeWalletPicker
                 lightningWallets={lightningWallets}
                 selectedWalletId={selectedWalletId}
@@ -443,7 +402,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
             <View style={styles.stateContainer}>
               <ActivityIndicator size="large" color={colors.brandPink} />
               <Text style={styles.instruction}>
-                {stage === 'reading' ? 'Reading…' : 'Claiming sats…'}
+                {stage === 'reading' ? t('nfcReadSheet.reading') : t('nfcReadSheet.claimingSats')}
               </Text>
             </View>
           )}
@@ -454,18 +413,16 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 <PartyPopper size={64} color={colors.green} strokeWidth={2} />
               </View>
               <Text style={styles.instruction}>
-                {claimedSats?.toLocaleString() ?? ''} sats inbound!
+                {t('nfcReadSheet.satsInbound', { sats: claimedSats?.toLocaleString() ?? '' })}
               </Text>
-              <Text style={styles.description}>
-                Sent to your chosen wallet — the receive toast fires the moment they land.
-              </Text>
+              <Text style={styles.description}>{t('nfcReadSheet.sentToWallet')}</Text>
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={handleClose}
-                accessibilityLabel="Dismiss prize sheet"
+                accessibilityLabel={t('nfcReadSheet.dismissPrizeSheet')}
                 testID="nfc-read-done"
               >
-                <Text style={styles.primaryButtonText}>Done</Text>
+                <Text style={styles.primaryButtonText}>{t('nfcReadSheet.done')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -476,40 +433,35 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
                 <Text style={styles.zzzBadge}>Zzz</Text>
               </View>
-              <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.piggySnoozing')}</Text>
               {cooldownRemaining !== null && cooldownRemaining > 0 ? (
                 <>
                   <Text style={styles.countdown} testID="nfc-read-sleep-countdown">
                     {formatCountdown(cooldownRemaining)}
                   </Text>
-                  <Text style={styles.description}>
-                    Another finder beat you to the trough. The Piggy wakes back up when the timer
-                    hits zero.
-                  </Text>
+                  <Text style={styles.description}>{t('nfcReadSheet.anotherFinder')}</Text>
                 </>
               ) : cooldownRemaining === 0 ? (
-                <Text style={styles.description}>Piggy is up — tap Try Again!</Text>
+                <Text style={styles.description}>{t('nfcReadSheet.piggyIsUp')}</Text>
               ) : (
-                <Text style={styles.description}>
-                  The trough's empty, or the cooldown is still running. Try again later.
-                </Text>
+                <Text style={styles.description}>{t('nfcReadSheet.troughEmpty')}</Text>
               )}
               <View style={styles.errorButtons}>
                 <TouchableOpacity
                   style={styles.retryButton}
                   onPress={handleRetry}
-                  accessibilityLabel="Try again"
+                  accessibilityLabel={t('nfcReadSheet.tryAgainAccessibility')}
                   testID="nfc-read-sleep-retry"
                 >
-                  <Text style={styles.retryButtonText}>Try Again</Text>
+                  <Text style={styles.retryButtonText}>{t('nfcReadSheet.tryAgain')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={handleClose}
-                  accessibilityLabel="Dismiss"
+                  accessibilityLabel={t('nfcReadSheet.dismiss')}
                   testID="nfc-read-sleep-cancel"
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('nfcReadSheet.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -523,24 +475,24 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                   <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
                 </View>
               </View>
-              <Text style={styles.instruction}>Couldn't claim</Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.couldntClaim')}</Text>
               <Text style={styles.description}>{errorMessage}</Text>
               <View style={styles.errorButtons}>
                 <TouchableOpacity
                   style={styles.retryButton}
                   onPress={handleRetry}
-                  accessibilityLabel="Retry"
+                  accessibilityLabel={t('nfcReadSheet.retry')}
                   testID="nfc-read-retry"
                 >
-                  <Text style={styles.retryButtonText}>Try Again</Text>
+                  <Text style={styles.retryButtonText}>{t('nfcReadSheet.tryAgain')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={handleClose}
-                  accessibilityLabel="Cancel"
+                  accessibilityLabel={t('nfcReadSheet.cancel')}
                   testID="nfc-read-error-cancel"
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('nfcReadSheet.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -551,138 +503,5 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      flex: 1,
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 40,
-    },
-    title: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 24,
-    },
-    stateContainer: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '100%',
-    },
-    iconContainer: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 20,
-    },
-    scanRing: {
-      ...StyleSheet.absoluteFillObject,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    successIcon: { backgroundColor: colors.greenLight },
-    sleepingIcon: { backgroundColor: colors.brandPinkLight },
-    // 'Zzz' label floats outside the top-right of the icon container,
-    // above the Piggy rather than over its body. Negative offsets push
-    // it past the circle's edge — the BottomSheetView clips overflow
-    // gracefully, so the Zzz sits visually atop the corner like a
-    // hand-drawn snore.
-    zzzBadge: {
-      position: 'absolute',
-      top: -6,
-      right: -8,
-      color: colors.brandPink,
-      fontSize: 24,
-      fontWeight: '800',
-      fontStyle: 'italic',
-      letterSpacing: -1,
-      transform: [{ rotate: '-10deg' }],
-    },
-    errorIcon: { backgroundColor: colors.redLight },
-    errorBadge: {
-      position: 'absolute',
-      bottom: 0,
-      right: 0,
-      backgroundColor: colors.surface,
-      borderRadius: 14,
-      padding: 1,
-    },
-    instruction: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    description: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-      paddingHorizontal: 16,
-      marginBottom: 16,
-    },
-    countdown: {
-      fontSize: 36,
-      fontWeight: '800',
-      color: colors.brandPink,
-      fontVariant: ['tabular-nums'],
-      marginBottom: 12,
-    },
-    primaryButton: {
-      paddingHorizontal: 48,
-      paddingVertical: 14,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    primaryButtonText: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    cancelButton: {
-      paddingHorizontal: 32,
-      paddingVertical: 12,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: colors.divider,
-    },
-    cancelButtonText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    errorButtons: {
-      flexDirection: 'row',
-      gap: 12,
-    },
-    retryButton: {
-      paddingHorizontal: 32,
-      paddingVertical: 12,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    retryButtonText: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.white,
-    },
-  });
 
 export default NfcReadSheet;

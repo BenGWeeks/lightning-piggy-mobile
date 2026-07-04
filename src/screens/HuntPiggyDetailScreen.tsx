@@ -45,10 +45,11 @@ import {
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import type { VerifiedEvent } from 'nostr-tools';
+import { parseFoundLog, type FoundLog } from '../utils/foundLog';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import { useContactProfileSheet } from '../hooks/useContactProfileSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import SendSheet from '../components/SendSheet';
 import type { Palette } from '../styles/palettes';
@@ -87,28 +88,6 @@ interface Props {
   route: RouteProp<ExploreStackParamList, 'HuntPiggyDetail'>;
 }
 
-type FoundLog = {
-  id: string;
-  pubkey: string;
-  createdAt: number;
-  content: string;
-  imageUrl: string | null;
-  amountSats: number | null;
-};
-
-const parseFoundLog = (e: VerifiedEvent): FoundLog => {
-  const tag = (k: string): string | undefined => e.tags.find((t) => t[0] === k)?.[1];
-  const amt = parseInt(tag('amount') ?? '', 10);
-  return {
-    id: e.id,
-    pubkey: e.pubkey,
-    createdAt: e.created_at,
-    content: e.content,
-    imageUrl: tag('image') ?? null,
-    amountSats: Number.isFinite(amt) && amt > 0 ? amt : null,
-  };
-};
-
 /**
  * Detail view for a single Hunt cache. Resolves the kind 37516 listing
  * by coord, subscribes to its kind 7516 found-log thread (NIP-GC), and
@@ -126,7 +105,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { coord, openComposer: openComposerParam } = route.params;
-  const { signEvent, relays, pubkey } = useNostr();
+  const { signEvent, relays, pubkey, profile } = useNostr();
 
   // Seed from the in-memory cache mirror so the screen paints instantly
   // when the user navigates from Explore / Hunt rails (where the cache
@@ -153,11 +132,22 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     lud16: string;
     pubkey: string;
     name: string | null;
-    logId: string;
+    // Set when zapping a specific find-log (scopes the 9734 → 9735 so the
+    // row's "zapped" pill updates). Unset when zapping the hider/finder
+    // straight from their profile sheet — there's no log to attribute to.
+    logId?: string;
   } | null>(null);
   const openZapForLog = useCallback((log: FoundLog, lud16: string, name: string | null) => {
     setZapTarget({ lud16, pubkey: log.pubkey, name, logId: log.id });
   }, []);
+  // Zap requested from a contact's profile sheet (hider or finder). Routes
+  // through the same in-app SendSheet, just without a find-log scope.
+  const openZapForContact = useCallback(
+    (target: { pubkey: string; name: string; lud16: string }) => {
+      setZapTarget({ lud16: target.lud16, pubkey: target.pubkey, name: target.name });
+    },
+    [],
+  );
   // Composer is always rendered (no toggle) — sharing a find is
   // independent of trying the LP prize. The route-param + scroll
   // effect just nudges the page to the composer when navigation
@@ -179,25 +169,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // time but only reveal in the UI when the hunter explicitly taps —
   // that preserves the "stuck? unhide" experience geocachers expect.
   const [hintRevealed, setHintRevealed] = useState(false);
-  // Reusable contact profile bottom sheet — opened when the user taps
-  // the hider's row at the top of the screen or any find-log row.
-  const [profileSheet, setProfileSheet] = useState<{
-    pubkey: string;
-    name: string;
-    picture: string | null;
-    lightningAddress: string | null;
-  } | null>(null);
-  const openProfileSheet = useCallback(
-    (pubkey: string, name: string | null, picture: string | null, lud16: string | null) => {
-      setProfileSheet({
-        pubkey,
-        name: name ?? shortNpub(pubkey),
-        picture,
-        lightningAddress: lud16,
-      });
-    },
-    [],
-  );
+  // Reusable contact profile bottom sheet — opened when the user taps the
+  // hider's row at the top of the screen or any find-log row. The hook
+  // owns the sheet state + re-resolves the verified profile so the banner
+  // and Lightning address are real (mirrors ConversationScreen). Its zaps
+  // route back into this screen's in-app SendSheet via openZapForContact.
+  const contactSheet = useContactProfileSheet(navigation, openZapForContact);
+  const { openProfileSheet } = contactSheet;
   // Finder NFC reader sheet — opens on "Try prize" tap. The sheet
   // owns the entire flow now (foreground reader → LNURLw resolve →
   // claim → success / sleeping / error) so no navigation is needed
@@ -607,6 +585,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       lon={decodeGeohash(cache.geohash).lng}
                       userLat={userPos?.lat ?? null}
                       userLon={userPos?.lon ?? null}
+                      userAvatarUri={profile?.picture ?? null}
                       userAccuracyMetres={userAccuracy}
                       merchants={[]}
                       caches={[cache]}
@@ -853,42 +832,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       </ScrollView>
 
       <ContactProfileSheet
-        visible={profileSheet !== null}
-        onClose={() => setProfileSheet(null)}
-        contact={
-          profileSheet
-            ? {
-                pubkey: profileSheet.pubkey,
-                name: profileSheet.name,
-                picture: profileSheet.picture,
-                lightningAddress: profileSheet.lightningAddress,
-                source: 'nostr',
-              }
-            : null
-        }
-        onMessage={
-          profileSheet
-            ? () => {
-                const target = profileSheet;
-                setProfileSheet(null);
-                navigation.navigate('Conversation', {
-                  pubkey: target.pubkey,
-                  name: target.name,
-                  picture: target.picture,
-                  lightningAddress: target.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onZap={
-          profileSheet?.lightningAddress
-            ? () => {
-                const lud16 = profileSheet.lightningAddress!;
-                setProfileSheet(null);
-                Linking.openURL(`lightning:${lud16}`).catch(() => {});
-              }
-            : undefined
-        }
+        visible={contactSheet.profileSheet !== null}
+        onClose={contactSheet.closeProfileSheet}
+        contact={contactSheet.contact}
+        canZap={contactSheet.canZap}
+        onMessage={contactSheet.onMessage}
+        onZap={contactSheet.onZap}
+        onViewFullProfile={contactSheet.onViewFullProfile}
       />
 
       {/* In-app NIP-57 zap on a specific find-log. zapEventId scopes

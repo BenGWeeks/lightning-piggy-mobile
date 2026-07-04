@@ -48,6 +48,14 @@ const DEV_LEFTOVER_PUBKEYS: ReadonlySet<string> = new Set([
   '5a6f56679c4d6d6b0a6c0be95cb1bed7758c53b618420e3dda579a98e277c372',
   //   npub1h994qya2zd7panwllt4qwwe8ngx85lg6x5xnpf4aakrayp50t6tsurqqlq
   'b94b5013aa137c1ecddffaea073b279a0c7a7d1a350d30a6bded87d2068f5e97',
+  // One-off disposable signer of `d=swavesey-trad-cache` (name="Swavesey
+  // Stash"), published 2026-05-10 via scripts/publish-test-piggy.mjs with
+  // LP_LABEL=0 — deliberately unlabelled so it masqueraded as a vanilla
+  // third-party NIP-GC cache during testing. Predates the script's
+  // named-fixture guard (#774 investigation), so the key is a lost
+  // throwaway: no nsec to NIP-09 delete or replace the event.
+  //   npub1kh88hkvztclxzak38h8mxnknddcqy9dl5mmseag7sq3zta2cz3hqun06j6
+  'b5ce7bd9825e3e6176d13dcfb34ed36b700215bfa6f70cf51e802225f558146e',
 ]);
 
 // O(1) membership test against the leftover set. Called per-event at
