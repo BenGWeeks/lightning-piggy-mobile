@@ -106,7 +106,14 @@ export const LegendSheet: React.FC<Props> = ({
   }, [availableCategories, placesVisible]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop} testID="legend-sheet">
         <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>

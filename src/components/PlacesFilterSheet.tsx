@@ -49,7 +49,14 @@ const PlacesFilterSheet: React.FC<Props> = ({
   const anyActive = selectedCategories.size > 0;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="places-filter-backdrop" />
       <View style={styles.sheet} testID="places-filter-sheet">
         <View style={styles.handleBar} />

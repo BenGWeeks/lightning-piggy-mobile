@@ -199,7 +199,14 @@ const AddContactCelebration: React.FC<Props> = ({
   }));
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onDismiss}
+    >
       <View style={themed.root}>
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {!alreadyConnected

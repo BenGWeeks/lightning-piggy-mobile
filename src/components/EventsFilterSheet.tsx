@@ -94,7 +94,14 @@ const EventsFilterSheet: React.FC<Props> = ({
   const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || wotTier !== 'all';
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="events-filter-backdrop" />
       {/* Hide the filter sheet while the WoT bottom sheet is open so its
           Done button doesn't peek out below — see matching note in

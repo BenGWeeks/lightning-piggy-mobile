@@ -802,6 +802,8 @@ const ConversationScreen: React.FC = () => {
       <Modal
         visible={fullscreenGifUrl !== null}
         transparent
+        statusBarTranslucent
+        navigationBarTranslucent
         animationType="fade"
         onRequestClose={() => setFullscreenGifUrl(null)}
       >

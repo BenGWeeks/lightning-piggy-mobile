@@ -87,7 +87,14 @@ const HuntFilterSheet: React.FC<Props> = ({
     wotTier !== 'all';
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="hunt-filter-backdrop" />
       {/* Hide the filter sheet itself while the WoT bottom sheet is open
           so its "Done" button doesn't peek out below the WoT sheet — both

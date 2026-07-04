@@ -109,7 +109,14 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="wot-sheet-backdrop" />
       <View style={styles.sheet} testID="wot-bottom-sheet">
         <View style={styles.handleBar} />
