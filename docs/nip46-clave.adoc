@@ -103,15 +103,17 @@ The relay default is `wss://relay.nsec.app`. Bunkers that subscribe to other rel
 | `nostr_nip46_connection` (SecureStore)
 | JSON `Nip46Connection` — `remoteSignerPubkey`, `userPubkey`, `relays`, `clientSecretKeyHex`, `perms`. **Sensitive** — anyone with this can impersonate the app session against the bunker.
 
-| `nip46_nip17_cache_v1` (AsyncStorage)
-| Wrap-id → decrypted rumor. Cleared on logout. Same shape as the `nsec_` and `amber_` caches.
+| `nip46_nip17_skip_v1` (AsyncStorage)
+| Skip-set of NIP-17 wrap ids that failed to unwrap (e.g. bunker denied `nip44_decrypt`), so a refresh doesn't re-attempt them every pass. Cleared on logout. Unlike the `nsec_`/`amber_` paths there is no `nip46_nip17_cache_v1` — decrypted rumors persist in the encrypted local DM store, not an AsyncStorage wrap-id → rumor cache.
 |===
 
 == Files
 
 * `src/services/nostrConnectService.ts` — service wrapper around `nostr-tools/nip46.BunkerSigner`. Mirrors the `amberService.ts` API.
 * `src/components/NostrLoginSheet.tsx` — adds the **Use NIP-46 Signer** button + the QR pairing screen (`mode === 'nip46-pair'`).
-* `src/contexts/NostrContext.tsx` — adds `loginWithNip46` + the `signerType === 'nip46'` branch in every signing path (`signEvent`, `signZapRequest`, `publishContactList`, `publishProfile`, `sendDirectMessage`, `sendGroupMessage`, `publishGroupState`, `decryptNip04ViaSigner`, `fetchConversation`, `refreshDmInbox`, `signEvent`).
+* `src/contexts/NostrContext.tsx` — wires `loginWithNip46` (via `useNip46Login`) + the `signerType === 'nip46'` branch in the signing paths it still owns (`signEvent`, `signZapRequest`, `publishProfile`, `sendDirectMessage`, `sendGroupMessage`, `publishGroupState`, `fetchConversation`, `refreshDmInbox`).
+* `src/contexts/useContactActions.ts` — the follow-list write path extracted from `NostrContext` (#779); carries the `signerType === 'nip46'` branch for `publishContactList` (follow / unfollow / add).
+* `src/contexts/useNip46Login.ts` — `loginWithNip46` + `restoreNip46Session` (cold-start restore with a persisted-connection shape guard).
 * `src/types/nostr.ts` — extends `SignerType` with `'nip46'`, adds `Nip46Connection`.
 * `tests/e2e/test-login-nip46.yaml` — Maestro scaffold reaching the pairing screen.
 
