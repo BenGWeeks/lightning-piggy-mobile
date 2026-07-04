@@ -32,7 +32,7 @@
  *   and prompt the user to re-pair with broader perms.
  */
 import { BunkerSigner, createNostrConnectURI, type BunkerPointer } from 'nostr-tools/nip46';
-import { hexToBytes } from '@noble/hashes/utils.js';
+import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 import type { Nip46Connection } from '../types/nostr';
 
 /** Lazily-constructed BunkerSigner. Re-created when the active
@@ -422,7 +422,7 @@ export async function awaitBunkerPair(input: {
     remoteSignerPubkey: signer.bp.pubkey,
     userPubkey,
     relays: [input.relay],
-    clientSecretKeyHex: bytesToHexLocal(input.clientSecretKey),
+    clientSecretKeyHex: bytesToHex(input.clientSecretKey),
     perms: input.perms.join(','),
   };
   return { signer, connection, userPubkey };
@@ -496,17 +496,4 @@ function raceAbort<T>(
       },
     );
   });
-}
-
-/**
- * Local hex encoder so we don't pull in another dep. Matches the output
- * of `@noble/hashes/utils.bytesToHex` for the same input.
- */
-function bytesToHexLocal(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const h = bytes[i].toString(16);
-    s += h.length === 1 ? '0' + h : h;
-  }
-  return s;
 }

@@ -35,6 +35,9 @@ jest.mock('nostr-tools/nip46', () => ({
 
 jest.mock('@noble/hashes/utils.js', () => ({
   hexToBytes: jest.fn(() => new Uint8Array([1, 2, 3, 4])),
+  bytesToHex: jest.fn((b: Uint8Array) =>
+    Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''),
+  ),
 }));
 
 import * as svc from './nostrConnectService';

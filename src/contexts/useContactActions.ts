@@ -92,6 +92,13 @@ export function useContactActions({
           const signedEventJson = await nip46Sign(event, pubkey);
           if (!signedEventJson) return false;
           await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
+        } else {
+          // No usable signer (null / unsupported): nothing was published, so
+          // report failure. Returning true here would let the callers commit
+          // the follow/unfollow to local state + cache while the kind-3 never
+          // hit a relay, silently diverging the device from the network.
+          console.warn('Failed to publish contact list: no active signer');
+          return false;
         }
         return true;
       } catch (error) {
