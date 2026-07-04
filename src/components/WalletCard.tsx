@@ -16,10 +16,10 @@ export const CARD_WIDTH = SCREEN_WIDTH - CARD_MARGIN * 2;
 export const CARD_HEIGHT = 200;
 export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT;
 
-// Mini preview is the full card scaled down
+// Mini preview is the full card scaled down. The default 2-up grid width;
+// the cover-flow picker passes a larger value. Height + scale are derived
+// per-instance from the width at render time.
 const MINI_CONTAINER_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // ~47% of sheet width
-const MINI_SCALE = MINI_CONTAINER_WIDTH / CARD_WIDTH;
-const MINI_CONTAINER_HEIGHT = CARD_HEIGHT * MINI_SCALE;
 
 interface WalletCardProps {
   wallet: WalletState;
@@ -356,9 +356,10 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: '700',
   },
+  // width/height are supplied per-instance at render time (defaulting to the
+  // 2-up grid size, or a larger value from the cover-flow picker), so they're
+  // intentionally omitted here to avoid a dead/contradictory hard-coded size.
   miniCardContainer: {
-    width: MINI_CONTAINER_WIDTH,
-    height: MINI_CONTAINER_HEIGHT,
     borderRadius: 16,
     borderWidth: 3,
     borderColor: 'transparent',
@@ -368,8 +369,6 @@ const styles = StyleSheet.create({
     borderColor: '#EC008C',
   },
   miniScaleWrapper: {
-    width: MINI_CONTAINER_WIDTH,
-    height: MINI_CONTAINER_HEIGHT,
     overflow: 'hidden',
   },
 });
