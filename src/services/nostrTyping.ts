@@ -1,6 +1,6 @@
 import { finalizeEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools';
-import { pool, publishSignedEvent } from './nostrService';
+import { pool, publishSignedEvent, trackRelays } from './nostrService';
 
 /**
  * Ephemeral "user is typing…" indicator for 1:1 DM conversations.
@@ -24,6 +24,13 @@ export const TYPING_INDICATOR_KIND = 20001;
  *  longer than the receiver's client-side clear timeout so a relay never keeps
  *  a "typing" alive past the UI. */
 export const TYPING_EXPIRY_SECONDS = 30;
+
+/** Lookback applied to the subscription's `since` so a small sender-clock
+ *  skew doesn't make a relay drop a live typing event whose `created_at`
+ *  lands just before the receiver's `now`. Mirrors the drift compensation in
+ *  other tag-filtered ephemeral subs (e.g. `nostrLiveLocation` → `now - 60`).
+ *  Replay isn't a concern here — ephemeral events are never stored. */
+export const TYPING_SINCE_LOOKBACK_SECONDS = 60;
 
 /** Build the unsigned ephemeral typing event for `peerPubkey`. */
 export function buildTypingEvent(
@@ -69,11 +76,14 @@ export function subscribeTyping(input: {
   onTyping: () => void;
 }): () => void {
   if (input.relays.length === 0) return () => {};
+  // Track for nostrService.cleanup() so these relay connections are closed
+  // on teardown like every other sub helper.
+  trackRelays(input.relays);
   const filter: Filter = {
     kinds: [TYPING_INDICATOR_KIND],
     authors: [input.peerPubkey],
     '#p': [input.myPubkey],
-    since: Math.floor(Date.now() / 1000),
+    since: Math.floor(Date.now() / 1000) - TYPING_SINCE_LOOKBACK_SECONDS,
   };
   const sub = pool.subscribeMany(input.relays, filter, {
     onevent: () => input.onTyping(),

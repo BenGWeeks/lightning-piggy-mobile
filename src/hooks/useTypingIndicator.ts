@@ -57,10 +57,15 @@ export function useTypingIndicator(peerPubkey: string | null): {
     if (now - lastSentRef.current < SEND_THROTTLE_MS) return;
     lastSentRef.current = now;
     void (async () => {
-      const secretKey = await getMemoisedSecretKey(pubkey);
-      if (!secretKey) return;
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      await publishTypingIndicator({ peerPubkey, secretKey, relays: writeRelays });
+      try {
+        const secretKey = await getMemoisedSecretKey(pubkey);
+        if (!secretKey) return;
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        await publishTypingIndicator({ peerPubkey, secretKey, relays: writeRelays });
+      } catch {
+        // Typing indicators are best-effort — a failed key read / publish
+        // must never surface as an unhandled rejection.
+      }
     })();
   }, [signerType, pubkey, peerPubkey, relays]);
 
