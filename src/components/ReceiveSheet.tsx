@@ -577,6 +577,9 @@ const ReceiveSheet: React.FC<Props> = ({
                   <Text style={styles.walletLabel}>{t('receiveSheet.to')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
+                      testID="receive-wallet-dropdown-toggle"
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: dropdownOpen }}
                       style={styles.walletDropdown}
                       onPress={() => setDropdownOpen(!dropdownOpen)}
                     >
