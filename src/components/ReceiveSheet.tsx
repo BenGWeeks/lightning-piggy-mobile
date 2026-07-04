@@ -485,9 +485,16 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      // Presenting the Boltz receive sheet (a second BottomSheetModal) on top
+      // collapses THIS sheet to index -1. That collapse is not a user dismiss —
+      // and closing here calls onClose() → the parent sets visible=false → this
+      // component returns null and unmounts, taking the still-open
+      // <BoltzReceiveSheet> child (rendered in this tree) down with it. That
+      // stranded the Boltz lockup QR the instant it opened (#92). Only treat a
+      // genuine collapse to -1 as a dismiss when no child sheet is open.
+      if (index === -1 && !boltzReceiveOpen) onClose();
     },
-    [onClose],
+    [onClose, boltzReceiveOpen],
   );
 
   const renderBackdrop = useCallback(
@@ -859,7 +866,15 @@ const ReceiveSheet: React.FC<Props> = ({
       />
       <BoltzReceiveSheet
         visible={boltzReceiveOpen}
-        onClose={() => setBoltzReceiveOpen(false)}
+        // Opening this sheet collapsed the parent ReceiveSheet's own sheet to
+        // -1 (see handleSheetChange); with the self-dismiss now guarded, that
+        // parent stays mounted-but-hidden behind. Closing Boltz therefore also
+        // closes ReceiveSheet so we return cleanly to Home instead of leaving
+        // an invisible, un-re-presentable ReceiveSheet stuck open (#92).
+        onClose={() => {
+          setBoltzReceiveOpen(false);
+          onClose();
+        }}
         walletId={selectedWalletId}
       />
     </>
