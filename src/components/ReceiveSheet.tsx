@@ -121,6 +121,14 @@ const ReceiveSheet: React.FC<Props> = ({
   const walletName = selectedWallet
     ? walletLabel(selectedWallet)
     : t('receiveSheet.walletFallback');
+  // List all wallets in the picker rather than gating on `isConnected` —
+  // receiving doesn't need a live connection (an on-chain wallet always has an
+  // address, and most NWC wallets mint an invoice on demand). If a chosen
+  // wallet genuinely can't produce one (e.g. a read-only NWC without
+  // `make_invoice`), that surfaces as an error at generate time — which is
+  // better than silently hiding it and locking the invoice to the active
+  // wallet, where the user couldn't choose where funds landed at all.
+  const receivableWallets = wallets;
   // Lightning Address is a per-wallet field (#169). Each NWC wallet can
   // carry its own lud16 (either parsed from the NWC URL or set manually
   // in Wallet Settings) — the Receive flow must read the *selected*
@@ -576,11 +584,14 @@ const ReceiveSheet: React.FC<Props> = ({
               <Text style={styles.title}>{t('receiveSheet.receive')}</Text>
 
               {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
+              {receivableWallets.length > 1 ? (
                 <View style={styles.walletDropdownRow}>
                   <Text style={styles.walletLabel}>{t('receiveSheet.to')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
+                      testID="receive-wallet-dropdown-toggle"
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: dropdownOpen }}
                       style={styles.walletDropdown}
                       onPress={() => setDropdownOpen(!dropdownOpen)}
                     >
@@ -593,30 +604,34 @@ const ReceiveSheet: React.FC<Props> = ({
                     </TouchableOpacity>
                     {dropdownOpen && (
                       <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected || w.walletType === 'onchain')
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
+                        {receivableWallets.map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            testID={`receive-wallet-option-${w.id}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: selectedWalletId === w.id }}
+                            accessibilityLabel={t('receiveSheet.selectWalletA11y', {
+                              wallet: walletLabel(w),
+                            })}
+                            style={[
+                              styles.walletDropdownItem,
+                              selectedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
                               style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
+                                styles.walletDropdownItemText,
+                                selectedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
                             >
-                              <Text
-                                style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
-                                ]}
-                              >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
+                              {walletLabel(w)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     )}
                   </View>
