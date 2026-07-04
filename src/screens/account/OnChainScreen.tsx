@@ -41,7 +41,14 @@ const OnChainScreen: React.FC = () => {
       setElectrumHostPort(parts.join(':'));
       setElectrumSSL(protocol === 's');
     });
-    getDefaultOnchainWalletId().then(setDefaultOnchainIdState);
+    getDefaultOnchainWalletId()
+      .then(setDefaultOnchainIdState)
+      .catch((err) => {
+        // AsyncStorage read can throw (corruption/full disk). Fall back to no
+        // default (null) rather than surfacing an unhandled promise rejection.
+        console.warn('Failed to read default on-chain wallet id', err);
+        setDefaultOnchainIdState(null);
+      });
   }, []);
 
   const handlePickDefault = async (walletId: string) => {

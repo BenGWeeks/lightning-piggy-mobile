@@ -307,11 +307,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // exactly the requested amount. Boltz takes its fee from the
         // *on-chain* side (so the sender pays slightly more than `sats`),
         // but the LN invoice they pay is the bare amount.
-        const invoice = await makeInvoiceForWallet(
-          walletId,
-          sats,
-          'Boltz swap (on-chain → Lightning)',
-        );
+        const invoice = await makeInvoiceForWallet(walletId, sats, t('boltzReceive.invoiceMemo'));
 
         // Step 2 — create the swap with Boltz.
         const created = await boltzService.createSubmarineSwapForward(invoice);

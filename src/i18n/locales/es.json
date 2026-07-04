@@ -1873,6 +1873,7 @@
     "getStarted": "Empezar"
   },
   "boltzReceive": {
+    "invoiceMemo": "Swap de Boltz (on-chain → Lightning)",
     "amountTitle": "Importe a recibir",
     "generateQr": "Generar QR on-chain",
     "title": "Recibir on-chain vía Boltz",
