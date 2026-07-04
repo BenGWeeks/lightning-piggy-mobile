@@ -9,6 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Zap, Plus, Minus, Check, ExternalLink, LogIn } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketCheckoutSheetStyles } from '../styles/MarketCheckoutSheet.styles';
 import { useMarketCheckout } from '../hooks/useMarketCheckout';
 import { useShippingOptions } from '../hooks/useShippingOptions';
@@ -66,6 +67,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   onPlaced,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketCheckoutSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const { status, error, isPlacing, canOrder, placeOrder, reset } = useMarketCheckout();
@@ -207,8 +209,8 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       });
       Toast.show({
         type: 'success',
-        text1: 'Order placed',
-        text2: `Waiting for ${sellerName} to send an invoice…`,
+        text1: t('market.checkout.toastPlaced'),
+        text2: t('market.checkout.toastPlacedBody', { seller: sellerName }),
         position: 'top',
         visibilityTime: 2600,
       });
@@ -228,6 +230,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     hasShipping,
     selectedOption,
     selectedShippingSats,
+    t,
   ]);
 
   const handleGoToConversation = useCallback(() => {
@@ -257,25 +260,24 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             <View style={styles.sentBadge}>
               <Check size={28} color={colors.greenDark} strokeWidth={3} />
             </View>
-            <Text style={styles.sentTitle}>Order placed</Text>
+            <Text style={styles.sentTitle}>{t('market.checkout.orderPlaced')}</Text>
             <Text style={styles.sentBody}>
-              Your order was sent to {sellerName}. When they send a Lightning invoice it&apos;ll
-              appear as a payable order in your chat with them.
+              {t('market.checkout.orderSentBody', { seller: sellerName })}
             </Text>
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={handleGoToConversation}
               accessibilityRole="button"
-              accessibilityLabel={`Open your conversation with ${sellerName}`}
+              accessibilityLabel={t('market.checkout.openConversation', { seller: sellerName })}
               testID="market-checkout-goto-conversation"
             >
               <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-              <Text style={styles.primaryButtonText}>Go to chat to pay</Text>
+              <Text style={styles.primaryButtonText}>{t('market.checkout.goToChat')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
-            <Text style={styles.title}>Buy from {sellerName}</Text>
+            <Text style={styles.title}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
 
             <View style={styles.productRow}>
               {hasThumb ? (
@@ -298,22 +300,27 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <Text style={styles.productTitle} numberOfLines={2}>
                   {product.title}
                 </Text>
-                <Text style={styles.productSeller}>from {sellerName}</Text>
+                <Text style={styles.productSeller}>
+                  {t('market.fromSeller', { seller: sellerName })}
+                </Text>
                 <Text style={styles.unitPrice}>
-                  {product.priceSats.toLocaleString()} sats each · {product.priceFiatLabel}
+                  {t('market.checkout.unitPrice', {
+                    amount: product.priceSats.toLocaleString(),
+                    fiat: product.priceFiatLabel,
+                  })}
                 </Text>
               </View>
             </View>
 
             <View style={styles.row}>
-              <Text style={styles.rowLabel}>Quantity</Text>
+              <Text style={styles.rowLabel}>{t('market.checkout.quantity')}</Text>
               <View style={styles.stepper}>
                 <TouchableOpacity
                   style={[styles.stepButton, quantity <= 1 && styles.stepButtonDisabled]}
                   onPress={() => setQuantity((q) => Math.max(1, q - 1))}
                   disabled={quantity <= 1}
                   accessibilityRole="button"
-                  accessibilityLabel="Decrease quantity"
+                  accessibilityLabel={t('market.checkout.decreaseQuantity')}
                   testID="market-checkout-qty-minus"
                 >
                   <Minus
@@ -330,7 +337,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                   onPress={() => setQuantity((q) => Math.min(MAX_QTY, q + 1))}
                   disabled={quantity >= MAX_QTY}
                   accessibilityRole="button"
-                  accessibilityLabel="Increase quantity"
+                  accessibilityLabel={t('market.checkout.increaseQuantity')}
                   testID="market-checkout-qty-plus"
                 >
                   <Plus
@@ -360,18 +367,18 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             {hasShipping ? (
               <>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Subtotal</Text>
+                  <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
                   <Text style={styles.summaryValue} testID="market-checkout-subtotal">
-                    {subtotalSats.toLocaleString()} sats
+                    {t('market.sats', { amount: subtotalSats.toLocaleString() })}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Shipping</Text>
+                  <Text style={styles.summaryLabel}>{t('market.checkout.shipping')}</Text>
                   <Text style={styles.summaryValue} testID="market-checkout-shipping">
                     {selectedShippingSats !== null
                       ? selectedShippingSats === 0
-                        ? 'Free'
-                        : `${selectedShippingSats.toLocaleString()} sats`
+                        ? t('market.free')
+                        : t('market.sats', { amount: selectedShippingSats.toLocaleString() })
                       : '—'}
                   </Text>
                 </View>
@@ -379,11 +386,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             ) : null}
 
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalLabel}>{t('market.checkout.total')}</Text>
               <View style={styles.totalValue}>
                 <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
                 <Text style={styles.totalSats} testID="market-checkout-total">
-                  {totalSats.toLocaleString()} sats
+                  {t('market.sats', { amount: totalSats.toLocaleString() })}
                 </Text>
               </View>
             </View>
@@ -397,7 +404,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               disabled={isPlacing || (canOrder && shippingBlocksSubmit)}
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel={canOrder ? `Place order with ${sellerName}` : 'Sign in to buy'}
+              accessibilityLabel={
+                canOrder
+                  ? t('market.checkout.placeOrderAccessibility', { seller: sellerName })
+                  : t('market.checkout.signInToBuy')
+              }
               testID="market-checkout-place-order"
             >
               {isPlacing ? (
@@ -405,12 +416,12 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               ) : canOrder ? (
                 <>
                   <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-                  <Text style={styles.primaryButtonText}>Place order</Text>
+                  <Text style={styles.primaryButtonText}>{t('market.checkout.placeOrder')}</Text>
                 </>
               ) : (
                 <>
                   <LogIn size={16} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>Sign in to buy</Text>
+                  <Text style={styles.primaryButtonText}>{t('market.checkout.signInToBuy')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -420,21 +431,22 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 {error}
               </Text>
             ) : (
-              <Text style={styles.hint}>
-                Your order is sent privately (gift-wrapped) to the seller, who replies with a
-                Lightning invoice you pay in-app.
-              </Text>
+              <Text style={styles.hint}>{t('market.checkout.hint')}</Text>
             )}
 
             <TouchableOpacity
               style={styles.fallbackLink}
               onPress={openWebsite}
               accessibilityRole="link"
-              accessibilityLabel={`Open ${sellerName} website instead`}
+              accessibilityLabel={t('market.checkout.openWebsiteAccessibility', {
+                seller: sellerName,
+              })}
               testID="market-checkout-website"
             >
               <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.fallbackLinkText}>Prefer the website? Open {sellerName}</Text>
+              <Text style={styles.fallbackLinkText}>
+                {t('market.checkout.websiteFallback', { seller: sellerName })}
+              </Text>
             </TouchableOpacity>
           </>
         )}

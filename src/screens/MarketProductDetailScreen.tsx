@@ -5,6 +5,7 @@ import { ChevronLeft, Zap, ExternalLink } from 'lucide-react-native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { marketFeedbackContext } from '../utils/marketFeedback';
@@ -41,6 +42,7 @@ interface Props {
  */
 const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketProductDetailStyles(colors), [colors]);
   const [imageFailed, setImageFailed] = useState(false);
   // Real aspect ratio of the product image, learned on load, so the hero
@@ -92,10 +94,13 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <View style={styles.container} testID="market-product-detail-missing">
         <View style={styles.missing}>
-          <Text style={styles.missingText}>This product is no longer available.</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()} accessibilityLabel="Go back">
+          <Text style={styles.missingText}>{t('market.detail.unavailable')}</Text>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel={t('market.detail.goBack')}
+          >
             <Text style={[styles.vendorName, { color: colors.brandPink, marginTop: 12 }]}>
-              Back to Market
+              {t('market.detail.backToMarket')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -118,7 +123,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Market"
+            accessibilityLabel={t('market.detail.back')}
             testID="market-product-detail-back"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -163,14 +168,14 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.priceRow}>
             <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
             <Text style={styles.priceSats} testID="market-product-detail-price">
-              {product.priceSats.toLocaleString()} sats
+              {t('market.sats', { amount: product.priceSats.toLocaleString() })}
             </Text>
             <Text style={styles.priceFiat}>· {product.priceFiatLabel}</Text>
           </View>
 
           <View style={styles.vendorRow}>
             {vendor ? <VendorAvatar vendor={vendor} size={24} /> : null}
-            <Text style={styles.vendorName}>from {sellerName}</Text>
+            <Text style={styles.vendorName}>{t('market.fromSeller', { seller: sellerName })}</Text>
           </View>
 
           <Text style={styles.description}>{product.description}</Text>
@@ -180,10 +185,13 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             onPress={openShop}
             testID="market-product-detail-buy"
             activeOpacity={0.85}
-            accessibilityLabel={`Buy ${product.title} from ${sellerName}`}
+            accessibilityLabel={t('market.detail.buyAccessibility', {
+              title: product.title,
+              seller: sellerName,
+            })}
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-            <Text style={styles.buyText}>Buy from {sellerName}</Text>
+            <Text style={styles.buyText}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
             {/* In-app checkout for Nostr sellers; the external-link glyph is only
                 shown when tapping Buy leaves the app for the seller's website. */}
             {vendorPubkey ? null : (
@@ -204,10 +212,7 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
         ) : (
           <View style={styles.noFeedback} testID="market-product-detail-no-feedback">
-            <Text style={styles.noFeedbackText}>
-              Reviews and comments aren&apos;t available for this seller yet — they need a Nostr
-              identity to anchor feedback on.
-            </Text>
+            <Text style={styles.noFeedbackText}>{t('market.detail.noFeedback')}</Text>
           </View>
         )}
       </ScrollView>

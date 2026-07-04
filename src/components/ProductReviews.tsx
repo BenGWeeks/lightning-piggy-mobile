@@ -8,6 +8,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useProductReviews } from '../hooks/useProductReviews';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
@@ -48,6 +49,7 @@ const ReviewForm: React.FC<{
   canPublish: boolean;
   onRequestSignIn: () => void;
 }> = ({ existing, styles, colors, onSubmit, submitting, canPublish, onRequestSignIn }) => {
+  const t = useTranslation();
   const existingStars = existing ? Math.round(existing.stars) : 0;
   const existingText = existing?.text ?? '';
   const [stars, setStars] = useState(existingStars);
@@ -84,14 +86,14 @@ const ReviewForm: React.FC<{
         testID="product-review-signin"
         activeOpacity={0.8}
       >
-        <Text style={styles.signInText}>Sign in to write a review</Text>
+        <Text style={styles.signInText}>{t('market.reviews.signIn')}</Text>
       </TouchableOpacity>
     );
   }
 
   const submit = async () => {
     if (stars < 1) {
-      setHint('Add a rating first');
+      setHint(t('market.reviews.addRating'));
       return;
     }
     setHint(null);
@@ -100,13 +102,15 @@ const ReviewForm: React.FC<{
 
   return (
     <View style={styles.form} testID="product-review-form">
-      <Text style={styles.formLabel}>{existing ? 'Update your review' : 'Write a review'}</Text>
+      <Text style={styles.formLabel}>
+        {existing ? t('market.reviews.updateLabel') : t('market.reviews.write')}
+      </Text>
       <StarRatingInput value={stars} onChange={onChangeStars} testID="product-review-star-input" />
       <TextInput
         style={styles.input}
         value={content}
         onChangeText={onChangeContent}
-        placeholder="Share your experience (optional)"
+        placeholder={t('market.reviews.placeholder')}
         placeholderTextColor={colors.textSupplementary}
         multiline
         testID="product-review-text"
@@ -122,7 +126,9 @@ const ReviewForm: React.FC<{
         {submitting ? (
           <ActivityIndicator color={colors.white} size="small" />
         ) : (
-          <Text style={styles.submitText}>{existing ? 'Update review' : 'Submit review'}</Text>
+          <Text style={styles.submitText}>
+            {existing ? t('market.reviews.submitUpdate') : t('market.reviews.submit')}
+          </Text>
         )}
       </TouchableOpacity>
     </View>
@@ -135,6 +141,7 @@ const ReviewForm: React.FC<{
  */
 const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { pubkey } = useNostr();
   const { reviews, aggregate, loading, error, refetch } = useProductReviews(coord);
@@ -182,7 +189,7 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
           <StarRating value={aggregate.average} size={18} />
           <Text style={styles.aggregateAvg}>{aggregate.average.toFixed(1)}</Text>
           <Text style={styles.aggregateCount}>
-            ({aggregate.count} {aggregate.count === 1 ? 'review' : 'reviews'})
+            ({t('market.reviews.count', { count: aggregate.count })})
           </Text>
         </View>
       ) : null}
@@ -203,7 +210,7 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       ) : loading && reviews.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : reviews.length === 0 ? (
-        <Text style={styles.state}>No reviews yet. Be the first to review this product!</Text>
+        <Text style={styles.state}>{t('market.reviews.empty')}</Text>
       ) : (
         reviews.map((r) => <ReviewItem key={r.id || r.pubkey} review={r} styles={styles} />)
       )}

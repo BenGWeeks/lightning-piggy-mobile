@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useProductComments } from '../hooks/useProductComments';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
@@ -42,6 +43,7 @@ const CommentItem: React.FC<{ comment: NostrEvent; styles: Styles }> = ({ commen
  */
 const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { topLevel, loading, error, refetch } = useProductComments(root);
   const { publishComment, publishing, canPublish } = usePublishProductFeedback();
@@ -83,7 +85,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
             style={styles.input}
             value={content}
             onChangeText={setContent}
-            placeholder="Add a comment"
+            placeholder={t('market.comments.placeholder')}
             placeholderTextColor={colors.textSupplementary}
             multiline
             testID="product-comment-text"
@@ -98,7 +100,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
             {publishing ? (
               <ActivityIndicator color={colors.white} size="small" />
             ) : (
-              <Text style={styles.submitText}>Post comment</Text>
+              <Text style={styles.submitText}>{t('market.comments.post')}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -109,7 +111,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
           testID="product-comment-signin"
           activeOpacity={0.8}
         >
-          <Text style={styles.signInText}>Sign in to comment</Text>
+          <Text style={styles.signInText}>{t('market.comments.signIn')}</Text>
         </TouchableOpacity>
       )}
 
@@ -118,7 +120,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       ) : loading && topLevel.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : topLevel.length === 0 ? (
-        <Text style={styles.state}>No comments yet. Be the first to start the discussion!</Text>
+        <Text style={styles.state}>{t('market.comments.empty')}</Text>
       ) : (
         topLevel.map((c) => <CommentItem key={c.id} comment={c} styles={styles} />)
       )}

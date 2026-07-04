@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketProductCardStyles } from '../styles/MarketProductCard.styles';
 import VendorAvatar from './VendorAvatar';
 import type { MarketProduct } from '../data/marketProducts';
@@ -45,6 +46,7 @@ const MarketProductCard: React.FC<Props> = ({
   testID,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketProductCardStyles(colors), [colors]);
   // Fall back to a branded placeholder tile if the image 404s / dead host.
   const [imageFailed, setImageFailed] = useState(false);
@@ -75,7 +77,7 @@ const MarketProductCard: React.FC<Props> = ({
       {product.featured ? (
         <View style={styles.featuredBadge} testID={testID ? `${testID}-featured` : undefined}>
           <Zap size={9} color={colors.zapYellowInk} strokeWidth={2.5} fill={colors.zapYellowInk} />
-          <Text style={styles.featuredText}>Featured</Text>
+          <Text style={styles.featuredText}>{t('market.card.featured')}</Text>
         </View>
       ) : null}
     </View>
@@ -85,7 +87,11 @@ const MarketProductCard: React.FC<Props> = ({
     <TouchableOpacity
       style={cardStyle}
       onPress={onPress}
-      accessibilityLabel={`${product.title} — ${product.priceSats.toLocaleString()} sats from ${sellerName}`}
+      accessibilityLabel={t('market.card.accessibility', {
+        title: product.title,
+        amount: product.priceSats.toLocaleString(),
+        seller: sellerName,
+      })}
       testID={testID}
       activeOpacity={0.8}
     >
@@ -97,7 +103,7 @@ const MarketProductCard: React.FC<Props> = ({
         <View style={styles.priceRow}>
           <Zap size={12} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
           <Text style={styles.price} testID={testID ? `${testID}-price` : undefined}>
-            {product.priceSats.toLocaleString()} sats
+            {t('market.sats', { amount: product.priceSats.toLocaleString() })}
           </Text>
         </View>
         <View style={styles.sellerRow}>
@@ -109,7 +115,7 @@ const MarketProductCard: React.FC<Props> = ({
             />
           ) : null}
           <Text style={styles.seller} numberOfLines={1}>
-            from {sellerName}
+            {t('market.fromSeller', { seller: sellerName })}
           </Text>
         </View>
         {variant === 'list' ? (

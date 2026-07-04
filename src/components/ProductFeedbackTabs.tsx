@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Star, MessageSquare } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { CommentRoot } from '../utils/productComments';
 import type { Palette } from '../styles/palettes';
 import ProductReviews from './ProductReviews';
@@ -26,6 +27,7 @@ type Tab = 'reviews' | 'comments';
  */
 const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSignIn }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [tab, setTab] = useState<Tab>('reviews');
   const [reviewCount, setReviewCount] = useState(0);
@@ -71,8 +73,8 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
   return (
     <View testID="product-feedback-tabs">
       <View style={styles.tabBar}>
-        {renderTab('reviews', 'Reviews', reviewCount, Star)}
-        {renderTab('comments', 'Comments', commentCount, MessageSquare)}
+        {renderTab('reviews', t('market.feedbackTabs.reviews'), reviewCount, Star)}
+        {renderTab('comments', t('market.feedbackTabs.comments'), commentCount, MessageSquare)}
       </View>
 
       <View style={styles.body}>

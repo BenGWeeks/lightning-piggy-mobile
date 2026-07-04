@@ -2,12 +2,17 @@ import { I18n } from 'i18n-js';
 import type { Scope, TranslateOptions } from 'i18n-js';
 import enJson from './locales/en.json';
 import esJson from './locales/es.json';
+import ukJson from './locales/uk.json';
 import type { Translations } from './locales/types';
 
 // #137 infra: seeded with en + es to prove the pipeline end-to-end (tab
 // bar labels). fr/de/nl (named in the issue) land as their own follow-up
 // batches, same as every other surface — see the issue's "extract in
-// batches per surface" plan.
+// batches per surface" plan. Ukrainian (uk) was seeded by the market
+// batch (#948): its `market` namespace is fully translated, and the rest
+// of the catalogue carries the English source as a fallback until later
+// per-surface batches translate it (enableFallback also folds unset keys
+// back to en).
 //
 // Locale catalogues are plain JSON (not .ts) so a translation-only
 // contribution — the issue explicitly calls this out as a good first
@@ -17,13 +22,14 @@ import type { Translations } from './locales/types';
 // misspells) a key, same guarantee a hand-written .ts file would give.
 const en: Translations = enJson;
 const es: Translations = esJson;
+const uk: Translations = ukJson;
 
 /** Raw catalogue dict — exported so LocaleContext can build its own
  *  per-locale I18n instance for rendering (see the render-purity note
  *  there) without duplicating the JSON imports. */
-export const translations = { en, es };
+export const translations = { en, es, uk };
 
-export const SUPPORTED_LOCALES = ['en', 'es'] as const;
+export const SUPPORTED_LOCALES = ['en', 'es', 'uk'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export function isSupportedLocale(code: string): code is SupportedLocale {

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 import { vendorSlug } from '../utils/marketVendors';
 
@@ -43,20 +44,23 @@ const Chip: React.FC<{
   onPress: () => void;
   testID?: string;
   styles: ReturnType<typeof createMarketFilterBarStyles>;
-}> = ({ label, selected, onPress, testID, styles }) => (
-  <TouchableOpacity
-    style={[styles.chip, selected && styles.chipSelected]}
-    onPress={onPress}
-    accessibilityState={{ selected }}
-    accessibilityLabel={`${label}${selected ? ', selected' : ''}`}
-    testID={testID}
-    activeOpacity={0.7}
-  >
-    <Text style={[styles.chipText, selected && styles.chipTextSelected]} numberOfLines={1}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
+}> = ({ label, selected, onPress, testID, styles }) => {
+  const t = useTranslation();
+  return (
+    <TouchableOpacity
+      style={[styles.chip, selected && styles.chipSelected]}
+      onPress={onPress}
+      accessibilityState={{ selected }}
+      accessibilityLabel={selected ? t('market.filters.chipSelected', { label }) : label}
+      testID={testID}
+      activeOpacity={0.7}
+    >
+      <Text style={[styles.chipText, selected && styles.chipTextSelected]} numberOfLines={1}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 /**
  * Right-anchored, slide-in **filter panel** for the Market screen.
@@ -92,6 +96,7 @@ const MarketFilterBar: React.FC<Props> = ({
   onClear,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketFilterBarStyles(colors), [colors]);
 
   // Panel width: a comfortable drawer that leaves the grid peeking behind it.
@@ -147,20 +152,20 @@ const MarketFilterBar: React.FC<Props> = ({
         testID="market-filter-panel"
       >
         <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle}>Filters</Text>
+          <Text style={styles.panelTitle}>{t('market.filters.title')}</Text>
           {active ? (
             <TouchableOpacity
               onPress={onClear}
-              accessibilityLabel="Clear all filters"
+              accessibilityLabel={t('market.filters.clearAll')}
               testID="market-filter-clear"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={styles.clearText}>Clear filters</Text>
+              <Text style={styles.clearText}>{t('market.filters.clear')}</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
             onPress={onClose}
-            accessibilityLabel="Close filters"
+            accessibilityLabel={t('market.filters.close')}
             testID="market-filter-close"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -177,10 +182,10 @@ const MarketFilterBar: React.FC<Props> = ({
           {/* Merchant */}
           {merchants.length > 0 ? (
             <View style={styles.section} testID="market-filter-merchants">
-              <Text style={styles.sectionLabel}>Merchant</Text>
+              <Text style={styles.sectionLabel}>{t('market.filters.merchant')}</Text>
               <View style={styles.chipWrap}>
                 <Chip
-                  label="All"
+                  label={t('market.filters.all')}
                   selected={selectedMerchant === null}
                   onPress={() => onSelectMerchant(null)}
                   testID="market-filter-merchant-all"
@@ -207,10 +212,10 @@ const MarketFilterBar: React.FC<Props> = ({
           {/* Country */}
           {countries.length > 0 ? (
             <View style={styles.section} testID="market-filter-countries">
-              <Text style={styles.sectionLabel}>Country</Text>
+              <Text style={styles.sectionLabel}>{t('market.filters.country')}</Text>
               <View style={styles.chipWrap}>
                 <Chip
-                  label="All"
+                  label={t('market.filters.all')}
                   selected={selectedCountry === null}
                   onPress={() => onSelectCountry(null)}
                   testID="market-filter-country-all"
@@ -237,10 +242,10 @@ const MarketFilterBar: React.FC<Props> = ({
           {/* Currency */}
           {currencies.length > 0 ? (
             <View style={styles.section} testID="market-filter-currencies">
-              <Text style={styles.sectionLabel}>Currency</Text>
+              <Text style={styles.sectionLabel}>{t('market.filters.currency')}</Text>
               <View style={styles.chipWrap}>
                 <Chip
-                  label="All"
+                  label={t('market.filters.all')}
                   selected={selectedCurrency === null}
                   onPress={() => onSelectCurrency(null)}
                   testID="market-filter-currency-all"
@@ -264,11 +269,11 @@ const MarketFilterBar: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.doneButton}
           onPress={onClose}
-          accessibilityLabel="Close filters"
+          accessibilityLabel={t('market.filters.close')}
           testID="market-filter-done"
           activeOpacity={0.8}
         >
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={styles.doneText}>{t('market.filters.done')}</Text>
         </TouchableOpacity>
       </Animated.View>
     </Modal>

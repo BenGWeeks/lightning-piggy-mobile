@@ -13,6 +13,7 @@ import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
@@ -65,6 +66,7 @@ const sellerPubkeyOf = (product: MarketProduct): string | null => {
  */
 const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
   const { trustSet } = useTrustGraph();
 
@@ -168,10 +170,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const emptyCopy = filterActive
-    ? 'No products match your search or filters.'
+    ? t('market.screen.emptyNoMatch')
     : mode === 'wotFriends'
-      ? 'None of your Nostr friends are selling Lightning Piggy products yet.'
-      : 'No products available right now.';
+      ? t('market.screen.emptyNoFriends')
+      : t('market.screen.emptyNone');
 
   return (
     <View style={styles.container} testID="market-screen">
@@ -185,21 +187,23 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('market.screen.back')}
             testID="market-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Market</Text>
+          <Text style={styles.headerTitle}>{t('market.screen.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
-        <Text style={styles.headerTagline}>Buy a Lightning Piggy &amp; Bitcoin merch</Text>
+        <Text style={styles.headerTagline}>{t('market.screen.tagline')}</Text>
       </View>
 
       <View style={styles.modeBar}>
         <MarketModeSelector value={mode} onChange={setMode} />
-        <Text style={styles.modeCaption}>Showing: {marketModeOption(mode).label}</Text>
+        <Text style={styles.modeCaption}>
+          {t('market.screen.showing', { label: marketModeOption(mode).label })}
+        </Text>
       </View>
 
       {/* Inline search + a compact filter icon that opens the slide-in panel.
@@ -212,7 +216,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.searchInput}
             value={query}
             onChangeText={setQuery}
-            placeholder="Search products or sellers"
+            placeholder={t('market.screen.searchPlaceholder')}
             placeholderTextColor={colors.textSupplementary}
             autoCapitalize="none"
             autoCorrect={false}
@@ -222,7 +226,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           {query.length > 0 ? (
             <TouchableOpacity
               onPress={() => setQuery('')}
-              accessibilityLabel="Clear search"
+              accessibilityLabel={t('market.screen.clearSearch')}
               testID="market-search-clear"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
@@ -234,7 +238,9 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
           style={[styles.filterButton, categoryFilterCount > 0 && styles.filterButtonActive]}
           onPress={() => setFiltersOpen(true)}
           accessibilityLabel={
-            categoryFilterCount > 0 ? `Filters, ${categoryFilterCount} applied` : 'Filters'
+            categoryFilterCount > 0
+              ? t('market.screen.filtersApplied', { count: categoryFilterCount })
+              : t('market.screen.filters')
           }
           testID="market-filter-button"
           activeOpacity={0.7}

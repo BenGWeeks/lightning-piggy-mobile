@@ -2,9 +2,12 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { ChevronRight, Globe, MessageCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketShippingSectionStyles } from '../styles/MarketShippingSection.styles';
 import { countryName } from '../data/countries';
 import type { ShippingOption } from '../utils/marketShipping';
+
+type TranslateFn = ReturnType<typeof useTranslation>;
 
 interface Props {
   /** Fetch state from useShippingOptions. */
@@ -25,11 +28,14 @@ interface Props {
 }
 
 /** "Ships worldwide" vs a short country list for an option row's sub-label. */
-function scopeLabel(option: ShippingOption): string {
-  if (option.countries.length === 0) return 'Ships worldwide';
+function scopeLabel(option: ShippingOption, t: TranslateFn): string {
+  if (option.countries.length === 0) return t('market.shipping.worldwide');
   const names = option.countries.slice(0, 3).map(countryName);
   const more = option.countries.length - names.length;
-  return `Ships to ${names.join(', ')}${more > 0 ? ` +${more}` : ''}`;
+  const countries = names.join(', ');
+  return more > 0
+    ? t('market.shipping.shipsToMore', { countries, count: more })
+    : t('market.shipping.shipsTo', { countries });
 }
 
 /**
@@ -52,15 +58,18 @@ const MarketShippingSection: React.FC<Props> = ({
   onMessageShop,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketShippingSectionStyles(colors), [colors]);
 
   if (status === 'loading') {
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>Shipping</Text>
+        <Text style={styles.sectionLabel}>{t('market.shipping.label')}</Text>
         <View style={styles.statusRow} testID="market-shipping-loading">
           <ActivityIndicator size="small" color={colors.brandPink} />
-          <Text style={styles.statusText}>Checking where {sellerName} ships…</Text>
+          <Text style={styles.statusText}>
+            {t('market.shipping.checking', { seller: sellerName })}
+          </Text>
         </View>
       </View>
     );
@@ -69,16 +78,16 @@ const MarketShippingSection: React.FC<Props> = ({
   if (status === 'error') {
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>Shipping</Text>
+        <Text style={styles.sectionLabel}>{t('market.shipping.label')}</Text>
         <View style={styles.statusRow} testID="market-shipping-error">
-          <Text style={styles.statusText}>Couldn&apos;t load shipping options.</Text>
+          <Text style={styles.statusText}>{t('market.shipping.loadError')}</Text>
           <TouchableOpacity
             onPress={retry}
             accessibilityRole="button"
-            accessibilityLabel="Retry loading shipping options"
+            accessibilityLabel={t('market.shipping.retryAccessibility')}
             testID="market-shipping-retry"
           >
-            <Text style={styles.retryText}>Retry</Text>
+            <Text style={styles.retryText}>{t('market.shipping.retry')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -87,21 +96,25 @@ const MarketShippingSection: React.FC<Props> = ({
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>Shipping</Text>
+      <Text style={styles.sectionLabel}>{t('market.shipping.label')}</Text>
 
       <TouchableOpacity
         style={styles.countryRow}
         onPress={onOpenCountryPicker}
         accessibilityRole="button"
         accessibilityLabel={
-          countryCode ? `Ship to ${countryName(countryCode)} — change country` : 'Choose country'
+          countryCode
+            ? t('market.shipping.shipTo', { country: countryName(countryCode) })
+            : t('market.shipping.chooseCountry')
         }
         testID="market-shipping-country"
       >
         {countryCode ? (
           <Text style={styles.countryLabel}>{countryName(countryCode)}</Text>
         ) : (
-          <Text style={styles.countryPlaceholder}>Choose country…</Text>
+          <Text style={styles.countryPlaceholder}>
+            {t('market.shipping.chooseCountryPlaceholder')}
+          </Text>
         )}
         <View style={styles.countryChevronWrap}>
           <Globe size={16} color={colors.textSupplementary} strokeWidth={2} />
@@ -113,17 +126,19 @@ const MarketShippingSection: React.FC<Props> = ({
         compatibleOptions.length === 0 ? (
           <View style={styles.emptyWrap} testID="market-shipping-empty">
             <Text style={styles.emptyText}>
-              We don&apos;t ship to {countryName(countryCode)} yet — message the shop and ask.
+              {t('market.shipping.noShip', { country: countryName(countryCode) })}
             </Text>
             <TouchableOpacity
               style={styles.messageShopButton}
               onPress={onMessageShop}
               accessibilityRole="button"
-              accessibilityLabel={`Message ${sellerName}`}
+              accessibilityLabel={t('market.shipping.message', { seller: sellerName })}
               testID="market-shipping-message-shop"
             >
               <MessageCircle size={15} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.messageShopText}>Message {sellerName}</Text>
+              <Text style={styles.messageShopText}>
+                {t('market.shipping.message', { seller: sellerName })}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -137,7 +152,9 @@ const MarketShippingSection: React.FC<Props> = ({
                 onPress={() => onSelectOption(option.coordinate)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={`Shipping option ${option.title}`}
+                accessibilityLabel={t('market.shipping.optionAccessibility', {
+                  title: option.title,
+                })}
                 testID={`market-shipping-option-${option.dTag}`}
               >
                 <View style={styles.optionInfo}>
@@ -145,17 +162,20 @@ const MarketShippingSection: React.FC<Props> = ({
                     {option.title}
                   </Text>
                   <Text style={styles.optionScope} numberOfLines={1}>
-                    {scopeLabel(option)}
+                    {scopeLabel(option, t)}
                   </Text>
                 </View>
                 <Text style={styles.optionCost}>
                   {costSats === null || costSats === undefined
                     ? // Fiat rate unavailable — show the merchant's own pricing
                       // rather than a wrong sats figure; submit stays blocked.
-                      `${option.baseAmount} ${option.currency || '?'}`
+                      t('market.shipping.priceFallback', {
+                        amount: option.baseAmount,
+                        currency: option.currency || '?',
+                      })
                     : costSats === 0
-                      ? 'Free'
-                      : `${costSats.toLocaleString()} sats`}
+                      ? t('market.free')
+                      : t('market.sats', { amount: costSats.toLocaleString() })}
                 </Text>
               </TouchableOpacity>
             );

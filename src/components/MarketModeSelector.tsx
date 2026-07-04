@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Check, Lock } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketModeSelectorStyles } from '../styles/MarketModeSelector.styles';
 import { MARKET_MODE_OPTIONS, type MarketMode } from '../utils/marketMode';
 
@@ -27,6 +28,7 @@ interface Props {
  */
 const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createMarketModeSelectorStyles(colors), [colors]);
 
   return (
@@ -60,8 +62,10 @@ const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
             accessibilityState={{ selected, disabled }}
             accessibilityLabel={
               disabled
-                ? `${opt.label} — coming soon`
-                : `${opt.label}${selected ? ', selected' : ''}`
+                ? t('market.modes.comingSoon', { label: opt.label })
+                : selected
+                  ? t('market.modes.selected', { label: opt.label })
+                  : opt.label
             }
             testID={`market-mode-${opt.mode}`}
             activeOpacity={disabled ? 1 : 0.7}
@@ -77,7 +81,7 @@ const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
             </Text>
             {disabled ? (
               <View style={styles.soonPill} testID={`market-mode-${opt.mode}-soon`}>
-                <Text style={styles.soonText}>Soon</Text>
+                <Text style={styles.soonText}>{t('market.modes.soon')}</Text>
               </View>
             ) : null}
           </TouchableOpacity>
