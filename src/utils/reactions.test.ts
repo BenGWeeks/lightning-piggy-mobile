@@ -214,6 +214,22 @@ describe('reduceReactions', () => {
     expect(out.get(TARGET_1)?.byEmoji['🔥']).toEqual([PK_A]);
   });
 
+  it('breaks equal-createdAt ties deterministically (higher id wins, any order)', () => {
+    // Two records for the same (reactor, emoji, target) sharing a second — a
+    // double-tap. The survivor must be the higher id regardless of delivery
+    // order, so both orderings resolve to the same reaction id.
+    const forward = reduceReactions(
+      [rec(PK_ME, '🔥', TARGET_1, 100, 'id-aaa'), rec(PK_ME, '🔥', TARGET_1, 100, 'id-bbb')],
+      PK_ME,
+    );
+    const reverse = reduceReactions(
+      [rec(PK_ME, '🔥', TARGET_1, 100, 'id-bbb'), rec(PK_ME, '🔥', TARGET_1, 100, 'id-aaa')],
+      PK_ME,
+    );
+    expect(forward.get(TARGET_1)?.myReactions['🔥']).toBe('id-bbb');
+    expect(reverse.get(TARGET_1)?.myReactions['🔥']).toBe('id-bbb');
+  });
+
   it('orders reactors within an emoji bucket by createdAt ascending', () => {
     const out = reduceReactions(
       [

@@ -210,6 +210,9 @@ export function parseReactionEvent(event: {
  *  - If the same reactor pubkey publishes the same emoji multiple times
  *    against the same message, only the LATEST (highest created_at) is
  *    kept — represents their current "vote". Older duplicates are dropped.
+ *    On an equal `created_at` (double-taps / spammy clients share the same
+ *    second) the higher event `id` wins, so the merge is deterministic
+ *    regardless of delivery order.
  *  - Different emojis from the same reactor coexist (a person can react
  *    with both ❤️ and 🔥).
  *  - `viewerPubkey` is matched lowercase; the matching reaction's id is
@@ -227,7 +230,13 @@ export function reduceReactions(
   for (const r of records) {
     const key = `${r.targetEventId}|${r.emoji}|${r.reactorPubkey}`;
     const prev = latestByKey.get(key);
-    if (!prev || r.createdAt > prev.record.createdAt) {
+    if (
+      !prev ||
+      r.createdAt > prev.record.createdAt ||
+      // Deterministic tie-break on equal timestamps: higher id wins so the
+      // survivor doesn't depend on input/delivery order.
+      (r.createdAt === prev.record.createdAt && r.id > prev.record.id)
+    ) {
       latestByKey.set(key, { record: r });
     }
   }
@@ -239,7 +248,7 @@ export function reduceReactions(
   // surviving records once, then bucket.
   const sorted = [...latestByKey.values()]
     .map((l) => l.record)
-    .sort((a, b) => a.createdAt - b.createdAt);
+    .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const r of sorted) {
     let state = out.get(r.targetEventId);
     if (!state) {

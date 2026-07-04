@@ -278,6 +278,7 @@ const MessageBubble: React.FC<Props> = ({
               onPress={() => onToggleReaction?.(emoji, myReactionId)}
               style={[styles.reactionPill, mine && styles.reactionPillMine]}
               accessibilityRole="button"
+              accessibilityState={{ disabled: !onToggleReaction }}
               accessibilityLabel={
                 mine
                   ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })
