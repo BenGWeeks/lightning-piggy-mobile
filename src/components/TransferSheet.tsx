@@ -99,16 +99,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [step, setStep] = useState<Step>('main');
   const [sending, setSending] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
-  // Issue #62: step-by-step progress display. While `progress.phase`
-  // is anything other than 'idle' the form is replaced by a checklist
-  // showing which step is active / done / failed. The legacy
-  // `progressMsg` is preserved as a block below the checklist (rendered
-  // in TransferProgress) so the rich Boltz "swap underway" copy still
-  // reaches the user.
+  // Issue #62: step-by-step progress display. The form is replaced by a
+  // checklist while `sending` (or `progress.phase === 'failed'`, to keep
+  // the failing step visible after `sending` clears); the checklist rows
+  // read `progress.phase`/`activeIndex` to show which step is active /
+  // done / failed. The legacy `progressMsg` is preserved as a block below
+  // the checklist (rendered in TransferProgress) so the rich Boltz "swap
+  // underway" copy still reaches the user.
   const [progress, setProgress] = useState<TransferProgressState>(() => idleProgress());
-  // true once the foreground work is done and the background task has the
-  // swap — the sheet becomes a "done, safe to close" confirmation state.
-  const [handedOff, setHandedOff] = useState(false);
   // Set when the background reverse-swap task errors (usually an NWC relay
   // timeout leaving the LN payment state unknown). Drives the "Retry now"
   // button + the updated progress message in the progress view. Once the
@@ -318,7 +316,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setSatsValue('');
       setStep('main');
       setSending(false);
-      setHandedOff(false);
       setProgressMsg(null);
       setProgress(idleProgress());
       setBackgroundError(null);
@@ -447,10 +444,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
     if (!transferType) return;
 
-    // Local flag shadowing the `handedOff` state — React setState is async,
-    // so setHandedOff(true) before return doesn't update the `handedOff`
-    // closure by the time the `finally` block runs. A plain let survives
-    // the same scope and is visible in finally.
+    // A plain local (not React state) so the value is readable in the
+    // `finally` block: on a Boltz hand-off we leave the "swap underway —
+    // safe to close" message up instead of clearing `sending`/`progressMsg`.
+    // React setState is async, so a state flag wouldn't be updated in the
+    // same closure by the time `finally` runs; a `let` survives the scope.
     let didHandOff = false;
 
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
@@ -768,7 +766,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         setProgress((p) => completeTransfer(p));
         didHandOff = true;
-        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
@@ -868,7 +865,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         setProgress((p) => completeTransfer(p));
         didHandOff = true;
-        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
         setProgressMsg('Broadcasting on-chain transaction...');
