@@ -286,7 +286,8 @@ export async function requestNip44DecryptSilent(
  *   nostrconnect://<client-pub>?relay=<url>&secret=<hex>&perms=<csv>&name=<urlenc>
  *
  * Multiple `relay=` params can be repeated — we keep one for now
- * (bunker.damus.io is the de-facto default).
+ * (the pairing flow in `NostrLoginSheet` passes `wss://relay.nsec.app`,
+ * the relay nsec.app / Aegis-style bunkers listen on by default).
  */
 export function buildPairingUri(input: {
   clientPubkey: string;

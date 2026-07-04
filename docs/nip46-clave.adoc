@@ -66,7 +66,7 @@ Amber has a `nip44_decrypt_batch` ContentResolver fast-path — one IPC for N de
 . Spec-extend with a batched bunker request and ship it across Clave / nsec.app / Aegis.
 . Take the slow-but-correct path: per-request round-trip, render a spinner.
 
-This PR takes option 2. Inbox refresh on cold cache will show a "decrypting…" spinner while the wraps catch up. The wrap-id cache (`nip46_nip17_cache_v1` in AsyncStorage) means subsequent refreshes only pay the round-trip cost for newly-arrived wraps — the steady-state UX is the same as nsec.
+This PR takes option 2. Inbox refresh on cold cache will show a "decrypting…" spinner while the wraps catch up. Two on-device short-circuits mean subsequent refreshes only pay the round-trip cost for newly-arrived wraps, so the steady-state UX is the same as nsec: decrypted rumors persist as rows in the encrypted SQLCipher store (`src/services/dmDb`), so a wrap whose id is already stored is never re-decrypted; and a per-signer negative skip-set (`nip46_nip17_skip_v1`, persisted via `expo-file-system`) records wrap ids that decrypted to a non-inbox rumor (group message / non-followed sender) so the loop skips them too. The legacy plaintext `*_nip17_cache_v1` AsyncStorage caches were retired in #848.
 
 Bunker-side batching is filed as a follow-up. See `src/services/nostrConnectService.ts` `requestNip44DecryptSilent` for the deliberate "throw to surface the trade-off" sentinel.
 

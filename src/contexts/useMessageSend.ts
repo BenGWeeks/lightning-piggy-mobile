@@ -7,15 +7,19 @@ import { NSEC_KEY } from './nostrAuthKeys';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
+import type { DmSendResult } from '../services/nostrService';
 import type { SignerType, RelayConfig } from '../types/nostr';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 // A send carries the per-relay delivery breakdown so the optimistic bubble can
-// show its tick and persist it (#856). `success` means ≥1 relay accepted ≥1
-// wrap — it drives whether the composer clears the draft. `delivery` is present
-// for any send that reached the publish stage (delivered / partial / all-failed
-// alike), so the optimistic bubble can settle to its final tick; only a hard
-// pre-publish error (not logged in, signer cancelled) omits it (#857).
+// show its tick and persist it (#856). `success` means the send FULLY delivered
+// — every intended wrap published and no signer/publish errors — and drives
+// whether the composer clears the draft; a partial send (e.g. self-wrap landed
+// but the recipient wrap failed) is NOT success, so the draft is kept for
+// Re-publish (see `toTextSendResult`). `delivery` is present for any send that
+// reached the publish stage (delivered / partial / all-failed alike), so the
+// optimistic bubble can settle to its final tick; only a hard pre-publish error
+// (not logged in, signer cancelled) omits it (#857).
 export interface SendResult {
   success: boolean;
   error?: string;
@@ -48,6 +52,28 @@ export interface UseMessageSendParams {
   isLoggedIn: boolean;
   signerType: SignerType | null;
   relays: RelayConfig[];
+}
+
+// Map a NIP-17 multi-wrap send result to the composer's success/draft outcome.
+//
+// A 1:1 send always fans out a self-wrap + a recipient wrap. `delivery.delivered`
+// only means SOME wrap reached SOME relay, so it can be `true` when just the
+// self-wrap landed but the recipient wrap was never signed (signer cancelled /
+// denied after the first seal — see the sequential loop in
+// `sendNip17ToManyWithSigner`) or never accepted by any relay. Gating `success`
+// on `delivered` would then clear the composer for a message the recipient never
+// received. Instead require the strict partial-send test the file-message path
+// below already uses: at least one wrap published AND no signer/publish errors.
+// `delivery` is still returned in every case so the optimistic bubble settles to
+// its final tick and a partial/failed send keeps the draft for Re-publish
+// (#857; Copilot review on #283).
+function toTextSendResult(result: DmSendResult): SendResult {
+  const fullyDelivered = result.wrapsPublished > 0 && result.errors.length === 0;
+  return {
+    success: fullyDelivered,
+    delivery: result.delivery,
+    error: fullyDelivered ? undefined : (result.errors[0] ?? 'Send failed'),
+  };
 }
 
 export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMessageSendParams) {
@@ -89,16 +115,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             relays: targetRelays,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
-          // Always return the per-relay delivery so the bubble can settle to its
-          // final tick (delivered / partial / all-failed). `success` = ≥1 relay
-          // accepted ≥1 wrap; drives whether the composer clears the draft. A
-          // partial/failed send keeps the draft AND leaves the bubble for the
-          // user to Re-publish — no more silent drop (#857).
-          return {
-            success: result.delivery.delivered,
-            delivery: result.delivery,
-            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
-          };
+          // Return the per-relay delivery so the bubble can settle to its final
+          // tick (delivered / partial / all-failed); `toTextSendResult` gates
+          // `success` (composer-clear) on a fully-delivered send so a partial one
+          // keeps the draft for Re-publish — no silent drop (#857).
+          return toTextSendResult(result);
         }
 
         if (signerType === 'amber') {
@@ -124,11 +145,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return {
-            success: result.delivery.delivered,
-            delivery: result.delivery,
-            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
-          };
+          return toTextSendResult(result);
         }
 
         if (signerType === 'nip46') {
@@ -158,11 +175,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return {
-            success: result.delivery.delivered,
-            delivery: result.delivery,
-            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
-          };
+          return toTextSendResult(result);
         }
 
         return { success: false, error: 'Unsupported signer type' };

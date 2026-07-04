@@ -1,6 +1,6 @@
 # NIP-46 pairing screenshots
 
-Visual verification of the NIP-46 ("Nostr Connect") signer (PR #284, issue #283).
+Visual verification of the NIP-46 ("Nostr Connect") signer (issue #283).
 Captured on the Android dev build (`com.lightningpiggy.app.dev`) driven via Maestro,
 cross-checked against the nsec.app web bunker (https://use.nsec.app) in Chrome.
 
