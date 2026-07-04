@@ -17,6 +17,7 @@ import {
   type VoteRecord,
 } from '../utils/nip88Poll';
 import type { ConversationMessageInput } from '../utils/conversationItems';
+import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { SendResult, SendHooks } from '../contexts/useMessageSend';
 
 interface UseConversationPollsParams {
@@ -34,6 +35,9 @@ interface UseConversationPollsParams {
     rumor: { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string },
     hooks?: SendHooks,
   ) => Promise<SendResult>;
+  /** Persist an optimistic local- row to the conversation cache so a sent poll
+   *  / vote survives navigating away + back before the self-wrap echo lands. */
+  appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   setMessages: React.Dispatch<React.SetStateAction<ConversationMessageInput[]>>;
 }
 
@@ -62,6 +66,7 @@ export function useConversationPolls({
   pubkey,
   sendDirectMessage,
   sendDirectRumor,
+  appendLocalDmMessage,
   setMessages,
 }: UseConversationPollsParams): UseConversationPollsResult {
   // Collect polls + votes across the thread from BOTH wire formats:
@@ -120,19 +125,20 @@ export function useConversationPolls({
   // deterministic), so the dedup matches and the tally never double-counts.
   const appendOptimistic = useCallback(
     (eventId: string, kind: number, text: string) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${eventId}`,
-          rumorId: eventId,
-          fromMe: true,
-          text,
-          createdAt: Math.floor(Date.now() / 1000),
-          wireKind: kind,
-        },
-      ]);
+      const optimistic: ConversationMessageInput = {
+        id: `local-${eventId}`,
+        rumorId: eventId,
+        fromMe: true,
+        text,
+        createdAt: Math.floor(Date.now() / 1000),
+        wireKind: kind,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      // Persist so the sent poll/vote survives a navigate-away + back before the
+      // self-wrap echo lands; the real-id echo dedups it via text+window match.
+      void appendLocalDmMessage(pubkey, optimistic);
     },
-    [setMessages],
+    [pubkey, appendLocalDmMessage, setMessages],
   );
 
   const handleSendPoll = useCallback(

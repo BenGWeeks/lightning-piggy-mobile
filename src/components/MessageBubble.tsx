@@ -596,12 +596,10 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   if (content.kind === 'pollVote') {
-    // Vote events are an internal protocol message — they're rolled up
-    // into the referenced poll's tally by the parent's `aggregateVotes`
-    // call, so the in-app conversation never shows them as bubbles.
-    // Foreign clients (Damus, Amethyst) still see a plain-text bubble
-    // because they don't recognise the [POLL_VOTE] prefix; that's an
-    // accepted limitation of the text-encoded MVP.
+    // Vote events are an internal protocol message — they're rolled up into
+    // the referenced poll's tally by the parent's `tallyPoll` call, so the
+    // in-app conversation never shows them as bubbles. (Structured kind-1018
+    // votes are dropped even earlier, at the item-build layer.)
     return null;
   }
 

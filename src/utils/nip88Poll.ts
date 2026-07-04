@@ -139,6 +139,10 @@ export function buildPollRumor(input: {
   if (question.length > POLL_MAX_QUESTION_LENGTH) {
     throw new Error(`Question too long (max ${POLL_MAX_QUESTION_LENGTH} chars)`);
   }
+  // Reject embedded newlines. Structured tags tolerate them, but the composer
+  // is shared with the group text-encoded path (where a stray newline injects
+  // wire lines), so we keep one line per field everywhere for consistent UX.
+  if (/[\r\n]/.test(question)) throw new Error('Question cannot contain line breaks');
   const cleanOptions = input.options.map((o) => o.trim()).filter((o) => o.length > 0);
   if (cleanOptions.length < POLL_MIN_OPTIONS) {
     throw new Error(`Need at least ${POLL_MIN_OPTIONS} options`);
@@ -150,6 +154,7 @@ export function buildPollRumor(input: {
     if (o.length > POLL_MAX_OPTION_LENGTH) {
       throw new Error(`Option too long (max ${POLL_MAX_OPTION_LENGTH} chars)`);
     }
+    if (/[\r\n]/.test(o)) throw new Error('Options cannot contain line breaks');
   }
   const pollType: PollType = input.pollType ?? 'singlechoice';
   const tags: string[][] = [];

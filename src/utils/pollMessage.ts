@@ -73,7 +73,15 @@ export function buildPollMessage(question: string, options: string[]): string {
   if (trimmedQ.length > POLL_MAX_QUESTION_LENGTH) {
     throw new Error(`Question too long (max ${POLL_MAX_QUESTION_LENGTH} chars)`);
   }
+  // Reject embedded newlines: this text format is line-oriented, so a pasted
+  // `\n`/`\r` in the question or an option could inject extra `option:` /
+  // `question:` wire lines and produce a poll that parses unexpectedly. Keeping
+  // the builder + parser aligned means one line per field, always.
+  if (/[\r\n]/.test(trimmedQ)) throw new Error('Question cannot contain line breaks');
   const cleanOptions = options.map((o) => o.trim()).filter((o) => o.length > 0);
+  if (cleanOptions.some((o) => /[\r\n]/.test(o))) {
+    throw new Error('Options cannot contain line breaks');
+  }
   if (cleanOptions.length < POLL_MIN_OPTIONS) {
     throw new Error(`Need at least ${POLL_MIN_OPTIONS} options`);
   }

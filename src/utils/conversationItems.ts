@@ -97,6 +97,12 @@ export type Item =
       pollId: string;
       poll: DisplayPoll;
       createdAt: number;
+      // Reaction/zap target + delivery tick, for parity with message/gif/
+      // location items. Present on optimistic sent rows (the store has no
+      // rumorId column, so incoming rows carry none — same as gif/location).
+      rumorId?: string;
+      deliveryStatus?: DeliveryStatus;
+      wireKind?: number;
     }
   | {
       kind: 'dayHeader';
@@ -274,6 +280,9 @@ export function buildConversationItems(
             fromMe: m.fromMe,
             poll,
             createdAt: m.createdAt,
+            rumorId: m.rumorId,
+            deliveryStatus: m.deliveryStatus,
+            wireKind: m.wireKind,
           },
         ];
       }
@@ -348,6 +357,9 @@ export function buildConversationItems(
           fromMe: m.fromMe,
           poll: classified.poll,
           createdAt: m.createdAt,
+          rumorId: m.rumorId,
+          deliveryStatus: m.deliveryStatus,
+          wireKind: m.wireKind,
         },
       ];
     }

@@ -75,6 +75,25 @@ describe('nip88Poll — poll rumor build/parse', () => {
     ).toThrow(/too long/i);
   });
 
+  it('rejects embedded newlines in question or options', () => {
+    expect(() =>
+      buildPollRumor({
+        senderPubkey: A,
+        recipientPubkeys: [PEER],
+        question: 'line1\nline2',
+        options: ['a', 'b'],
+      }),
+    ).toThrow(/line breaks/i);
+    expect(() =>
+      buildPollRumor({
+        senderPubkey: A,
+        recipientPubkeys: [PEER],
+        question: 'ok',
+        options: ['a', 'b\ninjected'],
+      }),
+    ).toThrow(/line breaks/i);
+  });
+
   it('parsePollRumor returns null for non-1068 or malformed', () => {
     expect(
       parsePollRumor({ pubkey: A, kind: 14, created_at: 1, tags: [], content: 'hi' }),

@@ -104,6 +104,7 @@ const ConversationScreen: React.FC = () => {
     fetchConversation,
     sendDirectMessage,
     sendDirectRumor,
+    appendLocalDmMessage,
     loadInitialConversation,
     persistDeliveryStatuses,
     signerType,
@@ -228,6 +229,7 @@ const ConversationScreen: React.FC = () => {
     pubkey,
     sendDirectMessage,
     sendDirectRumor,
+    appendLocalDmMessage,
     setMessages,
   });
 
