@@ -350,11 +350,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
           });
-          return {
-            success: result.delivery.delivered,
-            delivery: result.delivery,
-            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
-          };
+          // Strict success: at least one wrap published AND no signer/publish
+          // errors — `delivery.delivered` alone can be true when only the
+          // self-wrap landed but the recipient wrap failed, which would wrongly
+          // claim "Wallet shared" (Copilot review on #431).
+          return toTextSendResult(result);
         }
 
         if (signerType === 'amber') {
@@ -378,11 +378,35 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
               return JSON.parse(signedEventJson);
             },
           });
-          return {
-            success: result.delivery.delivered,
-            delivery: result.delivery,
-            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
-          };
+          return toTextSendResult(result);
+        }
+
+        if (signerType === 'nip46') {
+          // NIP-17 share over NIP-46 — same Encrypt → SignSeal → Publish shape
+          // as the Amber path, over a relay round-trip instead of an Android
+          // Intent. Mirrors `sendDirectMessage`'s nip46 branch so Wallet Share
+          // works for users logged in via a remote signer (Copilot review on #431).
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+            signerNip44Encrypt: (plain, recipient) =>
+              nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return toTextSendResult(result);
         }
 
         return { success: false, error: 'Unsupported signer type' };
