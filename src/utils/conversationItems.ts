@@ -291,6 +291,7 @@ export function buildConversationItems(
           fromMe: m.fromMe,
           location: classified.location,
           createdAt: m.createdAt,
+          rumorId: m.rumorId,
         },
       ];
     }
