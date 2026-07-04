@@ -573,12 +573,6 @@ const createStyles = (colors: Palette) =>
       marginTop: 4,
       textAlign: 'right',
     },
-    themeGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 12,
-      marginTop: 4,
-    },
     saveButton: {
       backgroundColor: colors.brandPink,
       height: 52,

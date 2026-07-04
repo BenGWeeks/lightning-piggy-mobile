@@ -12,9 +12,9 @@ interface Props {
   onSelect: (theme: CardTheme) => void;
   /**
    * `grid` — the original 2-up wrapping grid (used where vertical space is
-   * cheap). `coverflow` — a flick-through carousel with the centre card full
-   * and neighbours peeking (the wallet-settings Design tab + the add-wallet
-   * theme step).
+   * cheap; currently WalletSettingsSheet). `coverflow` — a flick-through
+   * carousel with the centre card full and neighbours peeking (currently the
+   * add-wallet theme step).
    */
   variant?: 'grid' | 'coverflow';
 }
@@ -56,6 +56,11 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
     0,
     themeList.findIndex((t) => t.id === selectedTheme),
   );
+  // Persisted wallets may carry a theme key that no longer exists (see the
+  // WalletCard.tsx fallback note); when `selectedTheme` isn't in `themeList`
+  // the carousel falls back to index 0, so derive the label/active state from
+  // the actually-centred card rather than the stale `selectedTheme`.
+  const centredTheme = themeList[initialIndex]?.id ?? selectedTheme;
 
   return (
     <View style={styles.coverflow} testID="wallet-card-picker-coverflow">
@@ -78,7 +83,7 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
             <MiniWalletCard
               theme={item}
               width={CF_CARD_WIDTH}
-              selected={item.id === selectedTheme}
+              selected={item.id === centredTheme}
               // Tapping a side card scrolls it to centre; the snap then
               // commits the selection via onSnapToItem.
               onPress={() => carouselRef.current?.scrollTo({ index, animated: true })}
@@ -91,11 +96,11 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
         {themeList.map((theme) => (
           <View
             key={theme.id}
-            style={[styles.dot, selectedTheme === theme.id && styles.dotActive]}
+            style={[styles.dot, centredTheme === theme.id && styles.dotActive]}
           />
         ))}
       </View>
-      <Text style={styles.name}>{cardThemes[selectedTheme]?.name ?? ''}</Text>
+      <Text style={styles.name}>{cardThemes[centredTheme]?.name ?? ''}</Text>
     </View>
   );
 };

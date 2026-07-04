@@ -827,11 +827,6 @@ const createStyles = (colors: Palette) =>
       fontSize: 16,
       fontWeight: '600',
     },
-    themeGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 12,
-    },
     errorText: {
       color: colors.red,
       fontSize: 14,
