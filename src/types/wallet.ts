@@ -14,11 +14,10 @@ export type CardTheme =
   | 'coinos'
   | 'revolut'
   | 'xapo'
-  // Sports-themed cards (#102). Placeholder gradient-only entries — real
-  // illustrations are a designer follow-up; once added, set
-  // `backgroundImage` + `backgroundImageStyle` on each entry in
-  // `src/themes/cardThemes.ts` and register a `bgStyle` in
-  // `src/themes/cards/index.ts`.
+  // Sports-themed cards (#102). Each renders a graffiti illustration over
+  // its gradient — `backgroundImage` + `backgroundImageStyle` live on the
+  // entry in `src/themes/cardThemes.ts`, with the per-theme `bgStyle`
+  // registered in `src/themes/cards/index.ts`.
   | 'tennis'
   | 'football'
   | 'basketball'

@@ -1,12 +1,10 @@
 /**
  * Shape tests for the wallet card theme registry. Catches drift between
  * the `CardTheme` union and the `cardThemes` map (forgotten entries,
- * malformed gradients, ID/key mismatch). Added with the sports themes
- * in #102 so the new placeholder entries don't quietly regress.
- *
- * Artwork landed in #102 — each sports theme now carries a graffiti
- * `backgroundImage` + matching `backgroundImageStyle`, rendered over
- * the gradient exactly like the animal cards.
+ * malformed gradients, ID/key mismatch). Covers the four sports themes
+ * (#102) specifically: each must carry a graffiti `backgroundImage` +
+ * a matching `backgroundImageStyle` so it renders over its gradient
+ * exactly like the animal cards.
  */
 
 import { cardThemes, themeList } from './cardThemes';
@@ -58,8 +56,8 @@ describe('cardThemes registry', () => {
     });
 
     it('registers a graffiti backgroundImage + matching backgroundImageStyle', () => {
-      // Artwork landed in #102 — each sports theme now renders its
-      // illustration over the gradient, like the animal cards.
+      // Each sports theme renders its graffiti illustration over the
+      // gradient, like the animal cards — assert the wiring is present.
       for (const id of SPORTS_THEMES) {
         expect(cardThemes[id].backgroundImage).toBeDefined();
         expect(cardThemes[id].backgroundImageStyle).toBe(id);
