@@ -251,6 +251,39 @@ export async function deleteMnemonic(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
 }
 
+// Best-effort AsyncStorage.multiRemove: if the batch rejects (a transient
+// storage error), log once and fall back to per-key removeItem so one bad key
+// can't strand the whole set — and the caller's wipe can still finish. Backs
+// privacy wipes, so failures are never swallowed silently. Absent keys no-op.
+export async function bestEffortMultiRemove(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  try {
+    await AsyncStorage.multiRemove(keys);
+  } catch (err) {
+    console.warn(`bestEffortMultiRemove: multiRemove failed (${keys.length} keys), per-key`, err);
+    const results = await Promise.allSettled(keys.map((k) => AsyncStorage.removeItem(k)));
+    // Surface any per-key failures too — a swallowed reject here could leave
+    // sensitive residue on disk, defeating the point of the fallback.
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.warn(`bestEffortMultiRemove: removeItem failed for ${keys[i]}`, r.reason);
+      }
+    });
+  }
+}
+
+// Per-wallet AsyncStorage caches keyed by walletId (balance / tx history /
+// receipt-dedup set). Removed alongside the wallet so a deleted wallet leaves
+// no balance or transaction residue behind — a privacy concern on shared
+// devices.
+export async function deleteWalletCaches(walletId: string): Promise<void> {
+  await bestEffortMultiRemove([
+    `balance_${walletId}`,
+    `txs_${walletId}`,
+    `seenReceipts_${walletId}`,
+  ]);
+}
+
 // --- Electrum / block-explorer server ---
 
 export async function getElectrumServer(): Promise<string> {

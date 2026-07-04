@@ -1,8 +1,10 @@
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
- * signed-out identity: per-wallet secrets (SecureStore), per-wallet tx
- * caches, the per-account namespaced caches from the #288 storage refactor,
- * per-conversation DM caches, and the encrypted DM store rows (#848).
+ * signed-out identity: per-wallet secrets (SecureStore), all per-wallet
+ * caches (balance / tx history / receipt-dedup, not just txs), the
+ * per-account namespaced caches from the #288 storage refactor,
+ * per-conversation DM caches, decrypted group-chat plaintext, the encrypted
+ * DM store rows (#848), and the device-global nostr places cache.
  *
  * Extracted from NostrContext (#703 file-size effort) — it was a
  * zero-dependency useCallback (empty deps array) closing over no provider
@@ -11,7 +13,15 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { perAccountKey } from '../services/perAccountStorage';
-import { deleteNwcUrl, deleteXpub, deleteMnemonic } from '../services/walletStorageService';
+import {
+  deleteNwcUrl,
+  deleteXpub,
+  deleteMnemonic,
+  deleteWalletCaches,
+  bestEffortMultiRemove,
+} from '../services/walletStorageService';
+import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
+import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -83,24 +93,29 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     `nostr_groups_${loggedOutPubkey}`,
     `groups_following_only_${loggedOutPubkey}`,
     walletListKey,
-    // Per-wallet tx caches (AsyncStorage). One key per wallet that
-    // was bound to this identity.
-    ...walletIds.map((id) => `txs_${id}`),
   ];
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
   for (const k of allKeys) {
     if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+    // group_messages_* holds decrypted group-chat plaintext keyed by random
+    // group id (not pubkey). Treat it like DM plaintext (#689): decrypted
+    // content must not survive logout / account wipe, so remove every blob.
+    if (k.startsWith(GROUP_MESSAGES_KEY_PREFIX)) toRemove.push(k);
   }
-  // group_messages_${groupId} is keyed by the random group id (not
-  // pubkey), so we can't selectively remove "this identity's groups"
-  // — they're shared across whichever identities are members. Leave
-  // them in place; they're orphaned safely once no remaining identity
-  // is a member, and re-attached if the same identity signs back in.
-  await AsyncStorage.multiRemove(toRemove);
+  // Best-effort so a transient multiRemove rejection can't abort the wipe below.
+  await bestEffortMultiRemove(toRemove);
+  // All per-wallet caches (balance / txs / receipt-dedup), not just txs_ —
+  // deleteWalletCaches wipes the full set so a deleted-identity wallet leaves
+  // no balance or transaction residue on a shared device.
+  await Promise.all(walletIds.map((id) => deleteWalletCaches(id)));
   // Decrypted DM plaintext must not survive logout / account wipe (#689
   // review / #690): delete the file-backed wrap + skip-set caches and this
   // owner's rows in the encrypted DB (#848) — see dmAccountWipe.
   await wipeDmStoresForAccount(loggedOutPubkey);
+  // Nostr places cache is device-global and not pubkey-namespaced, yet holds
+  // this identity's own by-author Piglets — wipe it on logout / switch so
+  // pins don't leak across accounts (the next live sub repopulates it).
+  await clearNostrPlacesCache();
 }
