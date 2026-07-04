@@ -8,6 +8,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { QUICK_REACTIONS } from '../utils/reactions';
 
@@ -69,6 +70,7 @@ const MessageActionsSheet: React.FC<Props> = ({
   onZap,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
 
@@ -107,7 +109,7 @@ const MessageActionsSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>React</Text>
+        <Text style={styles.title}>{t('messageActionsSheet.title')}</Text>
         <View style={styles.emojiRow} testID="message-actions-emoji-row">
           {QUICK_REACTIONS.map((emoji) => {
             const myReactionId = myReactions[emoji] ?? null;
@@ -117,7 +119,11 @@ const MessageActionsSheet: React.FC<Props> = ({
                 key={emoji}
                 style={[styles.emojiButton, active && styles.emojiButtonActive]}
                 onPress={() => onToggleReaction(emoji, myReactionId)}
-                accessibilityLabel={active ? `Remove ${emoji} reaction` : `React with ${emoji}`}
+                accessibilityLabel={
+                  active
+                    ? t('messageActionsSheet.removeReaction', { emoji })
+                    : t('messageActionsSheet.reactWith', { emoji })
+                }
                 accessibilityState={{ selected: active }}
                 testID={`message-actions-emoji-${emoji}`}
               >
@@ -130,11 +136,11 @@ const MessageActionsSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={styles.zapButton}
             onPress={onZap}
-            accessibilityLabel="Send a zap for this message"
+            accessibilityLabel={t('messageActionsSheet.zapMessageA11y')}
             testID="message-actions-zap"
           >
             <Zap size={18} color={colors.white} fill={colors.white} />
-            <Text style={styles.zapButtonText}>Zap this message</Text>
+            <Text style={styles.zapButtonText}>{t('messageActionsSheet.zapMessage')}</Text>
           </TouchableOpacity>
         ) : null}
       </BottomSheetView>

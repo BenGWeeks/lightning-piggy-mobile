@@ -1046,6 +1046,15 @@
     "suggestEditOnBtcMap": "Sugerir una edición en BTC Map",
     "suggestEdit": "Sugerir una edición →"
   },
+  "messageActionsSheet": {
+    "title": "Reaccionar",
+    "reactWith": "Reaccionar con {{emoji}}",
+    "removeReaction": "Quitar reacción {{emoji}}",
+    "zapMessage": "Enviar un zap a este mensaje",
+    "zapMessageA11y": "Enviar un zap por este mensaje",
+    "reactionFailedTitle": "Error en la reacción",
+    "reactionFailedBody": "No se pudo publicar tu reacción. Revisa tus relays e inténtalo de nuevo."
+  },
   "messageBubble": {
     "imageSent": "Imagen enviada",
     "imageReceived": "Imagen recibida",

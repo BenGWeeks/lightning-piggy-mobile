@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from '../components/BrandedAlert';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import {
   applyReactionDeletion,
@@ -95,6 +96,7 @@ export function useConversationReactions({
   fetchReactionDeletions,
   onZapMessage,
 }: UseConversationReactionsParams): UseConversationReactionsResult {
+  const t = useTranslation();
   // `reactionRecords` is the flat list of every kind-7 seen for any message in
   // this thread; `reactionsByTarget` is the reduced view. Separate slots so an
   // optimistic local append folds in cleanly without a re-fetch.
@@ -284,8 +286,8 @@ export function useConversationReactions({
         setReactionRecords((prev) => prev.filter((r) => r.id !== optimisticId));
         if (!cancelled) {
           Alert.alert(
-            'Reaction failed',
-            'Could not publish your reaction. Check your relays and try again.',
+            t('messageActionsSheet.reactionFailedTitle'),
+            t('messageActionsSheet.reactionFailedBody'),
           );
         }
       }
@@ -297,6 +299,7 @@ export function useConversationReactions({
       deleteReaction,
       fetchReactionsForMessages,
       mergeFreshRecords,
+      t,
     ],
   );
 
