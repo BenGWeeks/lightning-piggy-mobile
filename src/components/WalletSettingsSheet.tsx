@@ -457,7 +457,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           )}
 
           <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
-          <WalletCardPicker selectedTheme={selectedTheme} onSelect={setSelectedTheme} />
+          {/* Small top gap between the label and the picker — preserves the
+              spacing the removed `themeGrid` (marginTop: 4) used to provide. */}
+          <View style={{ marginTop: 4 }}>
+            <WalletCardPicker selectedTheme={selectedTheme} onSelect={setSelectedTheme} />
+          </View>
 
           <TouchableOpacity
             style={styles.saveButton}

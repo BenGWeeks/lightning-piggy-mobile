@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, Dimensions } from 'react-native';
 import Carousel, { type ICarouselInstance } from 'react-native-reanimated-carousel';
 import { MiniWalletCard, CARD_ASPECT } from './WalletCard';
@@ -37,6 +37,21 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
   const styles = useMemo(() => createWalletCardPickerStyles(colors), [colors]);
   const carouselRef = useRef<ICarouselInstance>(null);
 
+  const foundIndex = themeList.findIndex((t) => t.id === selectedTheme);
+  // Persisted wallets may carry a theme key that no longer exists (see the
+  // WalletCard.tsx fallback note). In coverflow the carousel visually falls
+  // back to index 0, so normalise the parent's `selectedTheme` back to that
+  // shown card — otherwise parent state (and any Save/Next) keeps a stale key
+  // while a different card is centred. Guarded to only fire when they differ,
+  // so it can't loop (once synced, `foundIndex` resolves and the branch exits).
+  useEffect(() => {
+    if (variant !== 'coverflow') return;
+    if (foundIndex === -1 && themeList.length > 0) {
+      const fallback = themeList[0].id;
+      if (fallback !== selectedTheme) onSelect(fallback);
+    }
+  }, [variant, foundIndex, selectedTheme, onSelect]);
+
   if (variant === 'grid') {
     return (
       <View style={styles.grid} testID="wallet-card-picker-grid">
@@ -52,14 +67,10 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect, variant = 
     );
   }
 
-  const initialIndex = Math.max(
-    0,
-    themeList.findIndex((t) => t.id === selectedTheme),
-  );
-  // Persisted wallets may carry a theme key that no longer exists (see the
-  // WalletCard.tsx fallback note); when `selectedTheme` isn't in `themeList`
-  // the carousel falls back to index 0, so derive the label/active state from
-  // the actually-centred card rather than the stale `selectedTheme`.
+  const initialIndex = Math.max(0, foundIndex);
+  // When `selectedTheme` isn't in `themeList` the carousel falls back to index
+  // 0, so derive the label/active state from the actually-centred card rather
+  // than the stale `selectedTheme` (the effect above also syncs it to parent).
   const centredTheme = themeList[initialIndex]?.id ?? selectedTheme;
 
   return (
