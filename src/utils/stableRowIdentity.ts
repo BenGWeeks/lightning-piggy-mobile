@@ -50,6 +50,10 @@ function shallowEqual(a: object, b: object): boolean {
   const bk = Object.keys(b);
   if (ak.length !== bk.length) return false;
   for (const k of ak) {
+    // Ownership check first: with equal key COUNTS but different key NAMES,
+    // an own-key of `a` holding `undefined` would otherwise Object.is-match
+    // `b`'s missing key (undefined) and false-positive as equal.
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
     if (!Object.is(a[k], (b as typeof a)[k])) return false;
   }
   return true;

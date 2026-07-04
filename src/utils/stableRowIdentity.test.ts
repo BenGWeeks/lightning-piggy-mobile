@@ -51,6 +51,15 @@ describe('reuseByIdShallow', () => {
     expect(out[0]).toBe(next[0]);
   });
 
+  it('treats same-count but different key NAMES as changed (undefined own-key vs missing key)', () => {
+    // Same number of keys, but prev has own-key `x: undefined` where next has
+    // `y: 1` — without the ownership check these false-positived as equal.
+    const prev = [{ id: 'a', x: undefined } as unknown as Row];
+    const next = [{ id: 'a', y: 1 } as unknown as Row];
+    const out = reuseByIdShallow(prev, next);
+    expect(out[0]).toBe(next[0]);
+  });
+
   it('treats differing key sets as changed', () => {
     const prev = [row('a')];
     const next = [{ ...row('a'), extra: true } as unknown as Row];
