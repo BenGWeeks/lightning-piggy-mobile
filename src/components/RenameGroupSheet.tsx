@@ -17,6 +17,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 
@@ -28,6 +29,7 @@ interface Props {
 
 const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, renameGroup } = useGroups();
   const group = groupId ? getGroup(groupId) : undefined;
@@ -81,7 +83,10 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
     if (!groupId) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      Alert.alert('Name required', 'Please enter a group name.');
+      Alert.alert(
+        t('renameGroupSheet.nameRequiredTitle'),
+        t('renameGroupSheet.nameRequiredMessage'),
+      );
       return;
     }
     if (trimmed === group?.name) {
@@ -94,16 +99,13 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
       if (ok) {
         onClose();
       } else {
-        Alert.alert('Error', 'Failed to rename group.');
+        Alert.alert(t('renameGroupSheet.errorTitle'), t('renameGroupSheet.renameFailedMessage'));
       }
     } catch (err) {
       // AsyncStorage write failure. Without try/finally `saving` would
       // stick true and the Save button would stay disabled.
       if (__DEV__) console.warn('[RenameGroupSheet] renameGroup failed:', err);
-      Alert.alert(
-        'Could not rename group',
-        'Failed to save the new name locally. Try again or restart the app.',
-      );
+      Alert.alert(t('renameGroupSheet.saveFailedTitle'), t('renameGroupSheet.saveFailedMessage'));
     } finally {
       setSaving(false);
     }
@@ -129,11 +131,11 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Rename Group</Text>
-        <Text style={styles.label}>Group Name</Text>
+        <Text style={styles.title}>{t('renameGroupSheet.title')}</Text>
+        <Text style={styles.label}>{t('renameGroupSheet.groupNameLabel')}</Text>
         <BottomSheetTextInput
           style={styles.input}
-          placeholder="Group name"
+          placeholder={t('renameGroupSheet.groupNamePlaceholder')}
           placeholderTextColor={colors.textSupplementary}
           value={name}
           onChangeText={setName}
@@ -141,20 +143,20 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
           autoCorrect={false}
           autoFocus
           maxLength={80}
-          accessibilityLabel="Group name"
+          accessibilityLabel={t('renameGroupSheet.groupNameA11y')}
           testID="rename-group-input"
         />
         <TouchableOpacity
           style={[styles.saveButton, !canSave && styles.disabled]}
           onPress={handleSave}
           disabled={!canSave}
-          accessibilityLabel="Save group name"
+          accessibilityLabel={t('renameGroupSheet.saveA11y')}
           testID="rename-group-save"
         >
           {saving ? (
             <ActivityIndicator color={colors.white} />
           ) : (
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={styles.saveButtonText}>{t('renameGroupSheet.save')}</Text>
           )}
         </TouchableOpacity>
       </BottomSheetScrollView>

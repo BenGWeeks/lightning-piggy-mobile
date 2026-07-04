@@ -8,6 +8,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Share2, Send, ExternalLink, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -30,6 +31,7 @@ const ContactActionsSheet: React.FC<Props> = ({
   nfcSupported,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['40%'], []);
@@ -64,36 +66,36 @@ const ContactActionsSheet: React.FC<Props> = ({
       backgroundStyle={{ backgroundColor: colors.surface }}
     >
       <BottomSheetView style={styles.container} testID="contact-actions-sheet">
-        <Text style={styles.title}>Contact actions</Text>
+        <Text style={styles.title}>{t('contactActionsSheet.contactActions')}</Text>
 
         <TouchableOpacity
           style={styles.row}
           onPress={handle(onShare)}
           testID="contact-action-share"
-          accessibilityLabel="Share"
+          accessibilityLabel={t('contactActionsSheet.share')}
         >
           <Share2 size={22} color={colors.brandPink} />
-          <Text style={styles.rowText}>Share</Text>
+          <Text style={styles.rowText}>{t('contactActionsSheet.share')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.row}
           onPress={handle(onOpenIn)}
           testID="contact-action-open-in"
-          accessibilityLabel="Open in external client"
+          accessibilityLabel={t('contactActionsSheet.openInExternalClient')}
         >
           <ExternalLink size={22} color={colors.brandPink} />
-          <Text style={styles.rowText}>Open in…</Text>
+          <Text style={styles.rowText}>{t('contactActionsSheet.openIn')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.row}
           onPress={handle(onShareToFriend)}
           testID="contact-action-share-to-friend"
-          accessibilityLabel="Share to friend"
+          accessibilityLabel={t('contactActionsSheet.shareToFriend')}
         >
           <Send size={22} color={colors.brandPink} />
-          <Text style={styles.rowText}>Share to friend</Text>
+          <Text style={styles.rowText}>{t('contactActionsSheet.shareToFriend')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -102,7 +104,9 @@ const ContactActionsSheet: React.FC<Props> = ({
           disabled={!nfcSupported}
           testID="contact-action-write-nfc"
           accessibilityLabel={
-            nfcSupported ? 'Write to NFC tag' : 'Write to NFC tag (not supported on this device)'
+            nfcSupported
+              ? t('contactActionsSheet.writeToNfcTag')
+              : t('contactActionsSheet.writeToNfcTagUnsupported')
           }
           accessibilityState={{ disabled: !nfcSupported }}
         >
@@ -112,7 +116,7 @@ const ContactActionsSheet: React.FC<Props> = ({
             strokeWidth={2}
           />
           <Text style={[styles.rowText, !nfcSupported && styles.rowTextDisabled]}>
-            Write to NFC tag
+            {t('contactActionsSheet.writeToNfcTag')}
           </Text>
         </TouchableOpacity>
       </BottomSheetView>

@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
@@ -87,6 +88,7 @@ const GroupConversationScreen: React.FC = () => {
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
   const { pubkey: myPubkey, profile: myProfile } = useNostr();
@@ -226,9 +228,9 @@ const GroupConversationScreen: React.FC = () => {
   const memberNameByPubkey = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of members) map.set(m.pubkey, m.name);
-    if (myPubkey) map.set(myPubkey, 'You');
+    if (myPubkey) map.set(myPubkey, t('groupConversationScreen.you'));
     return map;
-  }, [members, myPubkey]);
+  }, [members, myPubkey, t]);
 
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
@@ -319,12 +321,18 @@ const GroupConversationScreen: React.FC = () => {
 
   // MessageBubble handler — opens OSM in the system browser. Identical
   // to 1:1 conversation behaviour.
-  const openLocation = useCallback((loc: SharedLocation) => {
-    const url = buildOsmViewUrl(loc);
-    Linking.openURL(url).catch(() => {
-      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
-    });
-  }, []);
+  const openLocation = useCallback(
+    (loc: SharedLocation) => {
+      const url = buildOsmViewUrl(loc);
+      Linking.openURL(url).catch(() => {
+        Alert.alert(
+          t('groupConversationScreen.couldNotOpenLinkTitle'),
+          t('groupConversationScreen.couldNotOpenLinkMessage'),
+        );
+      });
+    },
+    [t],
+  );
 
   // Batch-fetch kind-0 profiles for every shared-contact reference in the
   // group thread. Mirrors the 1:1 path so contact cards render with avatar
@@ -456,7 +464,7 @@ const GroupConversationScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.backButton}
               onPress={() => navigation.goBack()}
-              accessibilityLabel="Back"
+              accessibilityLabel={t('groupConversationScreen.back')}
             >
               <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                 <Path
@@ -468,13 +476,13 @@ const GroupConversationScreen: React.FC = () => {
                 />
               </Svg>
             </TouchableOpacity>
-            <Text style={styles.title}>Group</Text>
+            <Text style={styles.title}>{t('groupConversationScreen.group')}</Text>
           </View>
         </View>
         <View style={styles.content}>
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Group not found</Text>
-            <Text style={styles.emptySubtitle}>This group may have been deleted.</Text>
+            <Text style={styles.emptyTitle}>{t('groupConversationScreen.groupNotFound')}</Text>
+            <Text style={styles.emptySubtitle}>{t('groupConversationScreen.groupDeleted')}</Text>
           </View>
         </View>
       </View>
@@ -488,12 +496,12 @@ const GroupConversationScreen: React.FC = () => {
   // tombstone — tracked as a follow-up.
   const handleLeave = () => {
     Alert.alert(
-      'Leave group',
-      `Remove "${group.name}" from this device? Other members will keep the group; you can be re-added if they message you again.`,
+      t('groupConversationScreen.leaveGroupTitle'),
+      t('groupConversationScreen.leaveGroupMessage', { name: group.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('groupConversationScreen.cancel'), style: 'cancel' },
         {
-          text: 'Leave',
+          text: t('groupConversationScreen.leave'),
           style: 'destructive',
           onPress: async () => {
             await deleteGroup(group.id);
@@ -517,7 +525,7 @@ const GroupConversationScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back"
+            accessibilityLabel={t('groupConversationScreen.back')}
             testID="group-back"
           >
             <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -533,7 +541,7 @@ const GroupConversationScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.titleTouch}
             onPress={() => setRenameVisible(true)}
-            accessibilityLabel="Rename group"
+            accessibilityLabel={t('groupConversationScreen.renameGroup')}
             testID="group-title"
           >
             <Text style={styles.title} numberOfLines={1}>
@@ -553,7 +561,7 @@ const GroupConversationScreen: React.FC = () => {
           <TouchableOpacity
             style={[styles.actionButton, styles.deleteIconButton]}
             onPress={handleLeave}
-            accessibilityLabel="Leave group"
+            accessibilityLabel={t('groupConversationScreen.leaveGroupTitle')}
             testID="leave-group-button"
           >
             <LogOut size={18} color={colors.white} strokeWidth={2} />
@@ -564,12 +572,14 @@ const GroupConversationScreen: React.FC = () => {
             that used to live below this header. See issue #259. */}
         <TouchableOpacity
           onPress={() => setMembersSheetVisible(true)}
-          accessibilityLabel="Manage members"
+          accessibilityLabel={t('groupConversationScreen.manageMembers')}
           testID="group-member-count"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Text style={styles.memberCount}>
-            {members.length} member{members.length === 1 ? '' : 's'}
+            {members.length === 1
+              ? t('groupConversationScreen.memberCountOne', { count: members.length })
+              : t('groupConversationScreen.memberCountOther', { count: members.length })}
           </Text>
         </TouchableOpacity>
       </View>
@@ -593,7 +603,9 @@ const GroupConversationScreen: React.FC = () => {
               testID="group-messages-list"
               ListEmptyComponent={
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
+                  <Text style={styles.emptySubtitle}>
+                    {t('groupConversationScreen.noMessages')}
+                  </Text>
                 </View>
               }
             />
@@ -615,13 +627,13 @@ const GroupConversationScreen: React.FC = () => {
           attachDisabled={sharingLocation || uploadingImage}
           attachLoading={sharingLocation || uploadingImage}
           onInputFocus={closeAttachPanel}
-          placeholder="Type a message…"
+          placeholder={t('groupConversationScreen.typeMessage')}
           sendButtonVariant="paper-plane"
           composerPaddingHorizontal={12}
           accessibilityLabels={{
-            input: 'Group message input',
-            attach: 'Attach',
-            send: 'Send group message',
+            input: t('groupConversationScreen.messageInput'),
+            attach: t('groupConversationScreen.attach'),
+            send: t('groupConversationScreen.sendMessage'),
           }}
           testIDs={{
             input: 'group-message-input',
@@ -639,7 +651,7 @@ const GroupConversationScreen: React.FC = () => {
               // users who expected the same set as 1:1 (#237).
               onSendZap={() => {}}
               zapDisabled
-              zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
+              zapAccessibilityLabel={t('groupConversationScreen.zapUnavailable')}
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);
@@ -704,8 +716,8 @@ const GroupConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
-        title={`Share a contact with ${group.name}`}
-        subtitle="They'll see it as a Nostr profile card they can open."
+        title={t('groupConversationScreen.shareContactTitle', { name: group.name })}
+        subtitle={t('groupConversationScreen.shareContactSubtitle')}
       />
 
       <ReceiveSheet
@@ -737,7 +749,7 @@ const GroupConversationScreen: React.FC = () => {
         <Pressable
           style={styles.fullscreenBackdrop}
           onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel="Close full-screen GIF"
+          accessibilityLabel={t('groupConversationScreen.closeFullscreenGif')}
           testID="group-conversation-gif-fullscreen"
         >
           {fullscreenGifUrl ? (

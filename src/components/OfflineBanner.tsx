@@ -9,6 +9,7 @@ import { StyleSheet, Text, View, type TextStyle, type ViewStyle } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 // Treat a connectivity state as "offline" only when NetInfo is *certain*
@@ -25,6 +26,7 @@ function isDefinitelyOffline(state: NetInfoState | null): boolean {
 
 const OfflineBanner: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors, insets.top), [colors, insets.top]);
   const [state, setState] = useState<NetInfoState | null>(null);
@@ -48,11 +50,11 @@ const OfflineBanner: React.FC = () => {
       style={styles.container}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      accessibilityLabel="You're offline. Some data may be stale."
+      accessibilityLabel={t('offlineBanner.a11yLabel')}
       testID="offline-banner"
     >
       <Text style={styles.text} numberOfLines={1}>
-        You&apos;re offline — some data may be stale
+        {t('offlineBanner.bannerText')}
       </Text>
     </View>
   );

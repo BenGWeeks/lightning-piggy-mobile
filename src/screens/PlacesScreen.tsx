@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -65,6 +66,7 @@ interface Props {
  */
 const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [mapBbox, setMapBbox] = useState<{
     minLat: number;
@@ -121,9 +123,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
       void seedFromCacheAsync();
       const perm = await Location.requestForegroundPermissionsAsync();
       if (perm.status !== 'granted') {
-        setError(
-          'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
-        );
+        setError(t('placesScreen.locationPermissionRequired'));
         setFetchSettled(true);
         setLoading(false);
         // Clear the pull-to-refresh spinner on the permission-denied early
@@ -284,23 +284,23 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back to Explore"
+            accessibilityLabel={t('placesScreen.backToExplore')}
             testID="places-back-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Places</Text>
+          <Text style={styles.headerTitle}>{t('placesScreen.title')}</Text>
           <TouchableOpacity
             onPress={() => navigation.navigate('Map')}
-            accessibilityLabel="Open map view"
+            accessibilityLabel={t('placesScreen.openMapView')}
             testID="places-map-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <MapPin size={20} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.headerTagline}>Bitcoin-accepting merchants from BTC Map</Text>
+        <Text style={styles.headerTagline}>{t('placesScreen.tagline')}</Text>
       </View>
 
       <FlatList
@@ -352,7 +352,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search places"
+                placeholder={t('placesScreen.searchPlaces')}
                 placeholderTextColor={colors.textSupplementary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -364,7 +364,11 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 style={styles.filterIconButton}
                 onPress={() => setFilterSheetOpen(true)}
                 testID="places-filter-button"
-                accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                accessibilityLabel={
+                  activeFilterCount > 0
+                    ? t('placesScreen.filtersActive', { count: activeFilterCount })
+                    : t('placesScreen.filters')
+                }
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
@@ -378,23 +382,20 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
             {loading && places.length === 0 ? (
               <View style={styles.center}>
                 <ActivityIndicator color={colors.brandPink} />
-                <Text style={styles.subtle}>Looking for Bitcoin-accepting places near you…</Text>
+                <Text style={styles.subtle}>{t('placesScreen.looking')}</Text>
               </View>
             ) : error ? (
               <View style={styles.center}>
                 <Text style={styles.errorText}>{error}</Text>
                 <TouchableOpacity style={styles.retryButton} onPress={reload}>
-                  <Text style={styles.retryButtonText}>Retry</Text>
+                  <Text style={styles.retryButtonText}>{t('placesScreen.retry')}</Text>
                 </TouchableOpacity>
               </View>
             ) : showEmptyState ? (
               <View style={styles.center} testID="places-empty-state">
                 <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-                <Text style={styles.emptyTitle}>No places nearby</Text>
-                <Text style={styles.subtle}>
-                  We searched a ~100 km area. Try opening the full map to pan further afield, or
-                  refresh later — the OSM merchant list updates daily.
-                </Text>
+                <Text style={styles.emptyTitle}>{t('placesScreen.noPlacesNearby')}</Text>
+                <Text style={styles.subtle}>{t('placesScreen.noPlacesNearbyHint')}</Text>
               </View>
             ) : !pos && places.length > 0 ? (
               // Legacy cache (disk blob predates the v1 anchor envelope): we
@@ -403,7 +404,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
               // rather than a blank header (Copilot #915).
               <View style={styles.center} testID="places-locating">
                 <ActivityIndicator color={colors.brandPink} />
-                <Text style={styles.subtle}>Getting your location to sort nearby places…</Text>
+                <Text style={styles.subtle}>{t('placesScreen.gettingLocation')}</Text>
               </View>
             ) : null}
           </>
@@ -420,7 +421,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         ListEmptyComponent={
           searchQuery.trim() !== '' && sortedPlaces.length > 0 ? (
             <Text style={styles.emptySearchText}>
-              Nothing matches “{searchQuery.trim()}”. Try a city or street name.
+              {t('placesScreen.noMatch', { query: searchQuery.trim() })}
             </Text>
           ) : null
         }
@@ -465,6 +466,7 @@ const PlaceRow: React.FC<{
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
 }> = ({ place, distance, colors, styles, onPress }) => {
+  const t = useTranslation();
   const lightning = acceptsLightning(place);
   const onchain = acceptsOnchain(place);
   const lud16 = lightningAddressOf(place);
@@ -476,7 +478,7 @@ const PlaceRow: React.FC<{
       style={[styles.row, boosted ? styles.rowBoosted : null]}
       onPress={onPress}
       testID={`place-row-${place.id}`}
-      accessibilityLabel={place.tags.name ?? 'Unnamed merchant'}
+      accessibilityLabel={place.tags.name ?? t('placesScreen.unnamedMerchant')}
     >
       <View style={[styles.iconWrap, lightning ? styles.iconLightning : styles.iconOnchain]}>
         {/* Category icon (Coffee / UtensilsCrossed / Hotel / …) tells
@@ -492,17 +494,21 @@ const PlaceRow: React.FC<{
       <View style={styles.rowMain}>
         <View style={styles.rowTitleLine}>
           <Text style={styles.rowTitle} numberOfLines={1}>
-            {place.tags.name ?? 'Unnamed merchant'}
+            {place.tags.name ?? t('placesScreen.unnamedMerchant')}
           </Text>
           {boosted ? (
             <View style={styles.rowFeaturedPill}>
               <Sparkles size={10} color={colors.textHeader} strokeWidth={2.5} />
-              <Text style={styles.rowFeaturedText}>Featured</Text>
+              <Text style={styles.rowFeaturedText}>{t('placesScreen.featured')}</Text>
             </View>
           ) : null}
         </View>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {lightning ? '⚡ Lightning' : onchain ? 'On-chain' : 'Bitcoin'}
+          {lightning
+            ? t('placesScreen.payLightning')
+            : onchain
+              ? t('placesScreen.payOnchain')
+              : t('placesScreen.payBitcoin')}
           {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {lud16 ? ` · ${lud16}` : ''}
         </Text>
@@ -516,7 +522,7 @@ const PlaceRow: React.FC<{
             }}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             testID={`place-row-${place.id}-website`}
-            accessibilityLabel={`Open website ${websiteLabel}`}
+            accessibilityLabel={t('placesScreen.openWebsite', { website: websiteLabel })}
           >
             <Text style={styles.rowLink} numberOfLines={1}>
               {websiteLabel}

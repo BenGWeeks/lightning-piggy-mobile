@@ -19,6 +19,7 @@ import Animated, {
 import { Image as ExpoImage } from 'expo-image';
 import { UserRoundCheck } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { lightPalette } from '../styles/palettes';
 import type { Palette } from '../styles/palettes';
@@ -153,6 +154,7 @@ const AddContactCelebration: React.FC<Props> = ({
   onDismiss,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const themed = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
 
@@ -225,33 +227,37 @@ const AddContactCelebration: React.FC<Props> = ({
                 recyclingKey={picture || undefined}
                 autoplay={false}
                 onError={() => setAvatarError(true)}
-                accessibilityLabel={`${name} profile picture`}
+                accessibilityLabel={t('addContactCelebration.profilePicture', { name })}
               />
             ) : (
               <UserRoundCheck size={36} color={colors.white} strokeWidth={2.5} />
             )}
           </View>
-          <Text style={themed.title}>{alreadyConnected ? 'Already connected' : 'Connected!'}</Text>
+          <Text style={themed.title}>
+            {alreadyConnected
+              ? t('addContactCelebration.alreadyConnected')
+              : t('addContactCelebration.connected')}
+          </Text>
           <Text style={themed.subtitle}>
             {alreadyConnected
-              ? `You're already connected to ${name}.`
-              : `You're now connected to ${name}.`}
+              ? t('addContactCelebration.alreadyConnectedBody', { name })
+              : t('addContactCelebration.connectedBody', { name })}
           </Text>
           <TouchableOpacity
             style={themed.button}
             onPress={onOpenProfile}
             testID="add-contact-celebration-open-profile"
-            accessibilityLabel="Open profile"
+            accessibilityLabel={t('addContactCelebration.openProfile')}
           >
-            <Text style={themed.buttonText}>Open profile</Text>
+            <Text style={themed.buttonText}>{t('addContactCelebration.openProfile')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={themed.secondaryButton}
             onPress={onDismiss}
             testID="add-contact-celebration-dismiss"
-            accessibilityLabel="Dismiss"
+            accessibilityLabel={t('addContactCelebration.dismiss')}
           >
-            <Text style={themed.secondaryButtonText}>Dismiss</Text>
+            <Text style={themed.secondaryButtonText}>{t('addContactCelebration.dismiss')}</Text>
           </TouchableOpacity>
         </Animated.View>
       </View>

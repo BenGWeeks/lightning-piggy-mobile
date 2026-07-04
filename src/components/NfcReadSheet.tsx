@@ -26,6 +26,7 @@ import { recordClaim } from '../services/claimHistoryService';
 import { friendlyClaimError } from '../utils/claimErrorMessage';
 import { SLEEPING_PATTERN, parseCooldownSeconds, formatCountdown } from '../utils/lnurlCooldown';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { createNfcReadSheetStyles } from '../styles/NfcReadSheet.styles';
 import PrizeWalletPicker from './PrizeWalletPicker';
@@ -52,6 +53,7 @@ type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'e
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createNfcReadSheetStyles(colors), [colors]);
   const { wallets, makeInvoiceForWallet, expectPayment } = useWallet();
   const { lastIncomingPayment } = useWalletLive();
@@ -161,19 +163,13 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         },
       });
       if (result.coord && expectedCoord && result.coord !== expectedCoord) {
-        throw new Error(
-          "This tag belongs to a different Piglet. Make sure you're scanning the right one.",
-        );
+        throw new Error(t('nfcReadSheet.wrongPiglet'));
       }
       if (!result.lnurl) {
-        throw new Error(
-          'No prize link on this tag. The hider may have written a tag without an LNURL.',
-        );
+        throw new Error(t('nfcReadSheet.noPrizeLink'));
       }
       if (!selectedWalletId) {
-        throw new Error(
-          'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
-        );
+        throw new Error(t('nfcReadSheet.noWalletConnected'));
       }
       if (!mountedRef.current) return;
       setStage('claiming');
@@ -243,7 +239,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     } catch (err) {
       if (mountedRef.current) {
         setStage('error');
-        const raw = err instanceof Error ? err.message : 'Failed to read NFC tag';
+        const raw = err instanceof Error ? err.message : t('nfcReadSheet.failedToReadTag');
         // Map nfcService's `NFC unavailable on this device` (raised by
         // ensureNfcStarted when NfcManager.start() rejected, which is
         // the disabled-NFC path on Android) to the same friendlier
@@ -252,12 +248,10 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         // user with a bare "NFC unavailable" message inconsistent with
         // the other sheets in the family.
         const isDisabled = /NFC unavailable on this device/i.test(raw);
-        setErrorMessage(
-          isDisabled ? 'NFC is turned off. Please enable NFC in your device settings.' : raw,
-        );
+        setErrorMessage(isDisabled ? t('nfcReadSheet.nfcTurnedOff') : raw);
       }
     }
-  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment]);
+  }, [expectedCoord, selectedWalletId, makeInvoiceForWallet, expectPayment, t]);
 
   useEffect(() => {
     if (visible) {
@@ -384,7 +378,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         handleIndicatorStyle={styles.handleIndicator}
       >
         <BottomSheetView style={styles.content}>
-          <Text style={styles.title}>Try the prize</Text>
+          <Text style={styles.title}>{t('nfcReadSheet.title')}</Text>
 
           {stage === 'ready' && (
             <View style={styles.stateContainer}>
@@ -392,10 +386,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
               <View style={styles.readyIndicator}>
                 <NfcScanIndicator spinning={lightningWallets.length > 0} />
               </View>
-              <Text style={styles.instruction}>Hold the Piglet to the back of your phone</Text>
-              <Text style={styles.description}>
-                We'll read the tag and try to claim the sats prize automatically.
-              </Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.holdPiglet')}</Text>
+              <Text style={styles.description}>{t('nfcReadSheet.willReadTag')}</Text>
               <PrizeWalletPicker
                 lightningWallets={lightningWallets}
                 selectedWalletId={selectedWalletId}
@@ -410,7 +402,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
             <View style={styles.stateContainer}>
               <ActivityIndicator size="large" color={colors.brandPink} />
               <Text style={styles.instruction}>
-                {stage === 'reading' ? 'Reading…' : 'Claiming sats…'}
+                {stage === 'reading' ? t('nfcReadSheet.reading') : t('nfcReadSheet.claimingSats')}
               </Text>
             </View>
           )}
@@ -421,18 +413,16 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 <PartyPopper size={64} color={colors.green} strokeWidth={2} />
               </View>
               <Text style={styles.instruction}>
-                {claimedSats?.toLocaleString() ?? ''} sats inbound!
+                {t('nfcReadSheet.satsInbound', { sats: claimedSats?.toLocaleString() ?? '' })}
               </Text>
-              <Text style={styles.description}>
-                Sent to your chosen wallet — the receive toast fires the moment they land.
-              </Text>
+              <Text style={styles.description}>{t('nfcReadSheet.sentToWallet')}</Text>
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={handleClose}
-                accessibilityLabel="Dismiss prize sheet"
+                accessibilityLabel={t('nfcReadSheet.dismissPrizeSheet')}
                 testID="nfc-read-done"
               >
-                <Text style={styles.primaryButtonText}>Done</Text>
+                <Text style={styles.primaryButtonText}>{t('nfcReadSheet.done')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -443,40 +433,35 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                 <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
                 <Text style={styles.zzzBadge}>Zzz</Text>
               </View>
-              <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.piggySnoozing')}</Text>
               {cooldownRemaining !== null && cooldownRemaining > 0 ? (
                 <>
                   <Text style={styles.countdown} testID="nfc-read-sleep-countdown">
                     {formatCountdown(cooldownRemaining)}
                   </Text>
-                  <Text style={styles.description}>
-                    Another finder beat you to the trough. The Piggy wakes back up when the timer
-                    hits zero.
-                  </Text>
+                  <Text style={styles.description}>{t('nfcReadSheet.anotherFinder')}</Text>
                 </>
               ) : cooldownRemaining === 0 ? (
-                <Text style={styles.description}>Piggy is up — tap Try Again!</Text>
+                <Text style={styles.description}>{t('nfcReadSheet.piggyIsUp')}</Text>
               ) : (
-                <Text style={styles.description}>
-                  The trough's empty, or the cooldown is still running. Try again later.
-                </Text>
+                <Text style={styles.description}>{t('nfcReadSheet.troughEmpty')}</Text>
               )}
               <View style={styles.errorButtons}>
                 <TouchableOpacity
                   style={styles.retryButton}
                   onPress={handleRetry}
-                  accessibilityLabel="Try again"
+                  accessibilityLabel={t('nfcReadSheet.tryAgainAccessibility')}
                   testID="nfc-read-sleep-retry"
                 >
-                  <Text style={styles.retryButtonText}>Try Again</Text>
+                  <Text style={styles.retryButtonText}>{t('nfcReadSheet.tryAgain')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={handleClose}
-                  accessibilityLabel="Dismiss"
+                  accessibilityLabel={t('nfcReadSheet.dismiss')}
                   testID="nfc-read-sleep-cancel"
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('nfcReadSheet.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -490,24 +475,24 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
                   <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
                 </View>
               </View>
-              <Text style={styles.instruction}>Couldn't claim</Text>
+              <Text style={styles.instruction}>{t('nfcReadSheet.couldntClaim')}</Text>
               <Text style={styles.description}>{errorMessage}</Text>
               <View style={styles.errorButtons}>
                 <TouchableOpacity
                   style={styles.retryButton}
                   onPress={handleRetry}
-                  accessibilityLabel="Retry"
+                  accessibilityLabel={t('nfcReadSheet.retry')}
                   testID="nfc-read-retry"
                 >
-                  <Text style={styles.retryButtonText}>Try Again</Text>
+                  <Text style={styles.retryButtonText}>{t('nfcReadSheet.tryAgain')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={handleClose}
-                  accessibilityLabel="Cancel"
+                  accessibilityLabel={t('nfcReadSheet.cancel')}
                   testID="nfc-read-error-cancel"
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('nfcReadSheet.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
