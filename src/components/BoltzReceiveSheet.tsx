@@ -194,6 +194,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
     if (!swap) return;
     const session = sessionRef.current;
     const cleanup = { cancelled: false };
+    // Real teardown handle: aborting this stops the underlying Boltz
+    // WebSocket/poller immediately on close/unmount, instead of leaving it
+    // running in the background (network + battery) until the terminal status
+    // or the 24h timeout. The `cancelled` flag alone only muted the callbacks.
+    const controller = new AbortController();
 
     boltzService
       .watchSubmarineSwapStatus(
@@ -207,6 +212,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // broadcast. 24h is well within the Boltz timeout (currently
         // ~144 blocks ≈ 24h on mainnet) and matches the lockup window.
         24 * 60 * 60 * 1000,
+        controller.signal,
       )
       .then(async (result) => {
         if (cleanup.cancelled || sessionRef.current !== session) return;
@@ -239,12 +245,17 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         // close the app first.
       })
       .catch((e) => {
+        // AbortError is the expected outcome when the sheet closes/unmounts
+        // mid-swap (we abort the controller below) — swallow it silently.
         if (cleanup.cancelled || sessionRef.current !== session) return;
+        if ((e as Error)?.name === 'AbortError') return;
         console.warn('[BoltzReceive] watchSubmarineSwapStatus errored:', e);
       });
 
     return () => {
       cleanup.cancelled = true;
+      // Tear the WS/poller down for real, not just mute its callbacks.
+      controller.abort();
     };
     // walletId/wallet/refreshBalance are read for the success branch —
     // re-running this effect on every wallet refresh would tear down + re-
