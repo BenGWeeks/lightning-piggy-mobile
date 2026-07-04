@@ -1,4 +1,3 @@
-import { SimplePool } from 'nostr-tools/pool';
 import {
   generateSecretKey,
   getPublicKey,
@@ -12,6 +11,7 @@ import {
 import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
 import { fetchProfilesBatch } from './nostrProfileBatch';
+import { pool, connectedRelays, trackRelays } from './nostrPool';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
@@ -27,12 +27,13 @@ export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
 export { LP_CLIENT_TAG };
 
-// Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
-// the Hunt feature's NIP-GC subs) can share the single connection pool
-// rather than spinning up parallel SimplePool instances per feature —
-// each pool maintains its own WebSockets per relay, so duplication adds
-// real connection cost.
-export const pool = new SimplePool();
+// The shared connection pool + relay tracker live in `./nostrPool` (a
+// dependency-free module, so `nostrProfileBatch` and other services can share
+// the singleton without an import cycle back to this file). Re-exported here
+// for back-compat with the many existing `import { pool, trackRelays } from
+// './nostrService'` call sites. This module owns the custom `verifyEvent`
+// fast-path applied to that same instance below.
+export { pool, trackRelays };
 
 // Fast-path verification for kind-0 (profile / metadata) events.
 // `SimplePool` runs `verifyEvent` synchronously for every event before
@@ -1048,14 +1049,6 @@ export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec
   const pubkey = getPublicKey(secretKey);
   const nsec = nip19.nsecEncode(secretKey);
   return { secretKey, pubkey, nsec };
-}
-
-const connectedRelays = new Set<string>();
-
-// Track all relays we connect to for proper cleanup
-// (exported for ./dmLiveSubscription, extracted per #703).
-export function trackRelays(relays: string[]) {
-  relays.forEach((r) => connectedRelays.add(r));
 }
 
 export function cleanup(): void {

@@ -769,7 +769,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           console.log(
             `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
           );
-        persistMergedProfileCache(pk, cachedProfileMap, profileMap);
+        await persistMergedProfileCache(pk, cachedProfileMap, profileMap);
       };
 
       if (opts?.awaitProfiles === false) {

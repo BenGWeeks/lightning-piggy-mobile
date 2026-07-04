@@ -1,6 +1,6 @@
 import type { Filter } from 'nostr-tools/filter';
 
-import { pool, trackRelays } from './nostrService';
+import { pool, trackRelays } from './nostrPool';
 
 /**
  * Stream a single batch of kind-0 (profile) events.
@@ -32,7 +32,10 @@ export async function fetchProfilesBatch(
   if (pubkeys.length === 0) return;
   trackRelays(relays);
   // Deduped set of the pubkeys we're waiting on — see condition (1) above.
+  // Also used for the subscription `authors` filter so we don't ask relays
+  // for the same pubkey twice.
   const wanted = new Set(pubkeys);
+  const authors = [...wanted];
   return new Promise<void>((resolve) => {
     const best = new Map<string, number>(); // pubkey → best created_at seen
     let closed = false;
@@ -49,7 +52,7 @@ export async function fetchProfilesBatch(
       }
       resolve();
     };
-    sub = pool.subscribeMany(relays, { kinds: [0], authors: pubkeys } as Filter, {
+    sub = pool.subscribeMany(relays, { kinds: [0], authors } as Filter, {
       onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
         // Keep only the newest kind-0 per pubkey — Nostr clients can
         // re-publish kind-0 with edits and we want the latest.

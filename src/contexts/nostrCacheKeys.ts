@@ -54,26 +54,43 @@ export async function readCachedWithTtl<T>(
 }
 
 /**
- * Merge freshly-fetched profiles on top of the existing on-disk profile
- * cache (so contacts we didn't refetch keep their known profile) and bump
- * the cache timestamp. Deferred behind InteractionManager so the writes
- * don't compete with an in-progress render/gesture.
+ * Merge freshly-fetched profiles on top of the profile cache (so contacts we
+ * didn't refetch keep their known profile) and bump the cache timestamp.
+ * Deferred behind InteractionManager so the writes don't compete with an
+ * in-progress render/gesture.
+ *
+ * `existing` is the caller's snapshot of the cache from when its fetch began.
+ * Because refreshes can now run fire-and-forget (#852), a second fetch may
+ * have persisted newer profiles while this one was in flight — so we re-read
+ * the latest on-disk cache at write time and merge on top of THAT, falling
+ * back to `existing` only if the read/parse fails. This prevents a slow
+ * background fetch from clobbering fresher data written by a later fetch.
  */
-export function persistMergedProfileCache(
+export async function persistMergedProfileCache(
   pk: string,
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,
-): void {
-  InteractionManager.runAfterInteractions(() => {
-    const merged: Record<string, NostrProfile> = { ...existing };
-    fetched.forEach((v, k) => {
-      merged[k] = v;
-    });
-    AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)).catch(
-      () => {},
-    );
-    AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()).catch(
-      () => {},
-    );
+): Promise<void> {
+  await new Promise<void>((resolve) => InteractionManager.runAfterInteractions(() => resolve()));
+  let base: Record<string, NostrProfile> = existing;
+  try {
+    const onDisk = await AsyncStorage.getItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk));
+    if (onDisk) {
+      // On-disk wins over the caller's older snapshot for overlapping keys.
+      base = { ...existing, ...(JSON.parse(onDisk) as Record<string, NostrProfile>) };
+    }
+  } catch {
+    // Corrupt / unreadable cache — keep the caller's snapshot as the base.
+  }
+  // This fetch's results are the most authoritative for the keys it covers.
+  const merged: Record<string, NostrProfile> = { ...base };
+  fetched.forEach((v, k) => {
+    merged[k] = v;
   });
+  AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)).catch(
+    () => {},
+  );
+  AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()).catch(
+    () => {},
+  );
 }
