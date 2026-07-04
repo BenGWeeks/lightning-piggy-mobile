@@ -65,8 +65,10 @@ export function isMarketModeEnabled(mode: MarketMode): boolean {
  *                  (from `useTrustGraph().trustSet` / the kind-3 follows);
  *                  a product matches when its seller's pubkey is in the set.
  *   `wotFof` / `wotAll` — DISABLED tiers; treated as no-ops here (the UI
- *                  blocks selecting them), so they fall through to the
- *                  preferred (curated) catalogue if ever invoked.
+ *                  blocks selecting them). Like `preferred`, they return the
+ *                  input `products` unchanged — the function applies no WoT
+ *                  filtering of its own, so what comes back is exactly what
+ *                  the caller passed (today, the curated catalogue).
  *
  * `sellerPubkeyOf` resolves a product's seller pubkey (hex) — injected so
  * this stays free of the nostr-tools decode dependency and trivially
