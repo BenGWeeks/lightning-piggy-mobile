@@ -164,6 +164,10 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontSize: 16,
       fontWeight: '700',
       color: colors.white,
+      // Shrink within the flex row (never overflow/clip) and stay centered
+      // when the font is auto-scaled down to fit a tight width.
+      flexShrink: 1,
+      textAlign: 'center',
     },
     hint: {
       fontSize: 13,

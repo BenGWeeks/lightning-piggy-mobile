@@ -32,6 +32,7 @@ import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import type { MessageReactionState } from '../utils/reactions';
 import MessageLinkPreview from './MessageLinkPreview';
+import MessageInvoiceActions from './MessageInvoiceActions';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import DecryptedImage from './DecryptedImage';
 import LibreMiniMap from './LibreMiniMap';
@@ -826,17 +827,15 @@ const MessageBubble: React.FC<Props> = ({
               </Text>
             ) : null}
           </View>
+          {/* Received, live, unpaid → Pay + QR + copy (#948), matching the
+              marketplace order card. Sent/paid/expired shows its pill instead. */}
           {fromMe || paid || expired ? null : (
-            <TouchableOpacity
-              style={styles.invoicePayButton}
-              onPress={() => onPayInvoice(invoice.raw)}
-              accessibilityRole="link"
-              accessibilityLabel={t('messageBubble.payInvoice')}
-              testID={`${testIdPrefix}-pay-${id}`}
-            >
-              <Zap size={16} color={colors.white} fill={colors.white} />
-              <Text style={styles.invoicePayText}>{t('messageBubble.pay')}</Text>
-            </TouchableOpacity>
+            <MessageInvoiceActions
+              bolt11={invoice.raw}
+              onPayInvoice={onPayInvoice}
+              testIdPrefix={testIdPrefix}
+              id={id}
+            />
           )}
           {renderFooter([styles.bubbleTime, fromMe && styles.bubbleTimeMe])}
         </Pressable>

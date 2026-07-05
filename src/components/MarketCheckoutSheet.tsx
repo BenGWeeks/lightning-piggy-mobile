@@ -273,7 +273,20 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               testID="market-checkout-goto-conversation"
             >
               <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-              <Text style={styles.primaryButtonText}>{t('market.checkout.goToChat')}</Text>
+              {/* numberOfLines + adjustsFontSizeToFit + flexShrink guarantee the
+                  label always fits on one line: under @gorhom/bottom-sheet's
+                  `enableDynamicSizing` measure pass the button can briefly hug
+                  its content instead of filling the centered success column, and
+                  a plain <Text> would then clip ("o to chat to pa"). Shrinking
+                  the font (down to 85%) rather than the text is the robust fix. */}
+              <Text
+                style={styles.primaryButtonText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+              >
+                {t('market.checkout.goToChat')}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
