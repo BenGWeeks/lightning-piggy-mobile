@@ -223,16 +223,16 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
   'ai-robot': {
     id: 'ai-robot',
     name: 'Robot',
-    // Full-bleed friendly-robot art (waving mascot to the right). The
-    // gradient is only a fallback tint behind the illustration — emerald
-    // green fading to deep teal, matching the art so any load gap isn't
-    // jarring and white balance text stays legible over the calmer left.
+    // Graffiti street-art robot (transparent splatter art), in the same
+    // corner-mascot family as Piggy / Bee / Cat: the art sits over an
+    // emerald→teal gradient rather than filling the card, so it reads as one of
+    // the graffiti cards. See cards/ai-robot.ts for the positioning; no
+    // resizeMode (the bgStyle sizes it, like the other mascots).
     gradientColors: ['#00C853', '#00695C'],
     textColor: '#FFFFFF',
     accentColor: '#69F0AE',
     backgroundImage: require('../../assets/images/ai-robot.png'),
     backgroundImageStyle: 'ai-robot',
-    backgroundImageResizeMode: 'cover',
   },
 };
 

@@ -1,14 +1,17 @@
 import { StyleSheet } from 'react-native';
 
-// Friendly AI robot mascot filling the whole card. Like the spaceship card
-// (and unlike the corner-decoration mascots) this is full-bleed art: the
-// emerald-to-teal gradient with the waving robot IS the background, so the
-// bgStyle uses absoluteFillObject to reach every edge despite the card's
-// padding:20. Paired with resizeMode 'cover' (cardThemes) so the ~1.5:1 art
-// fills the ~1.9:1 card with a slight top/bottom crop; the robot sits to the
-// right and the calmer, darker left keeps the white balance text readable.
+// Graffiti street-art robot — same transparent corner-mascot treatment as the
+// Piggy / Bee / Cat cards: the splatter art sits over the card's gradient in
+// the top-right, semi-transparent, rather than filling the whole card. Matches
+// lightning-bee.ts / lightning-cat.ts so the robot reads as one of the graffiti
+// family rather than a full-bleed photo card.
 export const bgStyle = StyleSheet.create({
   full: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    right: -40,
+    top: -30,
+    opacity: 0.75,
   },
 });
