@@ -87,10 +87,13 @@ export async function persistMergedProfileCache(
   fetched.forEach((v, k) => {
     merged[k] = v;
   });
-  AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)).catch(
-    () => {},
-  );
-  AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()).catch(
-    () => {},
-  );
+  // Await both writes (still swallowing errors) so the function only resolves
+  // once persistence has completed. Callers that `await` this (e.g.
+  // loadContacts with awaitProfiles) then get the durability the name implies,
+  // and the on-disk state can't lag a resolved promise; fire-and-forget callers
+  // (#852) are unaffected since they don't await the returned promise.
+  await Promise.all([
+    AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)),
+    AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()),
+  ]).catch(() => {});
 }
