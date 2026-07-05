@@ -113,25 +113,29 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [nwcRevealed, setNwcRevealed] = useState(false);
   const [nwcQrShown, setNwcQrShown] = useState(false);
   // Surface a non-fatal error if something prevents us from rendering
-  // the recovery callout fully (currently unused — kept for parity
-  // with the original API and as a hook for future failure paths).
-  const [recoveryError] = useState<string | null>(null);
+  // the recovery callout fully. Currently always null (no failure path sets
+  // it yet) — a plain const rather than unused state; promote to `useState`
+  // when a setter is actually needed.
+  const recoveryError: string | null = null;
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
   // `wallet` as a dep would re-fire on every `wallets` array update (balance
   // polls, NWC reconnect pings, etc.), each time stomping the user's in-
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
+  // Reset to the Design tab when the sheet opens for a different wallet — keyed
+  // ONLY on walletId (not `wallet?.id`), so it fires once per open and can't
+  // re-fire when the wallet hydrates a moment later and stomp a fast tab tap.
+  useEffect(() => {
+    setActiveTab('design');
+  }, [walletId]);
+
   useEffect(() => {
     // Cancellation flag so a fast wallet-switch / sheet dismiss
     // doesn't leak the previous wallet's CoinOS recovery / NWC string
     // after the new wallet is active. Each .then() bails when
     // cancelled is true.
     let cancelled = false;
-
-    // Reset to the Design tab whenever the sheet opens for a new wallet,
-    // so it always lands on the showcase rather than a stale tab.
-    setActiveTab('design');
 
     // Eager-clear all secret-bearing state on every walletId change —
     // covers wallet switch, sheet close, on-chain branch. Without
