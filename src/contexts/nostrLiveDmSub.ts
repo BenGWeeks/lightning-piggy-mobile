@@ -41,6 +41,7 @@ import {
   mergeInboxEntries,
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
+import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 
 // --- Live-sub self-re-arm on relay drop / app resume (#934) ---
 // The app-wide SimplePool deliberately does NOT auto-reconnect
@@ -190,31 +191,23 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const isFreshArrival = (createdAtSec: number): boolean =>
     createdAtSec >= subOpenedAtSec - NOTIFY_SKEW_SEC;
 
-  // Coalesce per-event inbox merges into one setDmInbox call per ~150 ms or per 25 events. Without this, a relay-restream burst (e.g. cold start with 200+ kind-4 events queued) causes one React re-render per event = 30+ rerenders/sec on the JS thread, which is what locks the UI for 30 seconds. Batching collapses that into ~6 rerenders/sec at most. Notifications still fire per-event so unread counts/sounds aren't dropped.
-  let pendingInboxEntries: DmInboxEntry[] = [];
-  let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  const PENDING_FLUSH_MS = 150;
-  const PENDING_FLUSH_THRESHOLD = 25;
-  const flushPendingInbox = (): void => {
-    if (pendingFlushTimer) {
-      clearTimeout(pendingFlushTimer);
-      pendingFlushTimer = null;
-    }
-    if (pendingInboxEntries.length === 0) return;
-    const batch = pendingInboxEntries;
-    pendingInboxEntries = [];
-    setDmInbox((prev) => mergeInboxEntries(prev, batch, DM_INBOX_CAP));
-  };
-  const queueInboxEntry = (entry: DmInboxEntry): void => {
-    pendingInboxEntries.push(entry);
-    if (pendingInboxEntries.length >= PENDING_FLUSH_THRESHOLD) {
-      flushPendingInbox();
-      return;
-    }
-    if (pendingFlushTimer === null) {
-      pendingFlushTimer = setTimeout(flushPendingInbox, PENDING_FLUSH_MS);
-    }
-  };
+  // Coalesce per-event inbox merges into batched setDmInbox calls — at most
+  // one per ~150 ms quiet window or per 25 events. Without batching, a
+  // relay-restream burst (e.g. cold start with 200+ kind-4 events queued)
+  // causes one React re-render per event = 30+ rerenders/sec on the JS
+  // thread, which is what locks the UI for 30 seconds; batching collapses
+  // that into ~6 rerenders/sec at most. The queue flushes on the LEADING
+  // edge, so the common case — one fresh DM arriving in the foreground —
+  // surfaces immediately instead of idling out the full 150 ms window
+  // (#934 item 3). Notifications still fire per-event so unread
+  // counts/sounds aren't dropped.
+  const inboxFlushQueue = createCoalescedFlushQueue<DmInboxEntry>({
+    flushMs: 150,
+    threshold: 25,
+    onFlush: (batch) => setDmInbox((prev) => mergeInboxEntries(prev, batch, DM_INBOX_CAP)),
+  });
+  const queueInboxEntry = inboxFlushQueue.push;
+  const flushPendingInbox = inboxFlushQueue.flush;
 
   // Replay the surface + notify side-effects of a fresh inbound that was
   // deferred by the follow-gate during the post-switch hydration window
@@ -401,7 +394,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live kind-4 persist failed:', e);
         });
-      await writeChain;
+      // Surface to the UI without awaiting the persist chain (#934 item 2):
+      // awaiting meant every earlier event's SQLite upsert + inbox-blob
+      // read-merge-write had to settle before THIS one could reach
+      // setDmInbox, so under a backlog burst arrival latency grew with
+      // queue depth. Persistence stays fully serialized via writeChain; a
+      // failed persist is recovered by the next refreshDmInbox — the same
+      // recovery model as the follow-gate replay path.
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       queueInboxEntry(k4InboxEntry);
@@ -497,20 +496,30 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
         });
-      await writeChain;
+      // Surface to the UI without awaiting the persist chain (#934 item 2) —
+      // same reasoning as the kind-4 path above.
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       queueInboxEntry(orderInboxEntry);
       notifyDmMessage(partnerPubkey);
-      if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
-        void fireMessageNotification({
-          kind: 'dm',
-          threadId: partnerPubkey,
-          title: 'Marketplace update',
-          body: preview,
-          data: { conversationPubkey: partnerPubkey },
-        });
-      }
+      // The OS-notification trust gate reads `partnerKnown`, which the
+      // persist closure above resolves from the pre-merge inbox cache — so
+      // the push (and only the push) still waits for the chain to settle.
+      // `writeChain` here is the captured promise INCLUDING this event's
+      // persist; later reassignments don't affect it, and its trailing
+      // .catch means this continuation always runs.
+      void writeChain.then(() => {
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+        if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
+          void fireMessageNotification({
+            kind: 'dm',
+            threadId: partnerPubkey,
+            title: 'Marketplace update',
+            body: preview,
+            data: { conversationPubkey: partnerPubkey },
+          });
+        }
+      });
       if (__DEV__)
         console.log(
           `[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} surfaced (order=${order.orderId.slice(0, 8)}, partner=${partnerPubkey.slice(0, 8)})`,
@@ -715,7 +724,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       .catch((e) => {
         if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
       });
-    await writeChain;
+    // Surface to the UI without awaiting the persist chain (#934 item 2) —
+    // same reasoning as the kind-4 path above. knownWrapIds was already
+    // eagerly claimed at the top of this handler, so dedup doesn't depend
+    // on the chain either.
     if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
     queueInboxEntry(inboxEntry);
