@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, Platform, Keyboard } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Platform,
+  Keyboard,
+  useWindowDimensions,
+} from 'react-native';
 import { Alert } from './BrandedAlert';
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
@@ -33,11 +40,30 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  // Pin the sheet to 85% of the screen. The 3-tab split keeps any single
-  // tab short, but the fixed header (segmented control) + footer (Remove)
-  // read best against a stable, generous sheet height.
-  const snapPoints = useMemo(() => ['85%'], []);
+  const { height: windowHeight } = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Content-height snap point, measured per tab. gorhom's own
+  // `enableDynamicSizing` can't size this sheet — its scroll view reports no
+  // intrinsic height, so the sheet collapses to header+footer and squashes the
+  // content. Instead we measure the header, the active tab's scroll content and
+  // the footer, sum them (+ handle + a little slack), clamp between a sensible
+  // floor and 92% of the screen, and drive a single pixel snap point. The sheet
+  // then animates to fit whichever tab is showing. `enableDynamicSizing` stays
+  // OFF, which also avoids the v5 "collapses to a strip when a
+  // BottomSheetTextInput is focused" bug (see docs/TROUBLESHOOTING.adoc).
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const snapPoints = useMemo(() => {
+    const measured = headerHeight + contentHeight + footerHeight + 24; // + handle/slack
+    const floor = windowHeight * 0.4;
+    const ceiling = windowHeight * 0.92;
+    // Until everything has measured, fall back to a generous height so the first
+    // frame isn't a thin strip.
+    const target = measured > 0 ? Math.min(ceiling, Math.max(floor, measured)) : ceiling;
+    return [Math.round(target)];
+  }, [headerHeight, contentHeight, footerHeight, windowHeight]);
 
   // Active tab of the segmented control. Defaults to Design — the
   // cover-flow card picker is the showcase surface of this redesign.
@@ -260,11 +286,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     <BottomSheetModal
       ref={bottomSheetRef}
       snapPoints={snapPoints}
-      // v5 defaults `enableDynamicSizing` to true, which overrides
-      // `snapPoints`. Disable it explicitly so the sheet honours the
-      // 85% pin. See docs/TROUBLESHOOTING.adoc
-      // "v5 modal collapses to a thin strip when its
-      // BottomSheetTextInput is focused".
+      // Sized via the measured `snapPoints` above, not gorhom's dynamic sizing
+      // (which collapses a header+scroll+footer sheet). Keep it off — it also
+      // triggers the v5 text-input-focus collapse bug.
       enableDynamicSizing={false}
       enablePanDownToClose
       onChange={handleSheetChange}
@@ -277,7 +301,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     >
       {/* Fixed header: title + segmented control. Kept outside the scroll
           view so the tab switcher stays put while the active tab scrolls. */}
-      <View style={styles.header}>
+      <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
         <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
         <View style={styles.segmentedControl} accessibilityRole="tablist">
           {tabs.map(({ key, label }) => {
@@ -307,6 +331,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 24 },
         ]}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={(_w: number, h: number) => setContentHeight(h)}
       >
         {activeTab === 'design' && (
           <WalletDesignTab
@@ -354,7 +379,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       </BottomSheetScrollView>
 
       {/* Fixed footer: Remove stays outside the tabs, always visible. */}
-      <View style={styles.footer}>
+      <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
         <TouchableOpacity
           style={styles.disconnectButton}
           onPress={handleDisconnect}

@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, Text, Dimensions } from 'react-native';
+import { interpolate, Extrapolation } from 'react-native-reanimated';
 import Carousel, { type ICarouselInstance } from 'react-native-reanimated-carousel';
 import { MiniWalletCard, CARD_ASPECT } from './WalletCard';
 import { themeList, cardThemes } from '../themes/cardThemes';
@@ -26,32 +27,39 @@ const DEFAULT_INDEX = Math.max(
 );
 
 // --- Cover-flow geometry -----------------------------------------------------
-// The centre (selected) card is drawn full-size and z-raised; its neighbours
-// are shrunk and packed with heavy overlap so ~9 cards fan across the viewport
-// at once (the centre plus ~4 peeking to each side). These are hand-tuned
-// constants — revisit them against fresh screenshots if the fan reads too
-// tight/loose or the centre doesn't stand out enough.
-const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.4); // centre card base width
+// A hand-driven cover flow: the centre (selected) card is drawn large and
+// z-raised, and its neighbours shrink AND draw closer together the further out
+// they sit, so the deck reads as "big centre → a good peek of the immediate
+// neighbours → progressively thinner slivers beyond". The per-distance scale
+// and offset ramps below are applied by `coverFlowAnimation` (a worklet) rather
+// than the carousel's flat `parallax` mode, which could only give every
+// neighbour a single identical scale. Revisit the ramps against fresh
+// screenshots if the fan reads too tight/loose or the centre doesn't dominate.
+const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.48); // centre card base width
 const CF_CARD_HEIGHT = Math.round(CF_CARD_WIDTH / CARD_ASPECT);
-const CF_VIEWPORT_HEIGHT = CF_CARD_HEIGHT + 24;
-// Centre-to-centre distance between adjacent cards. The parallax layout places
-// neighbour n at ±n·(SCREEN_WIDTH − parallaxScrollingOffset), so this constant
-// IS that spacing and the offset is derived from it. At ~0.19·cardWidth
-// (≈0.076·screen) four cards fan out on each side of the centre — the
-// outermost sitting at the viewport edge — so with the centre ~9 sit across
-// the viewport at once.
-const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.19);
-// Focused card at full size; neighbours only modestly smaller. A gentle scale
-// step (vs a steep one) keeps the immediate neighbours from being swallowed
-// behind the enlarged centre card, so the deck reads as many cards rather than
-// "centre + a couple of slivers" — while the full-scale centre + selected
-// border still make it clearly stand out.
-const CF_CENTER_SCALE = 1.0;
-const CF_ADJACENT_SCALE = 0.85;
+// Room for the enlarged centre card plus a little breathing space.
+const CF_VIEWPORT_HEIGHT = CF_CARD_HEIGHT + 28;
+// How many cards deep the fan is drawn on each side before they fade out. The
+// ramps below are sampled at integer distances 0..CF_DEPTH.
+const CF_DEPTH = 4;
+// Scale per integer distance from centre (0 = centre). The step from 0→1 is
+// deliberately gentle so the immediate neighbours stay substantial ("see a
+// little more of them"), then it falls off faster so far cards become slivers.
+const CF_SCALE_BY_DISTANCE = [1, 0.82, 0.66, 0.54, 0.46];
+// Centre-to-centre horizontal offset per integer distance, in units of
+// CF_CARD_WIDTH. The immediate neighbour sits well out (0.42·cardWidth) so a
+// generous slice of it shows past the enlarged centre card (~0.17·screen of
+// peek); each further step then adds a SMALLER increment (0.30 → 0.26 → 0.22)
+// so the fan compresses outward and every card shows a little less than the one
+// before it, trailing off into slivers at the viewport edge.
+const CF_OFFSET_BY_DISTANCE = [0, 0.42, 0.72, 0.98, 1.2];
 // Mount every card so the fanned deck is fully populated — there are only a
 // handful of designs, so this is cheap, and anything beyond the viewport is
 // clipped by the carousel's overflow:hidden.
 const CF_WINDOW_SIZE = themeList.length;
+
+// Distance sample points [0,1,2,3,4] shared by both interpolation ramps.
+const CF_DISTANCES = CF_SCALE_BY_DISTANCE.map((_, i) => i);
 
 /**
  * Shared wallet card-design picker — a flick-through cover-flow with the
@@ -101,6 +109,26 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
   // to parent).
   const centredTheme = themeList[initialIndex]?.id ?? selectedTheme;
 
+  // Cover-flow transform per card, driven by `value` = signed distance from the
+  // focused card (0 = centre, ±1 = immediate neighbour, fractional mid-swipe).
+  // Scale and horizontal offset both ramp with |distance| so the centre stays
+  // big while neighbours shrink and pack tighter outward; the centre is z-raised
+  // above its neighbours and far cards fade out at the fan's edge.
+  const coverFlowAnimation = useCallback((value: number) => {
+    'worklet';
+    const dist = Math.min(Math.abs(value), CF_DEPTH);
+    const scale = interpolate(dist, CF_DISTANCES, CF_SCALE_BY_DISTANCE, Extrapolation.CLAMP);
+    const offsetUnits = interpolate(dist, CF_DISTANCES, CF_OFFSET_BY_DISTANCE, Extrapolation.CLAMP);
+    const sign = value < 0 ? -1 : 1;
+    const translateX = sign * offsetUnits * CF_CARD_WIDTH;
+    const opacity = interpolate(dist, [0, CF_DEPTH - 1, CF_DEPTH], [1, 1, 0], Extrapolation.CLAMP);
+    return {
+      transform: [{ translateX }, { scale }],
+      opacity,
+      zIndex: Math.round(CF_DEPTH - dist),
+    };
+  }, []);
+
   return (
     <View style={styles.coverflow} testID="wallet-card-picker-coverflow">
       <Carousel
@@ -111,12 +139,7 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
         defaultIndex={initialIndex}
         loop={false}
         windowSize={CF_WINDOW_SIZE}
-        mode="parallax"
-        modeConfig={{
-          parallaxScrollingScale: CF_CENTER_SCALE,
-          parallaxScrollingOffset: SCREEN_WIDTH - CF_CARD_SPACING,
-          parallaxAdjacentItemScale: CF_ADJACENT_SCALE,
-        }}
+        customAnimation={coverFlowAnimation}
         onSnapToItem={(index) => {
           // Guard the lookup: a future refactor could empty themeList or the
           // carousel could report an out-of-range index — don't throw on `.id`.
