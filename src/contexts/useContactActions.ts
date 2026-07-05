@@ -32,7 +32,11 @@ export interface UseContactActionsParams {
   contacts: NostrContact[];
   setContacts: Dispatch<SetStateAction<NostrContact[]>>;
   getReadRelays: () => string[];
-  loadContacts: (pk: string, relayUrls: string[], opts?: { force?: boolean }) => Promise<void>;
+  loadContacts: (
+    pk: string,
+    relayUrls: string[],
+    opts?: { force?: boolean; awaitProfiles?: boolean },
+  ) => Promise<void>;
 }
 
 export interface UseContactActionsResult {
@@ -61,8 +65,15 @@ export function useContactActions({
     if (!pubkey) return;
     const readRelays = getReadRelays();
     // User-initiated refresh (e.g. pull-to-refresh) — bypass the 24h
-    // contacts cache so newly-added follows surface immediately.
-    await loadContacts(pubkey, readRelays, { force: true });
+    // contacts cache so newly-added follows surface immediately. Resolve
+    // as soon as the (force-fetched) contact LIST is in state, without
+    // blocking on the kind-0 profile batch: the caller's spinner should
+    // clear in seconds, and avatars stream in progressively via the
+    // profile batch's onBatch hook. This is what keeps pull-to-refresh
+    // from hanging ~90s on a large follow list, while the follow-gate /
+    // DM-inbox refresh (which only needs the contact list) still sees an
+    // up-to-date follow set. (#852)
+    await loadContacts(pubkey, readRelays, { force: true, awaitProfiles: false });
   }, [pubkey, getReadRelays, loadContacts]);
 
   const publishContactList = useCallback(

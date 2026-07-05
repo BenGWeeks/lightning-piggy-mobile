@@ -7,6 +7,7 @@ import {
   EyeOff,
   ShieldAlert,
   QrCode as QrCodeIcon,
+  Share2,
 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Alert } from './BrandedAlert';
@@ -37,6 +38,9 @@ interface Props {
   passwordRevealed: boolean;
   onTogglePasswordRevealed: () => void;
   recoveryError: string | null;
+  // "Share this wallet" (NWC only, #431/#988) — opens the trust warning +
+  // recipient picker in the parent sheet.
+  onShare: () => void;
 }
 
 /**
@@ -63,6 +67,7 @@ const WalletConnectionTab: React.FC<Props> = ({
   passwordRevealed,
   onTogglePasswordRevealed,
   recoveryError,
+  onShare,
 }) => {
   const hasContent =
     (walletType === 'onchain' && !!xpubDisplay) ||
@@ -239,6 +244,24 @@ const WalletConnectionTab: React.FC<Props> = ({
           )}
           <Text style={styles.hintText}>{t('walletSettingsSheet.nwcConnectionHint')}</Text>
         </>
+      )}
+
+      {/* NWC wallet: share the connection with a trusted contact (#431/#988).
+          Grouped with the connection settings above (relay / NWC string / QR)
+          because it's connection-sharing. Tapping it shows the trust warning,
+          then a recipient picker; the raw connection secret is never rendered —
+          it only travels inside the gift-wrapped DM. */}
+      {walletType === 'nwc' && (
+        <TouchableOpacity
+          style={[styles.coinosRow, { marginTop: 20 }]}
+          onPress={onShare}
+          activeOpacity={0.7}
+          accessibilityLabel={t('walletSettingsSheet.shareWallet')}
+          testID="wallet-settings-share"
+        >
+          <Text style={styles.coinosRowText}>{t('walletSettingsSheet.shareWallet')}</Text>
+          <Share2 size={18} color={colors.brandPink} strokeWidth={2} />
+        </TouchableOpacity>
       )}
 
       {/* On-chain wallet: show xpub (read-only) */}

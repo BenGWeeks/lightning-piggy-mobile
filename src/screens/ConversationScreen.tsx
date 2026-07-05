@@ -36,6 +36,7 @@ import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
+import NwcWalletShareSheet from '../components/NwcWalletShareSheet';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
@@ -49,11 +50,11 @@ import { buildOsmViewUrl, SharedLocation } from '../services/locationService';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
-import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
-import { extractSharedContact } from '../utils/messageContent';
+import { useNwcShareActions } from '../hooks/useNwcShareActions';
+import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
 import { useConversationPolls } from '../hooks/useConversationPolls';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
@@ -123,7 +124,7 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     armLiveDmSub();
   }, [armLiveDmSub]);
-  const { wallets } = useWallet();
+  const { wallets, addNwcWallet } = useWallet();
   const { startShare, stopShare } = useLiveLocation();
 
   // Thread data lifecycle — read-through paint, background relay top-up,
@@ -140,15 +141,10 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  // Profiles resolved from `nostr:` contact references the other party
-  // has shared in this conversation. Keyed by hex pubkey; a `null` value
-  // means we tried and the kind-0 lookup came back empty.
-  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
-  // Tracks which pubkeys have already been scheduled for a kind-0 fetch
-  // so the batch-fetch effect deps can be [messages] only, without needing
-  // sharedProfiles in the array (which would cause an extra cycle after
-  // every fetch batch writes the state).
-  const scheduledProfilePubkeys = useRef(new Set<string>());
+  // Profiles resolved from `nostr:` contact references the other party has
+  // shared in this conversation — see useSharedContactProfiles. Keyed by hex
+  // pubkey; a `null` value means the kind-0 lookup ran and came back empty.
+  const sharedProfiles = useSharedContactProfiles(messages);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   // Secret Mode chat-trigger card overlay state — driven by
   // MessageBubble's "secretthreewords" magic message. Owned here so
@@ -269,46 +265,6 @@ const ConversationScreen: React.FC = () => {
 
   const { isInvoicePaid } = usePaidInvoiceTracker(messages);
 
-  // Batch-fetch profiles for every `nostr:` profile reference that appears
-  // in the conversation. Relay hints from the nprofile (when present) are
-  // merged with the default set so we find the shared person's kind-0
-  // even if they publish on niche relays.
-  useEffect(() => {
-    const byPubkey = new Map<string, Set<string>>();
-    for (const m of messages) {
-      const ref = extractSharedContact(m.text);
-      if (!ref) continue;
-      if (scheduledProfilePubkeys.current.has(ref.pubkey)) continue;
-      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
-      for (const r of ref.relays) set.add(r);
-      byPubkey.set(ref.pubkey, set);
-    }
-    if (byPubkey.size === 0) return;
-    // Mark all found pubkeys as scheduled before the async work starts so
-    // a second messages-update doesn't re-queue the same fetches.
-    for (const pk of byPubkey.keys()) scheduledProfilePubkeys.current.add(pk);
-    let cancelled = false;
-    (async () => {
-      const updates: Record<string, NostrProfile | null> = {};
-      await Promise.all(
-        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
-          const mergedRelays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
-          try {
-            updates[pk] = await fetchProfile(pk, mergedRelays);
-          } catch {
-            updates[pk] = null;
-          }
-        }),
-      );
-      if (!cancelled) {
-        setSharedProfiles((prev) => ({ ...prev, ...updates }));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
-
   // Contact preview sheet — peek a counterparty without leaving the
   // conversation. Tapping "View full profile" inside the sheet drills
   // into the ContactProfile route. Shared across header avatar tap,
@@ -360,6 +316,7 @@ const ConversationScreen: React.FC = () => {
     handleShareContactPicked,
     handleSendGif,
     handleSendVoiceNote,
+    shareNwcWallet,
   } = useConversationComposerActions({
     pubkey,
     name,
@@ -470,6 +427,25 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
+  // Share an NWC wallet (#431) — sender picker + recipient Add flows, both
+  // gated behind an access warning. Extracted to keep this screen under the
+  // size cap; the bearer connection string only ever moves inside the
+  // encrypted NIP-17 DM.
+  const {
+    nwcWallets,
+    nwcPickerOpen,
+    openNwcSharePicker,
+    closeNwcPicker,
+    shareToWallet,
+    addSharedWallet,
+  } = useNwcShareActions({
+    wallets,
+    addNwcWallet,
+    shareNwcWallet,
+    peerName: name,
+    onCloseAttachPanel: closeAttachPanel,
+  });
+
   // Receive-side live-location plumbing (#206): the kind-20069 coordinate
   // subscription + per-session status/remaining read models the bubble
   // renders + a 1 Hz tick for the relative-time labels. Extracted to a hook
@@ -530,6 +506,7 @@ const ConversationScreen: React.FC = () => {
         onLongPress={buildOnLongPress(item)}
         reactions={reactionsForItem(item)}
         onToggleReaction={buildOnToggleReaction(item)}
+        onAddNwc={addSharedWallet}
       />
     ),
     [
@@ -538,6 +515,7 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      addSharedWallet,
       pollAggregates,
       handleVotePoll,
       handleToggleSecretMode,
@@ -784,6 +762,7 @@ const ConversationScreen: React.FC = () => {
                 // panel until the user actually picks (or cancels).
                 setContactPickerOpen(true);
               }}
+              onShareWallet={openNwcSharePicker}
               onSendGif={
                 isGifConfigured()
                   ? () => {
@@ -870,6 +849,12 @@ const ConversationScreen: React.FC = () => {
         onSelect={handleShareContactPicked}
         title={t('conversationScreen.shareContactTitle', { name })}
         subtitle={t('conversationScreen.shareContactSubtitle')}
+      />
+      <NwcWalletShareSheet
+        visible={nwcPickerOpen}
+        onClose={closeNwcPicker}
+        wallets={nwcWallets}
+        onSelect={shareToWallet}
       />
       <ReceiveSheet
         visible={invoiceSheetOpen}

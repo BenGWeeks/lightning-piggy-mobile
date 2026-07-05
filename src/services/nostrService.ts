@@ -1,4 +1,3 @@
-import { SimplePool } from 'nostr-tools/pool';
 import {
   generateSecretKey,
   getPublicKey,
@@ -11,6 +10,8 @@ import {
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
+import { fetchProfilesBatch } from './nostrProfileBatch';
+import { pool, connectedRelays, trackRelays } from './nostrPool';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
@@ -26,12 +27,13 @@ export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
 export { LP_CLIENT_TAG };
 
-// Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
-// the Hunt feature's NIP-GC subs) can share the single connection pool
-// rather than spinning up parallel SimplePool instances per feature —
-// each pool maintains its own WebSockets per relay, so duplication adds
-// real connection cost.
-export const pool = new SimplePool();
+// The shared connection pool + relay tracker live in `./nostrPool` (a
+// dependency-free module, so `nostrProfileBatch` and other services can share
+// the singleton without an import cycle back to this file). Re-exported here
+// for back-compat with the many existing `import { pool, trackRelays } from
+// './nostrService'` call sites. This module owns the custom `verifyEvent`
+// fast-path applied to that same instance below.
+export { pool, trackRelays };
 
 // Fast-path verification for kind-0 (profile / metadata) events.
 // `SimplePool` runs `verifyEvent` synchronously for every event before
@@ -481,50 +483,6 @@ export async function fetchRelayList(
     console.warn('Failed to fetch NIP-65 relay list:', error);
     return null;
   }
-}
-
-// Stream a single batch of profile events. Replaces the previous
-// `pool.querySync()`-based pattern which waited for EVERY relay in the
-// set to send EOSE before returning anything. With long lists like
-// Ben's 590-contact set this measured ~31 s for 580/590 profiles in
-// the #372 trace, dominated by per-batch waits against the slowest
-// relay. We instead open a sub, collect events as they arrive (tracking
-// the newest kind-0 per pubkey by created_at), and close after a soft
-// timeout. Events are surfaced to the caller via `onEvent` so the UI
-// can paint each name/avatar the moment it lands instead of waiting
-// for the batch to finish. (#372 follow-up)
-async function fetchProfilesBatch(
-  pubkeys: string[],
-  relays: string[],
-  softTimeoutMs: number,
-  onEvent: (event: { pubkey: string; content: string; created_at: number }) => void,
-): Promise<void> {
-  if (pubkeys.length === 0) return;
-  trackRelays(relays);
-  return new Promise<void>((resolve) => {
-    const best = new Map<string, number>(); // pubkey → best created_at seen
-    let closed = false;
-    const sub = pool.subscribeMany(relays, { kinds: [0], authors: pubkeys } as Filter, {
-      onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
-        // Keep only the newest kind-0 per pubkey — Nostr clients can
-        // re-publish kind-0 with edits and we want the latest.
-        const prev = best.get(ev.pubkey);
-        if (prev !== undefined && ev.created_at <= prev) return;
-        best.set(ev.pubkey, ev.created_at);
-        onEvent(ev);
-      },
-    });
-    setTimeout(() => {
-      if (closed) return;
-      closed = true;
-      try {
-        sub.close();
-      } catch {
-        // best-effort
-      }
-      resolve();
-    }, softTimeoutMs);
-  });
 }
 
 export async function fetchProfiles(
@@ -1091,14 +1049,6 @@ export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec
   const pubkey = getPublicKey(secretKey);
   const nsec = nip19.nsecEncode(secretKey);
   return { secretKey, pubkey, nsec };
-}
-
-const connectedRelays = new Set<string>();
-
-// Track all relays we connect to for proper cleanup
-// (exported for ./dmLiveSubscription, extracted per #703).
-export function trackRelays(relays: string[]) {
-  relays.forEach((r) => connectedRelays.add(r));
 }
 
 export function cleanup(): void {

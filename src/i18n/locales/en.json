@@ -289,6 +289,34 @@
     "shareContactTitle": "Share a contact with {{name}}",
     "shareContactSubtitle": "They'll see it as a Nostr profile card they can open."
   },
+  "nwcShareSheet": {
+    "title": "Share a wallet",
+    "subtitle": "Choose a connected wallet to share. The recipient will be able to spend from it.",
+    "empty": "You have no connected NWC wallets to share.",
+    "shareNamed": "Share {{name}}",
+    "noneTitle": "No wallet to share",
+    "noneBody": "Connect an NWC (Nostr Wallet Connect) wallet first, then you can share it.",
+    "confirmTitle": "Share this wallet?",
+    "confirmBody": "{{name}} will get full access to \"{{wallet}}\" — anyone with the connection can spend its funds. Only share with people you trust.",
+    "confirmBodyNoName": "Anyone with this wallet's connection can spend its funds. Only share with people you trust.",
+    "confirmShare": "Share",
+    "missingUrlTitle": "Could not share wallet",
+    "missingUrl": "Could not read this wallet's connection.",
+    "sentToast": "Wallet shared",
+    "cancel": "Cancel"
+  },
+  "nwcShareCard": {
+    "title": "Add NWC Wallet",
+    "trustWarning": "Only add NWC connections from people you trust. Whoever holds this connection can spend from the wallet.",
+    "youShared": "You shared this wallet",
+    "add": "Add",
+    "addConfirmTitle": "Add this wallet?",
+    "addConfirmBody": "You'll be able to spend from the wallet {{name}} shared. Only continue if you trust them — anyone with this connection can spend its funds.",
+    "addFailedTitle": "Could not add wallet",
+    "addFailedBody": "Please check the connection and try again.",
+    "defaultAlias": "Shared wallet",
+    "addedToast": "Wallet added"
+  },
   "courseDetailScreen": {
     "courseNotFound": "Course not found",
     "goBack": "Go back",
@@ -1862,6 +1890,8 @@
     "nwcConnectionCopied": "NWC connection copied to clipboard.",
     "nwcQrHint": "Scan from another Lightning Piggy install or NWC client to import this wallet.",
     "nwcConnectionHint": "Use this string to move the wallet to another device or NWC client.",
+    "shareWallet": "Share this wallet",
+    "shareWalletPickTitle": "Share wallet with…",
     "extendedPublicKey": "Extended Public Key",
     "tapToCopy": "Tap to copy",
     "cardDesign": "Card Design",

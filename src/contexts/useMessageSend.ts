@@ -6,6 +6,7 @@ import * as nostrConnectService from '../services/nostrConnectService';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
+import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { DmSendResult } from '../services/nostrService';
 import type { SignerType, RelayConfig } from '../types/nostr';
@@ -407,5 +408,109 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
     [pubkey, isLoggedIn, signerType, relays],
   );
 
-  return { sendDirectMessage, sendDirectRumor, sendFileMessage };
+  // Share an NWC wallet (#431). The NWC connection string is a BEARER SECRET,
+  // so it goes out ONLY inside a NIP-17 gift wrap (the same encrypted, peer-only
+  // path as every DM) — never a public/plaintext event. The inner rumor carries
+  // the app-specific `NWC_SHARE_KIND` with the share JSON as content; the
+  // recipient's client rebuilds an "Add NWC Wallet" card from it. Mirrors
+  // `sendFileMessage` (no delivery-tick hooks — the card has no tick UI).
+  const sendNwcShare = useCallback(
+    async (recipientPubkey: string, card: NwcShareCard): Promise<SendResult> => {
+      if (!pubkey || !isLoggedIn) {
+        return { success: false, error: 'Not logged in' };
+      }
+      const normalizedRecipientPubkey = recipientPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
+        return { success: false, error: 'Invalid public key format' };
+      }
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const rumor = {
+          pubkey,
+          kind: NWC_SHARE_KIND,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['p', normalizedRecipientPubkey]],
+          content: serializeNwcShare(card),
+        };
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return { success: false, error: 'Key not found' };
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          const result = await nostrService.sendNip17ToManyWithNsec({
+            senderSecretKey: secretKey,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+          });
+          // Strict success: at least one wrap published AND no signer/publish
+          // errors — `delivery.delivered` alone can be true when only the
+          // self-wrap landed but the recipient wrap failed, which would wrongly
+          // claim "Wallet shared" (Copilot review on #431).
+          return toTextSendResult(result);
+        }
+
+        if (signerType === 'amber') {
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+            signerNip44Encrypt: (plain, recipient) =>
+              amberService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await amberService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('Amber returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return toTextSendResult(result);
+        }
+
+        if (signerType === 'nip46') {
+          // NIP-17 share over NIP-46 — same Encrypt → SignSeal → Publish shape
+          // as the Amber path, over a relay round-trip instead of an Android
+          // Intent. Mirrors `sendDirectMessage`'s nip46 branch so Wallet Share
+          // works for users logged in via a remote signer (Copilot review on #431).
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+            signerNip44Encrypt: (plain, recipient) =>
+              nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return toTextSendResult(result);
+        }
+
+        return { success: false, error: 'Unsupported signer type' };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to share wallet';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  return { sendDirectMessage, sendDirectRumor, sendFileMessage, sendNwcShare };
 }

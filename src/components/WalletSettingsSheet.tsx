@@ -25,6 +25,8 @@ import { createWalletSettingsSheetStyles } from '../styles/WalletSettingsSheet.s
 import WalletDesignTab from './WalletDesignTab';
 import WalletDetailsTab from './WalletDetailsTab';
 import WalletConnectionTab from './WalletConnectionTab';
+import FriendPickerSheet from './FriendPickerSheet';
+import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
 
 interface Props {
   walletId: string | null;
@@ -39,6 +41,10 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const styles = useMemo(() => createWalletSettingsSheetStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
+  // "Share this wallet" flow (NWC only). Reuses #988's gift-wrapped NWC-share
+  // send + redaction; adds a recipient-pick step since settings has no open
+  // conversation. See useWalletShareFromSettings.
+  const { pickerOpen, startShare, closePicker, shareToFriend } = useWalletShareFromSettings(wallet);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { height: windowHeight } = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -283,115 +289,128 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   ];
 
   return (
-    <BottomSheetModal
-      ref={bottomSheetRef}
-      snapPoints={snapPoints}
-      // Sized via the measured `snapPoints` above, not gorhom's dynamic sizing
-      // (which collapses a header+scroll+footer sheet). Keep it off — it also
-      // triggers the v5 text-input-focus collapse bug.
-      enableDynamicSizing={false}
-      enablePanDownToClose
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-    >
-      {/* Fixed header: title + segmented control. Kept outside the scroll
-          view so the tab switcher stays put while the active tab scrolls. */}
-      <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
-        <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
-        <View style={styles.segmentedControl} accessibilityRole="tablist">
-          {tabs.map(({ key, label }) => {
-            const active = activeTab === key;
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.segment, active && styles.segmentActive]}
-                onPress={() => selectTab(key)}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={label}
-                testID={`wallet-settings-tab-${key}`}
-              >
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-
-      <BottomSheetScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 24 },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={(_w: number, h: number) => setContentHeight(h)}
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        // Sized via the measured `snapPoints` above, not gorhom's dynamic sizing
+        // (which collapses a header+scroll+footer sheet). Keep it off — it also
+        // triggers the v5 text-input-focus collapse bug.
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
-        {activeTab === 'design' && (
-          <WalletDesignTab
-            styles={styles}
-            t={t}
-            selectedTheme={selectedTheme}
-            onSelectTheme={setSelectedTheme}
-          />
-        )}
+        {/* Fixed header: title + segmented control. Kept outside the scroll
+          view so the tab switcher stays put while the active tab scrolls. */}
+        <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
+          <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
+          <View style={styles.segmentedControl} accessibilityRole="tablist">
+            {tabs.map(({ key, label }) => {
+              const active = activeTab === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => selectTab(key)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={label}
+                  testID={`wallet-settings-tab-${key}`}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
-        {activeTab === 'details' && (
-          <WalletDetailsTab
-            styles={styles}
-            colors={colors}
-            t={t}
-            walletType={wallet.walletType}
-            alias={alias}
-            onChangeAlias={setAlias}
-            lnAddress={lnAddress}
-            onChangeLnAddress={setLnAddress}
-            onSave={handleSave}
-          />
-        )}
-
-        {activeTab === 'connection' && (
-          <WalletConnectionTab
-            styles={styles}
-            colors={colors}
-            t={t}
-            walletType={wallet.walletType}
-            xpubDisplay={xpubDisplay}
-            onCopyXpub={handleCopyXpub}
-            relayUrl={relayUrl}
-            nwcConnection={nwcConnection}
-            nwcRevealed={nwcRevealed}
-            onToggleNwcRevealed={() => setNwcRevealed((v) => !v)}
-            nwcQrShown={nwcQrShown}
-            onToggleNwcQr={() => setNwcQrShown((v) => !v)}
-            coinosRecovery={coinosRecovery}
-            passwordRevealed={passwordRevealed}
-            onTogglePasswordRevealed={() => setPasswordRevealed((v) => !v)}
-            recoveryError={recoveryError}
-          />
-        )}
-      </BottomSheetScrollView>
-
-      {/* Fixed footer: Remove stays outside the tabs, always visible. */}
-      <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
-        <TouchableOpacity
-          style={styles.disconnectButton}
-          onPress={handleDisconnect}
-          testID="wallet-settings-remove"
-          accessibilityLabel={t('walletSettingsSheet.removeWalletTitle')}
+        <BottomSheetScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(_w: number, h: number) => setContentHeight(h)}
         >
-          <Text style={styles.disconnectButtonText}>
-            {t('walletSettingsSheet.removeWalletTitle')}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </BottomSheetModal>
+          {activeTab === 'design' && (
+            <WalletDesignTab
+              styles={styles}
+              t={t}
+              selectedTheme={selectedTheme}
+              onSelectTheme={setSelectedTheme}
+            />
+          )}
+
+          {activeTab === 'details' && (
+            <WalletDetailsTab
+              styles={styles}
+              colors={colors}
+              t={t}
+              walletType={wallet.walletType}
+              alias={alias}
+              onChangeAlias={setAlias}
+              lnAddress={lnAddress}
+              onChangeLnAddress={setLnAddress}
+              onSave={handleSave}
+            />
+          )}
+
+          {activeTab === 'connection' && (
+            <WalletConnectionTab
+              styles={styles}
+              colors={colors}
+              t={t}
+              walletType={wallet.walletType}
+              xpubDisplay={xpubDisplay}
+              onCopyXpub={handleCopyXpub}
+              relayUrl={relayUrl}
+              nwcConnection={nwcConnection}
+              nwcRevealed={nwcRevealed}
+              onToggleNwcRevealed={() => setNwcRevealed((v) => !v)}
+              nwcQrShown={nwcQrShown}
+              onToggleNwcQr={() => setNwcQrShown((v) => !v)}
+              coinosRecovery={coinosRecovery}
+              passwordRevealed={passwordRevealed}
+              onTogglePasswordRevealed={() => setPasswordRevealed((v) => !v)}
+              recoveryError={recoveryError}
+              onShare={startShare}
+            />
+          )}
+        </BottomSheetScrollView>
+
+        {/* Fixed footer: Remove stays outside the tabs, always visible. */}
+        <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+          <TouchableOpacity
+            style={styles.disconnectButton}
+            onPress={handleDisconnect}
+            testID="wallet-settings-remove"
+            accessibilityLabel={t('walletSettingsSheet.removeWalletTitle')}
+          >
+            <Text style={styles.disconnectButtonText}>
+              {t('walletSettingsSheet.removeWalletTitle')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </BottomSheetModal>
+
+      {/* Recipient step for "Share this wallet" — settings has no open
+          conversation, so pick who to send the gift-wrapped NWC share to.
+          Reuses the app's contact picker; onSelect runs the same send. */}
+      <FriendPickerSheet
+        visible={pickerOpen}
+        onClose={closePicker}
+        onSelect={shareToFriend}
+        title={t('walletSettingsSheet.shareWalletPickTitle')}
+      />
+    </>
   );
 };
 
