@@ -3,6 +3,7 @@ import { File, Paths } from 'expo-file-system';
 import { migrateDmStore } from '../services/dmStoreMigration';
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
 import { perAccountKey } from '../services/perAccountStorage';
+import { runDmBlobMigration } from './dmBlobMigration';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -108,28 +109,52 @@ async function runMigration(pubkey: string): Promise<boolean> {
       `[DmStore] migration complete for ${pubkey.slice(0, 8)}: plaintext wrap cache deleted (verified)`,
     );
   }
-  return result.ok;
+  if (!result.ok) return false;
+  // Second phase (#850): retire the plaintext inbox/conversation blobs into
+  // the encrypted store. Own flag, same populate → delete → verify ordering.
+  // Sequenced AFTER the wrap-cache import so both plaintext sources are gone
+  // before any caller trusts "migrated".
+  return runDmBlobMigration(pubkey);
 }
 
 // Single-flight + success memo per account. A failed/incomplete run clears
 // its entry so the next DM entry point retries; a successful run stays
-// memoised for the session (the AsyncStorage flag covers later sessions).
+// memoised for the session (the AsyncStorage flags cover later sessions).
 const migrationRuns = new Map<string, Promise<void>>();
 
+// N7 (#850): session backoff for a persistently failing migration. Without
+// it, a broken delete/verify (e.g. a wedged storage subsystem) re-runs the
+// full populate on EVERY DM entry point — inbox refresh, thread open,
+// live-sub open — burning I/O in a hot loop. One retry per backoff window is
+// plenty; the AsyncStorage flags make an eventual success durable.
+export const MIGRATION_RETRY_BACKOFF_MS = 60_000;
+const migrationFailedAt = new Map<string, number>();
+
 /**
- * Ensure the one-time DM-store migration has run for `pubkey`. Never rejects
- * — a failure is logged and retried on the next call, so callers can fire it
+ * Ensure the one-time DM-store migrations (#848 wrap cache + #850 blobs)
+ * have run for `pubkey`. Never rejects — a failure is logged and retried on
+ * a later call (after MIGRATION_RETRY_BACKOFF_MS), so callers can fire it
  * inline on hot paths (inbox refresh / thread open / live-sub open).
  */
-export function ensureDmStoreMigrated(pubkey: string): Promise<void> {
+export function ensureDmStoreMigrated(pubkey: string, now: () => number = Date.now): Promise<void> {
   const existing = migrationRuns.get(pubkey);
   if (existing) return existing;
+  const failedAt = migrationFailedAt.get(pubkey);
+  if (failedAt !== undefined && now() - failedAt < MIGRATION_RETRY_BACKOFF_MS) {
+    return Promise.resolve(); // still inside the backoff window — skip (N7)
+  }
   const run = runMigration(pubkey)
     .then((ok) => {
-      if (!ok) migrationRuns.delete(pubkey);
+      if (!ok) {
+        migrationRuns.delete(pubkey);
+        migrationFailedAt.set(pubkey, now());
+      } else {
+        migrationFailedAt.delete(pubkey);
+      }
     })
     .catch((e) => {
       migrationRuns.delete(pubkey);
+      migrationFailedAt.set(pubkey, now());
       if (__DEV__) console.warn('[DmStore] migration failed (will retry):', e);
     });
   migrationRuns.set(pubkey, run);
@@ -140,6 +165,7 @@ export function ensureDmStoreMigrated(pubkey: string): Promise<void> {
  * the per-account flag instead of trusting a stale "done" from this session. */
 export function forgetDmStoreMigration(pubkey: string): void {
   migrationRuns.delete(pubkey);
+  migrationFailedAt.delete(pubkey);
 }
 
 /** The in-flight migration for `pubkey`, if any — so a logout wipe can await

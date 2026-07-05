@@ -15,7 +15,12 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
-import { selectDmWrapIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import {
+  selectDmWrapIds,
+  upsertDmMessages,
+  hasConversationWith,
+  type DmMessageRow,
+} from '../services/dmDb';
 import {
   parseOrderEvent,
   serializeOrder,
@@ -34,9 +39,7 @@ import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSub
 import {
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
-  inboxCacheKey,
   inboxLastSeenKey,
-  safeGetDmCacheItem,
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
@@ -86,24 +89,6 @@ const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
  * reading them through the bundle keeps the gate + dedup behaviour
  * byte-for-byte identical.
  */
-
-/**
- * Parse the persisted inbox cache, dropping malformed entries. A corrupt cache
- * (null entries, non-objects, or a missing `partnerPubkey`) must not crash the
- * later `.some(...)` / `mergeInboxEntries` and break live order/DM ingest.
- */
-function parseCachedInboxEntries(raw: string | null): DmInboxEntry[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (e) => e && typeof e === 'object' && typeof e.partnerPubkey === 'string',
-    ) as DmInboxEntry[];
-  } catch {
-    return [];
-  }
-}
 
 export interface LiveDmSubscriptionParams {
   viewerPubkey: string;
@@ -354,10 +339,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         wireKind: 4,
       };
       // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
-      // LRU dies with the session) plus the inbox preview blob. Same
-      // writeChain as kind-1059 to serialize concurrent inbox writes. Also
-      // bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter
-      // advances and doesn't re-fetch already-seen events on the next refresh.
+      // LRU dies with the session). The store is the ONLY at-rest home now
+      // (#850; the plaintext inbox-preview blob is retired). Same writeChain
+      // as kind-1059 to serialize concurrent store writes. Also bump
+      // inboxLastSeenKey (a bare timestamp) so refreshDmInbox's kind-4
+      // `since` filter advances and doesn't re-fetch already-seen events.
       const k4Row: DmMessageRow = {
         owner: viewerPubkey,
         eventId: ev.id,
@@ -371,20 +357,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
-          await upsertDmMessages([k4Row]).catch((e) => {
-            if (__DEV__) console.warn('[DmStore] live kind-4 upsert failed:', e);
-          });
-          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-          const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
-          // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
-          if (cancelled) return;
-          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-            () => {},
-          );
+          // N5 (#850): a store failure THROWS here (caught by the trailing
+          // .catch), so the lastSeen bump below never runs for a row the DB
+          // failed to keep — aligned with the kind-1059 path. The next
+          // refresh's `since` floor then re-fetches the event instead of
+          // silently skipping past an unpersisted message.
+          await upsertDmMessages([k4Row]);
           const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
           const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
           if (ev.created_at > lastSeen) {
+            // Re-check after the awaits: logout may have wiped these stores
+            // while we were writing.
             if (cancelled) return;
             await AsyncStorage.setItem(inboxLastSeenKey(viewerPubkey), String(ev.created_at)).catch(
               () => {},
@@ -471,27 +454,25 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // by `#p`, so any sender can craft an order-shaped kind-16/17 to the
       // viewer. To avoid OS-level notification spam, only raise a push when the
       // market is already trusted: followed, OR an existing conversation in the
-      // inbox cache. Unknown senders are still stored + surfaced in-app silently.
+      // encrypted store (#850 — replaces the retired plaintext inbox blob scan).
+      // Unknown senders are still stored + surfaced in-app silently.
       // (Follow-up: record markets the user actively ordered from — e.g. via the
       // Explore Market checkout — into a trust set so a first legitimate order
-      // notifies too.) `partnerKnown` is read from the inbox BEFORE this event
-      // merges in, so the very first order from a stranger can't self-qualify.
+      // notifies too.) `partnerKnown` is checked BEFORE this event's own upsert,
+      // so the very first order from a stranger can't self-qualify.
       const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
       let partnerKnown = partnerFollowed;
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
+          if (!partnerKnown) {
+            partnerKnown = await hasConversationWith(viewerPubkey, partnerPubkey).catch(
+              () => false,
+            );
+          }
           await upsertDmMessages([orderRow]).catch((e) => {
             if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
           });
-          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-          if (cachedInbox.some((e) => e.partnerPubkey === partnerPubkey)) partnerKnown = true;
-          const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
-          if (cancelled) return;
-          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-            () => {},
-          );
         })
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
@@ -699,7 +680,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
     };
 
-    // Serialise store-upsert + inbox-blob write so concurrent live wraps don't race each other.
+    // Serialise store upserts so concurrent live wraps don't race each other.
     // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
     writeChain = writeChain
       .then(async () => {
@@ -707,19 +688,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         // Encrypted store write (#848) — idempotent by (owner, event_id), so
         // a wrap delivered by both the live sub and a near-simultaneous
         // refresh lands as one row (the old file read→merge→write dance and
-        // its #811 clobbering hazard are gone).
+        // its #811 clobbering hazard are gone). The store is the ONLY
+        // at-rest persistence (#850) — the plaintext inbox blob is retired.
         await upsertDmMessages([wrapRow]);
         knownWrapIds?.add(wrap.id);
-
-        // Re-check after each await: logout may have wiped these stores while we were writing. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
-        if (cancelled) return;
-        const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-        const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-        const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
-        if (cancelled) return;
-        await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-          () => {},
-        );
       })
       .catch((e) => {
         if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
