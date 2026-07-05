@@ -75,7 +75,15 @@ export function useNwcShareActions({
             style: 'destructive',
             onPress: () => {
               void (async () => {
-                const nwcUrl = await walletStorage.getNwcUrl(walletId);
+                let nwcUrl: string | null;
+                try {
+                  nwcUrl = await walletStorage.getNwcUrl(walletId);
+                } catch {
+                  // SecureStore reads can reject — treat a read failure the same
+                  // as a missing URL so it becomes the accurate alert below
+                  // rather than an unhandled rejection.
+                  nwcUrl = null;
+                }
                 if (!nwcUrl) {
                   // The user *did* pick a wallet — the connection just couldn't
                   // be read — so use an accurate title, not "No wallet to share".

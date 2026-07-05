@@ -57,7 +57,15 @@ export function useWalletShareFromSettings(wallet: WalletState | undefined) {
       setPickerOpen(false);
       if (!wallet || wallet.walletType !== 'nwc') return;
       void (async () => {
-        const nwcUrl = await getNwcUrl(wallet.id);
+        let nwcUrl: string | null;
+        try {
+          nwcUrl = await getNwcUrl(wallet.id);
+        } catch {
+          // SecureStore reads can reject — treat a read failure the same as a
+          // missing URL so it surfaces the "couldn't read the connection" alert
+          // instead of becoming an unhandled rejection.
+          nwcUrl = null;
+        }
         if (!nwcUrl) {
           Alert.alert(t('nwcShareSheet.missingUrlTitle'), t('nwcShareSheet.missingUrl'));
           return;
