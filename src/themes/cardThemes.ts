@@ -220,6 +220,20 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImageStyle: 'spaceship',
     backgroundImageResizeMode: 'stretch',
   },
+  'ai-robot': {
+    id: 'ai-robot',
+    name: 'Robot',
+    // Full-bleed friendly-robot art (waving mascot to the right). The
+    // gradient is only a fallback tint behind the illustration — emerald
+    // green fading to deep teal, matching the art so any load gap isn't
+    // jarring and white balance text stays legible over the calmer left.
+    gradientColors: ['#00C853', '#00695C'],
+    textColor: '#FFFFFF',
+    accentColor: '#69F0AE',
+    backgroundImage: require('../../assets/images/ai-robot.png'),
+    backgroundImageStyle: 'ai-robot',
+    backgroundImageResizeMode: 'cover',
+  },
 };
 
 // Pickers (Add-wallet wizard + Wallet settings) render this list in order,
