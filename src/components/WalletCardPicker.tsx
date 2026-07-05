@@ -31,17 +31,23 @@ const DEFAULT_INDEX = Math.max(
 // at once (the centre plus ~4 peeking to each side). These are hand-tuned
 // constants — revisit them against fresh screenshots if the fan reads too
 // tight/loose or the centre doesn't stand out enough.
-const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.44); // centre card base width
+const CF_CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.4); // centre card base width
 const CF_CARD_HEIGHT = Math.round(CF_CARD_WIDTH / CARD_ASPECT);
 const CF_VIEWPORT_HEIGHT = CF_CARD_HEIGHT + 24;
 // Centre-to-centre distance between adjacent cards. The parallax layout places
 // neighbour n at ±n·(SCREEN_WIDTH − parallaxScrollingOffset), so this constant
-// IS that spacing and the offset is derived from it. At ~0.25·cardWidth
-// (≈0.11·screen) the cards overlap heavily and ~9 fit across the viewport.
-const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.25);
-// Focused card at full size; neighbours notably smaller so the centre pops.
+// IS that spacing and the offset is derived from it. At ~0.19·cardWidth
+// (≈0.076·screen) four cards fan out on each side of the centre — the
+// outermost sitting at the viewport edge — so with the centre ~9 sit across
+// the viewport at once.
+const CF_CARD_SPACING = Math.round(CF_CARD_WIDTH * 0.19);
+// Focused card at full size; neighbours only modestly smaller. A gentle scale
+// step (vs a steep one) keeps the immediate neighbours from being swallowed
+// behind the enlarged centre card, so the deck reads as many cards rather than
+// "centre + a couple of slivers" — while the full-scale centre + selected
+// border still make it clearly stand out.
 const CF_CENTER_SCALE = 1.0;
-const CF_ADJACENT_SCALE = 0.72;
+const CF_ADJACENT_SCALE = 0.85;
 // Mount every card so the fanned deck is fully populated — there are only a
 // handful of designs, so this is cheap, and anything beyond the viewport is
 // clipped by the carousel's overflow:hidden.
