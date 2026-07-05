@@ -142,7 +142,11 @@ const ContactRow = React.memo(
     // closes the stale-handler gap without costing the scroll-perf win — they
     // stay equal frame-to-frame. Fields ListItem carries but this row never
     // renders (banner, nip05, source) are intentionally omitted: they can't
-    // change the output, so including them would only cause needless re-renders.
+    // change the row's output, so including them would only cause needless
+    // re-renders. The onPress closure can therefore capture a stale banner/
+    // nip05/source, but that's harmless — handleContactPress re-resolves the
+    // freshest item by id from itemsByIdRef before opening the profile sheet
+    // (#977 review), so the sheet/profile screen never see stale data.
     prev.item.id === next.item.id &&
     prev.item.name === next.item.name &&
     prev.item.picture === next.item.picture &&
@@ -354,6 +358,23 @@ const FriendsScreen: React.FC = () => {
     return items;
   }, [contacts, phoneContacts, filter]);
 
+  // Source-of-truth lookup keyed by the stable ListItem.id, mirrored into a
+  // ref so handleContactPress can read the FRESHEST item without depending on
+  // sortedItems (which would break its stable identity and cost the scroll
+  // perf win). ContactRow's memo comparator intentionally ignores
+  // banner/nip05/source — fields the row never renders — so a row can
+  // legitimately skip re-rendering while those change, leaving its captured
+  // `item` stale. Looking the contact up fresh by id when the sheet opens
+  // keeps ContactProfileSheet / handleViewFullProfile on current
+  // banner/nip05/source without widening the comparator (#977 review).
+  const itemsById = useMemo(() => {
+    const m = new Map<string, ListItem>();
+    for (const it of sortedItems) m.set(it.id, it);
+    return m;
+  }, [sortedItems]);
+  const itemsByIdRef = useRef(itemsById);
+  itemsByIdRef.current = itemsById;
+
   // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
   // match is O(n) per keystroke but with no allocations and no sort —
   // and `useDeferredValue` lets React stale-render this filter step
@@ -480,7 +501,12 @@ const FriendsScreen: React.FC = () => {
   // leaving the list; its "View full profile" link drills into the
   // full ContactProfile route when the user wants the deep view.
   const handleContactPress = useCallback((item: ListItem) => {
-    setSelectedContact(item);
+    // Resolve the freshest copy by stable id: the memoised row may have
+    // skipped re-rendering on a banner/nip05/source change (fields it never
+    // renders), so its captured `item` can be stale for the profile sheet.
+    // Fall back to the passed item if it's somehow not in the current list.
+    const fresh = itemsByIdRef.current.get(item.id) ?? item;
+    setSelectedContact(fresh);
     setProfileSheetVisible(true);
   }, []);
 
