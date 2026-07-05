@@ -10,9 +10,12 @@ const YEAR = 365 * DAY;
 
 /**
  * Format a UNIX timestamp (seconds) as a short relative label, e.g. "now",
- * "5m", "3h", "2d", "4w", "1y". Future timestamps clamp to "now".
+ * "5m", "3h", "2d", "4w", "1y". Future timestamps clamp to "now". Missing /
+ * non-positive / non-finite stamps (e.g. callers passing `created_at ?? 0`)
+ * also clamp to "now" rather than rendering as decades-old.
  */
 export function relativeTime(createdAtSecs: number, nowSecs: number = Date.now() / 1000): string {
+  if (!Number.isFinite(createdAtSecs) || createdAtSecs <= 0) return 'now';
   const diff = Math.floor(nowSecs - createdAtSecs);
   if (!Number.isFinite(diff) || diff < MINUTE) return 'now';
   if (diff < HOUR) return `${Math.floor(diff / MINUTE)}m`;

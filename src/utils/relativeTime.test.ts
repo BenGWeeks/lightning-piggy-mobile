@@ -20,4 +20,10 @@ describe('relativeTime', () => {
   it('guards against non-finite input', () => {
     expect(relativeTime(NaN, NOW)).toBe('now');
   });
+
+  it('clamps missing / non-positive stamps to "now" instead of decades-old', () => {
+    // Callers pass `created_at ?? 0`; a 0 stamp must not render as "31y".
+    expect(relativeTime(0, NOW)).toBe('now');
+    expect(relativeTime(-5, NOW)).toBe('now');
+  });
 });
