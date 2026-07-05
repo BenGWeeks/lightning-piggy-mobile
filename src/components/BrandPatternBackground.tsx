@@ -15,12 +15,15 @@ import { useThemeColors } from '../contexts/ThemeContext';
 
 export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
 
-// How much of the gradient sits over the monogram. Lower = pattern reads
-// stronger. Tuned on-device — dropped from 0.82 → 0.68 (#995) because at 0.82
-// the tone-on-tone monogram was near-invisible on real hardware (only ~18% of
-// the pattern showed through); 0.68 lets ~32% through so the motifs actually
-// read while still sitting "under" the fade rather than printed on top.
-const FADE_OPACITY = 0.68;
+// Directional fade veil over the monogram (#995). The pink→purple wash sits
+// OVER the monogram with a horizontal ALPHA ramp: heavy on the LEFT (monogram
+// nearly hidden — the soft "faded-left" look) easing to light on the RIGHT
+// (monogram clearly visible). An OPAQUE base gradient underneath keeps the
+// header's pink→purple background unchanged regardless of the veil. Values are
+// 2-hex-digit alpha appended to the theme colours: DB≈0.86, A6≈0.65, 80≈0.50.
+const FADE_LEFT_HEX = 'DB';
+const FADE_MID_HEX = 'A6';
+const FADE_RIGHT_HEX = '80';
 
 type MotifName = 'messageSquare' | 'heart' | 'userRound' | 'compass' | 'map';
 
@@ -170,6 +173,16 @@ const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
       style={[StyleSheet.absoluteFill, { backgroundColor: colors.brandPink }, style]}
       pointerEvents="none"
     >
+      {/* Opaque base gradient — the header background. Keeps the pink→purple
+          wash intact so the alpha veil below can hide/reveal the monogram
+          horizontally without washing out the colour on the right. */}
+      <LinearGradient
+        colors={[colors.brandPink, colors.brandGradientMid, colors.brandPurple]}
+        locations={[0, 0.55, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={StyleSheet.absoluteFill}
+      />
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
         <Defs>
           <Pattern
@@ -200,12 +213,19 @@ const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
         </Defs>
         <Rect width="100%" height="100%" fill={`url(#${patternId})`} />
       </Svg>
+      {/* Alpha-ramped veil OVER the monogram: opaque-ish pink on the left
+          (hides the motifs) → lighter purple on the right (reveals them). This
+          is what produces the faded-left → visible-right monogram. */}
       <LinearGradient
-        colors={[colors.brandPink, colors.brandGradientMid, colors.brandPurple]}
+        colors={[
+          `${colors.brandPink}${FADE_LEFT_HEX}`,
+          `${colors.brandGradientMid}${FADE_MID_HEX}`,
+          `${colors.brandPurple}${FADE_RIGHT_HEX}`,
+        ]}
         locations={[0, 0.55, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={[StyleSheet.absoluteFill, { opacity: FADE_OPACITY }]}
+        style={StyleSheet.absoluteFill}
       />
     </View>
   );
