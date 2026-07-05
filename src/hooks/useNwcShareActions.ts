@@ -77,7 +77,9 @@ export function useNwcShareActions({
               void (async () => {
                 const nwcUrl = await walletStorage.getNwcUrl(walletId);
                 if (!nwcUrl) {
-                  Alert.alert(t('nwcShareSheet.noneTitle'), t('nwcShareSheet.missingUrl'));
+                  // The user *did* pick a wallet — the connection just couldn't
+                  // be read — so use an accurate title, not "No wallet to share".
+                  Alert.alert(t('nwcShareSheet.missingUrlTitle'), t('nwcShareSheet.missingUrl'));
                   return;
                 }
                 const ok = await shareNwcWallet({

@@ -299,6 +299,7 @@
     "confirmTitle": "Share this wallet?",
     "confirmBody": "{{name}} will get full access to \"{{wallet}}\" — anyone with the connection can spend its funds. Only share with people you trust.",
     "confirmShare": "Share",
+    "missingUrlTitle": "Could not share wallet",
     "missingUrl": "Could not read this wallet's connection.",
     "sentToast": "Wallet shared",
     "cancel": "Cancel"

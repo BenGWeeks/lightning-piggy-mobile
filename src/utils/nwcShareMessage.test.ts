@@ -94,4 +94,15 @@ describe('previews never leak the bearer secret', () => {
     // A plain chat row (no special wireKind) is returned verbatim.
     expect(dmRowPreview('hello there', 14)).toBe('hello there');
   });
+
+  it('dmRowPreview redacts a kind-15 encrypted-file row so the AES key never leaks', () => {
+    // An AES-GCM voice note / photo is stored as its `#lpe=…` URL, whose
+    // fragment embeds the decryption key + nonce. The inbox/notification
+    // preview must never carry it.
+    const encryptedFileUrl = `https://blob.example/x.bin#lpe=1&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=audio%2Fmp4`;
+    const preview = dmRowPreview(encryptedFileUrl, 15);
+    expect(preview).not.toContain('lpe=');
+    expect(preview).not.toContain('a'.repeat(64));
+    expect(preview).not.toContain('blob.example');
+  });
 });

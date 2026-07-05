@@ -299,6 +299,7 @@
     "confirmTitle": "¿Compartir esta cartera?",
     "confirmBody": "{{name}} obtendrá acceso completo a «{{wallet}}»: cualquiera con la conexión puede gastar sus fondos. Compártela solo con personas de confianza.",
     "confirmShare": "Compartir",
+    "missingUrlTitle": "No se pudo compartir la cartera",
     "missingUrl": "No se pudo leer la conexión de esta cartera.",
     "sentToast": "Cartera compartida",
     "cancel": "Cancelar"
