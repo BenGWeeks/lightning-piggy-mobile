@@ -1833,6 +1833,10 @@
   },
   "walletSettingsSheet": {
     "title": "Wallet Settings",
+    "tabDesign": "Design",
+    "tabDetails": "Details",
+    "tabConnection": "Connection",
+    "noConnectionDetails": "No connection details for this wallet.",
     "alias": "Alias",
     "aliasPlaceholder": "Wallet name",
     "lightningAddress": "Lightning Address",

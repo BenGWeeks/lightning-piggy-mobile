@@ -1833,6 +1833,10 @@
   },
   "walletSettingsSheet": {
     "title": "Налаштування гаманця",
+    "tabDesign": "Дизайн",
+    "tabDetails": "Деталі",
+    "tabConnection": "Підключення",
+    "noConnectionDetails": "Немає деталей підключення для цього гаманця.",
     "alias": "Назва",
     "aliasPlaceholder": "Назва гаманця",
     "lightningAddress": "Адреса Lightning",

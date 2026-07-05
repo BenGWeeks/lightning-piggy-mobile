@@ -1833,6 +1833,10 @@
   },
   "walletSettingsSheet": {
     "title": "Ajustes de la cartera",
+    "tabDesign": "Diseño",
+    "tabDetails": "Detalles",
+    "tabConnection": "Conexión",
+    "noConnectionDetails": "No hay detalles de conexión para esta cartera.",
     "alias": "Alias",
     "aliasPlaceholder": "Nombre de la cartera",
     "lightningAddress": "Dirección Lightning",
