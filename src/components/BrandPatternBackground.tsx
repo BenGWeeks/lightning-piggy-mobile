@@ -6,12 +6,15 @@ import { useThemeColors } from '../contexts/ThemeContext';
 
 // Tone-on-tone monogram background for the content tabs — Messages and
 // Friends, plus the Explore hub and its sub-sections (via the
-// `explore-compass` variant). The mark is drawn INTO a solid brand ground,
-// then the pink->purple fade washes over it at ~82% so it reads as
-// Louis-Vuitton-style canvas texture rather than icons printed on top ("under
-// the fade"). Pure vector via react-native-svg, so it avoids the 754 KB
-// bitmap decode implicated in the cold-tab GPU stall (issue #245) and stays
-// crisp at every density.
+// `explore-compass` variant). The mark is drawn INTO an OPAQUE pink→purple
+// base gradient (the header ground), then a DIRECTIONAL alpha-ramped veil of
+// the same pink→purple is laid OVER it — heavy on the LEFT (monogram nearly
+// hidden, the soft "faded-left" look) easing to light on the RIGHT (monogram
+// clearly visible). So the mark fades in horizontally rather than sitting at a
+// single flat opacity, giving a Louis-Vuitton-style canvas texture "under the
+// fade" rather than icons printed on top. Pure vector via react-native-svg, so
+// it avoids the 754 KB bitmap decode implicated in the cold-tab GPU stall
+// (issue #245) and stays crisp at every density.
 
 export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
 
