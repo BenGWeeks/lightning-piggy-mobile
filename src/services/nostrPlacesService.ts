@@ -255,6 +255,37 @@ export const longestGeohash = (tags: string[][]): string | null => {
 };
 
 /**
+ * Flat parsed shape of a kind 7516 found-log. `coord` is the addressable
+ * `<kind>:<pubkey>:<d>` of the cache being logged; `finderPubkey` is the
+ * event author. Mirrors `parseCache` so both the community leaderboards
+ * and the recently-found feed can consume a pure, testable value instead
+ * of poking at raw tags. `amountSats` is the self-reported claim amount
+ * (the `amount` tag is in millisats), null when absent.
+ */
+export interface ParsedFoundLog {
+  id: string;
+  coord: string;
+  finderPubkey: string;
+  createdAt: number;
+  amountSats: number | null;
+}
+
+export const parseFoundLog = (event: VerifiedEvent): ParsedFoundLog | null => {
+  if (event.kind !== GC_FOUND_LOG_KIND) return null;
+  const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
+  if (!coord) return null;
+  const amount = event.tags.find((t) => t[0] === 'amount')?.[1];
+  const amountSats = amount ? Math.round(Number(amount) / 1000) || null : null;
+  return {
+    id: event.id,
+    coord,
+    finderPubkey: event.pubkey,
+    createdAt: event.created_at,
+    amountSats,
+  };
+};
+
+/**
  * Resolve a coord string back into its (hiderPubkey, d) parts. Coord
  * format is `<kind>:<pubkey>:<d>` per NIP-01.
  */

@@ -7,9 +7,11 @@ import {
   GC_LISTING_KIND,
   NIP52_TIME_BASED_KIND,
   parseCache,
+  parseFoundLog,
   parseNip52Event,
   type ParsedCache,
   type ParsedEvent,
+  type ParsedFoundLog,
 } from './nostrPlacesService';
 import { isDevLeftover } from './devEventDenylist';
 
@@ -129,6 +131,58 @@ export const subscribeNearbyCaches = (
     if (__burstFlushTimer) clearTimeout(__burstFlushTimer);
     sub.close();
   };
+};
+
+/**
+ * Subscribe to the most-recently-published caches across the geo-cache
+ * relay backbone — NOT geohash-scoped, so it surfaces global activity for
+ * the "Recently added" rail and the Hiders leaderboard. `limit` bounds the
+ * relay backfill (newest-first per NIP-01) so a busy relay can't firehose
+ * years of history into the client. The same event stream feeds the hider
+ * ranking (distinct caches per author), so callers only open one sub.
+ *
+ * Returns a closer; call it to terminate the subscription.
+ */
+export const subscribeRecentCaches = (
+  onEvent: (cache: ParsedCache) => void,
+  relays: string[] = GC_RELAYS,
+  limit = 200,
+): (() => void) => {
+  const filter: Filter = { kinds: [GC_LISTING_KIND], limit };
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
+    onevent: (e: NostrEvent) => {
+      if (isDevLeftover(e.pubkey)) return;
+      const parsed = parseCache(e as VerifiedEvent);
+      if (parsed) onEvent(parsed);
+    },
+  });
+  return () => sub.close();
+};
+
+/**
+ * Subscribe to the most-recent found-logs across the geo-cache relay
+ * backbone — no author filter, so it feeds the global "Recently found"
+ * feed AND the Finders leaderboard (distinct caches per finder) from one
+ * sub. The friends-only toggle is applied client-side at render time so
+ * flipping it re-filters instantly with no re-subscribe. `limit` bounds
+ * the backfill (newest-first).
+ *
+ * Returns a closer; call it to terminate the subscription.
+ */
+export const subscribeRecentFoundLogs = (
+  onEvent: (log: ParsedFoundLog) => void,
+  relays: string[] = GC_RELAYS,
+  limit = 200,
+): (() => void) => {
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], limit };
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
+    onevent: (e: NostrEvent) => {
+      if (isDevLeftover(e.pubkey)) return;
+      const parsed = parseFoundLog(e as VerifiedEvent);
+      if (parsed) onEvent(parsed);
+    },
+  });
+  return () => sub.close();
 };
 
 export const subscribeFoundLogs = (
