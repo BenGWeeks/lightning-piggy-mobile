@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Bitcoin, MapPin, PiggyBank, Zap } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
@@ -57,6 +58,7 @@ export const LegendSheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const translateY = useRef(new Animated.Value(0)).current;
   const responder = useRef(
@@ -106,10 +108,23 @@ export const LegendSheet: React.FC<Props> = ({
   }, [availableCategories, placesVisible]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop} testID="legend-sheet">
         <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+        {/* navigationBarTranslucent draws this bottom-docked sheet behind the
+            Android nav bar; pad the base 32 by the bottom safe-area inset so
+            the last legend rows stay clear of 3-button navigation (0 under
+            gesture nav, so edge-to-edge is preserved there). */}
+        <Animated.View
+          style={[styles.sheet, { paddingBottom: 32 + insets.bottom, transform: [{ translateY }] }]}
+        >
           {/* The whole header strip — grabber pill, the "Pin types"
               section title, AND a tall transparent area around them —
               is one big drag target so the user doesn't have to aim

@@ -8,6 +8,7 @@ import type { ConversationMessageInput } from '../utils/conversationItems';
 import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/dmDeliveryStatus';
 import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
 import { useComposerActions } from './useComposerActions';
+import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
 
 // Upper bound before the optimistic bubble's pending Clock flips to the red
 // failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
@@ -45,7 +46,7 @@ export function useConversationComposerActions(params: {
     setVoiceSheetOpen,
   } = params;
 
-  const { sendDirectMessage, sendFileMessage, appendLocalDmMessage } = useNostr();
+  const { sendDirectMessage, sendFileMessage, sendNwcShare, appendLocalDmMessage } = useNostr();
 
   // Optimistically append a locally-sent row; the relay echo dedups in
   // mergeConversationMessages. Also persisted via appendLocalDmMessage so the
@@ -183,6 +184,36 @@ export function useConversationComposerActions(params: {
     [pubkey, sendFileMessage, setMessages, appendLocalDmMessage],
   );
 
+  // Share an NWC wallet (#431). The connection string is a bearer secret sent
+  // ONLY inside the encrypted NIP-17 gift wrap (via `sendNwcShare`). Mirrors
+  // `sendFile`: publish first, then append the optimistic "Add NWC Wallet" card
+  // on success — the row carries `wireKind: NWC_SHARE_KIND` + the serialized
+  // card so `buildConversationItems` rebuilds the card (and the local- row
+  // dedupes against the self-wrap echo on the next fetch, which serializes
+  // identically). The caller (ConversationScreen) shows the access warning
+  // BEFORE invoking this.
+  const shareNwcWallet = useCallback(
+    async (card: NwcShareCard): Promise<boolean> => {
+      const result = await sendNwcShare(pubkey, card);
+      if (!result.success) {
+        Alert.alert('Could not share wallet', result.error ?? 'Please try again.');
+        return false;
+      }
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text: serializeNwcShare(card),
+        createdAt: Math.floor(Date.now() / 1000),
+        wireKind: NWC_SHARE_KIND,
+        deliveryStatus: result.delivery,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
+      return true;
+    },
+    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage],
+  );
+
   // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
   // resolving after a button already did.
   const confirmLocation = useCallback(
@@ -242,5 +273,5 @@ export function useConversationComposerActions(params: {
   // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish
   // (#856). It runs the full send path (publish + optimistic row + tick), so a
   // re-publish is indistinguishable from a fresh send and gets its own bubble.
-  return { ...actions, appendOptimisticLocal, resendText: sendText };
+  return { ...actions, appendOptimisticLocal, resendText: sendText, shareNwcWallet };
 }

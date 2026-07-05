@@ -16,12 +16,11 @@ import { NSEC_KEY } from './nostrAuthKeys';
  */
 export const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
 
-// Per-(viewer,partner) serialization chain for the optimistic local-
-// message disk-cache writes. Without this, two rapid sends (e.g.
-// double-tap retry, or two sequential tap-share-from-attach) could
-// each read-modify-write the conversation blob concurrently — last
-// write wins, losing the prior optimistic row. Per Copilot review #509.
-export const appendLocalDmChains = new Map<string, Promise<void>>();
+// NOTE: the per-(viewer,partner) `appendLocalDmChains` serialization map
+// (Copilot review #509) was removed in #850 — the optimistic local- rows it
+// guarded moved from a read-modify-write AsyncStorage blob to atomic
+// (owner, event_id)-keyed upserts in the encrypted store, where two rapid
+// sends can't clobber each other.
 export function __clearNip04PlaintextCacheForTests() {
   nip04PlaintextCache.clear();
 }

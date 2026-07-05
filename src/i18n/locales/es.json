@@ -289,6 +289,34 @@
     "shareContactTitle": "Compartir un contacto con {{name}}",
     "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir."
   },
+  "nwcShareSheet": {
+    "title": "Compartir una cartera",
+    "subtitle": "Elige una cartera conectada para compartir. El destinatario podrá gastar desde ella.",
+    "empty": "No tienes carteras NWC conectadas para compartir.",
+    "shareNamed": "Compartir {{name}}",
+    "noneTitle": "No hay cartera para compartir",
+    "noneBody": "Conecta primero una cartera NWC (Nostr Wallet Connect) y luego podrás compartirla.",
+    "confirmTitle": "¿Compartir esta cartera?",
+    "confirmBody": "{{name}} obtendrá acceso completo a «{{wallet}}»: cualquiera con la conexión puede gastar sus fondos. Compártela solo con personas de confianza.",
+    "confirmBodyNoName": "Cualquiera con la conexión de esta cartera puede gastar sus fondos. Compártela solo con personas de confianza.",
+    "confirmShare": "Compartir",
+    "missingUrlTitle": "No se pudo compartir la cartera",
+    "missingUrl": "No se pudo leer la conexión de esta cartera.",
+    "sentToast": "Cartera compartida",
+    "cancel": "Cancelar"
+  },
+  "nwcShareCard": {
+    "title": "Añadir cartera NWC",
+    "trustWarning": "Añade conexiones NWC solo de personas de confianza. Quien tenga esta conexión puede gastar desde la cartera.",
+    "youShared": "Compartiste esta cartera",
+    "add": "Añadir",
+    "addConfirmTitle": "¿Añadir esta cartera?",
+    "addConfirmBody": "Podrás gastar desde la cartera que compartió {{name}}. Continúa solo si confías en esa persona: cualquiera con esta conexión puede gastar sus fondos.",
+    "addFailedTitle": "No se pudo añadir la cartera",
+    "addFailedBody": "Comprueba la conexión e inténtalo de nuevo.",
+    "defaultAlias": "Cartera compartida",
+    "addedToast": "Cartera añadida"
+  },
   "courseDetailScreen": {
     "courseNotFound": "Curso no encontrado",
     "goBack": "Volver",
@@ -1866,6 +1894,8 @@
     "nwcConnectionCopied": "Conexión NWC copiada al portapapeles.",
     "nwcQrHint": "Escanea desde otra instalación de Lightning Piggy o cliente NWC para importar esta cartera.",
     "nwcConnectionHint": "Usa esta cadena para mover la cartera a otro dispositivo o cliente NWC.",
+    "shareWallet": "Compartir esta cartera",
+    "shareWalletPickTitle": "Compartir cartera con…",
     "extendedPublicKey": "Clave pública extendida",
     "tapToCopy": "Toca para copiar",
     "cardDesign": "Diseño de la tarjeta",
