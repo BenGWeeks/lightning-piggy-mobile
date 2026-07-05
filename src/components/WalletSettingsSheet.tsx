@@ -230,13 +230,18 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     [],
   );
 
+  // Present/dismiss keyed on whether a wallet EXISTS, not the `wallet` object
+  // itself — the object identity changes on every balance poll / reconnect ping,
+  // and depending on it would re-run this effect (calling present() again) on
+  // every such update. A boolean only flips when the wallet appears/disappears.
+  const hasWallet = !!wallet;
   useEffect(() => {
-    if (walletId && wallet) {
+    if (walletId && hasWallet) {
       bottomSheetRef.current?.present();
     } else {
       bottomSheetRef.current?.dismiss();
     }
-  }, [walletId, wallet]);
+  }, [walletId, hasWallet]);
 
   const handleSave = useCallback(async () => {
     if (!walletId || !wallet) return;
