@@ -96,7 +96,7 @@ describe('previews never leak the bearer secret', () => {
   });
 
   it('dmRowPreview redacts a kind-15 encrypted-file row so the AES key never leaks', () => {
-    // An AES-GCM voice note / photo is stored as its `#lpe=…` URL, whose
+    // An AES-GCM voice note / photo is stored as its `#lpe=1…` URL, whose
     // fragment embeds the decryption key + nonce. The inbox/notification
     // preview must never carry it.
     const encryptedFileUrl = `https://blob.example/x.bin#lpe=1&k=${'a'.repeat(64)}&n=${'b'.repeat(24)}&m=audio%2Fmp4`;
@@ -104,5 +104,7 @@ describe('previews never leak the bearer secret', () => {
     expect(preview).not.toContain('lpe=');
     expect(preview).not.toContain('a'.repeat(64));
     expect(preview).not.toContain('blob.example');
+    // A plain kind-15 row (bare blob URL, no `#lpe=1` secret) is not redacted.
+    expect(dmRowPreview('https://blob.example/x.bin', 15)).toBe('https://blob.example/x.bin');
   });
 });
