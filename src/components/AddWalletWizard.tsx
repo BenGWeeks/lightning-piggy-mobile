@@ -23,7 +23,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
-import { CardTheme, WalletType } from '../types/wallet';
+import type { CardTheme, WalletType } from '../types/wallet';
 import { defaultCardThemeFor } from '../themes/cardThemes';
 import WalletCardPicker from './WalletCardPicker';
 import { validateNwcUrl } from '../services/nwcService';

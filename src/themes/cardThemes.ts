@@ -1,4 +1,4 @@
-import { CardTheme, WalletType } from '../types/wallet';
+import type { CardTheme, WalletType } from '../types/wallet';
 import { ImageSourcePropType, ImageResizeMode } from 'react-native';
 
 export interface CardThemeConfig {

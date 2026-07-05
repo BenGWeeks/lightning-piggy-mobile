@@ -6,7 +6,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { CardTheme } from '../types/wallet';
+import type { CardTheme } from '../types/wallet';
 import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import {
   getXpub,
