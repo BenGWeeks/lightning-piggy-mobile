@@ -92,6 +92,19 @@ describe('nwcShareCardFromWallet', () => {
       walletName: undefined,
     });
   });
+
+  it('builds an identical card from both share entry points (Attach + Settings)', () => {
+    // Both `useNwcShareActions` (Attach menu) and `useWalletShareFromSettings`
+    // now route their card build through this one helper, passing the same
+    // wallet primitives — `wallet.alias` and `wallet.walletAlias ?? undefined`.
+    // Given identical inputs they must produce byte-identical cards; this locks
+    // in the dedup so the two paths can't drift apart again.
+    const alias = 'Pocket money';
+    const walletAlias = 'CoinOS wallet';
+    const attachCard = nwcShareCardFromWallet(VALID_NWC, alias, walletAlias ?? undefined);
+    const settingsCard = nwcShareCardFromWallet(VALID_NWC, alias, walletAlias ?? undefined);
+    expect(attachCard).toEqual(settingsCard);
+  });
 });
 
 describe('previews never leak the bearer secret', () => {

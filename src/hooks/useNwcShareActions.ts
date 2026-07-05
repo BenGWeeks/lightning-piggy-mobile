@@ -5,7 +5,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import * as walletStorage from '../services/walletStorageService';
 import { validateNwcUrl } from '../services/nwcService';
 import type { WalletState } from '../types/wallet';
-import type { NwcShareCard } from '../utils/nwcShareMessage';
+import { nwcShareCardFromWallet, type NwcShareCard } from '../utils/nwcShareMessage';
 
 interface Params {
   /** All wallets; the hook filters to the shareable NWC ones. */
@@ -82,15 +82,16 @@ export function useNwcShareActions({
                   Alert.alert(t('nwcShareSheet.missingUrlTitle'), t('nwcShareSheet.missingUrl'));
                   return;
                 }
-                const ok = await shareNwcWallet({
-                  nwcUrl,
-                  // Send the user's own local label (`alias`) — the name they
-                  // gave the wallet and the exact one the confirm dialog above
-                  // showed them — so the recipient's card matches what the
-                  // sender agreed to share. Fall back to the remote getInfo
-                  // name (`walletAlias`) only if the local label is blank.
-                  walletName: wallet.alias.trim() || wallet.walletAlias || undefined,
-                });
+                // Derive the card via the shared helper so this Attach path and
+                // the Settings share path (useWalletShareFromSettings) build an
+                // identical card: prefer the user's own local label (`alias` —
+                // the exact name the confirm dialog above showed), falling back
+                // to the remote getInfo name (`walletAlias`) only when it's
+                // blank. The raw `nwcUrl` bearer secret goes only into the
+                // gift-wrapped DM payload, never a preview.
+                const ok = await shareNwcWallet(
+                  nwcShareCardFromWallet(nwcUrl, wallet.alias, wallet.walletAlias ?? undefined),
+                );
                 if (ok) Toast.show({ type: 'success', text1: t('nwcShareSheet.sentToast') });
               })();
             },
