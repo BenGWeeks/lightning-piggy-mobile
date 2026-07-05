@@ -5,7 +5,7 @@ import {
   rumorEventId,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
-import { orderPreviewFromContent } from '../utils/orderEvents';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -166,12 +166,13 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           return null;
         }
         const text = textForRumor(rumor);
-        // For an order/receipt rumor (kind 16/17) `textForRumor` returns order
-        // JSON; the in-memory inbox preview must show a readable summary, never
-        // the raw blob (mirrors the live-sub path). The stored row keeps the raw
-        // order JSON below so the thread renderer + dmInbox projection re-derive
-        // from it. Plain DM rumors pass through unchanged.
-        const preview = orderPreviewFromContent(text, rumor.kind);
+        // For a structured rumor (order kind 16/17, or an NWC wallet share) the
+        // stored `text` is non-human JSON — the in-memory inbox preview must show
+        // a readable, SECRET-FREE summary, never the raw blob (an NWC share's
+        // content is a bearer connection string). The stored row keeps the raw
+        // JSON below so the thread renderer + dmInbox projection re-derive from
+        // it. Plain DM rumors pass through unchanged.
+        const preview = dmRowPreview(text, rumor.kind);
         // Inner rumor id — the cross-peer-stable id BOTH sides see for the
         // same logical message. For our own sent rows (fromMe) it's the
         // delivery-store key (#857); for received rows it's the NIP-25

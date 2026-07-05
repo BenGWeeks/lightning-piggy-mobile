@@ -1,0 +1,94 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Attach — share an NWC wallet with Little Piggy
+---
+# Opens the AttachPanel → Wallet tile → the "Share a wallet" picker
+# (#431). Exercises the sender side of NWC wallet sharing: the tile is
+# wired to `useNwcShareActions.openNwcSharePicker`, which either opens the
+# NwcWalletShareSheet (when the user has a connected NWC wallet) or shows
+# the branded "No wallet to share" alert (when they don't). Either outcome
+# proves the tile ships and is wired — we assert on whichever the current
+# account produces so the flow is deterministic regardless of wallet state.
+#
+# Per CLAUDE.md we avoid coordinates and rely on the shipped testIDs:
+# `conversation-attach`, `attach-share-wallet`, the picker rows'
+# `nwc-share-wallet-<id>`, and the BrandedAlert's `branded-alert-*`.
+#
+# NOTE: NwcWalletShareSheet is a @gorhom/bottom-sheet, whose content can be
+# invisible to Maestro on iOS under the New Architecture (see
+# docs/TROUBLESHOOTING.adoc). We therefore assert the tile + the branded
+# alert path and treat the sheet path as optional, then confirm we return
+# to the composer without error.
+#
+# Run: maestro --device emulator-5554 test .maestro/messaging/flow-123-attach-share-wallet.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open the inline AttachPanel and confirm the Wallet tile ships.
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'attach-share-wallet'
+- tapOn:
+    id: 'attach-share-wallet'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Two acceptable outcomes:
+#  (a) No connected NWC wallet → BrandedAlert "No wallet to share". Dismiss
+#      it so the run ends cleanly.
+#  (b) A wallet exists → the "Share a wallet" picker opens. Its rows/title
+#      may be invisible to Maestro on iOS, so we dismiss the sheet with the
+#      hardware back button rather than a (possibly unseen) Cancel row.
+- runFlow:
+    when:
+      visible:
+        id: 'branded-alert'
+    commands:
+      - assertVisible:
+          id: 'branded-alert-title'
+      - tapOn:
+          id: 'branded-alert-button-0'
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# Outcome (b): no alert means a wallet exists and NwcWalletShareSheet is
+# open. Its bottom-sheet content can be invisible to Maestro (iOS / New
+# Arch), so we can't rely on a Cancel row selector — dismiss it with the
+# hardware back button so the run returns to the composer cleanly instead
+# of hanging on the assertVisible below.
+- runFlow:
+    when:
+      notVisible:
+        id: 'branded-alert'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# Back at the message composer, share panel dismissed.
+- assertVisible:
+    id: 'conversation-input'

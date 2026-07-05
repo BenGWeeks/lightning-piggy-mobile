@@ -39,6 +39,7 @@ import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './n
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
 import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
+import type { NwcShareCard } from '../utils/nwcShareMessage';
 import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
@@ -175,6 +176,13 @@ interface NostrContextType extends UseReactionActionsResult {
    * gift-wraps the URL + decryption key. See #235.
    */
   sendFileMessage: (recipientPubkey: string, file: EncryptedUpload) => Promise<SendResult>;
+  /**
+   * Share an NWC wallet with a 1:1 recipient (#431). The NWC connection string
+   * is a bearer secret, so it is gift-wrapped into an encrypted NIP-17 DM
+   * (inner kind `NWC_SHARE_KIND`) — never a public event. The recipient's
+   * client renders it as an "Add NWC Wallet" card.
+   */
+  sendNwcShare: (recipientPubkey: string, card: NwcShareCard) => Promise<SendResult>;
   /**
    * Persist an optimistic local- DM message to the per-conversation
    * cache so it survives navigating away + back before the NIP-17
@@ -1561,7 +1569,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // useMessageSend (#703). Group send + group-state live in useGroupMessaging
   // (wired above). We take ONLY the 1:1 sends here so sendGroupMessage /
   // publishGroupState aren't declared twice.
-  const { sendDirectMessage, sendDirectRumor, sendFileMessage } = useMessageSend({
+  const { sendDirectMessage, sendDirectRumor, sendFileMessage, sendNwcShare } = useMessageSend({
     pubkey,
     isLoggedIn,
     signerType,
@@ -1644,6 +1652,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sendDirectMessage,
       sendDirectRumor,
       sendFileMessage,
+      sendNwcShare,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,
@@ -1680,6 +1689,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sendDirectMessage,
       sendDirectRumor,
       sendFileMessage,
+      sendNwcShare,
       sendGroupMessage,
       publishGroupState,
       fetchConversation,

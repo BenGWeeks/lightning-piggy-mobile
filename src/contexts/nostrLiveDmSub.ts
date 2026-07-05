@@ -21,12 +21,8 @@ import {
   hasConversationWith,
   type DmMessageRow,
 } from '../services/dmDb';
-import {
-  parseOrderEvent,
-  serializeOrder,
-  orderPreviewText,
-  orderPreviewFromContent,
-} from '../utils/orderEvents';
+import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -634,11 +630,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // own echoes and historical backlog (silent); persistence is left to the
       // next refreshDmInbox — see replayDeferredFollowGate.
       if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
-        // For an order/receipt rumor (kind 16/17) `textForRumor` returns order
-        // JSON; surface a readable preview so a raw blob never leaks into the
-        // conversation list when the sender isn't followed (mirrors the
-        // non-deferred path below). Plain DM rumors pass through unchanged.
-        const deferredText = orderPreviewFromContent(textForRumor(rumor), rumor.kind);
+        // For a structured rumor (order kind 16/17, or an NWC wallet share)
+        // `textForRumor` returns non-human JSON; surface a readable, SECRET-FREE
+        // preview so a raw blob (or, for a share, a bearer connection string)
+        // never leaks into the conversation list OR the notification body when
+        // the sender isn't followed (mirrors the non-deferred path below). Plain
+        // DM rumors pass through unchanged.
+        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind);
         followGateBuffer.defer({
           partnerPubkey: partnership.partnerPubkey,
           entry: {
@@ -649,7 +647,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             text: deferredText,
             wireKind: rumor.kind,
           },
-          notify: { title: 'New message', body: rumor.content },
+          notify: { title: 'New message', body: deferredText },
         });
       }
       return;
@@ -671,9 +669,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       partnerPubkey: partnership.partnerPubkey,
       fromMe: partnership.fromMe,
       createdAt: rumor.created_at,
-      // For an order/receipt rumor (kind 16/17) `wrapText` is order JSON;
-      // surface a readable preview. Plain DM rumors pass through unchanged.
-      text: orderPreviewFromContent(wrapText, rumor.kind),
+      // For a structured rumor (order kind 16/17, or an NWC wallet share)
+      // `wrapText` is non-human JSON; surface a readable, secret-free preview.
+      // Plain DM rumors pass through unchanged.
+      text: dmRowPreview(wrapText, rumor.kind),
       wireKind: rumor.kind,
       // Inner rumor id (#857) — the delivery-store key for our own sent rows,
       // stable across the optimistic bubble + this live echo.
@@ -713,7 +712,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         kind: 'dm',
         threadId: partnership.partnerPubkey,
         title: 'New message',
-        body: rumor.content,
+        // Use the already-redacted preview, not raw `rumor.content`: a
+        // structured rumor (order JSON, or an NWC wallet-share bearer
+        // connection string) must never surface its payload in a push body.
+        body: inboxEntry.text,
         data: { conversationPubkey: partnership.partnerPubkey },
       });
     }

@@ -28,8 +28,11 @@ import {
   EyeOff,
   ShieldAlert,
   QrCode as QrCodeIcon,
+  Share2,
 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
+import FriendPickerSheet from './FriendPickerSheet';
+import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
 
 interface Props {
   walletId: string | null;
@@ -42,6 +45,10 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
+  // "Share this wallet" flow (NWC only). Reuses #988's gift-wrapped NWC-share
+  // send + redaction; adds a recipient-pick step since settings has no open
+  // conversation. See useWalletShareFromSettings.
+  const { pickerOpen, startShare, closePicker, shareToFriend } = useWalletShareFromSettings(wallet);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
   // + full 8-card theme grid) is long enough that dynamic sizing pushed
@@ -468,6 +475,24 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             </>
           )}
 
+          {/* NWC wallet: share the connection with a trusted contact (#431).
+              Grouped with the connection settings above (relay / NWC string /
+              QR) because it's connection-sharing. Tapping it shows the trust
+              warning, then a recipient picker; the raw connection secret is
+              never rendered — it only travels inside the gift-wrapped DM. */}
+          {wallet.walletType === 'nwc' && (
+            <TouchableOpacity
+              style={[styles.coinosRow, { marginTop: 20 }]}
+              onPress={startShare}
+              activeOpacity={0.7}
+              accessibilityLabel={t('walletSettingsSheet.shareWallet')}
+              testID="wallet-settings-share"
+            >
+              <Text style={styles.coinosRowText}>{t('walletSettingsSheet.shareWallet')}</Text>
+              <Share2 size={18} color={colors.brandPink} strokeWidth={2} />
+            </TouchableOpacity>
+          )}
+
           {/* On-chain wallet: show xpub (read-only) */}
           {wallet.walletType === 'onchain' && xpubDisplay && (
             <>
@@ -527,6 +552,16 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheetModal>
+
+      {/* Recipient step for "Share this wallet" — settings has no open
+          conversation, so pick who to send the gift-wrapped NWC share to.
+          Reuses the app's contact picker; onSelect runs the same send. */}
+      <FriendPickerSheet
+        visible={pickerOpen}
+        onClose={closePicker}
+        onSelect={shareToFriend}
+        title={t('walletSettingsSheet.shareWalletPickTitle')}
+      />
     </>
   );
 };
