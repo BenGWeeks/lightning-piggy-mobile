@@ -82,7 +82,12 @@ export function useNwcShareActions({
                 }
                 const ok = await shareNwcWallet({
                   nwcUrl,
-                  walletName: wallet.walletAlias || wallet.alias,
+                  // Send the user's own local label (`alias`) — the name they
+                  // gave the wallet and the exact one the confirm dialog above
+                  // showed them — so the recipient's card matches what the
+                  // sender agreed to share. Fall back to the remote getInfo
+                  // name (`walletAlias`) only if the local label is blank.
+                  walletName: wallet.alias.trim() || wallet.walletAlias || undefined,
                 });
                 if (ok) Toast.show({ type: 'success', text1: t('nwcShareSheet.sentToast') });
               })();
