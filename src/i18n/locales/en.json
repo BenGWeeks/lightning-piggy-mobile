@@ -1193,6 +1193,7 @@
     "deleteDraftBody": "This Piglet is saved only on this device and was never published. Deleting removes it for good — this can't be undone.",
     "delete": "Delete",
     "pigletDeleted": "Piglet deleted",
+    "pigletDeletionRequested": "Deletion requested",
     "deleteFailed": "Delete failed"
   },
   "nearbyScreen": {

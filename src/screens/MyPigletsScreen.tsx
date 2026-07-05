@@ -441,7 +441,19 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                 next.delete(cache.d);
                 return next;
               });
-              Toast.show({ type: 'success', text1: t('myPigletsScreen.pigletDeleted') });
+              // Honest toast copy: a draft is a genuine local-only removal
+              // (it IS gone), but a published Piglet's delete is a NIP-09
+              // kind-5 *request* relays may ignore (+ local expire-now) — so
+              // don't promise "deleted" there, mirror the confirm dialog's
+              // "asks relays to remove it" honesty with "Deletion requested".
+              Toast.show({
+                type: 'success',
+                text1: t(
+                  isDraft
+                    ? 'myPigletsScreen.pigletDeleted'
+                    : 'myPigletsScreen.pigletDeletionRequested',
+                ),
+              });
             } catch (e) {
               Toast.show({
                 type: 'error',
