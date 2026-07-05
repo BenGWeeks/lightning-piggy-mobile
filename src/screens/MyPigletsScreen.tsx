@@ -25,7 +25,6 @@ import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t } from '../i18n';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
@@ -441,7 +440,19 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                 next.delete(cache.d);
                 return next;
               });
-              Toast.show({ type: 'success', text1: t('myPigletsScreen.pigletDeleted') });
+              // Honest toast copy: a draft is a genuine local-only removal
+              // (it IS gone), but a published Piglet's delete is a NIP-09
+              // kind-5 *request* relays may ignore (+ local expire-now) — so
+              // don't promise "deleted" there, mirror the confirm dialog's
+              // "asks relays to remove it" honesty with "Deletion requested".
+              Toast.show({
+                type: 'success',
+                text1: t(
+                  isDraft
+                    ? 'myPigletsScreen.pigletDeleted'
+                    : 'myPigletsScreen.pigletDeletionRequested',
+                ),
+              });
             } catch (e) {
               Toast.show({
                 type: 'error',
@@ -516,7 +527,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         )}
         renderSectionFooter={({ section }) =>
           section.data.length === 0 ? (
-            <Text style={styles.emptySection}>{emptyTextFor(section.id)}</Text>
+            <Text style={styles.emptySection}>{emptyTextFor(section.id, t)}</Text>
           ) : null
         }
         renderItem={({ item }) => {
@@ -583,7 +594,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const emptyTextFor = (id: string): string => {
+const emptyTextFor = (id: string, t: ReturnType<typeof useTranslation>): string => {
   if (id === 'hidden') return t('myPigletsScreen.emptyHidden');
   if (id === 'found') return t('myPigletsScreen.emptyFound');
   return t('myPigletsScreen.emptyFriendsFinds');

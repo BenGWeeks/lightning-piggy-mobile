@@ -1193,6 +1193,7 @@
     "deleteDraftBody": "Este Piglet está guardado solo en este dispositivo y nunca se publicó. Al eliminarlo desaparece para siempre: esto no se puede deshacer.",
     "delete": "Eliminar",
     "pigletDeleted": "Piglet eliminado",
+    "pigletDeletionRequested": "Eliminación solicitada",
     "deleteFailed": "Fallo al eliminar"
   },
   "nearbyScreen": {
