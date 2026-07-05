@@ -25,6 +25,8 @@ export interface ConversationMessageRowProps {
   onOpenLocation: BubbleProps['onOpenLocation'];
   onOpenGifFullscreen: BubbleProps['onOpenGifFullscreen'];
   onToggleSecretMode: BubbleProps['onToggleSecretMode'];
+  pollAggregates: BubbleProps['pollAggregates'];
+  onVotePoll: BubbleProps['onVotePoll'];
   onShowTxDetail: (tx: TransactionDetailData) => void;
   // Live-location pass-throughs (#206) — latest coords / status / countdown
   // per session, plus the in-bubble "Stop" handler for the sender.
@@ -68,6 +70,8 @@ function ConversationMessageRow({
   onOpenLocation,
   onOpenGifFullscreen,
   onToggleSecretMode,
+  pollAggregates,
+  onVotePoll,
   onShowTxDetail,
   liveLocationLatest,
   liveLocationStatus,
@@ -202,11 +206,13 @@ function ConversationMessageRow({
       ? ({ kind: 'gif', url: item.url } as const)
       : item.kind === 'location'
         ? ({ kind: 'location', location: item.location } as const)
-        : item.kind === 'liveLocationMarker'
-          ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
-          : item.kind === 'unsupported'
-            ? ({ kind: 'unsupported', rawKind: item.rawKind } as const)
-            : ({ kind: 'text', text: item.text } as const);
+        : item.kind === 'poll'
+          ? ({ kind: 'poll', poll: item.poll, pollId: item.pollId } as const)
+          : item.kind === 'liveLocationMarker'
+            ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
+            : item.kind === 'unsupported'
+              ? ({ kind: 'unsupported', rawKind: item.rawKind } as const)
+              : ({ kind: 'text', text: item.text } as const);
   return (
     <MessageBubble
       id={item.id}
@@ -221,6 +227,8 @@ function ConversationMessageRow({
       onOpenLocation={onOpenLocation}
       onOpenGifFullscreen={onOpenGifFullscreen}
       onToggleSecretMode={onToggleSecretMode}
+      pollAggregates={pollAggregates}
+      onVotePoll={onVotePoll}
       liveLocationLatest={liveLocationLatest}
       liveLocationStatus={liveLocationStatus}
       liveLocationRemainingMs={liveLocationRemainingMs}

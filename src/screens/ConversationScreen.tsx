@@ -32,6 +32,7 @@ import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
@@ -53,6 +54,7 @@ import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 import { extractSharedContact } from '../utils/messageContent';
+import { useConversationPolls } from '../hooks/useConversationPolls';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
@@ -100,6 +102,9 @@ const ConversationScreen: React.FC = () => {
   const {
     isLoggedIn,
     fetchConversation,
+    sendDirectMessage,
+    sendDirectRumor,
+    appendLocalDmMessage,
     loadInitialConversation,
     persistDeliveryStatuses,
     signerType,
@@ -196,6 +201,7 @@ const ConversationScreen: React.FC = () => {
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   // Live-location chooser sheet (Snapshot vs Share live for…).
   const [liveLocationPickerOpen, setLiveLocationPickerOpen] = useState(false);
@@ -214,6 +220,18 @@ const ConversationScreen: React.FC = () => {
     () => buildConversationItems(resolvedMessages, zapItems),
     [resolvedMessages, zapItems],
   );
+
+  // Poll aggregation + send/vote for this 1:1 thread (#203). Extracted to a
+  // hook so the screen stays under the #703 size cap — see useConversationPolls.
+  const { pollAggregates, handleSendPoll, handleVotePoll } = useConversationPolls({
+    messages,
+    myPubkey,
+    pubkey,
+    sendDirectMessage,
+    sendDirectRumor,
+    appendLocalDmMessage,
+    setMessages,
+  });
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -495,6 +513,8 @@ const ConversationScreen: React.FC = () => {
         onOpenLocation={openLocation}
         onOpenGifFullscreen={setFullscreenGifUrl}
         onToggleSecretMode={handleToggleSecretMode}
+        pollAggregates={pollAggregates}
+        onVotePoll={handleVotePoll}
         onShowTxDetail={setDetailTx}
         liveLocationLatest={liveLocationLatest}
         liveLocationStatus={liveLocationBubbleStatus}
@@ -518,6 +538,8 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      pollAggregates,
+      handleVotePoll,
       handleToggleSecretMode,
       handleShowInfo,
       liveLocationLatest,
@@ -770,6 +792,13 @@ const ConversationScreen: React.FC = () => {
                     }
                   : undefined
               }
+              onSharePoll={() => {
+                // Composer opens over the AttachPanel — close the panel
+                // first so the BottomSheet snaps without competing for
+                // touch focus with the visible attach grid behind it.
+                closeAttachPanel();
+                setPollComposerOpen(true);
+              }}
               onSendVoiceNote={() => {
                 // VoiceRecordingSheet opens over the panel; leave the panel
                 // mounted so dismissing the sheet returns the user to it.
@@ -798,6 +827,11 @@ const ConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleSendGif}
+      />
+      <PollComposerSheet
+        visible={pollComposerOpen}
+        onClose={() => setPollComposerOpen(false)}
+        onSend={handleSendPoll}
       />
       <Modal
         visible={fullscreenGifUrl !== null}

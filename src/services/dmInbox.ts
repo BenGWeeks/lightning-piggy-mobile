@@ -1,6 +1,7 @@
 import { getInboxLatest, getConversationMessages, type DmMessageRow } from './dmDb';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { orderPreviewFromContent } from '../utils/orderEvents';
+import { pollPreviewFromContent } from '../utils/nip88Poll';
 
 // The read seam between the encrypted DM store (dmDb) and the Messages UI
 // (#695 step 3b). NostrContext delegates here instead of walking a giant
@@ -19,10 +20,11 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   partnerPubkey: r.conversation,
   fromMe: r.fromMe,
   createdAt: r.createdAt,
-  // A kind-16/17 order row stores order JSON in `content`; surface a readable
-  // one-line summary in the preview instead of the raw blob. Other rows pass
-  // their plaintext through unchanged (#market).
-  text: orderPreviewFromContent(r.content, r.wireKind),
+  // A structured poll/vote row (kind 1068/1018) or a kind-16/17 order row
+  // stores JSON in `content`; surface a readable one-line summary instead of
+  // the raw blob. Other rows pass their plaintext through unchanged (#203/#market).
+  text:
+    pollPreviewFromContent(r.content, r.wireKind) ?? orderPreviewFromContent(r.content, r.wireKind),
   wireKind: r.wireKind,
 });
 

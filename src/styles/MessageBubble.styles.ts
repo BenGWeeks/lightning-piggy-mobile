@@ -456,6 +456,128 @@ export const createMessageBubbleStyles = (colors: Palette) =>
     imageBubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
     },
+    pollCard: {
+      maxWidth: '85%',
+      minWidth: 240,
+      paddingTop: 12,
+      paddingBottom: 4,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 8,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    pollCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    pollCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.divider,
+    },
+    pollHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    pollLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    pollLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    pollQuestion: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 2,
+    },
+    pollQuestionMe: {
+      color: colors.white,
+    },
+    pollOptionRow: {
+      borderRadius: 10,
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+      backgroundColor: colors.background,
+      marginTop: 4,
+      minHeight: 40,
+      justifyContent: 'center',
+    },
+    // Outgoing (pink) card: transparent rows so brand-pink shows through and white option text stays legible (the light row background made white-on-white unreadable).
+    pollOptionRowMe: {
+      backgroundColor: 'transparent',
+      borderColor: 'rgba(255,255,255,0.45)',
+    },
+    pollOptionRowMineThem: {
+      borderColor: colors.brandPink,
+    },
+    pollOptionRowMineMe: {
+      borderColor: colors.white,
+    },
+    pollOptionFill: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 0,
+    },
+    pollOptionFillThem: {
+      // Light pink wash for incoming polls — matches brand without
+      // overwhelming the text. Sits behind the row content layer.
+      backgroundColor: 'rgba(232, 62, 140, 0.12)',
+    },
+    pollOptionFillMe: {
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    pollOptionContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    pollOptionText: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textBody,
+    },
+    pollOptionTextMe: {
+      color: colors.white,
+    },
+    pollOptionMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    pollOptionCount: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      minWidth: 24,
+      textAlign: 'right',
+    },
+    pollOptionCountMe: {
+      color: 'rgba(255,255,255,0.9)',
+    },
+    pollFooter: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    pollFooterMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
     // Muted placeholder bubble for an unrenderable inner event kind. Subdued
     // surface + dashed border + italic supplementary text so it reads as a
     // system/placeholder note rather than a real chat bubble.
