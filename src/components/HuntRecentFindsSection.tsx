@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { PartyPopper, PiggyBank, User, Users, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -170,7 +171,13 @@ const FindRow: React.FC<{
       accessibilityLabel={t('huntCommunity.findRowA11y', { name: display, cache: cacheName })}
     >
       {picture ? (
-        <Image source={{ uri: picture }} style={styles.avatar} />
+        <Image
+          source={{ uri: picture }}
+          style={styles.avatar}
+          cachePolicy="memory-disk"
+          recyclingKey={picture}
+          autoplay={false}
+        />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback]}>
           <User size={18} color={colors.brandPink} strokeWidth={2.5} />
@@ -185,7 +192,7 @@ const FindRow: React.FC<{
         </Text>
       </View>
       {cache?.isLpPiggy ? <PiggyBank size={16} color={colors.brandPink} strokeWidth={2.5} /> : null}
-      {find.amountSats ? (
+      {find.amountSats != null ? (
         <View style={styles.amountPill}>
           <Zap size={11} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
           <Text style={styles.amountPillText}>{find.amountSats.toLocaleString()}</Text>

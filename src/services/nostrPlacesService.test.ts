@@ -11,6 +11,7 @@ import {
   longestGeohash,
   parseCache,
   parseCacheCoord,
+  parseFoundLog,
 } from './nostrPlacesService';
 import type { HiddenPiggy } from './piggyStorageService';
 import type { VerifiedEvent } from 'nostr-tools';
@@ -349,5 +350,67 @@ describe('parseCacheCoord', () => {
     expect(parseCacheCoord('37516:abcdef')).toBeNull();
     expect(parseCacheCoord('not-a-coord')).toBeNull();
     expect(parseCacheCoord('NaN:abcdef:p')).toBeNull();
+  });
+});
+
+describe('parseFoundLog', () => {
+  const makeFoundLog = (tags: string[][]): VerifiedEvent =>
+    ({
+      id: 'ev1',
+      kind: GC_FOUND_LOG_KIND,
+      pubkey: 'finder_pk',
+      created_at: 1700,
+      tags,
+      content: '',
+    }) as unknown as VerifiedEvent;
+
+  it('flattens the coord + finder + createdAt from a found-log', () => {
+    const log = parseFoundLog(makeFoundLog([['a', '37516:hider:piggy_1']]));
+    expect(log).toMatchObject({
+      id: 'ev1',
+      coord: '37516:hider:piggy_1',
+      finderPubkey: 'finder_pk',
+      createdAt: 1700,
+    });
+  });
+
+  it('returns null without an `a` (coord) tag or on the wrong kind', () => {
+    expect(parseFoundLog(makeFoundLog([]))).toBeNull();
+    expect(parseFoundLog({ ...makeFoundLog([['a', '37516:h:d']]), kind: 1 })).toBeNull();
+  });
+
+  it('reads the sat `amount` tag as sats (matches buildFoundLog / parseCache)', () => {
+    expect(
+      parseFoundLog(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '21'],
+        ]),
+      )?.amountSats,
+    ).toBe(21);
+  });
+
+  it('keeps a genuine 0-sat amount rather than nulling it', () => {
+    // `0` is a real claim amount — only missing / non-numeric tags → null.
+    expect(
+      parseFoundLog(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '0'],
+        ]),
+      )?.amountSats,
+    ).toBe(0);
+  });
+
+  it('nulls a missing or non-numeric amount tag', () => {
+    expect(parseFoundLog(makeFoundLog([['a', '37516:h:d']]))?.amountSats).toBeNull();
+    expect(
+      parseFoundLog(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', 'nope'],
+        ]),
+      )?.amountSats,
+    ).toBeNull();
   });
 });

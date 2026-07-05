@@ -259,8 +259,9 @@ export const longestGeohash = (tags: string[][]): string | null => {
  * `<kind>:<pubkey>:<d>` of the cache being logged; `finderPubkey` is the
  * event author. Mirrors `parseCache` so both the community leaderboards
  * and the recently-found feed can consume a pure, testable value instead
- * of poking at raw tags. `amountSats` is the self-reported claim amount
- * (the `amount` tag is in millisats), null when absent.
+ * of poking at raw tags. `amountSats` is the self-reported claim amount in
+ * sats (the `amount` tag is written in sats by `buildFoundLog`), null when
+ * absent or non-numeric.
  */
 export interface ParsedFoundLog {
   id: string;
@@ -274,8 +275,13 @@ export const parseFoundLog = (event: VerifiedEvent): ParsedFoundLog | null => {
   if (event.kind !== GC_FOUND_LOG_KIND) return null;
   const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
   if (!coord) return null;
-  const amount = event.tags.find((t) => t[0] === 'amount')?.[1];
-  const amountSats = amount ? Math.round(Number(amount) / 1000) || null : null;
+  // `amount` is written in sats by `buildFoundLog` (mirrors `parseCache` and
+  // `utils/foundLog.ts`). Parse first, then gate on `Number.isFinite` so a
+  // genuine `0` survives (it's a real claim amount) while missing /
+  // non-numeric tags fall back to null.
+  const amountRaw = event.tags.find((t) => t[0] === 'amount')?.[1];
+  const amountValue = amountRaw != null ? Number(amountRaw) : NaN;
+  const amountSats = Number.isFinite(amountValue) ? Math.round(amountValue) : null;
   return {
     id: event.id,
     coord,

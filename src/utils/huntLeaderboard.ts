@@ -12,7 +12,7 @@ import type { ParsedCache, ParsedFoundLog } from '../services/nostrPlacesService
  * (LightningPiggy/website#16): hiders rank by *distinct caches authored*
  * (kind-37516), finders by *distinct caches found* (kind-7516 found-logs,
  * deduped per cache). A `pigletCount` sub-tally counts the Lightning-Piggy
- * subset so the UI can show the `· N ⚡` badge.
+ * subset so the UI can show the piglet (`PiggyBank`) sub-badge.
  */
 
 export interface LeaderboardEntry {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { Medal, PiggyBank, Trophy, User, Users } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -28,8 +29,9 @@ interface Props {
 /**
  * One leaderboard board — hiders (by distinct caches authored) or finders
  * (by distinct caches found). Semantics mirror the website `/leaderboard`
- * page (LightningPiggy/website#16): a `· N ⚡` sub-badge tallies the
- * Lightning-Piggy subset. Rows resolve display name + avatar through the
+ * page (LightningPiggy/website#16): a piglet (`PiggyBank`) sub-badge
+ * tallies the Lightning-Piggy subset (`pigletCount`). Rows resolve display
+ * name + avatar through the
  * shared profile system and drill into the contact profile on tap.
  */
 const HuntLeaderboard: React.FC<Props> = ({ variant, entries, loading }) => {
@@ -100,7 +102,13 @@ const LeaderboardRow: React.FC<{
         )}
       </View>
       {picture ? (
-        <Image source={{ uri: picture }} style={styles.avatar} />
+        <Image
+          source={{ uri: picture }}
+          style={styles.avatar}
+          cachePolicy="memory-disk"
+          recyclingKey={picture}
+          autoplay={false}
+        />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback]}>
           {variant === 'finders' ? (
