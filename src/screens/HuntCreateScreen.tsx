@@ -2208,6 +2208,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           animationType="slide"
           onRequestClose={() => setScannerOpen(false)}
           statusBarTranslucent
+          navigationBarTranslucent
         >
           <View style={styles.scannerRoot}>
             {!cameraPermission?.granted ? (

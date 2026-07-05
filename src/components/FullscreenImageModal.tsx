@@ -109,7 +109,14 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
   }));
 
   return (
-    <Modal visible={url !== null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={url !== null}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <GestureHandlerRootView style={styles.root}>
         <GestureDetector gesture={composed}>
           <Animated.View

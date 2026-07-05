@@ -39,6 +39,8 @@ const LiveLocationDurationPicker: React.FC<Props> = ({
     <Modal
       visible={visible}
       transparent
+      statusBarTranslucent
+      navigationBarTranslucent
       animationType="fade"
       onRequestClose={onClose}
       testID="live-location-picker-modal"
