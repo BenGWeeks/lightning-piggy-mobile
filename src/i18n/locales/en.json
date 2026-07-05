@@ -637,7 +637,7 @@
   "homeScreen": {
     "greeting": "Hello, {{name}}!",
     "receive": "Receive",
-    "transfer": "Transfer",
+    "transfer": "Move",
     "send": "Send",
     "addWallet": "Add a wallet",
     "addWalletText": "+ Add a Wallet"
@@ -1219,6 +1219,7 @@
     "deleteDraftBody": "This Piglet is saved only on this device and was never published. Deleting removes it for good — this can't be undone.",
     "delete": "Delete",
     "pigletDeleted": "Piglet deleted",
+    "pigletDeletionRequested": "Deletion requested",
     "deleteFailed": "Delete failed"
   },
   "nearbyScreen": {
@@ -1639,7 +1640,7 @@
     "preset100kSub": "~£50 — confirm at or above this",
     "title": "Security",
     "confirmLargeSends": "Confirm large sends",
-    "confirmLargeSendsHint": "Show an \"Are you sure?\" prompt before dispatching a Lightning payment or wallet transfer at or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.",
+    "confirmLargeSendsHint": "Show an \"Are you sure?\" prompt before dispatching a Lightning payment or moving funds between wallets at or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.",
     "custom": "Custom",
     "customPlaceholder": "e.g. 25000",
     "customThresholdLabel": "Custom threshold in sats",
