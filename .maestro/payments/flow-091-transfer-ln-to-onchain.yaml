@@ -77,7 +77,7 @@ name: Transfer LN to On-chain Test
 # This can take up to 2 minutes
 - extendedWaitUntil:
     visible:
-      text: 'Transfer Complete'
+      text: 'Move Complete'
     timeout: 120000
 
 # Dismiss alert

@@ -90,7 +90,7 @@ name: Transfer On-chain to LN Test
 # On-chain→LN requires on-chain confirmation (~10 min) + Boltz processing
 - extendedWaitUntil:
     visible:
-      text: 'Transfer Complete'
+      text: 'Move Complete'
     timeout: 900000
 
 # Dismiss alert
