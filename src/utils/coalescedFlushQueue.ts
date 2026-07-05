@@ -53,15 +53,21 @@ export function createCoalescedFlushQueue<T>(options: {
       return;
     }
     if (timer !== null) return;
-    const elapsed = now() - lastFlushAt;
+    // Clamp elapsed to >= 0: if the wall clock jumps BACKWARDS (manual change
+    // / NTP correction) `now() - lastFlushAt` can go negative, which would
+    // otherwise inflate the timeout below to more than a full window and
+    // stall the flush. A non-negative elapsed keeps behaviour sane.
+    const elapsed = Math.max(0, now() - lastFlushAt);
     if (elapsed >= flushMs) {
       // Leading edge: first item after a quiet window surfaces immediately.
       flush();
       return;
     }
     // Mid-window: trail on the REMAINDER of the window (not a fresh full
-    // one) so the worst-case added latency stays bounded at flushMs.
-    timer = setTimeout(flush, flushMs - elapsed);
+    // one) so the worst-case added latency stays bounded at flushMs. Clamp
+    // the delay into [0, flushMs] as belt-and-braces against clock skew.
+    const delay = Math.min(flushMs, Math.max(0, flushMs - elapsed));
+    timer = setTimeout(flush, delay);
   };
 
   return { push, flush };

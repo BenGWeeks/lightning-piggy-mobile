@@ -66,6 +66,34 @@ describe('createCoalescedFlushQueue', () => {
     expect(flushes).toHaveLength(2);
   });
 
+  it('survives a BACKWARDS clock jump without stalling the trailing flush', () => {
+    // A manual clock change / NTP correction can move now() backwards, making
+    // (now() - lastFlushAt) negative. Unclamped, that inflates the trailing
+    // timeout past a full window (flushMs - (-X) > flushMs) and delays the
+    // flush. The Math.max(0, …) clamp must keep the delay bounded at flushMs.
+    const flushes: number[][] = [];
+    let clock = 10_000;
+    const q = createCoalescedFlushQueue<number>({
+      flushMs: 150,
+      threshold: 25,
+      onFlush: (b) => flushes.push(b),
+      now: () => clock,
+    });
+
+    q.push(1); // leading edge (elapsed = 10_000 ≥ 150) → flushes now, lastFlushAt = 10_000
+    expect(flushes).toEqual([[1]]);
+
+    clock = 9_900; // wall clock jumps BACKWARDS 100ms
+    q.push(2); // mid-window (clamped elapsed = 0) → trailing timer at delay ≤ flushMs
+
+    jest.advanceTimersByTime(150); // one full window is enough with the clamp
+    expect(flushes).toEqual([[1], [2]]);
+
+    // And nothing double-fires afterwards.
+    jest.advanceTimersByTime(1000);
+    expect(flushes).toEqual([[1], [2]]);
+  });
+
   it('manual flush() drains pending items and is a no-op when empty', () => {
     const flushes: number[][] = [];
     const q = make((b) => flushes.push(b));
