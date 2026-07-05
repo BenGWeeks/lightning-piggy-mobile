@@ -54,6 +54,25 @@ export function isNwcConnectionUrl(url: string): boolean {
 }
 
 /**
+ * Build the shareable card from a wallet's stored fields. Prefers the user's own
+ * local label (`alias` — the exact name shown in the settings/confirm UI) so the
+ * recipient's card matches what the sender agreed to share; falls back to the
+ * remote getInfo name (`walletAlias`) only when the local label is blank, and to
+ * `undefined` (an unnamed card) when neither is set. Kept as a tiny pure helper
+ * so both the Attach-menu and Settings share entry points derive the name
+ * identically. Takes primitives (not `WalletState`) to keep this file
+ * dependency-light for the render + preview paths.
+ */
+export function nwcShareCardFromWallet(
+  nwcUrl: string,
+  alias: string,
+  walletAlias?: string,
+): NwcShareCard {
+  const walletName = alias.trim() || walletAlias?.trim() || undefined;
+  return { nwcUrl, walletName };
+}
+
+/**
  * Canonical storage form. The card is persisted as its JSON in the DM row's
  * `content` (the flat store has no extra column), so the conversation renderer
  * can rebuild the full card. A blank `walletName` is dropped so it round-trips

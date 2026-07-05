@@ -5,6 +5,7 @@ import {
   parseNwcShare,
   nwcSharePreviewText,
   nwcSharePreviewFromContent,
+  nwcShareCardFromWallet,
   type NwcShareCard,
 } from './nwcShareMessage';
 import { dmRowPreview } from './dmRowPreview';
@@ -63,6 +64,33 @@ describe('serializeNwcShare / parseNwcShare round-trip', () => {
     expect(parseNwcShare('"a string"')).toBeNull();
     expect(parseNwcShare(JSON.stringify({ walletName: 'x' }))).toBeNull();
     expect(parseNwcShare(JSON.stringify({ nwcUrl: 'https://nope.com' }))).toBeNull();
+  });
+});
+
+describe('nwcShareCardFromWallet', () => {
+  it('prefers the local alias for the card name', () => {
+    expect(nwcShareCardFromWallet(VALID_NWC, 'Pocket money', 'CoinOS wallet')).toEqual({
+      nwcUrl: VALID_NWC,
+      walletName: 'Pocket money',
+    });
+  });
+
+  it('falls back to the getInfo walletAlias when the local alias is blank', () => {
+    expect(nwcShareCardFromWallet(VALID_NWC, '   ', 'CoinOS wallet')).toEqual({
+      nwcUrl: VALID_NWC,
+      walletName: 'CoinOS wallet',
+    });
+  });
+
+  it('yields an unnamed card when neither name is set', () => {
+    expect(nwcShareCardFromWallet(VALID_NWC, '   ', undefined)).toEqual({
+      nwcUrl: VALID_NWC,
+      walletName: undefined,
+    });
+    expect(nwcShareCardFromWallet(VALID_NWC, '', '  ')).toEqual({
+      nwcUrl: VALID_NWC,
+      walletName: undefined,
+    });
   });
 });
 
