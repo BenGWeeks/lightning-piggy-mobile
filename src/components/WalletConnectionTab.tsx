@@ -74,8 +74,7 @@ const WalletConnectionTab: React.FC<Props> = ({
   // SecureStore. Treat the whole type as having content so the empty-state
   // ("No connection details") never flashes during that async load, and never
   // renders beside the always-present Share row.
-  const hasContent =
-    (walletType === 'onchain' && !!xpubDisplay) || walletType === 'nwc';
+  const hasContent = (walletType === 'onchain' && !!xpubDisplay) || walletType === 'nwc';
 
   return (
     <View>
