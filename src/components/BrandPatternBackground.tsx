@@ -16,8 +16,11 @@ import { useThemeColors } from '../contexts/ThemeContext';
 export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
 
 // How much of the gradient sits over the monogram. Lower = pattern reads
-// stronger. Tuned on-device.
-const FADE_OPACITY = 0.82;
+// stronger. Tuned on-device — dropped from 0.82 → 0.68 (#995) because at 0.82
+// the tone-on-tone monogram was near-invisible on real hardware (only ~18% of
+// the pattern showed through); 0.68 lets ~32% through so the motifs actually
+// read while still sitting "under" the fade rather than printed on top.
+const FADE_OPACITY = 0.68;
 
 type MotifName = 'messageSquare' | 'heart' | 'userRound' | 'compass' | 'map';
 
@@ -68,7 +71,8 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     tileW: 54,
     tileH: 54,
     transform: 'rotate(18)',
-    opacity: 0.66,
+    // Raised 0.66 → 0.9 (#995) so the white monogram strokes read on-device.
+    opacity: 0.9,
     motifs: [{ name: 'messageSquare', x: 5, y: 5, size: 26, filledDotAt: [42, 39] }],
   },
   // Friends — figure + heart alternating on a gentle rotation ("Rotated Monogram").
@@ -76,7 +80,8 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     tileW: 58,
     tileH: 58,
     transform: 'rotate(14)',
-    opacity: 0.68,
+    // Raised 0.68 → 0.9 (#995) so the white monogram strokes read on-device.
+    opacity: 0.9,
     motifs: [
       { name: 'userRound', x: 5, y: 5, size: 22 },
       { name: 'heart', x: 34, y: 34, size: 17 },
@@ -88,7 +93,8 @@ const VARIANTS: Record<PatternVariant, VariantConfig> = {
     tileW: 58,
     tileH: 58,
     transform: 'rotate(-12)',
-    opacity: 0.68,
+    // Raised 0.68 → 0.9 (#995) so the white monogram strokes read on-device.
+    opacity: 0.9,
     motifs: [
       { name: 'compass', x: 5, y: 5, size: 22 },
       { name: 'map', x: 33, y: 33, size: 18 },
