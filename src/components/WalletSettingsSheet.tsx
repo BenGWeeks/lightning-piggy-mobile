@@ -62,12 +62,17 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [footerHeight, setFooterHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const snapPoints = useMemo(() => {
-    const measured = headerHeight + contentHeight + footerHeight + 24; // + handle/slack
     const floor = windowHeight * 0.4;
     const ceiling = windowHeight * 0.92;
-    // Until everything has measured, fall back to a generous height so the first
-    // frame isn't a thin strip.
-    const target = measured > 0 ? Math.min(ceiling, Math.max(floor, measured)) : ceiling;
+    // Only trust the measured height once ALL three parts have laid out —
+    // otherwise header/content/footer are still 0 and the `+ 24` slack alone
+    // would make it look "measured" and snap to the 40% floor, then jump when
+    // the real sizes arrive. Until then, open at the generous ceiling and let
+    // it settle DOWN to content (smoother than growing up from a thin strip).
+    const allMeasured = headerHeight > 0 && contentHeight > 0 && footerHeight > 0;
+    const target = allMeasured
+      ? Math.min(ceiling, Math.max(floor, headerHeight + contentHeight + footerHeight + 24))
+      : ceiling;
     return [Math.round(target)];
   }, [headerHeight, contentHeight, footerHeight, windowHeight]);
 
