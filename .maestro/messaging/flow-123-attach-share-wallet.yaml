@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Attach — share an NWC wallet with Little Piggy
 ---
 # Opens the AttachPanel → Wallet tile → the "Share a wallet" picker
@@ -61,8 +61,8 @@ name: Attach — share an NWC wallet with Little Piggy
 #  (a) No connected NWC wallet → BrandedAlert "No wallet to share". Dismiss
 #      it so the run ends cleanly.
 #  (b) A wallet exists → the "Share a wallet" picker opens. Its rows/title
-#      may be invisible to Maestro on iOS, so we only try (optionally) to
-#      close it via a Cancel affordance.
+#      may be invisible to Maestro on iOS, so we dismiss the sheet with the
+#      hardware back button rather than a (possibly unseen) Cancel row.
 - runFlow:
     when:
       visible:
@@ -72,6 +72,20 @@ name: Attach — share an NWC wallet with Little Piggy
           id: 'branded-alert-title'
       - tapOn:
           id: 'branded-alert-button-0'
+      - waitForAnimationToEnd:
+          timeout: 1500
+
+# Outcome (b): no alert means a wallet exists and NwcWalletShareSheet is
+# open. Its bottom-sheet content can be invisible to Maestro (iOS / New
+# Arch), so we can't rely on a Cancel row selector — dismiss it with the
+# hardware back button so the run returns to the composer cleanly instead
+# of hanging on the assertVisible below.
+- runFlow:
+    when:
+      notVisible:
+        id: 'branded-alert'
+    commands:
+      - pressKey: back
       - waitForAnimationToEnd:
           timeout: 1500
 

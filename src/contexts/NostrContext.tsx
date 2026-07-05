@@ -179,7 +179,7 @@ interface NostrContextType extends UseReactionActionsResult {
   /**
    * Share an NWC wallet with a 1:1 recipient (#431). The NWC connection string
    * is a bearer secret, so it is gift-wrapped into an encrypted NIP-17 DM
-   * (inner kind {@link NWC_SHARE_KIND}) — never a public event. The recipient's
+   * (inner kind `NWC_SHARE_KIND`) — never a public event. The recipient's
    * client renders it as an "Add NWC Wallet" card.
    */
   sendNwcShare: (recipientPubkey: string, card: NwcShareCard) => Promise<SendResult>;
