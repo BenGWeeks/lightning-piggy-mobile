@@ -1697,6 +1697,14 @@
     "resetText": "Scan / paste different invoice",
     "balance": "Balance: {{balance}} sats ({{fiat}})"
   },
+  "starRating": {
+    "readOnly": "{{value}} з {{max}} зірок",
+    "input": "Оцінка",
+    "rate": {
+      "one": "Оцінити на {{count}} зірку",
+      "other": "Оцінити на {{count}} зірок"
+    }
+  },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: {{title}} tip",
     "shareMessage": "Lightning invoice for {{amount}} sats tip ({{title}}):\n\n{{invoice}}",

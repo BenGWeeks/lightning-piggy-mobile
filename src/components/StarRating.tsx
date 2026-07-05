@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Pressable } from 'react-native';
 import { Star } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createStarRatingStyles } from '../styles/StarRating.styles';
 import { STARS_MAX } from '../utils/productReviews';
 
@@ -22,6 +23,7 @@ interface StarRatingProps {
  */
 export const StarRating: React.FC<StarRatingProps> = ({ value, size = 16, testID }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const clamped = Math.max(0, Math.min(STARS_MAX, value));
   const fillPct = (clamped / STARS_MAX) * 100;
   const stars = Array.from({ length: STARS_MAX });
@@ -30,7 +32,10 @@ export const StarRating: React.FC<StarRatingProps> = ({ value, size = 16, testID
     <View
       style={styles.starRow}
       testID={testID}
-      accessibilityLabel={`${clamped.toFixed(1)} out of ${STARS_MAX} stars`}
+      accessibilityLabel={t('starRating.readOnly', {
+        value: clamped.toFixed(1),
+        max: STARS_MAX,
+      })}
     >
       {stars.map((_, i) => (
         <Star key={`bg-${i}`} size={size} color={colors.divider} strokeWidth={2} />
@@ -66,6 +71,7 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
   testID,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const [hover, setHover] = useState<number | null>(null);
   const shown = hover ?? value;
 
@@ -77,7 +83,7 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
       // Expose the rating to screen readers and let them change it: without
       // these, "adjustable" is announced but increment/decrement gestures do
       // nothing (mirrors AmountSlider; Copilot review on #948).
-      accessibilityLabel="Rating"
+      accessibilityLabel={t('starRating.input')}
       accessibilityValue={{ min: 0, max: STARS_MAX, now: value }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
@@ -100,7 +106,7 @@ export const StarRatingInput: React.FC<StarRatingInputProps> = ({
             onPress={() => onChange(star)}
             onPressIn={() => setHover(star)}
             onPressOut={() => setHover(null)}
-            accessibilityLabel={`Rate ${star} star${star === 1 ? '' : 's'}`}
+            accessibilityLabel={t('starRating.rate', { count: star })}
             testID={testID ? `${testID}-star-${star}` : undefined}
             hitSlop={4}
             style={styles.inputStar}

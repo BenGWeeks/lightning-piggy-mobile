@@ -1697,6 +1697,14 @@
     "resetText": "Escanear / pegar otra factura",
     "balance": "Saldo: {{balance}} sats ({{fiat}})"
   },
+  "starRating": {
+    "readOnly": "{{value}} de {{max}} estrellas",
+    "input": "Valoración",
+    "rate": {
+      "one": "Valorar con {{count}} estrella",
+      "other": "Valorar con {{count}} estrellas"
+    }
+  },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: propina de {{title}}",
     "shareMessage": "Factura Lightning para propina de {{amount}} sats ({{title}}):\n\n{{invoice}}",
