@@ -19,9 +19,11 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   partnerPubkey: r.conversation,
   fromMe: r.fromMe,
   createdAt: r.createdAt,
-  // A kind-16/17 order row stores order JSON in `content`; surface a readable
-  // one-line summary in the preview instead of the raw blob. Other rows pass
-  // their plaintext through unchanged (#market).
+  // A structured NWC-share / poll / vote / order row stores JSON (or a bearer
+  // connection string) in `content`; surface a readable, secret-free one-line
+  // summary instead of the raw blob. Other rows pass their plaintext through
+  // unchanged (#203 / #market / NWC share). All four preview paths route through
+  // dmRowPreview so they redact identically.
   text: dmRowPreview(r.content, r.wireKind),
   wireKind: r.wireKind,
 });

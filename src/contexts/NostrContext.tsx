@@ -161,6 +161,16 @@ interface NostrContextType extends UseReactionActionsResult {
     hooks?: SendHooks,
   ) => Promise<SendResult>;
   /**
+   * Gift-wrap a pre-built NIP-17 rumor of any inner kind (e.g. a kind-1068
+   * NIP-88 poll or kind-1018 vote) to one or more recipients, keeping its
+   * structured tags on the wire. See #203.
+   */
+  sendDirectRumor: (
+    recipientPubkeys: string[],
+    rumor: { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string },
+    hooks?: SendHooks,
+  ) => Promise<SendResult>;
+  /**
    * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
    * 1:1 recipient. The blob is already AES-encrypted + uploaded; this
    * gift-wraps the URL + decryption key. See #235.
@@ -1559,7 +1569,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // useMessageSend (#703). Group send + group-state live in useGroupMessaging
   // (wired above). We take ONLY the 1:1 sends here so sendGroupMessage /
   // publishGroupState aren't declared twice.
-  const { sendDirectMessage, sendFileMessage, sendNwcShare } = useMessageSend({
+  const { sendDirectMessage, sendDirectRumor, sendFileMessage, sendNwcShare } = useMessageSend({
     pubkey,
     isLoggedIn,
     signerType,
@@ -1640,6 +1650,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signZapRequest,
       publishProfile,
       sendDirectMessage,
+      sendDirectRumor,
       sendFileMessage,
       sendNwcShare,
       sendGroupMessage,
@@ -1676,6 +1687,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signZapRequest,
       publishProfile,
       sendDirectMessage,
+      sendDirectRumor,
       sendFileMessage,
       sendNwcShare,
       sendGroupMessage,

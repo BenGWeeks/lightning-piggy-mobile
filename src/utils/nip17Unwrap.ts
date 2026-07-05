@@ -3,6 +3,7 @@ import { getEventHash } from 'nostr-tools/pure';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
+import { POLL_KIND, VOTE_KIND, serializePollFromRumor, serializeVoteFromRumor } from './nip88Poll';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -379,6 +380,19 @@ export function textForRumor(rumor: DecodedRumor): string {
   if (rumor.kind === 16 || rumor.kind === 17) {
     const order = parseOrderEvent(rumor);
     if (order) return serializeOrder(order);
+  }
+  // Structured NIP-88 poll (kind 1068) / vote (kind 1018) gift-wrapped in a DM
+  // (#203). Persist the canonical JSON so the thread renderer + tally rebuild
+  // the poll card + counts from the stored row — the poll id embedded here is
+  // the rumor event id, deterministic across sender + every recipient. Falls
+  // through to `rumor.content` when the event isn't a well-formed poll/vote.
+  if (rumor.kind === POLL_KIND) {
+    const poll = serializePollFromRumor(rumor);
+    if (poll) return poll;
+  }
+  if (rumor.kind === VOTE_KIND) {
+    const vote = serializeVoteFromRumor(rumor);
+    if (vote) return vote;
   }
   const meta = fileMetaFromRumor(rumor);
   // Only fold a kind-15 file into the `#lpe=…` URL — which embeds the

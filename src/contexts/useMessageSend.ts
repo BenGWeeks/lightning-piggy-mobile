@@ -188,6 +188,100 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
     [pubkey, isLoggedIn, signerType, relays],
   );
 
+  // Gift-wrap a pre-built NIP-17 rumor of ANY inner kind to one or more
+  // recipients (#203 structured polls). Mirrors `sendDirectMessage` but the
+  // caller supplies the rumor (a kind-1068 poll / kind-1018 vote) so its
+  // structured tags survive to the wire — `sendDirectMessage` only knows how to
+  // build a kind-14 chat rumor. The sender is always included by
+  // `wrapManyEvents`, so a 1:1 vote to `[author]` still lands the voter's own
+  // self-copy for their optimistic tally.
+  const sendDirectRumor = useCallback(
+    async (
+      recipientPubkeys: string[],
+      rumor: {
+        kind: number;
+        created_at: number;
+        tags: string[][];
+        content: string;
+        pubkey: string;
+      },
+      hooks?: SendHooks,
+    ): Promise<SendResult> => {
+      if (!pubkey || !isLoggedIn) {
+        return { success: false, error: 'Not logged in' };
+      }
+      const normalized = Array.from(
+        new Set(
+          recipientPubkeys
+            .map((p) => p.trim().toLowerCase())
+            .filter((p) => /^[0-9a-f]{64}$/.test(p)),
+        ),
+      );
+      if (normalized.length === 0) {
+        return { success: false, error: 'No valid recipients' };
+      }
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const eventId = directMessageRumorEventId(rumor);
+        hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return { success: false, error: 'Key not found' };
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          const result = await nostrService.sendNip17ToManyWithNsec({
+            senderSecretKey: secretKey,
+            rumor,
+            recipientPubkeys: normalized,
+            relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
+          });
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
+        }
+
+        if (signerType === 'amber') {
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: normalized,
+            relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
+            signerNip44Encrypt: (plain, recipient) =>
+              amberService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await amberService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('Amber returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
+        }
+
+        return { success: false, error: 'Unsupported signer type' };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
   // Encrypted NIP-17 kind-15 file message (voice note, #235). The blob is
   // already encrypted + uploaded; this gift-wraps the URL + AES key/nonce
   // to the recipient (and the sender's own inbox copy).
@@ -418,5 +512,5 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
     [pubkey, isLoggedIn, signerType, relays],
   );
 
-  return { sendDirectMessage, sendFileMessage, sendNwcShare };
+  return { sendDirectMessage, sendDirectRumor, sendFileMessage, sendNwcShare };
 }

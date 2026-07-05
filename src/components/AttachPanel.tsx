@@ -8,6 +8,7 @@ import {
   ImagePlus,
   Camera,
   Smile,
+  BarChart3,
   Mic,
   Wallet,
 } from 'lucide-react-native';
@@ -35,6 +36,10 @@ interface Props {
   onSendImage?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
+  // Optional: opens the PollComposerSheet. Omitted (= tile hidden) when
+  // the host chat doesn't support polls — currently always available
+  // when the rest of the composer is, so the tile is shown by default.
+  onSharePoll?: () => void;
   /**
    * Opens the NWC wallet picker to share a connected wallet with the peer
    * (#431). Omitted in builds/contexts without wallet sharing.
@@ -78,6 +83,7 @@ const AttachPanel: React.FC<Props> = ({
   onSendImage,
   onTakePhoto,
   onSendGif,
+  onSharePoll,
   onSendVoiceNote,
   onShareWallet,
 }) => {
@@ -166,6 +172,14 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onShareWallet,
         testID: 'attach-share-wallet',
         accessibilityLabel: 'Share a connected NWC wallet',
+      },
+      onSharePoll && {
+        key: 'poll',
+        label: 'Poll',
+        icon: <BarChart3 size={26} color={colors.white} />,
+        onPress: onSharePoll,
+        testID: 'attach-share-poll',
+        accessibilityLabel: 'Share a poll for the recipient to vote on',
       },
     ] as (Tile | false | undefined)[]
   ).filter((t): t is Tile => Boolean(t));

@@ -5,9 +5,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   BackHandler,
-  Keyboard,
   Linking,
-  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
@@ -38,6 +36,7 @@ import {
   isLightningAddress,
 } from '../utils/sendSheetInput';
 import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useSendSheetInput } from '../hooks/useSendSheetInput';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
@@ -168,7 +167,7 @@ const SendSheet: React.FC<Props> = ({
   // fixed-footer structure in the render output below) so they stay
   // reachable even when the form content is tall enough to require
   // internal scrolling.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardHeight = useKeyboardHeight();
 
   // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
   // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
@@ -237,24 +236,6 @@ const SendSheet: React.FC<Props> = ({
     });
     return () => handler.remove();
   }, [visible, onClose]);
-
-  // Track keyboard height so the BottomSheetScrollView has enough bottom
-  // padding to reach past the keyboard to the last field. Mirrors the
-  // pattern in NostrLoginSheet / EditProfileSheet / TransferSheet —
-  // rule 5 of the "Bottom sheet doesn't slide up when keyboard opens"
-  // checklist in docs/TROUBLESHOOTING.adoc.
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
   const pasteTextRef = useRef(pasteText);

@@ -3,6 +3,7 @@ import type { LiveLocationMarker } from '../services/liveLocationService';
 import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { WalletState } from '../types/wallet';
 import { classifyMessageContent } from './messageContent';
+import { POLL_KIND, VOTE_KIND, parseStoredPoll, type DisplayPoll } from './nip88Poll';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
 import {
@@ -97,6 +98,24 @@ export type Item =
       createdAt: number;
     }
   | {
+      kind: 'poll';
+      id: string;
+      fromMe: boolean;
+      // Correlation id — the vote target + tally key. For a structured NIP-88
+      // poll it's the poll rumor event id; for a legacy text poll it's the
+      // message id (`dm-…`). Kept separate from `id` (the React/FlatList key)
+      // so the two don't have to coincide.
+      pollId: string;
+      poll: DisplayPoll;
+      createdAt: number;
+      // Reaction/zap target + delivery tick, for parity with message/gif/
+      // location items. Present on optimistic sent rows (the store has no
+      // rumorId column, so incoming rows carry none — same as gif/location).
+      rumorId?: string;
+      deliveryStatus?: DeliveryStatus;
+      wireKind?: number;
+    }
+  | {
       kind: 'dayHeader';
       id: string;
       label: string;
@@ -170,7 +189,7 @@ export function buildZapItems(wallets: WalletState[], pubkey: string): TimedItem
 // inner event of a kind we don't display — surfaced as the `unsupported`
 // placeholder rather than a blank bubble. Plain text rows carry no wireKind
 // (`undefined`), so they never hit the fallback.
-const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17]);
+const RENDERABLE_WIRE_KINDS = new Set<number>([4, 14, 15, 16, 17, POLL_KIND, VOTE_KIND]);
 
 /**
  * Suppress a kind-14 chat-note that merely re-delivers an order's Lightning
@@ -221,31 +240,35 @@ export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
 ): Item[] {
-  const msgItems: TimedItem[] = messages.map((m) => {
+  const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
     if (m.wireKind === 16 || m.wireKind === 17) {
       const order = parseStoredOrder(m.text);
       if (order) {
-        return {
-          kind: 'order',
-          id: `dm-${m.id}`,
-          fromMe: m.fromMe,
-          order,
-          createdAt: m.createdAt,
-        };
+        return [
+          {
+            kind: 'order',
+            id: `dm-${m.id}`,
+            fromMe: m.fromMe,
+            order,
+            createdAt: m.createdAt,
+          },
+        ];
       }
       // Unparseable order/receipt row (corrupt, or a non-order payload sharing
       // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
       // placeholder rather than leaking the raw JSON blob into the thread
       // (mirrors `orderPreviewFromContent` in the inbox preview).
-      return {
-        kind: 'unsupported',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        rawKind: m.wireKind,
-        createdAt: m.createdAt,
-      };
+      return [
+        {
+          kind: 'unsupported',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          rawKind: m.wireKind,
+          createdAt: m.createdAt,
+        },
+      ];
     }
     // NWC wallet share (inner kind NWC_SHARE_KIND) — the row's `text` is the
     // card JSON (bearer connection string + optional name). Render an "Add NWC
@@ -254,81 +277,155 @@ export function buildConversationItems(
     if (m.wireKind === NWC_SHARE_KIND) {
       const card = parseNwcShare(m.text);
       if (card) {
-        return {
-          kind: 'nwcShare',
+        return [
+          {
+            kind: 'nwcShare',
+            id: `dm-${m.id}`,
+            fromMe: m.fromMe,
+            card,
+            createdAt: m.createdAt,
+          },
+        ];
+      }
+      return [
+        {
+          kind: 'unsupported',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
-          card,
+          rawKind: m.wireKind,
           createdAt: m.createdAt,
-        };
-      }
-      return {
-        kind: 'unsupported',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        rawKind: m.wireKind,
-        createdAt: m.createdAt,
-      };
+        },
+      ];
     }
+    // Structured NIP-88 poll (kind 1068) — stored as canonical poll JSON
+    // (#203). Render as a poll card keyed by the embedded poll rumor id so
+    // votes (which reference that id) correlate. A corrupt/unparseable row
+    // falls back to the muted placeholder rather than leaking JSON.
+    if (m.wireKind === POLL_KIND) {
+      const stored = parseStoredPoll(m.text);
+      if (stored) {
+        const poll: DisplayPoll = {
+          question: stored.question,
+          options: stored.options,
+          pollType: stored.pollType,
+          endsAt: stored.endsAt,
+        };
+        return [
+          {
+            kind: 'poll',
+            id: `dm-${m.id}`,
+            pollId: stored.pollId,
+            fromMe: m.fromMe,
+            poll,
+            createdAt: m.createdAt,
+            rumorId: m.rumorId,
+            deliveryStatus: m.deliveryStatus,
+            wireKind: m.wireKind,
+          },
+        ];
+      }
+      return [
+        {
+          kind: 'unsupported',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          rawKind: m.wireKind,
+          createdAt: m.createdAt,
+        },
+      ];
+    }
+    // Structured NIP-88 vote (kind 1018) — never a bubble; it's aggregated into
+    // the referenced poll's tally by the screen's poll hook. Drop from the list.
+    if (m.wireKind === VOTE_KIND) return [];
     // Generic, future-proof fallback: a stored message whose wireKind we don't
     // render (an inner Nostr event of an unhandled kind) becomes a muted
     // placeholder rather than a blank text bubble. Only fires for a defined
     // wireKind outside the renderable set — plain rows (no wireKind) and the
-    // 4/14/15/16/17 kinds handled above/below are unaffected.
+    // 4/14/15/16/17/1068/1018 kinds handled above/below are unaffected.
     if (m.wireKind !== undefined && !RENDERABLE_WIRE_KINDS.has(m.wireKind)) {
-      return {
-        kind: 'unsupported',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        rawKind: m.wireKind,
-        createdAt: m.createdAt,
-      };
+      return [
+        {
+          kind: 'unsupported',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          rawKind: m.wireKind,
+          createdAt: m.createdAt,
+        },
+      ];
     }
     // Classify each raw DM into the variant the renderer expects. Same
     // shape used by the group screen (via `classifyMessageContent`)
-    // — keeps gif / geo detection in one place.
+    // — keeps gif / geo / poll detection in one place.
     const classified = classifyMessageContent(m.text);
+    // Vote messages aren't shown as bubbles — they're aggregated into the
+    // referenced poll's tally by the screen, so drop them from the row list.
+    if (classified.kind === 'pollVote') return [];
     if (classified.kind === 'gif') {
-      return {
-        kind: 'gif',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        url: classified.url,
-        createdAt: m.createdAt,
-        rumorId: m.rumorId,
-      };
+      return [
+        {
+          kind: 'gif',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          url: classified.url,
+          createdAt: m.createdAt,
+          rumorId: m.rumorId,
+        },
+      ];
     }
     if (classified.kind === 'location') {
-      return {
-        kind: 'location',
-        id: `dm-${m.id}`,
-        fromMe: m.fromMe,
-        location: classified.location,
-        createdAt: m.createdAt,
-        rumorId: m.rumorId,
-      };
+      return [
+        {
+          kind: 'location',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          location: classified.location,
+          createdAt: m.createdAt,
+          rumorId: m.rumorId,
+        },
+      ];
+    }
+    if (classified.kind === 'poll') {
+      // Legacy text-encoded poll: correlation id IS the message id (votes were
+      // keyed by it in the MVP), so pollId === id here.
+      return [
+        {
+          kind: 'poll',
+          id: `dm-${m.id}`,
+          pollId: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          poll: classified.poll,
+          createdAt: m.createdAt,
+          rumorId: m.rumorId,
+          deliveryStatus: m.deliveryStatus,
+          wireKind: m.wireKind,
+        },
+      ];
     }
     if (classified.kind === 'liveLocationMarker') {
-      return {
-        kind: 'liveLocationMarker',
+      return [
+        {
+          kind: 'liveLocationMarker',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          marker: classified.marker,
+          createdAt: m.createdAt,
+        },
+      ];
+    }
+    return [
+      {
+        kind: 'message',
         id: `dm-${m.id}`,
         fromMe: m.fromMe,
-        marker: classified.marker,
+        // Drop orphaned object-replacement / zero-width placeholders so an
+        // inline-attachment artifact doesn't render as a tofu box (#764).
+        text: sanitizeDisplayText(m.text),
         createdAt: m.createdAt,
-      };
-    }
-    return {
-      kind: 'message',
-      id: `dm-${m.id}`,
-      fromMe: m.fromMe,
-      // Drop orphaned object-replacement / zero-width placeholders so an
-      // inline-attachment artifact doesn't render as a tofu box (#764).
-      text: sanitizeDisplayText(m.text),
-      createdAt: m.createdAt,
-      deliveryStatus: m.deliveryStatus,
-      wireKind: m.wireKind,
-      rumorId: m.rumorId,
-    };
+        deliveryStatus: m.deliveryStatus,
+        wireKind: m.wireKind,
+        rumorId: m.rumorId,
+      },
+    ];
   });
   // Drop any kind-14 chat-note that just re-delivers an order's invoice when
   // its kind-16 order card is also present (#market dedup) — a selector over the
