@@ -22,6 +22,7 @@ import type { ThemePreference } from '../../styles/palettes';
 const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
   en: 'English',
   es: 'Español',
+  uk: 'Українська',
 };
 
 const AppearanceScreen: React.FC = () => {
