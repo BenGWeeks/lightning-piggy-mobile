@@ -64,6 +64,7 @@ import {
   CACHE_MAX_AGE_MS,
   MISSING_PROFILE_RETRY_MS,
   readCachedWithTtl,
+  persistMergedProfileCache,
 } from './nostrCacheKeys';
 import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -606,7 +607,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const loadContacts = useCallback(
-    async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
+    async (
+      pk: string,
+      relayUrls: string[],
+      opts?: { force?: boolean; awaitProfiles?: boolean },
+    ) => {
       const t0 = Date.now();
 
       // Read the contact-list cache AND profile cache concurrently — both
@@ -758,39 +763,47 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // true we've already returned via one of the two fast paths above, so
       // the dropped "X served from cache" suffix would always be 0.)
       const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
-      const t1 = Date.now();
-      const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
-        // Update UI incrementally as each batch of profiles arrives
-        startTransition(() =>
-          setContacts((prev) =>
-            prev.map((c) => ({
-              ...c,
-              profile: partial.get(c.pubkey) ?? c.profile,
-            })),
-          ),
-        );
-      });
-      if (__DEV__)
-        console.log(
-          `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
-        );
 
-      // Merge new profiles on top of existing cache so we don't lose
-      // previously-known profiles for contacts we didn't refetch.
-      InteractionManager.runAfterInteractions(() => {
-        const merged: Record<string, NostrProfile> = { ...cachedProfileMap };
-        profileMap.forEach((v, k) => {
-          merged[k] = v;
+      // The kind-0 profile batch is the slow part (~90s cold for a 571-contact
+      // list). The contact LIST — everything the follow-gate and DM-inbox
+      // refresh depend on — is already resolved and in state by this point.
+      // Callers that own a pull-to-refresh spinner (see `refreshContacts`,
+      // `awaitProfiles: false`) let this batch run fire-and-forget: its
+      // `onBatch` hook streams avatars in progressively, so the spinner can
+      // clear the moment contacts are in rather than after every profile
+      // lands. All other callers keep the original awaited behaviour. (#852)
+      const runProfileFetch = async (): Promise<void> => {
+        const t1 = Date.now();
+        const profileMap = await nostrService.fetchProfiles(
+          pubkeysToFetch,
+          relayUrls,
+          (partial) => {
+            // Update UI incrementally as each batch of profiles arrives
+            startTransition(() =>
+              setContacts((prev) =>
+                prev.map((c) => ({
+                  ...c,
+                  profile: partial.get(c.pubkey) ?? c.profile,
+                })),
+              ),
+            );
+          },
+        );
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
+          );
+        await persistMergedProfileCache(pk, cachedProfileMap, profileMap);
+      };
+
+      if (opts?.awaitProfiles === false) {
+        // Fire-and-forget: don't block the caller (spinner) on profiles.
+        void runProfileFetch().catch((e) => {
+          if (__DEV__) console.warn('[Nostr] fetchProfiles (background) failed:', e);
         });
-        AsyncStorage.setItem(
-          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
-          JSON.stringify(merged),
-        ).catch(() => {});
-        AsyncStorage.setItem(
-          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
-          Date.now().toString(),
-        ).catch(() => {});
-      });
+      } else {
+        await runProfileFetch();
+      }
     },
     [],
   );
@@ -1408,6 +1421,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // the shared kind-3 publish — lives in useContactActions (file-size cap).
   // `contacts` state stays here (it feeds followPubkeys → the DM inbox); the
   // hook drives it via setContacts and force-refreshes through loadContacts.
+  // The non-blocking pull-to-refresh path (#852) lives inside the hook, which
+  // calls loadContacts with `awaitProfiles: false`.
   const { refreshContacts, followContact, unfollowContact, addContact } = useContactActions({
     pubkey,
     isLoggedIn,
