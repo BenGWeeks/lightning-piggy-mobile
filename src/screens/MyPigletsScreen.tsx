@@ -9,7 +9,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus, RotateCw } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  PiggyBank,
+  Plus,
+  RotateCw,
+  Trash2,
+} from 'lucide-react-native';
 import type { VerifiedEvent } from 'nostr-tools';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
@@ -17,16 +25,16 @@ import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { t } from '../i18n';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
-import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
+import { loadPiggies, removePiggy, type HiddenPiggy } from '../services/piggyStorageService';
 import { mergeHiddenWithDrafts, type HiddenRow } from '../utils/piggyToParsedCache';
 import { republishPiggy } from '../services/republishPiggyService';
+import { deletePiggy } from '../services/deletePiggyService';
 import { ExploreNavigation } from '../navigation/types';
 import type { Palette } from '../styles/palettes';
 
@@ -109,6 +117,10 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // spinner in place of the badge and ignore double-taps. Keyed by
   // cache coord.
   const [republishingCoord, setRepublishingCoord] = useState<string | null>(null);
+
+  // Same for delete — the row shows a spinner on its trash control and
+  // ignores double-taps while the two-step (expire → kind-5) runs.
+  const [deletingCoord, setDeletingCoord] = useState<string | null>(null);
 
   // Local NIP-GC cache — paint instantly, then refresh from AsyncStorage,
   // then ALSO query relays for the user's own kind 37516 listings by
@@ -382,6 +394,81 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     [piggiesById, relays, republishingCoord, signEvent, t],
   );
 
+  // Delete a Piglet the user owns. Belt-and-suspenders (#777): step 1
+  // republishes the kind 37516 listing with its NIP-40 expiration pinned
+  // to now (so the app's `expiresAt <= now` filter hides it everywhere
+  // regardless of relay behaviour); step 2 THEN sends a NIP-09 kind-5
+  // deletion request so compliant relays purge it. Only wired onto Hidden
+  // rows, which are already gated to `cache.hiderPubkey === pubkey`
+  // (mergeHiddenWithDrafts) — i.e. Piglets we hold the signing key for.
+  // Drafts have no relay event, so their delete is a local-record removal
+  // only; the relay steps are skipped.
+  const handleDelete = useCallback(
+    (cache: ParsedCache, isDraft: boolean) => {
+      const piggy = piggiesById.get(cache.d);
+      // Match the copy to what will actually run: a draft is a local-only
+      // removal; a published row WITH its local record gets the full
+      // belt+suspenders; a published row WITHOUT the local record (published
+      // from another device) can only send the kind-5 deletion, so don't
+      // promise the expire-now belt step there.
+      const body = isDraft
+        ? t('myPigletsScreen.deleteDraftBody')
+        : piggy
+          ? t('myPigletsScreen.deleteBody')
+          : t('myPigletsScreen.deleteNoLocalBody');
+      Alert.alert(t('myPigletsScreen.deleteTitle'), body, [
+        { text: t('myPigletsScreen.cancel'), style: 'cancel' },
+        {
+          text: t('myPigletsScreen.delete'),
+          style: 'destructive',
+          onPress: async () => {
+            if (deletingCoord) return;
+            setDeletingCoord(cache.coord);
+            try {
+              if (!isDraft) {
+                const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+                await deletePiggy({ coord: cache.coord, piggy, signEvent, writeRelays });
+              }
+              // Drop the local bearer record so a stale copy can't be
+              // re-published or resurface as a draft row.
+              await removePiggy(cache.d);
+              // Optimistic local removal from both mirrors so the row
+              // disappears before any relay round-trip lands.
+              setAllCaches((prev) => prev.filter((c) => c.coord !== cache.coord));
+              setPiggiesById((prev) => {
+                const next = new Map(prev);
+                next.delete(cache.d);
+                return next;
+              });
+              // Honest toast copy: a draft is a genuine local-only removal
+              // (it IS gone), but a published Piglet's delete is a NIP-09
+              // kind-5 *request* relays may ignore (+ local expire-now) — so
+              // don't promise "deleted" there, mirror the confirm dialog's
+              // "asks relays to remove it" honesty with "Deletion requested".
+              Toast.show({
+                type: 'success',
+                text1: t(
+                  isDraft
+                    ? 'myPigletsScreen.pigletDeleted'
+                    : 'myPigletsScreen.pigletDeletionRequested',
+                ),
+              });
+            } catch (e) {
+              Toast.show({
+                type: 'error',
+                text1: t('myPigletsScreen.deleteFailed'),
+                text2: (e as Error).message,
+              });
+            } finally {
+              setDeletingCoord(null);
+            }
+          },
+        },
+      ]);
+    },
+    [piggiesById, relays, deletingCoord, signEvent, t],
+  );
+
   return (
     <View style={styles.container} testID="my-piglets-screen">
       <View style={styles.header}>
@@ -440,7 +527,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         )}
         renderSectionFooter={({ section }) =>
           section.data.length === 0 ? (
-            <Text style={styles.emptySection}>{emptyTextFor(section.id)}</Text>
+            <Text style={styles.emptySection}>{emptyTextFor(section.id, t)}</Text>
           ) : null
         }
         renderItem={({ item }) => {
@@ -463,6 +550,10 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                 // republish — only published rows get the republish wiring.
                 onRepublish={item.isDraft ? undefined : () => handleRepublish(item.cache)}
                 republishing={republishingCoord === item.cache.coord}
+                // Delete is offered on every owned Hidden row (published
+                // or draft); the handler branches on draft-ness (#777).
+                onDelete={() => handleDelete(item.cache, item.isDraft)}
+                deleting={deletingCoord === item.cache.coord}
               />
             );
           }
@@ -503,7 +594,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const emptyTextFor = (id: string): string => {
+const emptyTextFor = (id: string, t: ReturnType<typeof useTranslation>): string => {
   if (id === 'hidden') return t('myPigletsScreen.emptyHidden');
   if (id === 'found') return t('myPigletsScreen.emptyFound');
   return t('myPigletsScreen.emptyFriendsFinds');
@@ -520,6 +611,11 @@ interface RowProps {
   // to a tap-to-republish handler. Friend / find rows omit it.
   onRepublish?: () => void;
   republishing?: boolean;
+  // Hidden-cache rows only — tapping the trash control runs the two-step
+  // delete (expire-now republish → NIP-09 kind-5). Omitted on find rows,
+  // which the user doesn't own (#777).
+  onDelete?: () => void;
+  deleting?: boolean;
   // True for a local-only draft (saved with Public off, not on relays).
   // Shows a "Draft" pill in place of the expiry badge (#909).
   isDraft?: boolean;
@@ -534,6 +630,8 @@ const Row: React.FC<RowProps> = ({
   testID,
   onRepublish,
   republishing,
+  onDelete,
+  deleting,
   isDraft,
 }) => {
   const t = useTranslation();
@@ -595,6 +693,22 @@ const Row: React.FC<RowProps> = ({
           {meta}
         </Text>
       </View>
+      {onDelete ? (
+        <TouchableOpacity
+          onPress={onDelete}
+          disabled={deleting}
+          style={styles.deleteButton}
+          accessibilityLabel={t('myPigletsScreen.deleteA11y')}
+          testID="piglet-delete"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {deleting ? (
+            <ActivityIndicator size="small" color={colors.red} />
+          ) : (
+            <Trash2 size={18} color={colors.textSupplementary} strokeWidth={2} />
+          )}
+        </TouchableOpacity>
+      ) : null}
       <ChevronRight size={20} color={colors.textSupplementary} />
     </TouchableOpacity>
   );
@@ -772,6 +886,15 @@ const createStyles = (colors: Palette) =>
       fontSize: 10,
       fontWeight: '800',
       letterSpacing: 0.2,
+    },
+    // Trash control on owned Hidden rows — a small square touch target
+    // sized to sit comfortably between the row body and the chevron.
+    deleteButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
   });
