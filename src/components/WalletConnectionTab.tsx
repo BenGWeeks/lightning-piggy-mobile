@@ -69,9 +69,13 @@ const WalletConnectionTab: React.FC<Props> = ({
   recoveryError,
   onShare,
 }) => {
+  // An NWC wallet ALWAYS has connection content — at minimum the "Share this
+  // wallet" row, plus the relay / connection string once they load from
+  // SecureStore. Treat the whole type as having content so the empty-state
+  // ("No connection details") never flashes during that async load, and never
+  // renders beside the always-present Share row.
   const hasContent =
-    (walletType === 'onchain' && !!xpubDisplay) ||
-    (walletType === 'nwc' && (!!relayUrl || !!nwcConnection || !!coinosRecovery));
+    (walletType === 'onchain' && !!xpubDisplay) || walletType === 'nwc';
 
   return (
     <View>
