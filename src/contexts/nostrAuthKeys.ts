@@ -3,6 +3,10 @@ import * as SecureStore from 'expo-secure-store';
 export const NSEC_KEY = 'nostr_nsec';
 export const PUBKEY_KEY = 'nostr_pubkey';
 export const SIGNER_TYPE_KEY = 'nostr_signer_type';
+/** SecureStore (not AsyncStorage) — the persisted NIP-46 connection
+ *  contains a per-app private key. Anyone with it + the bunker pubkey
+ *  + relay can impersonate this app's session against the bunker. */
+export const NIP46_CONNECTION_KEY = 'nostr_nip46_connection';
 
 // Hardened write options for the legacy single-active-identity slots, which
 // hold the nsec + persisted identity metadata. Matches the repo's existing

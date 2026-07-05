@@ -1,0 +1,373 @@
+= Architecture
+
+This document describes how the Lightning Piggy mobile app is put together: the
+technology stack, the layers of the codebase, the Nostr and Lightning protocol
+surface it speaks, how data is persisted, and the key runtime data flows (sending
+a DM, paying an invoice, publishing a geo-cache).
+
+It is the fuller companion to the *Architecture* section of the top-level
+`README.md`. Where a topic has its own deep-dive doc, this page links out rather
+than duplicating it — notably `SOLUTION_DESIGN.adoc` (feature designs),
+`PROTOCOLS.adoc` (wire formats + event kinds), `DATA_STORAGE.adoc` (persistence),
+`SECURITY.adoc`, `architecture/notifications.adoc`, and
+`architecture/perf-and-state.adoc`.
+
+== At a glance
+
+Lightning Piggy is a **Bitcoin Lightning wallet with Nostr social features**,
+built as an Expo / React Native app that runs from a custom dev-client (it ships
+custom native modules, so Expo Go is not used).
+
+[cols="1,2", options="header"]
+|===
+| Layer | Responsibility
+
+| **Native / config** | Expo config plugins (`plugins/`) + one local native module (`modules/amber-signer`) — Android manifest edits and the Amber signer IPC bridge. Background DM delivery is handled by `expo-background-task`, not a native service.
+| **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
+| **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
+| **Navigation** | `src/navigation/AppNavigator.tsx` — a four-tab bottom bar plus an Explore stack, an account drawer, and a root stack for conversation screens.
+| **Screens / components** | `src/screens/` and `src/components/` — presentation. Styles live in `src/styles/<Name>.styles.ts` per the file-size convention in `CLAUDE.md`.
+|===
+
+== Technology stack
+
+[cols="1,1,2", options="header"]
+|===
+| Area | Choice | Notes
+
+| Framework | Expo SDK 55, React Native 0.83, React 19 | Custom dev-client (custom native modules rule out Expo Go).
+| Language | TypeScript (strict) | `npx tsc --noEmit` must pass; Prettier + ESLint gated in CI.
+| Navigation | `@react-navigation` (native-stack, bottom-tabs, drawer) | See <<navigation>>.
+| Nostr | `nostr-tools` 2.x + `@noble/*` (ciphers, hashes, curves) | NIP-04 / NIP-44 / NIP-59 / NIP-17 crypto.
+| Lightning | Nostr Wallet Connect (NWC) as the primary rail | `src/services/nwcService.ts`.
+| On-chain | `bdk-rn` (BenGWeeks fork), `bitcoinjs-lib`, `@scure/btc-signer`, Electrum client | Watch-only (xpub) + hot-wallet (mnemonic) support; Boltz swaps for LN ↔ on-chain.
+| Encrypted DB | `@op-engineering/op-sqlite` with SQLCipher | Encrypted local DM store (`"op-sqlite": { "sqlcipher": true }` in `package.json`).
+| Key/value storage | `@react-native-async-storage/async-storage` + `expo-secure-store` | Caches vs. secrets; see <<persistence>>.
+| Maps | `@maplibre/maplibre-react-native` (native MapLibre) | Replaced the earlier Leaflet-in-WebView stack (#552); see <<maps>>.
+| NFC | `react-native-nfc-manager` | Read/write Lightning + Nostr tags; Hunt "Piglet" claim tags.
+| UI | `@gorhom/bottom-sheet`, `react-native-reanimated`, `@shopify/react-native-skia`, `lucide-react-native` | Bottom sheets, animation, canvas, icons.
+| Media | `expo-image-picker`, `expo-camera`, `expo-audio`, `expo-calendar`, `expo-contacts` | Attachments, QR scanning, voice notes, Add-to-Calendar, phone contacts.
+| Background | `expo-notifications`, `expo-background-task`, `expo-task-manager`, `expo-location` | Notifications + geofence + periodic background DM detect-and-ping (WorkManager / BGTaskScheduler). A realtime foreground service is a future upgrade — see <<native>> and `architecture/notifications.adoc`.
+|===
+
+Marketing version lives in `package.json` / `app.config.ts` (single source of
+truth). `versionCode` / `buildNumber` are owned by EAS's remote counter
+(`eas.json` → `"appVersionSource": "remote"`). Releases go through the GitHub
+Release workflow, not `eas build --local` — see `DEPLOYMENT.adoc` →
+"Cutting a release".
+
+=== Build variants
+
+Three variants install side-by-side via distinct identifiers, driven by the
+`APP_VARIANT` env var consumed in `app.config.ts`:
+
+[cols="1,2,2", options="header"]
+|===
+| Variant | App name | Package / bundle ID
+
+| development | Lightning Piggy (Dev) | `com.lightningpiggy.app.dev`
+| preview | Lightning Piggy (Preview) | `com.lightningpiggy.app.preview`
+| production | Lightning Piggy | `com.lightningpiggy.app`
+|===
+
+[[native]]
+== Native layer
+
+=== Config plugins (`plugins/`)
+
+Expo config plugins patch the generated native projects at prebuild time so no
+changes are hand-edited into `android/` / `ios/`.
+
+[cols="1,2", options="header"]
+|===
+| Plugin | What it wires up
+
+| `withAdjustResize.js` | Android `windowSoftInputMode="adjustResize"` so the keyboard resizes the layout and bottom sheets slide above it.
+| `withAmberQueries.js` | Android `<queries>` for the `nostrsigner:` / `nostr:` schemes so the app can discover and launch the Amber signer and other Nostr apps.
+| `withLargeHeap.js` | Android `largeHeap="true"` — a memory workaround retained from the Leaflet-WebView era.
+| `withNfc.js` | Android NFC permission + feature + NDEF intent filters for the app's deep-link schemes; iOS NFC usage string + TAG entitlement.
+| `withForegroundService.js` | Scaffolds Android manifest permissions (`FOREGROUND_SERVICE(_DATA_SYNC)`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `WAKE_LOCK`) for a *future* realtime relay foreground service (#279). It only declares the permissions — the Kotlin `Service` itself is not implemented; background DM delivery currently ships via `expo-background-task` (see `architecture/notifications.adoc`).
+|===
+
+`app.config.ts` also registers the MapLibre, secure-store, notifications,
+background-task, image-picker, contacts, location, audio, task-manager, and
+build-properties plugins, and declares the deep-link schemes (`lightningpiggy://`,
+`lightning://`, `lnurlw://`, `lnurl://`, `nostr://`).
+
+=== Local native modules (`modules/`)
+
+`modules/amber-signer` is the *only* Expo native module that ships. It is
+Android-only and loaded via `requireOptionalNativeModule` so it degrades
+gracefully on binaries that predate it.
+
+*`amber-signer`* — an IPC bridge to the https://github.com/greenart7c3/Amber[Amber]
+Nostr signer app, so the private key never enters Lightning Piggy's process.
+Exposes `getPublicKey`, `signEvent`, `nip04Encrypt/Decrypt`,
+`nip44Encrypt/Decrypt`, `nip44DecryptSilent` (blanket-permission batch path that
+avoids per-event approval dialogs), and `isInstalled`. Wrapped by
+`src/services/amberService.ts`.
+
+NOTE: There is no `background-dm-service` native module. Background DM delivery
+ships as a periodic `expo-background-task` detect-and-ping (Android WorkManager /
+iOS BGTaskScheduler): when the UI is not mounted the OS runs `runBackgroundSync`
+(`src/services/backgroundSyncService.ts`), which notices new encrypted inbound
+traffic and fires a generic notification *without decrypting*. A persistent
+realtime relay Kotlin foreground `Service` is only *scaffolded* — its manifest
+permissions are declared by `withForegroundService.js` but the `Service` class is
+not implemented, and is documented as a future upgrade. See
+`architecture/notifications.adoc` for the full background/notification model.
+
+== State: contexts
+
+The long-lived state lives in React contexts, composed once near the app root
+(`App.tsx`). Ordering matters — wallet state is established first, then Nostr
+identity, then the features that derive from it:
+
+[source]
+----
+SafeAreaProvider
+ └ KeyboardProvider
+   └ ThemeProvider
+     └ SendingAnimationProvider
+       └ WalletProvider          (wallets, balances, transactions)
+         └ NostrProvider         (identity, signer, relays, DM inbox, groups)
+           └ TrustGraphProvider  (web-of-trust, derived from contacts)
+             └ GroupsProvider
+               └ LiveLocationProvider
+                 └ UserLocationProvider
+                   └ BottomSheetModalProvider
+----
+
+The two heavyweight pillars:
+
+*`WalletContext.tsx`* — wallet-type-aware operations across both NWC and on-chain
+wallets: balances, transaction history, send/receive, transfers. Composes
+`nwcService`, `onchainService`, `lnurlService`, `swapRecoveryService`,
+`fiatService`, and `walletStorageService`, plus a `WalletLiveContext` for live
+payment events.
+
+*`NostrContext.tsx`* — Nostr identity, the active signer (nsec or Amber), relay
+set, contact list, and profiles. Rather than being one monolith, it composes
+per-responsibility hooks/services: `useDmInbox` (inbox hydration +
+subscriptions), `useGroupMessaging`, `useCacheNotifications`, plus the
+`nostrService` / `amberService` / `nostrRelayStorage` data layer and identity
+lifecycle helpers (`persistActiveIdentityKeys`, `promoteSuccessorIdentity`).
+
+NOTE: `WalletContext.tsx` and `NostrContext.tsx` are the largest files in the
+tree and are on the `CLAUDE.md` "known offenders" list — when touched they should
+be split by concern toward the 1,000-line cap, not grown.
+
+== Services (`src/services/`)
+
+A large, mostly-stateless service layer grouped by domain. Selected modules:
+
+[cols="1,2", options="header"]
+|===
+| Domain | Key modules
+
+| Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `amberService.ts`, `nostrRelayStorage.ts`, `trustGraphService.ts`
+| Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts`, `nostrLiveDmSub.ts` (lives in `src/contexts/`, not `src/services/`), `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
+| Background sync / DM ping | `backgroundTask.ts` (registers the periodic `expo-background-task` — WorkManager on Android / BGTaskScheduler on iOS — that runs while the UI isn't mounted), `backgroundSyncService.ts` (the headless detect-and-ping worker: notices new encrypted inbound traffic and fires a generic notification without decrypting — works for both nsec and Amber users). See `architecture/notifications.adoc`.
+| Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `nostrPlacesNip52.ts`, `republishPiggyService.ts`
+| Wallet — Lightning | `nwcService.ts`, `nwcEncryption.ts`, `nwcRelayHealth.ts`, `nwcErrors.ts`, `lnurlService.ts`, `lnurlWithdrawService.ts`
+| Wallet — on-chain | `onchainService.ts` (BDK), `boltzService.ts`, `swapRecoveryService.ts`, `walletStorageService.ts`
+| Zaps / caching | `bolt11SettlementCache.ts`, `zapCounterpartyStorage.ts`, `zapSenderProfileStorage.ts`, `findLogZapsService.ts`, `fiatService.ts`
+| Location / geofence | `locationService.ts`, `geofenceService.ts`, `btcMapService.ts`, `liveLocationService.ts`, `nearbyRadiusService.ts`
+| Notifications | `notificationService.ts`, `cacheNotifySubscription.ts`
+| Media | `imageUploadService.ts`, `blossomService.ts`, `giphyService.ts`, `linkPreviewFetcher.ts`
+| NFC | `nfcService.ts`, `nfcReaderMode.ts`, `nfcNostrWrite.ts`, `ntagLock.ts`
+| Groups | `groupMessagesStorageService.ts`, `groupRoutingRegistry.ts`, `groupsStorageService.ts`
+| Persistence plumbing | `localDb.ts`, `localDbKey.ts`, `perAccountStorage.ts`, `migrateToPerAccountStorage.ts`, `identitiesStore.ts`
+|===
+
+[[navigation]]
+== Navigation
+
+`src/navigation/AppNavigator.tsx` nests:
+
+* A **root stack** (`Main`, `Conversation`, `Groups`, `GroupConversation`,
+  `ContactProfile`, `UnsupportedEntity`).
+* An **account drawer** wrapping the tabs, holding the settings screens
+  (`Profile`, `Wallets`, `Nostr`, `On-Chain`, `Display`, `Appearance`,
+  `Nearby`, `Security`, `About`).
+* A **four-tab bottom bar** (test IDs in parentheses):
+  ** *Home* (`tab-home`) — wallet: balance, send, receive, transfer.
+  ** *Messages* (`tab-messages`) — DM conversation list.
+  ** *Explore* (`tab-explore`) — its own stack (below).
+  ** *Friends* (`tab-friends`) — Nostr contacts + phone contacts.
+* The **Explore stack**: `ExploreHome`, `Lessons` / `CourseDetail` /
+  `MissionDetail`, `Map`, `Places` / `PlaceDetail`, `Hunt` / `HuntCreate` /
+  `HuntFound` / `HuntPiggyDetail` / `MyPiglets`, `Events` / `EventDetail`.
+
+Interactive elements carry `accessibilityLabel` / `testID` props so Maestro
+flows never rely on coordinates (see `CLAUDE.md` → Testing).
+
+== Protocol surface
+
+=== Nostr event kinds
+
+The kinds Lightning Piggy actually reads or writes. See `PROTOCOLS.adoc` for the
+full wire formats.
+
+[cols="1,2,2", options="header"]
+|===
+| Kind | Meaning | Where
+
+| 0 | Profile metadata | `nostrService.ts` (fast-path fetch, per-account cache)
+| 3 | Contact list (follows) | `nostrService.ts`, `NostrContext.tsx`
+| 4 | NIP-04 legacy encrypted DM | inbox fetch stores `wire_kind=4`
+| 13 | NIP-59 seal (inner layer of a gift wrap) | `nostrService.ts` wrap builders
+| 14 | NIP-17 chat rumor (1:1 + group) | `nostrService.ts` (`buildChatRumor` / `buildGroupMessageRumor`)
+| 1059 | NIP-59 gift wrap (outer envelope) | inbox fetch, wrap builders, decrypt-once gate
+| 1111 | NIP-22 comment | Hunt "Piglet" comments
+| 7516 | NIP-GC found-log | recorded when a Piglet is claimed
+| 9734 | NIP-57 zap request | `nostrService.ts` (`buildZapRequest`)
+| 9735 | NIP-57 zap receipt | `nostrService.ts` (`fetchZapReceipts`, `parseZapReceipt`)
+| 10002 | NIP-65 relay list | `nostrService.ts` (`fetchRelayList`)
+| 20069 | Ephemeral live-location coordinate (in-DM sharing) | live-location feature
+| 31923 | NIP-52 calendar event (meetups, read-only) | Explore → Events
+| 37516 | NIP-GC geo-cache listing ("Piglet") | `nostrPlacesService.ts`
+|===
+
+The Gamma Markets marketplace kinds (30402 / 16 / 17) are on the roadmap but are
+not wired into the shipped code as of this writing — treat them as planned.
+
+=== Signers
+
+[cols="1,2", options="header"]
+|===
+| Signer | Status
+
+| **nsec (local key)** | Shipped. Sign/encrypt in-process via `nostr-tools` + `@noble/*`. Key held in `expo-secure-store`.
+| **Amber (NIP-55, Android)** | Shipped. IPC to the Amber app via the `amber-signer` native module — the key never enters this app's process.
+| **NIP-46 remote signer / Nostr Connect (e.g. Clave)** | Planned, not implemented.
+|===
+
+== Wallets
+
+*Lightning (primary rail)* — Nostr Wallet Connect. A NWC connection string
+(`nostr+walletconnect://…`) pairs the app with a remote wallet service (Alby,
+LNbits, etc.). `nwcService.ts` opens a relay subscription, sends NIP-47
+`pay_invoice` / `make_invoice` / `get_balance` requests encrypted to the wallet
+service pubkey, and awaits the encrypted response. LNURL-pay / Lightning-address
+sends resolve through `lnurlService.ts` into a BOLT-11 invoice, which is then
+paid over NWC.
+
+*On-chain (BDK)* — `onchainService.ts` wraps `bdk-rn` (native Rust) for
+watch-only (xpub) and hot (mnemonic) wallets: Electrum sync, balance, transaction
+history, and address derivation. `boltzService.ts` performs Boltz submarine swaps
+to bridge Lightning ↔ on-chain. Full design in `SOLUTION_DESIGN.adoc` →
+"On-Chain Wallet Support & Transfer".
+
+[[persistence]]
+== Persistence & caching
+
+Three tiers, deliberately separated by sensitivity. Full detail in
+`DATA_STORAGE.adoc`.
+
+*Encrypted SQLite (DM history)* — `src/services/localDb.ts` opens a single
+SQLCipher database via op-sqlite; `src/services/dmDb.ts` is the slice-read data
+access layer (no whole-blob parse; a `selectKnownEventIds` "decrypt-once" gate
+avoids re-decrypting gift wraps). The 256-bit DB key lives in `expo-secure-store`
+(`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, hardware-backed where available) and is
+managed by `src/services/localDbKey.ts`; a wrong-key signature after a backup
+restore triggers wipe-and-recreate rather than a crash.
+
+*Secure store (secrets)* — `expo-secure-store` holds the nsec, NWC connection
+strings, the DM DB key, and Hunt LNURL bearer tokens. Bearer tokens for Piglets
+live only on the physical NFC tag/QR and in the hider's secure store — never on
+the public relay event.
+
+*AsyncStorage (caches & preferences)* — namespaced per account via
+`src/services/perAccountStorage.ts`: `perAccountKey(baseKey, pubkey)` suffixes
+`_${pubkey}`. Profile/contact/relay/NIP-17 caches are per-account; a small set of
+device-scoped preferences (theme, electrum server, onboarding flags, secret mode)
+are intentionally not namespaced. `src/contexts/dmStoreMigrationRunner.ts`
+migrates legacy un-namespaced keys and hoists any legacy AsyncStorage DM cache
+into the encrypted SQLite DB on first run.
+
+[[maps]]
+== Maps
+
+The map is **native MapLibre** (`@maplibre/maplibre-react-native`), shared via
+`src/components/LibreMiniMap.tsx` and used by `MapScreen.tsx`, the Explore
+location cards, and search results, with Piglet pins rendered as
+`CacheMapMarker.tsx`. Merchant data comes from BTC Map / OpenStreetMap
+(`btcMapService.ts`, viewport-cached in AsyncStorage). No Google Maps API key or
+commercial tile vendor is used.
+
+The MapLibre-native renderer replaced the previous Leaflet-in-WebView stack
+(#552) to fix WebView memory pressure on de-Googled Android (GrapheneOS
+Vanadium). All map surfaces now use MapLibre-native — including the
+location-picker sheet, which renders through `LibreMiniMap` — and no
+`react-native-webview` map transport remains in `src/`.
+
+== Key data flows
+
+=== Sending / receiving a DM
+
+. The composer calls into `useDmInbox` / `useMessageSend`, which build a NIP-17
+  chat rumor (kind 14) for the recipient.
+. The rumor is sealed (kind 13, ephemeral key) and gift-wrapped (kind 1059) per
+  NIP-59, encrypting with NIP-44. Signing/encryption goes through the active
+  signer — in-process for nsec, or via the Amber IPC bridge.
+. The gift wrap is published to the recipient's (and the sender's own) relays.
+. Inbound: a live subscription (`src/contexts/nostrLiveDmSub.ts`) plus cold-start backfill
+  fetch kind-1059 (and legacy kind-4) events. `dmIngest.ts` unwraps them once
+  (guarded by the decrypt-once gate), and `dmDb.ts` upserts the plaintext into
+  the encrypted SQLite store keyed by `(owner, event_id)`.
+. When the app is closed on Android, a periodic `expo-background-task`
+  (WorkManager, ~15-min floor) runs `runBackgroundSync`, which detects new
+  inbound wraps and raises a generic notification *without decrypting them*
+  (detect-and-ping). A persistent foreground service for realtime delivery is
+  scaffolded (permissions only) but not yet implemented — see
+  `architecture/notifications.adoc`.
+
+=== Paying an invoice over NWC
+
+. The user scans/pastes a BOLT-11 invoice, or enters a Lightning address —
+  `lnurlService.ts` resolves the address to an invoice via LNURL-pay.
+. `WalletContext` routes the pay to the active wallet. For a NWC wallet,
+  `nwcService.ts` builds a NIP-47 `pay_invoice` request, encrypts it to the
+  wallet-service pubkey, and publishes it to the NWC relay.
+. The wallet service pays and returns an encrypted response; `nwcService.ts`
+  decrypts it and resolves success/failure, updating balance and history.
+. A NIP-57 zap follows the same rail but first publishes a zap request
+  (kind 9734) to the recipient's LNURL callback; the resulting zap receipt
+  (kind 9735) is later matched back to the conversation.
+
+=== Publishing a geo-cache ("Piglet")
+
+. In `HuntCreateScreen`, the hider picks a location and (optionally) writes an
+  LNURL-withdraw bearer to an NFC tag or QR — the bearer is the access control.
+. `nostrPlacesPublisher.ts` publishes a NIP-GC listing (kind 37516) tagged with a
+  NIP-32 `com.lightningpiggy.app / payout-lnurl-w` label, plus a stable `d` tag
+  so re-publishing (updated location/hint/expiry) has parameterised-replaceable
+  semantics. **The bearer token is never on the event** — only on the tag/QR and
+  in the hider's secure store.
+. Finders see the pin (BTC Map + Nostr caches merged on `MapScreen`). Claiming a
+  Piglet reads the bearer from the tag, performs the LNURL-withdraw, and records
+  a NIP-GC found-log (kind 7516); comments use NIP-22 (kind 1111).
+
+See `SOLUTION_DESIGN.adoc` → "Explore tab" and `PROTOCOLS.adoc` →
+"Hunt: Lightning extension to NIP-GC" for the full schema.
+
+== Testing
+
+* **Unit** — Jest via the `jest-expo` preset, scoped to `src/services`,
+  `src/utils`, and `src/contexts` (components are covered by Maestro, not unit
+  tests). CI gates line coverage against `main`. See `TESTING.adoc`.
+* **E2E** — Maestro flows in `.maestro/`. Selectors use `testID` / `text`, never
+  coordinates; all interactive elements carry accessibility props.
+
+== Related documents
+
+* `README.md` → *Architecture* — the skimmable overview.
+* `SOLUTION_DESIGN.adoc` — per-feature designs (on-chain wallet, Nostr
+  integration, Explore tab).
+* `PROTOCOLS.adoc` — Nostr/Lightning wire formats and event-kind reference.
+* `DATA_STORAGE.adoc` — persistence and migration detail.
+* `SECURITY.adoc` — key handling and threat model.
+* `architecture/notifications.adoc` — background + notification model.
+* `architecture/perf-and-state.adoc` — state management and performance notes.
+* `DEPLOYMENT.adoc` — build variants and the release workflow.

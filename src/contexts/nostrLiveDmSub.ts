@@ -1,7 +1,9 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -39,6 +41,34 @@ import {
   mergeInboxEntries,
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
+
+// --- Live-sub self-re-arm on relay drop / app resume (#934) ---
+// The app-wide SimplePool deliberately does NOT auto-reconnect
+// (enableReconnect stays default-false app-wide), so when the wrap
+// subscription's WebSocket silently drops — relay idle timeout, network
+// change, Android Doze suspending the socket on background — the foreground
+// live sub goes deaf and nothing re-opens it. The user then has to
+// pull-to-refresh to see missed DMs (the #934 symptom). We mirror the
+// background DM watch's self-re-arm (#958): the sub's `onWrapsClose` schedules
+// a backoff-scheduled re-open, and an AppState 'active' listener re-arms on
+// resume (Doze can freeze the JS engine before onWrapsClose ever fires). A
+// generation counter guards against re-arming after an intentional teardown
+// (logout / account switch / relay-list change), and re-arms are silent by
+// construction — re-subscribing over healthy sockets reuses the pool's open
+// connections, the `isFreshArrival` gate mutes the backlog replay, and
+// `knownWrapIds` + `claimWrapNotification` prevent duplicate work / alerts.
+const LIVE_SUB_RECONNECT_BASE_DELAY_MS = 5_000;
+const LIVE_SUB_RECONNECT_MAX_DELAY_MS = 5 * 60_000;
+// A subscription that survived at least this long before closing counts as
+// having been healthy — its next drop retries from the base delay; a
+// rapid-fail (offline) keeps climbing the exponential backoff ladder.
+const LIVE_SUB_HEALTHY_MIN_LIFETIME_MS = 60_000;
+// Leading-edge debounce for the AppState `active` re-arm: the first resume
+// re-arms immediately, but rapid foreground/background churn within this window
+// is coalesced (the socket a moment-ago resume opened is still healthy, so
+// re-subscribing again is wasted churn). A real Doze resume is far apart from
+// the prior one, so it always clears this window and re-arms.
+const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
 
 /**
  * Snapshot + live-dependency bundle the live-DM subscription closes over.
@@ -131,6 +161,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
+  // Self-re-arm state (#934). `armGeneration` is bumped on every (re)arm and on
+  // teardown; each underlying sub's `onWrapsClose` captures the generation live
+  // at arm time, so a close belonging to a sub we already superseded (or a
+  // torn-down sub) is stale and must not schedule a reconnect.
+  let armGeneration = 0;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Wall-clock ms of the last AppState-resume-triggered re-arm, for the
+  // leading-edge debounce below (rapid foreground/background churn coalesces).
+  let lastResumeArmMs = 0;
+  // True once the initial async arm (which seeds knownWrapIds + loads the
+  // kind-4 `since` cursor) has opened the first sub. The AppState-resume
+  // re-arm no-ops before this so it can't race ahead of the seed.
+  let initialArmed = false;
   let writeChain: Promise<void> = Promise.resolve();
   // Wall-clock second the sub opened. We fire OS notifications ONLY for
   // messages whose own timestamp is at/after this (minus a clock-skew
@@ -254,6 +298,12 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             );
           } else if (activeSigner === 'amber') {
             plaintext = await amberService.requestNip04Decrypt(
+              ev.content,
+              partnerPubkey,
+              viewerPubkey,
+            );
+          } else if (activeSigner === 'nip46') {
+            plaintext = await nostrConnectService.requestNip04Decrypt(
               ev.content,
               partnerPubkey,
               viewerPubkey,
@@ -527,6 +577,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         if (__DEV__) console.warn('[Nostr] live Amber NIP-17 unwrap failed:', error);
         return;
       }
+    } else if (activeSigner === 'nip46') {
+      // NIP-46 live unwrap. No silent-batch path (the silent variant
+      // throws), so use the plain per-wrap decrypt over the bunker.
+      // No PERMISSION_NOT_GRANTED concept, so no permission flag flip.
+      try {
+        rumor = await unwrapWrapViaNip44(
+          wrap,
+          (ct, cp) => nostrConnectService.requestNip44Decrypt(ct, cp, viewerPubkey),
+          onSkip,
+        );
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] live NIP-46 NIP-17 unwrap failed:', error);
+        return;
+      }
     }
     if (!rumor) {
       if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
@@ -677,9 +741,111 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
   let unsubscribe: (() => void) | null = null;
+  // The kind-4 `since` cursor loaded once by the initial seed below; re-arms
+  // (#934) reuse it. Re-streaming kind-4 from the same cursor on a re-arm is
+  // safe: the closure-scoped `seen` Set, the RAM plaintext cache, and the
+  // idempotent encrypted-store upsert all dedupe the re-fetched bytes.
+  let sinceK4Cursor: number | undefined;
+
+  const clearReconnectTimer = (): void => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  // Open (or re-open) the underlying relay subscription. Bumps the generation
+  // FIRST, then tears down any prior sub — so the prior sub's `onWrapsClose`,
+  // which fires synchronously on close, sees a stale generation and no-ops
+  // (never schedules a reconnect for a sub we intentionally superseded). Idempotent.
+  const armSub = (): void => {
+    if (cancelled) return;
+    clearReconnectTimer();
+    const generation = ++armGeneration;
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch {
+        // best-effort
+      }
+      unsubscribe = null;
+    }
+    const armedAtMs = Date.now();
+    unsubscribe = subscribeInboxDmsForViewer({
+      viewerPubkey,
+      relays: readRelays,
+      sinceK4: sinceK4Cursor,
+      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
+      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
+      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
+      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
+      onEvent: (ev) => {
+        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
+        handleInboxEvent(ev).catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
+        });
+      },
+      // The wrap sub closed on every relay — the socket dropped and we've gone
+      // deaf to new DMs (#934). Re-arm with backoff, unless this close belongs
+      // to a superseded / torn-down sub (stale generation) or we were cancelled.
+      onWrapsClose: () => {
+        if (cancelled || generation !== armGeneration) return;
+        // Lifetime-based health: a sub that survived a while was genuinely
+        // connected, so its drop retries from the base delay; a rapid-fail
+        // (offline) keeps climbing the exponential ladder.
+        if (Date.now() - armedAtMs >= LIVE_SUB_HEALTHY_MIN_LIFETIME_MS) reconnectAttempt = 0;
+        scheduleReconnect(generation);
+      },
+    });
+    if (__DEV__) {
+      console.log(
+        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
+      );
+    }
+  };
+
+  // Schedule a backoff-delayed re-arm after a socket drop (#934). Guards
+  // against a stale generation, an intentional teardown, and a reconnect
+  // already pending.
+  const scheduleReconnect = (generation: number): void => {
+    if (cancelled || generation !== armGeneration || reconnectTimer) return;
+    const delay = Math.min(
+      LIVE_SUB_RECONNECT_BASE_DELAY_MS * 2 ** Math.min(reconnectAttempt, 10),
+      LIVE_SUB_RECONNECT_MAX_DELAY_MS,
+    );
+    reconnectAttempt += 1;
+    if (__DEV__)
+      console.warn(`[Nostr] live DM sub closed — re-arming in ${Math.round(delay / 1000)}s`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (cancelled) return;
+      armSub();
+    }, delay);
+  };
+
+  // Re-arm on app resume (#934). Android Doze can suspend the relay WebSocket
+  // (and freeze the JS engine) while backgrounded, so on return to `active`
+  // the socket is often dead WITHOUT `onWrapsClose` ever having fired. Re-arm
+  // proactively from the shortest backoff. No-ops until the initial seed has
+  // armed the first sub, so a resume can't race ahead of the knownWrapIds seed.
+  const appStateSub = AppState.addEventListener('change', (next) => {
+    if (cancelled || !initialArmed) return;
+    if (next === 'active') {
+      // Debounce rapid foreground/background churn (#986 review): re-arming on
+      // every resume re-subscribes repeatedly when the user flicks between
+      // apps, even though a socket opened a second ago is still healthy. A
+      // genuine Doze resume is always far past this window, so it still re-arms.
+      const now = Date.now();
+      if (now - lastResumeArmMs < LIVE_SUB_RESUME_DEBOUNCE_MS) return;
+      lastResumeArmMs = now;
+      reconnectAttempt = 0;
+      armSub();
+    }
+  });
+
   (async () => {
     // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
-    const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
+    sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
     if (cancelled) return;
     // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
     // (#848 — one indexed id-only query, no plaintext leaves the DB). The
@@ -726,30 +892,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled) return;
-    unsubscribe = subscribeInboxDmsForViewer({
-      viewerPubkey,
-      relays: readRelays,
-      sinceK4,
-      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
-      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
-      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
-      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
-      onEvent: (ev) => {
-        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
-        handleInboxEvent(ev).catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
-        });
-      },
-    });
-    if (__DEV__) {
-      console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4 ?? 'default-90d'}`,
-      );
-    }
+    armSub();
+    initialArmed = true;
   })();
 
   return () => {
     cancelled = true;
+    // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
+    // the `unsubscribe()` below fires `onWrapsClose` synchronously, and without
+    // bumping the generation that intentional close would schedule a bogus
+    // reconnect (a logout / account switch / relay-list change must fully stop
+    // the sub, not resurrect it). Also stop the AppState-resume re-arm.
+    armGeneration += 1;
+    clearReconnectTimer();
+    appStateSub.remove();
     flushPendingInbox();
     // Drop the follow-gate deferral buffer + unregister the replay hook
     // atomically with sub teardown (#851 F2). A wipe / account switch tears

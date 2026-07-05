@@ -183,6 +183,60 @@ describe('buildConversationItems — unsupported message-kind fallback', () => {
     ).filter((i) => i.kind !== 'dayHeader');
     expect(items[0].kind).toBe('message');
   });
+});
+
+describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
+  const pollJson = JSON.stringify({
+    pollId: 'poll-1',
+    author: PEER,
+    question: 'Dinner?',
+    options: [
+      { id: '1', label: 'Pasta' },
+      { id: '2', label: 'Curry' },
+    ],
+    pollType: 'singlechoice',
+  });
+
+  it('renders a kind-1068 row as a poll item keyed by the embedded pollId', () => {
+    const items = buildConversationItems(
+      [{ id: 'w1', fromMe: false, text: pollJson, createdAt: DAY2, wireKind: 1068 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'poll',
+      id: 'dm-w1',
+      pollId: 'poll-1',
+      fromMe: false,
+    });
+    expect(items[0]).toHaveProperty('poll.question', 'Dinner?');
+  });
+
+  it('drops a kind-1018 vote row from the visible list', () => {
+    const voteJson = JSON.stringify({
+      pollId: 'poll-1',
+      voter: PEER,
+      optionIds: ['1'],
+      createdAt: DAY2,
+    });
+    const items = buildConversationItems(
+      [
+        { id: 'w1', fromMe: false, text: pollJson, createdAt: DAY1, wireKind: 1068 },
+        { id: 'w2', fromMe: true, text: voteJson, createdAt: DAY2, wireKind: 1018 },
+      ],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('poll');
+  });
+
+  it('falls back to the unsupported placeholder for a corrupt kind-1068 row', () => {
+    const items = buildConversationItems(
+      [{ id: 'w1', fromMe: false, text: 'not json', createdAt: DAY2, wireKind: 1068 }],
+      [],
+    ).filter((i) => i.kind !== 'dayHeader');
+    expect(items[0]).toMatchObject({ kind: 'unsupported', rawKind: 1068 });
+  });
 
   it('does NOT mark renderable wire kinds (4/14/15) as unsupported', () => {
     for (const wireKind of [4, 14, 15]) {

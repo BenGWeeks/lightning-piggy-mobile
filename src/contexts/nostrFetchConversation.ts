@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import type { SignerType } from '../types/nostr';
 import { unwrapWrapNsec, unwrapWrapViaNip44, type DecodedRumor } from '../utils/nip17Unwrap';
 import {
@@ -257,7 +258,10 @@ export async function fetchConversationFor(
     : await nostrService.fetchInboxDmEvents(pubkey, readRelays, {
         since: inboxLastSeenForWraps,
       });
-  if (kind1059.length > 0 && (signerType === 'nsec' || signerType === 'amber')) {
+  if (
+    kind1059.length > 0 &&
+    (signerType === 'nsec' || signerType === 'amber' || signerType === 'nip46')
+  ) {
     const onSkip = (reason: string, wrapId: string) => {
       if (__DEV__) console.warn(`[Nostr] NIP-17 thread unwrap skip (${wrapId}): ${reason}`);
     };
@@ -265,13 +269,19 @@ export async function fetchConversationFor(
     if (signerType === 'nsec') {
       const secretKey = await getMemoisedSecretKey(pubkey);
       if (secretKey) unwrap = (wrap) => unwrapWrapNsec(wrap, secretKey, onSkip);
-    } else {
+    } else if (signerType === 'amber') {
       // Thread view falls back to the Intent dialog if the silent path
       // rejects — the user has actively opened this thread, one approval
       // prompt per wrap is fine. Inbox refresh uses the silent-only path to
       // avoid the flood; stored rows cover the hot path.
       unwrap = (wrap) =>
         unwrapWrapViaNip44(wrap, (ct, cp) => amberService.requestNip44Decrypt(ct, cp, pubkey), onSkip); // prettier-ignore
+    } else {
+      // NIP-46 thread view: one bunker round-trip per wrap. Same as the
+      // Amber fallback — the user has actively opened this thread, so a
+      // per-wrap decrypt is acceptable; cache hits short-circuit.
+      unwrap = (wrap) =>
+        unwrapWrapViaNip44(wrap, (ct, cp) => nostrConnectService.requestNip44Decrypt(ct, cp, pubkey), onSkip); // prettier-ignore
     }
     if (unwrap) {
       // Same decrypt-once engine as refreshDmInbox (#848): DB known-id gate,
