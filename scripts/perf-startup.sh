@@ -9,8 +9,9 @@
 # Captured per run:
 #   1. cold start    — `am start -W` TotalTime (system time-to-first-frame)
 #   2. responsive    — wall clock between launch and the first
-#                      `[Perf] refreshDmInbox` log line (LP's own marker
-#                      saying the inbox refresh path settled)
+#                      `[Perf] fetchInboxDmEvents` / `[Perf] refreshDmInbox`
+#                      log line (LP's own markers saying the inbox
+#                      refresh path settled)
 #   3. tab nav       — Home → Messages → Explore → Friends, each tap
 #                      timed end-to-end via a Maestro flow that uses
 #                      `tab-<name>` testIDs (no coordinates per CLAUDE.md)
@@ -169,9 +170,14 @@ run_sample() {
   local wallet_ms
   wallet_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] wallet connected' "$since_ts" "$launch_start")
 
-  # Time-to-responsive: first refreshDmInbox completion log.
+  # Time-to-responsive: first DM-inbox settle marker. Matches EITHER
+  # `[Perf] fetchInboxDmEvents` (logged inside the fetch itself, always
+  # fires — nostrService.ts) or `[Perf] refreshDmInbox` (the refresh
+  # summary line, suppressed when a post-fetch abort short-circuits the
+  # refresh — useDmInbox.ts). Keying on refreshDmInbox alone made this
+  # column permanently TIMEOUT after the marker diverged in #789 (#814).
   local responsive_ms
-  responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts" "$launch_start")
+  responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] (refreshDmInbox|fetchInboxDmEvents)' "$since_ts" "$launch_start")
 
   # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-explore measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
   sleep 1.5
@@ -237,7 +243,7 @@ done
   echo "- **TotalTime** — Android's wall clock from \`am start\` to the first frame of the launched activity (system-side)."
   echo "- **WaitTime** — TotalTime + any pre-launch system overhead."
   echo "- **time-to-wallet** — wall clock from launch to the first \`[Perf] wallet connected\` line — i.e. how long until the active NWC wallet flips from Disconnected to Connected. Tracks issue #410."
-  echo "- **time-to-responsive** — wall clock from launch to the first \`[Perf] refreshDmInbox\` completion line. This is what the user *feels* — the screen is on, but new messages are still draining."
+  echo "- **time-to-responsive** — wall clock from launch to the first \`[Perf] fetchInboxDmEvents\` / \`[Perf] refreshDmInbox\` line. This is what the user *feels* — the screen is on, but new messages are still draining."
   echo "- **tab-X** — wall clock from \`maestro test\` invocation to the next \`[Perf] X first render\` log line. Includes Maestro's per-invocation JVM cold-start (~5–10 s) as a constant baseline; before/after comparisons of the same metric within one run are still valid."
   echo
   echo "Per-sample logs in \`$OUT/sample-N.log\`."

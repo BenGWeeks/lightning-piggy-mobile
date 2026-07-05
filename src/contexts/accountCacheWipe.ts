@@ -32,6 +32,7 @@ import {
 } from './nostrDmCache';
 import { wipeDmStoresForAccount } from './dmAccountWipe';
 import { dmStoreMigratedKey } from './dmStoreMigrationRunner';
+import { dmBlobMigratedKey } from './dmBlobMigration';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
@@ -83,9 +84,16 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
     perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
-    // DM-store migration flag (#848) — a future re-login re-runs the
-    // (then no-op) migration check instead of trusting a stale flag.
+    // DM-store migration flags (#848 wrap cache, #850 blobs) — a future
+    // re-login re-runs the (then no-op) migration checks instead of
+    // trusting a stale flag.
     dmStoreMigratedKey(loggedOutPubkey),
+    dmBlobMigratedKey(loggedOutPubkey),
+    // Pre-#288 UNSUFFIXED wrap-cache rows (N9, #850) — plaintext predating
+    // per-account keys. Not attributable to an owner, so any account's
+    // wipe removes them (the content is re-fetchable from relays).
+    AMBER_NIP17_CACHE_KEY_BASE,
+    NSEC_NIP17_CACHE_KEY_BASE,
     // Pre-existing per-pubkey caches (already namespaced before #288)
     inboxCacheKey(loggedOutPubkey),
     inboxLastSeenKey(loggedOutPubkey),

@@ -8,27 +8,49 @@ import { getOrCreateLocalDbKey, clearLocalDbKey } from './localDbKey';
 // One DB, indexed rows: DM messages (private) plus public cached events.
 const DB_NAME = 'lightningpiggy.db';
 
-// Schema v2 (#848). One row per decrypted DM event, scoped by `owner` (the
-// signed-in account's pubkey): multi-account devices share one DB file, and a
-// kind-4 DM between two local accounts is the SAME event id seen by both — so
-// the primary key is (owner, event_id), not event_id alone. Indexed by
-// (owner, conversation, created_at) for paginated slice reads — the whole
-// point of moving off the single-blob cache that froze the Messages tab
+// Schema v3 (#848, extended by #850). One row per decrypted DM event, scoped
+// by `owner` (the signed-in account's pubkey): multi-account devices share one
+// DB file, and a kind-4 DM between two local accounts is the SAME event id
+// seen by both — so the primary key is (owner, event_id), not event_id alone.
+// Indexed by (owner, conversation, created_at) for paginated slice reads — the
+// whole point of moving off the single-blob cache that froze the Messages tab
 // (#695). Public cache tables (caches/events/places) land in a later slice.
+//
+// #850 columns — everything the retired plaintext AsyncStorage blobs
+// (`nostr_dm_conv_v1_*` / `nostr_dm_inbox_v1_*`) were previously the only
+// home for, so conversations + inbox now serve PURELY from this store:
+//   delivery_status — JSON-serialised DeliveryStatus (#856) for our own sent
+//                     rows (per-relay tick breakdown). NULL on received rows.
+//   rumor_id        — NIP-17 inner-rumor event id (#857), stable across the
+//                     optimistic local- row and the relay echo; keys the
+//                     delivery-status store. NULL on received / legacy rows.
+// Optimistic sends persist as rows whose event_id starts with 'local-' until
+// the relay echo replaces them (upsertDmMessages deletes the matched local-
+// row and carries its delivery_status / rumor_id onto the echo row).
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS dm_messages (
-     owner        TEXT NOT NULL,
-     event_id     TEXT NOT NULL,
-     conversation TEXT NOT NULL,
-     created_at   INTEGER NOT NULL,
-     sender       TEXT NOT NULL,
-     content      TEXT NOT NULL,
-     from_me      INTEGER NOT NULL DEFAULT 0,
-     wire_kind    INTEGER NOT NULL DEFAULT 14,
+     owner           TEXT NOT NULL,
+     event_id        TEXT NOT NULL,
+     conversation    TEXT NOT NULL,
+     created_at      INTEGER NOT NULL,
+     sender          TEXT NOT NULL,
+     content         TEXT NOT NULL,
+     from_me         INTEGER NOT NULL DEFAULT 0,
+     wire_kind       INTEGER NOT NULL DEFAULT 14,
+     delivery_status TEXT,
+     rumor_id        TEXT,
      PRIMARY KEY (owner, event_id)
    );`,
   `CREATE INDEX IF NOT EXISTS idx_dm_owner_conversation_created
      ON dm_messages (owner, conversation, created_at DESC);`,
+];
+
+// Columns added after the v2 table shipped (#850). SQLite supports in-place
+// ADD COLUMN, so an existing install's table upgrades without a rebuild —
+// its rows (the decrypt-once memo) are preserved.
+const ADDED_COLUMNS: readonly { name: string; ddl: string }[] = [
+  { name: 'delivery_status', ddl: 'ALTER TABLE dm_messages ADD COLUMN delivery_status TEXT;' },
+  { name: 'rumor_id', ddl: 'ALTER TABLE dm_messages ADD COLUMN rumor_id TEXT;' },
 ];
 
 let dbPromise: Promise<DB> | null = null;
@@ -85,7 +107,19 @@ async function openLocalDbAttempt(): Promise<DB> {
   }
   await rebuildDmMessagesIfPreOwner(db);
   for (const stmt of SCHEMA) await db.execute(stmt);
+  await addMissingDmMessagesColumns(db);
   return db;
+}
+
+// v2 → v3 (#850): add the delivery_status / rumor_id columns to a table
+// created before they existed. CREATE TABLE IF NOT EXISTS is a no-op on an
+// existing table, so the SCHEMA pass alone doesn't add them.
+async function addMissingDmMessagesColumns(db: DB): Promise<void> {
+  const info = await db.execute('PRAGMA table_info(dm_messages);');
+  const have = new Set((info.rows ?? []).map((c) => String(c.name)));
+  for (const col of ADDED_COLUMNS) {
+    if (!have.has(col.name)) await db.execute(col.ddl);
+  }
 }
 
 // Schema v1 (pre-#848) had no `owner` column and keyed rows by event_id alone.

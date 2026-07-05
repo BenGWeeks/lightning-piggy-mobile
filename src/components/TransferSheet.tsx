@@ -541,8 +541,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Confirm large transfer',
-          `You're about to transfer ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
+          'Confirm large move',
+          `You're about to move ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
           [
             { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
             { text: 'Confirm', onPress: () => resolve(true) },
@@ -553,7 +553,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
-    setProgressMsg('Preparing transfer...');
+    setProgressMsg('Preparing move...');
     // Seed the step-by-step progress display (issue #62). Subsequent
     // setProgress(advanceTransfer(...)) calls walk the active row down
     // the list as each underlying step resolves; the existing
@@ -568,7 +568,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     const swapLabel =
       transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln'
         ? 'Boltz swap in progress'
-        : 'Transfer in progress';
+        : 'Move in progress';
     addPendingTransaction(sourceId, {
       type: 'outgoing',
       amount: currentSats,
@@ -605,7 +605,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (isCrossProfile) {
         if (!destWallet.lightningAddress) {
           throw new Error(
-            'Destination wallet has no lightning address. Set one on the destination wallet to receive cross-profile transfers.',
+            'Destination wallet has no lightning address. Set one on the destination wallet to receive cross-profile moves.',
           );
         }
         const params = await lnurlService.resolveLightningAddress(destWallet.lightningAddress);
@@ -621,11 +621,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // SendSheet LNURL-pay path.
         const opts: { comment?: string } = {};
         if (params.commentAllowed > 0) {
-          opts.comment = 'Transfer'.slice(0, params.commentAllowed);
+          opts.comment = 'Move'.slice(0, params.commentAllowed);
         }
         return lnurlService.fetchInvoice(params.callback, currentSats, opts);
       }
-      return makeInvoiceForWallet(destWallet.id, currentSats, 'Transfer');
+      return makeInvoiceForWallet(destWallet.id, currentSats, 'Move');
     };
 
     try {
@@ -901,25 +901,25 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       const settleMsg =
         transferType === 'onchain-to-onchain'
           ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : `${currentSats.toLocaleString()} sats transferred.`;
+          : `${currentSats.toLocaleString()} sats moved.`;
 
-      Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
+      Alert.alert('Move Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transfer failed';
+      const message = error instanceof Error ? error.message : 'Move failed';
       setProgress((p) => failTransfer(p, message));
       // "Cannot read property 'reload' of undefined" comes from
       // react-native's HMRClient when Metro drops the dev-client
       // connection. It is NOT a transfer failure — nothing was signed
       // or broadcast. Surface it as a dev-mode hiccup with a clear
-      // retry hint instead of a scary "Transfer Failed" alert.
+      // retry hint instead of a scary "Move Failed" alert.
       if (/reload.*of undefined|DevSettings/i.test(message)) {
         Alert.alert(
           'Development Reload Needed',
-          'Metro disconnected from the app mid-transfer. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
+          'Metro disconnected from the app mid-move. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
           [{ text: 'OK' }],
         );
       } else {
-        Alert.alert('Transfer Failed', message);
+        Alert.alert('Move Failed', message);
       }
     } finally {
       // When a Boltz swap has been handed off to a background IIFE we leave
@@ -1063,7 +1063,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         <BottomSheetView style={styles.content}>
           <AmountEntryScreen
             initialSats={currentSats}
-            title="Transfer amount"
+            title="Move amount"
             minSats={
               isBoltzTransfer
                 ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
@@ -1089,7 +1089,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           keyboardShouldPersistTaps="handled"
         >
           <>
-            <Text style={styles.title}>Transfer</Text>
+            <Text style={styles.title}>Move</Text>
 
             {/* Source wallet selector */}
             {sending || progress.phase === 'failed' ? (
@@ -1292,7 +1292,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   style={styles.amountPickerRow}
                   onPress={() => setStep('amount')}
                   testID="transfer-amount-picker"
-                  accessibilityLabel="Enter transfer amount"
+                  accessibilityLabel="Enter move amount"
                 >
                   {currentSats > 0 ? (
                     <>
@@ -1362,7 +1362,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {crossProfileLnNoAddress && (
                   <Text style={styles.warningText} testID="transfer-cross-profile-no-lud16">
                     Set a lightning address on the destination wallet to receive cross-profile
-                    transfers. On-chain destinations work without one.
+                    moves. On-chain destinations work without one.
                   </Text>
                 )}
 
@@ -1372,7 +1372,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     style={styles.cancelButton}
                     onPress={onClose}
                     testID="transfer-cancel"
-                    accessibilityLabel="Cancel transfer"
+                    accessibilityLabel="Cancel move"
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
@@ -1384,9 +1384,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onPress={handleTransfer}
                     disabled={!canTransfer || sending}
                     testID="transfer-execute"
-                    accessibilityLabel="Execute transfer"
+                    accessibilityLabel="Execute move"
                   >
-                    <Text style={styles.transferButtonText}>Transfer</Text>
+                    <Text style={styles.transferButtonText}>Move</Text>
                   </TouchableOpacity>
                 </View>
               </>

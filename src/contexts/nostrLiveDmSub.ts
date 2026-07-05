@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -14,7 +15,12 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
-import { selectDmWrapIds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import {
+  selectDmWrapIds,
+  upsertDmMessages,
+  hasConversationWith,
+  type DmMessageRow,
+} from '../services/dmDb';
 import {
   parseOrderEvent,
   serializeOrder,
@@ -33,13 +39,40 @@ import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSub
 import {
   COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
-  inboxCacheKey,
   inboxLastSeenKey,
-  safeGetDmCacheItem,
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
+import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
+
+// --- Live-sub self-re-arm on relay drop / app resume (#934) ---
+// The app-wide SimplePool deliberately does NOT auto-reconnect
+// (enableReconnect stays default-false app-wide), so when the wrap
+// subscription's WebSocket silently drops — relay idle timeout, network
+// change, Android Doze suspending the socket on background — the foreground
+// live sub goes deaf and nothing re-opens it. The user then has to
+// pull-to-refresh to see missed DMs (the #934 symptom). We mirror the
+// background DM watch's self-re-arm (#958): the sub's `onWrapsClose` schedules
+// a backoff-scheduled re-open, and an AppState 'active' listener re-arms on
+// resume (Doze can freeze the JS engine before onWrapsClose ever fires). A
+// generation counter guards against re-arming after an intentional teardown
+// (logout / account switch / relay-list change), and re-arms are silent by
+// construction — re-subscribing over healthy sockets reuses the pool's open
+// connections, the `isFreshArrival` gate mutes the backlog replay, and
+// `knownWrapIds` + `claimWrapNotification` prevent duplicate work / alerts.
+const LIVE_SUB_RECONNECT_BASE_DELAY_MS = 5_000;
+const LIVE_SUB_RECONNECT_MAX_DELAY_MS = 5 * 60_000;
+// A subscription that survived at least this long before closing counts as
+// having been healthy — its next drop retries from the base delay; a
+// rapid-fail (offline) keeps climbing the exponential backoff ladder.
+const LIVE_SUB_HEALTHY_MIN_LIFETIME_MS = 60_000;
+// Leading-edge debounce for the AppState `active` re-arm: the first resume
+// re-arms immediately, but rapid foreground/background churn within this window
+// is coalesced (the socket a moment-ago resume opened is still healthy, so
+// re-subscribing again is wasted churn). A real Doze resume is far apart from
+// the prior one, so it always clears this window and re-arms.
+const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
 
 /**
  * Snapshot + live-dependency bundle the live-DM subscription closes over.
@@ -56,24 +89,6 @@ import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
  * reading them through the bundle keeps the gate + dedup behaviour
  * byte-for-byte identical.
  */
-
-/**
- * Parse the persisted inbox cache, dropping malformed entries. A corrupt cache
- * (null entries, non-objects, or a missing `partnerPubkey`) must not crash the
- * later `.some(...)` / `mergeInboxEntries` and break live order/DM ingest.
- */
-function parseCachedInboxEntries(raw: string | null): DmInboxEntry[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (e) => e && typeof e === 'object' && typeof e.partnerPubkey === 'string',
-    ) as DmInboxEntry[];
-  } catch {
-    return [];
-  }
-}
 
 export interface LiveDmSubscriptionParams {
   viewerPubkey: string;
@@ -132,6 +147,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
+  // Self-re-arm state (#934). `armGeneration` is bumped on every (re)arm and on
+  // teardown; each underlying sub's `onWrapsClose` captures the generation live
+  // at arm time, so a close belonging to a sub we already superseded (or a
+  // torn-down sub) is stale and must not schedule a reconnect.
+  let armGeneration = 0;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Wall-clock ms of the last AppState-resume-triggered re-arm, for the
+  // leading-edge debounce below (rapid foreground/background churn coalesces).
+  let lastResumeArmMs = 0;
+  // True once the initial async arm (which seeds knownWrapIds + loads the
+  // kind-4 `since` cursor) has opened the first sub. The AppState-resume
+  // re-arm no-ops before this so it can't race ahead of the seed.
+  let initialArmed = false;
   let writeChain: Promise<void> = Promise.resolve();
   // Wall-clock second the sub opened. We fire OS notifications ONLY for
   // messages whose own timestamp is at/after this (minus a clock-skew
@@ -147,31 +176,23 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const isFreshArrival = (createdAtSec: number): boolean =>
     createdAtSec >= subOpenedAtSec - NOTIFY_SKEW_SEC;
 
-  // Coalesce per-event inbox merges into one setDmInbox call per ~150 ms or per 25 events. Without this, a relay-restream burst (e.g. cold start with 200+ kind-4 events queued) causes one React re-render per event = 30+ rerenders/sec on the JS thread, which is what locks the UI for 30 seconds. Batching collapses that into ~6 rerenders/sec at most. Notifications still fire per-event so unread counts/sounds aren't dropped.
-  let pendingInboxEntries: DmInboxEntry[] = [];
-  let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  const PENDING_FLUSH_MS = 150;
-  const PENDING_FLUSH_THRESHOLD = 25;
-  const flushPendingInbox = (): void => {
-    if (pendingFlushTimer) {
-      clearTimeout(pendingFlushTimer);
-      pendingFlushTimer = null;
-    }
-    if (pendingInboxEntries.length === 0) return;
-    const batch = pendingInboxEntries;
-    pendingInboxEntries = [];
-    setDmInbox((prev) => mergeInboxEntries(prev, batch, DM_INBOX_CAP));
-  };
-  const queueInboxEntry = (entry: DmInboxEntry): void => {
-    pendingInboxEntries.push(entry);
-    if (pendingInboxEntries.length >= PENDING_FLUSH_THRESHOLD) {
-      flushPendingInbox();
-      return;
-    }
-    if (pendingFlushTimer === null) {
-      pendingFlushTimer = setTimeout(flushPendingInbox, PENDING_FLUSH_MS);
-    }
-  };
+  // Coalesce per-event inbox merges into batched setDmInbox calls — at most
+  // one per ~150 ms quiet window or per 25 events. Without batching, a
+  // relay-restream burst (e.g. cold start with 200+ kind-4 events queued)
+  // causes one React re-render per event = 30+ rerenders/sec on the JS
+  // thread, which is what locks the UI for 30 seconds; batching collapses
+  // that into ~6 rerenders/sec at most. The queue flushes on the LEADING
+  // edge, so the common case — one fresh DM arriving in the foreground —
+  // surfaces immediately instead of idling out the full 150 ms window
+  // (#934 item 3). Notifications still fire per-event so unread
+  // counts/sounds aren't dropped.
+  const inboxFlushQueue = createCoalescedFlushQueue<DmInboxEntry>({
+    flushMs: 150,
+    threshold: 25,
+    onFlush: (batch) => setDmInbox((prev) => mergeInboxEntries(prev, batch, DM_INBOX_CAP)),
+  });
+  const queueInboxEntry = inboxFlushQueue.push;
+  const flushPendingInbox = inboxFlushQueue.flush;
 
   // Replay the surface + notify side-effects of a fresh inbound that was
   // deferred by the follow-gate during the post-switch hydration window
@@ -318,10 +339,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         wireKind: 4,
       };
       // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
-      // LRU dies with the session) plus the inbox preview blob. Same
-      // writeChain as kind-1059 to serialize concurrent inbox writes. Also
-      // bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter
-      // advances and doesn't re-fetch already-seen events on the next refresh.
+      // LRU dies with the session). The store is the ONLY at-rest home now
+      // (#850; the plaintext inbox-preview blob is retired). Same writeChain
+      // as kind-1059 to serialize concurrent store writes. Also bump
+      // inboxLastSeenKey (a bare timestamp) so refreshDmInbox's kind-4
+      // `since` filter advances and doesn't re-fetch already-seen events.
       const k4Row: DmMessageRow = {
         owner: viewerPubkey,
         eventId: ev.id,
@@ -335,20 +357,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
-          await upsertDmMessages([k4Row]).catch((e) => {
-            if (__DEV__) console.warn('[DmStore] live kind-4 upsert failed:', e);
-          });
-          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-          const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
-          // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
-          if (cancelled) return;
-          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-            () => {},
-          );
+          // N5 (#850): a store failure THROWS here (caught by the trailing
+          // .catch), so the lastSeen bump below never runs for a row the DB
+          // failed to keep — aligned with the kind-1059 path. The next
+          // refresh's `since` floor then re-fetches the event instead of
+          // silently skipping past an unpersisted message.
+          await upsertDmMessages([k4Row]);
           const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
           const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
           if (ev.created_at > lastSeen) {
+            // Re-check after the awaits: logout may have wiped these stores
+            // while we were writing.
             if (cancelled) return;
             await AsyncStorage.setItem(inboxLastSeenKey(viewerPubkey), String(ev.created_at)).catch(
               () => {},
@@ -358,7 +377,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live kind-4 persist failed:', e);
         });
-      await writeChain;
+      // Surface to the UI without awaiting the persist chain (#934 item 2):
+      // awaiting meant every earlier event's SQLite upsert + inbox-blob
+      // read-merge-write had to settle before THIS one could reach
+      // setDmInbox, so under a backlog burst arrival latency grew with
+      // queue depth. Persistence stays fully serialized via writeChain; a
+      // failed persist is recovered by the next refreshDmInbox — the same
+      // recovery model as the follow-gate replay path.
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       queueInboxEntry(k4InboxEntry);
@@ -429,45 +454,53 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // by `#p`, so any sender can craft an order-shaped kind-16/17 to the
       // viewer. To avoid OS-level notification spam, only raise a push when the
       // market is already trusted: followed, OR an existing conversation in the
-      // inbox cache. Unknown senders are still stored + surfaced in-app silently.
+      // encrypted store (#850 — replaces the retired plaintext inbox blob scan).
+      // Unknown senders are still stored + surfaced in-app silently.
       // (Follow-up: record markets the user actively ordered from — e.g. via the
       // Explore Market checkout — into a trust set so a first legitimate order
-      // notifies too.) `partnerKnown` is read from the inbox BEFORE this event
-      // merges in, so the very first order from a stranger can't self-qualify.
+      // notifies too.) `partnerKnown` is checked BEFORE this event's own upsert,
+      // so the very first order from a stranger can't self-qualify.
       const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
       let partnerKnown = partnerFollowed;
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
+          if (!partnerKnown) {
+            partnerKnown = await hasConversationWith(viewerPubkey, partnerPubkey).catch(
+              () => false,
+            );
+          }
           await upsertDmMessages([orderRow]).catch((e) => {
             if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
           });
-          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-          const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-          if (cachedInbox.some((e) => e.partnerPubkey === partnerPubkey)) partnerKnown = true;
-          const merged = mergeInboxEntries(cachedInbox, [orderInboxEntry], DM_INBOX_CAP);
-          if (cancelled) return;
-          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-            () => {},
-          );
         })
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
         });
-      await writeChain;
+      // Surface to the UI without awaiting the persist chain (#934 item 2) —
+      // same reasoning as the kind-4 path above.
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       queueInboxEntry(orderInboxEntry);
       notifyDmMessage(partnerPubkey);
-      if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
-        void fireMessageNotification({
-          kind: 'dm',
-          threadId: partnerPubkey,
-          title: 'Marketplace update',
-          body: preview,
-          data: { conversationPubkey: partnerPubkey },
-        });
-      }
+      // The OS-notification trust gate reads `partnerKnown`, which the
+      // persist closure above resolves from the pre-merge inbox cache — so
+      // the push (and only the push) still waits for the chain to settle.
+      // `writeChain` here is the captured promise INCLUDING this event's
+      // persist; later reassignments don't affect it, and its trailing
+      // .catch means this continuation always runs.
+      void writeChain.then(() => {
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+        if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
+          void fireMessageNotification({
+            kind: 'dm',
+            threadId: partnerPubkey,
+            title: 'Marketplace update',
+            body: preview,
+            data: { conversationPubkey: partnerPubkey },
+          });
+        }
+      });
       if (__DEV__)
         console.log(
           `[Nostr] live kind-${ev.kind} ${ev.id.slice(0, 8)} surfaced (order=${order.orderId.slice(0, 8)}, partner=${partnerPubkey.slice(0, 8)})`,
@@ -647,7 +680,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
     };
 
-    // Serialise store-upsert + inbox-blob write so concurrent live wraps don't race each other.
+    // Serialise store upserts so concurrent live wraps don't race each other.
     // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
     writeChain = writeChain
       .then(async () => {
@@ -655,24 +688,18 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         // Encrypted store write (#848) — idempotent by (owner, event_id), so
         // a wrap delivered by both the live sub and a near-simultaneous
         // refresh lands as one row (the old file read→merge→write dance and
-        // its #811 clobbering hazard are gone).
+        // its #811 clobbering hazard are gone). The store is the ONLY
+        // at-rest persistence (#850) — the plaintext inbox blob is retired.
         await upsertDmMessages([wrapRow]);
         knownWrapIds?.add(wrap.id);
-
-        // Re-check after each await: logout may have wiped these stores while we were writing. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
-        if (cancelled) return;
-        const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
-        const cachedInbox: DmInboxEntry[] = parseCachedInboxEntries(inboxRaw);
-        const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
-        if (cancelled) return;
-        await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-          () => {},
-        );
       })
       .catch((e) => {
         if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
       });
-    await writeChain;
+    // Surface to the UI without awaiting the persist chain (#934 item 2) —
+    // same reasoning as the kind-4 path above. knownWrapIds was already
+    // eagerly claimed at the top of this handler, so dedup doesn't depend
+    // on the chain either.
     if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
     queueInboxEntry(inboxEntry);
@@ -698,9 +725,111 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
   // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
   let unsubscribe: (() => void) | null = null;
+  // The kind-4 `since` cursor loaded once by the initial seed below; re-arms
+  // (#934) reuse it. Re-streaming kind-4 from the same cursor on a re-arm is
+  // safe: the closure-scoped `seen` Set, the RAM plaintext cache, and the
+  // idempotent encrypted-store upsert all dedupe the re-fetched bytes.
+  let sinceK4Cursor: number | undefined;
+
+  const clearReconnectTimer = (): void => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
+  // Open (or re-open) the underlying relay subscription. Bumps the generation
+  // FIRST, then tears down any prior sub — so the prior sub's `onWrapsClose`,
+  // which fires synchronously on close, sees a stale generation and no-ops
+  // (never schedules a reconnect for a sub we intentionally superseded). Idempotent.
+  const armSub = (): void => {
+    if (cancelled) return;
+    clearReconnectTimer();
+    const generation = ++armGeneration;
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch {
+        // best-effort
+      }
+      unsubscribe = null;
+    }
+    const armedAtMs = Date.now();
+    unsubscribe = subscribeInboxDmsForViewer({
+      viewerPubkey,
+      relays: readRelays,
+      sinceK4: sinceK4Cursor,
+      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
+      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
+      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
+      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
+      onEvent: (ev) => {
+        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
+        handleInboxEvent(ev).catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
+        });
+      },
+      // The wrap sub closed on every relay — the socket dropped and we've gone
+      // deaf to new DMs (#934). Re-arm with backoff, unless this close belongs
+      // to a superseded / torn-down sub (stale generation) or we were cancelled.
+      onWrapsClose: () => {
+        if (cancelled || generation !== armGeneration) return;
+        // Lifetime-based health: a sub that survived a while was genuinely
+        // connected, so its drop retries from the base delay; a rapid-fail
+        // (offline) keeps climbing the exponential ladder.
+        if (Date.now() - armedAtMs >= LIVE_SUB_HEALTHY_MIN_LIFETIME_MS) reconnectAttempt = 0;
+        scheduleReconnect(generation);
+      },
+    });
+    if (__DEV__) {
+      console.log(
+        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
+      );
+    }
+  };
+
+  // Schedule a backoff-delayed re-arm after a socket drop (#934). Guards
+  // against a stale generation, an intentional teardown, and a reconnect
+  // already pending.
+  const scheduleReconnect = (generation: number): void => {
+    if (cancelled || generation !== armGeneration || reconnectTimer) return;
+    const delay = Math.min(
+      LIVE_SUB_RECONNECT_BASE_DELAY_MS * 2 ** Math.min(reconnectAttempt, 10),
+      LIVE_SUB_RECONNECT_MAX_DELAY_MS,
+    );
+    reconnectAttempt += 1;
+    if (__DEV__)
+      console.warn(`[Nostr] live DM sub closed — re-arming in ${Math.round(delay / 1000)}s`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (cancelled) return;
+      armSub();
+    }, delay);
+  };
+
+  // Re-arm on app resume (#934). Android Doze can suspend the relay WebSocket
+  // (and freeze the JS engine) while backgrounded, so on return to `active`
+  // the socket is often dead WITHOUT `onWrapsClose` ever having fired. Re-arm
+  // proactively from the shortest backoff. No-ops until the initial seed has
+  // armed the first sub, so a resume can't race ahead of the knownWrapIds seed.
+  const appStateSub = AppState.addEventListener('change', (next) => {
+    if (cancelled || !initialArmed) return;
+    if (next === 'active') {
+      // Debounce rapid foreground/background churn (#986 review): re-arming on
+      // every resume re-subscribes repeatedly when the user flicks between
+      // apps, even though a socket opened a second ago is still healthy. A
+      // genuine Doze resume is always far past this window, so it still re-arms.
+      const now = Date.now();
+      if (now - lastResumeArmMs < LIVE_SUB_RESUME_DEBOUNCE_MS) return;
+      lastResumeArmMs = now;
+      reconnectAttempt = 0;
+      armSub();
+    }
+  });
+
   (async () => {
     // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
-    const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
+    sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
     if (cancelled) return;
     // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
     // (#848 — one indexed id-only query, no plaintext leaves the DB). The
@@ -747,30 +876,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled) return;
-    unsubscribe = subscribeInboxDmsForViewer({
-      viewerPubkey,
-      relays: readRelays,
-      sinceK4,
-      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
-      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
-      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
-      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
-      onEvent: (ev) => {
-        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
-        handleInboxEvent(ev).catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
-        });
-      },
-    });
-    if (__DEV__) {
-      console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4 ?? 'default-90d'}`,
-      );
-    }
+    armSub();
+    initialArmed = true;
   })();
 
   return () => {
     cancelled = true;
+    // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
+    // the `unsubscribe()` below fires `onWrapsClose` synchronously, and without
+    // bumping the generation that intentional close would schedule a bogus
+    // reconnect (a logout / account switch / relay-list change must fully stop
+    // the sub, not resurrect it). Also stop the AppState-resume re-arm.
+    armGeneration += 1;
+    clearReconnectTimer();
+    appStateSub.remove();
     flushPendingInbox();
     // Drop the follow-gate deferral buffer + unregister the replay hook
     // atomically with sub teardown (#851 F2). A wipe / account switch tears

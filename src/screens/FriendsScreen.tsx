@@ -76,6 +76,91 @@ interface ListItem {
   source: 'nostr' | 'contacts';
 }
 
+// Stable-callback wrapper so React.memo(ContactListItem) can actually skip
+// re-renders during scroll. renderItem would otherwise build fresh
+// onPress/onZap/onMessage closures for every row on every pass, defeating
+// ContactListItem's own memo and re-rendering the whole viewport each frame.
+interface ContactRowProps {
+  item: ListItem;
+  hasWallets: boolean;
+  zapDisabledReason: string;
+  onContactPress: (item: ListItem) => void;
+  onZapPress: (item: ListItem) => void;
+  navigation: FriendsNavigation;
+}
+
+const ContactRow = React.memo(
+  ({
+    item,
+    hasWallets,
+    zapDisabledReason,
+    onContactPress,
+    onZapPress,
+    navigation,
+  }: ContactRowProps) => {
+    const handlePress = React.useCallback(() => onContactPress(item), [onContactPress, item]);
+    const handleZap = React.useCallback(() => onZapPress(item), [onZapPress, item]);
+    const handleMessage = React.useMemo(() => {
+      // Capture pubkey in a non-null const so TS narrows it inside the
+      // closure — referencing item.pubkey directly widens it back to
+      // `string | null`.
+      const pubkey = item.pubkey;
+      if (!pubkey) return undefined;
+      return () =>
+        navigation.navigate('Conversation', {
+          pubkey,
+          name: item.name,
+          picture: item.picture,
+          lightningAddress: item.lightningAddress,
+        });
+    }, [navigation, item.pubkey, item.name, item.picture, item.lightningAddress]);
+
+    return (
+      <ContactListItem
+        name={item.name}
+        picture={item.picture}
+        lightningAddress={item.lightningAddress}
+        canMessage={!!item.pubkey}
+        canZap={hasWallets}
+        showZap={item.hasLightningAddress}
+        zapDisabledReason={zapDisabledReason}
+        onPress={handlePress}
+        onZap={handleZap}
+        onMessage={handleMessage}
+        testID={`friend-row-${item.id}`}
+      />
+    );
+  },
+  (prev, next) =>
+    // The row's output is a pure function of the `item` fields ContactRow
+    // actually reads to render (id → testID, name, picture, lightningAddress,
+    // hasLightningAddress → showZap, pubkey → canMessage/handleMessage), the
+    // two row-level gates (hasWallets, zapDisabledReason), and the callbacks.
+    // Compare each so a contact whose display data changes under the same id
+    // re-renders instead of showing stale UI. The callbacks/navigation are
+    // stable references (parent memoises them), so comparing them by identity
+    // closes the stale-handler gap without costing the scroll-perf win — they
+    // stay equal frame-to-frame. Fields ListItem carries but this row never
+    // renders (banner, nip05, source) are intentionally omitted: they can't
+    // change the row's output, so including them would only cause needless
+    // re-renders. The onPress closure can therefore capture a stale banner/
+    // nip05/source, but that's harmless — handleContactPress re-resolves the
+    // freshest item by id from itemsByIdRef before opening the profile sheet
+    // (#977 review), so the sheet/profile screen never see stale data.
+    prev.item.id === next.item.id &&
+    prev.item.name === next.item.name &&
+    prev.item.picture === next.item.picture &&
+    prev.item.lightningAddress === next.item.lightningAddress &&
+    prev.item.hasLightningAddress === next.item.hasLightningAddress &&
+    prev.item.pubkey === next.item.pubkey &&
+    prev.hasWallets === next.hasWallets &&
+    prev.zapDisabledReason === next.zapDisabledReason &&
+    prev.onContactPress === next.onContactPress &&
+    prev.onZapPress === next.onZapPress &&
+    prev.navigation === next.navigation,
+);
+ContactRow.displayName = 'ContactRow';
+
 const FriendsScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
@@ -113,6 +198,12 @@ const FriendsScreen: React.FC = () => {
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  // Mirror currentLetter in a ref so handleScroll can read the latest value
+  // without listing currentLetter in its deps — otherwise the callback is
+  // recreated on every letter-boundary crossing, re-subscribing the scroll
+  // handler mid-scroll.
+  const currentLetterRef = useRef(currentLetter);
+  currentLetterRef.current = currentLetter;
   const scrollTrackingPaused = useRef(false);
   // Performance instrumentation (dev only)
   const screenMountTime = useRef(Date.now());
@@ -246,9 +337,43 @@ const FriendsScreen: React.FC = () => {
       }
     }
 
-    items.sort((a, b) => NAME_COLLATOR.compare(a.name, b.name));
+    // Sort by firstAlpha bucket first, then by collator within the bucket —
+    // matches FriendPickerSheet / CreateGroupSheet. firstAlpha() buckets a
+    // name by the FIRST A–Z letter found ANYWHERE in it (after NFKD +
+    // uppercase), so a leading emoji/symbol/digit is skipped over to the first
+    // Latin letter (e.g. "🎉Alice" → 'A'). A name lands in '#' only when it
+    // has no A–Z at all (all-emoji, CJK-only, digits/symbols). Keeping '#' as
+    // one contiguous group at the top stops the alphabet sidebar highlight
+    // jumping between Z and # during scroll.
+    items.sort((a, b) => {
+      const alphaA = firstAlpha(a.name);
+      const alphaB = firstAlpha(b.name);
+      if (alphaA !== alphaB) {
+        if (alphaA === '#') return -1;
+        if (alphaB === '#') return 1;
+        return alphaA < alphaB ? -1 : 1;
+      }
+      return NAME_COLLATOR.compare(a.name, b.name);
+    });
     return items;
   }, [contacts, phoneContacts, filter]);
+
+  // Source-of-truth lookup keyed by the stable ListItem.id, mirrored into a
+  // ref so handleContactPress can read the FRESHEST item without depending on
+  // sortedItems (which would break its stable identity and cost the scroll
+  // perf win). ContactRow's memo comparator intentionally ignores
+  // banner/nip05/source — fields the row never renders — so a row can
+  // legitimately skip re-rendering while those change, leaving its captured
+  // `item` stale. Looking the contact up fresh by id when the sheet opens
+  // keeps ContactProfileSheet / handleViewFullProfile on current
+  // banner/nip05/source without widening the comparator (#977 review).
+  const itemsById = useMemo(() => {
+    const m = new Map<string, ListItem>();
+    for (const it of sortedItems) m.set(it.id, it);
+    return m;
+  }, [sortedItems]);
+  const itemsByIdRef = useRef(itemsById);
+  itemsByIdRef.current = itemsById;
 
   // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
   // match is O(n) per keystroke but with no allocations and no sort —
@@ -296,12 +421,12 @@ const FriendsScreen: React.FC = () => {
       const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
         const letter = firstAlpha(combinedList[index].name);
-        if (letter !== currentLetter) {
+        if (letter !== currentLetterRef.current) {
           setCurrentLetter(letter);
         }
       }
     },
-    [combinedList, currentLetter],
+    [combinedList],
   );
 
   const scrollToLetter = useCallback(
@@ -376,7 +501,12 @@ const FriendsScreen: React.FC = () => {
   // leaving the list; its "View full profile" link drills into the
   // full ContactProfile route when the user wants the deep view.
   const handleContactPress = useCallback((item: ListItem) => {
-    setSelectedContact(item);
+    // Resolve the freshest copy by stable id: the memoised row may have
+    // skipped re-rendering on a banner/nip05/source change (fields it never
+    // renders), so its captured `item` can be stale for the profile sheet.
+    // Fall back to the passed item if it's somehow not in the current list.
+    const fresh = itemsByIdRef.current.get(item.id) ?? item;
+    setSelectedContact(fresh);
     setProfileSheetVisible(true);
   }, []);
 
@@ -469,48 +599,25 @@ const FriendsScreen: React.FC = () => {
     });
   }, [celebration, celebDisplay, contacts, navigation]);
 
+  // Zap affordance only shows for contacts that actually have a Lightning
+  // address (hasLightningAddress). When shown it's enabled as long as the
+  // user has a wallet — the verified address is re-resolved on tap; greyed +
+  // tappable-for-why when there's no wallet. Disabled-reason strings are read
+  // to screen readers. Resolved once here (not per row) so ContactRow can
+  // treat it as a stable prop.
+  const zapDisabledReason = t('friendsScreen.noWalletAttachedReason');
   const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => {
-      // Zap affordance only shows for contacts that actually have a
-      // Lightning address (hasLightningAddress). When shown it's enabled
-      // as long as the user has a wallet — the verified address is
-      // re-resolved on tap; greyed + tappable-for-why when there's no
-      // wallet. Message needs a Nostr pubkey (phone-only contacts don't
-      // have one). Disabled-reason strings are read to screen readers.
-      const canZap = hasWallets;
-      const zapDisabledReason = t('friendsScreen.noWalletAttachedReason');
-      return (
-        <ContactListItem
-          name={item.name}
-          picture={item.picture}
-          lightningAddress={item.lightningAddress}
-          canMessage={!!item.pubkey}
-          canZap={canZap}
-          showZap={item.hasLightningAddress}
-          zapDisabledReason={zapDisabledReason}
-          onPress={() => handleContactPress(item)}
-          onZap={() => handleZap(item)}
-          onMessage={
-            // Capture pubkey in a non-null const so TS narrows it inside
-            // the closure — referencing item.pubkey directly inside the
-            // arrow body widens it back to `string | null`.
-            (() => {
-              const pubkey = item.pubkey;
-              if (!pubkey) return undefined;
-              return () =>
-                navigation.navigate('Conversation', {
-                  pubkey,
-                  name: item.name,
-                  picture: item.picture,
-                  lightningAddress: item.lightningAddress,
-                });
-            })()
-          }
-          testID={`friend-row-${item.id}`}
-        />
-      );
-    },
-    [handleZap, handleContactPress, hasWallets, navigation, t],
+    ({ item }: { item: ListItem }) => (
+      <ContactRow
+        item={item}
+        hasWallets={hasWallets}
+        zapDisabledReason={zapDisabledReason}
+        onContactPress={handleContactPress}
+        onZapPress={handleZap}
+        navigation={navigation}
+      />
+    ),
+    [handleZap, handleContactPress, hasWallets, navigation, zapDisabledReason],
   );
 
   const filters: { key: Filter; label: string }[] = [
