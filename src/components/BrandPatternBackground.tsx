@@ -177,8 +177,9 @@ const BrandPatternBackground: React.FC<Props> = ({ variant, style }) => {
       pointerEvents="none"
     >
       {/* Opaque base gradient — the header background. Keeps the pink→purple
-          wash intact so the alpha veil below can hide/reveal the monogram
-          horizontally without washing out the colour on the right. */}
+          wash intact so the alpha veil layered OVER the monogram (rendered
+          after the SVG, further down) can hide/reveal it horizontally without
+          washing out the colour on the right. */}
       <LinearGradient
         colors={[colors.brandPink, colors.brandGradientMid, colors.brandPurple]}
         locations={[0, 0.55, 1]}
