@@ -49,7 +49,7 @@ export const createSharedAccountStyles = (colors: Palette) =>
       paddingHorizontal: 2,
     },
     sslToggleActive: {
-      backgroundColor: colors.green,
+      backgroundColor: colors.brandPink,
     },
     sslToggleThumb: {
       width: 24,

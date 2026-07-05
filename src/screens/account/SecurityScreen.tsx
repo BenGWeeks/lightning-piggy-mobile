@@ -127,7 +127,7 @@ const SecurityScreen: React.FC = () => {
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
       <View style={styles.headerRow}>
-        <ShieldCheck size={22} color={colors.accentSecondary} />
+        <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           {t('securityScreen.confirmLargeSends')}
         </Text>
@@ -151,7 +151,7 @@ const SecurityScreen: React.FC = () => {
                 <Text style={styles.optionLabel}>{t(opt.labelKey)}</Text>
                 <Text style={styles.optionSublabel}>{t(opt.sublabelKey)}</Text>
               </View>
-              {selected && <Check size={18} color={colors.accentSecondary} />}
+              {selected && <Check size={18} color={colors.brandPink} />}
             </TouchableOpacity>
           );
         })}
@@ -174,12 +174,12 @@ const SecurityScreen: React.FC = () => {
               <Text style={styles.customSatsLabel}>{t('securityScreen.sats')}</Text>
             </View>
           </View>
-          {customActive && <Check size={18} color={colors.accentSecondary} />}
+          {customActive && <Check size={18} color={colors.brandPink} />}
         </View>
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <Link2 size={22} color={colors.accentSecondary} />
+        <Link2 size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           {t('securityScreen.linkPreviews')}
         </Text>
@@ -192,12 +192,13 @@ const SecurityScreen: React.FC = () => {
           onValueChange={handleToggleLinkPreview}
           accessibilityLabel={t('securityScreen.showLinkPreviewsA11y')}
           testID="security-link-preview-toggle"
-          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
+          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          thumbColor={colors.white}
         />
       </View>
 
       <View style={[styles.headerRow, styles.sectionGap]}>
-        <BellRing size={22} color={colors.accentSecondary} />
+        <BellRing size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
           {t('securityScreen.notificationContent')}
         </Text>
@@ -212,14 +213,15 @@ const SecurityScreen: React.FC = () => {
           onValueChange={handleToggleLockScreenContent}
           accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
           testID="security-lockscreen-content-toggle"
-          trackColor={{ false: colors.divider, true: colors.accentSecondary }}
+          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          thumbColor={colors.white}
         />
       </View>
 
       {isAndroid && (
         <>
           <View style={[styles.headerRow, styles.sectionGap]}>
-            <Radio size={22} color={colors.brandPink} />
+            <Radio size={22} color={colors.white} />
             <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
               {t('securityScreen.backgroundNotifications')}
             </Text>
@@ -235,6 +237,7 @@ const SecurityScreen: React.FC = () => {
               accessibilityLabel={t('securityScreen.watchForMessages')}
               testID="security-background-dm-toggle"
               trackColor={{ false: colors.divider, true: colors.brandPink }}
+              thumbColor={colors.white}
             />
           </View>
         </>
