@@ -18,7 +18,8 @@ import {
   syncBackgroundDmWatchFromPreference,
 } from '../services/backgroundDmService';
 import * as amberService from '../services/amberService';
-import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
+import * as nostrConnectService from '../services/nostrConnectService';
+import type { NostrProfile, NostrContact, RelayConfig, SignerType, Nip46Connection } from '../types/nostr'; // prettier-ignore
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -34,10 +35,13 @@ import { perfLog } from '../utils/perfLog';
 import { sanitizeContacts, resolveForcedRefreshContacts } from '../utils/contacts';
 import { useReactionActions, type UseReactionActionsResult } from '../hooks/useReactionActions';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
-import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
+import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
 import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
+import { useContactActions } from './useContactActions';
+import { useNip46Login, restoreNip46Session } from './useNip46Login';
+import { nip46Sign } from './nip46DmDecrypt';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
@@ -114,6 +118,8 @@ interface NostrContextType extends UseReactionActionsResult {
   signOutIdentity: (pubkey: string) => Promise<void>;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
+  /** Finalise a NIP-46 ("Nostr Connect" / bunker) pairing; see useNip46Login. */
+  loginWithNip46: (connection: Nip46Connection) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   /**
    * Re-fetch the logged-in user's kind-0.
@@ -151,6 +157,16 @@ interface NostrContextType extends UseReactionActionsResult {
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
+    hooks?: SendHooks,
+  ) => Promise<SendResult>;
+  /**
+   * Gift-wrap a pre-built NIP-17 rumor of any inner kind (e.g. a kind-1068
+   * NIP-88 poll or kind-1018 vote) to one or more recipients, keeping its
+   * structured tags on the wire. See #203.
+   */
+  sendDirectRumor: (
+    recipientPubkeys: string[],
+    rumor: { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string },
     hooks?: SendHooks,
   ) => Promise<SendResult>;
   /**
@@ -845,6 +861,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (storedPubkey) {
             pk = storedPubkey;
           }
+        } else if (storedSignerType === 'nip46') {
+          // Restore the persisted bunker connection (see useNip46Login).
+          pk = await restoreNip46Session();
         }
 
         if (!pk) return;
@@ -900,6 +919,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
             setIdentities(next.identities);
           }
+        } else if (storedSignerType === 'nip46') {
+          // Not in the multi-account registry; connection is live above.
+          setSignerType('nip46');
+          setIsLoggedIn(true);
         }
 
         // Eagerly hydrate cached state from disk in parallel — these
@@ -1129,6 +1152,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
+  // NIP-46 login lives in its own hook (#283); see useNip46Login.
+  const loginWithNip46 = useNip46Login({
+    setIsLoggingIn,
+    setPubkey,
+    setSignerType,
+    setIsLoggedIn,
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  });
+
   // Wipe every per-account AsyncStorage entry for `loggedOutPubkey`.
   // Extracted so the multi-account sign-out path can call it without
   // coupling to the active-identity teardown logic (#288).
@@ -1148,6 +1184,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
+    await SecureStore.deleteItemAsync(NIP46_CONNECTION_KEY);
+    // Tear down the live BunkerSigner so the bunker stops serving the old
+    // identity if someone signs back in immediately.
+    await nostrConnectService.setActiveConnection(null).catch(() => {});
     // Clear the dead-key-as-of-#404 amber NIP-17 toggle alongside
     // the per-account caches.
     await AsyncStorage.removeItem(AMBER_NIP17_ENABLED_KEY_LEGACY).catch(() => {});
@@ -1356,13 +1396,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, getReadRelays, loadProfile],
   );
 
-  const refreshContacts = useCallback(async () => {
-    if (!pubkey) return;
-    const readRelays = getReadRelays();
-    // User-initiated refresh (e.g. pull-to-refresh) — bypass the 24h
-    // contacts cache so newly-added follows surface immediately.
-    await loadContacts(pubkey, readRelays, { force: true });
-  }, [pubkey, getReadRelays, loadContacts]);
+  // Follow-list write path (#779) — refresh / follow / unfollow / add and
+  // the shared kind-3 publish — lives in useContactActions (file-size cap).
+  // `contacts` state stays here (it feeds followPubkeys → the DM inbox); the
+  // hook drives it via setContacts and force-refreshes through loadContacts.
+  const { refreshContacts, followContact, unfollowContact, addContact } = useContactActions({
+    pubkey,
+    isLoggedIn,
+    signerType,
+    relays,
+    contacts,
+    setContacts,
+    getReadRelays,
+    loadContacts,
+  });
 
   const signZapRequest = useCallback(
     async (
@@ -1402,44 +1449,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } catch {
           return null;
         }
+      } else if (signerType === 'nip46') {
+        try {
+          return (await nip46Sign(zapEvent, pubkey)) || null;
+        } catch {
+          return null;
+        }
       }
 
       return null;
     },
     [pubkey, isLoggedIn, signerType, getReadRelays],
-  );
-
-  const publishContactList = useCallback(
-    async (updatedContacts: NostrContact[]): Promise<boolean> => {
-      if (!pubkey || !isLoggedIn) return false;
-      try {
-        const event = nostrService.createContactListEvent(updatedContacts);
-        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
-
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return false;
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-        } else if (signerType === 'amber') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
-        }
-        return true;
-      } catch (error) {
-        console.warn('Failed to publish contact list:', error);
-        return false;
-      }
-    },
-    [pubkey, isLoggedIn, signerType, relays],
   );
 
   const publishProfile = useCallback(
@@ -1473,6 +1493,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (!signedEventJson) return false;
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
+        } else if (signerType === 'nip46') {
+          const signedEventJson = await nip46Sign(event, pubkey);
+          if (!signedEventJson) return false;
+          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         }
 
         // We just signed and published this kind-0, so the client already
@@ -1519,111 +1543,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, relays],
   );
 
-  const followContact = useCallback(
-    async (contactPubkey: string): Promise<boolean> => {
-      if (contacts.some((c) => c.pubkey === contactPubkey)) return true; // already following
-      const newContact: NostrContact = {
-        pubkey: contactPubkey,
-        relay: null,
-        petname: null,
-        profile: null,
-      };
-      const updatedContacts = [...contacts, newContact];
-      const success = await publishContactList(updatedContacts);
-      if (success) {
-        startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the follow immediately.
-        // Per-account namespaced (#288). Bumps the *contacts* timestamp
-        // (the right freshness clock for kind-3 list reads) — pre-#442
-        // code mistakenly wrote to CACHE_TIMESTAMP_KEY_BASE which is
-        // the *profiles* cache freshness, leaving the contacts list's
-        // own freshness clock stale after every follow.
-        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
-        const tKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey);
-        AsyncStorage.setItem(cKey, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(tKey, Date.now().toString()).catch(() => {});
-        // Fetch profile for the new contact
-        const readRelays = getReadRelays();
-        const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
-        if (profileData) {
-          startTransition(() =>
-            setContacts((prev) => {
-              const updated = prev.map((c) =>
-                c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
-              );
-              // Update cache with profile data
-              AsyncStorage.setItem(cKey, JSON.stringify(updated)).catch(() => {});
-              return updated;
-            }),
-          );
-        }
-      }
-      return success;
-    },
-    [contacts, publishContactList, getReadRelays, pubkey],
-  );
-
-  const unfollowContact = useCallback(
-    async (contactPubkey: string): Promise<boolean> => {
-      const updatedContacts = contacts.filter((c) => c.pubkey !== contactPubkey);
-      const success = await publishContactList(updatedContacts);
-      if (success) {
-        startTransition(() => setContacts(updatedContacts));
-        // Update cache so restarts reflect the unfollow immediately.
-        // Per-account namespaced (#288).
-        AsyncStorage.setItem(
-          perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
-          JSON.stringify(updatedContacts),
-        ).catch(() => {});
-        // Same fix as followContact above — bump the *contacts*
-        // timestamp, not the *profiles* one.
-        AsyncStorage.setItem(
-          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
-          Date.now().toString(),
-        ).catch(() => {});
-      }
-      return success;
-    },
-    [contacts, publishContactList, pubkey],
-  );
-
-  const addContact = useCallback(
-    async (
-      npubOrHex: string,
-    ): Promise<
-      | { success: true; pubkey: string; alreadyFollowing?: boolean }
-      | { success: false; error: string }
-    > => {
-      try {
-        let hex = npubOrHex.trim();
-        // Strip nostr: URI prefix (NIP-21)
-        if (hex.startsWith('nostr:')) {
-          hex = hex.slice(6);
-        }
-        if (hex.startsWith('npub1')) {
-          const decoded = nip19.decode(hex);
-          if (decoded.type !== 'npub') return { success: false, error: 'Invalid npub' };
-          hex = decoded.data;
-        }
-        if (!/^[0-9a-f]{64}$/i.test(hex)) {
-          return { success: false, error: 'Invalid public key format' };
-        }
-        if (contacts.some((c) => c.pubkey === hex)) {
-          // Already a follow — not a failure. Surface it as a neutral
-          // "already connected" so the UI doesn't show a red error (#660).
-          return { success: true, alreadyFollowing: true, pubkey: hex };
-        }
-        const success = await followContact(hex);
-        return success
-          ? { success: true, pubkey: hex }
-          : { success: false, error: 'Failed to publish contact list' };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Invalid key' };
-      }
-    },
-    [contacts, followContact],
-  );
-
   /**
    * Send a 1:1 direct message via NIP-17 (kind-14 rumor → kind-13 seal →
    * kind-1059 gift wrap). NIP-04 (kind 4) is no longer produced — see
@@ -1642,7 +1561,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // useMessageSend (#703). Group send + group-state live in useGroupMessaging
   // (wired above). We take ONLY the 1:1 sends here so sendGroupMessage /
   // publishGroupState aren't declared twice.
-  const { sendDirectMessage, sendFileMessage } = useMessageSend({
+  const { sendDirectMessage, sendDirectRumor, sendFileMessage } = useMessageSend({
     pubkey,
     isLoggedIn,
     signerType,
@@ -1669,6 +1588,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             '',
             pubkey,
           );
+          if (!signedEventJson) return null;
+          return JSON.parse(signedEventJson) as SignedEvent;
+        } else if (signerType === 'nip46') {
+          const signedEventJson = await nip46Sign(event, pubkey);
           if (!signedEventJson) return null;
           return JSON.parse(signedEventJson) as SignedEvent;
         }
@@ -1712,12 +1635,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signOutIdentity,
       loginWithNsec,
       loginWithAmber,
+      loginWithNip46,
       logout,
       refreshProfile,
       fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       sendDirectMessage,
+      sendDirectRumor,
       sendFileMessage,
       sendGroupMessage,
       publishGroupState,
@@ -1746,12 +1671,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signOutIdentity,
       loginWithNsec,
       loginWithAmber,
+      loginWithNip46,
       logout,
       refreshProfile,
       fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       sendDirectMessage,
+      sendDirectRumor,
       sendFileMessage,
       sendGroupMessage,
       publishGroupState,

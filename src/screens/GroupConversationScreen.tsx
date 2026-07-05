@@ -33,6 +33,7 @@ import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import BrandGradientBackground from '../components/BrandGradientBackground';
 import GifPickerSheet from '../components/GifPickerSheet';
+import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import SendSheet from '../components/SendSheet';
@@ -53,6 +54,14 @@ import {
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { buildPollMessage, buildVoteMessage, parsePoll, parseVote } from '../utils/pollMessage';
+import {
+  legacyPollToStored,
+  tallyPoll,
+  type PollTally,
+  type StoredPoll,
+  type VoteRecord,
+} from '../utils/nip88Poll';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
@@ -102,6 +111,7 @@ const GroupConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
@@ -241,6 +251,7 @@ const GroupConversationScreen: React.FC = () => {
     uploadingImage,
     sharingLocation,
     uploadingVoice,
+    sendText,
     handleSend,
     handlePickAndSendImage,
     handleTakeAndSendPhoto,
@@ -379,20 +390,87 @@ const GroupConversationScreen: React.FC = () => {
   // (a FlatList renderItem) doesn't call classifyMessageContent on every
   // frame for every visible bubble. Mirror of ConversationScreen's items
   // useMemo which does the same classification.
+  //
+  // Vote messages are dropped from the visible list — they're already
+  // rolled into the referenced poll's tally via pollAggregates below, so
+  // showing them as bubbles would just duplicate the vote in the thread.
   const classifiedMessages = useMemo<ClassifiedMessage[]>(
     // Sanitise before classify so a tofu placeholder (#764) never reaches
-    // the bubble's text branch.
+    // the bubble's text branch. Vote messages are dropped from the visible
+    // list — they're already rolled into the referenced poll's tally.
     () =>
-      messages.map((m) => ({
-        ...m,
-        content: classifyMessageContent(sanitizeDisplayText(m.text)),
-        // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
-        // stored text rather than hard-coding 14, so the info sheet reports
-        // kind-15 for voice/image file bubbles. Precomputed here (not in the
-        // hot renderMessage path) alongside the content classification.
-        wireKind: deriveGroupWireKind(m.text),
-      })),
+      messages
+        .map((m) => ({
+          ...m,
+          content: classifyMessageContent(sanitizeDisplayText(m.text)),
+          // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
+          // stored text rather than hard-coding 14, so the info sheet reports
+          // kind-15 for voice/image file bubbles. Precomputed here (not in the
+          // hot renderMessage path) alongside the content classification.
+          wireKind: deriveGroupWireKind(m.text),
+        }))
+        .filter((m) => m.content.kind !== 'pollVote'),
     [messages],
+  );
+
+  // Per-poll aggregates over the entire group history. Group messages carry a
+  // real `senderPubkey` (unlike 1:1 where we synthesise a per-direction voter
+  // id), so the tally gets accurate last-write-wins per member. Groups keep the
+  // TEXT-encoded poll format (the group message store is text-only — no inner
+  // wireKind/tags column), so structured NIP-88 is 1:1-only for now (#203);
+  // legacy polls are adapted to the shared display/tally shape here.
+  const pollAggregates = useMemo<Map<string, PollTally>>(() => {
+    const polls: StoredPoll[] = [];
+    const votes: VoteRecord[] = [];
+    for (const m of messages) {
+      const p = parsePoll(m.text);
+      if (p) {
+        polls.push(legacyPollToStored(m.id, p));
+        continue;
+      }
+      const v = parseVote(m.text);
+      if (v) {
+        votes.push({
+          pollId: v.pollId,
+          voter: m.senderPubkey,
+          optionIds: [String(v.optionId)],
+          createdAt: m.createdAt,
+        });
+      }
+    }
+    const out = new Map<string, PollTally>();
+    for (const poll of polls) out.set(poll.pollId, tallyPoll(poll, votes, myPubkey ?? null));
+    return out;
+  }, [messages, myPubkey]);
+
+  // Poll attach handlers — the composer returns the validated question +
+  // options; groups serialise them to the text body and hand off to sendText
+  // (the same path the GIF / location / contact-share attachments use). Vote
+  // sends use sendText too so the optimistic local-append behaviour matches.
+  const handleSendPoll = useCallback(
+    async (question: string, options: string[]): Promise<boolean> => {
+      let body: string;
+      try {
+        body = buildPollMessage(question, options);
+      } catch (err) {
+        Alert.alert('Could not send poll', err instanceof Error ? err.message : 'Invalid poll.');
+        return false;
+      }
+      return sendText(body);
+    },
+    [sendText],
+  );
+
+  const handleVotePoll = useCallback(
+    async (pollId: string, optionId: string) => {
+      const optNum = Number(optionId);
+      const payload = buildVoteMessage(pollId, Number.isFinite(optNum) ? optNum : 0);
+      const ok = await sendText(payload);
+      if (!ok) {
+        Alert.alert('Vote failed', 'Could not record your vote.');
+      }
+    },
+    [sendText],
   );
 
   const trackedMessages = useMemo(
@@ -413,10 +491,10 @@ const GroupConversationScreen: React.FC = () => {
         ? null
         : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
       // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
-      // invoice / location / image / GIF cards all render identically across
-      // chat types (#239). The classifier handles geo: + GIF detection up
-      // front; image / invoice / lnaddr / contact ride on the text variant
-      // and detect at render time.
+      // invoice / location / image / GIF / poll cards all render identically
+      // across chat types (#239). The classifier handles geo: + GIF + poll
+      // detection up front; image / invoice / lnaddr / contact ride on the
+      // text variant and detect at render time.
       return (
         <MessageBubble
           id={item.id}
@@ -430,6 +508,8 @@ const GroupConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          pollAggregates={pollAggregates}
+          onVotePoll={handleVotePoll}
           onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
           // Group DMs are NIP-17 gift-wrapped: kind-14 chat or kind-15 encrypted
@@ -450,6 +530,9 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      pollAggregates,
+      handleVotePoll,
+      handleToggleSecretMode,
       isInvoicePaid,
       handleShowInfo,
     ],
@@ -660,6 +743,13 @@ const GroupConversationScreen: React.FC = () => {
                 // Picker opens over the panel; close on cancel/select.
                 setContactPickerOpen(true);
               }}
+              onSharePoll={() => {
+                // Composer opens over the panel — close it first so the
+                // BottomSheet snaps without competing for touch focus
+                // with the visible attach grid behind it.
+                closeAttachPanel();
+                setPollComposerOpen(true);
+              }}
               onSendVoiceNote={() => setVoiceSheetOpen(true)}
             />
           }
@@ -705,6 +795,12 @@ const GroupConversationScreen: React.FC = () => {
         visible={gifPickerOpen}
         onClose={() => setGifPickerOpen(false)}
         onSelect={handleSendGif}
+      />
+
+      <PollComposerSheet
+        visible={pollComposerOpen}
+        onClose={() => setPollComposerOpen(false)}
+        onSend={handleSendPoll}
       />
 
       <FriendPickerSheet

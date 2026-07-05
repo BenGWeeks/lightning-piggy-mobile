@@ -145,7 +145,7 @@ const FeedbackSheet: React.FC<Props> = ({
 
   const canSend =
     isLoggedIn &&
-    (signerType === 'nsec' || signerType === 'amber') &&
+    (signerType === 'nsec' || signerType === 'amber' || signerType === 'nip46') &&
     message.trim().length > 0 &&
     !sending;
 

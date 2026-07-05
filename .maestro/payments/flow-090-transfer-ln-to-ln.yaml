@@ -64,7 +64,7 @@ name: Transfer LN to LN Test
 # Verify success alert
 - extendedWaitUntil:
     visible:
-      text: 'Transfer Complete'
+      text: 'Move Complete'
     timeout: 30000
 
 # Dismiss the alert

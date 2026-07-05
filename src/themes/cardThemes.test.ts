@@ -1,0 +1,73 @@
+/**
+ * Shape tests for the wallet card theme registry. Catches drift between
+ * the `CardTheme` union and the `cardThemes` map (forgotten entries,
+ * malformed gradients, ID/key mismatch). Covers the four sports themes
+ * (#102) specifically: each must carry a graffiti `backgroundImage` +
+ * a matching `backgroundImageStyle` so it renders over its gradient
+ * exactly like the animal cards.
+ */
+
+import { cardThemes, themeList } from './cardThemes';
+import type { CardTheme } from '../types/wallet';
+
+const HEX_COLOUR = /^#[0-9A-Fa-f]{6}$/;
+
+const SPORTS_THEMES: CardTheme[] = ['tennis', 'football', 'basketball', 'f1'];
+
+describe('cardThemes registry', () => {
+  it('keys each entry by its own id (no copy/paste drift)', () => {
+    for (const [key, entry] of Object.entries(cardThemes)) {
+      expect(entry.id).toBe(key);
+    }
+  });
+
+  it('has the required fields on every entry', () => {
+    for (const entry of themeList) {
+      expect(typeof entry.id).toBe('string');
+      expect(entry.id.length).toBeGreaterThan(0);
+      expect(typeof entry.name).toBe('string');
+      expect(entry.name.length).toBeGreaterThan(0);
+      expect(entry.gradientColors).toHaveLength(2);
+      expect(entry.gradientColors[0]).toMatch(HEX_COLOUR);
+      expect(entry.gradientColors[1]).toMatch(HEX_COLOUR);
+      expect(entry.textColor).toMatch(HEX_COLOUR);
+      expect(entry.accentColor).toMatch(HEX_COLOUR);
+    }
+  });
+
+  it('exposes themeList alphabetically by display name (picker order)', () => {
+    const names = themeList.map((t) => t.name);
+    const sorted = [...names].sort((a, b) => a.localeCompare(b));
+    expect(names).toEqual(sorted);
+  });
+
+  it('includes every registered theme in themeList', () => {
+    expect(themeList.map((t) => t.id).sort()).toEqual(Object.keys(cardThemes).sort());
+  });
+
+  describe('sports themes (#102)', () => {
+    it.each(SPORTS_THEMES)('registers %s with a name and gradient', (id) => {
+      const theme = cardThemes[id];
+      expect(theme).toBeDefined();
+      expect(theme.name.length).toBeGreaterThan(0);
+      expect(theme.gradientColors[0]).toMatch(HEX_COLOUR);
+      expect(theme.gradientColors[1]).toMatch(HEX_COLOUR);
+    });
+
+    it('appears in themeList so the wizard + settings picker auto-include them', () => {
+      const ids = themeList.map((t) => t.id);
+      for (const sportId of SPORTS_THEMES) {
+        expect(ids).toContain(sportId);
+      }
+    });
+
+    it('registers a graffiti backgroundImage + matching backgroundImageStyle', () => {
+      // Each sports theme renders its graffiti illustration over the
+      // gradient, like the animal cards — assert the wiring is present.
+      for (const id of SPORTS_THEMES) {
+        expect(cardThemes[id].backgroundImage).toBeDefined();
+        expect(cardThemes[id].backgroundImageStyle).toBe(id);
+      }
+    });
+  });
+});
