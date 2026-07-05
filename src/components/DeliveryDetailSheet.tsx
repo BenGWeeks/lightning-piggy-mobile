@@ -115,7 +115,14 @@ export default function DeliveryDetailSheet({
   // these relays", not "all failed".
 
   return (
-    <Modal visible transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <Pressable
         style={styles.root}
         onPress={onClose}

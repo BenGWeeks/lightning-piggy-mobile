@@ -498,6 +498,7 @@ export default function PaymentProgressOverlay({
       visible={visible}
       transparent
       statusBarTranslucent
+      navigationBarTranslucent
       animationType="fade"
       onRequestClose={handleRequestClose}
     >

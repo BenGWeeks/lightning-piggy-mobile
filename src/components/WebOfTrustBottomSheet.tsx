@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { ShieldCheck, ShieldOff, ShieldQuestion, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -84,6 +85,7 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
 const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wotTier, setWotTier } = useTrustGraph();
   // `activeTier` is what the picker renders as "checked". Defaults to
@@ -109,9 +111,20 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="wot-sheet-backdrop" />
-      <View style={styles.sheet} testID="wot-bottom-sheet">
+      {/* navigationBarTranslucent draws this bottom-anchored sheet behind
+          the Android nav bar; pad the base 28 by the bottom safe-area inset
+          so the Done button stays clear of 3-button navigation (0 under
+          gesture nav, so edge-to-edge is preserved there). */}
+      <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]} testID="wot-bottom-sheet">
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
           <Text style={styles.title}>{t('webOfTrustBottomSheet.title')}</Text>

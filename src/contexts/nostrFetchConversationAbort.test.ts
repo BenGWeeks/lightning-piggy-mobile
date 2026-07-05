@@ -21,6 +21,10 @@ jest.mock('../services/dmDb', () => ({
   getConversationMessages: jest.fn(async () => []),
   hasStoredWraps: jest.fn(async () => false),
   upsertDmMessages: jest.fn(async () => undefined),
+  // DB known-id gate for thread-open kind-4 decrypts (#850, N6).
+  selectKnownEventIds: jest.fn(async () => new Set<string>()),
+  LOCAL_DM_ID_PREFIX: 'local-',
+  LOCAL_DM_ECHO_WINDOW_SECS: 30,
 }));
 
 jest.mock('./dmStoreMigrationRunner', () => ({
@@ -121,5 +125,26 @@ describe('fetchConversationFor abort (#868)', () => {
       key.includes('conv_last_seen'),
     );
     expect(wroteCursor).toBe(true);
+  });
+
+  it('never writes decrypted plaintext to AsyncStorage (#850 at-rest invariant)', async () => {
+    // A full, successful run that decrypts fresh kind-4 events. The ONLY
+    // AsyncStorage write allowed is the bare-timestamp last-seen cursor —
+    // the plaintext conversation/inbox blobs are retired; decrypted content
+    // persists exclusively in the encrypted store (upsertDmMessages).
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue([
+      { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
+    ]);
+    (getConversationMessages as jest.Mock).mockResolvedValue([]);
+    (hasStoredWraps as jest.Mock).mockResolvedValue(true);
+
+    await fetchConversationFor(baseParams());
+
+    for (const [key, value] of setItem.mock.calls as [string, string][]) {
+      expect(key).toContain('last_seen'); // cursors only — no content blobs
+      expect(value).not.toContain('plaintext'); // the decrypted text never lands
+    }
+    expect(setItem.mock.calls.length).toBeGreaterThan(0); // the cursor did write
   });
 });
