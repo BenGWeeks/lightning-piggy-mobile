@@ -911,7 +911,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // react-native's HMRClient when Metro drops the dev-client
       // connection. It is NOT a transfer failure — nothing was signed
       // or broadcast. Surface it as a dev-mode hiccup with a clear
-      // retry hint instead of a scary "Transfer Failed" alert.
+      // retry hint instead of a scary "Move Failed" alert.
       if (/reload.*of undefined|DevSettings/i.test(message)) {
         Alert.alert(
           'Development Reload Needed',
