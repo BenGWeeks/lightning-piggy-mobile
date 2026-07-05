@@ -168,8 +168,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     return () => {
       cancelled = true;
     };
+    // Depend on `wallet?.id` (not the whole `wallet` object) as well as
+    // `walletId`: this re-runs once if the sheet mounts with `walletId`
+    // set before `wallet` has hydrated into the array (so the fields
+    // populate when it arrives), yet stays stable across balance-poll /
+    // NWC-reconnect updates that replace the wallet object but keep its
+    // id — so it never stomps the user's in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletId]);
+  }, [walletId, wallet?.id]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -227,6 +233,21 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     }
   }, [xpubDisplay, t]);
 
+  // Switch tabs, re-masking any credential revealed on the Connection tab
+  // when the user navigates away — so a revealed NWC string / CoinOS
+  // password / QR doesn't linger on-screen after leaving the tab that
+  // shows it (privacy; a returning user has to re-reveal deliberately).
+  const selectTab = useCallback((tab: SettingsTab) => {
+    setActiveTab((prev) => {
+      if (prev === 'connection' && tab !== 'connection') {
+        setNwcRevealed(false);
+        setPasswordRevealed(false);
+        setNwcQrShown(false);
+      }
+      return tab;
+    });
+  }, []);
+
   if (!walletId || !wallet) return null;
 
   const tabs: { key: SettingsTab; label: string }[] = [
@@ -265,7 +286,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               <TouchableOpacity
                 key={key}
                 style={[styles.segment, active && styles.segmentActive]}
-                onPress={() => setActiveTab(key)}
+                onPress={() => selectTab(key)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={label}
