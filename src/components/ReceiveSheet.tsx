@@ -229,11 +229,15 @@ const ReceiveSheet: React.FC<Props> = ({
         // amount-less request). Previously it jumped straight to
         // amount entry, which hid which wallet the invoice would pay
         // into. Only skip when there is genuinely nothing to show or
-        // choose: exactly one wallet and it has no lightning address.
-        // (=== 1, not <= 1: WalletContext initialises `wallets` to []
-        // before hydration, and an empty list must not skip the main
-        // view for a user who has several wallets once hydrated.)
-        if (!wallet?.lightningAddress && wallets.length === 1) {
+        // choose: exactly one RESOLVED wallet and it has no lightning
+        // address. (=== 1, not <= 1: WalletContext initialises
+        // `wallets` to [] before hydration, and an empty list must not
+        // skip the main view for a user who has several wallets once
+        // hydrated. Requiring `wallet` non-null covers the cold-start
+        // render where `wallets` is populated but `activeWalletId`
+        // hasn't hydrated yet — a null wallet must not be treated as
+        // "no lightning address".)
+        if (wallet && !wallet.lightningAddress && wallets.length === 1) {
           return { step: 'amount', mode: 'amount' };
         }
         return { step: 'main', mode: 'address' };
