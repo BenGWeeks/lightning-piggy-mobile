@@ -1,4 +1,4 @@
-import { isSameFix } from '../../src/utils/locationFix';
+import { isSameFix } from './locationFix';
 
 describe('isSameFix — GPS fix value-dedupe (sporadic-freeze trigger)', () => {
   const base = { lat: 52.2964, lon: 0.0589, accuracy: 4.5 };

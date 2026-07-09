@@ -18,9 +18,10 @@
  *    accuracy of consumer GPS, so treating sub-metre drift as identical
  *    loses nothing for the map surfaces (their dot is drawn 10s of pixels
  *    wide at typical zooms);
- *  - the accuracy halo lands in the same 5 m bucket — accuracy flutters
- *    (±0.5 m sample-to-sample) far faster than it matters visually, and
- *    including raw accuracy in the comparison would defeat the dedupe.
+ *  - the accuracy halo rounds to the same nearest-5 m bucket (boundaries at
+ *    2.5 m, 7.5 m, …) — accuracy flutters (±0.5 m sample-to-sample) far
+ *    faster than it matters visually, and including raw accuracy in the
+ *    comparison would defeat the dedupe.
  */
 export interface LocationFixLike {
   lat: number;
