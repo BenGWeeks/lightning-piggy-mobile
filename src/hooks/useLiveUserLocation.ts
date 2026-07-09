@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
+import { isSameFix } from '../utils/locationFix';
 
 /**
  * Live user-location subscription for map views.
@@ -102,6 +103,19 @@ export function useLiveUserLocation(
   // consistent across both update channels.
   const lastTimestampRef = useRef<number>(0);
 
+  // Last fix actually published through setPos, for value-dedupe. Android
+  // redelivers fixes on the watch's timeInterval cadence even when the
+  // device hasn't moved (same coords, fresh timestamp), and real-hardware
+  // GPS jitters by centimetres while stationary. Each publish fans a new
+  // `pos` object out through UserLocationContext and re-renders every
+  // mounted map consumer — ExploreHomeScreen measured 300–700 ms per
+  // commit — so a stationary phone paid a JS-thread stall on every watch
+  // tick ("the tabs randomly freeze"). Dropping value-identical fixes here
+  // (see isSameFix) stops the storm at the single shared source. Seeded
+  // from opts.initial so a first watch fix identical to the caller's
+  // cached anchor doesn't re-publish it.
+  const lastPublishedRef = useRef<LiveUserLocation | null>(opts.initial ?? null);
+
   useEffect(() => {
     let cancelled = false;
     let watch: Location.LocationSubscription | null = null;
@@ -119,11 +133,17 @@ export function useLiveUserLocation(
       const ts = typeof fix.timestamp === 'number' ? fix.timestamp : Date.now();
       if (ts <= lastTimestampRef.current) return;
       lastTimestampRef.current = ts;
-      setPos({
+      const next: LiveUserLocation = {
         lat: fix.coords.latitude,
         lon: fix.coords.longitude,
         accuracy: typeof fix.coords.accuracy === 'number' ? fix.coords.accuracy : null,
-      });
+      };
+      // Value-dedupe: a redelivered/jittered fix for the same place must not
+      // re-render every context consumer. Timestamp still advances above so
+      // the newest-wins ordering vs the parallel one-shot stays correct.
+      if (lastPublishedRef.current && isSameFix(lastPublishedRef.current, next)) return;
+      lastPublishedRef.current = next;
+      setPos(next);
     };
 
     (async () => {
