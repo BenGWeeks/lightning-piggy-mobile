@@ -5,12 +5,15 @@ import {
   type RelaySettle,
 } from '../utils/dmDeliveryStatus';
 
-// Minimal structural view of nostr-tools' SimplePool — just the one method
+// Minimal structural view of nostr-tools' SimplePool — just the two methods
 // this module calls. Taking it as a parameter (rather than importing the
 // concrete `pool` from `nostrService`) keeps this module a leaf with no
 // dependency on `nostrService`, so there's no import cycle (Copilot #858).
 export interface RelayPublisher {
   publish(relays: string[], event: VerifiedEvent): Promise<string>[];
+  // Optional (SimplePool has it): force-close + drop the given relays so the
+  // next publish reconnects from scratch. Used by the stale-socket retry.
+  close?(relays: string[]): void;
 }
 
 // Result of a NIP-17 multi-wrap DM send. `wrapsPublished` / `errors` are the
@@ -29,22 +32,6 @@ export interface DmSendResult {
 // the complete single→double picture (#857).
 export type OnDeliveryFinalized = (delivery: DeliveryStatus) => void;
 
-/**
- * Publish a batch of gift-wraps to a relay set, capturing each relay's
- * per-wrap accept/reject (`Promise.allSettled` over the per-relay promises
- * `pool.publish` returns) and folding them into a single `DeliveryStatus`.
- *
- * `wrapsPublished` keeps the old `Promise.any` threshold — a wrap counts as
- * published once ≥1 relay accepts it. `errors` records, per fully-failed wrap,
- * the FIRST rejecting relay's message (a concrete relay error, deliberately
- * NOT the old `AggregateError` "all promises were rejected" text). The added
- * `delivery` field carries the per-relay detail for the bubble's tick; #856 is
- * delivery VISIBILITY only — the retry/outbox work is #857.
- *
- * `publish(relays, event)` returns one promise per relay, in the same order as
- * `relays` — so a settle maps back to its relay URL by index. The pool is
- * injected so this module stays a leaf (no `nostrService` import cycle).
- */
 // Upper bound on how long a send waits for relays before settling to a result
 // (#857). Offline / unreachable relays leave `pool.publish` promises pending
 // forever (no socket → nothing to resolve OR reject), so without this cap the
@@ -56,26 +43,53 @@ export const DM_PUBLISH_TIMEOUT_MS = 8_000;
 
 const TIMED_OUT = Symbol('timed-out');
 
-export async function publishWrapsTrackingRelays(
+// nostr-tools' `pool.publish` RESOLVES (does not reject) with this string
+// prefix when `ensureRelay` can't open a socket at all (abstract-pool.js,
+// verified on 2.23.3). Without this check a fully-unreachable relay counted
+// as an ACCEPT — `wrapsPublished` went up and the bubble painted a green tick
+// for a message that never left the device.
+const isConnectionFailure = (value: unknown): value is string =>
+  typeof value === 'string' && value.startsWith('connection failure:');
+
+// Transport-shaped failures — the socket was dead/unreachable, as opposed to a
+// live relay actively rejecting the event (e.g. "blocked:", "rate-limited:").
+// Covers nostr-tools' "publish timed out" (a half-open socket that never sends
+// OK), "relay connection timed out" / "connection failed" / "websocket closed"
+// (connect-level), and the resolved "connection failure: …" string above.
+const isTransportFailure = (reason: unknown): boolean => {
+  const message = typeof reason === 'string' ? reason : ((reason as Error)?.message ?? '');
+  return /timed out|connection|websocket/i.test(message);
+};
+
+interface AttemptOutcome {
+  result: DmSendResult;
+  // Relays whose failure looked transport-shaped (dead socket, unreachable,
+  // never settled) — the ones worth force-reconnecting before a retry.
+  staleRelays: string[];
+}
+
+/**
+ * One publish attempt of a batch of gift-wraps to a relay set, capturing each
+ * relay's per-wrap accept/reject and folding them into a single
+ * `DeliveryStatus`. See `publishWrapsTrackingRelays` for the full contract.
+ */
+async function attemptPublish(
   wraps: VerifiedEvent[],
   relays: string[],
   pool: RelayPublisher,
-  // Event identity (rumor id + kind) surfaced in the long-press detail sheet
-  // (#856). Carried straight onto the resulting DeliveryStatus.
-  meta?: { eventId?: string; kind?: number },
-  // Optional: called once with the COMPLETE breakdown after every relay has
-  // settled (#857). The send resolves early; this fires later so a slow relay
-  // can upgrade the tick (e.g. single → double) without delaying the bubble.
-  onFinalized?: OnDeliveryFinalized,
-  // Hard cap on the wait before settling — see DM_PUBLISH_TIMEOUT_MS. Injected
-  // so tests can drive it to 0.
-  timeoutMs: number = DM_PUBLISH_TIMEOUT_MS,
-): Promise<DmSendResult> {
+  meta: { eventId?: string; kind?: number } | undefined,
+  onFinalized: OnDeliveryFinalized | undefined,
+  timeoutMs: number,
+): Promise<AttemptOutcome> {
   const errors: string[] = [];
   let published = 0;
   // Settles seen so far, shared across the early-resolve and background phases.
   // A relay that accepts ANY wrap is `ok`; aggregateRelayResults folds repeats.
   const settles: RelaySettle[] = [];
+  // Relays that produced any real settle (accept OR reject) for any wrap —
+  // used to tell "relay answered" apart from "socket black-holed" on timeout.
+  const settledRelays = new Set<string>();
+  const staleRelays = new Set<string>();
   // Per-wrap promises that complete only once EVERY relay for that wrap has
   // settled — awaited in the background for the final breakdown.
   const fullSettlePromises: Promise<void>[] = [];
@@ -85,11 +99,25 @@ export async function publishWrapsTrackingRelays(
       const perRelay = pool.publish(relays, wrap);
       // Record each relay's outcome into the shared `settles` as soon as it
       // resolves/rejects, so the early snapshot reflects whatever has landed.
+      // A resolution carrying the "connection failure:" string is a FAILURE
+      // (see isConnectionFailure) — never count it as an accept.
       const tagged = perRelay.map((p, i) => {
         const relay = relays[i];
         return p.then(
-          () => settles.push({ relay, ok: true }),
-          () => settles.push({ relay, ok: false }),
+          (value) => {
+            settledRelays.add(relay);
+            if (isConnectionFailure(value)) {
+              staleRelays.add(relay);
+              settles.push({ relay, ok: false });
+            } else {
+              settles.push({ relay, ok: true });
+            }
+          },
+          (reason) => {
+            settledRelays.add(relay);
+            if (isTransportFailure(reason)) staleRelays.add(relay);
+            settles.push({ relay, ok: false });
+          },
         );
       });
       // Whole-wrap settle (background) — feeds the final snapshot only.
@@ -97,20 +125,32 @@ export async function publishWrapsTrackingRelays(
 
       // Decide this wrap's published/error status as soon as it's KNOWN: the
       // first accept wins immediately; `Promise.any` rejects (AggregateError)
-      // only once every relay has rejected. Race it against a timeout so a dead
-      // network (publish promises that never settle) can't hang the send.
+      // only once every relay has rejected. Connection-failure resolutions are
+      // re-thrown so they count as rejections here too. Race it against a
+      // timeout so a dead network (publish promises that never settle) can't
+      // hang the send.
+      const accepts = perRelay.map((p) =>
+        p.then((value) => {
+          if (isConnectionFailure(value)) throw new Error(value);
+          return value;
+        }),
+      );
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
         timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
       });
       try {
-        const outcome = await Promise.race([Promise.any(perRelay), timeout]);
+        const outcome = await Promise.race([Promise.any(accepts), timeout]);
         if (outcome === TIMED_OUT) {
           // No relay accepted within the window. Record the relays that never
           // settled as failed so the snapshot is a concrete all-failed result
           // (red tick) rather than an empty one (which renders as pending).
+          // A relay that never even settles is the stale-socket signature.
           for (const relay of relays) {
-            if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
+            if (!settledRelays.has(relay)) {
+              staleRelays.add(relay);
+              if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
+            }
           }
           errors.push('publish timed out — no relay responded');
         } else {
@@ -145,8 +185,99 @@ export async function publishWrapsTrackingRelays(
   }
 
   return {
-    wrapsPublished: published,
-    errors,
-    delivery: aggregateRelayResults(settles, meta, targetRelayCount),
+    result: {
+      wrapsPublished: published,
+      errors,
+      delivery: aggregateRelayResults(settles, meta, targetRelayCount),
+    },
+    staleRelays: [...staleRelays],
   };
+}
+
+/**
+ * Publish a batch of gift-wraps to a relay set, capturing each relay's
+ * per-wrap accept/reject (`Promise.allSettled` over the per-relay promises
+ * `pool.publish` returns) and folding them into a single `DeliveryStatus`.
+ *
+ * `wrapsPublished` keeps the old `Promise.any` threshold — a wrap counts as
+ * published once ≥1 relay accepts it. `errors` records, per fully-failed wrap,
+ * the FIRST rejecting relay's message (a concrete relay error, deliberately
+ * NOT the old `AggregateError` "all promises were rejected" text). The added
+ * `delivery` field carries the per-relay detail for the bubble's tick; #856 is
+ * delivery VISIBILITY only — the retry/outbox work is #857.
+ *
+ * `publish(relays, event)` returns one promise per relay, in the same order as
+ * `relays` — so a settle maps back to its relay URL by index. The pool is
+ * injected so this module stays a leaf (no `nostrService` import cycle).
+ *
+ * Stale-socket auto-retry: the shared SimplePool has no ping/keepalive, so
+ * after Android doze or a Wi-Fi→cellular handover its sockets can be half-open
+ * — "connected" as far as the pool knows, but black holes on the wire. Every
+ * publish then dies on nostr-tools' ~4.4s "publish timed out" until the OS
+ * finally closes the socket (minutes later), which is why a manual Re-publish
+ * eventually worked. When an attempt publishes NOTHING and at least one relay
+ * failed transport-shaped, we force-close those relays (dropping the stale
+ * sockets) and retry the whole batch once — the automatic equivalent of the
+ * manual Re-publish. Live relay rejections (e.g. "blocked:") don't trigger it.
+ */
+export async function publishWrapsTrackingRelays(
+  wraps: VerifiedEvent[],
+  relays: string[],
+  pool: RelayPublisher,
+  // Event identity (rumor id + kind) surfaced in the long-press detail sheet
+  // (#856). Carried straight onto the resulting DeliveryStatus.
+  meta?: { eventId?: string; kind?: number },
+  // Optional: called once with the COMPLETE breakdown after every relay has
+  // settled (#857). The send resolves early; this fires later so a slow relay
+  // can upgrade the tick (e.g. single → double) without delaying the bubble.
+  onFinalized?: OnDeliveryFinalized,
+  // Hard cap on the wait before settling — see DM_PUBLISH_TIMEOUT_MS. Injected
+  // so tests can drive it to 0.
+  timeoutMs: number = DM_PUBLISH_TIMEOUT_MS,
+): Promise<DmSendResult> {
+  // The caller's finalize must only ever fire for the attempt whose result we
+  // return. Whether attempt 1 is that attempt isn't known until it resolves,
+  // and its background finalize can land in the same microtask turn — so gate
+  // it: buffer a finalize that arrives before the retry decision, then either
+  // flush it (no retry) or drop it (retrying — attempt 2 owns the tick).
+  let firstAttemptIsFinal = false;
+  let decided = false;
+  let buffered: DeliveryStatus | null = null;
+  const gatedFinalize: OnDeliveryFinalized | undefined = onFinalized
+    ? (delivery) => {
+        if (!decided) {
+          buffered = delivery;
+        } else if (firstAttemptIsFinal) {
+          onFinalized(delivery);
+        }
+      }
+    : undefined;
+
+  const first = await attemptPublish(wraps, relays, pool, meta, gatedFinalize, timeoutMs);
+
+  const shouldRetry =
+    wraps.length > 0 &&
+    first.result.wrapsPublished === 0 &&
+    first.staleRelays.length > 0 &&
+    typeof pool.close === 'function';
+
+  if (!shouldRetry) {
+    firstAttemptIsFinal = true;
+    decided = true;
+    if (buffered && onFinalized) onFinalized(buffered);
+    return first.result;
+  }
+
+  decided = true; // an all-failed finalize from attempt 1 is dropped here.
+  try {
+    pool.close!(first.staleRelays);
+  } catch {
+    // Closing an already-dead socket can throw in exotic states; the retry's
+    // ensureRelay reconnects either way.
+  }
+  const second = await attemptPublish(wraps, relays, pool, meta, onFinalized, timeoutMs);
+  // Attempt 2's result stands alone: callers derive "intended sends" from
+  // wrapsPublished + errors.length, so merging attempt 1's errors in would
+  // double-count the same wraps.
+  return second.result;
 }
