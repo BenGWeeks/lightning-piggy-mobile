@@ -32,9 +32,17 @@ describe('isSameFix — GPS fix value-dedupe (sporadic-freeze trigger)', () => {
     expect(isSameFix(base, { ...base, accuracy: null })).toBe(false);
   });
 
-  it('is exact at the 5 dp boundary in both hemispheres', () => {
+  it('handles negative-hemisphere coordinates', () => {
     const west = { lat: -33.86882, lon: -151.20929, accuracy: null };
     expect(isSameFix(west, { ...west })).toBe(true);
     expect(isSameFix(west, { ...west, lat: -33.86893 })).toBe(false);
+  });
+
+  it('is exact at the 5th-decimal boundary', () => {
+    const west = { lat: -33.86882, lon: -151.20929, accuracy: null };
+    // One unit in the 5th decimal (~1.1 m) is a DIFFERENT place…
+    expect(isSameFix(west, { ...west, lat: -33.86883 })).toBe(false);
+    // …while 6th-decimal drift rounds to the same 5 dp value.
+    expect(isSameFix(west, { ...west, lat: -33.868823 })).toBe(true);
   });
 });
