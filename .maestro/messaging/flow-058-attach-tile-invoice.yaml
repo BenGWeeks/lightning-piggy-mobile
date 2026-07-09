@@ -57,13 +57,15 @@ name: Attach tile — Invoice opens ReceiveSheet
           id: 'attach-send-invoice'
       - waitForAnimationToEnd:
           timeout: 3000
-      # ReceiveSheet rendered on top. Wallets without a lud16 land on
-      # the AmountEntryScreen directly (see test-receive-landing-by-
-      # lud16.yaml for the rationale). Either branch satisfies "the
-      # invoice flow opened" so we accept either testID.
+      # ReceiveSheet rendered on top. The DM flow now lands on the MAIN
+      # receive view (wallet picker + "Send to <name>") so the user can
+      # see/change the destination wallet before entering an amount.
+      # Wallets without a lud16 still land on the AmountEntryScreen
+      # directly (see flow-078 for the rationale). Either testID
+      # satisfies "the invoice flow opened".
       - extendedWaitUntil:
           visible:
-            id: 'amount-entry-screen'
+            id: 'receive-send-to-friend|amount-entry-screen'
           timeout: 5000
       - back
       - waitForAnimationToEnd:

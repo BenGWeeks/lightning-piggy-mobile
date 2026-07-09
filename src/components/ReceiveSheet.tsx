@@ -214,15 +214,19 @@ const ReceiveSheet: React.FC<Props> = ({
       if (wallet?.walletType === 'onchain') {
         return { step: 'main', mode: 'address' };
       }
-      if (presetFriend || presetGroup) {
-        // "Send invoice to friend" / "Send invoice to group" entry point:
-        // skip straight to amount entry so the user doesn't land on the
-        // main receive/address view they can't use, then need a second
-        // tap on "Enter custom amount". Group flow needs an amount-bound
-        // bolt11 invoice anyway — sharing a static lud16 to a group has
-        // no useful "pay me" semantics.
+      if (presetGroup) {
+        // "Send invoice to group" entry point: skip straight to amount
+        // entry — the group flow needs an amount-bound bolt11 invoice
+        // (sharing a static lud16 to a group has no useful "pay me"
+        // semantics), so the main receive/address view is unusable.
         return { step: 'amount', mode: 'amount' };
       }
+      // The 1:1 DM flow (presetFriend) deliberately does NOT skip the
+      // main view: it lands there like the Home receive sheet does, so
+      // the "To:" wallet picker is visible BEFORE the user commits to
+      // an amount, and the lightning address can be sent as-is (an
+      // amount-less request). Previously it jumped straight to amount
+      // entry, which hid which wallet the invoice would pay into.
       if (!wallet?.lightningAddress) {
         // No per-wallet LN address (#168/#169). Nothing useful to show
         // on the main view — jump directly to amount entry instead of
@@ -231,7 +235,7 @@ const ReceiveSheet: React.FC<Props> = ({
       }
       return { step: 'main', mode: 'address' };
     },
-    [presetFriend, presetGroup],
+    [presetGroup],
   );
 
   // Open/close the sheet — intentionally depends only on `visible`.
@@ -835,7 +839,11 @@ const ReceiveSheet: React.FC<Props> = ({
                     </TouchableOpacity>
                   ) : null}
                 </View>
-              ) : !presetFriend && !presetGroup && !loading ? (
+              ) : !presetGroup && !loading ? (
+                // Shown for the standalone Receive flow AND the 1:1 DM
+                // flow (presetFriend) — in a DM the user can either send
+                // their address as-is via "Send to <name>" or add an
+                // amount here to request a specific sum.
                 <TouchableOpacity
                   style={styles.enterAmountButton}
                   onPress={() => {
