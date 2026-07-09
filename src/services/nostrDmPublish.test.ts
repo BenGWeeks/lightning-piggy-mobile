@@ -168,3 +168,176 @@ describe('publishWrapsTrackingRelays — early-resolve + background settle (#857
     expect(result.delivery.kind).toBe(14);
   });
 });
+
+describe('publishWrapsTrackingRelays — connection failures + stale-socket retry', () => {
+  it('treats a resolved "connection failure: …" as a FAILURE, not an accept', async () => {
+    // nostr-tools' pool.publish RESOLVES with this string when it cannot open
+    // a socket (verified on 2.23.3). Pre-fix this counted as a published wrap
+    // and painted a delivered tick for a message that never left the device.
+    const pool: RelayPublisher = {
+      publish: () => [Promise.resolve('connection failure: Error: connection timed out')],
+    };
+    const result = await publishWrapsTrackingRelays([wrap('w1')], ['wss://dead'], pool);
+    expect(result.wrapsPublished).toBe(0);
+    expect(result.delivery.delivered).toBe(false);
+    expect(result.delivery.relayResults['wss://dead']).toBe('failed');
+    expect(result.errors[0]).toContain('connection failure');
+  });
+
+  it('force-closes stale relays and retries once when nothing was published', async () => {
+    // Attempt 1: both relays reject with the stale-socket signature. The
+    // publisher must close them (dropping the dead sockets) and re-publish;
+    // attempt 2 succeeds → the send reports delivered.
+    let call = 0;
+    const closed: string[][] = [];
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return call === 1
+          ? [
+              Promise.reject(new Error('publish timed out')),
+              Promise.reject(new Error('publish timed out')),
+            ]
+          : [Promise.resolve('ok'), Promise.resolve('ok')];
+      },
+      close: (relays) => closed.push(relays),
+    };
+    const result = await publishWrapsTrackingRelays([wrap('w1')], ['wss://a', 'wss://b'], pool);
+    expect(closed).toEqual([['wss://a', 'wss://b']]);
+    expect(call).toBe(2);
+    expect(result.wrapsPublished).toBe(1);
+    expect(result.delivery.delivered).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('does NOT retry when at least one wrap was published', async () => {
+    let call = 0;
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return [Promise.resolve('ok'), Promise.reject(new Error('publish timed out'))];
+      },
+      close: () => {
+        throw new Error('close must not be called');
+      },
+    };
+    const result = await publishWrapsTrackingRelays([wrap('w1')], ['wss://a', 'wss://b'], pool);
+    expect(call).toBe(1);
+    expect(result.wrapsPublished).toBe(1);
+  });
+
+  it('does NOT retry when relays actively rejected (non-transport failure)', async () => {
+    // A live relay saying "blocked:" answered on a healthy socket — retrying
+    // with a fresh connection cannot help and must not double the latency.
+    let call = 0;
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return [Promise.reject(new Error('blocked: pubkey not admitted'))];
+      },
+      close: () => {
+        throw new Error('close must not be called');
+      },
+    };
+    const result = await publishWrapsTrackingRelays([wrap('w1')], ['wss://a'], pool);
+    expect(call).toBe(1);
+    expect(result.wrapsPublished).toBe(0);
+    expect(result.errors[0]).toContain('blocked');
+  });
+
+  it('retries when relays never settle (synthesized timeout marks them stale)', async () => {
+    let call = 0;
+    const neverSettles = new Promise<string>(() => {});
+    const closed: string[][] = [];
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return call === 1 ? [neverSettles] : [Promise.resolve('ok')];
+      },
+      close: (relays) => closed.push(relays),
+    };
+    const result = await publishWrapsTrackingRelays(
+      [wrap('w1')],
+      ['wss://stuck'],
+      pool,
+      undefined,
+      undefined,
+      0, // immediate timeout on both attempts
+    );
+    expect(closed).toEqual([['wss://stuck']]);
+    expect(result.wrapsPublished).toBe(1);
+    expect(result.delivery.delivered).toBe(true);
+  });
+
+  it('onFinalized reflects the RETRY attempt, not the failed first attempt', async () => {
+    let call = 0;
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return call === 1
+          ? [Promise.reject(new Error('publish timed out'))]
+          : [Promise.resolve('ok')];
+      },
+      close: () => {},
+    };
+    const finalized: DeliveryStatus[] = [];
+    const result = await publishWrapsTrackingRelays(
+      [wrap('w1')],
+      ['wss://a'],
+      pool,
+      { eventId: 'rumor-1', kind: 14 },
+      (d) => finalized.push(d),
+    );
+    expect(result.delivery.delivered).toBe(true);
+    // Let background finalizes flush.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(finalized).toHaveLength(1);
+    expect(finalized[0].delivered).toBe(true);
+    expect(summariseDelivery(finalized[0])).toEqual({ ok: 1, total: 1 });
+  });
+
+  it('skips the retry when the pool exposes no close()', async () => {
+    let call = 0;
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        return [Promise.reject(new Error('publish timed out'))];
+      },
+    };
+    const result = await publishWrapsTrackingRelays([wrap('w1')], ['wss://a'], pool);
+    expect(call).toBe(1);
+    expect(result.wrapsPublished).toBe(0);
+  });
+});
+
+describe('publishWrapsTrackingRelays — per-wrap stale tracking (multi-wrap sends)', () => {
+  it('marks a relay stale when it black-holes a later wrap despite settling an earlier one', async () => {
+    // Wrap A gets an active rejection (relay alive at that instant); wrap B on
+    // the SAME relay never settles (socket died between wraps). The timeout
+    // branch must judge "settled" per wrap — with a shared set, wrap A's
+    // settle suppressed wrap B's staleness and the auto-retry never fired.
+    let call = 0;
+    const closed: string[][] = [];
+    const pool: RelayPublisher = {
+      publish: () => {
+        call++;
+        if (call === 1) return [Promise.reject(new Error('blocked: not admitted'))]; // wrap A, attempt 1
+        if (call === 2) return [new Promise<string>(() => {})]; // wrap B, attempt 1 — black hole
+        return [Promise.resolve('ok')]; // both wraps, attempt 2
+      },
+      close: (relays) => closed.push(relays),
+    };
+    const result = await publishWrapsTrackingRelays(
+      [wrap('wA'), wrap('wB')],
+      ['wss://dying'],
+      pool,
+      undefined,
+      undefined,
+      0, // immediate timeout so the black-holed wrap settles the attempt fast
+    );
+    expect(closed).toEqual([['wss://dying']]);
+    expect(call).toBe(4); // 2 wraps × 2 attempts
+    expect(result.wrapsPublished).toBe(2);
+    expect(result.delivery.delivered).toBe(true);
+  });
+});
