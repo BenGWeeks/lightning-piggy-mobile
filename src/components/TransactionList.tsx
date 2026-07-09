@@ -8,12 +8,10 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 import type { RefreshControlProps } from 'react-native';
-import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostrContacts } from '../contexts/NostrContext';
 import ContactProfileSheet from './ContactProfileSheet';
@@ -23,15 +21,14 @@ import TransactionDetailSheet, {
   CounterpartyContact,
 } from './TransactionDetailSheet';
 import SendSheet from './SendSheet';
-import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
+import TransactionRow from './TransactionRow';
+import type { TransactionIconState } from './TransactionTypeIcon';
 import { swapIconState } from '../utils/swapIconState';
-import { getTxCategory } from '../utils/txCategory';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
 import type { RootStackParamList } from '../navigation/types';
-import { AVATAR_SIZE, createTransactionListStyles } from '../styles/TransactionList.styles';
+import { createTransactionListStyles } from '../styles/TransactionList.styles';
 import {
   buildTransactionRows,
   hasMoreTransactions,
@@ -54,28 +51,6 @@ interface Props {
 // change immediately) rather than the module-level one (which lags the UI).
 type Translate = ReturnType<typeof useTranslation>;
 
-function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
-  if (cp.anonymous) return t('transactionList.anonymous');
-  const profile = cp.profile;
-  if (profile?.displayName) return profile.displayName;
-  if (profile?.name) return profile.name;
-  if (profile?.npub) return `${profile.npub.slice(0, 12)}…`;
-  return t('transactionList.nostrUser');
-}
-
-// Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
-// "https://memestore.satmo-dev.xyz - Order #4497" renders with the domain
-// prominent and the full URL/memo below, matching Primal's treatment.
-function splitDescription(desc: string): { primary: string; subtitle: string | null } {
-  const trimmed = desc.trim();
-  const urlMatch = trimmed.match(/^(https?:\/\/)([^\s/]+)(.*)$/i);
-  if (urlMatch) {
-    const [, , host, rest] = urlMatch;
-    return { primary: host, subtitle: rest.replace(/^\s*-\s*/, '').trim() || null };
-  }
-  return { primary: trimmed, subtitle: null };
-}
-
 function formatDayHeader(ts: number, t: Translate): string {
   const date = new Date(ts * 1000);
   const today = new Date();
@@ -91,13 +66,6 @@ function formatDayHeader(ts: number, t: Translate): string {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-  });
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
   });
 }
 
@@ -152,15 +120,6 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     return m;
   }, [contacts]);
 
-  // Extract a lightning address from a tx description. NWC/LNbits ledger
-  // entries frequently encode the counterparty as `user@host`, either as
-  // the whole string or embedded in a longer memo like
-  // "Zap from alice@primal.net - nice work!".
-  const findLud16InDescription = (desc: string | undefined): string | null => {
-    if (!desc) return null;
-    const match = desc.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-    return match ? match[0].toLowerCase() : null;
-  };
   // Incremental "infinite scroll" page counter. Page 1 renders the initial
   // window; onEndReached advances it, revealing another slice. The full tx
   // array already lives in memory (WalletContext owns it), so this is
@@ -179,8 +138,28 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   // per row. We bump a single counter on either change to force a render
   // — the actual lookups go through swapRecoveryService each time.
   const [swapStateTick, setSwapStateTick] = useState(0);
+  // Fingerprint of the swap state the rows actually consult. `bump` used to
+  // fire unconditionally on every notify — and `recoverPendingSwaps()` runs on
+  // every pull-to-refresh — so the extraData tick changed each refresh and
+  // forced EVERY visible row to re-render even when no swap state changed
+  // (measured: ~110 ms of a ~130 ms Home commit, #1014). Only bump when the
+  // attention/claimed sets differ from what the last render consumed.
+  const swapFpRef = useRef<string | null>(null);
   useEffect(() => {
-    const bump = () => setSwapStateTick((n) => n + 1);
+    const fingerprint = () => {
+      const att = [...swapRecoveryService.getAttentionPaymentHashes()].sort().join('|');
+      const claimed = [...swapRecoveryService.getClaimedPaymentHashes().entries()]
+        .map(([k, v]) => `${k}=${v ?? ''}`)
+        .sort()
+        .join('|');
+      return `${att}§${claimed}`;
+    };
+    const bump = () => {
+      const fp = fingerprint();
+      if (fp === swapFpRef.current) return;
+      swapFpRef.current = fp;
+      setSwapStateTick((n) => n + 1);
+    };
     const unsubAttention = swapRecoveryService.subscribeAttention(bump);
     const unsubClaimed = swapRecoveryService.subscribeClaimed(bump);
     // Defensive bump: `loadClaimedHashes()` is kicked off eagerly at module
@@ -247,141 +226,40 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     setPagesLoaded((p) => nextPage(transactions.length, p));
   }, [transactions.length]);
 
-  const renderRow = useCallback(
-    ({ item: row }: ListRenderItemInfo<TxRow>) => {
-      if (row.kind === 'header') {
-        return <Text style={styles.dayHeader}>{row.label}</Text>;
-      }
-      const item = row.tx;
-      const isIncoming = item.type === 'incoming';
-      const amountSats = Math.abs(item.amount);
-      // `??` (not `||`) so a `0` (epoch) timestamp counts as present; only
-      // null/undefined means the tx has no settle/create time yet (pending).
-      const ts = item.settled_at ?? item.created_at;
-      const isPending = ts == null && !item.blockHeight;
-      const zapCpRaw = item.zapCounterparty ?? undefined;
-      // Prefer the live profile from contacts (which refreshes when the
-      // profile cache updates) over the snapshot embedded in the tx.
-      const liveProfile = zapCpRaw?.pubkey
-        ? contactProfileByPubkey.get(zapCpRaw.pubkey)
-        : undefined;
-      const zapCp = zapCpRaw
-        ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
-        : undefined;
-
-      // For non-zap transactions, attempt to resolve the counterparty
-      // via a lightning-address in the description. Keyed in
-      // `contactByLud16` off the user's contacts, so it only promotes
-      // people they follow (same source Friends tab reads from).
-      const lud16FromDescription = !zapCp ? findLud16InDescription(item.description) : null;
-      const descriptionContact = lud16FromDescription
-        ? contactByLud16.get(lud16FromDescription)
-        : undefined;
-
-      // Primary label: counterparty name if attributed; else contact-by-
-      // lud16 name; else URL host or raw description; else
-      // "Received" / "Sent".
-      let primary: string;
-      let subtitle: string | null = null;
-      if (isPending) {
-        primary = t('transactionList.pending');
-      } else if (zapCp) {
-        primary = zapCounterpartyLabel(zapCp, t);
-        subtitle = zapCp.comment?.trim() || null;
-      } else if (descriptionContact) {
-        primary =
-          descriptionContact.profile?.displayName ??
-          descriptionContact.profile?.name ??
-          lud16FromDescription ??
-          (isIncoming ? t('transactionList.received') : t('transactionList.sent'));
-      } else if (item.description) {
-        const split = splitDescription(item.description);
-        primary = split.primary;
-        subtitle = split.subtitle;
-      } else {
-        primary = isIncoming ? t('transactionList.received') : t('transactionList.sent');
-      }
-
-      // Explicit null check so a `0` (epoch) timestamp still formats instead of
-      // rendering an empty string.
-      const timeStr = ts != null ? formatTime(ts) : '';
-      const counterpartyAvatar =
-        zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
-      const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
-
-      const rowIconState = iconStateFor(item);
-
-      return (
-        <TouchableOpacity
-          style={[styles.item, isPending && styles.itemPending]}
-          onPress={() => {
-            setDetail(item as TransactionDetailData);
-            setDetailIconState(rowIconState);
-          }}
-          accessibilityLabel={t('transactionList.openDetailsFor', { name: primary })}
-        >
-          <View style={styles.avatarWrap}>
-            {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
-              <Image
-                source={{ uri: counterpartyAvatar }}
-                style={styles.avatar}
-                cachePolicy="memory-disk"
-                recyclingKey={counterpartyAvatar}
-                autoplay={false}
-                contentFit="cover"
-              />
-            ) : (
-              <TransactionTypeIcon
-                category={getTxCategory(item)}
-                size={AVATAR_SIZE}
-                state={rowIconState}
-              />
-            )}
-          </View>
-
-          <View style={styles.centerCol}>
-            <View style={styles.centerLine}>
-              <Text style={[styles.primary, isPending && styles.pendingText]} numberOfLines={1}>
-                {primary}
-              </Text>
-              {timeStr ? <Text style={styles.time}> | {timeStr}</Text> : null}
-            </View>
-            {subtitle ? (
-              <Text style={styles.subtitle} numberOfLines={1}>
-                {subtitle}
-              </Text>
-            ) : null}
-          </View>
-
-          <View style={styles.rightCol}>
-            <View style={styles.amountsColumn}>
-              <Text
-                style={[
-                  styles.amount,
-                  isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
-                ]}
-              >
-                {amountSats.toLocaleString()} sats
-              </Text>
-              {fiatStr ? (
-                <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
-              ) : null}
-            </View>
-            <Text
-              style={[
-                styles.arrow,
-                isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
-              ]}
-            >
-              {isIncoming ? '↓' : '↑'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      );
+  // Stable press handler so TransactionRow's memo isn't defeated by a fresh
+  // callback identity every render.
+  const onPressTx = useCallback(
+    (tx: TransactionDetailData, ic: TransactionIconState | undefined) => {
+      setDetail(tx);
+      setDetailIconState(ic);
     },
-    // iconStateFor / findLud16InDescription are stable per-render closures;
-    // the maps + price + styles cover all the data they read.
-    [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, t],
+    [],
+  );
+
+  // Thin renderItem: all row content lives in the memoised TransactionRow.
+  // FlatList re-wraps renderItem in a fresh closure whenever the list
+  // re-renders, which re-executes every visible cell — with the content
+  // memoised, that re-execution is just element creation and the memo bails
+  // on stable props (#1014). `swapStateTick` is a dep so a REAL swap-state
+  // change recomputes iconState (a primitive prop) and repaints just the
+  // rows whose badge changed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const renderRow = useCallback(
+    ({ item: row }: ListRenderItemInfo<TxRow>) => (
+      <TransactionRow
+        row={row}
+        styles={styles}
+        contactProfileByPubkey={contactProfileByPubkey}
+        contactByLud16={contactByLud16}
+        btcPrice={btcPrice}
+        currency={currency}
+        iconState={row.kind === 'tx' ? iconStateFor(row.tx) : undefined}
+        onPressTx={onPressTx}
+      />
+    ),
+    // iconStateFor is a stable per-render closure over live swapRecoveryService
+    // reads; swapStateTick re-creates this callback when that state changes.
+    [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, onPressTx, swapStateTick],
   );
 
   const listFooter = hasMore ? (

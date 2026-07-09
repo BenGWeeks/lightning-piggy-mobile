@@ -157,6 +157,13 @@ export function getClaimTxId(paymentHash: string): string | null | undefined {
   return claimedPaymentHashes.get(paymentHash);
 }
 
+/** Snapshot of the claimed-hash cache (hash → claim txid | null). Used by
+ *  TransactionList to fingerprint swap state so a recovery pass that changed
+ *  NOTHING doesn't force a full row re-render via its extraData tick (#1014). */
+export function getClaimedPaymentHashes(): ReadonlyMap<string, string | null> {
+  return claimedPaymentHashes;
+}
+
 /** Subscribe to changes in the claimed-hash cache. Returns an unsubscribe fn. */
 export function subscribeClaimed(cb: () => void): () => void {
   claimedListeners.add(cb);

@@ -207,7 +207,7 @@ const HomeScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletId, isWalletAvailable]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
     // Also retry any pending Boltz swap claims — recovery otherwise only runs
@@ -220,7 +220,17 @@ const HomeScreen: React.FC = () => {
     // Explicit pull-to-refresh — force a full zap-resolver pass.
     await fetchData({ force: true });
     setRefreshing(false);
-  };
+  }, [activeWalletId, fetchData]);
+
+  // Stable RefreshControl ELEMENT. Passing a fresh element on every render
+  // made the (Pure) FlatList inside TransactionList re-render on every Home
+  // commit — and FlatList re-wraps renderItem when it re-renders, which
+  // re-executed every visible row (#1014). Memoised, it only changes when
+  // the spinner state genuinely flips.
+  const homeRefreshControl = useMemo(
+    () => <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />,
+    [refreshing, handleRefresh],
+  );
 
   const handleWalletChange = useCallback(
     (walletId: string | null) => {
@@ -374,15 +384,9 @@ const HomeScreen: React.FC = () => {
           working on them too. */}
       <View style={styles.transactionsWrapper}>
         {showTransactionList ? (
-          <TransactionList
-            transactions={transactions}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          />
+          <TransactionList transactions={transactions} refreshControl={homeRefreshControl} />
         ) : (
-          <ScrollView
-            style={styles.transactionsContainer}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          >
+          <ScrollView style={styles.transactionsContainer} refreshControl={homeRefreshControl}>
             {!hasWallets ? (
               <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
             ) : addCardActive || activeWalletId === null ? (
