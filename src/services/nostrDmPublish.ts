@@ -86,9 +86,6 @@ async function attemptPublish(
   // Settles seen so far, shared across the early-resolve and background phases.
   // A relay that accepts ANY wrap is `ok`; aggregateRelayResults folds repeats.
   const settles: RelaySettle[] = [];
-  // Relays that produced any real settle (accept OR reject) for any wrap —
-  // used to tell "relay answered" apart from "socket black-holed" on timeout.
-  const settledRelays = new Set<string>();
   const staleRelays = new Set<string>();
   // Per-wrap promises that complete only once EVERY relay for that wrap has
   // settled — awaited in the background for the final breakdown.
@@ -97,6 +94,12 @@ async function attemptPublish(
   await Promise.all(
     wraps.map(async (wrap) => {
       const perRelay = pool.publish(relays, wrap);
+      // Relays that produced a real settle (accept OR reject) for THIS wrap —
+      // used to tell "relay answered" apart from "socket black-holed" in the
+      // timeout branch below. Deliberately per-wrap, not shared: a relay can
+      // settle an earlier wrap and still black-hole a later one mid-death,
+      // and that later hang must still mark it stale (Copilot #1011).
+      const settledForWrap = new Set<string>();
       // Record each relay's outcome into the shared `settles` as soon as it
       // resolves/rejects, so the early snapshot reflects whatever has landed.
       // A resolution carrying the "connection failure:" string is a FAILURE
@@ -105,7 +108,7 @@ async function attemptPublish(
         const relay = relays[i];
         return p.then(
           (value) => {
-            settledRelays.add(relay);
+            settledForWrap.add(relay);
             if (isConnectionFailure(value)) {
               staleRelays.add(relay);
               settles.push({ relay, ok: false });
@@ -114,7 +117,7 @@ async function attemptPublish(
             }
           },
           (reason) => {
-            settledRelays.add(relay);
+            settledForWrap.add(relay);
             if (isTransportFailure(reason)) staleRelays.add(relay);
             settles.push({ relay, ok: false });
           },
@@ -147,7 +150,7 @@ async function attemptPublish(
           // (red tick) rather than an empty one (which renders as pending).
           // A relay that never even settles is the stale-socket signature.
           for (const relay of relays) {
-            if (!settledRelays.has(relay)) {
+            if (!settledForWrap.has(relay)) {
               staleRelays.add(relay);
               if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
             }
