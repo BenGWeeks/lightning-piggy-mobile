@@ -25,7 +25,6 @@ import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
-import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { orderFeaturedFirst } from '../utils/featuredPlaces';
@@ -147,8 +146,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     },
   );
   const [locationDenied, setLocationDenied] = useState(false);
-  // Live position for the user dot — doesn't re-trigger data fetches.
-  const { pos: livePos } = useUserLocation();
+  // NOTE: the live GPS position is deliberately NOT consumed here. Its only
+  // consumer on this screen is the mini-map's camera/user-dot, and
+  // ExploreMiniMap subscribes to useUserLocation() itself — subscribing at
+  // the screen root re-committed this whole tree (measured 240–280 ms) on
+  // every watch fix, one JS-thread stall per 15 s at walking pace.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -902,18 +904,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       >
         <ExploreMiniMap
           locationDenied={locationDenied}
-          // Mini-map is non-interactive (zoom-only, follows GPS) — so the
-          // camera anchor SHOULD track the live position, not the stale
-          // one-shot `pos` (seeded from a cached merchant-centroid anchor on
-          // cold start). Falls back to `pos` only while the live fix resolves.
-          lat={livePos?.lat ?? pos?.lat ?? null}
-          lon={livePos?.lon ?? pos?.lon ?? null}
-          userLat={livePos?.lat ?? null}
-          userLon={livePos?.lon ?? null}
-          // Cached anchor accuracy is only useful BEFORE a live fix arrives.
-          // Once livePos exists, trust its accuracy (even if null) so the halo
-          // never renders around live coords using stale data.
-          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          // One-shot cached anchor — the mini-map reads the LIVE position via
+          // its own useUserLocation() subscription and uses this only until
+          // the first live fix lands (see the perf note on ExploreMiniMap).
+          fallbackAnchor={pos}
           merchants={merchants}
           caches={cachesArr}
           events={eventsArr}
