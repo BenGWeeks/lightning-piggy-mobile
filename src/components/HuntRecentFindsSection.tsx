@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import { PartyPopper, PiggyBank, User, Users, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -170,7 +171,7 @@ const FindRow: React.FC<{
       testID={`hunt-recent-finds-row-${index}`}
       accessibilityLabel={t('huntCommunity.findRowA11y', { name: display, cache: cacheName })}
     >
-      {picture ? (
+      {picture && isSupportedImageUrl(picture) ? (
         <Image
           source={{ uri: picture }}
           style={styles.avatar}

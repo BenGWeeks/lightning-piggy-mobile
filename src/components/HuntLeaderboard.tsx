@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import { Medal, PiggyBank, Trophy, User, Users } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -101,7 +102,7 @@ const LeaderboardRow: React.FC<{
           <Text style={styles.rankText}>{rank + 1}</Text>
         )}
       </View>
-      {picture ? (
+      {picture && isSupportedImageUrl(picture) ? (
         <Image
           source={{ uri: picture }}
           style={styles.avatar}
