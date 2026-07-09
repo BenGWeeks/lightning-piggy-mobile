@@ -43,6 +43,7 @@ import {
 } from '../services/cacheNotifySubscription';
 import { fireCacheNotification } from '../services/notificationService';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
+import { subscribeOwnCachesChanged } from '../services/ownCachesBus';
 import { parseCacheCoord } from '../services/nostrPlacesService';
 import { notifyFoundLog } from './nostrEventBus';
 
@@ -54,11 +55,13 @@ const NOTIFY_SKEW_SEC = 120;
 // the Set to grow unboundedly across the life of the sub.
 const SEEN_CAP = 1000;
 
-// Re-poll the viewer's cache coords once a minute so a cache published
-// mid-session is picked up by the live sub without a full app restart
-// (Copilot review #742). Bounded (5 s maxWait inside fetchCachesByAuthor)
-// and inexpensive (kind-37516 by one pubkey is replaceable + small).
-const REFETCH_COORDS_INTERVAL_MS = 60_000;
+// Safety-net re-poll of the viewer's cache coords. Same-device publishes
+// re-arm EVENT-DRIVEN via ownCachesBus (#1016), so this interval only
+// covers the rare cross-device case (a cache published/edited from another
+// device mid-session). It was 60 s — ~1,440 seven-relay REQ sweeps a day,
+// measured at 3–5 s of relay wait each and returning nothing for most
+// users; 15 min keeps the cross-device catch-up without the churn.
+const REFETCH_COORDS_INTERVAL_MS = 15 * 60_000;
 // Minimum gap between actual refetch passes. The 60 s interval and one-time
 // mount call sit well above it; its job is to coalesce AppState 'active'
 // bursts — the OS can deliver several 'active' events back-to-back on resume,
@@ -189,12 +192,14 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
      * picked up without a full app restart. `fetchCachesByAuthor` caps
      * itself at 5 s so this can't pin the hook against a slow relay.
      */
-    const refetchAndRearm = async (): Promise<void> => {
+    const refetchAndRearm = async (opts?: { force?: boolean }): Promise<void> => {
       if (cancelled) return;
       // Throttle bursts (esp. multiple back-to-back AppState 'active' events on
       // resume) so we don't fire overlapping relay fetches (#751 audit #5).
+      // `force` (a just-published own cache, #1016) bypasses the gap — the
+      // whole point of the event-driven re-arm is picking the change up NOW.
       const startNow = Date.now();
-      if (startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
+      if (!opts?.force && startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
       lastRefetchStartedAt = startNow;
       try {
         const myCaches = await fetchCachesByAuthor(pubkey, readRelays);
@@ -248,11 +253,17 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     const appStateSub = AppState.addEventListener('change', (s: AppStateStatus) => {
       if (s === 'active') void refetchAndRearm();
     });
+    // Event-driven re-arm: this device just published / edited / expired /
+    // deleted one of its own caches (#1016) — refresh the coord set now.
+    const unsubOwnCaches = subscribeOwnCachesChanged(() => {
+      void refetchAndRearm({ force: true });
+    });
 
     return () => {
       cancelled = true;
       clearInterval(interval);
       appStateSub.remove();
+      unsubOwnCaches();
       if (unsubscribeComments) unsubscribeComments();
       if (unsubscribeFoundLogs) unsubscribeFoundLogs();
     };
