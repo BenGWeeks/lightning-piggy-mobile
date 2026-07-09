@@ -65,7 +65,7 @@ name: Attach tile — Invoice opens ReceiveSheet
       # satisfies "the invoice flow opened".
       - extendedWaitUntil:
           visible:
-            id: 'receive-send-to-friend|amount-entry-screen'
+            id: '^(receive-send-to-friend|amount-entry-screen)$'
           timeout: 5000
       - back
       - waitForAnimationToEnd:
