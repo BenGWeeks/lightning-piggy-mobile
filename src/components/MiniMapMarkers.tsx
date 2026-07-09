@@ -102,7 +102,10 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
             lngLat={[m.lon, m.lat]}
             onPress={onSelectMerchant ? () => onSelectMerchant(m) : undefined}
           >
-            <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain, markerDim]}>
+            <View
+              style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain, markerDim]}
+              testID={`minimap-merchant-${m.id}`}
+            >
               <Icon size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
             </View>
           </Marker>
@@ -189,7 +192,7 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
             lngLat={[e.lng, e.lat]}
             onPress={onSelectEvent && original ? () => onSelectEvent(original) : undefined}
           >
-            <View style={[styles.pin, styles.pinEvent, markerDim]}>
+            <View style={[styles.pin, styles.pinEvent, markerDim]} testID={`minimap-event-${e.id}`}>
               <Calendar size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
             </View>
           </Marker>
