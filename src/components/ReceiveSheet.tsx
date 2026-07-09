@@ -221,12 +221,20 @@ const ReceiveSheet: React.FC<Props> = ({
         // semantics), so the main receive/address view is unusable.
         return { step: 'amount', mode: 'amount' };
       }
-      // The 1:1 DM flow (presetFriend) deliberately does NOT skip the
-      // main view: it lands there like the Home receive sheet does, so
-      // the "To:" wallet picker is visible BEFORE the user commits to
-      // an amount, and the lightning address can be sent as-is (an
-      // amount-less request). Previously it jumped straight to amount
-      // entry, which hid which wallet the invoice would pay into.
+      if (presetFriend) {
+        // The 1:1 DM flow deliberately does NOT skip the main view: it
+        // lands there like the Home receive sheet does, so the "To:"
+        // wallet picker is visible BEFORE the user commits to an
+        // amount, and the lightning address can be sent as-is (an
+        // amount-less request). Previously it jumped straight to
+        // amount entry, which hid which wallet the invoice would pay
+        // into. Only skip when there is genuinely nothing to show or
+        // choose: a single wallet with no lightning address.
+        if (!wallet?.lightningAddress && wallets.length <= 1) {
+          return { step: 'amount', mode: 'amount' };
+        }
+        return { step: 'main', mode: 'address' };
+      }
       if (!wallet?.lightningAddress) {
         // No per-wallet LN address (#168/#169). Nothing useful to show
         // on the main view — jump directly to amount entry instead of
@@ -235,7 +243,7 @@ const ReceiveSheet: React.FC<Props> = ({
       }
       return { step: 'main', mode: 'address' };
     },
-    [presetGroup],
+    [presetFriend, presetGroup, wallets],
   );
 
   // Open/close the sheet — intentionally depends only on `visible`.
