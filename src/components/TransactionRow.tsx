@@ -39,12 +39,13 @@ function zapCounterpartyLabel(cp: ZapCounterpartyInfo, t: Translate): string {
 // a LNURL comment shows the host prominent and the full URL/memo below,
 // matching Primal's treatment.
 function splitDescription(desc: string): { primary: string; subtitle: string | null } {
-  try {
-    const url = new URL(desc);
-    return { primary: url.hostname, subtitle: desc };
-  } catch {
-    return { primary: desc, subtitle: null };
+  const trimmed = desc.trim();
+  const urlMatch = trimmed.match(/^(https?:\/\/)([^\s/]+)(.*)$/i);
+  if (urlMatch) {
+    const [, , host, rest] = urlMatch;
+    return { primary: host, subtitle: rest.replace(/^\s*-\s*/, '').trim() || null };
   }
+  return { primary: trimmed, subtitle: null };
 }
 
 function formatTime(ts: number): string {
