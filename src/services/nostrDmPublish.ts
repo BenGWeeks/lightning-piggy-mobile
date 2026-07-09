@@ -152,7 +152,10 @@ async function attemptPublish(
               if (!settles.some((s) => s.relay === relay)) settles.push({ relay, ok: false });
             }
           }
-          errors.push('publish timed out — no relay responded');
+          // Neutral wording: some relays may have answered (with a rejection)
+          // while others never settled — the only universal fact on this
+          // branch is that nothing ACCEPTED within the window.
+          errors.push('publish timed out — no relay accepted within the window');
         } else {
           published++;
         }
