@@ -82,7 +82,7 @@ The app supports three Nostr signers, branched on `signerType` in `NostrContext.
 
 - Coverage scope: **`src/services`, `src/utils`, `src/contexts` only.** Components are excluded — they're best covered by Maestro pixel/flow tests (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort, low-payoff).
 - Runner: Jest via `jest-expo` preset. Per the 2026 review of alternatives (Vitest's RN preset is still WIP, Bun test isn't documented for Expo, node:test has no RN renderer), Jest remains the right choice for RN + Expo SDK 55.
-- Add new tests under `tests/unit/<area>.test.ts`. Co-located `.test.ts` next to source files also works.
+- Add new tests as co-located `.test.ts` files next to the source (e.g. `src/utils/foo.test.ts`). Jest only collects `src/**/*.test.{ts,tsx}` (see `jest.config.js` `testMatch`) — a file under `tests/unit/` is silently never run.
 - Pick targets via `bash scripts/coverage-priorities.sh 20` — ranks files by `(churn × LOC × fanout) / (coverage% + 1)`. Top of the list is where bugs hurt most.
 - The `Coverage` GitHub Actions workflow gates every PR: line-coverage may not drop more than 0.5pp vs main.
 
