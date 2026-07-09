@@ -24,6 +24,7 @@ import {
 import { fireCacheNotification } from '../services/notificationService';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
 import { notifyFoundLog } from './nostrEventBus';
+import { notifyOwnCachesChanged } from '../services/ownCachesBus';
 
 jest.mock('../services/cacheNotifySubscription', () => ({
   __esModule: true,
@@ -193,5 +194,49 @@ describe('useCacheNotifications', () => {
     expect(mockedFire).toHaveBeenCalledWith(
       expect.objectContaining({ cacheCoord: COORD_B, title: 'New find on your cache' }),
     );
+  });
+});
+
+describe('event-driven own-caches rearm (#1016)', () => {
+  it('refetches immediately on ownCachesBus notify, bypassing the resume-burst gap', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    renderHook(() => useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] }));
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1)); // mount arm
+
+    // A publish right after mount is inside REFETCH_MIN_GAP_MS — the forced
+    // path must refetch anyway (that's the point of the event-driven re-arm).
+    await act(async () => {
+      notifyOwnCachesChanged();
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+  });
+
+  it('queues (not overlaps) a force that lands while a pass is in flight', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_A }]);
+    renderHook(() => useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] }));
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1)); // pending
+
+    // Two publishes mid-flight → no concurrent fetch fires…
+    await act(async () => {
+      notifyOwnCachesChanged();
+      notifyOwnCachesChanged();
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+
+    // …and exactly ONE queued follow-up runs once the first pass settles.
+    await act(async () => {
+      resolveFirst([{ coord: COORD_A }]);
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    // No third call sneaks in behind the queued one.
+    await act(async () => {});
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 });
