@@ -175,7 +175,9 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
       <Text
         style={styles.name}
         testID="wallet-card-picker-name"
-        accessibilityLabel={t('walletCardPicker.selectedTheme', { name: cardThemes[centredTheme]?.name ?? '' })}
+        accessibilityLabel={t('walletCardPicker.selectedTheme', {
+          name: cardThemes[centredTheme]?.name ?? '',
+        })}
       >
         {cardThemes[centredTheme]?.name ?? ''}
       </Text>
