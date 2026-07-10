@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import type { ParsedCache, ParsedFoundLog } from '../services/nostrPlacesService';
@@ -71,13 +71,23 @@ export const useHuntCommunity = (): HuntCommunityData => {
 
   const readRelays = useMemo(() => relays.filter((r) => r.read).map((r) => r.url), [relays]);
 
+  // Ref that mirrors whether any data has arrived since the last focus.
+  // Updated in the useEffect below; read in the useFocusEffect callback so
+  // the focus effect can decide whether to show the loading skeleton without
+  // adding cachesMap / findsMap to the useCallback deps (which would cause
+  // a close → resubscribe loop every time useCoalescedMap flushes, because
+  // flush() always produces a new Map object).
+  const hasDataRef = useRef(false);
+
   useFocusEffect(
     useCallback(() => {
-      // Re-entering a screen whose Maps were flushed/empty (e.g. fresh mount
-      // or a screen that was popped and re-pushed) must show the loading
-      // spinner again — otherwise the empty-state text flashes briefly
-      // before events arrive from the relay.
-      if (cachesMap.size === 0 && findsMap.size === 0) setLoading(true);
+      // Re-entering a screen whose Maps were flushed on blur (fresh mount or
+      // re-push after navigation) must show the loading skeleton again so the
+      // empty-state text doesn't flash before events arrive. We read a ref
+      // rather than cachesMap.size / findsMap.size so the callback deps stay
+      // stable: useCoalescedMap replaces the Map object on every flush, which
+      // would make .size flicker and re-arm this effect in a tight loop.
+      if (!hasDataRef.current) setLoading(true);
       const urls = readRelays.length > 0 ? readRelays : undefined;
       const closeCaches = subscribeRecentCaches((c) => {
         if (isHiddenInProd(c.hiderPubkey)) return;
@@ -94,22 +104,22 @@ export const useHuntCommunity = (): HuntCommunityData => {
         clearTimeout(settle);
         flushCaches();
         flushFinds();
+        // On blur the Maps are flushed/cleared, so the next focus is a
+        // fresh fetch — reset the sentinel so loading shows again.
+        hasDataRef.current = false;
       };
-    }, [
-      readRelays,
-      enqueueCache,
-      enqueueFind,
-      flushCaches,
-      flushFinds,
-      cachesMap.size,
-      findsMap.size,
-    ]),
+    }, [readRelays, enqueueCache, enqueueFind, flushCaches, flushFinds]),
   );
 
   // Drop the spinner as soon as any event lands, so a fast relay doesn't
-  // wait out the full settle window.
+  // wait out the full settle window. Also update the ref so the next focus
+  // (if the user navigates away and back before the blur cleanup runs) knows
+  // that data is already present.
   useEffect(() => {
-    if (cachesMap.size > 0 || findsMap.size > 0) setLoading(false);
+    if (cachesMap.size > 0 || findsMap.size > 0) {
+      hasDataRef.current = true;
+      setLoading(false);
+    }
   }, [cachesMap.size, findsMap.size]);
 
   const cacheList = useMemo(() => [...cachesMap.values()], [cachesMap]);
