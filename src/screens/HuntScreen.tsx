@@ -433,7 +433,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         }
         ListHeaderComponent={
           <View>
-            {/* Community engagement rails + leaderboards — sit above the
+            {/* Community engagement rails + leaderboard link — sit above the
                 distance-sorted nearby list so discovery isn't limited to
                 whatever happens to be within ~5 km. */}
             <HuntCommunitySections

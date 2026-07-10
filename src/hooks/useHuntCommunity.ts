@@ -73,6 +73,11 @@ export const useHuntCommunity = (): HuntCommunityData => {
 
   useFocusEffect(
     useCallback(() => {
+      // Re-entering a screen whose Maps were flushed/empty (e.g. fresh mount
+      // or a screen that was popped and re-pushed) must show the loading
+      // spinner again — otherwise the empty-state text flashes briefly
+      // before events arrive from the relay.
+      if (cachesMap.size === 0 && findsMap.size === 0) setLoading(true);
       const urls = readRelays.length > 0 ? readRelays : undefined;
       const closeCaches = subscribeRecentCaches((c) => {
         if (isHiddenInProd(c.hiderPubkey)) return;
@@ -90,7 +95,15 @@ export const useHuntCommunity = (): HuntCommunityData => {
         flushCaches();
         flushFinds();
       };
-    }, [readRelays, enqueueCache, enqueueFind, flushCaches, flushFinds]),
+    }, [
+      readRelays,
+      enqueueCache,
+      enqueueFind,
+      flushCaches,
+      flushFinds,
+      cachesMap.size,
+      findsMap.size,
+    ]),
   );
 
   // Drop the spinner as soon as any event lands, so a fast relay doesn't
