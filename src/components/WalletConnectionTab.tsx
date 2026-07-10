@@ -284,7 +284,12 @@ const WalletConnectionTab: React.FC<Props> = ({
           {xpubDisplay === undefined ? (
             <Text style={styles.xpubText}>{'…'}</Text>
           ) : (
-            <TouchableOpacity onPress={onCopyXpub} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={onCopyXpub}
+              activeOpacity={0.7}
+              accessibilityLabel={t('walletSettingsSheet.copyXpub')}
+              testID="settings-onchain-copy-xpub"
+            >
               <Text style={styles.xpubText} numberOfLines={3}>
                 {xpubDisplay}
               </Text>

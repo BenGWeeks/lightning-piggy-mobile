@@ -1897,6 +1897,7 @@
     "shareWalletPickTitle": "Share wallet with…",
     "extendedPublicKey": "Extended Public Key",
     "tapToCopy": "Tap to copy",
+    "copyXpub": "Copy extended public key",
     "cardDesign": "Card Design",
     "save": "Save",
     "saveWalletSettings": "Save wallet settings",

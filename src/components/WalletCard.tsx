@@ -3,7 +3,8 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState, WalletConnectionHealth } from '../types/wallet';
-import { CardThemeConfig, cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
+import type { CardThemeConfig } from '../themes/cardThemes';
+import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
