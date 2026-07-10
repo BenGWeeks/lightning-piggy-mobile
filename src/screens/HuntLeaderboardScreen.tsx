@@ -3,14 +3,14 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { ChevronLeft } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { useHuntCommunity } from '../hooks/useHuntCommunity';
 import HuntLeaderboard from '../components/HuntLeaderboard';
 import BrandPatternBackground from '../components/BrandPatternBackground';
-import type { ExploreNavigation } from '../navigation/types';
+import type { ExploreNavigation, HuntLeaderboardRoute } from '../navigation/types';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
   navigation: ExploreNavigation;
+  route: HuntLeaderboardRoute;
 }
 
 /**
@@ -18,12 +18,25 @@ interface Props {
  * authored) and Top Finders (by distinct caches claimed), derived from
  * the same `useHuntCommunity` data hook as the community rail sections.
  * Accessible via the "Leaderboard" link in HuntCommunitySections.
+ *
+ * Data arrives via route params rather than a second `useHuntCommunity()`
+ * call: HuntScreen's instance (via HuntCommunitySections) already owns the
+ * subscribeRecentCaches / subscribeRecentFoundLogs subscription pair, so
+ * opening a second instance here would duplicate ~400 relay events through
+ * the JS thread (#1028). The leaderboard arrays are plain-serialisable
+ * (pubkey/total/pigletCount strings and numbers) so they travel safely
+ * through navigation state.
  */
-const HuntLeaderboardScreen: React.FC<Props> = ({ navigation }) => {
+const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { hiderLeaderboard, finderLeaderboard, loading } = useHuntCommunity();
+  // Guard against restored navigation state from before params were added
+  // (#1028). A cold-start restore of a stale HuntLeaderboard entry (which
+  // previously took no params) would arrive here with route.params undefined.
+  // Fall back to empty boards so the screen renders the empty-state text
+  // rather than crashing on destructuring.
+  const { hiderLeaderboard = [], finderLeaderboard = [], loading = false } = route.params ?? {};
 
   return (
     <View style={styles.container} testID="hunt-leaderboard-screen">
