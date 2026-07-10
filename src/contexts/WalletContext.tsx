@@ -1097,12 +1097,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
           txs = mapNwcTransactions(raw as NwcRawTransaction[], existing);
         }
-        // Unchanged-poll skip (#1014): reuse JSON as a content fingerprint.
-        // When the freshly-mapped list serialises identically to the last
-        // committed one, keep the OLD `wallet.transactions` identity — the
-        // mappers rebuild a new-but-equal array on every poll, and committing
-        // it re-rendered every visible TransactionList row each 30 s tick.
-        // Baseline seeding + zap resolver below still run either way.
+        // Unchanged-poll skip (#1014): JSON reused as content fingerprint.
+        // Identical serialisation keeps old `wallet.transactions` identity,
+        // avoiding a re-render of every visible row on each 30 s poll.
         const txsJson = JSON.stringify(txs);
         const txsUnchanged = lastTxsJsonRef.current.get(walletId) === txsJson;
         if (!txsUnchanged) {
@@ -1187,7 +1184,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // future polls as "unchanged" (#1014).
         const json = JSON.stringify(nextTxs);
         AsyncStorage.setItem(`txs_${walletId}`, json)
-          .then(() => { lastTxsJsonRef.current.set(walletId, json); })
+          .then(() => {
+            lastTxsJsonRef.current.set(walletId, json);
+          })
           .catch(() => {});
       }
     },
