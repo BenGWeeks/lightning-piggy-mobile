@@ -1892,8 +1892,15 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Tema de tarjeta seleccionado: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Ajustes de la cartera",
+    "tabDesign": "Diseño",
+    "tabDetails": "Detalles",
+    "tabConnection": "Conexión",
+    "noConnectionDetails": "No hay detalles de conexión para esta cartera.",
     "alias": "Alias",
     "aliasPlaceholder": "Nombre de la cartera",
     "lightningAddress": "Dirección Lightning",
@@ -1923,6 +1930,7 @@
     "shareWalletPickTitle": "Compartir cartera con…",
     "extendedPublicKey": "Clave pública extendida",
     "tapToCopy": "Toca para copiar",
+    "copyXpub": "Copiar clave pública extendida",
     "cardDesign": "Diseño de la tarjeta",
     "save": "Guardar",
     "saveWalletSettings": "Guardar ajustes de la cartera",

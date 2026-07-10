@@ -1864,8 +1864,15 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Вибрана тема картки: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Налаштування гаманця",
+    "tabDesign": "Дизайн",
+    "tabDetails": "Деталі",
+    "tabConnection": "Підключення",
+    "noConnectionDetails": "Немає деталей підключення для цього гаманця.",
     "alias": "Назва",
     "aliasPlaceholder": "Назва гаманця",
     "lightningAddress": "Адреса Lightning",
@@ -1895,6 +1902,7 @@
     "shareWalletPickTitle": "Поділитися гаманцем із…",
     "extendedPublicKey": "Розширений публічний ключ",
     "tapToCopy": "Торкніться, щоб копіювати",
+    "copyXpub": "Копіювати розширений публічний ключ",
     "cardDesign": "Дизайн картки",
     "save": "Зберегти",
     "saveWalletSettings": "Зберегти налаштування гаманця",

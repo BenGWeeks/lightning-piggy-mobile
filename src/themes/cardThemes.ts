@@ -1,4 +1,4 @@
-import { CardTheme } from '../types/wallet';
+import type { CardTheme, WalletType } from '../types/wallet';
 import { ImageSourcePropType, ImageResizeMode } from 'react-native';
 
 export interface CardThemeConfig {
@@ -241,3 +241,14 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
 // than hand-ordering the map) keeps the map grouped logically while the UI
 // stays A→Z as new cards are added.
 export const themeList = Object.values(cardThemes).sort((a, b) => a.name.localeCompare(b.name));
+
+/**
+ * Card design a wallet falls back to when it carries no explicit (or a
+ * stale/unknown) theme id: on-chain wallets default to the orange
+ * **Bitcoin** card, Lightning/NWC wallets to the **Lightning Piggy** card.
+ * These are the theme *ids* (`'bitcoin'` / `'lightning-piggy'`) — display
+ * names may differ.
+ */
+export function defaultCardThemeFor(walletType: WalletType): CardTheme {
+  return walletType === 'onchain' ? 'bitcoin' : 'lightning-piggy';
+}

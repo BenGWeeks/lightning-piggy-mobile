@@ -1892,8 +1892,15 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Selected card theme: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Wallet Settings",
+    "tabDesign": "Design",
+    "tabDetails": "Details",
+    "tabConnection": "Connection",
+    "noConnectionDetails": "No connection details for this wallet.",
     "alias": "Alias",
     "aliasPlaceholder": "Wallet name",
     "lightningAddress": "Lightning Address",
@@ -1923,6 +1930,7 @@
     "shareWalletPickTitle": "Share wallet with…",
     "extendedPublicKey": "Extended Public Key",
     "tapToCopy": "Tap to copy",
+    "copyXpub": "Copy extended public key",
     "cardDesign": "Card Design",
     "save": "Save",
     "saveWalletSettings": "Save wallet settings",
