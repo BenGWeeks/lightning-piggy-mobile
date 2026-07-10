@@ -7,6 +7,7 @@ import {
   isBoltzTransaction,
   hasClaimedPaymentHash,
   getClaimTxId,
+  getClaimedPaymentHashes,
   recordClaimedPaymentHash,
   subscribeClaimed,
 } from './swapRecoveryService';
@@ -162,5 +163,19 @@ describe('claimed-hash cache', () => {
     await recordClaimedPaymentHash(HASH, TXID);
     expect(cb).not.toHaveBeenCalled();
     unsub();
+  });
+
+  it('getClaimedPaymentHashes returns a live view of the cache', async () => {
+    // Assert the returned Map is the live module-level map, not a snapshot:
+    // entries recorded AFTER calling getClaimedPaymentHashes() are immediately
+    // visible through the same reference.
+    const HASH_LIVE = '4'.repeat(64);
+    const TXID_LIVE = '5'.repeat(64);
+    const view = getClaimedPaymentHashes();
+    expect(view.has(HASH_LIVE)).toBe(false);
+    await recordClaimedPaymentHash(HASH_LIVE, TXID_LIVE);
+    // The previously-captured reference now reflects the new entry.
+    expect(view.has(HASH_LIVE)).toBe(true);
+    expect(view.get(HASH_LIVE)).toBe(TXID_LIVE);
   });
 });
