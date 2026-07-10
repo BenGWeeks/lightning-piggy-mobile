@@ -926,7 +926,9 @@
   "huntLeaderboard": {
     "title": "Clasificación",
     "tagline": "Los mejores escondedores y buscadores de la red",
-    "backToGeoCaches": "Volver a Geocachés"
+    "backToGeoCaches": "Volver a Geocachés",
+    "tabHiders": "Mejores escondedores",
+    "tabFinders": "Mejores buscadores"
   },
   "huntScreen": {
     "backToExplore": "Volver a Explorar",
