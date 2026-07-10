@@ -906,7 +906,9 @@
     "aGeoCache": "un geocaché",
     "foundCache": "Encontró {{cache}}",
     "cachesHidden": "{{count}} cachés escondidos",
+    "cacheHiddenOne": "1 caché escondido",
     "cachesFound": "{{count}} cachés encontrados",
+    "cacheFoundOne": "1 caché encontrado",
     "ageMinutes": "hace {{count}} min",
     "ageHours": "hace {{count}} h",
     "ageDays": "hace {{count}} d",
@@ -916,6 +918,7 @@
     "emptyHiders": "Aún no hay escondedores: sé el primero en esconder un Piglet.",
     "emptyFinders": "Aún no hay buscadores: reclama un caché para entrar en la lista.",
     "leaderRowA11y": "Puesto {{rank}}: {{name}}, {{count}} cachés",
+    "leaderRowA11yOne": "Puesto {{rank}}: {{name}}, 1 caché",
     "findRowA11y": "{{name}} encontró {{cache}}"
   },
   "huntScreen": {

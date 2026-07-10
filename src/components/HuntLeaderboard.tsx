@@ -88,11 +88,10 @@ const LeaderboardRow: React.FC<{
     <TouchableOpacity
       style={styles.leaderRow}
       testID={testID}
-      accessibilityLabel={t('huntCommunity.leaderRowA11y', {
-        rank: rank + 1,
-        name: display,
-        count: entry.total,
-      })}
+      accessibilityLabel={t(
+        entry.total === 1 ? 'huntCommunity.leaderRowA11yOne' : 'huntCommunity.leaderRowA11y',
+        { rank: rank + 1, name: display, count: entry.total },
+      )}
       onPress={() => openProfile(entry.pubkey, name, picture, lud16)}
     >
       <View style={styles.rankBadge}>
@@ -125,8 +124,12 @@ const LeaderboardRow: React.FC<{
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {variant === 'hiders'
-            ? t('huntCommunity.cachesHidden', { count: entry.total })
-            : t('huntCommunity.cachesFound', { count: entry.total })}
+            ? t(entry.total === 1 ? 'huntCommunity.cacheHiddenOne' : 'huntCommunity.cachesHidden', {
+                count: entry.total,
+              })
+            : t(entry.total === 1 ? 'huntCommunity.cacheFoundOne' : 'huntCommunity.cachesFound', {
+                count: entry.total,
+              })}
         </Text>
       </View>
       <View style={styles.countPill}>
