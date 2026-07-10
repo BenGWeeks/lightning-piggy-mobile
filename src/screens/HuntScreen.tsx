@@ -380,45 +380,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>{t('huntScreen.tagline')}</Text>
       </View>
 
-      {/* Inline interactive map — lives OUTSIDE the FlatList rather
-          than as ListHeaderComponent so a vertical pan on the map
-          never reaches the FlatList's RefreshControl. The earlier
-          `scrollEnabled={!mapTouched}` toggle had a state-update race
-          that let the FlatList capture the gesture before mapTouched
-          flipped, accidentally firing pull-to-refresh when the user
-          tried to pan the map down. Trade-off: the map no longer
-          scrolls out of view as the user scrolls the list — but that
-          matches the typical map+list pattern (Uber, Citymapper, etc.).
-          The list below filters by WoT + difficulty/terrain/type +
-          search; passing `filteredCaches` so the map matches the list
-          visually (#19). */}
-      <View style={styles.mapWrap}>
-        <LibreMiniMap
-          // Mini-map follows GPS — camera anchor should track live
-          // position, not the stale one-shot fetch `pos`.
-          lat={livePos?.lat ?? pos?.lat ?? null}
-          lon={livePos?.lon ?? pos?.lon ?? null}
-          userLat={livePos?.lat ?? null}
-          userLon={livePos?.lon ?? null}
-          userAvatarUri={profile?.picture ?? null}
-          // Only fall back to the initial-fetch accuracy when there's
-          // no live fix yet; once livePos exists, trust its accuracy
-          // (including null) so we never render a halo around live
-          // coords with stale accuracy.
-          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
-          merchants={[]}
-          caches={filteredCaches.map((c) => c.cache)}
-          events={[]}
-          onTapMap={() => navigation.navigate('Map')}
-          onSelectCache={(c) => setSelectedCache(c)}
-          onOpenLegend={() => setLegendVisible(true)}
-          // One zoom level wider than the default 13 so the Geo-caches
-          // hub map shows a bigger catchment without the user having to
-          // pinch-zoom out.
-          defaultZoom={12}
-        />
-      </View>
-
       <FlatList
         data={filteredCaches}
         keyExtractor={({ cache }) => cache.coord}
@@ -433,6 +394,41 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         }
         ListHeaderComponent={
           <View>
+            {/* Mini-map scrolls with the content — same pattern as
+                PlacesScreen (ListHeaderComponent). MapLibre is native so
+                vertical pans on the map are consumed by the map's gesture
+                recogniser before they reach the FlatList's RefreshControl,
+                meaning the old pull-to-refresh race (issue #570, WebView era)
+                no longer applies. LibreMiniMap carries its own
+                marginHorizontal: 16 so the map lands at a 16 dp inset without
+                any additional offset here. Passes `filteredCaches` so the map
+                pins match the list visually (#19). */}
+            <View style={styles.miniMapContainer}>
+              <LibreMiniMap
+                // Mini-map follows GPS — camera anchor should track live
+                // position, not the stale one-shot fetch `pos`.
+                lat={livePos?.lat ?? pos?.lat ?? null}
+                lon={livePos?.lon ?? pos?.lon ?? null}
+                userLat={livePos?.lat ?? null}
+                userLon={livePos?.lon ?? null}
+                userAvatarUri={profile?.picture ?? null}
+                // Only fall back to the initial-fetch accuracy when there's
+                // no live fix yet; once livePos exists, trust its accuracy
+                // (including null) so we never render a halo around live
+                // coords with stale accuracy.
+                userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+                merchants={[]}
+                caches={filteredCaches.map((c) => c.cache)}
+                events={[]}
+                onTapMap={() => navigation.navigate('Map')}
+                onSelectCache={(c) => setSelectedCache(c)}
+                onOpenLegend={() => setLegendVisible(true)}
+                // One zoom level wider than the default 13 so the Geo-caches
+                // hub map shows a bigger catchment without the user having to
+                // pinch-zoom out.
+                defaultZoom={12}
+              />
+            </View>
             {/* Community engagement rails + leaderboard link — sit above the
                 distance-sorted nearby list so discovery isn't limited to
                 whatever happens to be within ~5 km. */}
@@ -636,14 +632,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
-    mapWrap: {
-      // 16dp header-to-map gap — kept in sync with ExploreHome's
-      // `scrollContent.paddingTop` and PlacesScreen's `listContent`
-      // top padding so the three Explore-stack screens match.
-      marginTop: 16,
-      // 10 dp below the map = same gap between search and rows below =
-      // same gap between rows. Three identical vertical rhythms so the
-      // page reads as a tidy stack rather than three different spacings.
+    miniMapContainer: {
+      // `listContent` carries NO horizontal padding (rows / headers own
+      // their own marginHorizontal: 16). `LibreMiniMap` already applies
+      // marginHorizontal: 16 internally, so no offset is needed here.
+      // `listContent.paddingTop: 16` already gives the 16 dp header-to-map
+      // gap shared across Explore / Places / Geo-caches. Bottom margin
+      // gives breathing room before the community sections.
       marginBottom: 10,
     },
     nearbyHeader: {
@@ -697,7 +692,12 @@ const createStyles = (colors: Palette) =>
       fontSize: 10,
       fontWeight: '800',
     },
-    listContent: { paddingBottom: 32 },
+    // paddingTop: 16 — header-to-map gap, in sync with PlacesScreen's
+    // `listContent` and ExploreHome's `scrollContent.paddingTop` so the
+    // three Explore-stack screens share the same opening rhythm. No
+    // paddingHorizontal — rows / search / headers each carry their own
+    // marginHorizontal: 16 so adding it here would double-inset to 32 dp.
+    listContent: { paddingTop: 16, paddingBottom: 32 },
     center: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
     subtle: { fontSize: 14, color: colors.textSupplementary, textAlign: 'center', lineHeight: 20 },
     emptyTitle: {
