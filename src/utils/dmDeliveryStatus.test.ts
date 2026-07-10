@@ -181,6 +181,11 @@ describe('shortRelayLabel', () => {
 describe('deliverySheetTitle', () => {
   it('titles a received message "message received" regardless of status', () => {
     expect(deliverySheetTitle('received', undefined)).toEqual({ key: 'messageReceived' });
+    // A received row never carries a real status today, but the contract is
+    // that direction wins — even a populated status must not flip the title.
+    expect(deliverySheetTitle('received', failedDelivery({ eventId: 'e' }))).toEqual({
+      key: 'messageReceived',
+    });
   });
 
   it('titles an UNTRACKED sent message "message sent", never "send failed"', () => {
