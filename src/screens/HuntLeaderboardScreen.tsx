@@ -31,7 +31,12 @@ const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { hiderLeaderboard, finderLeaderboard, loading } = route.params;
+  // Guard against restored navigation state from before params were added
+  // (#1028). A cold-start restore of a stale HuntLeaderboard entry (which
+  // previously took no params) would arrive here with route.params undefined.
+  // Fall back to empty boards so the screen renders the empty-state text
+  // rather than crashing on destructuring.
+  const { hiderLeaderboard = [], finderLeaderboard = [], loading = false } = route.params ?? {};
 
   return (
     <View style={styles.container} testID="hunt-leaderboard-screen">
