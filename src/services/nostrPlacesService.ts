@@ -228,7 +228,11 @@ export const parseCache = (event: VerifiedEvent): ParsedCache | null => {
     // the publish-side rot13 so callers see the plaintext.
     hint: tag('hint') ? rot13(tag('hint') as string) : null,
     imageUrl: tag('image') ?? null,
-    isLpPiggy: hasLpLabel(event.tags),
+    // A listing is a Piglet if it carries the payout label OR was simply
+    // published by Lightning Piggy (NIP-89 client tag) — every cache made
+    // in LP is a Piglet even with no prize attached (#1025). The label
+    // alone used to decide, so prize-less hides rendered as plain NIP-GC.
+    isLpPiggy: hasLpLabel(event.tags) || hasLpClientTag(event.tags),
     waitSeconds: Number.isFinite(wait) ? wait : null,
     uses: Number.isFinite(uses) ? uses : null,
     payoutSats: Number.isFinite(amount) ? amount : null,
@@ -244,6 +248,17 @@ export const parseCache = (event: VerifiedEvent): ParsedCache | null => {
  */
 export const hasLpLabel = (tags: string[][]): boolean =>
   tags.some((t) => t[0] === 'l' && t[1] === LP_LABEL_VALUE && t[2] === LP_LABEL_NAMESPACE);
+
+/**
+ * Predicate — was this listing published by Lightning Piggy? Every event the
+ * app signs carries the NIP-89 `['client', 'Lightning Piggy']` tag (see
+ * nip89ClientTag.ts), so this classifies prize-less Piglets that never earn
+ * the payout label. Match on name only — a future upgrade to the full
+ * 4-element client tag (name, 31990 coordinate, relay hint) must not break
+ * classification.
+ */
+export const hasLpClientTag = (tags: string[][]): boolean =>
+  tags.some((t) => t[0] === LP_CLIENT_TAG[0] && t[1] === LP_CLIENT_TAG[1]);
 
 /**
  * Returns the longest `g` tag on an event, or null. Helpers like the
