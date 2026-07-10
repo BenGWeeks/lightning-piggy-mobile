@@ -1108,7 +1108,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const txsJson = JSON.stringify(txs);
         const txsUnchanged = lastTxsJsonRef.current.get(walletId) === txsJson;
         if (!txsUnchanged) {
-          lastTxsJsonRef.current.set(walletId, txsJson);
           updateWalletInState(walletId, { transactions: txs });
         }
 
@@ -1122,8 +1121,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         // Persist to AsyncStorage for fast loading on next startup —
         // skipped on an unchanged poll (identical bytes are already there).
+        // Update the fingerprint ref only after the write succeeds so it
+        // stays aligned with what's actually on disk; a failed write should
+        // let the next poll retry rather than silently skipping the persist.
         if (!txsUnchanged) {
           await AsyncStorage.setItem(`txs_${walletId}`, txsJson);
+          lastTxsJsonRef.current.set(walletId, txsJson);
         }
 
         // Kick off background zap sender resolution for any incoming
@@ -1187,9 +1190,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (nextTxs) {
         // Keep the unchanged-poll fingerprint in step with this write (#1014)
         // so the next poll compares against the resolver-enriched list.
+        // Update the ref only after the write succeeds — a swallowed failure
+        // must not cause future polls to skip the persist permanently.
         const json = JSON.stringify(nextTxs);
-        lastTxsJsonRef.current.set(walletId, json);
-        AsyncStorage.setItem(`txs_${walletId}`, json).catch(() => {});
+        AsyncStorage.setItem(`txs_${walletId}`, json)
+          .then(() => {
+            lastTxsJsonRef.current.set(walletId, json);
+          })
+          .catch(() => {});
       }
     },
     [],

@@ -100,16 +100,25 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   const t = useTranslation();
   // Avatar error state — declared before the early `header` return to satisfy
   // the Rules of Hooks (hooks must not be called after a conditional return).
-  // Tracks the zap-counterparty picture URL; reset when it changes so a
-  // refreshed/corrected URL gets a clean retry rather than staying hidden.
-  // (The description-contact avatar path uses the same state — if both are
-  // present only the zap picture shows, so tracking it is sufficient.)
+  // Reset when either avatar URL changes so a refreshed/corrected URL gets a
+  // clean retry rather than staying hidden. Both the zap-counterparty picture
+  // and the description-contact picture feed into the same `counterpartyAvatar`
+  // slot, so we track both here; computing the description-contact URL up here
+  // (before the early header return) keeps the hook dependency stable.
   const zapAvatarUrl =
     row.kind === 'tx' ? (row.tx.zapCounterparty?.profile?.picture ?? null) : null;
+  const descContactAvatarUrl =
+    row.kind === 'tx'
+      ? (() => {
+          const desc = row.tx.description;
+          const lud16 = !row.tx.zapCounterparty ? findLud16InDescription(desc) : null;
+          return lud16 ? (contactByLud16.get(lud16)?.profile?.picture ?? null) : null;
+        })()
+      : null;
   const [avatarError, setAvatarError] = useState(false);
   useEffect(() => {
     setAvatarError(false);
-  }, [zapAvatarUrl]);
+  }, [zapAvatarUrl, descContactAvatarUrl]);
 
   if (row.kind === 'header') {
     return <Text style={styles.dayHeader}>{row.label}</Text>;
