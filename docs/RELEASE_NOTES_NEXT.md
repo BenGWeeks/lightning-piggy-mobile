@@ -23,6 +23,7 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - Settings screens (Security, On-chain, Nearby merchants) now use white section icons and brand-pink toggles and selected rows.
 - Home feels snappier — wallet refreshes that change nothing no longer rebuild the transaction list.
 - Explore map pans more smoothly (marker layers no longer re-render on every GPS fix).
+- Group messages appear in the thread instantly when you hit send.
 
 ### Fixed
 

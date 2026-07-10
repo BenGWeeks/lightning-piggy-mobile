@@ -14,9 +14,20 @@
  *  - kind 1059 (NIP-59 gift-wrap) must skip schnorr and use only
  *    structural `validateEvent` — the outer wrap uses an ephemeral key
  *    so schnorr provides no integrity signal. (#739 Fix 5)
+ *
+ * And the inlined `wrapManyEvents` parity tests (#1033):
+ *  - `sendNip17ToManyWithNsec` inlined loop produces the same wrap
+ *    count and recipient set as the old `wrapManyEvents` call.
  */
 
-import { createDirectMessageRumor, createGroupChatRumor, pool } from './nostrService';
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import * as nip59 from 'nostr-tools/nip59';
+import {
+  createDirectMessageRumor,
+  createGroupChatRumor,
+  pool,
+  sendNip17ToManyWithNsec,
+} from './nostrService';
 
 const PK_A = 'a'.repeat(64);
 const PK_B = 'b'.repeat(64);
@@ -142,4 +153,155 @@ describe('pool.verifyEvent — skip-verify kinds (#739 Fix 5)', () => {
   // that would be testing nostr-tools' schnorr implementation, not our code.
   // The positive tests above are sufficient to confirm SKIP_VERIFY_KINDS
   // membership; schnorr correctness is nostr-tools' responsibility.
+});
+
+// ---------------------------------------------------------------------------
+// sendNip17ToManyWithNsec — inlined wrap loop parity (#1033)
+//
+// The old path called nip59.wrapManyEvents synchronously (one blocking crypto
+// burst). The new path inlines the same wrapEvent loop with yieldToEventLoop()
+// between iterations so UI can paint between recipients. These tests verify:
+//   1. Same wrap COUNT as wrapManyEvents for a 5-member group.
+//   2. Every recipient (+ self-wrap) has exactly one gift-wrap (kind 1059)
+//      with a matching `p` tag.
+//   3. Sender is always included (self-wrap — parity with wrapManyEvents).
+//   4. Duplicate recipients are deduplicated (parity with wrapManyEvents dedup).
+//
+// We mock `publishWrapsTrackingRelays` to capture the wraps array so we can
+// inspect it without needing live relay connections.
+// ---------------------------------------------------------------------------
+
+// jest.mock must be at module scope (hoisted) but we need access to the
+// captured wraps inside tests — use a module-level variable.
+const capturedWraps: unknown[] = [];
+jest.mock('./nostrDmPublish', () => ({
+  publishWrapsTrackingRelays: jest.fn(async (wraps: unknown[]) => {
+    capturedWraps.length = 0;
+    capturedWraps.push(...wraps);
+    return {
+      wrapsPublished: wraps.length,
+      errors: [],
+      delivery: { delivered: true, relayResults: {}, eventId: 'test', kind: 14 },
+    };
+  }),
+}));
+
+// yieldToEventLoop uses requestAnimationFrame. jest-expo exposes it globally
+// via jsdom / react-native preset; spy on it so we can assert it fires.
+beforeEach(() => {
+  capturedWraps.length = 0;
+});
+
+describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', () => {
+  const senderKey = generateSecretKey();
+  const senderPubkey = getPublicKey(senderKey);
+  const recipientKeys = Array.from({ length: 4 }, () => generateSecretKey());
+  const recipientPubkeys = recipientKeys.map(getPublicKey);
+
+  const rumor = {
+    kind: 14,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [['subject', 'Test Group'], ...recipientPubkeys.map((p) => ['p', p])],
+    content: 'hello group',
+  };
+
+  it('produces self-wrap + one wrap per recipient (matches wrapManyEvents count)', async () => {
+    // Reference count from wrapManyEvents: 1 self + N recipients.
+    const expectedCount = 1 + recipientPubkeys.length;
+    // wrapManyEvents deduplicates senderPubkey from the recipient list —
+    // our loop does the same via the Set dedup step.
+    const referenceWraps = nip59.wrapManyEvents(
+      rumor as Parameters<typeof nip59.wrapManyEvents>[0],
+      senderKey,
+      recipientPubkeys,
+    );
+    expect(referenceWraps).toHaveLength(expectedCount);
+
+    await sendNip17ToManyWithNsec({
+      senderSecretKey: senderKey,
+      rumor,
+      recipientPubkeys,
+      relays: ['wss://test'],
+    });
+
+    expect(capturedWraps).toHaveLength(expectedCount);
+  });
+
+  it('every produced wrap is kind 1059 (NIP-59 gift-wrap)', async () => {
+    await sendNip17ToManyWithNsec({
+      senderSecretKey: senderKey,
+      rumor,
+      recipientPubkeys,
+      relays: ['wss://test'],
+    });
+
+    for (const w of capturedWraps) {
+      expect((w as { kind: number }).kind).toBe(1059);
+    }
+  });
+
+  it('wrap recipient p-tags cover every deduplicated recipient including self', async () => {
+    await sendNip17ToManyWithNsec({
+      senderSecretKey: senderKey,
+      rumor,
+      recipientPubkeys,
+      relays: ['wss://test'],
+    });
+
+    const pTagged = new Set(
+      capturedWraps.map((w) => {
+        const tags = (w as { tags: string[][] }).tags;
+        const pTag = tags.find((t) => t[0] === 'p');
+        return pTag ? pTag[1] : null;
+      }),
+    );
+
+    // All original recipients should be covered.
+    for (const pk of recipientPubkeys) {
+      expect(pTagged.has(pk)).toBe(true);
+    }
+    // Self (sender) must also be covered.
+    expect(pTagged.has(senderPubkey)).toBe(true);
+    // No duplicate p-tags (each recipient gets exactly one wrap).
+    expect(pTagged.size).toBe(capturedWraps.length);
+  });
+
+  it('deduplicates recipient who equals the sender (no double self-wrap)', async () => {
+    // Include the sender's own pubkey in the recipient list — wrapManyEvents
+    // deduplicates via Set so only one wrap goes to self. Our inlined loop
+    // uses the same dedup step.
+    const recipientsWithSelf = [...recipientPubkeys, senderPubkey];
+    const expectedCount = 1 + recipientPubkeys.length; // same as without the extra self entry
+
+    await sendNip17ToManyWithNsec({
+      senderSecretKey: senderKey,
+      rumor,
+      recipientPubkeys: recipientsWithSelf,
+      relays: ['wss://test'],
+    });
+
+    expect(capturedWraps).toHaveLength(expectedCount);
+  });
+
+  it('yieldToEventLoop is called between recipients (not on the first wrap)', async () => {
+    const rafSpy = jest.spyOn(global, 'requestAnimationFrame');
+    rafSpy.mockImplementation((cb) => {
+      cb(performance.now());
+      return 0;
+    });
+
+    try {
+      await sendNip17ToManyWithNsec({
+        senderSecretKey: senderKey,
+        rumor,
+        recipientPubkeys: recipientPubkeys.slice(0, 2), // 3 wraps: self + 2
+        relays: ['wss://test'],
+      });
+
+      // 3 wraps, yields happen between iterations (i > 0), so RAF fires twice.
+      expect(rafSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      rafSpy.mockRestore();
+    }
+  });
 });

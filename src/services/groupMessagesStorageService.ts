@@ -95,6 +95,29 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
 
+/**
+ * Remove a single message row by id. Used by the group send failure path
+ * (#1033) to retract the optimistic `local_*` row that was painted before
+ * signing — mirrors the 1:1 path's "keep the bubble on failure" semantics
+ * adapted for group storage: we show a BrandedAlert AND remove the row so
+ * a never-published message doesn't linger in the thread. Returns the
+ * updated message list (empty array on storage errors, so callers can
+ * always call setMessages on the result).
+ */
+export async function removeGroupMessage(
+  groupId: string,
+  messageId: string,
+): Promise<GroupMessage[]> {
+  try {
+    const existing = await loadGroupMessages(groupId);
+    const filtered = existing.filter((m) => m.id !== messageId);
+    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+    return filtered;
+  } catch {
+    return [];
+  }
+}
+
 // Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
 // the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to

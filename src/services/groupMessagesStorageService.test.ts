@@ -10,6 +10,7 @@ import {
   appendGroupMessage,
   clearGroupMessages,
   loadGroupMessages,
+  removeGroupMessage,
   GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
@@ -139,6 +140,31 @@ describe('appendGroupMessage — basic ordering & cap', () => {
     await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'hi', 1700000000));
     await clearGroupMessages(GROUP);
     expect(await loadGroupMessages(GROUP)).toEqual([]);
+  });
+});
+
+describe('removeGroupMessage — failure-path retraction (#1033)', () => {
+  it('removes the row with the given id and returns the remaining messages', async () => {
+    const t = 1700000000;
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'first', t));
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'second', t + 1));
+    await appendGroupMessage(GROUP, wrap('b'.repeat(64), 'third', t + 2));
+    const after = await removeGroupMessage(GROUP, 'local_1_aaa');
+    expect(after).toHaveLength(2);
+    expect(after.find((m) => m.id === 'local_1_aaa')).toBeUndefined();
+  });
+
+  it('is a no-op when the id is not found — returns the unmodified list', async () => {
+    const t = 1700000000;
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'only', t));
+    const after = await removeGroupMessage(GROUP, 'nonexistent');
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe('a'.repeat(64));
+  });
+
+  it('returns an empty array when the group has no messages', async () => {
+    const after = await removeGroupMessage(GROUP, 'local_1_aaa');
+    expect(after).toEqual([]);
   });
 });
 
