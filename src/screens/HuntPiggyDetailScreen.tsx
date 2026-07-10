@@ -241,20 +241,29 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         clearTimeout(logFlushTimerRef.current);
         logFlushTimerRef.current = null;
       }
+      // Guard against a queued timer firing after the effect cleaned up
+      // (cancelled = true on unmount / coord change). setLogs would be
+      // a no-op on an unmounted component but could still set state on a
+      // freshly re-mounted screen keyed to a different coord. (Copilot.)
+      if (cancelled) {
+        pendingLogsRef.current = new Map();
+        return;
+      }
       if (pendingLogsRef.current.size === 0) return;
       const batch = pendingLogsRef.current;
       pendingLogsRef.current = new Map();
       setLogs((prev) => {
         // Dedupe: skip any id already committed so we don't clobber a
-        // newer optimistic insert (the handlePostLog path).
-        let changed = false;
-        const next = new Map(prev);
+        // newer optimistic insert (the handlePostLog path). Only allocate
+        // `next` when we actually find a new id — a relay echo of ids that
+        // are already in `prev` avoids the O(prev.size) clone entirely. (Copilot.)
+        let next: Map<string, FoundLog> | null = null;
         for (const [id, log] of batch) {
-          if (next.has(id)) continue;
+          if (prev.has(id)) continue;
+          if (next === null) next = new Map(prev);
           next.set(id, log);
-          changed = true;
         }
-        return changed ? next : prev;
+        return next ?? prev;
       });
     };
 

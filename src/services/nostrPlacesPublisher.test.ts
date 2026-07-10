@@ -137,8 +137,8 @@ describe('subscribeRecentFoundLogs', () => {
     expect(mockSubscribeMany).toHaveBeenCalledTimes(2);
     const cachesSince = (mockSubscribeMany.mock.calls[0] as [unknown, { since: number }])[1].since;
     const logsSince = (mockSubscribeMany.mock.calls[1] as [unknown, { since: number }])[1].since;
-    // Both should be within a few seconds of each other (test runs in <1 s),
-    // and each should be independently computed (not the same object ref).
+    // Both should be within a few seconds of each other (test runs in <1 s).
+    // Each is independently computed via RECENT_SINCE_SECS() at call time.
     expect(Math.abs(cachesSince - logsSince)).toBeLessThan(2);
   });
 });
