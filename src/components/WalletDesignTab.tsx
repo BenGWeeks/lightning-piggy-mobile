@@ -18,7 +18,7 @@ interface Props {
  * {@link WalletCardPicker}, so the sheet reads as pure composition.
  */
 const WalletDesignTab: React.FC<Props> = ({ styles, t, selectedTheme, onSelectTheme }) => (
-  <View>
+  <View style={{ gap: 8 }}>
     <Text style={styles.label}>{t('walletSettingsSheet.cardDesign')}</Text>
     {/* Small top gap between the label and the picker — preserves the
         spacing the removed `themeGrid` (marginTop: 4) used to provide. */}

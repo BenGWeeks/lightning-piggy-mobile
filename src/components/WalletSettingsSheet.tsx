@@ -98,7 +98,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [alias, setAlias] = useState('');
   const [lnAddress, setLnAddress] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>(defaultCardThemeFor('nwc'));
-  const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
+  // `undefined` = on-chain load in progress; `null` = not applicable / loaded
+  // but absent; `string` = loaded xpub ready to display.
+  const [xpubDisplay, setXpubDisplay] = useState<string | null | undefined>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
   // CoinOS managed-wallet recovery info (#287). Loaded eagerly when
   // the sheet opens so we can render the username inline and surface a
@@ -164,8 +166,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         cardThemes[wallet.theme] ? wallet.theme : defaultCardThemeFor(wallet.walletType),
       );
 
-      // Load xpub for on-chain wallets
+      // Load xpub for on-chain wallets. Set to `undefined` (loading) before the
+      // async call so switching between two on-chain wallets never shows the
+      // previous wallet's xpub while the new one is resolving — the Connection
+      // tab will show a loading placeholder instead of stale data.
       if (wallet.walletType === 'onchain' && walletId) {
+        setXpubDisplay(undefined);
         getXpub(walletId).then((xpub) => {
           if (cancelled) return;
           setXpubDisplay(xpub);

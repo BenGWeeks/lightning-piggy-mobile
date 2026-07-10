@@ -35,7 +35,7 @@ const WalletDetailsTab: React.FC<Props> = ({
   onChangeLnAddress,
   onSave,
 }) => (
-  <View>
+  <View style={{ gap: 8 }}>
     <Text style={styles.label}>{t('walletSettingsSheet.alias')}</Text>
     <BottomSheetTextInput
       style={styles.input}

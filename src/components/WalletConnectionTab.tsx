@@ -23,8 +23,8 @@ interface Props {
   colors: Palette;
   t: ReturnType<typeof useTranslation>;
   walletType: WalletType;
-  // On-chain
-  xpubDisplay: string | null;
+  // On-chain. `undefined` = still loading, `null` = loaded but absent, `string` = ready.
+  xpubDisplay: string | null | undefined;
   onCopyXpub: () => void;
   // NWC
   relayUrl: string | null;
@@ -74,10 +74,16 @@ const WalletConnectionTab: React.FC<Props> = ({
   // SecureStore. Treat the whole type as having content so the empty-state
   // ("No connection details") never flashes during that async load, and never
   // renders beside the always-present Share row.
-  const hasContent = (walletType === 'onchain' && !!xpubDisplay) || walletType === 'nwc';
+  // For on-chain wallets, `xpubDisplay` is `undefined` while loading and
+  // `null` once loaded but absent — treat loading as having content so the
+  // empty state only appears after the fetch has completed (or definitively
+  // found nothing).
+  const xpubLoading = walletType === 'onchain' && xpubDisplay === undefined;
+  const hasContent =
+    (walletType === 'onchain' && (xpubLoading || !!xpubDisplay)) || walletType === 'nwc';
 
   return (
-    <View>
+    <View style={{ gap: 8 }}>
       {/* CoinOS managed-wallet recovery callout (#287). Visually prominent
           block — pink-bordered surface with shield-alert badge — so the
           recovery credentials read as a "save this now" affordance. */}
@@ -267,18 +273,24 @@ const WalletConnectionTab: React.FC<Props> = ({
         </TouchableOpacity>
       )}
 
-      {/* On-chain wallet: show xpub (read-only) */}
-      {walletType === 'onchain' && xpubDisplay && (
+      {/* On-chain wallet: show xpub (read-only).
+          `undefined` = still loading (show placeholder), `null` = loaded but
+          absent (render nothing), `string` = ready to display. */}
+      {walletType === 'onchain' && xpubDisplay !== null && (
         <>
           <Text style={[styles.label, { marginTop: 20 }]}>
             {t('walletSettingsSheet.extendedPublicKey')}
           </Text>
-          <TouchableOpacity onPress={onCopyXpub} activeOpacity={0.7}>
-            <Text style={styles.xpubText} numberOfLines={3}>
-              {xpubDisplay}
-            </Text>
-            <Text style={styles.copyHint}>{t('walletSettingsSheet.tapToCopy')}</Text>
-          </TouchableOpacity>
+          {xpubDisplay === undefined ? (
+            <Text style={styles.xpubText}>{'…'}</Text>
+          ) : (
+            <TouchableOpacity onPress={onCopyXpub} activeOpacity={0.7}>
+              <Text style={styles.xpubText} numberOfLines={3}>
+                {xpubDisplay}
+              </Text>
+              <Text style={styles.copyHint}>{t('walletSettingsSheet.tapToCopy')}</Text>
+            </TouchableOpacity>
+          )}
         </>
       )}
 

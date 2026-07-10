@@ -53,10 +53,12 @@ const CF_SCALE_BY_DISTANCE = [1, 0.82, 0.66, 0.54, 0.46];
 // so the fan compresses outward and every card shows a little less than the one
 // before it, trailing off into slivers at the viewport edge.
 const CF_OFFSET_BY_DISTANCE = [0, 0.42, 0.72, 0.98, 1.2];
-// Mount every card so the fanned deck is fully populated — there are only a
-// handful of designs, so this is cheap, and anything beyond the viewport is
-// clipped by the carousel's overflow:hidden.
-const CF_WINDOW_SIZE = themeList.length;
+// Render the centre card + 2 neighbours on each side (5 total). Cards beyond
+// that are clipped by the carousel's overflow:hidden and are never actually
+// visible, so rendering all ~20 themes at once adds unnecessary work and can
+// hurt swipe smoothness. 5 covers the full visible fan depth (CF_DEPTH = 4)
+// with a 1-card pre-render buffer, matching the recommended FlatList pattern.
+const CF_WINDOW_SIZE = 5;
 
 // Distance sample points [0,1,2,3,4] shared by both interpolation ramps.
 const CF_DISTANCES = CF_SCALE_BY_DISTANCE.map((_, i) => i);

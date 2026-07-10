@@ -7,7 +7,7 @@
  * exactly like the animal cards.
  */
 
-import { cardThemes, themeList } from './cardThemes';
+import { cardThemes, themeList, defaultCardThemeFor } from './cardThemes';
 import type { CardTheme } from '../types/wallet';
 
 const HEX_COLOUR = /^#[0-9A-Fa-f]{6}$/;
@@ -43,6 +43,21 @@ describe('cardThemes registry', () => {
 
   it('includes every registered theme in themeList', () => {
     expect(themeList.map((t) => t.id).sort()).toEqual(Object.keys(cardThemes).sort());
+  });
+
+  describe('defaultCardThemeFor()', () => {
+    it('returns bitcoin for onchain wallets', () => {
+      expect(defaultCardThemeFor('onchain')).toBe('bitcoin');
+    });
+
+    it('returns lightning-piggy for nwc wallets', () => {
+      expect(defaultCardThemeFor('nwc')).toBe('lightning-piggy');
+    });
+
+    it('returned theme ids exist in the cardThemes registry', () => {
+      expect(cardThemes['bitcoin']).toBeDefined();
+      expect(cardThemes['lightning-piggy']).toBeDefined();
+    });
   });
 
   describe('sports themes (#102)', () => {
