@@ -8,6 +8,7 @@ import {
   buildComment,
   buildFoundLog,
   hasLpLabel,
+  hasLpClientTag,
   longestGeohash,
   parseCache,
   parseCacheCoord,
@@ -254,6 +255,23 @@ describe('hasLpLabel', () => {
   });
 });
 
+describe('hasLpClientTag', () => {
+  it('returns true for the bare NIP-89 client tag LP stamps on every publish', () => {
+    expect(hasLpClientTag([['client', 'Lightning Piggy']])).toBe(true);
+  });
+
+  it('returns true for a future 4-element client tag (name + 31990 coordinate)', () => {
+    expect(hasLpClientTag([['client', 'Lightning Piggy', '31990:pubkey:d', 'wss://relay']])).toBe(
+      true,
+    );
+  });
+
+  it('returns false for other clients and unrelated tags', () => {
+    expect(hasLpClientTag([['client', 'Damus']])).toBe(false);
+    expect(hasLpClientTag([['d', 'piggy_x']])).toBe(false);
+  });
+});
+
 describe('longestGeohash', () => {
   it('returns the longest g tag value', () => {
     expect(
@@ -333,6 +351,33 @@ describe('parseCache', () => {
       ],
     });
     expect(parseCache(noLabel)!.isLpPiggy).toBe(false);
+  });
+
+  it('isLpPiggy=true for a prize-less cache carrying only the LP client tag (#1025)', () => {
+    // A cache hidden in Lightning Piggy with no prize never gets the payout
+    // label, but every LP publish stamps the NIP-89 client tag — that alone
+    // must classify it as a Piglet (piglet pin/icon, not the plain NIP-GC pin).
+    const clientOnly = sampleEvent({
+      tags: [
+        ['client', 'Lightning Piggy'],
+        ['d', 'piggy'],
+        ['name', 'Fleet & Lightning'],
+        ['g', 'u1212vz'],
+      ],
+    });
+    expect(parseCache(clientOnly)!.isLpPiggy).toBe(true);
+  });
+
+  it("isLpPiggy=false for another client's tag without the LP label", () => {
+    const otherClient = sampleEvent({
+      tags: [
+        ['client', 'treasures.to'],
+        ['d', 'piggy'],
+        ['name', 'Plain cache'],
+        ['g', 'u1212vz'],
+      ],
+    });
+    expect(parseCache(otherClient)!.isLpPiggy).toBe(false);
   });
 });
 

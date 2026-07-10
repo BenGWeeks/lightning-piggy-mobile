@@ -37,7 +37,7 @@ changing how anything is stored.
 
 | `AsyncStorage`
   (Android: SQLite `RKStorage` in the app sandbox)
-| App settings, WoT tier, geo-cache blob (`@lp:nostr-caches-v1`), NIP-52
+| App settings, WoT tier, geo-cache blob (`@lp:nostr-caches-v2`), NIP-52
   events blob (`@lp:nostr-events-v1`), per-wallet tx caches, last-seen cursors
   (bare timestamps). The plaintext DM inbox summaries (`nostr_dm_inbox_v1_*`)
   and per-conversation caches (`nostr_dm_conv_v1_*`) are *retired* — #850
