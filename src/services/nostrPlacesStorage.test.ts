@@ -19,7 +19,9 @@ import {
   saveEvents,
 } from './nostrPlacesStorage';
 
-const CACHES_STORAGE_KEY = '@lp:nostr-caches-v1';
+// Mirror of the module-private keys — bump together with the module (v2:
+// client-tag classification re-parse, #1025).
+const CACHES_STORAGE_KEY = '@lp:nostr-caches-v2';
 const EVENTS_STORAGE_KEY = '@lp:nostr-events-v1';
 
 // One of the four disposable signers of d=big-piggy-geo-cache-1 in
