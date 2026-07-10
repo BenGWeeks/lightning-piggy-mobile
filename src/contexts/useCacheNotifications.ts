@@ -68,6 +68,16 @@ const REFETCH_COORDS_INTERVAL_MS = 15 * 60_000;
 // resume, each otherwise firing an overlapping fetchCachesByAuthor that piles
 // onto the JS thread during warm re-foreground (#751 warm-path audit #5).
 const REFETCH_MIN_GAP_MS = 10_000;
+// Resume-burst stagger (#554). On AppState → active, five concurrent handlers
+// fire (DM re-arm, wallet refresh, relay reconnect, …). fetchCachesByAuthor
+// against 7 relays costs 3–5 s of JS-thread time and starves tap-dispatch
+// queued during the background pause — users tap UI that feels dead.
+// Cache-coord refetch is latency-insensitive (the live sub stays armed with
+// the previous coord set; the refetch only matters if a NEW cache was
+// published while backgrounded, which is rare). A 3 s stagger yields to the
+// latency-sensitive work (DM re-arm, wallet refresh) and keeps the bridge
+// responsive on resume.
+const RESUME_REFETCH_DELAY_MS = 3_000;
 
 // Per-surface notification copy. Comments and found-logs are separate
 // event kinds now, so the OS notification title should match what actually
@@ -265,12 +275,33 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       }
     };
 
+    // Staggered-resume timer. Populated when AppState fires 'active'; cleared
+    // on unmount and on the NEXT AppState event (background→active bounce must
+    // not stack timers or fire after re-backgrounding — see #554).
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
     void refetchAndRearm();
     const interval = setInterval(() => {
       void refetchAndRearm();
     }, REFETCH_COORDS_INTERVAL_MS);
     const appStateSub = AppState.addEventListener('change', (s: AppStateStatus) => {
-      if (s === 'active') void refetchAndRearm();
+      // Cancel any pending stagger from a prior 'active' event — a quick
+      // active→background→active bounce must not stack timers or fire the
+      // stale timer after the app re-enters the background (#554).
+      if (resumeTimer !== null) {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
+      }
+      if (s !== 'active') return;
+      // Resume-burst stagger (#554): defer the coord refetch so it doesn't
+      // compete with latency-sensitive work (DM re-arm, wallet refresh) that
+      // fires concurrently on resume. Cache-coord refetch is not
+      // latency-sensitive — the live sub stays armed; the refetch matters
+      // only if a cache was published while backgrounded (rare).
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        void refetchAndRearm();
+      }, RESUME_REFETCH_DELAY_MS);
     });
     // Event-driven re-arm: this device just published / edited / expired /
     // deleted one of its own caches (#1016) — refresh the coord set now.
@@ -280,6 +311,10 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
 
     return () => {
       cancelled = true;
+      if (resumeTimer !== null) {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
+      }
       clearInterval(interval);
       appStateSub.remove();
       unsubOwnCaches();
