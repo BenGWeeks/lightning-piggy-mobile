@@ -391,6 +391,7 @@
     "sending": "Enviando…",
     "sendFailed": "Error al enviar",
     "sentToRelays": "Enviado a {{ok}} de {{total}} relays",
+    "messageSent": "Mensaje enviado",
     "messageReceived": "Mensaje recibido",
     "statusNotTracked": "Sin seguimiento",
     "statusReceived": "Recibido",

@@ -164,6 +164,43 @@ export function aggregateRelayResults(
   return { delivered, relayResults, eventId: meta?.eventId, kind: meta?.kind, targetRelayCount };
 }
 
+/**
+ * Which title the message-info sheet shows, as a translation-key descriptor
+ * (the component maps `key` → `deliveryDetailSheet.<key>` via i18n).
+ *
+ * The `!status` branch matters: a SENT message with no `DeliveryStatus` at all
+ * is an UNTRACKED send — group sends today, plus 1:1 rows that predate
+ * tracking — not a failure. Group bubbles only exist because the relay publish
+ * succeeded (the composer alerts and skips the optimistic append otherwise),
+ * so titling them "Send failed" was provably wrong. "Send failed" is
+ * reserved for a TRACKED, settled send whose relay breakdown is empty (e.g. a
+ * pre-publish `failedDelivery`); the status row's "Not tracked" / "Failed"
+ * split (below) already made this distinction.
+ */
+export type DeliverySheetTitle =
+  | { key: 'messageReceived' }
+  | { key: 'messageSent' }
+  | { key: 'sending' }
+  | { key: 'sendingToRelays'; total: number }
+  | { key: 'sendFailed' }
+  | { key: 'sentToRelays'; ok: number; total: number };
+
+export function deliverySheetTitle(
+  direction: 'sent' | 'received',
+  status: DeliveryStatus | undefined,
+): DeliverySheetTitle {
+  if (direction !== 'sent') return { key: 'messageReceived' };
+  if (!status) return { key: 'messageSent' };
+  const { ok, total } = summariseDelivery(status);
+  // In flight: seeded relays read as `failed` (ok 0 of N), but the send hasn't
+  // settled, so say "Sending…" rather than "Sent to 0 of N relays".
+  if (status.pending) {
+    return total > 0 ? { key: 'sendingToRelays', total } : { key: 'sending' };
+  }
+  if (total === 0) return { key: 'sendFailed' };
+  return { key: 'sentToRelays', ok, total };
+}
+
 /** Count of relays that accepted, and the total relays attempted. Drives the
  * breakdown copy ("Sent to 4 of 6 relays") and the single→double tick. `total`
  * is the attempted relay count (`targetRelayCount`) when known, so an early

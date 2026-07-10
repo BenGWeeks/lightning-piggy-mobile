@@ -363,6 +363,7 @@
     "sending": "Надсилання…",
     "sendFailed": "Не вдалося надіслати",
     "sentToRelays": "Надіслано на {{ok}} з {{total}} релеїв",
+    "messageSent": "Повідомлення надіслано",
     "messageReceived": "Повідомлення отримано",
     "statusNotTracked": "Не відстежується",
     "statusReceived": "Отримано",
