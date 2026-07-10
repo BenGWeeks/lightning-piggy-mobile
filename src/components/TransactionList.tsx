@@ -249,8 +249,9 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
         onPressTx={onPressTx}
       />
     ),
-    // iconStateFor is a stable per-render closure over live swapRecoveryService
-    // reads; swapStateTick re-creates this callback when that state changes.
+    // iconStateFor is re-declared each render (deliberately not a dep — it
+    // captures no render-local values, only live swapRecoveryService reads);
+    // swapStateTick re-creates this callback when that service state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, onPressTx, swapStateTick],
   );

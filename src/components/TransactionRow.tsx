@@ -49,8 +49,10 @@ function splitDescription(desc: string): { primary: string; subtitle: string | n
 }
 
 function formatTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ts * 1000).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // Extract a lightning address from a tx description. NWC/LNbits ledger

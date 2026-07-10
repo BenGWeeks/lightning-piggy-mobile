@@ -209,17 +209,21 @@ const HomeScreen: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
-    // Also retry any pending Boltz swap claims — recovery otherwise only runs
-    // at app startup, so a swap parked mid-session (e.g. an ambiguous pay that
-    // resolved later) would stay unclaimed until a full restart. Fire-and-
-    // forget; the single-flight guard dedupes against a startup pass.
-    swapRecoveryService.recoverPendingSwaps().catch((e) => {
-      console.warn('[Home] pull-to-refresh swap recovery failed:', e);
-    });
-    // Explicit pull-to-refresh — force a full zap-resolver pass.
-    await fetchData({ force: true });
-    setRefreshing(false);
+    try {
+      if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
+      // Also retry any pending Boltz swap claims — recovery otherwise only runs
+      // at app startup, so a swap parked mid-session (e.g. an ambiguous pay that
+      // resolved later) would stay unclaimed until a full restart. Fire-and-
+      // forget; the single-flight guard dedupes against a startup pass.
+      swapRecoveryService.recoverPendingSwaps().catch((e) => {
+        console.warn('[Home] pull-to-refresh swap recovery failed:', e);
+      });
+      // Explicit pull-to-refresh — force a full zap-resolver pass.
+      await fetchData({ force: true });
+    } finally {
+      // A rejected refresh must never strand the pull-to-refresh spinner.
+      setRefreshing(false);
+    }
   }, [activeWalletId, fetchData]);
 
   // Stable RefreshControl ELEMENT. Passing a fresh element on every render
