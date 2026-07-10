@@ -11,7 +11,7 @@ import {
   longestGeohash,
   parseCache,
   parseCacheCoord,
-  parseFoundLog,
+  parseFoundLogEvent,
 } from './nostrPlacesService';
 import type { HiddenPiggy } from './piggyStorageService';
 import type { VerifiedEvent } from 'nostr-tools';
@@ -353,7 +353,7 @@ describe('parseCacheCoord', () => {
   });
 });
 
-describe('parseFoundLog', () => {
+describe('parseFoundLogEvent', () => {
   const makeFoundLog = (tags: string[][]): VerifiedEvent =>
     ({
       id: 'ev1',
@@ -365,7 +365,7 @@ describe('parseFoundLog', () => {
     }) as unknown as VerifiedEvent;
 
   it('flattens the coord + finder + createdAt from a found-log', () => {
-    const log = parseFoundLog(makeFoundLog([['a', '37516:hider:piggy_1']]));
+    const log = parseFoundLogEvent(makeFoundLog([['a', '37516:hider:piggy_1']]));
     expect(log).toMatchObject({
       id: 'ev1',
       coord: '37516:hider:piggy_1',
@@ -375,13 +375,13 @@ describe('parseFoundLog', () => {
   });
 
   it('returns null without an `a` (coord) tag or on the wrong kind', () => {
-    expect(parseFoundLog(makeFoundLog([]))).toBeNull();
-    expect(parseFoundLog({ ...makeFoundLog([['a', '37516:h:d']]), kind: 1 })).toBeNull();
+    expect(parseFoundLogEvent(makeFoundLog([]))).toBeNull();
+    expect(parseFoundLogEvent({ ...makeFoundLog([['a', '37516:h:d']]), kind: 1 })).toBeNull();
   });
 
   it('reads the sat `amount` tag as sats (matches buildFoundLog / parseCache)', () => {
     expect(
-      parseFoundLog(
+      parseFoundLogEvent(
         makeFoundLog([
           ['a', '37516:h:d'],
           ['amount', '21'],
@@ -393,7 +393,7 @@ describe('parseFoundLog', () => {
   it('keeps a genuine 0-sat amount rather than nulling it', () => {
     // `0` is a real claim amount — only missing / non-numeric tags → null.
     expect(
-      parseFoundLog(
+      parseFoundLogEvent(
         makeFoundLog([
           ['a', '37516:h:d'],
           ['amount', '0'],
@@ -403,9 +403,9 @@ describe('parseFoundLog', () => {
   });
 
   it('nulls a missing or non-numeric amount tag', () => {
-    expect(parseFoundLog(makeFoundLog([['a', '37516:h:d']]))?.amountSats).toBeNull();
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:h:d']]))?.amountSats).toBeNull();
     expect(
-      parseFoundLog(
+      parseFoundLogEvent(
         makeFoundLog([
           ['a', '37516:h:d'],
           ['amount', 'nope'],

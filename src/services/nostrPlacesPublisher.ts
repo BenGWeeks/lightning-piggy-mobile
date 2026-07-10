@@ -7,7 +7,7 @@ import {
   GC_LISTING_KIND,
   NIP52_TIME_BASED_KIND,
   parseCache,
-  parseFoundLog,
+  parseFoundLogEvent,
   parseNip52Event,
   type ParsedCache,
   type ParsedEvent,
@@ -178,7 +178,7 @@ export const subscribeRecentFoundLogs = (
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => {
       if (isDevLeftover(e.pubkey)) return;
-      const parsed = parseFoundLog(e as VerifiedEvent);
+      const parsed = parseFoundLogEvent(e as VerifiedEvent);
       if (parsed) onEvent(parsed);
     },
   });

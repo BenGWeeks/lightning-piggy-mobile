@@ -271,17 +271,22 @@ export interface ParsedFoundLog {
   amountSats: number | null;
 }
 
-export const parseFoundLog = (event: VerifiedEvent): ParsedFoundLog | null => {
+// Named parseFoundLogEvent (not parseFoundLog) to avoid colliding with the
+// pre-existing `utils/foundLog.ts` parseFoundLog, which shapes the SAME kind
+// of event for HuntPiggyDetail's log thread — two same-named exports with
+// different return types were a refactor trap (Copilot #1001).
+export const parseFoundLogEvent = (event: VerifiedEvent): ParsedFoundLog | null => {
   if (event.kind !== GC_FOUND_LOG_KIND) return null;
   const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
   if (!coord) return null;
-  // `amount` is written in sats by `buildFoundLog` (mirrors `parseCache` and
-  // `utils/foundLog.ts`). Parse first, then gate on `Number.isFinite` so a
-  // genuine `0` survives (it's a real claim amount) while missing /
-  // non-numeric tags fall back to null.
+  // `amount` is written in integer sats by `buildFoundLog` — parse with
+  // parseInt (matching `utils/foundLog.ts`) rather than Number+round so a
+  // malformed fractional tag can't be silently reshaped into a different
+  // sats value; gate on Number.isFinite so a genuine `0` survives while
+  // missing / non-numeric tags fall back to null.
   const amountRaw = event.tags.find((t) => t[0] === 'amount')?.[1];
-  const amountValue = amountRaw != null ? Number(amountRaw) : NaN;
-  const amountSats = Number.isFinite(amountValue) ? Math.round(amountValue) : null;
+  const amountValue = Number.parseInt(amountRaw ?? '', 10);
+  const amountSats = Number.isFinite(amountValue) ? amountValue : null;
   return {
     id: event.id,
     coord,
