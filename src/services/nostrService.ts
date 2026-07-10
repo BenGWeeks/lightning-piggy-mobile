@@ -1138,67 +1138,32 @@ export function createGroupChatRumor(input: {
 }
 
 /**
- * NIP-17 multi-recipient send (nsec path). Builds a kind-14/15 rumor once,
- * then seal+wraps it for each recipient + self (matching `wrapManyEvents`
- * semantics exactly — same nip59 helpers, same self-wrap dedup). All wraps
- * are then published in parallel.
- *
- * Previously called `nip59.wrapManyEvents` (a fully synchronous loop). Now
- * inlined with `await yieldToEventLoop()` between recipients so a 5-member
- * group's ~60-80 ms of synchronous @noble/secp256k1 crypto no longer blocks
- * a single frame (#1033). Byte-compatible: uses the same nip59.createSeal /
- * nip59.createWrap primitives, same randomised `created_at` distribution,
- * same recipient ordering (self-wrap first, then recipients). Verified
- * against node_modules/nostr-tools/lib/esm/nip59.js: wrapManyEvents pushes
- * [wrapEvent(…, senderPublicKey), …recipientsPublicKeys.map(wrapEvent)].
- *
- * NSEC-only path. Amber path requires per-event signEvent IPC which the
- * NIP-59 helpers don't support out of the box; tracked as a follow-up.
+ * NIP-17 multi-recipient send (nsec path). Inlines `wrapManyEvents` with
+ * `yieldToEventLoop()` between recipients (#1033) — same nip59.wrapEvent
+ * helper, same self-wrap-first + recipient-dedup semantics, but yields an
+ * RAF frame between wraps so per-recipient crypto doesn't block the UI.
  */
 export async function sendNip17ToManyWithNsec(input: {
   senderSecretKey: Uint8Array;
   rumor: { kind: number; created_at: number; tags: string[][]; content: string };
   recipientPubkeys: string[];
   relays: string[];
-  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
+  onDeliveryFinalized?: OnDeliveryFinalized;
 }): Promise<DmSendResult> {
   trackRelays(input.relays);
   const senderPublicKey = getPublicKey(input.senderSecretKey);
-  // Rumor id (stable kind-14/15 inner-event id) + kind for the detail sheet.
   const eventId = getEventHash({ ...input.rumor, pubkey: senderPublicKey });
-
-  // Match wrapManyEvents semantics: self-wrap first, then one wrap per
-  // deduplicated recipient. Sender is included by the self-wrap; if they are
-  // also listed in recipientPubkeys they are deduped out so they only receive
-  // one gift wrap (not two).
-  const dedupedRecipients = Array.from(
+  // Self-wrap first (matching wrapManyEvents); sender deduped out if also in recipients.
+  const recipients = Array.from(
     new Set([senderPublicKey, ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
   );
-
-  // Inline the per-recipient wrapEvent loop (previously wrapManyEvents) with a
-  // `yieldToEventLoop()` between iterations. Each seal+wrap pair calls @noble's
-  // secp256k1 scalar-mult twice (~14-26 ms on mid-range Android), so a 5-member
-  // group runs ~70-130 ms synchronously without yielding — enough to drop 4-8
-  // frames at 60 fps. Yielding via requestAnimationFrame hands the JS thread
-  // back to the Choreographer between recipients so paint + touch continue.
   const signedWraps: VerifiedEvent[] = [];
-  for (let i = 0; i < dedupedRecipients.length; i++) {
-    if (i > 0) await yieldToEventLoop(); // give the UI thread a breath between wraps
-    const wrap = nip59.wrapEvent(
-      input.rumor as Parameters<typeof nip59.wrapEvent>[0],
-      input.senderSecretKey,
-      dedupedRecipients[i],
-    );
+  for (let i = 0; i < recipients.length; i++) {
+    if (i > 0) await yieldToEventLoop();
+    const wrap = nip59.wrapEvent(input.rumor as Parameters<typeof nip59.wrapEvent>[0], input.senderSecretKey, recipients[i]); // prettier-ignore
     signedWraps.push(wrap as VerifiedEvent);
   }
-
-  return publishWrapsTrackingRelays(
-    signedWraps,
-    input.relays,
-    pool,
-    { eventId, kind: input.rumor.kind },
-    input.onDeliveryFinalized,
-  );
+  return publishWrapsTrackingRelays(signedWraps, input.relays, pool, { eventId, kind: input.rumor.kind }, input.onDeliveryFinalized); // prettier-ignore
 }
 
 /**
