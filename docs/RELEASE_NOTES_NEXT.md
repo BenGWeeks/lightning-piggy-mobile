@@ -14,19 +14,17 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Receive on-chain, land as Lightning.** Send Bitcoin to your on-chain address and the app swaps it to Lightning for you automatically (via a Boltz submarine swap) — no manual steps.
-- **A celebration when on-chain money lands.** Incoming on-chain payments now show a full-screen celebration overlay, the same as Lightning payments.
-- **Watch your transfer happen.** Sending a payment now replaces the form with a step-by-step progress display so you can see each stage.
-- **React to and zap individual messages.** Long-press any message in a chat to add a reaction or send it a zap.
-- **Full Spanish app.** Switch to Spanish (Account → Appearance → Language) and the whole app is translated, not just the tab labels.
-- **Pick where a received payment lands.** When creating an invoice you can now choose any of your wallets as the destination.
+- **Hunt community sections.** The Geo-caches screen now shows "Recently added" and "Recently found" rails, plus a Leaderboard page (top hiders and top finders) — Explore → Geo-caches → scroll down.
+- **Cover-flow card picker.** Wallet Settings → Card Design is now a swipeable cover-flow of all card themes.
+- **AI Robot wallet card.** A new chrome-and-green robot design in the card picker.
 
 ### Improved
 
-- Monogram tab backgrounds on Messages, Friends and Explore for a more branded look.
-- Smoother pink→purple brand fade behind the wallet card on Home.
+- Settings screens (Security, On-chain, Nearby merchants) now use white section icons and brand-pink toggles and selected rows.
+- Home feels snappier — wallet refreshes that change nothing no longer rebuild the transaction list.
+- Explore map pans more smoothly (marker layers no longer re-render on every GPS fix).
 
 ### Fixed
 
-- Logging out now wipes group-chat message text and the places cache from the device; removing a wallet clears its cached data.
-- Pasting or typing into the Send address / memo fields no longer drops or duplicates characters.
+- Tapping a sent group message no longer shows a false "Send failed" dialog — delivered messages now read "Message sent".
+- Geo-caches hidden in Lightning Piggy now always show the Piglet icon and pink map pin, even when they have no prize attached (existing caches fix themselves, no republish needed).
