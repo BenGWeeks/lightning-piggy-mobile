@@ -48,6 +48,10 @@ const isFresh = (entry: CachedShape<unknown> | null): boolean =>
 const hydrate = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
+    // One-shot cleanup of the superseded v1 blob (#1025 key bump) so it
+    // doesn't sit orphaned on disk forever — removeItem on a missing key
+    // is a no-op, so this is safe to fire on every start.
+    AsyncStorage.removeItem('@lp:nostr-caches-v1').catch(() => {});
     try {
       const [cachesRaw, eventsRaw] = await Promise.all([
         AsyncStorage.getItem(CACHES_STORAGE_KEY),
