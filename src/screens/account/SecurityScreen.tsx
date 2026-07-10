@@ -193,7 +193,7 @@ const SecurityScreen: React.FC = () => {
           accessibilityLabel={t('securityScreen.showLinkPreviewsA11y')}
           testID="security-link-preview-toggle"
           trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={colors.white}
+          thumbColor={linkPreviewOn ? colors.white : undefined}
         />
       </View>
 
@@ -214,7 +214,7 @@ const SecurityScreen: React.FC = () => {
           accessibilityLabel={t('securityScreen.showMessagePaymentDetailsA11y')}
           testID="security-lockscreen-content-toggle"
           trackColor={{ false: colors.divider, true: colors.brandPink }}
-          thumbColor={colors.white}
+          thumbColor={lockScreenContentOn ? colors.white : undefined}
         />
       </View>
 
@@ -237,7 +237,7 @@ const SecurityScreen: React.FC = () => {
               accessibilityLabel={t('securityScreen.watchForMessages')}
               testID="security-background-dm-toggle"
               trackColor={{ false: colors.divider, true: colors.brandPink }}
-              thumbColor={colors.white}
+              thumbColor={backgroundDmOn ? colors.white : undefined}
             />
           </View>
         </>
@@ -276,10 +276,10 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     optionRowSelected: {
-      // Selected radio row — purple accent + tint, matching the selected/
-      // active state convention across Settings.
-      borderColor: colors.accentSecondary,
-      backgroundColor: colors.accentSecondaryLight,
+      // Selected radio row — brand pink + tint, matching the pink checkmark
+      // and the active-row convention used in OnChainScreen.
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPinkLight,
     },
     optionTextBlock: {
       flex: 1,
