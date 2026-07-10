@@ -184,16 +184,6 @@ export const createWalletSettingsSheetStyles = (colors: Palette) =>
       letterSpacing: 0.5,
       marginTop: 8,
     },
-    recoveryCalloutLink: {
-      marginTop: 8,
-      paddingVertical: 6,
-      alignSelf: 'flex-start',
-    },
-    recoveryCalloutLinkText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
     credentialRow: {
       backgroundColor: colors.background,
       borderRadius: 12,
