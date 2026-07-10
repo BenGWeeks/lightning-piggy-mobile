@@ -1,12 +1,11 @@
 import { useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
+import { getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { createGroupFileRumor } from '../services/nostrFileMessage';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
-import { NSEC_KEY } from './nostrAuthKeys';
 
 /**
  * Provider-owned slices the group-messaging callbacks close over: the
@@ -94,9 +93,8 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
@@ -234,9 +232,8 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
           return { success: true };
         }
