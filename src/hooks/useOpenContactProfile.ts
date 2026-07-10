@@ -4,6 +4,7 @@ import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ExploreNavigation, RootStackParamList } from '../navigation/types';
 import { shortNpub } from '../utils/shortNpub';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 type Nav = CompositeNavigationProp<
   ExploreNavigation,
@@ -31,7 +32,10 @@ export const useOpenContactProfile = (): ((
         contact: {
           pubkey,
           name: name ?? shortNpub(pubkey),
-          picture,
+          // Guard the seeded picture the same way other avatar surfaces do —
+          // expo-image can flood Android logs with BitmapFactory errors for
+          // unsupported formats like .svg/.heic.
+          picture: picture && isSupportedImageUrl(picture) ? picture : null,
           banner: null,
           about: null,
           lightningAddress: lud16,

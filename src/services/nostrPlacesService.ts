@@ -279,14 +279,22 @@ export const parseFoundLogEvent = (event: VerifiedEvent): ParsedFoundLog | null 
   if (event.kind !== GC_FOUND_LOG_KIND) return null;
   const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
   if (!coord) return null;
+  // Validate coord shape: must be `<kind>:<pubkey>:<d>` with the listing kind.
+  // A bare non-empty string would cause a navigation crash in CacheDetail.
+  const coordParts = coord.split(':');
+  if (coordParts.length !== 3 || Number.parseInt(coordParts[0], 10) !== GC_LISTING_KIND) {
+    return null;
+  }
   // `amount` is written in integer sats by `buildFoundLog` — parse with
   // parseInt (matching `utils/foundLog.ts`) rather than Number+round so a
   // malformed fractional tag can't be silently reshaped into a different
   // sats value; gate on Number.isFinite so a genuine `0` survives while
-  // missing / non-numeric tags fall back to null.
+  // missing / non-numeric tags fall back to null. Reject negatives: sats
+  // represent a payout and cannot be negative (buildFoundLog only writes
+  // amount when sats > 0), so treat them as malformed.
   const amountRaw = event.tags.find((t) => t[0] === 'amount')?.[1];
   const amountValue = Number.parseInt(amountRaw ?? '', 10);
-  const amountSats = Number.isFinite(amountValue) ? amountValue : null;
+  const amountSats = Number.isFinite(amountValue) && amountValue >= 0 ? amountValue : null;
   return {
     id: event.id,
     coord,

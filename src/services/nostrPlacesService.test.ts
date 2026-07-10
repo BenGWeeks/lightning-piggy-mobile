@@ -413,4 +413,30 @@ describe('parseFoundLogEvent', () => {
       )?.amountSats,
     ).toBeNull();
   });
+
+  it('rejects a negative amount tag (malformed relay data)', () => {
+    // buildFoundLog only writes `amount` when sats > 0; a negative value
+    // would produce a confusing UI (negative zap pill), so treat it as null.
+    expect(
+      parseFoundLogEvent(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '-5'],
+        ]),
+      )?.amountSats,
+    ).toBeNull();
+  });
+
+  it('rejects a coord where the kind does not match GC_LISTING_KIND', () => {
+    // e.g. a malformed relay event pointing at a different NIP kind.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '1:hider:d']]))).toBeNull();
+    expect(parseFoundLogEvent(makeFoundLog([['a', 'bad:hider:d']]))).toBeNull();
+  });
+
+  it('rejects a coord that is not <kind>:<pubkey>:<d>', () => {
+    // Only two parts — missing the d-tag segment.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:onlytwo']]))).toBeNull();
+    // Non-empty but otherwise garbage.
+    expect(parseFoundLogEvent(makeFoundLog([['a', 'notacoord']]))).toBeNull();
+  });
 });

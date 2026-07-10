@@ -58,6 +58,7 @@ export const useHuntCommunity = (): HuntCommunityData => {
     flush: flushCaches,
   } = useCoalescedMap<ParsedCache>({
     shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+    maxSize: 400,
   });
   const {
     map: findsMap,
