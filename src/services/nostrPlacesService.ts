@@ -250,9 +250,10 @@ export const hasLpLabel = (tags: string[][]): boolean =>
   tags.some((t) => t[0] === 'l' && t[1] === LP_LABEL_VALUE && t[2] === LP_LABEL_NAMESPACE);
 
 /**
- * Predicate — was this listing published by Lightning Piggy? Every event the
- * app signs carries the NIP-89 `['client', 'Lightning Piggy']` tag (see
- * nip89ClientTag.ts), so this classifies prize-less Piglets that never earn
+ * Predicate — was this listing published by Lightning Piggy? Every PUBLIC
+ * event the app signs carries the NIP-89 `['client', 'Lightning Piggy']` tag
+ * (sealed DM rumors deliberately omit it — see nip89ClientTag.ts), and cache
+ * listings are public, so this classifies prize-less Piglets that never earn
  * the payout label. Match on name only — a future upgrade to the full
  * 4-element client tag (name, 31990 coordinate, relay hint) must not break
  * classification.

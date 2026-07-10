@@ -997,7 +997,7 @@ The mini-map's `onBoundsChange` emits the current viewport bbox. Naive filtering
 
 Mirrors the BTC Map pattern:
 
-* **Two AsyncStorage keys** — `@lp:nostr-caches-v1` (kind 37516) and `@lp:nostr-events-v1` (kind 31923).
+* **Two AsyncStorage keys** — `@lp:nostr-caches-v2` (kind 37516) and `@lp:nostr-events-v1` (kind 31923).
 * **In-memory mirror** + sync peek so the first useState init in HuntScreen / EventsScreen has populated data on warm starts.
 * **Capped at 500 entries each** — newest by `createdAt` for caches, newest-upcoming by `startsAt` for events. The blob is well under 200 KB at the cap.
 * **7-day TTL** on the persisted blob; the live relay subscription (`subscribeNearbyCaches` / `subscribeNearbyEvents`) authoritatively backfills as soon as the user lands on the rail.
