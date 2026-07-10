@@ -31,7 +31,8 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { recentCaches, finds, cacheByCoord, loading } = useHuntCommunity();
+  const { recentCaches, finds, cacheByCoord, hiderLeaderboard, finderLeaderboard, loading } =
+    useHuntCommunity();
 
   return (
     <View testID="hunt-community-sections">
@@ -51,7 +52,13 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
           so the main hunt list stays uncluttered. */}
       <TouchableOpacity
         style={styles.leaderboardLink}
-        onPress={() => navigation.navigate('HuntLeaderboard')}
+        onPress={() =>
+          navigation.navigate('HuntLeaderboard', {
+            hiderLeaderboard,
+            finderLeaderboard,
+            loading,
+          })
+        }
         testID="hunt-leaderboard-link"
         accessibilityLabel={t('huntCommunity.viewLeaderboard')}
       >

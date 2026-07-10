@@ -70,13 +70,19 @@ const HuntLeaderboard: React.FC<Props> = ({ variant, entries, loading }) => {
   );
 };
 
+/**
+ * Memoised leaderboard row — profile fetches from usePubkeyProfile trickle
+ * in one-by-one, and without memo every arriving profile re-executes all
+ * ~20 rows (each calling usePubkeyProfile). Memo limits re-execution to the
+ * row whose data actually changed (#1028).
+ */
 const LeaderboardRow: React.FC<{
   entry: LeaderboardEntry;
   rank: number;
   variant: LeaderboardVariant;
   styles: HuntCommunityStyles;
   testID: string;
-}> = ({ entry, rank, variant, styles, testID }) => {
+}> = React.memo(function LeaderboardRowInner({ entry, rank, variant, styles, testID }) {
   const colors = useThemeColors();
   const t = useTranslation();
   const { name, picture, lud16 } = usePubkeyProfile(entry.pubkey);
@@ -153,7 +159,7 @@ const LeaderboardRow: React.FC<{
       </View>
     </TouchableOpacity>
   );
-};
+});
 
 export const SkeletonRows: React.FC<{ styles: HuntCommunityStyles; count: number }> = ({
   styles,
