@@ -242,13 +242,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         logFlushTimerRef.current = null;
       }
       // Guard against a queued timer firing after the effect cleaned up
-      // (cancelled = true on unmount / coord change). setLogs would be
-      // a no-op on an unmounted component but could still set state on a
-      // freshly re-mounted screen keyed to a different coord. (Copilot.)
-      if (cancelled) {
-        pendingLogsRef.current = new Map();
-        return;
-      }
+      // (cancelled = true on unmount / coord change). Simply return without
+      // touching pendingLogsRef — the cleanup path already cleared it, and
+      // mutating the shared ref here could wipe logs buffered by the *next*
+      // effect instance that started after the coord change. (Copilot.)
+      if (cancelled) return;
       if (pendingLogsRef.current.size === 0) return;
       const batch = pendingLogsRef.current;
       pendingLogsRef.current = new Map();

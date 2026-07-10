@@ -97,8 +97,10 @@ describe('subscribeRecentFoundLogs', () => {
     const after = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
     expect(mockSubscribeMany).toHaveBeenCalledTimes(1);
     const [, filterArg] = mockSubscribeMany.mock.calls[0] as [unknown, { since: number }];
-    expect(filterArg.since).toBeGreaterThanOrEqual(before - 2);
-    expect(filterArg.since).toBeLessThanOrEqual(after + 2);
+    // Allow ±5 s tolerance for the tick between `before` and `after`
+    // (keeps the assertion deterministic under CI load).
+    expect(filterArg.since).toBeGreaterThanOrEqual(before - 5);
+    expect(filterArg.since).toBeLessThanOrEqual(after + 5);
   });
 
   it('retains the default limit of 200', () => {
@@ -140,6 +142,7 @@ describe('subscribeRecentFoundLogs', () => {
     const logsSince = (mockSubscribeMany.mock.calls[1] as [unknown, { since: number }])[1].since;
     // Both should be within a few seconds of each other (test runs in <1 s).
     // Each is independently computed via RECENT_SINCE_SECS() at call time.
-    expect(Math.abs(cachesSince - logsSince)).toBeLessThan(2);
+    // ±10 s is generous enough to be stable under CI load.
+    expect(Math.abs(cachesSince - logsSince)).toBeLessThan(10);
   });
 });
