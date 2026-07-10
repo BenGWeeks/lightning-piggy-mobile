@@ -975,6 +975,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
+      lastTxsJsonRef.current.delete(walletId); // drop stale fingerprint so a future wallet with the same id starts fresh
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
 
