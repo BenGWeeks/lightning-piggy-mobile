@@ -67,7 +67,7 @@ export const createHuntCommunityStyles = (colors: Palette) =>
     railTitle: { fontSize: 14, fontWeight: '700', color: colors.textHeader },
     railMeta: { fontSize: 11, color: colors.textSupplementary, marginTop: 2 },
 
-    // Avatar (shared by find + leaderboard rows) ---------------------------
+    // Avatar (shared by leaderboard rows) ----------------------------------
     avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.divider },
     avatarFallback: {
       alignItems: 'center',
@@ -75,7 +75,53 @@ export const createHuntCommunityStyles = (colors: Palette) =>
       backgroundColor: colors.brandPinkLight,
     },
 
-    // Recently-found feed row ----------------------------------------------
+    // Recently-found horizontal rail cards ---------------------------------
+    findCard: {
+      width: 140,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 10,
+    },
+    findCardAvatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.divider,
+      marginBottom: 8,
+    },
+    findCardAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brandPinkLight,
+    },
+    findCardName: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
+    findCardCache: { fontSize: 11, color: colors.textSupplementary, marginTop: 2, lineHeight: 15 },
+    findCardFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 6,
+      flexWrap: 'wrap',
+    },
+    findCardAmountPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: colors.brandPinkLight,
+    },
+    findCardAmountText: { fontSize: 10, fontWeight: '800', color: colors.brandPink },
+    findCardAge: { fontSize: 10, color: colors.textSupplementary, flex: 1 },
+    skeletonFindCard: {
+      width: 140,
+      height: 120,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+    },
+
+    // Row styles (kept for backward compat if used elsewhere) --------------
     row: {
       flexDirection: 'row',
       alignItems: 'center',

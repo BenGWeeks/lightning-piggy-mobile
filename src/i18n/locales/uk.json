@@ -891,7 +891,13 @@
     "emptyFinders": "Ще немає шукачів — знайдіть кеш, щоб потрапити до списку.",
     "leaderRowA11y": "Місце {{rank}}: {{name}}, {{count}} кешів",
     "leaderRowA11yOne": "Місце {{rank}}: {{name}}, 1 схованка",
-    "findRowA11y": "{{name}} знайшов {{cache}}"
+    "findRowA11y": "{{name}} знайшов {{cache}}",
+    "viewLeaderboard": "Рейтинг"
+  },
+  "huntLeaderboard": {
+    "title": "Рейтинг",
+    "tagline": "Найкращі ховачі та шукачі мережі",
+    "backToGeoCaches": "Назад до Геосхованок"
   },
   "huntScreen": {
     "backToExplore": "Назад до Огляду",

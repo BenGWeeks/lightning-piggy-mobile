@@ -919,7 +919,13 @@
     "emptyFinders": "Aún no hay buscadores: reclama un caché para entrar en la lista.",
     "leaderRowA11y": "Puesto {{rank}}: {{name}}, {{count}} cachés",
     "leaderRowA11yOne": "Puesto {{rank}}: {{name}}, 1 caché",
-    "findRowA11y": "{{name}} encontró {{cache}}"
+    "findRowA11y": "{{name}} encontró {{cache}}",
+    "viewLeaderboard": "Clasificación"
+  },
+  "huntLeaderboard": {
+    "title": "Clasificación",
+    "tagline": "Los mejores escondedores y buscadores de la red",
+    "backToGeoCaches": "Volver a Geocachés"
   },
   "huntScreen": {
     "backToExplore": "Volver a Explorar",

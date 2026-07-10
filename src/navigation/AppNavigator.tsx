@@ -58,6 +58,7 @@ const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'))
 const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
 const HuntPiggyDetailScreen = lazyScreen(() => import('../screens/HuntPiggyDetailScreen'));
 const MyPigletsScreen = lazyScreen(() => import('../screens/MyPigletsScreen'));
+const HuntLeaderboardScreen = lazyScreen(() => import('../screens/HuntLeaderboardScreen'));
 const EventsScreen = lazyScreen(() => import('../screens/EventsScreen'));
 const EventDetailScreen = lazyScreen(() => import('../screens/EventDetailScreen'));
 const CourseDetailScreen = lazyScreen(() => import('../screens/CourseDetailScreen'));
@@ -276,6 +277,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />
       <ExploreStack.Screen name="HuntPiggyDetail" component={HuntPiggyDetailScreen} />
       <ExploreStack.Screen name="MyPiglets" component={MyPigletsScreen} />
+      <ExploreStack.Screen name="HuntLeaderboard" component={HuntLeaderboardScreen} />
       <ExploreStack.Screen name="Events" component={EventsScreen} />
       <ExploreStack.Screen name="EventDetail" component={EventDetailScreen} />
     </ExploreStack.Navigator>

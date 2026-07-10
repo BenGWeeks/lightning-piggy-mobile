@@ -136,6 +136,7 @@ export type ExploreStackParamList = {
   // finder doesn't have to remember to tap the compose button.
   HuntPiggyDetail: { coord: string; openComposer?: boolean };
   MyPiglets: undefined;
+  HuntLeaderboard: undefined;
   Events: undefined;
   EventDetail: { coord: string };
 };

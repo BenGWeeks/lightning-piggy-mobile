@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList } from 'react-native';
 import { Image } from 'expo-image';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { PartyPopper, PiggyBank, User, Users, Zap } from 'lucide-react-native';
@@ -15,8 +15,6 @@ import {
   createHuntCommunityStyles,
   type HuntCommunityStyles,
 } from '../styles/HuntCommunity.styles';
-import { SkeletonRows } from './HuntLeaderboard';
-
 interface Props {
   /** All found-logs (deduped by id), newest-first. Filtered + sliced here. */
   finds: ParsedFoundLog[];
@@ -28,11 +26,13 @@ interface Props {
 const FEED_LIMIT = 12;
 
 /**
- * "Recently found" — a feed of the latest cache claims across the network,
- * with an All ⟷ Friends toggle. "Friends" reuses the app's web-of-trust
- * set (kind-3 follows + seeds, minus the signed-in user) — the same source
- * `MyPiglets` uses for its "Friends' finds" section — filtered client-side
- * so flipping the toggle re-ranks instantly with no re-subscribe.
+ * "Recently found" — a horizontal rail of the latest cache claims across
+ * the network, with an All ⟷ Friends toggle. "Friends" reuses the app's
+ * web-of-trust set (kind-3 follows + seeds, minus the signed-in user) —
+ * the same source `MyPiglets` uses for its "Friends' finds" section —
+ * filtered client-side so flipping the toggle re-ranks instantly with no
+ * re-subscribe. Mirrors the horizontal layout of the "Recently added" rail
+ * so the two sections form a consistent visual pair.
  */
 const HuntRecentFindsSection: React.FC<Props> = ({
   finds,
@@ -100,7 +100,14 @@ const HuntRecentFindsSection: React.FC<Props> = ({
       </View>
 
       {loading && finds.length === 0 ? (
-        <SkeletonRows styles={styles} count={3} />
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={[0, 1, 2]}
+          keyExtractor={(i) => `sfk-${i}`}
+          contentContainerStyle={styles.rail}
+          renderItem={() => <View style={styles.skeletonFindCard} accessibilityElementsHidden />}
+        />
       ) : visibleFinds.length === 0 ? (
         <Text style={styles.emptyText} testID="hunt-recent-finds-empty">
           {friendsOnly
@@ -108,16 +115,22 @@ const HuntRecentFindsSection: React.FC<Props> = ({
             : t('huntCommunity.emptyRecentlyFound')}
         </Text>
       ) : (
-        visibleFinds.map((find, index) => (
-          <FindRow
-            key={find.id}
-            find={find}
-            cache={cacheByCoord.get(find.coord) ?? null}
-            index={index}
-            styles={styles}
-            onPress={() => find.coord && onPressCache(find.coord)}
-          />
-        ))
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={visibleFinds}
+          keyExtractor={(f) => f.id}
+          contentContainerStyle={styles.rail}
+          renderItem={({ item, index }) => (
+            <FindCard
+              find={item}
+              cache={cacheByCoord.get(item.coord) ?? null}
+              index={index}
+              styles={styles}
+              onPress={() => item.coord && onPressCache(item.coord)}
+            />
+          )}
+        />
       )}
     </View>
   );
@@ -144,7 +157,7 @@ const ToggleButton: React.FC<{
   </TouchableOpacity>
 );
 
-const FindRow: React.FC<{
+const FindCard: React.FC<{
   find: ParsedFoundLog;
   cache: ParsedCache | null;
   index: number;
@@ -166,39 +179,44 @@ const FindRow: React.FC<{
 
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={styles.findCard}
       onPress={onPress}
-      testID={`hunt-recent-finds-row-${index}`}
+      testID={`hunt-recent-finds-card-${index}`}
       accessibilityLabel={t('huntCommunity.findRowA11y', { name: display, cache: cacheName })}
     >
       {picture && isSupportedImageUrl(picture) ? (
         <Image
           source={{ uri: picture }}
-          style={styles.avatar}
+          style={styles.findCardAvatar}
           cachePolicy="memory-disk"
           recyclingKey={picture}
           autoplay={false}
         />
       ) : (
-        <View style={[styles.avatar, styles.avatarFallback]}>
-          <User size={18} color={colors.brandPink} strokeWidth={2.5} />
+        <View style={[styles.findCardAvatar, styles.findCardAvatarFallback]}>
+          <User size={22} color={colors.brandPink} strokeWidth={2.5} />
         </View>
       )}
-      <View style={styles.rowMain}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {display}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {t('huntCommunity.foundCache', { cache: cacheName })} · {ageLabel}
+      <Text style={styles.findCardName} numberOfLines={1}>
+        {display}
+      </Text>
+      <Text style={styles.findCardCache} numberOfLines={2}>
+        {cacheName}
+      </Text>
+      <View style={styles.findCardFooter}>
+        {cache?.isLpPiggy ? (
+          <PiggyBank size={12} color={colors.brandPink} strokeWidth={2.5} />
+        ) : null}
+        {find.amountSats != null ? (
+          <View style={styles.findCardAmountPill}>
+            <Zap size={10} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
+            <Text style={styles.findCardAmountText}>{find.amountSats.toLocaleString()}</Text>
+          </View>
+        ) : null}
+        <Text style={styles.findCardAge} numberOfLines={1}>
+          {ageLabel}
         </Text>
       </View>
-      {cache?.isLpPiggy ? <PiggyBank size={16} color={colors.brandPink} strokeWidth={2.5} /> : null}
-      {find.amountSats != null ? (
-        <View style={styles.amountPill}>
-          <Zap size={11} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.amountPillText}>{find.amountSats.toLocaleString()}</Text>
-        </View>
-      ) : null}
     </TouchableOpacity>
   );
 };

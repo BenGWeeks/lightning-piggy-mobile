@@ -919,7 +919,13 @@
     "emptyFinders": "No finders yet — claim a cache to get on the board.",
     "leaderRowA11y": "Rank {{rank}}: {{name}}, {{count}} caches",
     "leaderRowA11yOne": "Rank {{rank}}: {{name}}, 1 cache",
-    "findRowA11y": "{{name}} found {{cache}}"
+    "findRowA11y": "{{name}} found {{cache}}",
+    "viewLeaderboard": "Leaderboard"
+  },
+  "huntLeaderboard": {
+    "title": "Leaderboard",
+    "tagline": "Top hiders and finders across the network",
+    "backToGeoCaches": "Back to Geo-caches"
   },
   "huntScreen": {
     "backToExplore": "Back to Explore",

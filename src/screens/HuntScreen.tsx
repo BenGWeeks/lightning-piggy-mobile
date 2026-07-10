@@ -439,6 +439,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             <HuntCommunitySections
               pos={communityPos}
               onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+              navigation={navigation}
             />
             <Text style={styles.nearbyHeader}>{t('huntCommunity.nearby')}</Text>
             <View style={styles.searchRow}>
