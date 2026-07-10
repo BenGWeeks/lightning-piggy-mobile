@@ -1,5 +1,4 @@
-import * as nip44 from 'nostr-tools/nip44';
-import { getEventHash } from 'nostr-tools/pure';
+import { nip44GetConversationKey, nip44Decrypt, nostrGetEventHash } from '../services/nostrCrypto';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
@@ -217,8 +216,8 @@ export function unwrapWrapNsec(
   // Layer 1: wrap.content → seal, keyed by the ephemeral wrap pubkey.
   let sealJson: string;
   try {
-    const wrapKey = nip44.v2.utils.getConversationKey(secretKey, wrap.pubkey);
-    sealJson = nip44.v2.decrypt(wrap.content, wrapKey);
+    const wrapKey = nip44GetConversationKey(secretKey, wrap.pubkey);
+    sealJson = nip44Decrypt(wrap.content, wrapKey);
   } catch (error) {
     return skip(`wrap decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
@@ -228,8 +227,8 @@ export function unwrapWrapNsec(
   // Layer 2: seal.content → rumor, keyed by the seal (sender) pubkey.
   let rumorJson: string;
   try {
-    const sealKey = nip44.v2.utils.getConversationKey(secretKey, seal.pubkey);
-    rumorJson = nip44.v2.decrypt(seal.content, sealKey);
+    const sealKey = nip44GetConversationKey(secretKey, seal.pubkey);
+    rumorJson = nip44Decrypt(seal.content, sealKey);
   } catch (error) {
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
@@ -287,7 +286,7 @@ export function partnerFromRumor(
  * key). A `DecodedRumor` is an UnsignedEvent for hashing purposes.
  */
 export function rumorEventId(rumor: DecodedRumor): string {
-  return getEventHash(rumor);
+  return nostrGetEventHash(rumor);
 }
 
 export function subjectFromRumor(rumor: DecodedRumor): string | null {
