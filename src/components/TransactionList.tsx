@@ -1,11 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  ActivityIndicator,
-  type ListRenderItemInfo,
-} from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, type ListRenderItemInfo } from 'react-native';
 import type { RefreshControlProps } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';

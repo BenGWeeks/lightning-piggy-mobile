@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useEffect, useRef } from 'react';
 import * as nwcService from '../services/nwcService';
 import * as walletStorage from '../services/walletStorageService';
