@@ -6,11 +6,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   InteractionManager,
+  AppState,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import TabBackgroundImage from '../components/TabBackgroundImage';
+import BrandPatternBackground from '../components/BrandPatternBackground';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Clock, Search, X, Zap } from 'lucide-react-native';
@@ -19,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -36,6 +37,7 @@ import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import {
   buildConversationSummaries,
   buildDmSummaries,
@@ -43,6 +45,11 @@ import {
   mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
+import { useStableRowIdentity } from '../utils/stableRowIdentity';
+// __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
+// __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
+// runtime in a release build (the module may still be present in the bundle).
+import { seedDevOrderConversation } from '../utils/devSeedOrders';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 import type { NostrProfile } from '../types/nostr';
@@ -54,6 +61,7 @@ type MessagesNavigation = CompositeNavigationProp<
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
   const messagesRenderLoggedRef = useRef(false);
   useEffect(() => {
@@ -64,18 +72,9 @@ const MessagesScreen: React.FC = () => {
   const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const {
-    isLoggedIn,
-    profile,
-    contacts,
-    refreshContacts,
-    refreshProfile,
-    dmInbox,
-    refreshDmInbox,
-    armLiveDmSub,
-    fetchProfilesForPubkeys,
-    pubkey,
-  } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, fetchProfilesForPubkeys, pubkey } = useNostr();
+  const { dmInbox, refreshDmInbox, armLiveDmSub } = useNostrDmInbox();
+  const { contacts, refreshContacts } = useNostrContacts();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();
   // `trustSetForTier` rather than the raw `trustSet` so the screen's
@@ -94,8 +93,22 @@ const MessagesScreen: React.FC = () => {
   // already collapses 'all' → 'friends' for non-secret-mode users, so a
   // stale persisted 'all' can't leak past the parental-control gate.
   const enforceFollowingOnly = effectiveWotTier !== 'all';
-  // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
-  const lastAppliedEnforceRef = useRef<boolean>(true);
+  // Tracks the `enforceFollowingOnly` value the LAST refresh actually
+  // applied, so a genuine later toggle triggers a data-layer re-fetch
+  // (not just a UI re-filter). Seeded to `null` (= "no refresh has run
+  // yet") rather than a hardcoded boolean: the WoT tier hydrates async
+  // from AsyncStorage, so on first render `enforceFollowingOnly` reflects
+  // the transient default ('all' → false), not the persisted value. A
+  // hardcoded seed of `true` made the first settle read as a flip, which
+  // fired a SECOND `refreshDmInbox` whose `newRefreshSignal()` aborted the
+  // focus-effect's cold refresh mid-decrypt — stamping the freshness
+  // cursor so the retry no longer counted as a cold start and #788's
+  // macro-task yield never ran (a double-fetch that no-op'd the
+  // optimisation). With `null`, the enforce-flip effect stays dormant
+  // until a refresh has actually recorded which filter it used; the cold
+  // focus refresh is then the SINGLE fetch and carries the correct filter.
+  // (#788)
+  const lastAppliedEnforceRef = useRef<boolean | null>(null);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -148,15 +161,6 @@ const MessagesScreen: React.FC = () => {
     ).catch(() => {});
   }, [showZapCounterparties]);
 
-  // Defer the refresh until the Messages tab's transition animation
-  // and first-paint have finished. The refresh itself (relay fetches
-  // + decrypt loop) holds the JS thread for 3-5 s; running it inside
-  // the focus-effect callback synchronously meant navigating away
-  // from Messages felt laggy because the NEXT tab's render queued
-  // behind it. InteractionManager yields to the scheduler and runs
-  // the work once the UI is idle. `.cancel()` in cleanup avoids
-  // firing the refresh on a focus that was already abandoned.
-  //
   // Also pre-warms the friend-picker avatar bitmaps. Histograms from
   // perf-suite showed the FAB → FriendPicker open path spends most
   // of its modern-jank budget on cold avatar decode. Prefetching the
@@ -181,8 +185,20 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  // Short TTL written on abort (#731 Fix 1 — "chaining trap").
+  // The full 30 s TTL is only written when the refresh RESOLVES. If the
+  // user blurs before it finishes the TTL was previously left unset,
+  // so the very next focus would immediately start another full refresh
+  // (tab-hop faster than the refresh → full refresh every time,
+  // indefinitely). Writing a shorter marker on abort tells the next
+  // focus "a refresh already started and was interrupted; wait a bit
+  // before trying again" — 10 s is long enough to suppress spurious
+  // re-chains without delaying a genuine user intent to view new DMs.
+  const DM_INBOX_ABORT_TTL_MS = 10_000;
   // Aborts the in-flight refreshDmInbox when the user leaves Messages, so the NIP-17 unwrap loop releases the JS thread quickly instead of grinding through hundreds of cached wraps after blur. See #412 for the perceived "tabs feel locked during refresh" symptom.
   const refreshAbortRef = useRef<AbortController | null>(null);
+  // Tracks the post-interaction delay timer so it can be cancelled on blur before it fires (#731 Fix 1).
+  const refreshDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newRefreshSignal = useCallback((): AbortSignal => {
     refreshAbortRef.current?.abort();
     const ctrl = new AbortController();
@@ -195,9 +211,17 @@ const MessagesScreen: React.FC = () => {
     enforceFollowingOnlyRef.current = enforceFollowingOnly;
   }, [enforceFollowingOnly]);
 
-  // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
+  // Force-refresh the inbox whenever the effective enforcement GENUINELY
+  // flips (a real WoT-tier toggle), so all data-layer paths re-apply the
+  // new filter. Dormant until the cold focus refresh below has recorded
+  // which filter it applied (`lastAppliedEnforceRef.current !== null`):
+  // on first render the WoT tier is still hydrating, so firing here would
+  // abort the cold refresh and defeat #788's macro-task yield. Once a
+  // refresh has run, a later toggle that differs from the applied value
+  // re-fetches with `force: true` so newly-(un)trusted senders surface.
   useEffect(() => {
     if (!isLoggedIn) return;
+    if (lastAppliedEnforceRef.current === null) return;
     if (lastAppliedEnforceRef.current === enforceFollowingOnly) return;
     lastAppliedEnforceRef.current = enforceFollowingOnly;
     refreshDmInbox({
@@ -215,24 +239,71 @@ const MessagesScreen: React.FC = () => {
       // Messages-tab focus pays the wrap-drain cost here, where a
       // brief loading state is the expected UX.
       armLiveDmSub();
-      const handle = InteractionManager.runAfterInteractions(() => {
+      // Two-stage defer (#731 Fix 1 — keep decrypt off the tab-animation hot path):
+      //
+      // 1. InteractionManager.runAfterInteractions waits for the tab-bar
+      //    slide animation to complete its "interaction" frame budget.
+      // 2. Inside that callback a 120 ms safety margin lets the first JS
+      //    paint of MessagesScreen (FlashList measure + item layout +
+      //    avatar decode) finish before the decrypt loop begins. Without
+      //    this delay those two phases competed for the JS thread on every
+      //    cold Messages focus — visible as list-renders jank right after
+      //    the tab-bar animation completes.
+      //
+      // Both the interactionHandle and refreshDelayRef are cancelled in
+      // cleanup so a blur before the delay fires is a complete no-op —
+      // no decrypt work starts at all (optimal outcome for a fast tab-hop).
+      const interactionHandle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
-        // Bump the TTL marker only after the refresh resolves successfully — if it's aborted (tab blur) or throws, leave the marker untouched so the next focus retries instead of suppressing for 30 s. (#413 review)
-        const startedAt = Date.now();
-        refreshDmInbox({
-          includeNonFollows: !enforceFollowingOnlyRef.current,
-          signal: newRefreshSignal(),
-        })
-          .then(() => {
-            dmInboxLastRefreshAt.current = startedAt;
+        refreshDelayRef.current = setTimeout(() => {
+          refreshDelayRef.current = null;
+          const startedAt = Date.now();
+          // Capture the signal: refreshDmInbox RESOLVES (never rejects) on
+          // abort — it early-returns internally on `signal.aborted` — so
+          // `.then` runs in BOTH the completed and aborted cases and `.catch`
+          // is effectively dead for aborts. We therefore branch on the signal
+          // (not the catch) to choose the TTL marker.
+          const signal = newRefreshSignal();
+          // Record the filter this (cold) refresh applies so the
+          // enforce-flip effect above stops being dormant and only
+          // re-fires on a GENUINE later toggle away from this value.
+          // Reading `enforceFollowingOnlyRef.current` here (vs. a stale
+          // closure) means the WoT tier has had until now — past
+          // InteractionManager + the 120 ms margin, comfortably longer
+          // than the AsyncStorage hydrate — to settle, so this single
+          // fetch carries the correct, settled filter. (#788)
+          lastAppliedEnforceRef.current = enforceFollowingOnlyRef.current;
+          refreshDmInbox({
+            includeNonFollows: !enforceFollowingOnlyRef.current,
+            signal,
           })
-          .catch(() => {
-            // Abort or relay error — TTL untouched, next focus retries.
-          });
+            .then(() => {
+              // Aborted mid-refresh (e.g. a fast tab-hop): write a shorter
+              // 10 s marker (#731 Fix 1 — "chaining trap") so the next focus
+              // doesn't immediately re-chain a full refresh, while still
+              // refreshing sooner than a clean 30 s TTL would. A clean
+              // completion gets the full 30 s TTL.
+              dmInboxLastRefreshAt.current = signal.aborted
+                ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
+                : startedAt;
+            })
+            .catch(() => {
+              // refreshDmInbox rarely rejects, but if it does, treat it like an
+              // abort: short marker so we retry soon rather than waiting 30 s.
+              dmInboxLastRefreshAt.current =
+                Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS);
+            });
+        }, 120);
       });
       return () => {
-        handle.cancel();
-        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the 30 s TTL gate.
+        interactionHandle.cancel();
+        // Cancel any pending delay that was scheduled inside the interaction
+        // callback but hadn't fired yet (e.g. blur during the 120 ms window).
+        if (refreshDelayRef.current !== null) {
+          clearTimeout(refreshDelayRef.current);
+          refreshDelayRef.current = null;
+        }
+        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the TTL gate (30 s resolved, 10 s aborted).
         refreshAbortRef.current?.abort();
         refreshAbortRef.current = null;
       };
@@ -277,6 +348,21 @@ const MessagesScreen: React.FC = () => {
       return () => handle.cancel();
     }, [isLoggedIn, contacts]),
   );
+
+  // Abort any in-flight decrypt loop when the app goes to background
+  // (#739 Fix 2). RAF callbacks suspend when Android pauses Choreographer
+  // (user hits Home or switches apps), so an in-flight loop hangs until
+  // the app resumes and appears frozen on return. Mirror the pattern from
+  // WalletContext.tsx:735. The listener must outlive focus/blur so we use
+  // a plain useEffect scoped to the screen mount, not useFocusEffect.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        refreshAbortRef.current?.abort();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Trust gate (#547). For 'friends' tier this is L1 follows + viewer + seeds;
   // for 'fof' it adds L2 follows-of-follows; for 'all' it's still computed
@@ -416,11 +502,18 @@ const MessagesScreen: React.FC = () => {
     if (!showZapCounterparties) return null;
     return buildConversationSummaries(wallets, deferredContacts);
   }, [wallets, deferredContacts, showZapCounterparties]);
-  const conversationSummaries = useMemo(() => {
+  const mergedSummaries = useMemo(() => {
     // #147: by default the inbox shows DMs only — zap-only counterparties (rows derived purely from wallet zap history with no decoded NIP-04/NIP-17 message) are hidden. The "Show zap counterparties" chip re-unions them when the user opts in.
     if (!zapSummaries) return dmSummaries;
     return mergeSummaries(zapSummaries, dmSummaries);
   }, [dmSummaries, zapSummaries]);
+  // Identity-stabilise the rows across contact/profile churn (#854): while a
+  // cold-start fetchProfiles stream is landing, every profile batch rebuilds
+  // the summaries with all-new object references, defeating ConversationRow's
+  // React.memo for every visible row on every batch — the list-wide re-render
+  // thrash behind the blank-cells-while-scrolling symptom. Value-identical
+  // rows keep their previous reference so memo'd rows bail out.
+  const conversationSummaries = useStableRowIdentity(mergedSummaries);
 
   // The trust gate is on by default (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
@@ -494,6 +587,11 @@ const MessagesScreen: React.FC = () => {
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
       // Pull-to-refresh deliberately does NOT call newRefreshSignal() here. If a focus refresh is already in flight, refreshDmInbox's single-flight guard returns the existing promise; aborting that promise via newRefreshSignal() then awaiting it would resolve to AbortError and never start a fresh refresh — making pull-to-refresh a no-op whenever a focus refresh was running. We let the in-flight one finish (its result is what the user wants anyway) and only kick off a new refresh if none is running. The focus-effect signal still aborts on blur, which covers the original snappiness goal. (#413 review)
+      // Record the filter this refresh applies, same as the cold focus
+      // refresh: if pull-to-refresh is the first refresh of the session
+      // it must take the enforce-flip effect out of its dormant (`null`)
+      // state so a later genuine WoT-tier toggle still re-fetches. (#788)
+      lastAppliedEnforceRef.current = enforceFollowingOnly;
       await refreshDmInbox({
         force: true,
         includeNonFollows: !enforceFollowingOnly,
@@ -542,6 +640,22 @@ const MessagesScreen: React.FC = () => {
   const handleStartConversation = useCallback(() => {
     setPickerVisible(true);
   }, []);
+
+  // __DEV__-only: seed a marketplace payment-request + receipt conversation and
+  // open it, so Maestro / manual QA can exercise the order-card Pay / QR
+  // affordance without a live market relay. This branch is __DEV__-gated and the
+  // helper is a no-op outside __DEV__, so it never runs in a release build.
+  const handleSeedDevOrder = useCallback(async () => {
+    if (!__DEV__ || !pubkey) return;
+    const seeded = await seedDevOrderConversation(pubkey);
+    if (!seeded) return;
+    navigation.navigate('Conversation', {
+      pubkey: seeded.pubkey,
+      name: seeded.name,
+      picture: null,
+      lightningAddress: null,
+    });
+  }, [navigation, pubkey]);
 
   const handlePickerSelect = useCallback(
     (friend: PickedFriend) => {
@@ -613,8 +727,11 @@ const MessagesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <TabBackgroundImage style={styles.bgImage} />
-      <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
+      <BrandPatternBackground variant="messages-weave" />
+      <TabHeader
+        title={t('messagesScreen.title')}
+        icon={<MessageCircle size={20} color={colors.brandPink} />}
+      />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (
@@ -623,13 +740,13 @@ const MessagesScreen: React.FC = () => {
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search conversations..."
+                placeholder={t('messagesScreen.searchPlaceholder')}
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 value={search}
                 onChangeText={setSearch}
                 autoCapitalize="none"
                 autoCorrect={false}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-input"
               />
               <TouchableOpacity
@@ -638,7 +755,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(false);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Close search"
+                accessibilityLabel={t('messagesScreen.closeSearch')}
                 testID="messages-close-search"
               >
                 <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
@@ -653,7 +770,7 @@ const MessagesScreen: React.FC = () => {
                   setSearchExpanded(true);
                   setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                accessibilityLabel="Search conversations"
+                accessibilityLabel={t('messagesScreen.searchConversations')}
                 testID="messages-search-toggle"
               >
                 <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
@@ -677,12 +794,14 @@ const MessagesScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
-              accessibilityLabel={`Window: last ${windowDays} days. Tap to change.`}
+              accessibilityLabel={t('messagesScreen.windowToggleA11y', { days: windowDays })}
               accessibilityRole="button"
               testID="messages-window-toggle"
             >
               <Clock size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Last {windowDays} days</Text>
+              <Text style={styles.filterChipText}>
+                {t('messagesScreen.lastDays', { days: windowDays })}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={
@@ -693,34 +812,46 @@ const MessagesScreen: React.FC = () => {
               onPress={toggleShowZapCounterparties}
               accessibilityLabel={
                 showZapCounterparties
-                  ? 'Hide zap counterparties from the inbox'
-                  : 'Show zap counterparties in the inbox'
+                  ? t('messagesScreen.hideZapCounterparties')
+                  : t('messagesScreen.showZapCounterparties')
               }
               accessibilityRole="button"
               accessibilityState={{ selected: showZapCounterparties }}
               testID="messages-zaps-toggle"
             >
               <Zap size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Zaps</Text>
+              <Text style={styles.filterChipText}>{t('messagesScreen.zaps')}</Text>
             </TouchableOpacity>
             {/* Hidden marker so Maestro can assert WHICH state the toggle is in (chip is always visible regardless), without relying on accessibilityState which RN exposes inconsistently across Android versions. */}
             <View
               testID={`messages-zaps-toggle-${showZapCounterparties ? 'on' : 'off'}`}
               accessibilityElementsHidden
             />
+            {__DEV__ && (
+              // Dev-only fixture launcher for the marketplace order cards. Never
+              // present in release builds (see handleSeedDevOrder).
+              <TouchableOpacity
+                style={styles.filterChipInteractive}
+                onPress={handleSeedDevOrder}
+                accessibilityLabel="Seed a dev marketplace order conversation"
+                accessibilityRole="button"
+                testID="messages-dev-seed-order"
+              >
+                <Zap size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Dev order</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Connect Nostr</Text>
-            <Text style={styles.emptySubtitle}>
-              Connect your Nostr identity to see your conversations here.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>
+            <Text style={styles.emptySubtitle}>{t('messagesScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
-              <Text style={styles.connectButtonText}>Go to Account</Text>
+              <Text style={styles.connectButtonText}>{t('messagesScreen.goToAccount')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -737,10 +868,12 @@ const MessagesScreen: React.FC = () => {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>
-                  {search ? 'No matches' : 'No conversations yet'}
+                  {search ? t('messagesScreen.noMatches') : t('messagesScreen.noConversationsYet')}
                 </Text>
                 <Text style={styles.emptySubtitle}>
-                  {search ? 'Try a different search term.' : 'Zap a friend or tap + to start one.'}
+                  {search
+                    ? t('messagesScreen.tryDifferentSearch')
+                    : t('messagesScreen.noConversationsSubtitle')}
                 </Text>
               </View>
             }
@@ -752,7 +885,7 @@ const MessagesScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.fab}
             onPress={handleStartConversation}
-            accessibilityLabel="Start new conversation"
+            accessibilityLabel={t('messagesScreen.startNewConversation')}
             testID="start-conversation-button"
             activeOpacity={0.85}
           >
@@ -767,7 +900,7 @@ const MessagesScreen: React.FC = () => {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         onSelect={handlePickerSelect}
-        title="Start a conversation"
+        title={t('messagesScreen.startConversationTitle')}
         onNewGroup={() => {
           setPickerVisible(false);
           setCreateGroupVisible(true);

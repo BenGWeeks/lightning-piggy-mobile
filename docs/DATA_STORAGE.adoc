@@ -37,19 +37,70 @@ changing how anything is stored.
 
 | `AsyncStorage`
   (Android: SQLite `RKStorage` in the app sandbox)
-| App settings, WoT tier, DM inbox summaries (`nostr_dm_inbox_v1`),
-  per-conversation caches, geo-cache blob (`@lp:nostr-caches-v1`), NIP-52
+| App settings, WoT tier, geo-cache blob (`@lp:nostr-caches-v1`), NIP-52
   events blob (`@lp:nostr-events-v1`), per-wallet tx caches, last-seen cursors
-| Mixed (mostly public/cache; DM *summaries* are decrypted snippets)
+  (bare timestamps). The plaintext DM inbox summaries (`nostr_dm_inbox_v1_*`)
+  and per-conversation caches (`nostr_dm_conv_v1_*`) are *retired* — #850
+  migrates them into the encrypted DB and deletes them (verified).
+  Remaining known plaintext: decrypted *group-chat* logs
+  (`group_messages_<groupId>`) and group previews
+  (`nostr_group_activity_<pubkey>`) — see the residual-risk note under
+  <<threat>>.
+| Mixed (mostly public/cache; group-chat plaintext is the known residual)
 | App sandbox + OS file-based encryption (FBE). *Not* app-level encrypted.
 
 | `expo-file-system`
   (app document dir, `Paths.document`)
-| NIP-17 wrap plaintext cache, per-account (`<key>.json`, #689); BTC Map
-  places cache (`btcmap-last-result.json`)
-| The wrap cache holds *decrypted DM plaintext* (sensitive); places are public
-| App sandbox + OS FBE. *Not* app-level encrypted.
+| NIP-17 skip-set files, per-account (wrap *ids* only — no plaintext, #743);
+  BTC Map places cache (`btcmap-last-result.json`). The per-account wrap
+  *plaintext* cache (`<key>.json`, #689) is *retired* — #848 migrates it into
+  the encrypted DB and deletes it (verified).
+| Skip-set = public nonces; places are public
+| App sandbox + OS FBE. *Not* app-level encrypted (nothing here needs it).
+
+| `op-sqlite` + SQLCipher
+  (`lightningpiggy.db`, #695/#848/#850)
+| Decrypted DM rows (`dm_messages`: NIP-17 rumors *and* NIP-04 plaintexts),
+  one row per event, keyed `(owner, event_id)`, indexed
+  `(owner, conversation, created_at)`. Since #850 the rows also carry the
+  per-relay delivery tick (`delivery_status`, #856), the NIP-17 rumor id
+  (`rumor_id`, #857) and the optimistic `local-` send rows — so the store is
+  the *only* at-rest home for 1:1 DM content; no plaintext side blobs.
+| *Decrypted DM plaintext* — the most sensitive bulk data on the device
+| *Whole-file SQLCipher encryption*, key in the OS keystore (#697). Signal's
+  model — see <<keys>>.
 |===
+
+[[threat]]
+== Threat model: device seizure
+
+The at-rest design assumes the strongest realistic adversary for a travelling
+user: *the phone is seized (e.g. border control) and forensically imaged*,
+possibly while powered on and after first unlock.
+
+* *What the design protects:* every 1:1 DM ever decrypted — content, delivery
+  metadata, optimistic sends — exists on disk only inside `lightningpiggy.db`,
+  which is SQLCipher ciphertext end-to-end (content *and* metadata). The
+  256-bit DB key never touches disk outside the hardware keystore
+  (`expo-secure-store`, `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` — excluded from
+  backups, not device-migratable). Imaging the flash yields ciphertext; the
+  key material is wrapped by the secure element and is not extractable
+  without defeating the hardware (or coercing the device unlock itself — no
+  app-level design survives a compelled unlock; see the app-lock follow-up).
+* *Wallet + identity secrets* (`nsec`, NWC URLs, mnemonics, xpubs, LNURL-w
+  bearers, the DB key) are individually keystore-wrapped — same story.
+* *Known residual plaintext (accepted, tracked):* decrypted *group-chat* logs
+  (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`) still live in
+  AsyncStorage — wiped on logout (#944) but readable from a seized unlocked
+  device until they get the same encrypted-store treatment (follow-up).
+  Public caches (places, profiles, geo-caches) are public data by
+  definition; the eventual move into the one encrypted DB is a metadata-
+  privacy nicety, not a confidentiality requirement.
+* *Out of scope at the app layer:* a compelled/observed device unlock, a
+  rooted device with the app running (RAM holds decrypted rows while the UI
+  displays them), and platform supply-chain compromise. Mitigations that
+  raise the bar further — an app-level lock gating the DB key read, a panic
+  wipe — are candidate follow-ups, not current features.
 
 == Gotcha: the 2 MB AsyncStorage row limit
 
@@ -74,6 +125,16 @@ is the case for <<target>>.
 
 [[target]]
 == Target architecture (#695): indexed, encrypted SQLite
+
+NOTE: *Status:* the DM slice of this architecture is *complete* as of #850 —
+`dm_messages` is wired into the inbox refresh, the live DM subscription and
+thread opens (ingest via `dmWrapIngest`/`dmIngest`, reads via `dmDb`'s indexed
+queries), and is the *sole* at-rest home for 1:1 DM content: the plaintext
+wrap-cache file was retired in #848 (`dmStoreMigrationRunner`) and the
+plaintext inbox/conversation AsyncStorage blobs in #850 (`dmBlobMigration`),
+each via a one-time verified populate → delete → verify migration.
+Transactions/swaps and the public cache tables remain future slices; group
+chat is the known plaintext residual (see <<threat>>).
 
 The blob/file caches don't scale (whole-blob parse, no indexes, the 2 MB trap).
 The target — matching how 0xchat / Damus persist Nostr data — is a single
@@ -163,11 +224,16 @@ the pubkey columns reference Nostr identities, not enforced foreign keys.
 ....
 erDiagram
     dm_messages {
+        TEXT owner PK
         TEXT event_id PK
         TEXT conversation
         INTEGER created_at
         TEXT sender
         TEXT content
+        INTEGER from_me
+        INTEGER wire_kind
+        TEXT delivery_status
+        TEXT rumor_id
     }
     group_messages {
         TEXT event_id PK
@@ -251,19 +317,45 @@ Logout / account wipe deletes the **Keystore** secrets and the **Encrypted DB**
 **Plain cache** survive: they're either non-identifying settings or public data
 that isn't yours to wipe.
 
-=== Migration (old store → new): re-fetch, don't import
+=== Migration (old store → new): import the decrypt memo, then delete
 
-The encrypted DB is populated from the *canonical sources*, not by importing the
-old caches. Relays are already the source of truth for messages — the old wrap
-cache only memoized decryption — so we re-fetch wraps and decrypt-once into the
-DB, then *delete* the old plaintext caches (closing the at-rest gap, #690). The
-old blob/file caches are never read as a migration source.
+Relays remain the *canonical source* for messages. But the old plaintext
+caches were never independent data — they were purely *memos of decryptions*
+this app already performed on relay-fetched events. So the one-time
+migrations import each memo as rows, then delete the plaintext with
+verification (ordering enforced by `dmStoreMigration`: populate → delete →
+verify → flag; a crash anywhere retries next launch, and plaintext is never
+deleted before the DB holds the rows):
+
+* *#848 (`dmStoreMigrationRunner`)* — the file-backed NIP-17 wrap cache
+  (closing the original at-rest gap, #690).
+* *#850 (`dmBlobMigration`)* — the last two plaintext blobs: the inbox
+  summaries (`nostr_dm_inbox_v1_*`) and the per-conversation threads
+  (`nostr_dm_conv_v1_*`). The conversation import is the only carrier of the
+  delivery ticks (#856), rumor ids (#857) and optimistic `local-` rows, so
+  the import is *fill-only*: an existing encrypted row always wins; the blob
+  only supplies rows the store lacks plus missing tick/rumor columns. The
+  delete step also removes any pre-#288 *unsuffixed* wrap-cache remnants
+  (delete-only: an unowned cache can't be attributed on a multi-account
+  device, and its content is re-fetchable).
+
+Why import rather than the originally-planned "re-fetch and re-decrypt"?
+Re-decrypting the whole inbox on migration day is exactly the cold-start
+decrypt sweep #846/#847 eliminated (~25 ms × hundreds of wraps on the JS
+thread). The memo preserves decrypt-once across the migration at the cost of
+one file read + one DB transaction. Anything the memo didn't cover is
+re-fetched from relays and decrypted once by the normal ingest path — so the
+worst case (corrupt/missing cache) degrades to the re-fetch plan, never to
+data loss.
 
 [mermaid]
 ....
 flowchart LR
-    R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once"| DB[("Encrypted DB")]
+    R["Relays<br/>(kind 1059 wraps)"] -->|"fetch + decrypt-once<br/>(steady state)"| DB[("Encrypted DB")]
     W["Wallet backend<br/>(NWC / on-chain)"] -->|"sync"| DB
     BM["BTC Map API"] -->|"refresh"| PC["Plain places cache"]
-    OLD["Old plaintext caches<br/>(wrap cache, AsyncStorage blobs)"] -.->|"deleted, not imported"| X["discarded"]
+    OLD["Old plaintext wrap cache<br/>(decrypt memo, #689)"] -->|"one-time import (#848)"| DB
+    OLD -.->|"then deleted, verified"| X["discarded"]
+    BLOB["Plaintext inbox + conv blobs<br/>(nostr_dm_inbox_v1_* / nostr_dm_conv_v1_*)"] -->|"one-time fill-only import (#850)"| DB
+    BLOB -.->|"then deleted, verified"| X
 ....

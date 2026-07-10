@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   BackHandler,
   Image,
   Keyboard,
@@ -22,7 +21,8 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import { useWallet } from '../contexts/WalletContext';
+import { promptSubmarineRefund } from '../utils/submarineRefund';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
@@ -37,6 +37,15 @@ import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
 import * as nip19 from 'nostr-tools/nip19';
 import AmountEntryScreen from './AmountEntryScreen';
+import TransferProgress from './TransferProgress';
+import {
+  advanceTransfer,
+  completeTransfer,
+  failTransfer,
+  idleProgress,
+  startTransfer,
+  type TransferProgress as TransferProgressState,
+} from '../utils/transferPhase';
 
 interface Props {
   visible: boolean;
@@ -51,7 +60,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const {
     wallets,
     activeWalletId,
-    btcPrice,
     currency,
     makeInvoiceForWallet,
     payInvoiceForWallet,
@@ -59,6 +67,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     fetchTransactionsForWallet,
     addPendingTransaction,
   } = useWallet();
+  const { btcPrice } = useWalletLive();
   const { identities, pubkey: activePubkey } = useNostr();
 
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -90,9 +99,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [step, setStep] = useState<Step>('main');
   const [sending, setSending] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
-  // true once the foreground work is done and the background task has the
-  // swap — the sheet becomes a "done, safe to close" confirmation state.
-  const [handedOff, setHandedOff] = useState(false);
+  // Issue #62: step-by-step progress display. The form is replaced by a
+  // checklist while `sending` (or `progress.phase === 'failed'`, to keep
+  // the failing step visible after `sending` clears); the checklist rows
+  // read `progress.phase`/`activeIndex` to show which step is active /
+  // done / failed. The legacy `progressMsg` is preserved as a block below
+  // the checklist (rendered in TransferProgress) so the rich Boltz "swap
+  // underway" copy still reaches the user.
+  const [progress, setProgress] = useState<TransferProgressState>(() => idleProgress());
   // Set when the background reverse-swap task errors (usually an NWC relay
   // timeout leaving the LN payment state unknown). Drives the "Retry now"
   // button + the updated progress message in the progress view. Once the
@@ -302,8 +316,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setSatsValue('');
       setStep('main');
       setSending(false);
-      setHandedOff(false);
       setProgressMsg(null);
+      setProgress(idleProgress());
       setBackgroundError(null);
       setRetryingRecovery(false);
       setRecoveryAcked(false);
@@ -428,11 +442,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
+    if (!transferType) return;
 
-    // Local flag shadowing the `handedOff` state — React setState is async,
-    // so setHandedOff(true) before return doesn't update the `handedOff`
-    // closure by the time the `finally` block runs. A plain let survives
-    // the same scope and is visible in finally.
+    // A plain local (not React state) so the value is readable in the
+    // `finally` block: on a Boltz hand-off we leave the "swap underway —
+    // safe to close" message up instead of clearing `sending`/`progressMsg`.
+    // React setState is async, so a state flag wouldn't be updated in the
+    // same closure by the time `finally` runs; a `let` survives the scope.
     let didHandOff = false;
 
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
@@ -525,8 +541,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
-          'Confirm large transfer',
-          `You're about to transfer ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
+          'Confirm large move',
+          `You're about to move ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
           [
             { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
             { text: 'Confirm', onPress: () => resolve(true) },
@@ -537,7 +553,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
-    setProgressMsg('Preparing transfer...');
+    setProgressMsg('Preparing move...');
+    // Seed the step-by-step progress display (issue #62). Subsequent
+    // setProgress(advanceTransfer(...)) calls walk the active row down
+    // the list as each underlying step resolves; the existing
+    // setProgressMsg(...) calls keep the per-step sublabel in sync.
+    setProgress(startTransfer(transferType));
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
@@ -547,13 +568,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     const swapLabel =
       transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln'
         ? 'Boltz swap in progress'
-        : 'Transfer in progress';
+        : 'Move in progress';
     addPendingTransaction(sourceId, {
       type: 'outgoing',
       amount: currentSats,
       description: swapLabel,
       created_at: now,
       settled_at: null,
+      // Flag so the tx-list merge keeps this row across a pull-to-refresh
+      // until the real swap leg settles (#896).
+      optimistic: true,
     });
     // Skip pending-tx for cross-profile destinations — that wallet
     // belongs to a different profile and isn't in the active wallets
@@ -565,6 +589,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         description: swapLabel,
         created_at: now,
         settled_at: null,
+        optimistic: true,
       });
     }
 
@@ -580,7 +605,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (isCrossProfile) {
         if (!destWallet.lightningAddress) {
           throw new Error(
-            'Destination wallet has no lightning address. Set one on the destination wallet to receive cross-profile transfers.',
+            'Destination wallet has no lightning address. Set one on the destination wallet to receive cross-profile moves.',
           );
         }
         const params = await lnurlService.resolveLightningAddress(destWallet.lightningAddress);
@@ -596,19 +621,21 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // SendSheet LNURL-pay path.
         const opts: { comment?: string } = {};
         if (params.commentAllowed > 0) {
-          opts.comment = 'Transfer'.slice(0, params.commentAllowed);
+          opts.comment = 'Move'.slice(0, params.commentAllowed);
         }
         return lnurlService.fetchInvoice(params.callback, currentSats, opts);
       }
-      return makeInvoiceForWallet(destWallet.id, currentSats, 'Transfer');
+      return makeInvoiceForWallet(destWallet.id, currentSats, 'Move');
     };
 
     try {
       if (transferType === 'ln-to-ln') {
         setProgressMsg('Creating invoice...');
         const invoice = await fetchInvoiceForDest(dest);
+        setProgress((p) => advanceTransfer(p)); // invoice → pay
         setProgressMsg('Sending payment...');
         await payInvoiceForWallet(sourceId, invoice);
+        setProgress((p) => advanceTransfer(p)); // pay → refresh
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain.
         // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
@@ -616,6 +643,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
+        setProgress((p) => advanceTransfer(p)); // swap → handoff
 
         // Persist full swap state so the claim can be recovered if the
         // app crashes, is force-stopped, or the background task dies.
@@ -732,19 +760,23 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // the user can dismiss when they're ready. The background task runs
         // independently and will surface completion via toasts.
         setProgressMsg(
-          'Swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next.\n\n' +
+          'Boltz swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setProgress((p) => completeTransfer(p));
         didHandOff = true;
-        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await fetchInvoiceForDest(dest);
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Persist swap state for crash recovery + refund (includes all keys and scripts)
+        // Persist swap state for crash recovery + refund (includes all keys
+        // and scripts). `sourceWalletId` lets the recovery pass derive a
+        // refund address if the app is killed before the swap settles.
+        // Registered in the index too so recoverPendingSwaps actually finds
+        // it (previously this record was written but never read).
         await SecureStore.setItemAsync(
           `submarine_swap_${swap.id}`,
           JSON.stringify({
@@ -755,17 +787,29 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             claimPublicKey: swap.claimPublicKey,
             timeoutBlockHeight: swap.timeoutBlockHeight,
             swapTree: swap.swapTree,
+            sourceWalletId: sourceId,
             createdAt: Date.now(),
           }),
+          { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
         );
+        await swapRecoveryService.registerPendingSubmarineSwap(swap.id);
 
+        setProgress((p) => advanceTransfer(p)); // swap → broadcast
         // Foreground: broadcast the on-chain tx (the user's action).
         // Background: wait for Boltz to pay the LN invoice, handle refund path.
         setProgressMsg('Broadcasting on-chain transaction...');
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
-        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        const lockupTxId = await onchainService.sendTransaction(
+          sourceId,
+          swap.address,
+          swap.expectedAmount,
+        );
+        // Tag both legs so the settled on-chain lockup + LN receive badge as a
+        // Boltz swap rather than generic Sent/Received (#895).
+        await swapRecoveryService.recordSubmarineSwapLegs(lockupTxId, invoice, swap.id);
+        setProgress((p) => advanceTransfer(p)); // broadcast → handoff
         const submarineAmount = swap.expectedAmount;
         // Same closure-capture pattern as the reverse-swap branch.
         const destIsCrossProfileSubmarine = isCrossProfile;
@@ -794,53 +838,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (swapError) {
             const msg = swapError instanceof Error ? swapError.message : '';
             console.warn('[Transfer] Background submarine swap failed:', msg);
-            if (
-              msg.includes('swap.expired') ||
-              msg.includes('invoice.failedToPay') ||
-              msg.includes('transaction.lockupFailed')
-            ) {
-              const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
-              if (lockup) {
-                const destAddr = await onchainService.getNextReceiveAddress(sourceId);
-                Alert.alert(
-                  'Swap Failed — Refund Available',
-                  `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
-                  [
-                    {
-                      text: 'Refund Now',
-                      onPress: async () => {
-                        try {
-                          await boltzService.refundSwap(swap, lockup, destAddr);
-                          await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
-                          Toast.show({
-                            type: 'success',
-                            text1: 'Refund sent',
-                            text2: 'Your refund transaction has been broadcast.',
-                            position: 'top',
-                            visibilityTime: 8000,
-                          });
-                        } catch (refundErr) {
-                          Toast.show({
-                            type: 'error',
-                            text1: 'Refund failed',
-                            text2: refundErr instanceof Error ? refundErr.message : 'Refund failed',
-                            position: 'top',
-                            visibilityTime: 10000,
-                          });
-                        }
-                      },
-                    },
-                    { text: 'Later', style: 'cancel' },
-                  ],
-                );
-              }
+            // #894: ONLY an explicit Boltz FAIL_STATUS is terminal → refund path.
+            // Timeouts AND transient/network errors (e.g. "Boltz status check
+            // failed: 500", fetch failures) are ambiguous — the swap may still
+            // settle — so show "still settling", never a false "Swap Failed".
+            if (boltzService.isExplicitSwapFailure(swapError)) {
+              await promptSubmarineRefund(swap, sourceId, msg);
             } else {
               Toast.show({
-                type: 'error',
-                text1: 'Swap failed',
-                text2: msg.slice(0, 140),
+                type: 'info',
+                text1: 'Swap still settling',
+                text2: 'Funds are safe — it finishes automatically once the lockup confirms.',
                 position: 'top',
-                visibilityTime: 10000,
+                visibilityTime: 12000,
               });
             }
           }
@@ -849,17 +859,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
         setProgressMsg(
-          'Swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next.\n\n' +
+          'Boltz swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next. Swaps take a little longer to settle.\n\n' +
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setProgress((p) => completeTransfer(p));
         didHandOff = true;
-        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
-        setProgressMsg('Sending on-chain transaction...');
+        setProgressMsg('Broadcasting on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
+        setProgress((p) => advanceTransfer(p)); // broadcast → refresh
       }
 
       setProgressMsg('Refreshing wallets...');
@@ -883,29 +894,32 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.warn('Post-transfer refresh failed — pull to refresh');
       }
 
+      setProgress((p) => completeTransfer(p));
+
       // Only ln-to-ln and onchain-to-onchain reach here — Boltz paths return
       // early after handing off to the background task.
       const settleMsg =
         transferType === 'onchain-to-onchain'
           ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : `${currentSats.toLocaleString()} sats transferred.`;
+          : `${currentSats.toLocaleString()} sats moved.`;
 
-      Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
+      Alert.alert('Move Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transfer failed';
+      const message = error instanceof Error ? error.message : 'Move failed';
+      setProgress((p) => failTransfer(p, message));
       // "Cannot read property 'reload' of undefined" comes from
       // react-native's HMRClient when Metro drops the dev-client
       // connection. It is NOT a transfer failure — nothing was signed
       // or broadcast. Surface it as a dev-mode hiccup with a clear
-      // retry hint instead of a scary "Transfer Failed" alert.
+      // retry hint instead of a scary "Move Failed" alert.
       if (/reload.*of undefined|DevSettings/i.test(message)) {
         Alert.alert(
           'Development Reload Needed',
-          'Metro disconnected from the app mid-transfer. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
+          'Metro disconnected from the app mid-move. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
           [{ text: 'OK' }],
         );
       } else {
-        Alert.alert('Transfer Failed', message);
+        Alert.alert('Move Failed', message);
       }
     } finally {
       // When a Boltz swap has been handed off to a background IIFE we leave
@@ -927,6 +941,49 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     },
     [onClose],
   );
+
+  // Retry handler for the "Retry now" button in the progress view. Kept
+  // in the sheet (not TransferProgress) because it orchestrates
+  // component state + refs: a synchronous re-entrancy guard so a fast
+  // double-tap can't fire two concurrent recoverPendingSwaps() calls
+  // before React applies `disabled`, and the session token so a late
+  // callback can't paint state onto a subsequent transfer.
+  const handleRetryRecovery = useCallback(async () => {
+    if (retryInFlightRef.current) return;
+    retryInFlightRef.current = true;
+    const retrySession = sessionRef.current;
+    setRetryingRecovery(true);
+    try {
+      await swapRecoveryService.recoverPendingSwaps();
+      Toast.show({
+        type: 'info',
+        text1: 'Retry kicked off',
+        text2: 'Any claimable swaps are being re-broadcast.',
+        position: 'top',
+        visibilityTime: 6000,
+      });
+      if (sessionRef.current === retrySession) {
+        // Keep `backgroundError` set so the spinner stays suppressed;
+        // flip `recoveryAcked` to swap the message + hide the Retry button.
+        setRecoveryAcked(true);
+        setProgressMsg('Recovery retried — check transaction history for the final status.');
+      }
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      Toast.show({
+        type: 'error',
+        text1: 'Retry failed',
+        text2: m,
+        position: 'top',
+        visibilityTime: 8000,
+      });
+    } finally {
+      retryInFlightRef.current = false;
+      if (sessionRef.current === retrySession) {
+        setRetryingRecovery(false);
+      }
+    }
+  }, []);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -1006,7 +1063,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         <BottomSheetView style={styles.content}>
           <AmountEntryScreen
             initialSats={currentSats}
-            title="Transfer amount"
+            title="Move amount"
             minSats={
               isBoltzTransfer
                 ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
@@ -1032,103 +1089,29 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           keyboardShouldPersistTaps="handled"
         >
           <>
-            <Text style={styles.title}>Transfer</Text>
+            <Text style={styles.title}>Move</Text>
 
             {/* Source wallet selector */}
-            {sending ? (
-              /* Progress view — replaces form while transfer is executing */
-              <View style={styles.progressView}>
-                <Text style={styles.progressSummary}>{currentSats.toLocaleString()} sats</Text>
-                <Text style={styles.progressRoute}>
-                  {source?.alias} → {dest?.alias}
-                </Text>
-                {feeEstimate && (
-                  <Text style={styles.feeText}>
-                    Fee: {feeEstimate.split('\u00B7')[0].trim()}
-                    {feeEstimate.includes('\u00B7')
-                      ? ` · ${feeEstimate.split('\u00B7')[1].trim()}`
-                      : ''}
-                  </Text>
-                )}
-                <View style={styles.progressContainer}>
-                  {/* Hide spinner whenever the background errored — even
-                      after the retry succeeded. Re-enabling it would
-                      misrepresent the "Recovery retried" state as still
-                      running. Explicit `=== null` rather than `!x`
-                      because Error.message can be empty string and we
-                      want to suppress the spinner whenever the error
-                      slot is set, regardless of message length. */}
-                  {backgroundError === null && (
-                    <ActivityIndicator size="small" color={colors.brandPink} />
-                  )}
-                  <Text style={styles.progressText}>{progressMsg}</Text>
-                </View>
-                {backgroundError !== null && !recoveryAcked && (
-                  <TouchableOpacity
-                    style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
-                    onPress={async () => {
-                      // Synchronous re-entrancy guard. A fast double-tap
-                      // can fire two onPress callbacks before React
-                      // applies setRetryingRecovery(true) + the disabled
-                      // prop — the ref check + set is atomic in JS, so
-                      // the second tap returns immediately.
-                      if (retryInFlightRef.current) return;
-                      retryInFlightRef.current = true;
-                      const retrySession = sessionRef.current;
-                      setRetryingRecovery(true);
-                      try {
-                        await swapRecoveryService.recoverPendingSwaps();
-                        Toast.show({
-                          type: 'info',
-                          text1: 'Retry kicked off',
-                          text2: 'Any claimable swaps are being re-broadcast.',
-                          position: 'top',
-                          visibilityTime: 6000,
-                        });
-                        if (sessionRef.current === retrySession) {
-                          // Keep `backgroundError` set so the spinner
-                          // stays suppressed; flip `recoveryAcked` to
-                          // swap the message + hide the Retry button.
-                          setRecoveryAcked(true);
-                          setProgressMsg(
-                            'Recovery retried — check transaction history for the final status.',
-                          );
-                        }
-                      } catch (err) {
-                        const m = err instanceof Error ? err.message : String(err);
-                        Toast.show({
-                          type: 'error',
-                          text1: 'Retry failed',
-                          text2: m,
-                          position: 'top',
-                          visibilityTime: 8000,
-                        });
-                      } finally {
-                        retryInFlightRef.current = false;
-                        if (sessionRef.current === retrySession) {
-                          setRetryingRecovery(false);
-                        }
-                      }
-                    }}
-                    disabled={retryingRecovery}
-                    accessibilityLabel="Retry swap recovery"
-                    testID="transfer-retry-now"
-                  >
-                    {retryingRecovery ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.closeButtonText}>Retry now</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={onClose}
-                  accessibilityLabel="Close"
-                >
-                  <Text style={styles.closeButtonText}>Close</Text>
-                </TouchableOpacity>
-              </View>
+            {sending || progress.phase === 'failed' ? (
+              /* Progress view — replaces the form while a transfer is
+                 executing (`sending`) and stays mounted on failure
+                 (`phase === 'failed'`) so the failing step renders its X
+                 row. `finally` clears `sending` but leaves the failed
+                 progress in place; reopening the sheet resets it to
+                 idle. */
+              <TransferProgress
+                amountSats={currentSats}
+                sourceAlias={source?.alias}
+                destAlias={dest?.alias}
+                feeEstimate={feeEstimate}
+                progress={progress}
+                progressMsg={progressMsg}
+                backgroundError={backgroundError}
+                recoveryAcked={recoveryAcked}
+                retryingRecovery={retryingRecovery}
+                onRetry={handleRetryRecovery}
+                onClose={onClose}
+              />
             ) : (
               <>
                 <Text style={styles.sectionLabel}>From</Text>
@@ -1309,7 +1292,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   style={styles.amountPickerRow}
                   onPress={() => setStep('amount')}
                   testID="transfer-amount-picker"
-                  accessibilityLabel="Enter transfer amount"
+                  accessibilityLabel="Enter move amount"
                 >
                   {currentSats > 0 ? (
                     <>
@@ -1379,7 +1362,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {crossProfileLnNoAddress && (
                   <Text style={styles.warningText} testID="transfer-cross-profile-no-lud16">
                     Set a lightning address on the destination wallet to receive cross-profile
-                    transfers. On-chain destinations work without one.
+                    moves. On-chain destinations work without one.
                   </Text>
                 )}
 
@@ -1389,7 +1372,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     style={styles.cancelButton}
                     onPress={onClose}
                     testID="transfer-cancel"
-                    accessibilityLabel="Cancel transfer"
+                    accessibilityLabel="Cancel move"
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
@@ -1401,9 +1384,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onPress={handleTransfer}
                     disabled={!canTransfer || sending}
                     testID="transfer-execute"
-                    accessibilityLabel="Execute transfer"
+                    accessibilityLabel="Execute move"
                   >
-                    <Text style={styles.transferButtonText}>Transfer</Text>
+                    <Text style={styles.transferButtonText}>Move</Text>
                   </TouchableOpacity>
                 </View>
               </>

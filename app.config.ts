@@ -97,6 +97,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // to file separate export-compliance documentation. See
       // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
       ITSAppUsesNonExemptEncryption: false,
+      // Background modes for the OS-notification detect-and-ping (#279).
+      // The `expo-background-task` config plugin registers ITS OWN
+      // BGTaskScheduler identifier in Info.plist and runs our JS task
+      // (lp-relay-bg-sync) under it — there is no separate Swift handler
+      // and no background decryption (detect-and-ping only; see
+      // src/services/backgroundSyncService.ts). We surface notifications
+      // without APNs / a remote push server — see
+      // docs/architecture/notifications.adoc for rationale.
+      //
+      // Trade-off: BGTaskScheduler cadence is OS-controlled; expect
+      // ~30 min between executions in practice. iOS realtime DM
+      // notifications are NOT achievable without APNs + a remote
+      // server, and the project explicitly rejects that path. The
+      // ~30 min latency is the iOS reality we accept; surface it in
+      // onboarding when the iOS build ships.
+      UIBackgroundModes: ['fetch', 'processing'],
     },
   },
   plugins: [
@@ -126,7 +142,38 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // #552 for migration rationale + memory `reference_map_stack_future_maplibre`.
     '@maplibre/maplibre-react-native',
     './plugins/withNfc',
+    // OS notifications foundation (#279). Adds Android manifest
+    // permissions for the planned persistent foreground service that
+    // keeps a relay WebSocket alive without FCM. The Java/Kotlin
+    // Service class itself ships in a follow-up — see
+    // plugins/withForegroundService.js for the deferred-vs-landed
+    // breakdown.
+    './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-localization — reads the device's locale list at startup so
+    // LocaleContext can default the in-app language to it (#137). No
+    // permissions/options needed; just links the native module.
+    'expo-localization',
+    // expo-notifications config plugin sets the Android notification
+    // small icon + colour, and is a no-op on iOS beyond linking the native
+    // module. The small icon is a white PiggyBank silhouette (lucide
+    // PiggyBank glyph) — Android renders the small icon as a flat mask and
+    // tints it with `color`, so it shows as a pink pig in the status bar /
+    // shade. We rely on local (not remote) notifications only — no FCM
+    // token is requested. See src/services/notificationService.ts.
+    [
+      'expo-notifications',
+      {
+        icon: './assets/notification-icon.png',
+        color: '#e91e63',
+      },
+    ],
+    // expo-background-task (#279): runs the detect-and-ping background sync
+    // periodically via WorkManager (Android) + BGTaskScheduler (iOS). The
+    // plugin wires the required Info.plist BGTask identifier + Android
+    // WorkManager bits — no custom native code. See
+    // src/services/backgroundTask.ts.
+    'expo-background-task',
     [
       'expo-image-picker',
       {
@@ -146,7 +193,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and to share it in private messages.',
+          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and so you can share it (one-shot or live for a chosen duration) in a private message.',
         // Background location is needed for the opt-in "Nearby merchants"
         // alerts (#467) — geofences fire even when the app is backgrounded
         // so the user gets the notification while walking past the shop.
@@ -157,10 +204,47 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isAndroidBackgroundLocationEnabled: true,
       },
     ],
-    // Local notifications for the geofence alerts (#467). No FCM / no
-    // remote push — these all fire from the on-device TaskManager task.
-    'expo-notifications',
+    // expo-audio — short voice-note recording in the message composer
+    // (#235). We only ever record while the recording sheet is open, so
+    // background-recording / background-playback / notifications stay
+    // off (the plugin defaults would otherwise add FOREGROUND_SERVICE +
+    // POST_NOTIFICATIONS which we don't need).
+    [
+      'expo-audio',
+      {
+        microphonePermission:
+          'Allow Lightning Piggy to use your microphone to record short voice notes for your conversations.',
+        enableBackgroundRecording: false,
+        enableBackgroundPlayback: false,
+      },
+    ],
+    // NB: geofence alerts (#467) also use local notifications, but
+    // `expo-notifications` is already registered above (for #279) — listing
+    // it twice makes the second config win silently, so keep the single
+    // entry above. No FCM / no remote push — all fired on-device.
     'expo-task-manager',
+    // expo-build-properties — inject R8/proguard keep rules into the CNG
+    // prebuild output. Production builds run R8 minification, which strips
+    // expo-camera's MLKit barcode classes (loaded dynamically), so the QR
+    // scanner previews but never decodes in release. Editing
+    // android/proguard-rules.pro directly would be wiped by prebuild, so the
+    // keeps live here. See the linked bug for the full root cause.
+    [
+      'expo-build-properties',
+      {
+        android: {
+          extraProguardRules: [
+            '# Keep MLKit barcode scanning (expo-camera QR scanner) from R8 stripping',
+            '-keep class com.google.mlkit.** { *; }',
+            '-keep class com.google.android.gms.internal.mlkit_vision_** { *; }',
+            '-dontwarn com.google.mlkit.**',
+            '-keep class com.google.android.gms.vision.** { *; }',
+            '# Keep expo-camera native module',
+            '-keep class expo.modules.camera.** { *; }',
+          ].join('\n'),
+        },
+      },
+    ],
   ],
   android: {
     adaptiveIcon: {
@@ -187,6 +271,35 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         action: 'VIEW',
         category: ['BROWSABLE', 'DEFAULT'],
         data: [{ scheme: 'lightning' }],
+      },
+      // LUD-17 LNURL-withdraw scheme — standalone withdraw tags / gift cards
+      // whose URI is `lnurlw://…` (no `lightning:` wrapper). Routed by App.tsx's
+      // Linking handler into the withdraw claim, same as `lightning:lnurl…`
+      // (#341). NDEF (NFC-tap) variants live in plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurlw' }],
+      },
+      // `lnurl://…` — the rare spec-allowed cleartext form App.tsx's Linking
+      // handler also routes; without this VIEW filter such links/taps are a
+      // silent no-op on Android (#341 Copilot review). NDEF variant in
+      // plugins/withNfc.js.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lnurl' }],
+      },
+      // `nostr:` profile / entity URIs — NFC contact badges (#754) and
+      // `Linking.openURL('nostr:nprofile1…')` from other Nostr clients.
+      // Android shows its standard chooser when another Nostr-aware app
+      // also registers the scheme, so this doesn't hijack the user's
+      // preferred client. The App.tsx router decodes npub / nprofile →
+      // ContactProfile and falls back to UnsupportedEntity for the rest.
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'nostr' }],
       },
     ],
     // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".

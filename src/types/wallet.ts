@@ -2,6 +2,7 @@ export type CardTheme =
   | 'lightning-piggy'
   | 'lightning-bee'
   | 'lightning-cat'
+  | 'bitpopart'
   | 'lightning-cow'
   | 'lightning-goat'
   | 'nostrich'
@@ -12,7 +13,17 @@ export type CardTheme =
   | 'primal'
   | 'coinos'
   | 'revolut'
-  | 'xapo';
+  | 'xapo'
+  // Sports-themed cards (#102). Each renders a graffiti illustration over
+  // its gradient — `backgroundImage` + `backgroundImageStyle` live on the
+  // entry in `src/themes/cardThemes.ts`, with the per-theme `bgStyle`
+  // registered in `src/themes/cards/index.ts`.
+  | 'tennis'
+  | 'football'
+  | 'basketball'
+  | 'f1'
+  // Deep-space nebula card with a graffiti rocket illustration.
+  | 'spaceship';
 
 export type WalletType = 'nwc' | 'onchain';
 
@@ -106,8 +117,18 @@ export function walletLabel(w: { alias: string; walletType: WalletType }): strin
   return `${w.alias} (${w.walletType === 'onchain' ? 'on-chain' : 'lightning'})`;
 }
 
+/**
+ * Tri-state relay health for the wallet card (#786). `responsive` shows green
+ * "Connected", `degraded` shows amber "Not responding" (connected socket but
+ * the relay is parked / not answering), `disconnected` shows red. Optional /
+ * may be absent before the first connection check, in which case the card
+ * falls back to the binary `isConnected`.
+ */
+export type WalletConnectionHealth = 'responsive' | 'degraded' | 'disconnected';
+
 export interface WalletState extends WalletMetadata {
   isConnected: boolean;
+  connectionHealth?: WalletConnectionHealth;
   balance: number | null;
   walletAlias: string | null; // alias from NWC getInfo()
   transactions: WalletTransaction[];

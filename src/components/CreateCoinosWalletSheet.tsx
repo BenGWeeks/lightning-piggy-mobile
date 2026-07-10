@@ -16,6 +16,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { useWallet } from '../contexts/WalletContext';
 import * as coinosService from '../services/coinosService';
@@ -46,6 +47,7 @@ interface Props {
  */
 const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete }) => {
   const colors = useThemeColors();
+  const tr = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { addNwcWallet, setActiveWallet } = useWallet();
   const ref = useRef<BottomSheetModal>(null);
@@ -145,7 +147,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
       // background after the UI has been closed.
       if (cancelledRef.current) return;
       if (!ok) {
-        setError('Could not reach that CoinOS instance. Check the URL and try again.');
+        setError(tr('createCoinosWalletSheet.unreachableInstance'));
         return;
       }
     }
@@ -171,7 +173,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
         const result = await addNwcWallet(minted.nwc, 'CoinOS', 'coinos');
         if (!result.success || !result.walletId) {
           setStep('custody');
-          setError(result.error || 'Lightning Piggy could not connect to the new CoinOS wallet.');
+          setError(result.error || tr('createCoinosWalletSheet.connectFailed'));
           return;
         }
 
@@ -210,12 +212,12 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     setStep('custody');
     setError(
       lastError instanceof coinosService.CoinosError
-        ? coinosErrorCopy(lastError)
+        ? coinosErrorCopy(lastError, tr)
         : lastError instanceof Error
           ? lastError.message
-          : 'Something went wrong creating your CoinOS wallet.',
+          : tr('createCoinosWalletSheet.genericError'),
     );
-  }, [addNwcWallet, baseUrl]);
+  }, [addNwcWallet, baseUrl, tr]);
 
   const handleAcknowledge = useCallback(() => {
     // Make sure the new wallet is selected as active before we exit so
@@ -256,30 +258,26 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
               <View style={styles.iconBubble}>
                 <ShieldAlert size={36} color={colors.white} strokeWidth={2.5} />
               </View>
-              <Text style={styles.title}>Create a Lightning wallet</Text>
-              <Text style={styles.subtitle}>
-                Lightning Piggy will set up a managed Lightning wallet for you on CoinOS so you can
-                start sending and receiving in seconds — no setup, no seed phrase to write down
-                today.
-              </Text>
+              <Text style={styles.title}>{tr('createCoinosWalletSheet.title')}</Text>
+              <Text style={styles.subtitle}>{tr('createCoinosWalletSheet.subtitle')}</Text>
 
               <View style={styles.warningCard} testID="coinos-custody-warning">
-                <Text style={styles.warningTitle}>Heads-up: this is a custodial wallet</Text>
+                <Text style={styles.warningTitle}>
+                  {tr('createCoinosWalletSheet.custodialWarningTitle')}
+                </Text>
                 <Text style={styles.warningBody}>
-                  Your funds will be held by CoinOS, not by you. Suitable for testing or small
-                  amounts &mdash; not life savings. You can move to self-custody whenever
-                  you&apos;re ready.
+                  {tr('createCoinosWalletSheet.custodialWarningBody')}
                 </Text>
               </View>
 
               <TouchableOpacity
                 onPress={() => setShowAdvanced((v) => !v)}
                 style={styles.advancedToggle}
-                accessibilityLabel="Toggle advanced settings"
+                accessibilityLabel={tr('createCoinosWalletSheet.toggleAdvancedA11y')}
                 testID="coinos-advanced-toggle"
               >
                 <Text style={styles.advancedToggleText}>
-                  Advanced: use a self-hosted CoinOS instance
+                  {tr('createCoinosWalletSheet.advancedToggleText')}
                 </Text>
                 {showAdvanced ? (
                   <ChevronUp size={18} color={colors.textSupplementary} />
@@ -290,7 +288,9 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
 
               {showAdvanced && (
                 <View style={styles.advancedBlock}>
-                  <Text style={styles.advancedLabel}>CoinOS server URL</Text>
+                  <Text style={styles.advancedLabel}>
+                    {tr('createCoinosWalletSheet.serverUrlLabel')}
+                  </Text>
                   <BottomSheetTextInput
                     style={styles.input}
                     value={baseUrl}
@@ -306,10 +306,9 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
                     testID="coinos-base-url-input"
                   />
                   <Text style={styles.advancedHint}>
-                    Leave as {coinosService.DEFAULT_COINOS_BASE_URL} for the public managed
-                    instance, or paste the URL of a CoinOS API server you trust. Include the `/api`
-                    path suffix — the bare host serves a frontend that won&apos;t accept register
-                    requests.
+                    {tr('createCoinosWalletSheet.serverUrlHint', {
+                      url: coinosService.DEFAULT_COINOS_BASE_URL,
+                    })}
                   </Text>
                 </View>
               )}
@@ -324,23 +323,27 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
                 style={styles.primaryButton}
                 onPress={handleConfirmCustody}
                 disabled={probing}
-                accessibilityLabel="Create CoinOS managed Lightning wallet"
+                accessibilityLabel={tr('createCoinosWalletSheet.createButtonA11y')}
                 testID="coinos-create-button"
               >
                 {probing ? (
                   <ActivityIndicator color={colors.white} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Create my wallet</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {tr('createCoinosWalletSheet.createButton')}
+                  </Text>
                 )}
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={onClose}
                 style={styles.cancelButton}
-                accessibilityLabel="Cancel CoinOS wallet creation"
+                accessibilityLabel={tr('createCoinosWalletSheet.cancelButtonA11y')}
                 testID="coinos-create-cancel"
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>
+                  {tr('createCoinosWalletSheet.cancelButton')}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -349,12 +352,11 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
             <View style={styles.creatingBlock} testID="coinos-creating">
               <ActivityIndicator size="large" color={colors.brandPink} />
               <Text style={styles.creatingTitle}>
-                {probing ? 'Checking your CoinOS instance…' : 'Creating your wallet on CoinOS…'}
+                {probing
+                  ? tr('createCoinosWalletSheet.checkingInstance')
+                  : tr('createCoinosWalletSheet.creatingWallet')}
               </Text>
-              <Text style={styles.creatingHint}>
-                Picking a username, generating a strong password, and minting a Nostr Wallet Connect
-                connection. This usually takes a few seconds.
-              </Text>
+              <Text style={styles.creatingHint}>{tr('createCoinosWalletSheet.creatingHint')}</Text>
             </View>
           )}
         </BottomSheetScrollView>
@@ -374,25 +376,34 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   );
 };
 
-/** Map structured CoinOS errors to user-facing copy. */
-function coinosErrorCopy(err: coinosService.CoinosError): string {
+/**
+ * Map structured CoinOS errors to user-facing copy.
+ *
+ * Takes the hook translate fn (`useTranslation()`'s return) rather than the
+ * module-level `t` — this is render-path/UI copy and the module-level
+ * translator can lag the live UI locale (see src/i18n/index.ts).
+ */
+function coinosErrorCopy(
+  err: coinosService.CoinosError,
+  tr: ReturnType<typeof useTranslation>,
+): string {
   switch (err.code) {
     case 'username_taken':
-      return 'CoinOS rejected the auto-generated username. Tap Create again to retry with a fresh one.';
+      return tr('createCoinosWalletSheet.errorUsernameTaken');
     case 'rate_limited':
-      return 'CoinOS is rate-limiting registrations right now. Try again in a minute.';
+      return tr('createCoinosWalletSheet.errorRateLimited');
     case 'service_down':
-      return 'CoinOS appears to be down. Try again in a few minutes.';
+      return tr('createCoinosWalletSheet.errorServiceDown');
     case 'network':
-      return "Couldn't reach CoinOS. Check your connection and try again.";
+      return tr('createCoinosWalletSheet.errorNetwork');
     case 'timeout':
-      return 'CoinOS took too long to respond. Try again.';
+      return tr('createCoinosWalletSheet.errorTimeout');
     case 'auth':
-      return 'CoinOS rejected the request — please report this to Lightning Piggy support.';
+      return tr('createCoinosWalletSheet.errorAuth');
     case 'invalid_input':
       return err.message;
     default:
-      return err.message || 'Something went wrong creating your CoinOS wallet.';
+      return err.message || tr('createCoinosWalletSheet.genericError');
   }
 }
 

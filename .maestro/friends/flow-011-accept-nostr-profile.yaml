@@ -1,0 +1,17 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Accept Nostr profile (adopt displayName)
+---
+# After logging in, the app offers to overwrite the locally-entered name
+# with the Nostr profile's displayName (post-#169 this merge no longer
+# touches Lightning Address — that's per-wallet now and is captured by
+# the Add Wallet flow / Wallet Settings, not the global account).
+
+# Trigger the login flow (which surfaces the profile-update alert)
+- tapOn: { id: 'tab-home', optional: true }
+- waitForAnimationToEnd: { timeout: 2000 }
+- tapOn: { id: 'profile-icon' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# If the alert is showing from a previous session, adopt the profile
+- tapOn: { text: 'UPDATE', optional: true }
+- waitForAnimationToEnd: { timeout: 2000 }

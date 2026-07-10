@@ -15,17 +15,16 @@ LIMIT=1000
 # when the rule landed, 2026-05-26). Shrink these over time and lower the number
 # here; never raise it. Delete the entry once a file drops under the cap.
 declare -A BASELINE=(
-  ["src/contexts/NostrContext.tsx"]=1879
-  ["src/screens/HuntCreateScreen.tsx"]=3121
+  ["src/contexts/NostrContext.tsx"]=1837
+  ["src/screens/HuntCreateScreen.tsx"]=2386
   ["src/contexts/WalletContext.tsx"]=2173
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1710
   ["src/screens/MapScreen.tsx"]=1562
-  ["src/services/nostrService.ts"]=1529
+  ["src/services/nostrService.ts"]=1475
   ["src/components/TransferSheet.tsx"]=1418
   ["src/screens/ExploreHomeScreen.tsx"]=1377
   ["src/services/nfcService.ts"]=1242
   ["src/components/SendSheet.tsx"]=1176
-  ["src/services/nwcService.ts"]=1009
 )
 
 # GitHub Actions error annotation when running in CI; plain echo locally.

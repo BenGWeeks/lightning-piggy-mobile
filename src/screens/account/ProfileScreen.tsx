@@ -10,15 +10,31 @@ import EditProfileSheet from '../../components/EditProfileSheet';
 import QrWithIdentityToggle from '../../components/QrWithIdentityToggle';
 import NfcWriteSheet from '../../components/NfcWriteSheet';
 import { isNfcSupported } from '../../services/nfcService';
+import { nprofileEncode, buildOwnProfileRelayHints } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 
 const ProfileScreen: React.FC = () => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { isLoggedIn, profile, refreshProfile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile, pubkey, relays } = useNostr();
+
+  // Build the `nostr:nprofile1…` to write to an NFC tag when sharing my
+  // own profile (#755). Embeds my NIP-65 *write* (outbox) relays, capped
+  // at 2, so a cold first-contact scanner resolves my metadata even if I
+  // use niche relays — strictly more useful than a bare npub. Falls back
+  // to app defaults when I've published no write relays. Recomputed only
+  // when my identity or relay set changes.
+  const nprofileRef = useMemo(() => {
+    if (!pubkey) return undefined;
+    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+    const hints = buildOwnProfileRelayHints(writeRelays, 2);
+    return `nostr:${nprofileEncode(pubkey, hints)}`;
+  }, [pubkey, relays]);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
@@ -43,7 +59,7 @@ const ProfileScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title="Profile">
+    <AccountScreenLayout title={t('profileScreen.title')}>
       {isLoggedIn && profile ? (
         <View style={styles.profileSection}>
           {profile.banner && (
@@ -65,7 +81,7 @@ const ProfileScreen: React.FC = () => {
             )}
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
-                {profile.displayName || profile.name || 'Unknown'}
+                {profile.displayName || profile.name || t('profileScreen.unknown')}
               </Text>
               {profile.nip05 && <Text style={styles.profileNip05}>{profile.nip05}</Text>}
             </View>
@@ -92,26 +108,25 @@ const ProfileScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.editProfileButton}
             onPress={() => setEditProfileOpen(true)}
-            accessibilityLabel="Edit Profile"
+            accessibilityLabel={t('profileScreen.editProfile')}
             testID="edit-profile-button"
           >
-            <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+            <Text style={styles.editProfileButtonText}>{t('profileScreen.editProfile')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <TouchableOpacity
           style={styles.connectButton}
           onPress={() => setLoginSheetOpen(true)}
-          accessibilityLabel="Connect Nostr"
+          accessibilityLabel={t('profileScreen.connectNostr')}
           testID="connect-nostr"
         >
-          <Text style={styles.connectButtonText}>Connect Nostr</Text>
+          <Text style={styles.connectButtonText}>{t('profileScreen.connectNostr')}</Text>
         </TouchableOpacity>
       )}
 
       <Text style={[sharedAccountStyles.fieldHint, { marginTop: 16 }]}>
-        Your Nostr identity is how friends find you for zaps and messages. Sign out from the drawer
-        to disconnect.
+        {t('profileScreen.identityHint')}
       </Text>
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
@@ -121,7 +136,8 @@ const ProfileScreen: React.FC = () => {
           visible={nfcWriteVisible}
           onClose={() => setNfcWriteVisible(false)}
           npub={profile.npub}
-          displayName={profile.displayName || profile.name || 'You'}
+          nostrRef={nprofileRef}
+          displayName={profile.displayName || profile.name || t('profileScreen.you')}
         />
       )}
     </AccountScreenLayout>
@@ -189,10 +205,12 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 2,
-      borderColor: colors.brandPink,
+      // Secondary action — purple accent (matches the outlined secondary
+      // buttons across Settings) so it sits below the primary brand pink.
+      borderColor: colors.accentSecondary,
     },
     editProfileButtonText: {
-      color: colors.brandPink,
+      color: colors.accentSecondary,
       fontSize: 14,
       fontWeight: '600',
     },

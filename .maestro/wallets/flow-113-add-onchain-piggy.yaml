@@ -1,0 +1,36 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Add Little Piggy on-chain wallet via clipboard paste
+---
+# Adds the Little Piggy on-chain wallet (BIP-84 hot, MAESTRO_MNEMONIC_LITTLE
+# from .env) to the AVD via the in-app Paste button on the seed-phrase
+# step. Verifies the wallet appears in the carousel post-connect.
+#
+# Run:
+#   source .env
+#   echo -n "$MAESTRO_MNEMONIC_LITTLE" | xclip -selection clipboard
+#   maestro test .maestro/wallets/flow-113-add-onchain-piggy.yaml
+#
+# To add a different Piggy's on-chain wallet, swap MAESTRO_MNEMONIC_LITTLE
+# for MAESTRO_MNEMONIC_MIDDLE / MAESTRO_MNEMONIC_BIG and rename the
+# WALLET_NAME / clipboard env var accordingly.
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Defer to the reusable subflow.
+- runFlow:
+    file: ../common/add-onchain-mnemonic.yaml
+    env:
+      WALLET_NAME: 'Little Piggy on-chain'
+
+# Sanity check after subflow completes — substring regex (see comment
+# in the subflow about inputText char drops + Maestro substring rules).
+- assertVisible:
+    text: '.*on-chain.*'

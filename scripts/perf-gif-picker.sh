@@ -34,7 +34,7 @@ LABEL="${1:-baseline}"
 OUT="/tmp/perf-gif-${LABEL}"
 PKG="com.lightningpiggy.app.dev"
 DEVICE="emulator-5554"
-FLOW="tests/e2e/perf-gif-picker-open.yaml"
+FLOW=".maestro/perf/perf-gif-picker-open.yaml"
 
 mkdir -p "$OUT"
 echo "→ writing to $OUT"

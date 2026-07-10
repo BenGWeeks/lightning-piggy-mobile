@@ -10,6 +10,7 @@ import {
   appendGroupMessage,
   clearGroupMessages,
   loadGroupMessages,
+  GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
 
@@ -138,5 +139,19 @@ describe('appendGroupMessage — basic ordering & cap', () => {
     await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'hi', 1700000000));
     await clearGroupMessages(GROUP);
     expect(await loadGroupMessages(GROUP)).toEqual([]);
+  });
+});
+
+describe('GROUP_MESSAGES_KEY_PREFIX — logout-wipe contract', () => {
+  // The logout / account-wipe path (NostrContext.wipeAccountCaches) removes
+  // every AsyncStorage key starting with this prefix so decrypted group
+  // plaintext can't survive logout. Pin the stored key shape to the prefix
+  // so a rename can't silently break that wipe.
+  it('every persisted group blob is keyed under the wipe prefix', async () => {
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'hi', 1700000000));
+    const keys = await AsyncStorage.getAllKeys();
+    const groupKeys = keys.filter((k) => k.startsWith(GROUP_MESSAGES_KEY_PREFIX));
+    expect(groupKeys).toContain(`${GROUP_MESSAGES_KEY_PREFIX}${GROUP}`);
+    expect(groupKeys).toHaveLength(1);
   });
 });

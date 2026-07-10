@@ -10,6 +10,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
@@ -27,8 +28,11 @@ import {
   EyeOff,
   ShieldAlert,
   QrCode as QrCodeIcon,
+  Share2,
 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
+import FriendPickerSheet from './FriendPickerSheet';
+import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
 
 interface Props {
   walletId: string | null;
@@ -37,9 +41,14 @@ interface Props {
 
 const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
+  // "Share this wallet" flow (NWC only). Reuses #988's gift-wrapped NWC-share
+  // send + redaction; adds a recipient-pick step since settings has no open
+  // conversation. See useWalletShareFromSettings.
+  const { pickerOpen, startShare, closePicker, shareToFriend } = useWalletShareFromSettings(wallet);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
   // + full 8-card theme grid) is long enough that dynamic sizing pushed
@@ -199,11 +208,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   };
 
   const handleDisconnect = () => {
-    const actionText = wallet.walletType === 'onchain' ? 'remove' : 'disconnect';
-    Alert.alert('Remove Wallet', `Are you sure you want to ${actionText} "${wallet.alias}"?`, [
-      { text: 'Cancel', style: 'cancel' },
+    const message =
+      wallet.walletType === 'onchain'
+        ? t('walletSettingsSheet.removeConfirmMessage', { alias: wallet.alias })
+        : t('walletSettingsSheet.disconnectConfirmMessage', { alias: wallet.alias });
+    Alert.alert(t('walletSettingsSheet.removeWalletTitle'), message, [
+      { text: t('walletSettingsSheet.cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('walletSettingsSheet.remove'),
         style: 'destructive',
         onPress: async () => {
           await removeWallet(walletId);
@@ -216,7 +228,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const handleCopyXpub = async () => {
     if (xpubDisplay) {
       await Clipboard.setStringAsync(xpubDisplay);
-      Alert.alert('Copied', 'Extended public key copied to clipboard.');
+      Alert.alert(t('walletSettingsSheet.copiedTitle'), t('walletSettingsSheet.xpubCopied'));
     }
   };
 
@@ -247,14 +259,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.title}>Wallet Settings</Text>
+          <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
 
-          <Text style={styles.label}>Alias</Text>
+          <Text style={styles.label}>{t('walletSettingsSheet.alias')}</Text>
           <BottomSheetTextInput
             style={styles.input}
             value={alias}
             onChangeText={setAlias}
-            placeholder="Wallet name"
+            placeholder={t('walletSettingsSheet.aliasPlaceholder')}
             placeholderTextColor={colors.textSupplementary}
             autoCapitalize="words"
           />
@@ -262,22 +274,22 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           {/* NWC wallet: lightning address (LUD-16) */}
           {wallet.walletType === 'nwc' && (
             <>
-              <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
+              <Text style={[styles.label, { marginTop: 20 }]}>
+                {t('walletSettingsSheet.lightningAddress')}
+              </Text>
               <BottomSheetTextInput
                 style={styles.input}
                 value={lnAddress}
                 onChangeText={setLnAddress}
-                placeholder="user@domain.com"
+                placeholder={t('walletSettingsSheet.lightningAddressPlaceholder')}
                 placeholderTextColor={colors.textSupplementary}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
                 testID="wallet-lightning-address-input"
-                accessibilityLabel="Lightning Address"
+                accessibilityLabel={t('walletSettingsSheet.lightningAddress')}
               />
-              <Text style={styles.hintText}>
-                LUD-16 address for receiving payments. Usually provided by the NWC connection.
-              </Text>
+              <Text style={styles.hintText}>{t('walletSettingsSheet.lightningAddressHint')}</Text>
             </>
           )}
 
@@ -291,23 +303,28 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             <View style={styles.recoveryCallout}>
               <View style={styles.recoveryCalloutHeader}>
                 <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.recoveryCalloutTitle}>Recovery info</Text>
+                <Text style={styles.recoveryCalloutTitle}>
+                  {t('walletSettingsSheet.recoveryInfoTitle')}
+                </Text>
               </View>
               <Text style={styles.recoveryCalloutBody}>
-                Lightning Piggy keeps these securely on this device, but a phone wipe loses access.
-                Save them somewhere safe (a password manager, written down) so you can sign back in
-                to {hostFromBaseUrl(coinosRecovery.baseUrl)} and recover your funds.
+                {t('walletSettingsSheet.recoveryInfoBody', {
+                  host: hostFromBaseUrl(coinosRecovery.baseUrl),
+                })}
               </Text>
 
-              <Text style={styles.recoveryCalloutLabel}>Username</Text>
+              <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.username')}</Text>
               <TouchableOpacity
                 activeOpacity={0.7}
                 onPress={async () => {
                   await Clipboard.setStringAsync(coinosRecovery.username);
-                  Alert.alert('Copied', 'CoinOS username copied to clipboard.');
+                  Alert.alert(
+                    t('walletSettingsSheet.copiedTitle'),
+                    t('walletSettingsSheet.coinosUsernameCopied'),
+                  );
                 }}
                 style={styles.credentialRow}
-                accessibilityLabel="Copy CoinOS username"
+                accessibilityLabel={t('walletSettingsSheet.copyCoinosUsername')}
                 testID="settings-coinos-copy-username"
               >
                 <Text style={styles.credentialText} selectable>
@@ -316,7 +333,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
               </TouchableOpacity>
 
-              <Text style={styles.recoveryCalloutLabel}>Password</Text>
+              <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.password')}</Text>
               <View style={styles.credentialRow}>
                 <Text style={styles.credentialText} selectable={passwordRevealed}>
                   {passwordRevealed ? coinosRecovery.password : '••••••••••••'}
@@ -324,7 +341,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <TouchableOpacity
                   onPress={() => setPasswordRevealed((v) => !v)}
                   accessibilityLabel={
-                    passwordRevealed ? 'Hide CoinOS password' : 'Reveal CoinOS password'
+                    passwordRevealed
+                      ? t('walletSettingsSheet.hideCoinosPassword')
+                      : t('walletSettingsSheet.revealCoinosPassword')
                   }
                   testID="settings-coinos-reveal-password"
                   hitSlop={8}
@@ -338,9 +357,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <TouchableOpacity
                   onPress={async () => {
                     await Clipboard.setStringAsync(coinosRecovery.password);
-                    Alert.alert('Copied', 'CoinOS password copied to clipboard.');
+                    Alert.alert(
+                      t('walletSettingsSheet.copiedTitle'),
+                      t('walletSettingsSheet.coinosPasswordCopied'),
+                    );
                   }}
-                  accessibilityLabel="Copy CoinOS password"
+                  accessibilityLabel={t('walletSettingsSheet.copyCoinosPassword')}
                   testID="settings-coinos-copy-password"
                   hitSlop={8}
                 >
@@ -361,7 +383,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           {/* NWC wallet: relay URL (read-only) */}
           {wallet.walletType === 'nwc' && relayUrl && (
             <>
-              <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
+              <Text style={[styles.label, { marginTop: 20 }]}>
+                {t('walletSettingsSheet.relay')}
+              </Text>
               <Text style={styles.xpubText} numberOfLines={2}>
                 {relayUrl}
               </Text>
@@ -378,7 +402,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               NWC wallet, not just managed CoinOS ones. */}
           {wallet.walletType === 'nwc' && nwcConnection && (
             <>
-              <Text style={[styles.label, { marginTop: 20 }]}>NWC Connection</Text>
+              <Text style={[styles.label, { marginTop: 20 }]}>
+                {t('walletSettingsSheet.nwcConnection')}
+              </Text>
               <View style={styles.nwcRow}>
                 <Text
                   style={styles.nwcRowText}
@@ -389,7 +415,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 </Text>
                 <TouchableOpacity
                   onPress={() => setNwcRevealed((v) => !v)}
-                  accessibilityLabel={nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'}
+                  accessibilityLabel={
+                    nwcRevealed
+                      ? t('walletSettingsSheet.hideNwcConnection')
+                      : t('walletSettingsSheet.revealNwcConnection')
+                  }
                   testID="settings-nwc-reveal"
                   hitSlop={8}
                 >
@@ -402,7 +432,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <TouchableOpacity
                   onPress={() => setNwcQrShown((v) => !v)}
                   accessibilityLabel={
-                    nwcQrShown ? 'Hide NWC connection QR code' : 'Show NWC connection QR code'
+                    nwcQrShown
+                      ? t('walletSettingsSheet.hideNwcQr')
+                      : t('walletSettingsSheet.showNwcQr')
                   }
                   testID="settings-nwc-qr"
                   hitSlop={8}
@@ -412,9 +444,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <TouchableOpacity
                   onPress={async () => {
                     await Clipboard.setStringAsync(nwcConnection);
-                    Alert.alert('Copied', 'NWC connection copied to clipboard.');
+                    Alert.alert(
+                      t('walletSettingsSheet.copiedTitle'),
+                      t('walletSettingsSheet.nwcConnectionCopied'),
+                    );
                   }}
-                  accessibilityLabel="Copy NWC connection"
+                  accessibilityLabel={t('walletSettingsSheet.copyNwcConnection')}
                   testID="settings-nwc-copy"
                   hitSlop={8}
                 >
@@ -433,31 +468,49 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                     backgroundColor="#FFFFFF"
                     color="#000000"
                   />
-                  <Text style={styles.qrHint}>
-                    Scan from another Lightning Piggy install or NWC client to import this wallet.
-                  </Text>
+                  <Text style={styles.qrHint}>{t('walletSettingsSheet.nwcQrHint')}</Text>
                 </View>
               )}
-              <Text style={styles.hintText}>
-                Use this string to move the wallet to another device or NWC client.
-              </Text>
+              <Text style={styles.hintText}>{t('walletSettingsSheet.nwcConnectionHint')}</Text>
             </>
+          )}
+
+          {/* NWC wallet: share the connection with a trusted contact (#431).
+              Grouped with the connection settings above (relay / NWC string /
+              QR) because it's connection-sharing. Tapping it shows the trust
+              warning, then a recipient picker; the raw connection secret is
+              never rendered — it only travels inside the gift-wrapped DM. */}
+          {wallet.walletType === 'nwc' && (
+            <TouchableOpacity
+              style={[styles.coinosRow, { marginTop: 20 }]}
+              onPress={startShare}
+              activeOpacity={0.7}
+              accessibilityLabel={t('walletSettingsSheet.shareWallet')}
+              testID="wallet-settings-share"
+            >
+              <Text style={styles.coinosRowText}>{t('walletSettingsSheet.shareWallet')}</Text>
+              <Share2 size={18} color={colors.brandPink} strokeWidth={2} />
+            </TouchableOpacity>
           )}
 
           {/* On-chain wallet: show xpub (read-only) */}
           {wallet.walletType === 'onchain' && xpubDisplay && (
             <>
-              <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
+              <Text style={[styles.label, { marginTop: 20 }]}>
+                {t('walletSettingsSheet.extendedPublicKey')}
+              </Text>
               <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
                 <Text style={styles.xpubText} numberOfLines={3}>
                   {xpubDisplay}
                 </Text>
-                <Text style={styles.copyHint}>Tap to copy</Text>
+                <Text style={styles.copyHint}>{t('walletSettingsSheet.tapToCopy')}</Text>
               </TouchableOpacity>
             </>
           )}
 
-          <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
+          <Text style={[styles.label, { marginTop: 20 }]}>
+            {t('walletSettingsSheet.cardDesign')}
+          </Text>
           <View style={styles.themeGrid}>
             {themeList.map((theme) => (
               <MiniWalletCard
@@ -473,30 +526,42 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             style={styles.saveButton}
             onPress={handleSave}
             testID="wallet-settings-save"
-            accessibilityLabel="Save wallet settings"
+            accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
           >
-            <Text style={styles.saveButtonText}>Save</Text>
+            <Text style={styles.saveButtonText}>{t('walletSettingsSheet.save')}</Text>
           </TouchableOpacity>
 
           {coinosRecovery && (
             <TouchableOpacity
               style={[styles.coinosRow, styles.coinosRowDisabled]}
               disabled
-              accessibilityLabel="Migrate to self-custody (coming soon)"
+              accessibilityLabel={t('walletSettingsSheet.migrateSelfCustodyComingSoon')}
               testID="wallet-settings-migrate"
             >
               <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
-                Migrate to self-custody
+                {t('walletSettingsSheet.migrateSelfCustody')}
               </Text>
-              <Text style={styles.coinosRowHint}>Coming soon</Text>
+              <Text style={styles.coinosRowHint}>{t('walletSettingsSheet.comingSoon')}</Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
-            <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
+            <Text style={styles.disconnectButtonText}>
+              {t('walletSettingsSheet.removeWalletTitle')}
+            </Text>
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheetModal>
+
+      {/* Recipient step for "Share this wallet" — settings has no open
+          conversation, so pick who to send the gift-wrapped NWC share to.
+          Reuses the app's contact picker; onSelect runs the same send. */}
+      <FriendPickerSheet
+        visible={pickerOpen}
+        onClose={closePicker}
+        onSelect={shareToFriend}
+        title={t('walletSettingsSheet.shareWalletPickTitle')}
+      />
     </>
   );
 };

@@ -34,10 +34,11 @@
 
 ## Testing
 
-- E2E tests use Maestro and live in `tests/e2e/`
+- E2E tests use Maestro and live in `.maestro/`, organised one folder deep by feature area (`authentication/`, `wallets/`, `payments/`, `messaging/`, `groups/`, `friends/`, `hunt/`, `profile/`, `map/`, `ui/`, `cards/`). Composed flows are named `flow-NNN-<description>.yaml` (globally sequential); shared building blocks live un-numbered in `common/` and are pulled in via `runFlow` (never run on their own). `perf/` and `keyboard-audit/` are kept as their own sub-sections. See `.maestro/README.adoc` for the full layout + the relay/identity safety rules.
 - Install Maestro: `curl -Ls "https://get.maestro.mobile.dev" | bash`
-- Run tests: `maestro test tests/e2e/<test-file>.yaml`
-- **NEVER use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests or when interacting with the app** — coordinates are fragile and break across screen sizes, devices, and OS versions. Always add `accessibilityLabel` and/or `testID` props to components and use `id:` or `text:` selectors in Maestro instead.
+- Run one flow: `maestro test .maestro/<area>/flow-NNN-<name>.yaml` · Run the curated wallet/transfer suite: `source .env && bash .maestro/reporting/run-all.sh`
+- A **disabled** nightly Maestro Cloud workflow (`.github/workflows/maestro-nightly.yml`) is scaffolded — gated off behind `vars.ENABLE_MAESTRO_NIGHTLY`; enable only with a Maestro Cloud subscription.
+- **NEVER use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) for the app's own UI** — coordinates are fragile and break across screen sizes, devices, and OS versions. Always add `accessibilityLabel` and/or `testID` props to components and use `id:` or `text:` selectors in Maestro instead. The *only* exception is **OS-owned surfaces the app can't instrument** — the system photo picker / image crop, the camera, and third-party WebViews — which expose no testID or label to the app; there `point:` is a documented last resort (see the picker/crop taps in the `attach-*` and `profile-image` flows). If an element is in *our* UI, add a testID — never reach for coordinates.
 - If a component is missing an accessibility label, add one to the source code rather than using coordinates as a workaround
 - All interactive elements (buttons, tabs, alphabet letters, etc.) must have `accessibilityLabel` and/or `testID` props
 - Tab bar buttons use `tabBarButtonTestID` (e.g., `tab-friends`) and `tabBarAccessibilityLabel` (e.g., `Friends tab`)
@@ -56,6 +57,14 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## Signers
+
+The app supports three Nostr signers, branched on `signerType` in `NostrContext.tsx`:
+
+- `nsec` — local key (`src/services/nostrService.ts`)
+- `amber` (NIP-55) — Android only via Intent IPC (`src/services/amberService.ts`)
+- `nip46` (NIP-46 / "Nostr Connect") — cross-platform, relay-based; works with Clave (iOS), Aegis, nsec.app (`src/services/nostrConnectService.ts`). See `docs/nip46-clave.adoc` for the pairing flow + the silent-decrypt batch trade-off.
+
 ## File size and modularity
 
 - **Aim for elegant, well-organised code — the line cap is a symptom, not the goal.** When a file is too big, the fix is to find the *right* seams and give each module a single, nameable responsibility, NOT to shuffle lines around until the number drops. A split is only worth doing if the result reads better than the original: a reviewer should be able to say what each new file is *for* in one phrase (presentation / pure data-shaping / one sub-view / one set of actions). If an extraction doesn't make the code clearer, it's line-golf — don't do it. Getting under 1,000 lines should fall out of organising the code well.
@@ -67,13 +76,13 @@
   - **Contexts** → extract per-responsibility hooks/services. E.g. `NostrContext` → `useDmInbox` / `useProfiles` / `useRelays` (+ the `src/services/dm*` data layer), each its own file; the context just composes them.
   - **Screens** → lift sub-views into components, and non-UI logic into hooks/utils (`useXScreenState`, `src/utils/…`). Styles → `src/styles/<Name>.styles.ts` (see above).
   - **Services** → split by domain (`nostrService` → `nostrRelay` / `nostrDm` / `nostrProfile`).
-- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015), `nwcService.ts` (1,009). The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
+- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015). (`nwcService.ts` dropped under the cap in #785 once its relay-health layer moved to `src/services/nwcRelayHealth.ts` — baseline entry removed.) The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
 
 ## Unit tests
 
 - Coverage scope: **`src/services`, `src/utils`, `src/contexts` only.** Components are excluded — they're best covered by Maestro pixel/flow tests (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort, low-payoff).
 - Runner: Jest via `jest-expo` preset. Per the 2026 review of alternatives (Vitest's RN preset is still WIP, Bun test isn't documented for Expo, node:test has no RN renderer), Jest remains the right choice for RN + Expo SDK 55.
-- Add new tests under `tests/unit/<area>.test.ts`. Co-located `.test.ts` next to source files also works.
+- Add new tests as co-located `.test.ts` files next to the source (e.g. `src/utils/foo.test.ts`). Jest only collects `src/**/*.test.{ts,tsx}` (see `jest.config.js` `testMatch`) — a file under `tests/unit/` is silently never run.
 - Pick targets via `bash scripts/coverage-priorities.sh 20` — ranks files by `(churn × LOC × fanout) / (coverage% + 1)`. Top of the list is where bugs hurt most.
 - The `Coverage` GitHub Actions workflow gates every PR: line-coverage may not drop more than 0.5pp vs main.
 

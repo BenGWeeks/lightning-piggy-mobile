@@ -1,45 +1,47 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { touchNip17CacheEntry } from '../utils/nip17Cache';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import { nip46DecryptNip04 } from './nip46DmDecrypt';
+import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
-import { perAccountKey } from '../services/perAccountStorage';
 import {
-  nip04PlaintextCache,
-  appendLocalDmChains,
-  getMemoisedSecretKey,
-} from './nostrSecretKeyCache';
-import { tryRouteGroupRumor } from './nostrGroupRouting';
+  selectKnownEventIds,
+  upsertDmMessages,
+  updateDmDeliveryStatuses,
+  hasStoredWraps,
+  getConversationMessages,
+  type DmMessageRow,
+} from '../services/dmDb';
+import { loadInboxEntries } from '../services/dmInbox';
+import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
+import { yieldToEventLoop, DECRYPT_YIELD_EVERY } from './nostrDecryptPacing';
 import {
-  yieldToEventLoop,
-  DECRYPT_FRAME_BUDGET_MS,
-  createYieldScheduler,
-  DECRYPT_YIELD_EVERY,
-  NIP17_LOOP_YIELD_EVERY,
-} from './nostrDecryptPacing';
-import {
-  AMBER_NIP17_CACHE_KEY_BASE,
-  NSEC_NIP17_CACHE_KEY_BASE,
-  type Nip17CacheEntry,
-  safeParseRecord,
-  writeNip17Cache,
-  DM_INBOX_REFRESH_TTL_MS,
+  COLD_INITIAL_WRAP_LIMIT,
   DM_INBOX_CAP,
   DM_CONV_CAP,
-  inboxCacheKey,
   inboxLastSeenKey,
-  convCacheKey,
-  safeGetDmCacheItem,
-  loadDmInboxFromCache,
   loadLastSeen,
   mergeInboxEntries,
 } from './nostrDmCache';
+import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { RefreshDmInboxOptions, ConversationMessage } from './nostrContextTypes';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import {
+  isColdStartRefresh,
+  shouldSkipForFreshness,
+  shouldStampCursor,
+  bypassesFreshnessTtl,
+  shouldBypassSkipSet,
+  shouldDropK4Since,
+} from './dmRefreshGate';
 import { startLiveDmSubscription } from './nostrLiveDmSub';
+import { createLiveSubFollowGateBuffer, type DeferredFollowGateEntry } from './liveSubFollowGate';
 import { fetchConversationFor } from './nostrFetchConversation';
+import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
+import { scheduleColdStartBackfill } from './dmColdStartBackfill';
+import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -69,9 +71,20 @@ export interface UseDmInboxResult {
   dmInbox: DmInboxEntry[];
   dmInboxLoading: boolean;
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
-  fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
-  getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  fetchConversation: (
+    otherPubkey: string,
+    opts?: { signal?: AbortSignal },
+  ) => Promise<ConversationMessage[]>;
+  // Read-through (#868, single-sourced in #850): the instant-paint set for a
+  // thread open — the SAME encrypted-store rows the inbox preview is built
+  // from (the plaintext per-conversation blob is retired). Guarantees the
+  // thread is never behind the preview.
+  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  persistDeliveryStatuses: (
+    otherPubkey: string,
+    statusById: Record<string, DeliveryStatus>,
+  ) => Promise<void>;
   armLiveDmSub: () => void;
   amberNip44Permission: 'unknown' | 'granted' | 'denied';
   hydrateDmInboxFromCache: (pk: string) => Promise<void>;
@@ -98,26 +111,52 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     'unknown' | 'granted' | 'denied'
   >('unknown');
 
+  // Hydrate + persist the eventId-keyed delivery store (#857) for the active
+  // account, so settled ticks survive a cold restart. Re-binds on account
+  // switch; the teardown flushes any pending write and detaches the hook.
+  useEffect(() => {
+    if (!pubkey) return;
+    let teardown: (() => void) | null = null;
+    // AbortController crosses the async boundary (#866): aborting on cleanup
+    // tells an in-flight bind whose getItem hasn't resolved yet to no-op before
+    // it hydrates / installs its persist hook. Without this, a stale bind from
+    // the previous account could resolve late and clobber the new account's
+    // in-memory delivery statuses or detach its persist hook.
+    const controller = new AbortController();
+    void bindDmDeliveryStorePersistence(pubkey, { signal: controller.signal }).then((fn) => {
+      // If we were torn down while the bind was resolving, run its (inert or
+      // real) teardown immediately rather than retaining it.
+      if (controller.signal.aborted) fn();
+      else teardown = fn;
+    });
+    return () => {
+      controller.abort();
+      teardown?.();
+    };
+  }, [pubkey]);
+
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
-  // they don't race on the AsyncStorage wrap-id cache.
+  // they don't race on the skip-set file + encrypted-store writes.
   const dmInboxInFlight = useRef<{
     promise: Promise<void>;
     includeNonFollows: boolean;
   } | null>(null);
-  /** `performance.now()` of last successful `refreshDmInbox` completion.
-   * Gate for the `DM_INBOX_REFRESH_TTL_MS` throttle so that Messages-tab
-   * focus doesn't re-fire full relay queries on every tab bounce. */
+  /** `performance.now()` of the last COMPLETED `refreshDmInbox` (`0` before
+   * any). Drives the cold-start + freshness-TTL gates — see dmRefreshGate. */
   const dmInboxLastRefreshAt = useRef<number>(0);
 
-  /** Eagerly hydrate `dmInbox` from the persisted NIP-17 inbox cache so
-   * the Messages tab paints conversations on cold start instead of
-   * staying blank for the relay-fetch + decrypt loop (~3-5 s). Called
-   * from session-restore + post-login flows; refreshDmInbox handles
-   * its own cache read separately for the delta-fetch path. */
+  /** Eagerly hydrate `dmInbox` so the Messages tab paints conversations on
+   * cold start instead of staying blank for the relay-fetch + decrypt loop
+   * (~3-5 s). Single source (#850): the encrypted DM store's indexed
+   * latest-per-conversation read — the plaintext inbox-summary blob is
+   * retired. The one-time migration runs first (memoised; a Map lookup once
+   * done) so a just-updated install hydrates the pre-#848 kind-4-only
+   * threads its blobs held. Called from session-restore + post-login flows. */
   const hydrateDmInboxFromCache = useCallback(async (pk: string) => {
-    const cached = await loadDmInboxFromCache(pk);
-    if (cached.length > 0) setDmInbox(cached);
+    await ensureDmStoreMigrated(pk);
+    const dbLatest = await loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]);
+    if (dbLatest.length > 0) setDmInbox(dbLatest);
   }, []);
 
   /**
@@ -140,6 +179,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         }
         if (signerType === 'amber') {
           return await amberService.requestNip04Decrypt(ciphertext, counterpartyPubkey, pubkey);
+        }
+        if (signerType === 'nip46') {
+          return await nip46DecryptNip04(ciphertext, counterpartyPubkey, pubkey);
         }
         return null;
       } catch (error) {
@@ -164,71 +206,59 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [pubkey],
   );
 
-  const getCachedConversation = useCallback(
-    async (otherPubkey: string): Promise<ConversationMessage[]> => {
-      if (!pubkey) return [];
-      const normalized = otherPubkey.trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
-      try {
-        const raw = await safeGetDmCacheItem(convCacheKey(pubkey, normalized));
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    },
-    [pubkey],
-  );
-
+  // Persist the optimistic local- send row into the ENCRYPTED store (#850 —
+  // formerly a plaintext AsyncStorage blob write). The row carries the
+  // delivery tick (#856) + rumorId (#857); when the relay echo lands,
+  // upsertDmMessages retires the local- row and carries both onto the echo.
+  // Atomic by (owner, event_id), so the pre-#850 read-modify-write clobber
+  // hazard (Copilot review #509) no longer needs a serialization chain.
   const appendLocalDmMessage = useCallback(
     async (otherPubkey: string, msg: ConversationMessage): Promise<void> => {
       if (!pubkey) return;
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return;
-      // Serialize concurrent appends to the same conversation. Without
-      // this, two rapid sends could both read the same `existing` array,
-      // each merge their msg, both write back — last write wins, the
-      // earlier optimistic row is silently lost. Per Copilot review #509.
-      const chainKey = `${pubkey}:${normalized}`;
-      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
-      const next = prev.then(async () => {
-        try {
-          const key = convCacheKey(pubkey, normalized);
-          const raw = await AsyncStorage.getItem(key);
-          const existing: ConversationMessage[] = raw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
-          // Dedup on id (same key would arise from a double-tap retry).
-          const map = new Map<string, ConversationMessage>();
-          for (const m of existing) map.set(m.id, m);
-          map.set(msg.id, msg);
-          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-          const capped =
-            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
-          await AsyncStorage.setItem(key, JSON.stringify(capped));
-        } catch {
-          // Swallow — the in-memory setMessages above already painted
-          // the bubble. The remount-after-back regression is precisely
-          // what this method exists to fix, so a write failure is
-          // unfortunate but not destructive (next relay echo will
-          // repopulate the cache).
-        }
-      });
-      // `.catch` on the chain entry so a single failure doesn't poison
-      // every subsequent append on this conversation.
-      appendLocalDmChains.set(
-        chainKey,
-        next.catch(() => {}),
-      );
-      await next;
+      try {
+        await upsertDmMessages([
+          {
+            owner: pubkey,
+            eventId: msg.id,
+            conversation: normalized,
+            createdAt: msg.createdAt,
+            sender: msg.fromMe ? pubkey : normalized,
+            content: msg.text,
+            fromMe: msg.fromMe,
+            wireKind: msg.wireKind ?? 14,
+            deliveryStatus: msg.deliveryStatus,
+            rumorId: msg.rumorId,
+          },
+        ]);
+      } catch (e) {
+        // Swallow — the in-memory setMessages already painted the bubble; a
+        // write failure is unfortunate but not destructive (the next relay
+        // echo repopulates the store).
+        if (__DEV__) console.warn('[DmStore] optimistic append failed:', e);
+      }
+    },
+    [pubkey],
+  );
+
+  // Durably attach delivery status (#856) to stored rows, keyed by row id —
+  // now a fill-only UPDATE on the encrypted store (#850). The optimistic
+  // `local-` row's tick is otherwise lost across a cold restart when the
+  // relay echo replaces it before the tick settled; after the in-memory
+  // reconcile re-attaches it to the real-id row, this writes it back so the
+  // next cold start reads it.
+  const persistDeliveryStatuses = useCallback(
+    async (_otherPubkey: string, statusById: Record<string, DeliveryStatus>): Promise<void> => {
+      if (!pubkey) return;
+      if (Object.keys(statusById).length === 0) return;
+      try {
+        await updateDmDeliveryStatuses(pubkey, statusById);
+      } catch (e) {
+        // Non-fatal — the in-memory tick already shows; worst case the next
+        // send/echo cycle re-persists it.
+        if (__DEV__) console.warn('[DmStore] delivery-status persist failed:', e);
+      }
     },
     [pubkey],
   );
@@ -237,7 +267,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // hook threads in the identity + relay + NIP-04 decrypt dependencies it
   // closes over; the body is unchanged.
   const fetchConversation = useCallback(
-    (otherPubkey: string): Promise<ConversationMessage[]> =>
+    (otherPubkey: string, opts?: { signal?: AbortSignal }): Promise<ConversationMessage[]> =>
       fetchConversationFor({
         pubkey,
         isLoggedIn,
@@ -245,10 +275,35 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         getReadRelays,
         decryptNip04ViaSigner,
         otherPubkey,
+        signal: opts?.signal,
       }),
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
 
+  // Read-through (#868, single-sourced in #850): paint the thread from the
+  // encrypted store BEFORE the relay fetch resolves, so a DM the inbox
+  // already ingested shows immediately and the thread is never behind the
+  // preview. Reads the SAME rows the inbox list is built from (getInboxLatest
+  // / getConversationMessages both read dm_messages), so they can't disagree
+  // — and the rows now carry the optimistic local- sends + delivery ticks the
+  // retired plaintext blob used to.
+  const loadInitialConversation = useCallback(
+    (otherPubkey: string): Promise<ConversationMessage[]> =>
+      loadInitialConversationFor(otherPubkey, {
+        getStoredRows: (peer) => {
+          if (!pubkey) return Promise.resolve([] as DmMessageRow[]);
+          const normalized = peer.trim().toLowerCase();
+          if (!/^[0-9a-f]{64}$/.test(normalized)) return Promise.resolve([] as DmMessageRow[]);
+          return getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
+        },
+      }),
+    [pubkey],
+  );
+
+  // Stable self-reference so the cold-start backfill can re-invoke
+  // refreshDmInbox without it listing itself as a dependency (declared here,
+  // assigned just after the useCallback).
+  const refreshDmInboxRef = useRef<((opts?: RefreshDmInboxOptions) => Promise<void>) | null>(null);
   const refreshDmInbox = useCallback(
     async (opts?: RefreshDmInboxOptions): Promise<void> => {
       if (!pubkey || !isLoggedIn) {
@@ -267,16 +322,24 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // become no-ops AND the cache hydrate skips its filter so the
       // already-cached unfollowed entries don't get masked.
       const includeNonFollows = opts?.includeNonFollows === true;
-      // Freshness TTL: skip the refresh entirely if the previous one
-      // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
-      // explicitly opts into a forced refresh (pull-to-refresh). The
-      // Messages tab's `useFocusEffect` uses the default TTL path so
-      // tab-bouncing doesn't retrigger expensive relay+decrypt work.
-      if (!opts?.force) {
-        const age = performance.now() - dmInboxLastRefreshAt.current;
-        if (dmInboxLastRefreshAt.current > 0 && age < DM_INBOX_REFRESH_TTL_MS) {
-          return;
-        }
+      // Cold start = first refresh this session (incl. force: the real cold
+      // load is MessagesScreen's on-mount focus refresh; the cold-start wrap
+      // cap + #788 macro-task yield must apply to it). See dmRefreshGate.
+      const isColdStart = isColdStartRefresh(dmInboxLastRefreshAt.current);
+      // Skip-set / TTL / kind-4 `since` policies are pure functions in
+      // dmRefreshGate — the cold-start backfill (#751) bypasses only the
+      // TTL; backfill itself must NOT inherit the #743 force-refresh cache
+      // bypasses (includeNonFollows still bypasses, see shouldBypassSkipSet)
+      // (that was the every-cold-start decrypt sweep, #846).
+      const bypassSkipSet = shouldBypassSkipSet(opts);
+      if (
+        shouldSkipForFreshness(
+          dmInboxLastRefreshAt.current,
+          bypassesFreshnessTtl(opts),
+          performance.now(),
+        )
+      ) {
+        return;
       }
       // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
       if (dmInboxInFlight.current) {
@@ -300,53 +363,70 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshFollows = followPubkeys;
       const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
+      let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+
       const task = (async () => {
         setDmInboxLoading(true);
         try {
+          // One-time plaintext→encrypted store migration (#848). Memoised +
+          // single-flighted per account; after the first call it costs one
+          // Map lookup, so firing it on every refresh is safe.
+          await ensureDmStoreMigrated(refreshForPubkey);
+
+          // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
+          // has an empty store: this sweep is the ONLY thing that will populate
+          // the 1:1 inbox. Honoring a tab-hop abort here (as #412 does for warm
+          // refreshes) stranded the user on an empty inbox for minutes — the
+          // decrypted sweep was discarded and only an unrelated later refocus
+          // committed one. So a genuine rebuild (first refresh of the session
+          // AND no NIP-17 rows yet for this owner) runs to completion: we swap
+          // the abort signal for `undefined` on the decrypt+commit path. A WARM
+          // refresh (store already populated) keeps the real signal, so #412's
+          // fast tab-hopper abort is fully intact.
+          const mustCompleteRebuild = isColdStart && !(await hasStoredWraps(refreshForPubkey));
+          const effectiveSignal = mustCompleteRebuild ? undefined : signal;
+          if (__DEV__ && mustCompleteRebuild) {
+            console.log('[Perf] refreshDmInbox: cold rebuild — running to completion (F1)');
+          }
+
           const readRelays = getReadRelays();
           const refreshStart = performance.now();
           let nip04CacheHits = 0;
+          // kind-4 events skipped because their decrypts are already rows in
+          // the encrypted DB (#848) — the persistent decrypt-once gate the
+          // RAM-only nip04PlaintextCache couldn't provide across launches.
+          let nip04DbHits = 0;
           let nip04FreshDecrypts = 0;
-          // NIP-17 perf counters — emitted in the `[Perf] refreshDmInbox`
-          // line so #193 can be tracked post-merge. `nip17Hits` /
-          // `nip17Misses` capture the cache-hit ratio per refresh;
-          // `nip17Evictions` shows whether the 5000-cap is actually
-          // squeezing entries out (was previously invisible — the FIFO
-          // sort-and-slice path ran silently).
+          // NIP-17 store counters — emitted in the `[Perf] nip17-store`
+          // line. `nip17Hits` = wraps short-circuited by the encrypted DB's
+          // decrypt-once gate; `nip17Misses` = fresh decrypt attempts;
+          // `nip17Stored` = rows persisted this refresh.
           let nip17Hits = 0;
           let nip17Misses = 0;
-          let nip17Evictions = 0;
-          let nip17CacheSize = 0;
-          // Number of actual `setTimeout(0)` yields the NIP-17 loop
-          // performed this refresh — emitted in the [Perf] nip17-cache
-          // line so we can track how often the new frame-budget
-          // scheduler trips (#532). Higher = more breathing room
-          // given back to the UI thread.
+          let nip17Stored = 0;
+          // Wraps short-circuited by the negative-result skip-set (#743).
+          // Counted separately from store hits so we can see how much
+          // decrypt work the skip-set is saving per refresh.
+          let nip17SkipHits = 0;
+          // Pacing yields the ingest performed this refresh (#532/#788).
           let nip17YieldCount = 0;
 
-          // PR B: load persisted inbox + last-seen so we can (a) paint
-          // cached entries before the relay round-trip finishes and
-          // (b) only fetch events newer than the last one we saw.
-          const [cachedInboxRaw, lastSeen] = await Promise.all([
-            safeGetDmCacheItem(inboxCacheKey(refreshForPubkey)),
+          // Load the store's inbox + the last-seen cursor so we can (a) paint
+          // stored entries before the relay round-trip finishes and (b) only
+          // fetch events newer than the last one we saw. Single source
+          // (#850): the encrypted store's indexed latest-per-conversation
+          // read — the plaintext inbox blob is retired (the migration above
+          // already folded any legacy blob into the store).
+          const [storedInbox, lastSeen] = await Promise.all([
+            loadInboxEntries(refreshForPubkey).catch(() => [] as DmInboxEntry[]),
             loadLastSeen(inboxLastSeenKey(refreshForPubkey)),
           ]);
-          const cachedInbox: DmInboxEntry[] = cachedInboxRaw
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(cachedInboxRaw);
-                  return Array.isArray(parsed) ? parsed : [];
-                } catch {
-                  return [];
-                }
-              })()
-            : [];
-          // Render the cached entries immediately so the Messages tab
+          // Render the stored entries immediately so the Messages tab
           // isn't blank while the relay fetches the delta. The followers
-          // set may have changed since the cache was written; re-apply
+          // set may have changed since the rows were written; re-apply
           // the filter here so unfollowed senders don't resurrect.
-          if (cachedInbox.length > 0) {
-            const filteredCache = cachedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
+          if (storedInbox.length > 0) {
+            const filteredCache = storedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
             setDmInbox(filteredCache);
           }
 
@@ -362,9 +442,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
-            opts?.force ? {} : { since: lastSeen },
+            {
+              // kind-4 `since` floor policy → dmRefreshGate.shouldDropK4Since (#751/#846). Wraps ignore `since` internally regardless (random NIP-59 ts).
+              ...(shouldDropK4Since(opts, isColdStart) ? {} : { since: lastSeen }),
+              signal: effectiveSignal,
+              ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
+            },
           );
-          if (signal?.aborted) return;
+          if (effectiveSignal?.aborted) return;
           const entries: DmInboxEntry[] = [];
 
           // NIP-04 — partner pubkey is in the envelope, so we can apply
@@ -405,10 +490,28 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               k4Misses.push(t);
             }
           }
+          // Persistent decrypt-once gate (#848): RAM-cache misses whose
+          // decrypts are already rows in the encrypted DB don't need a
+          // signer round-trip — the DB-latest merge below keeps their
+          // conversations in the inbox. One chunked indexed query.
+          const k4Known =
+            k4Misses.length > 0
+              ? await selectKnownEventIds(
+                  refreshForPubkey,
+                  k4Misses.map((t) => t.ev.id),
+                ).catch(() => new Set<string>())
+              : new Set<string>();
+          nip04DbHits = k4Known.size;
+          const k4ToDecrypt = k4Misses.filter((t) => !k4Known.has(t.ev.id));
+          const k4Rows: DmMessageRow[] = [];
           // Slow pass — parallel decrypt of misses in yield-able chunks.
-          for (let i = 0; i < k4Misses.length; i += DECRYPT_YIELD_EVERY) {
-            if (signal?.aborted) return;
-            const batch = k4Misses.slice(i, i + DECRYPT_YIELD_EVERY);
+          for (let i = 0; i < k4ToDecrypt.length; i += DECRYPT_YIELD_EVERY) {
+            // Stop decrypting on abort (releases the JS thread, #412) but BREAK
+            // rather than return: the k4Rows decrypted so far are idempotent
+            // and persist below, then the productive-abort commit paints them
+            // (F1, #849). A cold rebuild's effectiveSignal never aborts here.
+            if (effectiveSignal?.aborted) break;
+            const batch = k4ToDecrypt.slice(i, i + DECRYPT_YIELD_EVERY);
             const batchResults = await Promise.all(
               batch.map(async (t) => {
                 nip04FreshDecrypts++;
@@ -428,10 +531,32 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 text: r.plaintext,
                 wireKind: 4,
               });
+              k4Rows.push({
+                owner: refreshForPubkey,
+                eventId: r.t.ev.id,
+                conversation: r.t.partnerPubkey,
+                createdAt: r.t.ev.created_at,
+                sender: r.t.fromMe ? refreshForPubkey : r.t.partnerPubkey,
+                content: r.plaintext,
+                fromMe: r.t.fromMe,
+                wireKind: 4,
+              });
             }
-            if (i + DECRYPT_YIELD_EVERY < k4Misses.length) await yieldToEventLoop();
+            if (i + DECRYPT_YIELD_EVERY < k4ToDecrypt.length) await yieldToEventLoop();
           }
-          if (signal?.aborted) return;
+          // Persist fresh NIP-04 decrypts BEFORE honoring any abort (F1, #849):
+          // a decrypted kind-4 row is idempotent + `(owner, event_id)`-keyed,
+          // so a sweep cut short by a tab blur must not throw away the decrypts
+          // it already paid for — otherwise the next sweep re-decrypts them and
+          // the inbox stays empty. The RAM LRU dies with the session, so the DB
+          // is the only durable decrypt-once memo. Even a genuine backlog
+          // refetch (user pull-to-refresh drops the `since` floor, #743) is
+          // decrypt-once from now on.
+          if (k4Rows.length > 0) {
+            await upsertDmMessages(k4Rows).catch((e) => {
+              if (__DEV__) console.warn('[DmStore] kind-4 upsert failed:', e);
+            });
+          }
 
           // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
           // have to decrypt to know who sent it. For the nsec signer this
@@ -445,251 +570,79 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             if (__DEV__) console.warn(`[Nostr] NIP-17 inbox unwrap skip (${wrapId}): ${reason}`);
           };
 
-          if (refreshForSigner === 'nsec' && kind1059.length > 0) {
-            const secretKey = await getMemoisedSecretKey(refreshForPubkey);
-            if (secretKey) {
-              // Persistent wrap-id cache mirroring the Amber branch. Only
-              // ever contains rumors from followed senders — see the
-              // filter gate below. This is the fix for #176. Per-account
-              // namespaced (#288).
-              const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-              const raw = await safeGetDmCacheItem(nsecCacheKey);
-              const cache = safeParseRecord<Nip17CacheEntry>(raw);
-              const newlyCached: Nip17CacheEntry[] = [];
-              let unfollowedPurged = 0;
-              let touched = 0;
-              // Frame-budget scheduler (#532): yield whenever we've held
-              // the JS thread for >= DECRYPT_FRAME_BUDGET_MS, with the
-              // count-based modulo kept as a safety cap. On abort, the
-              // scheduler hard-cancels any pending setTimeout so the
-              // loop unwinds in the next microtask instead of waiting
-              // out one more scheduler round-trip.
-              const nsecYield = createYieldScheduler({
-                signal,
-                safetyEvery: NIP17_LOOP_YIELD_EVERY,
-              });
-              try {
-                for (const wrap of kind1059) {
-                  // Time-budget yield + abort check (#286, #532). Covers
-                  // the cache-hit path too — without it, a long run of
-                  // cache hits walks the whole kind1059 list synchronously
-                  // and any back-tap during refresh appears frozen.
-                  await nsecYield.maybeYield();
-                  if (signal?.aborted) return;
-                  const cached = cache[wrap.id];
-                  if (cached) {
-                    nip17Hits++;
-                    // Cache entry exists → it was from a followed sender
-                    // when first stored. Re-check against the *current*
-                    // follow set so unfollowed partners don't keep
-                    // surfacing from cache. Purge the stale entry so we
-                    // don't keep dragging it through every refresh until
-                    // the 5000-cap LRU finally evicts it.
-                    if (!passesFollowGate(cached.partnerPubkey)) {
-                      delete cache[wrap.id];
-                      unfollowedPurged++;
-                      continue;
-                    }
-                    // LRU touch (#193): re-insert at the tail so this hot
-                    // entry survives the next overflow eviction. Without
-                    // this the cache is FIFO-by-first-write — a thread
-                    // the user re-opens regularly can be evicted just
-                    // because 5000 newer wraps happened to arrive first.
-                    touchNip17CacheEntry(cache, wrap.id);
-                    touched++;
-                    entries.push({
-                      id: cached.wrapId,
-                      partnerPubkey: cached.partnerPubkey,
-                      fromMe: cached.fromMe,
-                      createdAt: cached.createdAt,
-                      text: cached.text,
-                      wireKind: cached.wireKind,
-                    });
-                    continue;
-                  }
-                  nip17Misses++;
-                  const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
-                  // No per-decrypt yield here: the frame-budget scheduler
-                  // at the top of the loop already yields whenever the
-                  // accumulated work exceeds DECRYPT_FRAME_BUDGET_MS,
-                  // which captures the cost of unwrapWrapNsec naturally.
-                  if (!rumor) continue;
-                  // Multi-recipient (group) rumors: route to group storage
-                  // and short-circuit the DM-inbox path. The 1:1 inbox
-                  // never sees group messages — they belong to a different
-                  // surface (GroupConversationScreen).
-                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                  if (routeResult.kind !== 'not-group') continue;
-                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                  if (!partnership) continue;
-                  // B1 — drop non-follows at the data layer. No caching, no
-                  // state. The filter is load-bearing ("parental control"),
-                  // so it runs here not in the view.
-                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                  const entry: Nip17CacheEntry = {
-                    id: wrap.id,
-                    wrapId: wrap.id,
-                    partnerPubkey: partnership.partnerPubkey,
-                    fromMe: partnership.fromMe,
-                    createdAt: rumor.created_at,
-                    text: rumor.content,
-                    wireKind: rumor.kind,
-                  };
-                  cache[wrap.id] = entry;
-                  newlyCached.push(entry);
-                  entries.push({
-                    id: entry.id,
-                    partnerPubkey: entry.partnerPubkey,
-                    fromMe: entry.fromMe,
-                    createdAt: entry.createdAt,
-                    text: entry.text,
-                    wireKind: entry.wireKind,
-                  });
-                }
-              } finally {
-                nsecYield.dispose();
-              }
-              nip17YieldCount += nsecYield.yieldCount;
-
-              // Persist if we mutated the cache for any reason: new
-              // entries, follow-set purges, or LRU touches (#193) — the
-              // touch reorders insertion order, and we need that order
-              // on disk for it to survive app restart.
-              if (newlyCached.length > 0 || unfollowedPurged > 0 || touched > 0) {
-                nip17Evictions += await writeNip17Cache(nsecCacheKey, cache);
-              }
-              nip17CacheSize = Object.keys(cache).length;
-            }
-          } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
-            // Always run the unwrap loop — Amber's silent content-resolver path returns PERMISSION_NOT_GRANTED on the first wrap if the user hasn't granted nip44_decrypt yet, which we surface via setAmberNip44Permission('denied') so NostrScreen can show the one-shot "Grant permission in Amber" button. Closes #404.
-            // Persistent cache keyed by wrap id. Only ever contains rumors from *followed* senders — see the filter gate below. Per-account namespaced (#288).
-            const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-            const raw = await safeGetDmCacheItem(amberCacheKey);
-            const cache = safeParseRecord<Nip17CacheEntry>(raw);
-            const newlyCached: Nip17CacheEntry[] = [];
-            let permissionDenied = false;
-            let touched = 0;
-            let unfollowedPurged = 0;
-            // Frame-budget scheduler (#532) — see nsec branch above.
-            const amberYield = createYieldScheduler({
-              signal,
-              safetyEvery: NIP17_LOOP_YIELD_EVERY,
-            });
-            try {
-              for (const wrap of kind1059) {
-                // Time-budget yield + abort check (#286, #532) — see nsec branch above for rationale.
-                await amberYield.maybeYield();
-                if (signal?.aborted) return;
-                const cached = cache[wrap.id];
-                if (cached) {
-                  nip17Hits++;
-                  // Re-check against current follow set; purge if no longer followed so we don't drag stale entries through every refresh.
-                  if (!passesFollowGate(cached.partnerPubkey)) {
-                    delete cache[wrap.id];
-                    unfollowedPurged++;
-                    continue;
-                  }
-                  touchNip17CacheEntry(cache, wrap.id);
-                  touched++;
-                  entries.push({
-                    id: cached.wrapId,
-                    partnerPubkey: cached.partnerPubkey,
-                    fromMe: cached.fromMe,
-                    createdAt: cached.createdAt,
-                    text: cached.text,
-                    wireKind: cached.wireKind,
-                  });
-                  continue;
-                }
-                nip17Misses++;
-                // Uncached — unwrap via Amber's silent content-resolver path.
-                // If Amber hasn't granted blanket nip44_decrypt permission,
-                // this throws PERMISSION_NOT_GRANTED and we stop iterating.
-                try {
-                  const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
-                  if (!rumor) continue;
-                  // Multi-recipient (group) rumors: route to group storage
-                  // and short-circuit the DM-inbox path.
-                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                  if (routeResult.kind !== 'not-group') continue;
-                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                  if (!partnership) continue;
-                  // B1 — never cache rumors from non-followed senders. The
-                  // cost is re-decrypting them on the next refresh, but the
-                  // silent path is ~1 ms per call and keeps plaintext off
-                  // AsyncStorage.
-                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                  const entry: Nip17CacheEntry = {
-                    id: wrap.id,
-                    wrapId: wrap.id,
-                    partnerPubkey: partnership.partnerPubkey,
-                    fromMe: partnership.fromMe,
-                    createdAt: rumor.created_at,
-                    text: rumor.content,
-                    wireKind: rumor.kind,
-                  };
-                  cache[wrap.id] = entry;
-                  newlyCached.push(entry);
-                  entries.push({
-                    id: entry.id,
-                    partnerPubkey: entry.partnerPubkey,
-                    fromMe: entry.fromMe,
-                    createdAt: entry.createdAt,
-                    text: entry.text,
-                    wireKind: entry.wireKind,
-                  });
-                } catch (error) {
-                  const code = (error as { code?: string })?.code;
-                  const message = (error as Error)?.message ?? '';
-                  if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
-                    permissionDenied = true;
-                    if (__DEV__) {
-                      console.log(
-                        `[Nostr] Amber NIP-44 permission not granted — stopping NIP-17 unwrap for this refresh`,
-                      );
-                    }
-                    break;
-                  }
-                  if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
-                }
-              }
-            } finally {
-              amberYield.dispose();
-            }
-            nip17YieldCount += amberYield.yieldCount;
-
-            setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
-
-            // Persist on new entries, LRU touches (#193 — touches reorder insertion order which we need on disk), or unfollowed-partner purges (so the purge survives the next launch).
-            if (newlyCached.length > 0 || touched > 0 || unfollowedPurged > 0) {
-              nip17Evictions += await writeNip17Cache(amberCacheKey, cache);
-            }
-            nip17CacheSize = Object.keys(cache).length;
+          // Per-signer NIP-17 decrypt-once ingest lives in inboxNip17Ingest
+          // (#283) so this hook stays under the file-size cap. All three
+          // signers feed the same engine; the dispatcher returns null when
+          // there's nothing to do (no wraps / nsec key unavailable), leaving
+          // the counters untouched exactly as the old inline chain did.
+          const nip17 =
+            refreshForSigner === 'nsec' ||
+            refreshForSigner === 'amber' ||
+            refreshForSigner === 'nip46'
+              ? await ingestInboxNip17ForSigner({
+                  signerType: refreshForSigner,
+                  ownerPubkey: refreshForPubkey,
+                  wraps: kind1059,
+                  passesFollowGate,
+                  bypassSkipSet,
+                  isColdStart,
+                  signal: effectiveSignal,
+                  onSkip,
+                  amberNip44DecryptSilent,
+                })
+              : null;
+          if (nip17) {
+            // No early return on abort: entries is [] when aborted, but
+            // nip17Stored counts rows persisted before the abort (F1, #849)
+            // and drives the productive-abort commit below.
+            entries.push(...nip17.entries);
+            nip17Hits = nip17.alreadyKnown;
+            nip17SkipHits = nip17.skipHits;
+            nip17Misses = nip17.misses;
+            nip17Stored = nip17.stored;
+            nip17YieldCount = nip17.yields;
+            if (nip17.amberPermission) setAmberNip44Permission(nip17.amberPermission);
           }
 
           // Identity-change guard: if the user logged out or switched signer
           // while we were mid-flight, don't leak these entries into a
-          // different session's state. Abort signal is treated the same way:
-          // if the navigating-away screen has signalled cancel, skip the
-          // commit so we don't pay the merge / persist cost.
+          // different session's state. This is a HARD return — never paint
+          // one session's plaintext into another.
           if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
-          if (signal?.aborted) return;
 
-          // PR B: merge cached-with-fresh, keep at most DM_INBOX_CAP
-          // entries (newest-first), then persist + update last-seen.
-          const merged = mergeInboxEntries(cachedInbox, entries, DM_INBOX_CAP);
+          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal is
+          // undefined (never aborts), so this guard is false and we always
+          // commit — the rebuild paints the freshly-decrypted inbox.
+          // For a WARM refresh, effectiveSignal IS the real signal: a tab-hop
+          // that aborted before decrypting anything fresh skips the commit,
+          // exactly as #412 intends (no merge / persist cost, next focus
+          // retries). A warm abort that DID persist fresh rows (k4 or NIP-17)
+          // still falls through so those idempotent rows paint via
+          // loadInboxEntries below instead of being stranded until a refocus.
+          const persistedFreshRows = nip17Stored > 0 || k4Rows.length > 0;
+          if (effectiveSignal?.aborted && !persistedFreshRows) return;
+
+          // Merge sources for the inbox (#848/#850): the encrypted store's
+          // indexed latest-per-conversation read (re-read AFTER the ingest so
+          // it includes this refresh's persisted rows; DB-known wraps /
+          // kind-4 no longer re-emit per-event entries) plus this refresh's
+          // fresh decrypts (which carry rumorId etc. the projection lacks).
+          // The plaintext summary blob is gone — the store is the only
+          // at-rest source. Keep at most DM_INBOX_CAP entries (newest-first).
+          const dbLatest = await loadInboxEntries(refreshForPubkey).catch(
+            () => [] as DmInboxEntry[],
+          );
+          const merged = mergeInboxEntries(dbLatest, entries, DM_INBOX_CAP);
           const filteredFinal = merged.filter((e) => passesFollowGate(e.partnerPubkey));
 
           // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
-          // The `nip17-cache` segment (#193) lets us see at a glance
-          // whether the LRU swap is keeping hot entries warm: a healthy
-          // long-running inbox should converge to hits >> misses with
-          // size pinned at the 5000 cap and a non-zero evictions counter
-          // each refresh once the cap is reached.
+          // The `nip17-store` segment shows the encrypted store doing its
+          // decrypt-once job: a healthy steady state is known >> misses
+          // with stored ≈ misses (every fresh decrypt persisted).
           console.log(
             `[Perf] refreshDmInbox: ` +
               `${(performance.now() - refreshStart).toFixed(0)}ms, ` +
-              `k4=${kind4.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
+              `k4=${kind4.length} (hits=${nip04CacheHits}, dbKnown=${nip04DbHits}, fresh=${nip04FreshDecrypts}), ` +
               `k1059=${kind1059.length}, ` +
               `since=${lastSeen ?? 0}, ` +
               `fresh=${entries.length}, ` +
@@ -697,17 +650,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               `rendered=${filteredFinal.length}`,
           );
           console.log(
-            `[Perf] nip17-cache: ` +
-              `hits=${nip17Hits}, ` +
+            `[Perf] nip17-store: ` +
+              `known=${nip17Hits}, ` +
+              `skipHits=${nip17SkipHits}, ` +
               `misses=${nip17Misses}, ` +
-              `evictions=${nip17Evictions}, ` +
-              `size=${nip17CacheSize}, ` +
-              `yields=${nip17YieldCount} (budget=${DECRYPT_FRAME_BUDGET_MS}ms, cap=${NIP17_LOOP_YIELD_EVERY})`,
+              `stored=${nip17Stored}, ` +
+              `dbInbox=${dbLatest.length}, ` +
+              `yields=${nip17YieldCount}`,
           );
 
           setDmInbox(filteredFinal);
 
-          // Persist merged list + new last-seen. Only kind-4 contributes
+          // Advance the kind-4 last-seen cursor (a bare unix timestamp — no
+          // plaintext; the decrypted content itself persists ONLY in the
+          // encrypted store now, #850). Only kind-4 contributes
           // here — NIP-59 wraps have randomized timestamps (~2 days in
           // either direction of the real publish time) for plausible
           // deniability, so wrap.created_at can't be used as a
@@ -716,18 +672,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // forward-dated ts, then cause subsequent kind-4 since-filters
           // to drop legitimate recent NIP-04 messages. fetchInboxDmEvents
           // already drops the `since` filter for kind-1059 entirely (see
-          // the matching comment there); the cache dedupes wraps by id.
+          // the matching comment there); the store dedupes wraps by id.
           const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
-          await Promise.all([
-            AsyncStorage.setItem(inboxCacheKey(refreshForPubkey), JSON.stringify(merged)).catch(
-              () => {},
-            ),
-            newLastSeen > (lastSeen ?? 0)
-              ? AsyncStorage.setItem(inboxLastSeenKey(refreshForPubkey), String(newLastSeen)).catch(
-                  () => {},
-                )
-              : Promise.resolve(),
-          ]);
+          if (newLastSeen > (lastSeen ?? 0)) {
+            await AsyncStorage.setItem(
+              inboxLastSeenKey(refreshForPubkey),
+              String(newLastSeen),
+            ).catch(() => {});
+          }
+          // A cold rebuild (effectiveSignal undefined) that reached here
+          // finished its backlog → claim the full cursor stamp. A WARM
+          // productive-but-aborted sweep painted from the DB but did NOT finish
+          // the backlog → leave refreshCompleted false so it gets the short
+          // abort-TTL and the next focus tops up (F1, #849).
+          if (!effectiveSignal?.aborted) refreshCompleted = true;
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
@@ -738,7 +696,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       dmInboxInFlight.current = { promise: task, includeNonFollows };
       try {
         await task;
-        dmInboxLastRefreshAt.current = performance.now();
+        // Stamp only for a refresh that COMPLETED its work — gate on
+        // `refreshCompleted`, not `signal.aborted` (see the helper). #788.
+        if (shouldStampCursor(!refreshCompleted)) {
+          dmInboxLastRefreshAt.current = performance.now();
+        }
       } finally {
         dmInboxInFlight.current = null;
         const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
@@ -748,6 +710,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           console.log(`[PerfBlock] refreshDmInbox: ${__perfBlockMs}ms`);
         }
       }
+
+      // Cold-start backfill (#751) — recent slice painted fast above; top up to
+      // the full backlog in the background (deferred + abortable). See module.
+      scheduleColdStartBackfill({
+        isColdStart,
+        signal,
+        includeNonFollows,
+        refreshRef: refreshDmInboxRef,
+      });
     },
     [
       pubkey,
@@ -759,6 +730,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       amberNip44DecryptSilent,
     ],
   );
+  // Keep the self-ref pointed at the latest refreshDmInbox closure.
+  refreshDmInboxRef.current = refreshDmInbox;
 
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);
@@ -771,8 +744,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // reconnected. Reading via ref keeps the gate fresh per event
   // without thrashing the subscription on every contacts update.
   const followPubkeysRef = useRef(followPubkeys);
+
+  // Follow-gate deferral (#851 F2). The buffer holds fresh inbound the live
+  // sub dropped while the post-switch follows list was still hydrating; the
+  // sub registers its replay function here. When `followPubkeys` updates we
+  // re-test the buffer and replay (surface + notify) any partner that now
+  // passes the gate. Buffer + replay are owned across sub re-opens via refs
+  // and reset on viewer change alongside `knownWrapIdsRef`.
+  const followGateBufferRef = useRef(createLiveSubFollowGateBuffer());
+  const deferredReplayRef = useRef<((item: DeferredFollowGateEntry) => void) | null>(null);
+
   useEffect(() => {
     followPubkeysRef.current = followPubkeys;
+    const replay = deferredReplayRef.current;
+    if (replay) followGateBufferRef.current.reevaluate(followPubkeys, replay);
   }, [followPubkeys]);
 
   // Idempotent — any DM-surface (Messages tab, ConversationScreen)
@@ -808,8 +793,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // Per-event handler:
   //  1. Dedupe against (a) a session-scoped `seen` set so the same
   //     wrap delivered by multiple relays is processed once, and
-  //     (b) the persisted Nip17CacheEntry cache so wraps previously
-  //     decrypted by `refreshDmInbox` short-circuit.
+  //     (b) the encrypted DM store's wrap-id index (#848) so wraps
+  //     previously decrypted by `refreshDmInbox` short-circuit.
   //  2. Decrypt with the active signer's NIP-17 helper — same code
   //     path used by `refreshDmInbox` (`unwrapWrapNsec` for nsec,
   //     `unwrapWrapViaNip44` + Amber silent-decrypt for Amber).
@@ -817,9 +802,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   //     rumors land in group storage and fire the existing
   //     `notifyGroupMessage` listener — open GroupConversationScreen
   //     re-loads automatically.
-  //  4. 1:1 rumors that pass the follow gate are written to the
-  //     persistent NIP-17 wrap cache (so the next inbox / thread open
-  //     can short-circuit), appended to `dmInbox` state, and
+  //  4. 1:1 rumors that pass the follow gate are upserted into the
+  //     encrypted DM store (so the next inbox / thread open can
+  //     short-circuit, #848), appended to `dmInbox` state, and
   //     broadcast to `dmMessageListeners` so an open
   //     ConversationScreen for that peer re-fetches.
   //
@@ -828,13 +813,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // cached or surfaced to dmInbox state. The dev-mode "All (dev)"
   // toggle still relies on the next pull-to-refresh to surface
   // unfollowed live wraps; live delivery for that view is a
-  // follow-up. Rationale: caching unfollowed plaintext on disk
+  // follow-up. Rationale: storing unfollowed plaintext on disk
   // violates the "B1 — never cache rumors from non-followed senders"
   // invariant in `refreshDmInbox`.
   //
-  // Writes to the wrap + inbox caches go through a serial queue to
-  // avoid racing with `refreshDmInbox` (both read-modify-write the
-  // same AsyncStorage blobs). The queue is per-effect-instance; the
+  // Store upserts + inbox-blob writes go through a serial queue to
+  // avoid racing with `refreshDmInbox` (both touch the same inbox
+  // summary blob). The queue is per-effect-instance; the
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
@@ -860,6 +845,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       followPubkeysRef,
       setDmInbox,
       setAmberNip44Permission,
+      followGateBuffer: followGateBufferRef.current,
+      setDeferredReplay: (fn) => {
+        deferredReplayRef.current = fn;
+      },
     });
   }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
@@ -868,8 +857,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     dmInboxLoading,
     refreshDmInbox,
     fetchConversation,
-    getCachedConversation,
+    loadInitialConversation,
     appendLocalDmMessage,
+    persistDeliveryStatuses,
     armLiveDmSub,
     amberNip44Permission,
     hydrateDmInboxFromCache,

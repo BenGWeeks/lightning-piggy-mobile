@@ -17,8 +17,10 @@ import {
   View,
 } from 'react-native';
 import { ShieldCheck, ShieldOff, ShieldQuestion, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { WotTier } from '../services/wotSettingsService';
 
@@ -45,6 +47,7 @@ interface TierRowProps {
 
 const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabled, onSelect }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const Icon = tier === 'friends' ? ShieldCheck : tier === 'fof' ? ShieldQuestion : ShieldOff;
   return (
@@ -59,7 +62,7 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
       testID={`wot-tier-${tier}-chip`}
       accessibilityRole="radio"
       accessibilityState={{ selected: active, disabled }}
-      accessibilityLabel={`${title}. ${disabled ? 'Locked. Stick to Friends for now.' : ''}`}
+      accessibilityLabel={`${title}. ${disabled ? t('webOfTrustBottomSheet.locked') : ''}`}
     >
       <View style={styles.tierIcon}>
         <Icon
@@ -81,6 +84,8 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
 
 const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wotTier, setWotTier } = useTrustGraph();
   // `activeTier` is what the picker renders as "checked". Defaults to
@@ -106,16 +111,27 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="wot-sheet-backdrop" />
-      <View style={styles.sheet} testID="wot-bottom-sheet">
+      {/* navigationBarTranslucent draws this bottom-anchored sheet behind
+          the Android nav bar; pad the base 28 by the bottom safe-area inset
+          so the Done button stays clear of 3-button navigation (0 under
+          gesture nav, so edge-to-edge is preserved there). */}
+      <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]} testID="wot-bottom-sheet">
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Web of Trust</Text>
+          <Text style={styles.title}>{t('webOfTrustBottomSheet.title')}</Text>
           <TouchableOpacity
             onPress={onClose}
             testID="wot-sheet-close"
-            accessibilityLabel="Close"
+            accessibilityLabel={t('webOfTrustBottomSheet.close')}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <X size={20} color={colors.textHeader} strokeWidth={2.5} />
@@ -123,40 +139,35 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
         </View>
 
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Text style={styles.explainer}>
-            We filter out unverified senders, cache hiders, and event organisers — anyone could
-            publish a phishing message or set up a physical lure, so by default you only see content
-            from people in your trust graph.
-          </Text>
+          <Text style={styles.explainer}>{t('webOfTrustBottomSheet.explainer')}</Text>
 
           <TierRow
             tier="friends"
-            title="Friends"
-            subtitle="Only people you follow."
+            title={t('webOfTrustBottomSheet.friendsTitle')}
+            subtitle={t('webOfTrustBottomSheet.friendsSubtitle')}
             active={activeTier === 'friends'}
             disabled={false}
             onSelect={() => handleSelect('friends')}
           />
           <TierRow
             tier="fof"
-            title="Friends of friends"
-            subtitle="Not yet implemented — coming soon. We're working out how to download and cache the extended graph without freezing the app."
+            title={t('webOfTrustBottomSheet.fofTitle')}
+            subtitle={t('webOfTrustBottomSheet.fofSubtitle')}
             active={false}
             disabled
             onSelect={() => {}}
           />
           <TierRow
             tier="all"
-            title="All"
-            subtitle="Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten."
+            title={t('webOfTrustBottomSheet.allTitle')}
+            subtitle={t('webOfTrustBottomSheet.allSubtitle')}
             active={activeTier === 'all'}
             disabled={false}
             onSelect={() => handleSelect('all')}
           />
 
           <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
-            Friends-of-friends is temporarily disabled while we rework the trust-graph compute
-            (#565). Friends is the safest feed; All is the broadest.
+            {t('webOfTrustBottomSheet.gateHint')}
           </Text>
 
           {/* The computing banner + fof meta row + error row hang off L2 state
@@ -169,9 +180,9 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
           style={styles.doneButton}
           onPress={onClose}
           testID="wot-sheet-done"
-          accessibilityLabel="Done"
+          accessibilityLabel={t('webOfTrustBottomSheet.done')}
         >
-          <Text style={styles.doneText}>Done</Text>
+          <Text style={styles.doneText}>{t('webOfTrustBottomSheet.done')}</Text>
         </TouchableOpacity>
       </View>
     </Modal>

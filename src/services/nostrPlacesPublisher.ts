@@ -1,5 +1,6 @@
 import type { Event as NostrEvent, Filter, VerifiedEvent } from 'nostr-tools';
 import { DEFAULT_RELAYS, pool, publishSignedEvent } from './nostrService';
+import { GC_RELAYS } from './geocacheRelays';
 import {
   GC_COMMENT_KIND,
   GC_FOUND_LOG_KIND,
@@ -11,6 +12,7 @@ import {
   type ParsedEvent,
 } from './nostrPlacesService';
 import { isDevLeftover } from './devEventDenylist';
+import { notifyOwnCachesChanged } from './ownCachesBus';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
  * matches VerifiedEvent's data fields without the runtime brand symbol
@@ -34,10 +36,30 @@ export interface SignedEventLike {
  * publisher through this module; tests only need the pure side.
  */
 
+/**
+ * Union the geo-cache backbone (`GC_RELAYS`) into whatever relays the
+ * caller passes, deduped. Every NIP-GC publish/read goes through here so
+ * mobile treasures always reach (and are read back from) exactly the
+ * relays treasures.to uses — `nos.lol`, Damus, ditto.pub, dreamith.to —
+ * even when the caller supplies the user's own NIP-65 / override relays
+ * (which would otherwise *replace* the defaults and silently exclude the
+ * Ditto search relays). Without GC_RELAYS the set degrades to whatever the
+ * caller passed; with it the backbone is guaranteed. See #907.
+ */
+const withGcRelays = (relays: string[] = GC_RELAYS): string[] => [
+  ...new Set([...relays, ...GC_RELAYS]),
+];
+
 export const publishCacheEvent = async (
   signed: SignedEventLike,
-  relays: string[] = DEFAULT_RELAYS,
-): Promise<void> => publishSignedEvent(signed, relays);
+  relays: string[] = GC_RELAYS,
+): Promise<void> => {
+  await publishSignedEvent(signed, withGcRelays(relays));
+  // Every own-cache mutation (create / edit / expire / NIP-09 delete)
+  // funnels through here — tell useCacheNotifications to re-arm its live
+  // sub now instead of waiting for the safety-net poll (#1016).
+  notifyOwnCachesChanged();
+};
 
 /**
  * Subscribe to nearby caches by geohash prefix. `prefixes` should
@@ -51,10 +73,11 @@ export const publishCacheEvent = async (
 export const subscribeNearbyCaches = (
   prefixes: string[],
   onEvent: (cache: ParsedCache) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
   filterExtras: Partial<Filter> = {},
 ): (() => void) => {
   if (prefixes.length === 0) return () => {};
+  relays = withGcRelays(relays);
   const filter: Filter = {
     kinds: [GC_LISTING_KIND],
     '#g': prefixes,
@@ -118,10 +141,10 @@ export const subscribeNearbyCaches = (
 export const subscribeFoundLogs = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord] };
-  const sub = pool.subscribeMany(relays, filter, {
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
   return () => sub.close();
@@ -135,11 +158,11 @@ export const subscribeFoundLogs = (
 export const subscribeFoundLogsByAuthors = (
   authors: string[],
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
 ): (() => void) => {
   if (authors.length === 0) return () => {};
   const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors };
-  const sub = pool.subscribeMany(relays, filter, {
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
   return () => sub.close();
@@ -148,10 +171,10 @@ export const subscribeFoundLogsByAuthors = (
 export const subscribeComments = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord] };
-  const sub = pool.subscribeMany(relays, filter, {
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
   return () => sub.close();
@@ -246,8 +269,9 @@ export const subscribeNearbyEvents = (
  */
 export const fetchCachesByAuthor = async (
   hiderPubkey: string,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
 ): Promise<ParsedCache[]> => {
+  relays = withGcRelays(relays);
   // Cap the relay query at 5 s via nostr-tools' built-in `maxWait` so a
   // slow relay doesn't pin pull-to-refresh in a "still refreshing"
   // state. Pre-fix we used Promise.race + setTimeout — but Hermes
@@ -285,13 +309,13 @@ export const fetchCachesByAuthor = async (
 export const fetchCache = async (
   hiderPubkey: string,
   d: string,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = GC_RELAYS,
 ): Promise<ParsedCache | null> => {
   // 5 s maxWait — same Hermes timer-starvation rationale as
   // fetchCachesByAuthor above. Without it a slow relay leaves
   // HuntPiggyDetailScreen / EventDetailScreen on a spinner indefinitely.
   const events = await pool.querySync(
-    relays,
+    withGcRelays(relays),
     {
       kinds: [GC_LISTING_KIND],
       authors: [hiderPubkey],

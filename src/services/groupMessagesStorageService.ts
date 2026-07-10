@@ -17,12 +17,14 @@ export interface GroupMessage {
   createdAt: number;
 }
 
-// Account scoping: keyed only by groupId, not by viewer pubkey. Cross-
-// account leak is prevented at logout by NostrContext.logout, which
-// scans AsyncStorage for keys starting with `group_messages_` and
-// removes them. Per-account namespacing tracked as a follow-up
-// alongside multi-account switching.
-const KEY = (groupId: string): string => `group_messages_${groupId}`;
+// Account scoping: keyed only by groupId, not by viewer pubkey. These
+// blobs hold decrypted group-chat plaintext, so to prevent a cross-account
+// privacy leak NostrContext.wipeAccountCaches scans AsyncStorage for keys
+// with the GROUP_MESSAGES_KEY_PREFIX and removes them on logout / account
+// wipe. Per-account namespacing tracked as a follow-up alongside
+// multi-account switching.
+export const GROUP_MESSAGES_KEY_PREFIX = 'group_messages_';
+const KEY = (groupId: string): string => `${GROUP_MESSAGES_KEY_PREFIX}${groupId}`;
 const CAP = 500;
 
 export async function loadGroupMessages(groupId: string): Promise<GroupMessage[]> {
@@ -93,8 +95,8 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
 
-// Scan AsyncStorage for every `group_messages_*` blob and return the
-// set of message ids that look like NIP-17 wrap ids (64-char hex —
+// Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
+// the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to
 // pre-seed `knownWrapIds` on cold start so the live DM sub doesn't
 // redundantly decrypt + re-route group wraps it already processed in
@@ -103,7 +105,7 @@ const WRAP_ID_PATTERN = /^[0-9a-f]{64}$/;
 export async function listPersistedGroupWrapIds(): Promise<string[]> {
   try {
     const keys = await AsyncStorage.getAllKeys();
-    const groupKeys = keys.filter((k) => k.startsWith('group_messages_'));
+    const groupKeys = keys.filter((k) => k.startsWith(GROUP_MESSAGES_KEY_PREFIX));
     if (groupKeys.length === 0) return [];
     const pairs = await AsyncStorage.multiGet(groupKeys);
     const ids: string[] = [];

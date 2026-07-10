@@ -6,6 +6,7 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { Alert } from '../../components/BrandedAlert';
 import { useThemeColors } from '../../contexts/ThemeContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import type { Palette } from '../../styles/palettes';
 import {
   DEFAULT_NEARBY_SETTINGS,
@@ -22,6 +23,7 @@ import {
 const RADIUS_PRESETS: NearbySettings['alertRadiusMeters'][] = [50, 100, 250, 500];
 
 const NearbyScreen: React.FC = () => {
+  const t = useTranslation();
   const colors = useThemeColors();
   const sharedStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -66,28 +68,26 @@ const NearbyScreen: React.FC = () => {
       const fg = await Location.requestForegroundPermissionsAsync();
       if (fg.status !== 'granted') {
         Alert.alert(
-          'Location permission required',
-          'Granting "While in use" location is the first step before we can ask for "Always".',
-          [{ text: 'OK' }],
+          t('nearbyScreen.locationPermissionTitle'),
+          t('nearbyScreen.locationPermissionMessage'),
+          [{ text: t('nearbyScreen.ok') }],
         );
         return;
       }
       const bg = await Location.requestBackgroundPermissionsAsync();
       if (bg.status !== 'granted') {
         Alert.alert(
-          'Background location required',
-          'Without "Always" location, we can\'t alert you near merchants while the app is in your pocket. Open Settings to enable it, or leave this feature off.',
-          [{ text: 'OK' }],
+          t('nearbyScreen.backgroundLocationTitle'),
+          t('nearbyScreen.backgroundLocationMessage'),
+          [{ text: t('nearbyScreen.ok') }],
         );
         return;
       }
       const notif = await Notifications.requestPermissionsAsync();
       if (notif.status !== 'granted') {
-        Alert.alert(
-          'Notifications required',
-          'Geofence alerts need notification permission so we can tell you when you walk past a merchant.',
-          [{ text: 'OK' }],
-        );
+        Alert.alert(t('nearbyScreen.notificationsTitle'), t('nearbyScreen.notificationsMessage'), [
+          { text: t('nearbyScreen.ok') },
+        ]);
         return;
       }
 
@@ -100,9 +100,9 @@ const NearbyScreen: React.FC = () => {
         // the persisted preference at OFF so isGeofencingActive() / the toggle
         // visual stay honest.
         Alert.alert(
-          'No nearby merchants',
-          "We couldn't find any Bitcoin-accepting merchants near your current location. Move closer to a city centre and toggle this on again.",
-          [{ text: 'OK' }],
+          t('nearbyScreen.noNearbyMerchantsTitle'),
+          t('nearbyScreen.noNearbyMerchantsMessage'),
+          [{ text: t('nearbyScreen.ok') }],
         );
         await persist({ ...settings, enabled: false });
         setActive(false);
@@ -111,11 +111,13 @@ const NearbyScreen: React.FC = () => {
       await persist({ ...settings, enabled: true });
       setActive(true);
     } catch (e) {
-      Alert.alert('Could not enable', (e as Error).message, [{ text: 'OK' }]);
+      Alert.alert(t('nearbyScreen.couldNotEnableTitle'), (e as Error).message, [
+        { text: t('nearbyScreen.ok') },
+      ]);
     } finally {
       setBusy(false);
     }
-  }, [busy, settings, persist]);
+  }, [busy, settings, persist, t]);
 
   const handleRadius = useCallback(
     async (m: NearbySettings['alertRadiusMeters']) => {
@@ -159,27 +161,27 @@ const NearbyScreen: React.FC = () => {
   );
 
   return (
-    <AccountScreenLayout title="Nearby merchants">
+    <AccountScreenLayout title={t('nearbyScreen.title')}>
       <View style={sharedStyles.card}>
         <View style={styles.row}>
           <View style={styles.rowMain}>
-            <Text style={styles.rowTitle}>Alert me near Bitcoin shops</Text>
+            <Text style={styles.rowTitle}>{t('nearbyScreen.alertMeNearShops')}</Text>
             <Text style={styles.rowSub}>
-              {active
-                ? "Geofencing is on — we'll alert you when you walk near a merchant."
-                : 'Off. Turn this on to opt in to background-location alerts.'}
+              {active ? t('nearbyScreen.geofencingOn') : t('nearbyScreen.geofencingOff')}
             </Text>
           </View>
           <Toggle
             on={settings.enabled}
             onPress={handleToggle}
             testID="settings-nearby-merchants-toggle"
-            label="Enable nearby merchant alerts"
+            label={t('nearbyScreen.enableAlertsLabel')}
           />
         </View>
       </View>
 
-      <Text style={[sharedStyles.sectionLabel, styles.sectionGap]}>Alert radius</Text>
+      <Text style={[sharedStyles.sectionLabel, styles.sectionGap]}>
+        {t('nearbyScreen.alertRadius')}
+      </Text>
       <View style={styles.chipRow}>
         {RADIUS_PRESETS.map((m) => {
           const selected = settings.alertRadiusMeters === m;
@@ -192,34 +194,33 @@ const NearbyScreen: React.FC = () => {
               accessibilityState={{ selected }}
               testID={`settings-alert-radius-${m}`}
             >
-              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{m} m</Text>
+              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                {t('nearbyScreen.radiusMeters', { meters: m })}
+              </Text>
             </TouchableOpacity>
           );
         })}
       </View>
 
-      <Text style={[sharedStyles.sectionLabel, styles.sectionGap]}>Quiet hours</Text>
+      <Text style={[sharedStyles.sectionLabel, styles.sectionGap]}>
+        {t('nearbyScreen.quietHours')}
+      </Text>
       <View style={sharedStyles.card}>
         <View style={styles.row}>
           <View style={styles.rowMain}>
-            <Text style={styles.rowTitle}>22:00 – 08:00 (local time)</Text>
-            <Text style={styles.rowSub}>
-              No alerts during the window even when you walk past a merchant.
-            </Text>
+            <Text style={styles.rowTitle}>{t('nearbyScreen.quietHoursWindow')}</Text>
+            <Text style={styles.rowSub}>{t('nearbyScreen.quietHoursSub')}</Text>
           </View>
           <Toggle
             on={settings.quietHoursEnabled}
             onPress={handleQuietHours}
             testID="settings-quiet-hours-toggle"
-            label="Quiet hours"
+            label={t('nearbyScreen.quietHours')}
           />
         </View>
       </View>
 
-      <Text style={styles.privacyHint}>
-        Geofences run on your device. Your live location never leaves your phone — we only send a
-        coarse bounding box (≈ 2 km) to BTC Map at most every 500 m of movement.
-      </Text>
+      <Text style={styles.privacyHint}>{t('nearbyScreen.privacyHint')}</Text>
     </AccountScreenLayout>
   );
 };
@@ -267,7 +268,8 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
     },
     chipTextSelected: {
-      color: colors.brandPink,
+      // Selected chip — purple accent (selected/active state convention).
+      color: colors.accentSecondary,
     },
     privacyHint: {
       marginTop: 24,

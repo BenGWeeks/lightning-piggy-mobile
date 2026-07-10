@@ -18,19 +18,27 @@ import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import { singleFlight } from '../utils/singleFlight';
-import { pickNewReceipts, settledIncomingHashes } from '../utils/incomingReceipts';
+import { settledIncomingHashes, shouldSeedBaseline } from '../utils/incomingReceipts';
+import { mapNwcTransactions, type NwcRawTransaction } from '../utils/nwcTransactions';
+import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { WalletLiveContext } from './WalletLiveContext';
+import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
+import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
+import type { IncomingPaymentSource } from './incomingPaymentSource';
 import {
   CardTheme,
   WalletMetadata,
   WalletState,
   WalletTransaction,
   ZapCounterpartyInfo,
-  walletLabel,
 } from '../types/wallet';
+import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
+import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
@@ -51,6 +59,14 @@ export interface IncomingPayment {
   // expectPayment (by lookup) and the transaction-list detector (by tx
   // identity). Kept nullable for backward-compat.
   paymentHash: string | null;
+  // Which rail delivered this credit. Lets the overlay surface a
+  // small visual distinction (#134) — on-chain receives include a
+  // mempool/confirmation hint subtitle so users know an unconfirmed
+  // tx isn't yet final, while lightning lands instantly settled.
+  // Shared `IncomingPaymentSource` union (not an inline literal) so the
+  // event and the overlay's `ReceiveSource` prop can't drift as new
+  // rails are added.
+  source: IncomingPaymentSource;
   // True when the receipt was found in an already-current transaction list, so
   // the post-receive refresh effect can skip a redundant list_transactions
   // round-trip (#655 review).
@@ -105,7 +121,6 @@ interface WalletContextType {
   // User prefs
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
-  btcPrice: number | null;
 
   // Wallet actions
   addNwcWallet: (
@@ -162,12 +177,6 @@ interface WalletContextType {
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
-  // Incoming payment event bus. Set whenever any connected wallet's
-  // balance goes UP; consumed by the app-root PaymentProgressOverlay
-  // so the celebration appears regardless of which screen is active.
-  lastIncomingPayment: IncomingPayment | null;
-  clearLastIncomingPayment: () => void;
-
   /**
    * Kick off aggressive 1 s polling for a specific NWC invoice for up
    * to `durationMs` (default 3 min). Called by ReceiveSheet when an
@@ -220,6 +229,10 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+// Live price/receive slices (#801) live in their own module; re-export the
+// consumer hook so the public surface stays at one path, like `useWallet`.
+export { useWalletLive } from './WalletLiveContext';
+
 // Persist a wallet's announced-receipt hashes so a payment is announced once,
 // EVER — not once per JS session. The in-memory set resets on every cold start
 // / Metro re-eval, and the tx cache it seeds from can be stale (missing a
@@ -252,6 +265,43 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so a flapping/stale balance can't re-announce the same payment (#653).
   // Seeded silently from existing history on first sight (no launch re-announce).
   const seenReceiptsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Wallet ids whose initial transaction fetch has already been kicked off, so
+  // the initial-fetch effect runs once per wallet rather than on every render
+  // that touches `wallets` (#725).
+  const initiallyFetchedRef = useRef<Set<string>>(new Set());
+
+  // Record a wallet's announced-receipt baseline in memory and (optionally) on
+  // disk — the "set the ref + persistSeenReceipts" pattern shared by the launch-
+  // hydration, identity-switch, and first-fetch baseline sites. `persist` is
+  // false only when the set was just read back from disk (no need to re-write).
+  const seedSeenReceipts = useCallback(
+    (walletId: string, seeded: Set<string>, persist = true): void => {
+      seenReceiptsRef.current.set(walletId, seeded);
+      if (persist) persistSeenReceipts(walletId, seeded);
+    },
+    [],
+  );
+
+  // Seed a wallet's announced-receipts set BEFORE the detector runs, on launch
+  // hydration / identity switch: prefer the persisted set, else baseline from
+  // cached history (a corrupt persisted value falls back to a fresh baseline).
+  // The in-memory set alone reset on every JS re-eval and re-announced a payment
+  // whose hash wasn't in the (possibly stale) tx cache (#653 follow-up).
+  const hydrateSeenReceipts = useCallback(
+    async (walletId: string, cachedTxs: readonly WalletTransaction[]): Promise<void> => {
+      try {
+        const seenRaw = await AsyncStorage.getItem(`seenReceipts_${walletId}`);
+        if (seenRaw) {
+          seedSeenReceipts(walletId, new Set<string>(JSON.parse(seenRaw) as string[]), false);
+        } else {
+          seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
+        }
+      } catch {
+        seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
+      }
+    },
+    [seedSeenReceipts],
+  );
 
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
@@ -287,7 +337,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
-    setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+    // No-op bail-out (unchanged poll → same `wallets` identity) lives in mergeWalletUpdate.
+    setWallets((prev) => mergeWalletUpdate(prev, walletId, updates));
     // Persist fresh balance to disk so the next cold start can hydrate
     // it instantly (vs paying ~9 s BDK.Wallet.create + Electrum.sync to
     // re-derive it). Fire-and-forget; failure mode is "next boot shows
@@ -435,25 +486,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } catch {
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
-            // Seed the announced-receipts set BEFORE the detector runs: prefer
-            // the persisted set, else baseline from cached history. In-memory
-            // alone reset on every JS re-eval and re-announced a payment whose
-            // hash wasn't in the (possibly stale) tx cache (#653 follow-up).
-            try {
-              const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
-              const seeded = seenRaw
-                ? new Set<string>(JSON.parse(seenRaw) as string[])
-                : settledIncomingHashes(cachedTxs);
-              seenReceiptsRef.current.set(w.id, seeded);
-              if (!seenRaw) persistSeenReceipts(w.id, seeded);
-            } catch {
-              // Corrupt persisted value — overwrite with a fresh baseline so the
-              // next cold start doesn't keep hitting this catch (and possibly
-              // re-announcing off a stale tx cache).
-              const seeded = settledIncomingHashes(cachedTxs);
-              seenReceiptsRef.current.set(w.id, seeded);
-              persistSeenReceipts(w.id, seeded);
-            }
+            // Seed the announced-receipts set BEFORE the detector runs.
+            await hydrateSeenReceipts(w.id, cachedTxs);
             return {
               ...w,
               isConnected: false,
@@ -568,6 +602,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsLoading(false);
       }
     })();
+    // Mount-once startup. `hydrateSeenReceipts` is a stable useCallback; adding
+    // it would (wrongly) re-run the whole startup hydration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchPrice]);
 
   // Re-hydrate wallets when the active Nostr identity changes (#288).
@@ -622,20 +659,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               }
               // Seed the announced-receipts set before the detector runs (see
               // the startup-hydration path for the rationale).
-              try {
-                const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
-                const seeded = seenRaw
-                  ? new Set<string>(JSON.parse(seenRaw) as string[])
-                  : settledIncomingHashes(cachedTxs);
-                seenReceiptsRef.current.set(w.id, seeded);
-                if (!seenRaw) persistSeenReceipts(w.id, seeded);
-              } catch {
-                // Corrupt persisted value — overwrite with a fresh baseline (see
-                // the startup-hydration path for the rationale).
-                const seeded = settledIncomingHashes(cachedTxs);
-                seenReceiptsRef.current.set(w.id, seeded);
-                persistSeenReceipts(w.id, seeded);
-              }
+              await hydrateSeenReceipts(w.id, cachedTxs);
               return {
                 ...w,
                 isConnected: false,
@@ -695,6 +719,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       cancelled = true;
       unsubscribe();
     };
+    // Subscribe-once effect; `hydrateSeenReceipts` is a stable useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Refresh BTC price every 5 minutes
@@ -759,11 +785,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
           // Sync stored state to relay *responsiveness* (does it answer?), not
           // connect()'s socket-level success — so a dead relay stays
-          // Disconnected instead of flapping back to Connected (#654). Write
-          // only on change to avoid needless re-renders.
-          const responsive = nwcService.isWalletConnected(w.id);
-          if (responsive !== w.isConnected) {
-            updateWalletInState(w.id, { isConnected: responsive });
+          // Disconnected instead of flapping back to Connected (#654). Also
+          // surface the tri-state health so the card can show amber "Not
+          // responding" when the socket is up but the relay is parked /
+          // rate-limited (#786). Write only on change to avoid re-renders.
+          const isConnected = nwcService.isWalletConnected(w.id);
+          // getWalletHealth needs the SOCKET-only state to tell amber
+          // "Not responding" (socket up, relay parked) from red "Disconnected"
+          // (socket down) — isWalletConnected is already false for the degraded
+          // case, which would force red instead of amber (#786 review).
+          const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
+          if (isConnected !== w.isConnected || health !== w.connectionHealth) {
+            updateWalletInState(w.id, { isConnected, connectionHealth: health });
           }
         }
       } finally {
@@ -967,9 +1000,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.deleteCoinosRecovery(walletId);
       }
 
+      await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
       const currentList = await walletStorage.getWalletList();
-      const updated = currentList.filter((w) => w.id !== walletId);
-      await walletStorage.saveWalletList(updated);
+      await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
 
       setWallets((prev) => {
         const remaining = prev.filter((w) => w.id !== walletId);
@@ -1068,6 +1101,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!wallet) return;
 
       try {
+        // Load swap-meta before mapping so swap legs tag on the first fetch
+        // after launch (getSwapMeta is sync), not a refresh later (#895/#898).
+        await swapRecoveryService.ensureSwapMetaLoaded();
         let txs: WalletTransaction[];
         if (wallet.walletType === 'onchain') {
           // Single sync for both balance + transactions (avoids double Electrum sync)
@@ -1075,79 +1111,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (result.balance !== null) {
             updateWalletInState(walletId, { balance: result.balance });
           }
-          txs = result.transactions.map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.confirmed ? (tx.type === 'incoming' ? 'Received' : 'Sent') : 'Pending',
-            settled_at: tx.timestamp,
-            created_at: tx.timestamp,
-            blockHeight: tx.blockHeight,
-            txid: tx.txid,
-          }));
+          // mapOnchainTransactions tags Boltz swap legs by txid (#895) and
+          // preserves optimistic swap placeholder rows across the refresh (#896).
+          const existingOnchain =
+            walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
+          txs = mapOnchainTransactions(result.transactions, existingOnchain);
         } else {
           const raw = await nwcService.listTransactions(walletId);
-          // Preserve any previously resolved zap sender info so a refresh
-          // doesn't re-trigger relay lookups for transactions we've already
-          // attributed. Also preserves optimistic counterparty entries
-          // written at pay-time (see SendSheet) so the zap card doesn't
-          // flicker out when the LNbits refresh lands.
+          // Carries forward resolved zap-counterparties + optimistic rows the
+          // server doesn't round-trip (see mapNwcTransactions).
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
-          const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
-          for (const prev of existing) {
-            if (prev.paymentHash && prev.zapCounterparty !== undefined) {
-              counterpartyByHash.set(prev.paymentHash, prev.zapCounterparty);
-            }
-          }
-          type NwcTx = {
-            type: 'incoming' | 'outgoing';
-            amount: number;
-            description?: string | null;
-            settled_at?: number | null;
-            created_at?: number | null;
-            invoice?: string;
-            payment_hash?: string;
-            preimage?: string;
-            fees_paid?: number;
-          };
-          txs = (raw as NwcTx[]).map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.description ?? undefined,
-            settled_at: tx.settled_at ?? undefined,
-            created_at: tx.created_at ?? undefined,
-            bolt11: tx.invoice,
-            invoice: tx.invoice,
-            paymentHash: tx.payment_hash,
-            preimage: tx.preimage,
-            // NWC reports fees in msats; surface as sats for display.
-            feesSats:
-              typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
-            zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
-          }));
-          // Preserve optimistic rows that SendSheet inserted at pay-time but
-          // LNbits hasn't flushed into its own ledger yet. Without this the
-          // freshly-sent zap would disappear from the conversation thread on
-          // the very next refresh, then reappear a second or two later when
-          // LNbits catches up. Only rows marked `optimistic` are preserved —
-          // the matching uses `paymentHash + type` because a self-pay produces
-          // both an incoming and an outgoing leg with the same hash; keying on
-          // hash alone would drop our optimistic outgoing leg as soon as the
-          // incoming leg came back from the server. The `optimistic` flag also
-          // scopes preservation to newly-inserted rows, so older historical
-          // txs that fall off the listTransactions window aren't regrown.
-          const returnedKeys = new Set(
-            txs.filter((t) => !!t.paymentHash).map((t) => `${t.type}:${t.paymentHash}`),
-          );
-          const stillPending = existing.filter(
-            (t) => t.optimistic && t.paymentHash && !returnedKeys.has(`${t.type}:${t.paymentHash}`),
-          );
-          if (stillPending.length > 0) {
-            txs = [...stillPending, ...txs].sort(
-              (a, b) => (b.settled_at ?? b.created_at ?? 0) - (a.settled_at ?? a.created_at ?? 0),
-            );
-          }
+          txs = mapNwcTransactions(raw as NwcRawTransaction[], existing);
         }
         updateWalletInState(walletId, { transactions: txs });
+
+        // First fetch for this wallet (e.g. a freshly-added NWC wallet, whose
+        // history isn't loaded on connect): seed the announced-receipts baseline
+        // from the *fetched* history so the detector can't announce it as new
+        // (the empty-baseline race, #725 — see shouldSeedBaseline).
+        if (shouldSeedBaseline(seenReceiptsRef.current.get(walletId))) {
+          seedSeenReceipts(walletId, settledIncomingHashes(txs));
+        }
 
         // Persist to AsyncStorage for fast loading on next startup
         await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
@@ -1156,9 +1140,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // transactions that haven't been resolved yet. `force` (set by
         // an explicit pull-to-refresh) bypasses the fingerprint skip so
         // the resolver always does a full pass — see resolveZapSenders.
-        resolveZapSendersRef
-          .current?.(walletId, { force: opts?.force })
-          .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        // Deferred one macrotask so the resolver's `mergeResolverResults`
+        // re-render burst can't land in the same event-loop tick as the
+        // `updateWalletInState` commit above — that tick is where the
+        // incoming-payment overlay's dismiss tap was getting queued (#828).
+        setTimeout(() => {
+          resolveZapSendersRef
+            .current?.(walletId, { force: opts?.force })
+            ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
+        }, 0);
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
@@ -1166,7 +1156,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
     // the list short means callers that capture this function (e.g. SendSheet's
     // post-pay refresh IIFE) hold onto a stable reference across renders.
-    [updateWalletInState],
+    [updateWalletInState, seedSeenReceipts],
   );
 
   /**
@@ -1219,29 +1209,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           zapResolverControllers.delete(walletId);
         }
       };
-
-      const userPubkey = nostrService.getCurrentUserPubkey();
-      // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
-      // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
-      // Self-hosted LNbits typically tags receipts with the server's pubkey,
-      // not the user's.
-      const recipients: string[] = [];
-      if (userPubkey) recipients.push(userPubkey);
-      const lud16s = new Set<string>();
-      const currentWallet = walletsRef.current.find((w) => w.id === walletId);
-      if (currentWallet?.lightningAddress) lud16s.add(currentWallet.lightningAddress);
-      for (const lud16 of lud16s) {
-        const pk = await resolveLud16ToNostrPubkey(lud16);
-        if (pk) recipients.push(pk);
-      }
-      if (recipients.length === 0) {
-        releaseController();
-        return;
-      }
-      if (signal.aborted) {
-        releaseController();
-        return;
-      }
 
       // Snapshot the pending list via a setter so we always read the latest
       // transactions without having to thread a ref through this callback.
@@ -1302,6 +1269,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
         releaseController();
       };
+
+      // Recipient pubkeys for the `#p` filter — resolved AFTER the pending/
+      // fingerprint short-circuits so the common no-op balance tick never pays
+      // the resolveLud16ToNostrPubkey round-trip. userPubkey reused below.
+      const userPubkey = nostrService.getCurrentUserPubkey();
+      const recipients = await collectZapRecipientPubkeys(
+        userPubkey,
+        walletsRef.current.find((w) => w.id === walletId)?.lightningAddress,
+        resolveLud16ToNostrPubkey,
+      );
+      if (recipients.length === 0 || signal.aborted) {
+        releaseController();
+        return;
+      }
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
@@ -1842,6 +1823,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 amountSats: expectedAmountSats,
                 at: Date.now(),
                 paymentHash,
+                // expectPayment is invoice-poll based — only ever wired
+                // up by the Lightning ReceiveSheet. On-chain receives
+                // arrive via the balance-diff path below.
+                source: 'lightning',
               });
             }
             stopExpectedPayment();
@@ -1898,9 +1883,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // refresh here would be a redundant list_transactions round-trip. Only the
     // expectPayment path needs it (the list may not yet include the settle).
     if (lastIncomingPayment.fromTxList) return;
-    fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
-      // Non-fatal: next organic refresh will pick the tx up.
-    });
+    const walletId = lastIncomingPayment.walletId;
+    // Defer past the interaction frame so the overlay's dismiss tap is serviced
+    // before this heavy refresh runs on the JS thread (#859, #828).
+    const handle = deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId));
+    return () => handle.cancel();
     // Intentionally only fire on `lastIncomingPayment` changes; the
     // callback identity is stable enough across renders that adding it
     // would double-fetch on unrelated renders.
@@ -1922,77 +1909,51 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         AsyncStorage.removeItem(`seenReceipts_${id}`).catch(() => {});
       }
 
+    const handles: { cancel: () => void }[] = [];
     for (const wallet of wallets) {
       const bal = wallet.balance;
       if (bal === null || bal === undefined) continue;
       const prev = baselines.get(wallet.id);
       baselines.set(wallet.id, bal);
       if (prev !== undefined && bal > prev) {
-        void fetchTransactionsForWallet(wallet.id).catch(() => {});
+        // A balance bump is when the receive overlay pops — defer the refresh
+        // off the interaction path so the dismiss tap stays responsive (#859).
+        const walletId = wallet.id;
+        handles.push(deferPostPaymentRefresh(() => fetchTransactionsForWallet(walletId)));
       }
     }
+    return () => handles.forEach((h) => h.cancel());
     // fetchTransactionsForWallet is a stable useCallback; omitting it from deps
     // avoids re-running on unrelated renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets]);
 
-  // Receive detector. Announces each settled incoming payment exactly once,
-  // keyed by payment_hash — so a flapping / stale balance can't re-announce the
-  // same payment (#653). First sight of a wallet seeds the seen-set from its
-  // (cache-hydrated) history: a silent baseline, so launch doesn't re-announce
-  // past receives. Lives in the context so the overlay pops on any screen.
+  // Build the transaction list once per wallet when it first appears in state —
+  // an effect (not a synchronous call in the add paths) so it runs AFTER the
+  // wallet is committed and walletsRef.current includes it; otherwise
+  // fetchTransactionsForWallet early-returns on the stale ref (#725). Only fetch
+  // wallets whose list wasn't hydrated from cache (freshly added → empty), so a
+  // launch with cached history doesn't trigger a redundant refresh storm.
   useEffect(() => {
-    // Mark every new receipt seen (so none re-announces on a later refresh), but
-    // announce only ONE per render: the overlay shows a single payment and
-    // setLastIncomingPayment is one state value — calling it in a loop would
-    // batch and keep only the last, dropping the rest (#655 review). Pick the
-    // newest by settled_at, deterministically, across all wallets.
-    let newest: {
-      walletId: string;
-      amountSats: number;
-      paymentHash: string;
-      settledAt: number;
-    } | null = null;
-    let newestLabel = '';
-    for (const wallet of wallets) {
-      const txns = wallet.transactions ?? [];
-      const seen = seenReceiptsRef.current.get(wallet.id);
-      if (seen === undefined) {
-        // Newly-added wallet (hydration already seeded existing ones): baseline
-        // its history silently and persist so it survives the next re-eval.
-        const seeded = settledIncomingHashes(txns);
-        seenReceiptsRef.current.set(wallet.id, seeded);
-        persistSeenReceipts(wallet.id, seeded);
-        continue;
+    for (const w of wallets) {
+      if (initiallyFetchedRef.current.has(w.id)) continue;
+      initiallyFetchedRef.current.add(w.id);
+      if ((w.transactions?.length ?? 0) === 0) {
+        void fetchTransactionsForWallet(w.id, { force: true }).catch(() => {});
       }
-      let changed = false;
-      for (const receipt of pickNewReceipts(txns, seen)) {
-        seen.add(receipt.paymentHash);
-        changed = true;
-        if (!newest || receipt.settledAt > newest.settledAt) {
-          newest = { walletId: wallet.id, ...receipt };
-          newestLabel = walletLabel(wallet);
-        }
-      }
-      // Persist the moment a new receipt is seen so a reload before the next
-      // write can't re-announce it.
-      if (changed) persistSeenReceipts(wallet.id, seen);
     }
-    if (newest) {
-      if (__DEV__)
-        console.log(
-          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newestLabel} (${newest.paymentHash.slice(0, 12)}…)`,
-        );
-      setLastIncomingPayment({
-        walletId: newest.walletId,
-        amountSats: newest.amountSats,
-        at: Date.now(),
-        paymentHash: newest.paymentHash,
-        // Already detected from a current tx list — skip the redundant refresh.
-        fromTxList: true,
-      });
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallets]);
+
+  // Receive detector — announces each settled incoming payment exactly once
+  // across all wallets. Extracted into its own hook (WalletContext is over-cap);
+  // #134 threads the on-chain/lightning `source` through it for the overlay hint.
+  useIncomingReceiveAnnouncer({
+    wallets,
+    seenReceiptsRef,
+    persistSeenReceipts,
+    setLastIncomingPayment,
+  });
 
   // Keep the active NWC wallet's balance in rough sync so the global
   // overlay pops for *any* incoming payment — not just ones the user
@@ -2007,9 +1968,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   //     fast poll (1 s for 3 min) takes over when the user is
   //     *actively* waiting on a specific invoice.
   //
-  // On-chain is skipped — BDK sync is expensive and not safe to run
-  // every 30 s; #134 tracks the on-chain variant of this coverage.
-  // True background / app-closed delivery needs OS push (#45).
+  // On-chain has its own gentler coverage in useOnchainIncomingPoll —
+  // BDK / Electrum sync is too expensive for this 30 s cadence. True
+  // background / app-closed delivery still needs OS push (#45).
   // Track the active wallet's connection state as an explicit dep so
   // the poll starts/stops when a wallet reconnects without the active
   // id changing. (Previous version only re-ran on `activeWalletId`
@@ -2079,6 +2040,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [activeWalletId, activeWalletConnected, updateWalletInState, balancePollDemand]);
 
+  // On-chain incoming-payment coverage (#134). Extracted into its own
+  // hook so this over-cap context doesn't grow — see
+  // useOnchainIncomingPoll for the full rationale (gentle 2-min cadence,
+  // foreground-resume one-shot, all-wallet sweep). It refreshes on-chain
+  // balances, which trips the same balance-diff receive detector above.
+  useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInState });
+
   // Stable context value — without `useMemo` here the inline `{{...}}`
   // literal produced a fresh object identity on every render of
   // `WalletProvider`, so every consumer of `useWallet()` re-rendered
@@ -2097,7 +2065,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2115,8 +2082,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
       isConnected,
@@ -2136,7 +2101,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       walletsHydrated,
       currency,
       setCurrency,
-      btcPrice,
       addNwcWallet,
       addOnchainWallet,
       addHotWallet,
@@ -2154,14 +2118,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fetchTransactionsForWallet,
       addPendingTransaction,
       getReceiveAddress,
-      lastIncomingPayment,
-      clearLastIncomingPayment,
       expectPayment,
       requestBalancePoll,
     ],
   );
 
-  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
+  // Sibling value carrying the high-frequency price/receive slices (#801).
+  // Memoised separately so a fiat-price poll or a settled receive rebuilds only
+  // this — not `contextValue` — and only `useWalletLive()` consumers re-render.
+  const walletLiveValue = useMemo(
+    () => ({ btcPrice, lastIncomingPayment, clearLastIncomingPayment }),
+    [btcPrice, lastIncomingPayment, clearLastIncomingPayment],
+  );
+
+  return (
+    <WalletContext.Provider value={contextValue}>
+      <WalletLiveContext.Provider value={walletLiveValue}>{children}</WalletLiveContext.Provider>
+    </WalletContext.Provider>
+  );
 };
 
 export function useWallet() {

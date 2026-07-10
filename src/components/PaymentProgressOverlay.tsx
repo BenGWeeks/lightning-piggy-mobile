@@ -27,7 +27,11 @@ import Animated, {
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { useSendingAnimation } from '../contexts/SendingAnimationContext';
+import LightningOverlay from './LightningOverlay';
 import { lightPalette, type Palette } from '../styles/palettes';
+import type { IncomingPaymentSource } from '../contexts/incomingPaymentSource';
 
 export type PaymentProgressState =
   | 'sending'
@@ -40,6 +44,12 @@ export type PaymentProgressState =
   | 'error'
   | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
+/** Which rail delivered an incoming payment — used by the receive
+ * overlay to show a small hint after the amount (e.g. "1 confirmation
+ * pending" for on-chain). Defaults to lightning when omitted. #134.
+ * Aliases the shared `IncomingPaymentSource` union so the overlay prop
+ * and the WalletContext event can't drift as new rails are added. */
+export type ReceiveSource = IncomingPaymentSource;
 
 interface Props {
   state: PaymentProgressState;
@@ -47,11 +57,18 @@ interface Props {
   amountSats?: number;
   recipientName?: string;
   errorMessage?: string;
+  /** Only meaningful when `direction === 'receive'`. */
+  receiveSource?: ReceiveSource;
   onDismiss: () => void;
   /** If provided, a "Cancel" link renders beneath the spinner during
    * the `sending` state. Used to abort long-running NWC payments when
    * the relay is unreachable (see #175). */
   onCancel?: () => void;
+  /** When the in-flight payment is a Boltz swap (e.g. Lightning → on-chain
+   * via a reverse swap), the `in-flight-extended` state names it as a swap
+   * and explains swaps take longer — instead of the generic copy used for a
+   * plain Lightning send that's slow to confirm. */
+  inFlightIsSwap?: boolean;
 }
 
 const BUBBLE_COUNT = 140;
@@ -293,12 +310,18 @@ export default function PaymentProgressOverlay({
   amountSats,
   recipientName,
   errorMessage,
+  receiveSource,
   onDismiss,
   onCancel,
+  inFlightIsSwap = false,
 }: Props) {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
+  // Which send animation the user picked in Appearance. Only affects the
+  // outgoing (send) particle layer; receive keeps its confetti burst.
+  const { preference: sendingAnimation } = useSendingAnimation();
 
   // Keep the overlay mounted across `hidden` so bubbles don't flash
   // when state flips back to sending mid-flow. We drive the Modal's
@@ -400,41 +423,63 @@ export default function PaymentProgressOverlay({
 
   const formattedAmount =
     typeof amountSats === 'number' && amountSats > 0
-      ? `${amountSats.toLocaleString()} sats`
+      ? t('paymentProgressOverlay.amountSats', { amount: amountSats.toLocaleString() })
       : undefined;
 
   const isReceive = direction === 'receive';
-  let title = isReceive ? 'Waiting for payment…' : 'Sending payment…';
+  let title = isReceive
+    ? t('paymentProgressOverlay.waitingTitle')
+    : t('paymentProgressOverlay.sendingTitle');
   let subtitle: string | undefined = recipientName
     ? isReceive
-      ? `from ${recipientName}`
-      : `to ${recipientName}`
+      ? t('paymentProgressOverlay.fromRecipient', { name: recipientName })
+      : t('paymentProgressOverlay.toRecipient', { name: recipientName })
     : formattedAmount;
   if (state === 'success') {
-    title = isReceive ? 'Payment received!' : 'Payment sent!';
+    title = isReceive
+      ? t('paymentProgressOverlay.receivedTitle')
+      : t('paymentProgressOverlay.sentTitle');
     subtitle = formattedAmount
       ? recipientName
         ? isReceive
-          ? `${formattedAmount} from ${recipientName}`
-          : `${formattedAmount} to ${recipientName}`
+          ? t('paymentProgressOverlay.amountFromRecipient', {
+              amount: formattedAmount,
+              name: recipientName,
+            })
+          : t('paymentProgressOverlay.amountToRecipient', {
+              amount: formattedAmount,
+              name: recipientName,
+            })
         : formattedAmount
       : recipientName
         ? isReceive
-          ? `from ${recipientName}`
-          : `to ${recipientName}`
+          ? t('paymentProgressOverlay.fromRecipient', { name: recipientName })
+          : t('paymentProgressOverlay.toRecipient', { name: recipientName })
         : undefined;
   } else if (state === 'connection-lost') {
-    title = 'Connection lost';
-    subtitle =
-      "We couldn't reach your wallet to confirm. Your payment may still have gone through — check your balance before trying again.";
+    title = t('paymentProgressOverlay.connectionLostTitle');
+    subtitle = t('paymentProgressOverlay.connectionLostSubtitle');
   } else if (state === 'error') {
-    title = 'Payment failed';
+    title = t('paymentProgressOverlay.failedTitle');
     subtitle = humanizedError.message;
   } else if (state === 'in-flight-extended') {
-    title = 'Still in flight';
-    subtitle =
-      'Lightning payments via bridge nodes can take 1–2 min. The result will appear in your transactions once the network settles.';
+    if (inFlightIsSwap) {
+      title = t('paymentProgressOverlay.swapInProgressTitle');
+      subtitle = t('paymentProgressOverlay.swapInProgressSubtitle');
+    } else {
+      title = t('paymentProgressOverlay.stillInFlightTitle');
+      subtitle = t('paymentProgressOverlay.stillInFlightSubtitle');
+    }
   }
+
+  // On-chain incoming payments are detected at the mempool stage
+  // (see WalletContext on-chain poll, #134). Surface a small hint so
+  // users understand the credit is unconfirmed — the celebration is
+  // informational, not a balance commitment.
+  const onchainHint =
+    isReceive && state === 'success' && receiveSource === 'onchain'
+      ? t('paymentProgressOverlay.onchainHint')
+      : undefined;
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
   // — passing `undefined` intermittently can warn and makes the button
@@ -453,36 +498,44 @@ export default function PaymentProgressOverlay({
       visible={visible}
       transparent
       statusBarTranslucent
+      navigationBarTranslucent
       animationType="fade"
       onRequestClose={handleRequestClose}
     >
       <View style={styles.root}>
         {/* Particle layer renders BEHIND the card — later siblings stack
          *  above earlier ones in RN, so this block must come first.
-         *  Send = pink bubbles rising; Receive = radial confetti burst
-         *  from card centre, so pieces appear to launch out from behind
-         *  the card and fly past its edges. */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {isReceive
-            ? confettiSpecs.map((spec) => (
-                <Confetti
-                  key={spec.index}
-                  spec={spec}
-                  armed={confettiArmed}
-                  originX={width / 2}
-                  originY={height / 2}
-                />
-              ))
-            : bubbleSpecs.map((spec) => (
-                <Bubble
-                  key={spec.index}
-                  spec={spec}
-                  colorProgress={colorProgress}
-                  screenWidth={width}
-                  screenHeight={height}
-                />
-              ))}
-        </View>
+         *  Receive = radial confetti burst from card centre. Send respects
+         *  the Appearance "Sending animation" setting: bubbles (default) or
+         *  the procedural Skia lightning. Both send variants morph purple →
+         *  green on success via the same `colorProgress` driver. */}
+        {isReceive ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {confettiSpecs.map((spec) => (
+              <Confetti
+                key={spec.index}
+                spec={spec}
+                armed={confettiArmed}
+                originX={width / 2}
+                originY={height / 2}
+              />
+            ))}
+          </View>
+        ) : sendingAnimation === 'lightning' ? (
+          <LightningOverlay progress={colorProgress} width={width} height={height} />
+        ) : (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {bubbleSpecs.map((spec) => (
+              <Bubble
+                key={spec.index}
+                spec={spec}
+                colorProgress={colorProgress}
+                screenWidth={width}
+                screenHeight={height}
+              />
+            ))}
+          </View>
+        )}
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
           {showSpinner && (
@@ -506,6 +559,11 @@ export default function PaymentProgressOverlay({
 
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {onchainHint ? (
+            <Text style={styles.hint} testID="payment-overlay-onchain-hint">
+              {onchainHint}
+            </Text>
+          ) : null}
 
           {/* Error detail toggle: the humanised subtitle is shown by
            *  default; tapping "Show details" reveals the raw error for
@@ -525,11 +583,17 @@ export default function PaymentProgressOverlay({
               <TouchableOpacity
                 onPress={() => setShowDetails((prev) => !prev)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={showDetails ? 'Hide error details' : 'Show error details'}
+                accessibilityLabel={
+                  showDetails
+                    ? t('paymentProgressOverlay.hideDetailsA11y')
+                    : t('paymentProgressOverlay.showDetailsA11y')
+                }
                 testID="payment-overlay-details-toggle"
               >
                 <Text style={styles.detailsToggle}>
-                  {showDetails ? 'Hide details' : 'Show details'}
+                  {showDetails
+                    ? t('paymentProgressOverlay.hideDetails')
+                    : t('paymentProgressOverlay.showDetails')}
                 </Text>
               </TouchableOpacity>
             </>
@@ -547,17 +611,17 @@ export default function PaymentProgressOverlay({
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel={
                 state === 'in-flight-extended'
-                  ? 'Continue in background'
-                  : 'Dismiss payment confirmation'
+                  ? t('paymentProgressOverlay.continueInBackground')
+                  : t('paymentProgressOverlay.dismissConfirmationA11y')
               }
               testID="payment-overlay-ok"
             >
               <Text style={styles.okButtonText}>
                 {state === 'in-flight-extended'
-                  ? 'Continue in background'
+                  ? t('paymentProgressOverlay.continueInBackground')
                   : state === 'error'
-                    ? 'Dismiss'
-                    : 'OK'}
+                    ? t('paymentProgressOverlay.dismiss')
+                    : t('paymentProgressOverlay.ok')}
               </Text>
             </TouchableOpacity>
           ) : onCancel ? (
@@ -565,10 +629,10 @@ export default function PaymentProgressOverlay({
               style={styles.cancelButton}
               onPress={onCancel}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Cancel payment"
+              accessibilityLabel={t('paymentProgressOverlay.cancelPaymentA11y')}
               testID="payment-overlay-cancel"
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('paymentProgressOverlay.cancel')}</Text>
             </TouchableOpacity>
           ) : null}
         </Animated.View>
@@ -644,6 +708,17 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       color: colors.textSupplementary,
       textAlign: 'center',
+    },
+    hint: {
+      // Used for the on-chain mempool-pending tag (#134). Sits below
+      // the subtitle, brand-pink so it reads as a status flag rather
+      // than another fact about the payment.
+      marginTop: -6,
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.brandPink,
+      textAlign: 'center',
+      letterSpacing: 0.3,
     },
     okButton: {
       marginTop: 12,

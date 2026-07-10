@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 import { Bitcoin, MapPin, PiggyBank, Zap } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 
@@ -55,6 +57,8 @@ export const LegendSheet: React.FC<Props> = ({
   availableCategories,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const translateY = useRef(new Animated.Value(0)).current;
   const responder = useRef(
@@ -104,10 +108,23 @@ export const LegendSheet: React.FC<Props> = ({
   }, [availableCategories, placesVisible]);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop} testID="legend-sheet">
         <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+        {/* navigationBarTranslucent draws this bottom-docked sheet behind the
+            Android nav bar; pad the base 32 by the bottom safe-area inset so
+            the last legend rows stay clear of 3-button navigation (0 under
+            gesture nav, so edge-to-edge is preserved there). */}
+        <Animated.View
+          style={[styles.sheet, { paddingBottom: 32 + insets.bottom, transform: [{ translateY }] }]}
+        >
           {/* The whole header strip — grabber pill, the "Pin types"
               section title, AND a tall transparent area around them —
               is one big drag target so the user doesn't have to aim
@@ -115,7 +132,7 @@ export const LegendSheet: React.FC<Props> = ({
               lives in the ScrollView and scrolls independently. */}
           <View {...responder.panHandlers} style={styles.grabberZone} testID="legend-sheet-grabber">
             <View style={styles.handle} />
-            <Text style={styles.sectionTitle}>Pin types</Text>
+            <Text style={styles.sectionTitle}>{t('legendSheet.pinTypes')}</Text>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPad}>
             {/* All pin-type rows render the same 22-px circle-with-glyph
@@ -127,39 +144,39 @@ export const LegendSheet: React.FC<Props> = ({
               <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
                 <Zap size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>Lightning merchant</Text>
+              <Text style={styles.rowLabel}>{t('legendSheet.lightningMerchant')}</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#F7931A' }]}>
                 <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>On-chain merchant</Text>
+              <Text style={styles.rowLabel}>{t('legendSheet.onChainMerchant')}</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
                 <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>NIP-GC Piglet (Lightning Piggy)</Text>
+              <Text style={styles.rowLabel}>{t('legendSheet.nipGcPiglet')}</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: colors.cachePurple }]}>
                 <MapPin size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>NIP-GC cache (vanilla)</Text>
+              <Text style={styles.rowLabel}>{t('legendSheet.nipGcCache')}</Text>
             </View>
             <View style={styles.row}>
               <View style={styles.userDotChip}>
                 <View style={styles.userDotInner} />
               </View>
-              <Text style={styles.rowLabel}>You</Text>
+              <Text style={styles.rowLabel}>{t('legendSheet.you')}</Text>
             </View>
 
             {categoryRows.length > 0 ? (
               <>
-                <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Categories</Text>
-                <Text style={styles.sectionSub}>
-                  Icons used on Places pins in the current viewport.
+                <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
+                  {t('legendSheet.categories')}
                 </Text>
+                <Text style={styles.sectionSub}>{t('legendSheet.categoriesSub')}</Text>
                 {categoryRows.map((row) => {
                   const Icon = btcMapIconComponent(row.key);
                   return (

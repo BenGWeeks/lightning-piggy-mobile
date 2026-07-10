@@ -1,4 +1,11 @@
-import { pickNewReceipts, settledIncomingHashes, isValidPaymentHash } from './incomingReceipts';
+import {
+  pickNewReceipts,
+  pickNewerReceipt,
+  settledIncomingHashes,
+  isValidPaymentHash,
+  shouldSeedBaseline,
+  type AnnouncedReceipt,
+} from './incomingReceipts';
 import type { WalletTransaction } from '../types/wallet';
 
 // Valid payment hashes are 64 hex chars.
@@ -68,6 +75,51 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
     expect(pickNewReceipts(txns, new Set([H1]))).toEqual([
       { paymentHash: H2, amountSats: 222, settledAt: 200 },
     ]);
+  });
+});
+
+describe('pickNewerReceipt (#859 — announce one, the most recent)', () => {
+  const r = (settledAt: number, walletId = 'w', paymentHash = H1): AnnouncedReceipt => ({
+    paymentHash,
+    amountSats: 1,
+    settledAt,
+    walletId,
+    walletLabel: walletId,
+  });
+
+  it('takes the candidate when there is no current winner yet', () => {
+    const cand = r(100);
+    expect(pickNewerReceipt(null, cand)).toBe(cand);
+  });
+
+  it('keeps the later-settled receipt when the candidate is older', () => {
+    const current = r(200, 'a');
+    expect(pickNewerReceipt(current, r(100, 'b'))).toBe(current);
+  });
+
+  it('switches to the candidate when it settled later', () => {
+    const candidate = r(300, 'b');
+    expect(pickNewerReceipt(r(200, 'a'), candidate)).toBe(candidate);
+  });
+
+  it('keeps the existing winner on an exact tie (stable, deterministic)', () => {
+    const current = r(150, 'a');
+    expect(pickNewerReceipt(current, r(150, 'b'))).toBe(current);
+  });
+});
+
+describe('shouldSeedBaseline (#725 — own baselining, never off in-state txns)', () => {
+  it('is true only when the wallet has never been baselined', () => {
+    expect(shouldSeedBaseline(undefined)).toBe(true);
+  });
+
+  it('is false once a baseline exists (even an EMPTY one)', () => {
+    // The empty-set case is the crux of #725 case (c): a wallet added with no
+    // history seeds an empty baseline on first fetch, and that empty set must
+    // still count as "baselined" so a later REAL receive is announced (not re-
+    // baselined away) by the detector.
+    expect(shouldSeedBaseline(new Set<string>())).toBe(false);
+    expect(shouldSeedBaseline(new Set(['a'.repeat(64)]))).toBe(false);
   });
 });
 

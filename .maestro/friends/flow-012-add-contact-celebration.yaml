@@ -1,0 +1,40 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Add-contact celebration (#660/#662)
+---
+# Adds a contact via the Add Friend sheet and asserts the celebration card
+# (confetti + Open profile / Dismiss) appears. Captures a screenshot for the PR.
+# Assumes already logged in with a Nostr account.
+
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: 'Friends tab'
+    timeout: 180000
+- tapOn:
+    text: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 8000
+
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 10000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1fvhukn3uxrqnv0z27h36dt0tl6fu64ev84tuxx42g3uajzrpyqmq8vtatq'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'add-friend-submit'
+
+# The celebration card (#660): confetti + Open profile / Dismiss buttons.
+- extendedWaitUntil:
+    visible:
+      id: 'add-contact-celebration-dismiss'
+    timeout: 20000
+- takeScreenshot: /tmp/lp-celebration
+- assertVisible:
+    id: 'add-contact-celebration-open-profile'

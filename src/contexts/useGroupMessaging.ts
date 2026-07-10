@@ -2,6 +2,9 @@ import { useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
+import { createGroupFileRumor } from '../services/nostrFileMessage';
+import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
 import { NSEC_KEY } from './nostrAuthKeys';
 
@@ -27,7 +30,11 @@ export interface UseGroupMessagingResult {
     groupId: string;
     subject: string;
     memberPubkeys: string[];
-    text: string;
+    /** Text body. Optional when sending a `file` (kind-15) message. */
+    text?: string;
+    /** When set, sends an encrypted NIP-17 kind-15 group file message
+     *  (e.g. a voice note, #235) instead of a kind-14 chat message. */
+    file?: EncryptedUpload;
   }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
   publishGroupState: (input: {
     groupId: string;
@@ -56,20 +63,35 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       groupId: string;
       subject: string;
       memberPubkeys: string[];
-      text: string;
+      text?: string;
+      file?: EncryptedUpload;
     }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      const text = input.text.trim();
-      if (!text) return { success: false, error: 'Empty message' };
+      const text = (input.text ?? '').trim();
+      if (!input.file && !text) return { success: false, error: 'Empty message' };
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
-        const rumor = nostrService.createGroupChatRumor({
-          senderPubkey: pubkey,
-          subject: input.subject,
-          memberPubkeys: input.memberPubkeys,
-          content: text,
-        });
+        // kind-15 encrypted file (voice note, #235) when a `file` is given;
+        // otherwise the standard kind-14 group chat rumor.
+        const rumor = input.file
+          ? createGroupFileRumor({
+              senderPubkey: pubkey,
+              subject: input.subject,
+              memberPubkeys: input.memberPubkeys,
+              url: input.file.url,
+              mime: input.file.mime,
+              keyHex: input.file.keyHex,
+              nonceHex: input.file.nonceHex,
+              sha256Hex: input.file.sha256Hex,
+              size: input.file.size,
+            })
+          : nostrService.createGroupChatRumor({
+              senderPubkey: pubkey,
+              subject: input.subject,
+              memberPubkeys: input.memberPubkeys,
+              content: text,
+            });
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
@@ -141,6 +163,47 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           return { success: true, wrapsPublished: result.wrapsPublished };
         }
 
+        if (signerType === 'nip46') {
+          // NIP-46 group send. Mirrors the Amber path's shape exactly —
+          // including the partial-send-as-failure semantics — but routes
+          // per-recipient nip44_encrypt + seal-sign calls through the
+          // bunker instead of an Android Intent. Each recipient costs 2
+          // bunker round-trips, so a large group can take several
+          // seconds; the composer shows a spinner while this runs.
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: input.memberPubkeys,
+            relays: targetRelays,
+            signerNip44Encrypt: (plaintext, recipientPubkey) =>
+              nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              wrapsPublished: result.wrapsPublished,
+              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+            };
+          }
+          return { success: true, wrapsPublished: result.wrapsPublished };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send group message';
@@ -188,6 +251,21 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           );
           if (!signedEventJson) {
             return { success: false, error: 'Amber returned empty event' };
+          }
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+          return { success: true };
+        }
+
+        if (signerType === 'nip46') {
+          // Single signEvent — one bunker round-trip, no fan-out.
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) {
+            return { success: false, error: 'NIP-46 signer returned empty event' };
           }
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);

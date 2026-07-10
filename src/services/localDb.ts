@@ -8,28 +8,90 @@ import { getOrCreateLocalDbKey, clearLocalDbKey } from './localDbKey';
 // One DB, indexed rows: DM messages (private) plus public cached events.
 const DB_NAME = 'lightningpiggy.db';
 
-// Schema v1. One row per event keyed by event_id (unique → dedupe), indexed
-// by (conversation, created_at) for paginated slice reads — the whole point
-// of moving off the single-blob cache that froze the Messages tab (#695).
-// Public cache tables (caches/events/places) land in a later slice; DMs first
-// since they cause the freeze and need the encryption.
+// Schema v3 (#848, extended by #850). One row per decrypted DM event, scoped
+// by `owner` (the signed-in account's pubkey): multi-account devices share one
+// DB file, and a kind-4 DM between two local accounts is the SAME event id
+// seen by both — so the primary key is (owner, event_id), not event_id alone.
+// Indexed by (owner, conversation, created_at) for paginated slice reads — the
+// whole point of moving off the single-blob cache that froze the Messages tab
+// (#695). Public cache tables (caches/events/places) land in a later slice.
+//
+// #850 columns — everything the retired plaintext AsyncStorage blobs
+// (`nostr_dm_conv_v1_*` / `nostr_dm_inbox_v1_*`) were previously the only
+// home for, so conversations + inbox now serve PURELY from this store:
+//   delivery_status — JSON-serialised DeliveryStatus (#856) for our own sent
+//                     rows (per-relay tick breakdown). NULL on received rows.
+//   rumor_id        — NIP-17 inner-rumor event id (#857), stable across the
+//                     optimistic local- row and the relay echo; keys the
+//                     delivery-status store. NULL on received / legacy rows.
+// Optimistic sends persist as rows whose event_id starts with 'local-' until
+// the relay echo replaces them (upsertDmMessages deletes the matched local-
+// row and carries its delivery_status / rumor_id onto the echo row).
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS dm_messages (
-     event_id     TEXT PRIMARY KEY,
-     conversation TEXT NOT NULL,
-     created_at   INTEGER NOT NULL,
-     sender       TEXT NOT NULL,
-     content      TEXT NOT NULL,
-     from_me      INTEGER NOT NULL DEFAULT 0,
-     wire_kind    INTEGER NOT NULL DEFAULT 14
+     owner           TEXT NOT NULL,
+     event_id        TEXT NOT NULL,
+     conversation    TEXT NOT NULL,
+     created_at      INTEGER NOT NULL,
+     sender          TEXT NOT NULL,
+     content         TEXT NOT NULL,
+     from_me         INTEGER NOT NULL DEFAULT 0,
+     wire_kind       INTEGER NOT NULL DEFAULT 14,
+     delivery_status TEXT,
+     rumor_id        TEXT,
+     PRIMARY KEY (owner, event_id)
    );`,
-  `CREATE INDEX IF NOT EXISTS idx_dm_conversation_created
-     ON dm_messages (conversation, created_at DESC);`,
+  `CREATE INDEX IF NOT EXISTS idx_dm_owner_conversation_created
+     ON dm_messages (owner, conversation, created_at DESC);`,
+];
+
+// Columns added after the v2 table shipped (#850). SQLite supports in-place
+// ADD COLUMN, so an existing install's table upgrades without a rebuild —
+// its rows (the decrypt-once memo) are preserved.
+const ADDED_COLUMNS: readonly { name: string; ddl: string }[] = [
+  { name: 'delivery_status', ddl: 'ALTER TABLE dm_messages ADD COLUMN delivery_status TEXT;' },
+  { name: 'rumor_id', ddl: 'ALTER TABLE dm_messages ADD COLUMN rumor_id TEXT;' },
 ];
 
 let dbPromise: Promise<DB> | null = null;
 
+// W1 (#849 review): a backup-restored install carries the ciphertext DB file
+// but NOT the SQLCipher key (SecureStore is THIS_DEVICE_ONLY by design), so
+// every open fails with SQLCipher's wrong-key signature "file is not a
+// database" — forever, bricking every DM path. The store is a rebuildable
+// relay cache, so the recovery is: wipe file + key, recreate empty, let the
+// next refresh rebuild from relays. The heal triggers ONLY on that exact
+// signature — transient errors (e.g. locked) keep the existing
+// reject-and-retry-later semantics, and the SQLCipher-missing guard below is
+// never healed (wiping there would recreate the DB as plaintext on a
+// regressed build).
+const SQLCIPHER_MISSING = 'SQLCipher not active';
+const WRONG_KEY_SIGNATURE = /file is not a database/i;
+
 async function openLocalDb(): Promise<DB> {
+  try {
+    return await openLocalDbAttempt();
+  } catch (e) {
+    if (!WRONG_KEY_SIGNATURE.test(String((e as Error)?.message ?? e))) throw e;
+    if (__DEV__) {
+      console.warn(
+        `[localDb] open failed (${(e as Error)?.message ?? e}) — wiping undecryptable store and recreating (backup-restore self-heal)`,
+      );
+    }
+    // Direct wipe — NOT wipeLocalDmStore/clearLocalDb, which await dbPromise:
+    // we ARE dbPromise here, so that would self-deadlock. A bare (keyless)
+    // handle suffices to delete the file; pair it with the key wipe.
+    try {
+      open({ name: DB_NAME }).delete();
+    } catch (delErr) {
+      if (__DEV__) console.warn(`[localDb] heal delete failed: ${(delErr as Error)?.message}`);
+    }
+    await clearLocalDbKey();
+    return openLocalDbAttempt();
+  }
+}
+
+async function openLocalDbAttempt(): Promise<DB> {
   const encryptionKey = await getOrCreateLocalDbKey();
   const db = open({ name: DB_NAME, encryptionKey });
   // Fail loud if SQLCipher isn't actually compiled in: op-sqlite silently
@@ -40,26 +102,36 @@ async function openLocalDb(): Promise<DB> {
   const cipher = await db.execute('PRAGMA cipher_version;');
   if (!String(cipher.rows?.[0]?.cipher_version ?? '')) {
     throw new Error(
-      'SQLCipher not active — refusing to open a plaintext DB (cipher_version empty)',
+      `${SQLCIPHER_MISSING} — refusing to open a plaintext DB (cipher_version empty)`,
     );
   }
+  await rebuildDmMessagesIfPreOwner(db);
   for (const stmt of SCHEMA) await db.execute(stmt);
-  await migrateDmMessagesColumns(db);
+  await addMissingDmMessagesColumns(db);
   return db;
 }
 
-// `CREATE TABLE IF NOT EXISTS` won't add columns to a dm_messages table created
-// by an earlier schema version (e.g. a dev build before from_me/wire_kind), so
-// add any missing ones explicitly. The table is a rebuildable relay cache, but
-// ALTER preserves rows already synced. Idempotent via the table_info check.
-async function migrateDmMessagesColumns(db: DB): Promise<void> {
+// v2 → v3 (#850): add the delivery_status / rumor_id columns to a table
+// created before they existed. CREATE TABLE IF NOT EXISTS is a no-op on an
+// existing table, so the SCHEMA pass alone doesn't add them.
+async function addMissingDmMessagesColumns(db: DB): Promise<void> {
   const info = await db.execute('PRAGMA table_info(dm_messages);');
   const have = new Set((info.rows ?? []).map((c) => String(c.name)));
-  if (!have.has('from_me')) {
-    await db.execute('ALTER TABLE dm_messages ADD COLUMN from_me INTEGER NOT NULL DEFAULT 0;');
+  for (const col of ADDED_COLUMNS) {
+    if (!have.has(col.name)) await db.execute(col.ddl);
   }
-  if (!have.has('wire_kind')) {
-    await db.execute('ALTER TABLE dm_messages ADD COLUMN wire_kind INTEGER NOT NULL DEFAULT 14;');
+}
+
+// Schema v1 (pre-#848) had no `owner` column and keyed rows by event_id alone.
+// SQLite can't ALTER a primary key, so a pre-owner table is dropped and
+// recreated by the SCHEMA pass. Safe because (a) the table is a rebuildable
+// relay cache and (b) the store was dormant before #848 (imported only by its
+// own tests), so pre-owner tables exist only on dev installs.
+async function rebuildDmMessagesIfPreOwner(db: DB): Promise<void> {
+  const info = await db.execute('PRAGMA table_info(dm_messages);');
+  const have = new Set((info.rows ?? []).map((c) => String(c.name)));
+  if (have.size > 0 && !have.has('owner')) {
+    await db.execute('DROP TABLE dm_messages;');
   }
 }
 
@@ -112,9 +184,10 @@ async function clearLocalDb(): Promise<void> {
 /**
  * Full wipe of the local DM store on logout / account-wipe: delete the
  * encrypted DB file AND its keystore key. A lone key or a lone ciphertext file
- * is useless, but leave neither behind (#690 / #710 H1). Wire this into the
- * logout path alongside the DM-store rewire (#709) that first writes real rows;
- * safe to call earlier — both halves are no-ops when nothing has been created.
+ * is useless, but leave neither behind (#690 / #710 H1). Wired into the
+ * last-identity logout path in NostrContext (#848); per-account sign-out of a
+ * non-final identity deletes only that owner's rows (dmDb). Safe to call when
+ * nothing was ever created — both halves are no-ops.
  */
 export async function wipeLocalDmStore(): Promise<void> {
   await clearLocalDb();
@@ -136,9 +209,9 @@ export async function verifyEncryptedDb(): Promise<string> {
   const cipher = String(res.rows?.[0]?.cipher_version ?? '');
   try {
     await db.execute(
-      `INSERT OR REPLACE INTO dm_messages (event_id, conversation, created_at, sender, content)
-       VALUES (?, ?, ?, ?, ?);`,
-      ['__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
+      `INSERT OR REPLACE INTO dm_messages (owner, event_id, conversation, created_at, sender, content)
+       VALUES (?, ?, ?, ?, ?, ?);`,
+      ['__smoke__', '__smoke__', '__smoke__', 0, '__smoke__', 'ok'],
     );
     const back = await db.execute('SELECT content FROM dm_messages WHERE event_id = ?;', [
       '__smoke__',

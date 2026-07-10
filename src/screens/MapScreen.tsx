@@ -3,13 +3,13 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Linking,
   ScrollView,
   Animated,
   PanResponder,
   Dimensions,
+  InteractionManager,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -31,7 +31,9 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
-import { ExploreNavigation } from '../navigation/types';
+import { createMapScreenStyles, type MapScreenStyles } from '../styles/MapScreen.styles';
+import { ExploreNavigation, RootNavigation, ExploreStackParamList } from '../navigation/types';
+import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import {
   Bbox,
   BtcMapPlace,
@@ -41,12 +43,15 @@ import {
   btcMapVerifyUrl,
   daysSinceVerified,
   fetchPlacesInBbox,
+  peekCachedPlacesSync,
   formatAddress,
   isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -56,9 +61,16 @@ import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
+import { useFriendsLiveLocations } from '../hooks/useFriendsLiveLocations';
+import { useIsFocused } from '@react-navigation/native';
+import { useTranslation } from '../contexts/LocaleContext';
+import { t } from '../i18n';
 
 interface Props {
-  navigation: ExploreNavigation;
+  // Composite so the back handler can return to the DM (`Conversation` is a
+  // RootStack screen) when the Map is opened from a live-location card.
+  navigation: CompositeNavigationProp<ExploreNavigation, RootNavigation>;
+  route: RouteProp<ExploreStackParamList, 'Map'>;
 }
 
 type PermissionState = 'unknown' | 'granted' | 'denied';
@@ -71,7 +83,8 @@ type PermissionState = 'unknown' | 'granted' | 'denied';
  * Renderer is native MapLibre via the shared LibreMiniMap component (no
  * Google Maps, no API key, OSM tiles streamed from openstreetmap.org).
  */
-const MapScreen: React.FC<Props> = ({ navigation }) => {
+const MapScreen: React.FC<Props> = ({ navigation, route }) => {
+  const t = useTranslation();
   const colors = useThemeColors();
   // Tier-aware predicate from the Web-of-Trust context. `isTrusted`
   // already encodes the current wotTier (Friends / FoF / All), so
@@ -81,7 +94,29 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // 306270c — the full map was the last surface still showing every
   // cache regardless of trust.
   const { isTrusted, wotTier } = useTrustGraph();
-  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  const { pubkey: signedInPubkey, relays: userRelays, profile } = useNostr();
+  // Friends currently sharing their live location with me — plotted as
+  // circular avatar chips. Gated on screen focus so the underlying
+  // kind-20069 ping subscriptions go quiet when a detail sheet/screen
+  // covers the map or we navigate away (no background battery cost).
+  const isFocused = useIsFocused();
+  // Defer enabling the live-location subscription until the tab transition
+  // settles (#824) — its backlog replay otherwise lands as a second setState
+  // burst that competes with the navigation animation. Disables on blur.
+  const [friendsEnabled, setFriendsEnabled] = useState(false);
+  useEffect(() => {
+    if (!isFocused) {
+      setFriendsEnabled(false);
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => setFriendsEnabled(true));
+    return () => task.cancel();
+  }, [isFocused]);
+  const friends = useFriendsLiveLocations({ enabled: friendsEnabled });
+  const friendMarkers = useMemo(
+    () => friends.map((f) => ({ key: f.pubkey, lat: f.lat, lon: f.lon, avatarUri: f.avatarUri })),
+    [friends],
+  );
   // WoT bottom-sheet visibility — opened from the chip inside the
   // FilterSheet so the user can change tier without leaving the map.
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
@@ -89,7 +124,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // Recenter at the map's bottom-left. Replaces the inline legend
   // strip that used to sit under the map and ate vertical space.
   const [legendVisible, setLegendVisible] = useState(false);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBbox = useRef<Bbox | null>(null);
 
@@ -117,8 +152,18 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // around without re-centring the map (the camera stays anchored to
   // the user's initial pos so panning behaviour isn't fighting GPS).
   const { pos: livePos } = useUserLocation();
-  const [places, setPlaces] = useState<BtcMapPlace[]>([]);
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
+  // Seed synchronously from the warm BTC Map cache (#823) so the map paints
+  // pins on the first frame instead of a blank map until the viewport fetch
+  // returns — matches ExploreHomeScreen/PlacesScreen. The bbox fetch below
+  // then refreshes them (stale-while-revalidate).
+  const [places, setPlaces] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
+  // Coalesced (#824): a relay backlog flushed on (re)focus commits as ONE
+  // setState per flush window instead of one Map-clone + render per event —
+  // the per-event burst that froze the tab transition. `shouldReplace` keeps
+  // the newest entry per coord (same rule the inline merges used).
+  const caches = useCoalescedMap<ParsedCache>({
+    shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
+  });
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
   const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -222,13 +267,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         const prefixes = geohashNeighbours(myTile);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
-          setCaches((prev) => {
-            const existing = prev.get(cache.coord);
-            if (existing && existing.createdAt >= cache.createdAt) return prev;
-            const next = new Map(prev);
-            next.set(cache.coord, cache);
-            return next;
-          });
+          // Hide the project's own test-account ("Piggy") Piglets on the
+          // map in the production app; dev/preview keep them for Maestro.
+          if (isHiddenInProd(cache.hiderPubkey)) return;
+          caches.enqueue(cache.coord, cache);
         });
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -237,6 +279,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
       cachesCloserRef.current?.();
+      caches.flush();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -258,14 +301,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
       .then((mine) => {
         if (cancelled || mine.length === 0) return;
-        setCaches((prev) => {
-          const next = new Map(prev);
-          for (const c of mine) {
-            const existing = next.get(c.coord);
-            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
-          }
-          return next;
-        });
+        for (const c of mine) caches.enqueue(c.coord, c);
+        // One-shot fetch — flush now so the author's own pins commit on this
+        // frame instead of waiting on the coalesce debounce (~100ms) when the
+        // batch is under the flush threshold (Copilot review on #825).
+        caches.flush();
       })
       .catch(() => {
         // Best-effort — the nearby subscription will fill the gap if the
@@ -274,6 +314,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- caches.enqueue is stable; one-shot per (signedInPubkey, userRelays)
   }, [signedInPubkey, userRelays]);
 
   // Distinct categories across the currently-loaded places — fed into
@@ -284,6 +325,18 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
     return [...seen].sort();
   }, [places]);
+
+  // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
+  // filtering `caches.map.values()` twice every render (Copilot review on #825).
+  const cacheCounts = useMemo(() => {
+    let piglets = 0;
+    let others = 0;
+    for (const c of caches.map.values()) {
+      if (c.isLpPiggy) piglets++;
+      else others++;
+    }
+    return { piglets, others };
+  }, [caches.map]);
 
   // Filtered arrays for LibreMiniMap. Same predicates the WebView path
   // used to send across the bridge — now plain memoised derived state.
@@ -301,11 +354,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     });
   }, [places, filters.lightning, filters.onchain, categoryFilter]);
 
+  // Re-evaluate the NIP-40 expiry filter as time advances even if nothing else
+  // changes — a cache can expire while the map just sits open. A 60s tick is
+  // plenty (expiry is a slow day/year-scale boundary) and, unlike putting a
+  // per-render `Date.now()` in the memo deps (which would recompute
+  // visibleCaches every render), keeps the memo cached between ticks (#763).
+  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Date.now() / 1000), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   const visibleCaches = useMemo(() => {
-    return [...caches.values()].filter(
-      (c) => (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
+    // Drop NIP-40-expired caches — relays that don't honour expiration keep
+    // serving them, so the client filters them out. The Geo-caches list
+    // (HuntScreen) already does this; the map must too, else an expired Piglet
+    // lingers on the map after it's gone from the list (#762).
+    return [...caches.map.values()].filter(
+      (c) =>
+        !isHiddenInProd(c.hiderPubkey) &&
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
+        isTrusted(c.hiderPubkey) &&
+        (c.expiresAt === null || c.expiresAt > nowSec),
     );
-  }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
+  }, [caches.map, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -337,29 +409,47 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     [refreshPlaces],
   );
 
+  // Back target: when opened from a DM live-location card the route carries
+  // `returnTo`, so return to that conversation; otherwise pop the stack —
+  // preserving back for the Explore / Places / Events / Hunt entry points.
+  const handleBack = useCallback(() => {
+    const returnTo = route.params?.returnTo;
+    if (returnTo?.screen === 'Conversation') {
+      // Pop this Map off the Explore stack first, otherwise it stays mounted
+      // (with its returnTo param) underneath the DM and re-appears next time
+      // the user visits the Explore tab.
+      navigation.popToTop();
+      navigation.navigate('Conversation', returnTo.params);
+      return;
+    }
+    navigation.goBack();
+  }, [navigation, route.params]);
+
+  // The header + permission-screen back button can now return to a DM, so the
+  // "Back to Explore" wording only fits the in-stack entry points.
+  const backLabel = route.params?.returnTo ? t('mapScreen.back') : t('mapScreen.backToExplore');
+
   // ------- render --------------------------------------------------------
 
   if (permission === 'denied') {
     return (
       <View style={styles.container} testID="map-screen">
         <Header
-          onBack={() => navigation.goBack()}
+          onBack={handleBack}
           onOpenFilters={() => setFiltersOpen(true)}
           colors={colors}
+          backLabel={backLabel}
         />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
-          <Text style={styles.deniedTitle}>Location permission required</Text>
-          <Text style={styles.deniedSubtitle}>
-            We use your location to show nearby Bitcoin merchants. Grant location access in Settings
-            to enable this map.
-          </Text>
+          <Text style={styles.deniedTitle}>{t('mapScreen.locationRequiredTitle')}</Text>
+          <Text style={styles.deniedSubtitle}>{t('mapScreen.locationRequiredSubtitle')}</Text>
           <TouchableOpacity
             style={styles.deniedButton}
-            onPress={() => navigation.goBack()}
+            onPress={handleBack}
             testID="map-permission-back-button"
           >
-            <Text style={styles.deniedButtonText}>Back to Explore</Text>
+            <Text style={styles.deniedButtonText}>{backLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -369,9 +459,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="map-screen">
       <Header
-        onBack={() => navigation.goBack()}
+        onBack={handleBack}
         onOpenFilters={() => setFiltersOpen(true)}
         colors={colors}
+        backLabel={backLabel}
       />
       <View style={styles.webviewWrapper}>
         <LibreMiniMap
@@ -385,6 +476,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           // the halo — using `pos.accuracy` here would draw a halo
           // around live coords using accuracy from a different fix.
           userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          userAvatarUri={profile?.picture ?? null}
+          profileMarkers={friendMarkers}
+          uniformMarkerSize={32}
           merchants={visibleMerchants}
           caches={visibleCaches}
           events={[]}
@@ -402,11 +496,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.footerError}>{error}</Text>
         ) : (
           <Text style={styles.footerText}>
-            {places.length} merchants
-            {caches.size > 0
-              ? ` · ${[...caches.values()].filter((c) => c.isLpPiggy).length} Piglets · ${
-                  [...caches.values()].filter((c) => !c.isLpPiggy).length
-                } caches`
+            {t('mapScreen.merchantsCount', { count: places.length })}
+            {caches.map.size > 0
+              ? t('mapScreen.cachesSuffix', {
+                  piglets: cacheCounts.piglets,
+                  caches: cacheCounts.others,
+                })
               : ''}
           </Text>
         )}
@@ -452,7 +547,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           untrustedCacheCount={
             // Caches that would render if the WoT filter were "All".
             // Computed each render; cheap because `caches` is small.
-            [...caches.values()].filter(
+            [...caches.map.values()].filter(
               (c) =>
                 (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && !isTrusted(c.hiderPubkey),
             ).length
@@ -483,22 +578,24 @@ const Header: React.FC<{
   onBack: () => void;
   onOpenFilters: () => void;
   colors: Palette;
-}> = ({ onBack, onOpenFilters, colors }) => {
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  backLabel: string;
+}> = ({ onBack, onOpenFilters, colors, backLabel }) => {
+  const t = useTranslation();
+  const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
     <View style={styles.header}>
       <TouchableOpacity
         onPress={onBack}
-        accessibilityLabel="Back to Explore"
+        accessibilityLabel={backLabel}
         testID="map-back-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
         <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>Map</Text>
+      <Text style={styles.headerTitle}>{t('mapScreen.title')}</Text>
       <TouchableOpacity
         onPress={onOpenFilters}
-        accessibilityLabel="Filter pins on map"
+        accessibilityLabel={t('mapScreen.filterPins')}
         testID="map-filter-button"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
@@ -573,8 +670,9 @@ const MerchantDetailSheet: React.FC<{
   onClose: () => void;
   onViewDetails: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({ place, onClose, onViewDetails, colors, styles }) => {
+  const t = useTranslation();
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const days = daysSinceVerified(place);
   const lud16 = lightningAddressOf(place);
@@ -582,10 +680,10 @@ const MerchantDetailSheet: React.FC<{
     days === null
       ? null
       : days === 0
-        ? 'Verified today via OSM'
+        ? t('mapScreen.verifiedToday')
         : days === 1
-          ? 'Verified 1 day ago via OSM'
-          : `Verified ${days} days ago via OSM`;
+          ? t('mapScreen.verifiedOneDay')
+          : t('mapScreen.verifiedDaysAgo', { days });
 
   return (
     <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
@@ -608,7 +706,7 @@ const MerchantDetailSheet: React.FC<{
             );
           })()}
           <Text style={styles.sheetTitle} testID="merchant-detail-name">
-            {place.tags.name ?? 'Unnamed merchant'}
+            {place.tags.name ?? t('mapScreen.unnamedMerchant')}
           </Text>
         </View>
         <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
@@ -616,18 +714,18 @@ const MerchantDetailSheet: React.FC<{
           {isBoosted(place) && (
             <View style={styles.sheetChipFeatured} testID="merchant-detail-featured">
               <Sparkles size={12} color={colors.textHeader} strokeWidth={2.5} />
-              <Text style={styles.sheetChipFeaturedText}>Featured</Text>
+              <Text style={styles.sheetChipFeaturedText}>{t('mapScreen.featured')}</Text>
             </View>
           )}
           {acceptsLightning(place) && (
             <View style={styles.sheetChipPink}>
               <Zap size={12} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.sheetChipPinkText}>Lightning</Text>
+              <Text style={styles.sheetChipPinkText}>{t('mapScreen.lightning')}</Text>
             </View>
           )}
           {acceptsOnchain(place) && (
             <View style={styles.sheetChipOrange}>
-              <Text style={styles.sheetChipOrangeText}>On-chain</Text>
+              <Text style={styles.sheetChipOrangeText}>{t('mapScreen.onchain')}</Text>
             </View>
           )}
         </View>
@@ -657,11 +755,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.tags['contact:website']!)}
                 testID="merchant-detail-website"
-                accessibilityLabel="Open website"
+                accessibilityLabel={t('mapScreen.openWebsite')}
               >
                 <Globe size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Website
+                  {t('mapScreen.website')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -670,7 +768,7 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
                 testID="merchant-detail-phone"
-                accessibilityLabel={`Call ${place.phone}`}
+                accessibilityLabel={t('mapScreen.callPhone', { phone: place.phone })}
               >
                 <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -683,11 +781,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(`mailto:${place.email!}`)}
                 testID="merchant-detail-email"
-                accessibilityLabel={`Email ${place.email}`}
+                accessibilityLabel={t('mapScreen.emailAddress', { email: place.email })}
               >
                 <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Email
+                  {t('mapScreen.email')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -696,11 +794,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
                 testID="merchant-detail-facebook"
-                accessibilityLabel="Open Facebook page"
+                accessibilityLabel={t('mapScreen.openFacebook')}
               >
                 <SocialIcon network="facebook" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Facebook
+                  {t('mapScreen.facebook')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -709,11 +807,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
                 testID="merchant-detail-x"
-                accessibilityLabel="Open X profile"
+                accessibilityLabel={t('mapScreen.openX')}
               >
                 <SocialIcon network="x" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  X
+                  {t('mapScreen.x')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -722,11 +820,11 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetContactChip}
                 onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
                 testID="merchant-detail-instagram"
-                accessibilityLabel="Open Instagram"
+                accessibilityLabel={t('mapScreen.openInstagram')}
               >
                 <SocialIcon network="instagram" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Instagram
+                  {t('mapScreen.instagram')}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -745,7 +843,11 @@ const MerchantDetailSheet: React.FC<{
               // adds the lud16 entry-path on the Home tab.
             }}
             testID="merchant-detail-pay-button"
-            accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
+            accessibilityLabel={
+              lud16
+                ? t('mapScreen.payAddress', { address: lud16 })
+                : t('mapScreen.noLightningAddress')
+            }
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
             {/* Keep the label "Pay" in both states — the disabled
@@ -753,15 +855,15 @@ const MerchantDetailSheet: React.FC<{
                 and the long "No Lightning address" string wraps awkwardly
                 on small screens. Screen readers still get the
                 disambiguating context via accessibilityLabel above. */}
-            <Text style={styles.sheetButtonText}>Pay</Text>
+            <Text style={styles.sheetButtonText}>{t('mapScreen.pay')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
             onPress={onViewDetails}
             testID="merchant-detail-view-button"
-            accessibilityLabel="Open place detail"
+            accessibilityLabel={t('mapScreen.openPlaceDetail')}
           >
-            <Text style={styles.sheetButtonSecondaryText}>View details</Text>
+            <Text style={styles.sheetButtonSecondaryText}>{t('mapScreen.viewDetails')}</Text>
           </TouchableOpacity>
         </View>
         {btcMapVerifyUrl(place) || btcMapMerchantUrl(place) ? (
@@ -771,10 +873,10 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
                 testID="merchant-detail-verify"
-                accessibilityLabel="Verify this listing on BTC Map"
+                accessibilityLabel={t('mapScreen.verifyListing')}
               >
                 <ShieldCheck size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetBtcMapActionText}>Verify</Text>
+                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.verify')}</Text>
               </TouchableOpacity>
             ) : null}
             {btcMapMerchantUrl(place) ? (
@@ -782,9 +884,9 @@ const MerchantDetailSheet: React.FC<{
                 style={styles.sheetBtcMapActionButton}
                 onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
                 testID="merchant-detail-suggest-edit"
-                accessibilityLabel="Suggest an edit on BTC Map"
+                accessibilityLabel={t('mapScreen.suggestEditLabel')}
               >
-                <Text style={styles.sheetBtcMapActionText}>Suggest an edit →</Text>
+                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.suggestEdit')}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -799,10 +901,11 @@ const CacheDetailSheet: React.FC<{
   onClose: () => void;
   onViewDetails: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({ cache, onClose, onViewDetails, colors, styles }) => {
+  const t = useTranslation();
   const { translateY, panHandlers } = useDismissibleSheet(onClose);
-  const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
+  const kindLabel = cache.isLpPiggy ? t('mapScreen.piglet') : t('mapScreen.nipgcCache');
   const specBits = [
     cache.cacheType,
     cache.size,
@@ -857,9 +960,9 @@ const CacheDetailSheet: React.FC<{
             style={styles.sheetButton}
             onPress={onViewDetails}
             testID="cache-detail-view-button"
-            accessibilityLabel={`Open ${kindLabel} detail`}
+            accessibilityLabel={t('mapScreen.openKindDetail', { kind: kindLabel })}
           >
-            <Text style={styles.sheetButtonText}>View details</Text>
+            <Text style={styles.sheetButtonText}>{t('mapScreen.viewDetails')}</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -887,22 +990,32 @@ interface FilterOption {
 // still an independent toggle — there's no master "Show all places"
 // switch (unticking the two beneath it gives the same result).
 const PLACES_FILTERS: ReadonlyArray<FilterOption> = [
-  { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
-  { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F7931A' },
+  {
+    key: 'lightning',
+    label: t('mapScreen.lightning'),
+    hint: t('mapScreen.lightningHint'),
+    swatch: '#EC008C',
+  },
+  {
+    key: 'onchain',
+    label: t('mapScreen.onchain'),
+    hint: t('mapScreen.onchainHint'),
+    swatch: '#F7931A',
+  },
 ];
 
 const CACHE_FILTERS: ReadonlyArray<FilterOption> = [
   {
     key: 'piglet',
-    label: 'Piglet',
-    hint: 'Lightning Piggy stash',
+    label: t('mapScreen.piglet'),
+    hint: t('mapScreen.pigletHint'),
     swatch: '#EC008C',
     diamond: true,
   },
   {
     key: 'nipgcCache',
-    label: 'NIP-GC cache',
-    hint: 'Geo-cache (treasures.to et al.)',
+    label: t('mapScreen.nipgcCache'),
+    hint: t('mapScreen.nipgcCacheHint'),
     swatch: '#7A5CFF',
     diamond: true,
   },
@@ -919,7 +1032,7 @@ const FilterSheet: React.FC<{
   untrustedCacheCount: number;
   onOpenWotPicker: () => void;
   colors: Palette;
-  styles: ReturnType<typeof createStyles>;
+  styles: MapScreenStyles;
 }> = ({
   filters,
   onChange,
@@ -933,6 +1046,7 @@ const FilterSheet: React.FC<{
   colors,
   styles,
 }) => {
+  const t = useTranslation();
   const toggle = (k: keyof PinFilters) => onChange({ ...filters, [k]: !filters[k] });
   // Render one filter row — extracted so the Places and Geo-caches
   // sections can share the same swatch + toggle layout without
@@ -946,7 +1060,10 @@ const FilterSheet: React.FC<{
         style={styles.filterRow}
         onPress={() => toggle(opt.key)}
         testID={`map-filter-${opt.key}`}
-        accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
+        accessibilityLabel={t('mapScreen.pinsToggle', {
+          label: opt.label,
+          state: on ? t('mapScreen.on') : t('mapScreen.off'),
+        })}
       >
         <View
           style={[
@@ -986,7 +1103,7 @@ const FilterSheet: React.FC<{
               when the current tier is hiding pins they might expect to
               see (the cause of the "where did all the geo-caches go?"
               moment that prompted #19 to grow this filter UI). */}
-          <Text style={styles.sheetTitle}>Web of Trust</Text>
+          <Text style={styles.sheetTitle}>{t('mapScreen.webOfTrust')}</Text>
           <View style={styles.wotRow}>
             <WebOfTrustChip
               currentTier={wotTier}
@@ -994,40 +1111,41 @@ const FilterSheet: React.FC<{
               testID="map-filter-wot-chip"
             />
             {untrustedCacheCount > 0 ? (
-              <Text style={styles.wotHiddenCount}>{untrustedCacheCount} hidden</Text>
+              <Text style={styles.wotHiddenCount}>
+                {t('mapScreen.hiddenCount', { count: untrustedCacheCount })}
+              </Text>
             ) : null}
           </View>
           <Text style={[styles.sheetSubtitle, { marginBottom: 16 }]}>
-            Only caches from hiders you trust at the current tier appear on the map. Tap the chip to
-            widen the tier.
+            {t('mapScreen.trustExplain')}
           </Text>
 
-          <Text style={styles.sheetTitle}>Places</Text>
-          <Text style={styles.sheetSubtitle}>Bitcoin-accepting merchants from BTC Map.</Text>
+          <Text style={styles.sheetTitle}>{t('mapScreen.places')}</Text>
+          <Text style={styles.sheetSubtitle}>{t('mapScreen.placesSubtitle')}</Text>
           <View style={{ marginTop: 8 }}>{PLACES_FILTERS.map(renderFilterRow)}</View>
 
-          <Text style={[styles.sheetTitle, { marginTop: 20 }]}>Geo-caches</Text>
-          <Text style={styles.sheetSubtitle}>Piglets and standard NIP-GC stashes.</Text>
+          <Text style={[styles.sheetTitle, { marginTop: 20 }]}>{t('mapScreen.geocaches')}</Text>
+          <Text style={styles.sheetSubtitle}>{t('mapScreen.geocachesSubtitle')}</Text>
           <View style={{ marginTop: 8 }}>{CACHE_FILTERS.map(renderFilterRow)}</View>
 
           {availableCategories.length > 0 ? (
             <View style={{ marginTop: 16, paddingBottom: 24 }}>
               <View style={styles.categoryHeaderRow}>
-                <Text style={styles.sheetTitle}>Categories</Text>
+                <Text style={styles.sheetTitle}>{t('mapScreen.categories')}</Text>
                 {categoryFilter.size > 0 ? (
                   <TouchableOpacity
                     onPress={clearCategories}
                     testID="map-filter-categories-clear"
-                    accessibilityLabel="Clear category filter"
+                    accessibilityLabel={t('mapScreen.clearCategoryFilter')}
                   >
-                    <Text style={styles.categoryClearText}>Clear</Text>
+                    <Text style={styles.categoryClearText}>{t('mapScreen.clear')}</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
               <Text style={styles.sheetSubtitle}>
                 {categoryFilter.size === 0
-                  ? 'Tap to narrow to one or more BTC Map categories.'
-                  : `${categoryFilter.size} selected`}
+                  ? t('mapScreen.categoriesHint')
+                  : t('mapScreen.categoriesSelected', { count: categoryFilter.size })}
               </Text>
               <View style={styles.categoryChipsWrap}>
                 {availableCategories.map((cat) => {
@@ -1041,7 +1159,10 @@ const FilterSheet: React.FC<{
                         on ? styles.categoryChipOn : styles.categoryChipOff,
                       ]}
                       testID={`map-filter-category-${cat}`}
-                      accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
+                      accessibilityLabel={t('mapScreen.categoryToggle', {
+                        category: cat,
+                        state: on ? t('mapScreen.on') : t('mapScreen.off'),
+                      })}
                     >
                       <Text
                         style={[styles.categoryChipText, on ? styles.categoryChipTextOn : null]}
@@ -1074,489 +1195,5 @@ const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
 // -----------------------------------------------------------------------------
 // styles
 // -----------------------------------------------------------------------------
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-    },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerRightSpacer: {
-      width: 24,
-    },
-    webviewWrapper: {
-      flex: 1,
-      position: 'relative',
-    },
-    webview: {
-      flex: 1,
-    },
-    recenterButton: {
-      position: 'absolute',
-      left: 14,
-      bottom: 14,
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    // Legend button — sits just above the recenter at bottom-left so
-    // the two map utilities cluster visually. Same surface treatment
-    // as recenterButton (white circle + shadow) so they read as a pair.
-    legendButton: {
-      position: 'absolute',
-      left: 14,
-      bottom: 62,
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
-    footer: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    legend: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 14,
-      rowGap: 6,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    legendItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    legendDot: {
-      width: 12,
-      height: 12,
-      borderRadius: 6,
-      borderWidth: 1.5,
-      borderColor: '#fff',
-    },
-    legendDiamond: {
-      width: 11,
-      height: 11,
-      transform: [{ rotate: '45deg' }],
-      borderWidth: 1.5,
-      borderColor: '#fff',
-    },
-    legendText: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    footerText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    footerError: {
-      fontSize: 13,
-      color: colors.brandPink,
-      fontWeight: '600',
-    },
-    loadingOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: 'rgba(0,0,0,0.05)',
-    },
-    deniedBody: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 32,
-      gap: 12,
-    },
-    deniedTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    deniedSubtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      lineHeight: 20,
-    },
-    deniedButton: {
-      marginTop: 12,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 18,
-      paddingVertical: 10,
-      borderRadius: 100,
-    },
-    deniedButtonText: {
-      color: colors.white,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    // ----- bottom sheet
-    sheetBackdrop: {
-      ...StyleSheet.absoluteFillObject,
-      justifyContent: 'flex-end',
-      backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-    sheetTapAway: {
-      flex: 1,
-    },
-    sheet: {
-      backgroundColor: colors.surface,
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 28,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-      gap: 8,
-      // Cap so the FilterSheet's category list can scroll instead of
-      // pushing the sheet off the top of the screen.
-      maxHeight: '80%',
-    },
-    // Touch target around the visible handle bar — bigger than the
-    // 4px-tall pill itself so a swipe from anywhere in the top of the
-    // sheet actually reaches the PanResponder. Without this you'd
-    // need pixel-precise drag aim.
-    sheetHandleGrabber: {
-      width: '100%',
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-    sheetHandle: {
-      alignSelf: 'center',
-      width: 36,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.divider,
-      marginBottom: 6,
-    },
-    sheetTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    sheetSubtitle: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-    },
-    wotRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-    },
-    wotHiddenCount: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    sheetChipRow: {
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 6,
-    },
-    sheetChipPink: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipPinkText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipFeatured: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.zapYellow,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipFeaturedText: {
-      color: colors.textHeader,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipGrey: {
-      backgroundColor: colors.divider,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipGreyText: {
-      color: colors.textSupplementary,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetChipOrange: {
-      backgroundColor: '#F7931A',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipOrangeText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetVerify: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    sheetDescription: {
-      fontSize: 13,
-      color: colors.textBody,
-      lineHeight: 18,
-      marginTop: 8,
-      marginBottom: 4,
-    },
-    sheetActions: {
-      flexDirection: 'row',
-      gap: 12,
-      marginTop: 14,
-    },
-    sheetButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 12,
-      borderRadius: 100,
-    },
-    sheetButtonDisabled: {
-      backgroundColor: colors.divider,
-    },
-    sheetButtonText: {
-      color: colors.white,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    sheetButtonSecondary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: 'transparent',
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetButtonSecondaryText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    sheetContactRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    sheetContactChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    sheetContactText: {
-      color: colors.textHeader,
-      fontSize: 12,
-      fontWeight: '600',
-      maxWidth: 160,
-    },
-    sheetTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginBottom: 4,
-    },
-    sheetIconWrap: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sheetBtcMapActionsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 12,
-      paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    sheetBtcMapActionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetBtcMapActionText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    sheetMetaRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 6,
-    },
-    sheetMetaText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      flexShrink: 1,
-    },
-    filterRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-      paddingVertical: 10,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-    },
-    filterSwatchDot: {
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-    },
-    filterSwatchDiamond: {
-      width: 14,
-      height: 14,
-      transform: [{ rotate: '45deg' }],
-    },
-    filterTextWrap: {
-      flex: 1,
-    },
-    filterLabel: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    filterHint: {
-      fontSize: 11,
-      color: colors.textSupplementary,
-      marginTop: 1,
-    },
-    filterToggle: {
-      width: 40,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: colors.divider,
-      padding: 2,
-      justifyContent: 'center',
-    },
-    filterToggleOn: {
-      backgroundColor: colors.brandPink,
-    },
-    filterToggleThumb: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: colors.white,
-    },
-    filterToggleThumbOn: {
-      transform: [{ translateX: 16 }],
-    },
-    categoryHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    categoryClearText: {
-      color: colors.brandPink,
-      fontSize: 13,
-      fontWeight: '700',
-    },
-    categoryChipsWrap: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 10,
-    },
-    categoryChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-    },
-    categoryChipOff: {
-      backgroundColor: 'transparent',
-      borderColor: colors.divider,
-    },
-    categoryChipOn: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    categoryChipText: {
-      fontSize: 12,
-      color: colors.textHeader,
-      fontWeight: '600',
-      textTransform: 'capitalize',
-    },
-    categoryChipTextOn: {
-      color: colors.white,
-    },
-  });
 
 export default MapScreen;

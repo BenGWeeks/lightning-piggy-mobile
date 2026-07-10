@@ -140,6 +140,7 @@ export function BrandedAlertHost(): React.ReactElement | null {
       visible
       transparent
       statusBarTranslucent
+      navigationBarTranslucent
       animationType="fade"
       onRequestClose={cancelable ? handleDismiss : noop}
     >

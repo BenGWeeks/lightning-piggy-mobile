@@ -18,6 +18,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 import type { SignerType } from '../types/nostr';
 
@@ -43,15 +44,20 @@ const FeedbackSheet: React.FC<Props> = ({
   isLoggedIn,
   signerType,
   onLoginPress,
-  title = 'Send Feedback',
-  subtitle = 'Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.',
+  title,
+  subtitle,
   initialMessage = '',
   messagePrefix = '[Feedback]',
-  successTitle = 'Feedback Sent',
-  successMessage = 'Thank you for your feedback!',
+  successTitle,
+  successMessage,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const t = useTranslation();
+  const resolvedTitle = title ?? t('feedbackSheet.sendFeedbackTitle');
+  const resolvedSubtitle = subtitle ?? t('feedbackSheet.subtitle');
+  const resolvedSuccessTitle = successTitle ?? t('feedbackSheet.successTitle');
+  const resolvedSuccessMessage = successMessage ?? t('feedbackSheet.successMessage');
   const sheetRef = useRef<BottomSheetModal>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -110,12 +116,14 @@ const FeedbackSheet: React.FC<Props> = ({
 
       const result = await onSend(fullMessage);
       if (result.success) {
-        Alert.alert(successTitle, successMessage, [{ text: 'OK', onPress: onClose }]);
+        Alert.alert(resolvedSuccessTitle, resolvedSuccessMessage, [
+          { text: t('feedbackSheet.ok'), onPress: onClose },
+        ]);
       } else {
-        Alert.alert('Error', result.error || 'Failed to send feedback.');
+        Alert.alert(t('feedbackSheet.errorTitle'), result.error || t('feedbackSheet.sendFailed'));
       }
     } catch {
-      Alert.alert('Error', 'Failed to send feedback.');
+      Alert.alert(t('feedbackSheet.errorTitle'), t('feedbackSheet.sendFailed'));
     } finally {
       setSending(false);
     }
@@ -137,7 +145,7 @@ const FeedbackSheet: React.FC<Props> = ({
 
   const canSend =
     isLoggedIn &&
-    (signerType === 'nsec' || signerType === 'amber') &&
+    (signerType === 'nsec' || signerType === 'amber' || signerType === 'nip46') &&
     message.trim().length > 0 &&
     !sending;
 
@@ -160,55 +168,55 @@ const FeedbackSheet: React.FC<Props> = ({
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={styles.title}>{resolvedTitle}</Text>
+        <Text style={styles.subtitle}>{resolvedSubtitle}</Text>
 
         {!isLoggedIn ? (
           <View style={styles.loginPrompt}>
-            <Text style={styles.loginText}>Sign in with Nostr to send feedback.</Text>
+            <Text style={styles.loginText}>{t('feedbackSheet.signInPrompt')}</Text>
             <TouchableOpacity
               style={styles.loginButton}
               onPress={() => {
                 onClose();
                 onLoginPress();
               }}
-              accessibilityLabel="Connect Nostr to send feedback"
+              accessibilityLabel={t('feedbackSheet.connectNostrA11y')}
               testID="feedback-login-button"
             >
-              <Text style={styles.loginButtonText}>Connect Nostr</Text>
+              <Text style={styles.loginButtonText}>{t('feedbackSheet.connectNostr')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
             <BottomSheetTextInput
               style={styles.textInput}
-              placeholder="What's on your mind?"
+              placeholder={t('feedbackSheet.placeholder')}
               placeholderTextColor={colors.textSupplementary}
               value={message}
               onChangeText={setMessage}
               multiline
               maxLength={500}
               autoFocus
-              accessibilityLabel="Feedback message"
+              accessibilityLabel={t('feedbackSheet.feedbackMessageA11y')}
               testID="feedback-input"
             />
             <Text style={styles.charCount}>{message.length}/500</Text>
 
             <View style={styles.buttonRow}>
               <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>{t('feedbackSheet.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
                 onPress={handleSend}
                 disabled={!canSend}
-                accessibilityLabel="Send feedback"
+                accessibilityLabel={t('feedbackSheet.sendFeedbackA11y')}
                 testID="feedback-send-button"
               >
                 {sending ? (
                   <ActivityIndicator color={colors.white} size="small" />
                 ) : (
-                  <Text style={styles.sendButtonText}>Send</Text>
+                  <Text style={styles.sendButtonText}>{t('feedbackSheet.send')}</Text>
                 )}
               </TouchableOpacity>
             </View>

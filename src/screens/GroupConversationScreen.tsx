@@ -22,21 +22,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createGroupConversationScreenStyles } from '../styles/GroupConversationScreen.styles';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, subscribeGroupMessages } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts, subscribeGroupMessages } from '../contexts/NostrContext';
 import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
+import BrandGradientBackground from '../components/BrandGradientBackground';
 import GifPickerSheet from '../components/GifPickerSheet';
+import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
+import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
 import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
@@ -44,9 +50,19 @@ import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
+  deriveGroupWireKind,
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { buildPollMessage, buildVoteMessage, parsePoll, parseVote } from '../utils/pollMessage';
+import {
+  legacyPollToStored,
+  tallyPoll,
+  type PollTally,
+  type StoredPoll,
+  type VoteRecord,
+} from '../utils/nip88Poll';
+import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
@@ -58,7 +74,7 @@ type GroupConversationNavigation = NativeStackNavigationProp<
 
 // Pre-classified variant of GroupMessage — created in a useMemo so
 // classifyMessageContent is NOT called inside the hot renderMessage path.
-type ClassifiedMessage = GroupMessage & { content: BubbleContent };
+type ClassifiedMessage = GroupMessage & { content: BubbleContent; wireKind: 14 | 15 };
 
 interface MemberRow {
   pubkey: string;
@@ -81,9 +97,11 @@ const GroupConversationScreen: React.FC = () => {
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createGroupConversationScreenStyles(colors), [colors]);
   const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
-  const { contacts, pubkey: myPubkey, profile: myProfile } = useNostr();
+  const { pubkey: myPubkey, profile: myProfile } = useNostr();
+  const { contacts } = useNostrContacts();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -93,6 +111,8 @@ const GroupConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
   // same in groups.
@@ -218,9 +238,9 @@ const GroupConversationScreen: React.FC = () => {
   const memberNameByPubkey = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of members) map.set(m.pubkey, m.name);
-    if (myPubkey) map.set(myPubkey, 'You');
+    if (myPubkey) map.set(myPubkey, t('groupConversationScreen.you'));
     return map;
-  }, [members, myPubkey]);
+  }, [members, myPubkey, t]);
 
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
@@ -230,6 +250,8 @@ const GroupConversationScreen: React.FC = () => {
     sending,
     uploadingImage,
     sharingLocation,
+    uploadingVoice,
+    sendText,
     handleSend,
     handlePickAndSendImage,
     handleTakeAndSendPhoto,
@@ -237,6 +259,8 @@ const GroupConversationScreen: React.FC = () => {
     handleSendGif,
     handleShareContactPicked,
     handleSendInvoiceToGroup,
+    handleSendVoiceNote,
+    resendText,
   } = useGroupComposerActions({
     group,
     draft,
@@ -246,7 +270,19 @@ const GroupConversationScreen: React.FC = () => {
     setAttachPanelOpen,
     setGifPickerOpen,
     setContactPickerOpen,
+    setVoiceSheetOpen,
   });
+
+  // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
+  // Group sends aren't per-relay tracked (no delivery store), so the sheet
+  // shows the protocol/kind/event-id metadata + a Re-publish for sent text.
+  const {
+    info: messageSheetInfo,
+    showInfo: handleShowInfo,
+    closeInfo: closeMessageInfo,
+    resendFromInfo: handleResendFromInfo,
+    canResend: canResendFromInfo,
+  } = useMessageInfoSheet(resendText);
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
   // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
@@ -296,12 +332,18 @@ const GroupConversationScreen: React.FC = () => {
 
   // MessageBubble handler — opens OSM in the system browser. Identical
   // to 1:1 conversation behaviour.
-  const openLocation = useCallback((loc: SharedLocation) => {
-    const url = buildOsmViewUrl(loc);
-    Linking.openURL(url).catch(() => {
-      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
-    });
-  }, []);
+  const openLocation = useCallback(
+    (loc: SharedLocation) => {
+      const url = buildOsmViewUrl(loc);
+      Linking.openURL(url).catch(() => {
+        Alert.alert(
+          t('groupConversationScreen.couldNotOpenLinkTitle'),
+          t('groupConversationScreen.couldNotOpenLinkMessage'),
+        );
+      });
+    },
+    [t],
+  );
 
   // Batch-fetch kind-0 profiles for every shared-contact reference in the
   // group thread. Mirrors the 1:1 path so contact cards render with avatar
@@ -348,9 +390,87 @@ const GroupConversationScreen: React.FC = () => {
   // (a FlatList renderItem) doesn't call classifyMessageContent on every
   // frame for every visible bubble. Mirror of ConversationScreen's items
   // useMemo which does the same classification.
+  //
+  // Vote messages are dropped from the visible list — they're already
+  // rolled into the referenced poll's tally via pollAggregates below, so
+  // showing them as bubbles would just duplicate the vote in the thread.
   const classifiedMessages = useMemo<ClassifiedMessage[]>(
-    () => messages.map((m) => ({ ...m, content: classifyMessageContent(m.text) })),
+    // Sanitise before classify so a tofu placeholder (#764) never reaches
+    // the bubble's text branch. Vote messages are dropped from the visible
+    // list — they're already rolled into the referenced poll's tally.
+    () =>
+      messages
+        .map((m) => ({
+          ...m,
+          content: classifyMessageContent(sanitizeDisplayText(m.text)),
+          // Derive the real NIP-17 kind (14 chat / 15 encrypted file) from the
+          // stored text rather than hard-coding 14, so the info sheet reports
+          // kind-15 for voice/image file bubbles. Precomputed here (not in the
+          // hot renderMessage path) alongside the content classification.
+          wireKind: deriveGroupWireKind(m.text),
+        }))
+        .filter((m) => m.content.kind !== 'pollVote'),
     [messages],
+  );
+
+  // Per-poll aggregates over the entire group history. Group messages carry a
+  // real `senderPubkey` (unlike 1:1 where we synthesise a per-direction voter
+  // id), so the tally gets accurate last-write-wins per member. Groups keep the
+  // TEXT-encoded poll format (the group message store is text-only — no inner
+  // wireKind/tags column), so structured NIP-88 is 1:1-only for now (#203);
+  // legacy polls are adapted to the shared display/tally shape here.
+  const pollAggregates = useMemo<Map<string, PollTally>>(() => {
+    const polls: StoredPoll[] = [];
+    const votes: VoteRecord[] = [];
+    for (const m of messages) {
+      const p = parsePoll(m.text);
+      if (p) {
+        polls.push(legacyPollToStored(m.id, p));
+        continue;
+      }
+      const v = parseVote(m.text);
+      if (v) {
+        votes.push({
+          pollId: v.pollId,
+          voter: m.senderPubkey,
+          optionIds: [String(v.optionId)],
+          createdAt: m.createdAt,
+        });
+      }
+    }
+    const out = new Map<string, PollTally>();
+    for (const poll of polls) out.set(poll.pollId, tallyPoll(poll, votes, myPubkey ?? null));
+    return out;
+  }, [messages, myPubkey]);
+
+  // Poll attach handlers — the composer returns the validated question +
+  // options; groups serialise them to the text body and hand off to sendText
+  // (the same path the GIF / location / contact-share attachments use). Vote
+  // sends use sendText too so the optimistic local-append behaviour matches.
+  const handleSendPoll = useCallback(
+    async (question: string, options: string[]): Promise<boolean> => {
+      let body: string;
+      try {
+        body = buildPollMessage(question, options);
+      } catch (err) {
+        Alert.alert('Could not send poll', err instanceof Error ? err.message : 'Invalid poll.');
+        return false;
+      }
+      return sendText(body);
+    },
+    [sendText],
+  );
+
+  const handleVotePoll = useCallback(
+    async (pollId: string, optionId: string) => {
+      const optNum = Number(optionId);
+      const payload = buildVoteMessage(pollId, Number.isFinite(optNum) ? optNum : 0);
+      const ok = await sendText(payload);
+      if (!ok) {
+        Alert.alert('Vote failed', 'Could not record your vote.');
+      }
+    },
+    [sendText],
   );
 
   const trackedMessages = useMemo(
@@ -371,10 +491,10 @@ const GroupConversationScreen: React.FC = () => {
         ? null
         : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
       // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
-      // invoice / location / image / GIF cards all render identically across
-      // chat types (#239). The classifier handles geo: + GIF detection up
-      // front; image / invoice / lnaddr / contact ride on the text variant
-      // and detect at render time.
+      // invoice / location / image / GIF / poll cards all render identically
+      // across chat types (#239). The classifier handles geo: + GIF + poll
+      // detection up front; image / invoice / lnaddr / contact ride on the
+      // text variant and detect at render time.
       return (
         <MessageBubble
           id={item.id}
@@ -388,8 +508,17 @@ const GroupConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          pollAggregates={pollAggregates}
+          onVotePoll={handleVotePoll}
           onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
+          // Group DMs are NIP-17 gift-wrapped: kind-14 chat or kind-15 encrypted
+          // file (voice/image). The info sheet reads the protocol/kind off this,
+          // so pass the per-message wireKind derived above rather than a hard
+          // 14. Group sends aren't per-relay tracked, so no deliveryStatus (the
+          // sheet shows "Not tracked").
+          wireKind={item.wireKind}
+          onShowInfo={handleShowInfo}
           testIdPrefix="group-conversation"
         />
       );
@@ -401,19 +530,24 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      pollAggregates,
+      handleVotePoll,
+      handleToggleSecretMode,
       isInvoicePaid,
+      handleShowInfo,
     ],
   );
 
   if (!group) {
     return (
       <View style={styles.container}>
+        <BrandGradientBackground />
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.titleRow}>
             <TouchableOpacity
               style={styles.backButton}
               onPress={() => navigation.goBack()}
-              accessibilityLabel="Back"
+              accessibilityLabel={t('groupConversationScreen.back')}
             >
               <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                 <Path
@@ -425,13 +559,13 @@ const GroupConversationScreen: React.FC = () => {
                 />
               </Svg>
             </TouchableOpacity>
-            <Text style={styles.title}>Group</Text>
+            <Text style={styles.title}>{t('groupConversationScreen.group')}</Text>
           </View>
         </View>
         <View style={styles.content}>
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Group not found</Text>
-            <Text style={styles.emptySubtitle}>This group may have been deleted.</Text>
+            <Text style={styles.emptyTitle}>{t('groupConversationScreen.groupNotFound')}</Text>
+            <Text style={styles.emptySubtitle}>{t('groupConversationScreen.groupDeleted')}</Text>
           </View>
         </View>
       </View>
@@ -445,12 +579,12 @@ const GroupConversationScreen: React.FC = () => {
   // tombstone — tracked as a follow-up.
   const handleLeave = () => {
     Alert.alert(
-      'Leave group',
-      `Remove "${group.name}" from this device? Other members will keep the group; you can be re-added if they message you again.`,
+      t('groupConversationScreen.leaveGroupTitle'),
+      t('groupConversationScreen.leaveGroupMessage', { name: group.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('groupConversationScreen.cancel'), style: 'cancel' },
         {
-          text: 'Leave',
+          text: t('groupConversationScreen.leave'),
           style: 'destructive',
           onPress: async () => {
             await deleteGroup(group.id);
@@ -468,12 +602,13 @@ const GroupConversationScreen: React.FC = () => {
     // the keyboard-handling via KeyboardStickyView, so the screen's own
     // wrapper is just a plain View that stacks header + content + composer.
     <View style={styles.container}>
+      <BrandGradientBackground />
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
-            accessibilityLabel="Back"
+            accessibilityLabel={t('groupConversationScreen.back')}
             testID="group-back"
           >
             <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -489,7 +624,7 @@ const GroupConversationScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.titleTouch}
             onPress={() => setRenameVisible(true)}
-            accessibilityLabel="Rename group"
+            accessibilityLabel={t('groupConversationScreen.renameGroup')}
             testID="group-title"
           >
             <Text style={styles.title} numberOfLines={1}>
@@ -509,7 +644,7 @@ const GroupConversationScreen: React.FC = () => {
           <TouchableOpacity
             style={[styles.actionButton, styles.deleteIconButton]}
             onPress={handleLeave}
-            accessibilityLabel="Leave group"
+            accessibilityLabel={t('groupConversationScreen.leaveGroupTitle')}
             testID="leave-group-button"
           >
             <LogOut size={18} color={colors.white} strokeWidth={2} />
@@ -520,12 +655,14 @@ const GroupConversationScreen: React.FC = () => {
             that used to live below this header. See issue #259. */}
         <TouchableOpacity
           onPress={() => setMembersSheetVisible(true)}
-          accessibilityLabel="Manage members"
+          accessibilityLabel={t('groupConversationScreen.manageMembers')}
           testID="group-member-count"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Text style={styles.memberCount}>
-            {members.length} member{members.length === 1 ? '' : 's'}
+            {members.length === 1
+              ? t('groupConversationScreen.memberCountOne', { count: members.length })
+              : t('groupConversationScreen.memberCountOther', { count: members.length })}
           </Text>
         </TouchableOpacity>
       </View>
@@ -549,7 +686,9 @@ const GroupConversationScreen: React.FC = () => {
               testID="group-messages-list"
               ListEmptyComponent={
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
+                  <Text style={styles.emptySubtitle}>
+                    {t('groupConversationScreen.noMessages')}
+                  </Text>
                 </View>
               }
             />
@@ -564,19 +703,20 @@ const GroupConversationScreen: React.FC = () => {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
           onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
           attachOpen={attachPanelOpen}
           attachDisabled={sharingLocation || uploadingImage}
           attachLoading={sharingLocation || uploadingImage}
           onInputFocus={closeAttachPanel}
-          placeholder="Type a message…"
+          placeholder={t('groupConversationScreen.typeMessage')}
           sendButtonVariant="paper-plane"
           composerPaddingHorizontal={12}
           accessibilityLabels={{
-            input: 'Group message input',
-            attach: 'Attach',
-            send: 'Send group message',
+            input: t('groupConversationScreen.messageInput'),
+            attach: t('groupConversationScreen.attach'),
+            send: t('groupConversationScreen.sendMessage'),
           }}
           testIDs={{
             input: 'group-message-input',
@@ -594,7 +734,7 @@ const GroupConversationScreen: React.FC = () => {
               // users who expected the same set as 1:1 (#237).
               onSendZap={() => {}}
               zapDisabled
-              zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
+              zapAccessibilityLabel={t('groupConversationScreen.zapUnavailable')}
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);
@@ -603,10 +743,25 @@ const GroupConversationScreen: React.FC = () => {
                 // Picker opens over the panel; close on cancel/select.
                 setContactPickerOpen(true);
               }}
+              onSharePoll={() => {
+                // Composer opens over the panel — close it first so the
+                // BottomSheet snaps without competing for touch focus
+                // with the visible attach grid behind it.
+                closeAttachPanel();
+                setPollComposerOpen(true);
+              }}
+              onSendVoiceNote={() => setVoiceSheetOpen(true)}
             />
           }
         />
       </View>
+
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
 
       <RenameGroupSheet
         visible={renameVisible}
@@ -642,6 +797,12 @@ const GroupConversationScreen: React.FC = () => {
         onSelect={handleSendGif}
       />
 
+      <PollComposerSheet
+        visible={pollComposerOpen}
+        onClose={() => setPollComposerOpen(false)}
+        onSend={handleSendPoll}
+      />
+
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {
@@ -651,8 +812,8 @@ const GroupConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
-        title={`Share a contact with ${group.name}`}
-        subtitle="They'll see it as a Nostr profile card they can open."
+        title={t('groupConversationScreen.shareContactTitle', { name: group.name })}
+        subtitle={t('groupConversationScreen.shareContactSubtitle')}
       />
 
       <ReceiveSheet
@@ -678,13 +839,15 @@ const GroupConversationScreen: React.FC = () => {
       <Modal
         visible={fullscreenGifUrl !== null}
         transparent
+        statusBarTranslucent
+        navigationBarTranslucent
         animationType="fade"
         onRequestClose={() => setFullscreenGifUrl(null)}
       >
         <Pressable
           style={styles.fullscreenBackdrop}
           onPress={() => setFullscreenGifUrl(null)}
-          accessibilityLabel="Close full-screen GIF"
+          accessibilityLabel={t('groupConversationScreen.closeFullscreenGif')}
           testID="group-conversation-gif-fullscreen"
         >
           {fullscreenGifUrl ? (
@@ -724,6 +887,11 @@ const GroupConversationScreen: React.FC = () => {
         visible={secretCelebrationVisible}
         enabled={secretPendingEnabled}
         onDismiss={() => setSecretCelebrationVisible(false)}
+      />
+      <DeliveryDetailSheet
+        info={messageSheetInfo}
+        onClose={closeMessageInfo}
+        onResend={canResendFromInfo ? handleResendFromInfo : undefined}
       />
     </View>
   );

@@ -1,0 +1,67 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Order card Pay and QR affordance
+---
+# Asserts the Pay / QR affordance on the kind-16/17 marketplace order cards:
+#
+#   - a kind-16 type-2 "Payment" request renders a Pay button, a Show-QR
+#     toggle (revealing the invoice QR) and a Copy-invoice button;
+#   - a kind-17 receipt renders a "Paid" badge (no Pay button).
+#
+# Markets publish these as PLAINTEXT kind-16/17 events to the buyer and there
+# is no test relay that does so, so the cards are seeded into the local DM
+# store by a __DEV__-only "Dev order" button on the Messages screen
+# (messages-dev-seed-order → src/utils/devSeedOrders.ts), which then opens the
+# seeded conversation. The fixture partner is Little Piggy (a project test
+# account), keeping it inside the controlled fixture set per README.adoc.
+#
+# Dev-build only: the seed button is __DEV__-gated, so this flow is for the
+# dev-client/emulator suite — do NOT add to a release-APK run.
+#
+# Run (from existing app state):
+#   maestro test --env MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
+#     .maestro/messaging/flow-120-order-card-pay-qr.yaml
+
+- runFlow:
+    file: ../common/login-as-piggy.yaml
+    env:
+      PIGGY_NSEC: ${MAESTRO_NSEC_BIG}
+
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: 'messages-search-toggle'
+
+# __DEV__-only fixture launcher: seeds a payment-request + receipt order
+# conversation and opens it.
+- assertVisible:
+    id: 'messages-dev-seed-order'
+- tapOn:
+    id: 'messages-dev-seed-order'
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# The payment-request card (kind-16 type-2) renders the full affordance.
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-order-pay-.*'
+    timeout: 10000
+- assertVisible:
+    id: 'conversation-order-qr-toggle-.*'
+- assertVisible:
+    id: 'conversation-order-copy-.*'
+# The receipt card (kind-17) shows a Paid badge instead of a Pay button.
+- assertVisible:
+    id: 'conversation-order-paid-.*'
+- takeScreenshot: order-card-pay-qr-affordance
+
+# Toggling Show QR reveals the invoice QR image (testID `…-qr-dm…`, distinct
+# from the `…-qr-toggle-…` button).
+- tapOn:
+    id: 'conversation-order-qr-toggle-.*'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-order-qr-dm.*'
+- takeScreenshot: order-card-qr-revealed

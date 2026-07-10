@@ -42,6 +42,47 @@ export function pickNewReceipts(
   return fresh;
 }
 
+// Whether a wallet needs its announced-receipt baseline seeded now.
+//
+// A wallet is baselined exactly once — the first time we have its real history
+// in hand (launch hydration from cache, identity switch, or the first
+// `fetchTransactionsForWallet`). `existingBaseline` is the per-wallet entry from
+// the seen-set map: `undefined` means "never baselined". The receive detector
+// must NOT baseline off the *current* in-state txns, because a freshly-added
+// NWC wallet first appears with an empty tx list; baselining empty there would
+// let the later fetched history announce a stale receive on the user's first
+// refresh (the empty-baseline race, #725). So baselining is owned by the fetch
+// (which has the real, fetched history) and gated on this predicate.
+export function shouldSeedBaseline(
+  existingBaseline: ReadonlySet<string> | undefined,
+): existingBaseline is undefined {
+  return existingBaseline === undefined;
+}
+
+// A new receipt tagged with which wallet (and label) it belongs to — the unit
+// the receive detector picks a single winner from across all wallets.
+export interface AnnouncedReceipt extends NewReceipt {
+  walletId: string;
+  walletLabel: string;
+  // Which rail delivered this credit (#134). Optional so the pure
+  // dedup/tie-break helpers (and their tests) don't need to supply it;
+  // the receive detector always populates it before it reaches the
+  // celebration overlay.
+  source?: 'lightning' | 'onchain';
+}
+
+// Pick the newer of two candidate receipts deterministically (latest
+// settledAt wins). The overlay shows ONE payment per render, so when several
+// wallets each surface a fresh receive in the same tick we announce only the
+// most recent — extracted so the tie-break is unit-testable (#859, #828).
+export function pickNewerReceipt(
+  current: AnnouncedReceipt | null,
+  candidate: AnnouncedReceipt,
+): AnnouncedReceipt {
+  if (!current || candidate.settledAt > current.settledAt) return candidate;
+  return current;
+}
+
 // All payment_hashes of settled incoming txns (well-formed only) — used to seed
 // the seen-set on first sight of a wallet (silent baseline: no launch re-announce).
 export function settledIncomingHashes(transactions: readonly WalletTransaction[]): Set<string> {

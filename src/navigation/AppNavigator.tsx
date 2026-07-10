@@ -1,12 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  StyleSheet,
-  ActivityIndicator,
-  View,
-  Platform,
-  useWindowDimensions,
-} from 'react-native';
+import { Linking, StyleSheet, ActivityIndicator, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NavigationContainer,
   NavigationState,
@@ -23,46 +17,65 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { setActiveThread, setActiveCache } from '../services/notificationService';
 import {
   RootStackParamList,
   ExploreStackParamList,
   MainTabParamList,
   AccountDrawerParamList,
 } from './types';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
+import { lazyScreen } from './lazyScreen';
+
+// Tab-root + drawer-chrome screens stay EAGER — they must render instantly on
+// tab switch / drawer open, so paying their Hermes parse cost up-front is the
+// right trade. Everything reachable only via a stack push is `lazyScreen`'d
+// below so its module isn't evaluated until first navigate (audit HIGH 1).
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
 import ExploreHomeScreen from '../screens/ExploreHomeScreen';
-import LessonsScreen from '../screens/LessonsScreen';
-import MapScreen from '../screens/MapScreen';
-import PlacesScreen from '../screens/PlacesScreen';
-import PlaceDetailScreen from '../screens/PlaceDetailScreen';
-import HuntScreen from '../screens/HuntScreen';
-import HuntCreateScreen from '../screens/HuntCreateScreen';
-import HuntFoundScreen from '../screens/HuntFoundScreen';
-import HuntPiggyDetailScreen from '../screens/HuntPiggyDetailScreen';
-import MyPigletsScreen from '../screens/MyPigletsScreen';
-import EventsScreen from '../screens/EventsScreen';
-import EventDetailScreen from '../screens/EventDetailScreen';
-import CourseDetailScreen from '../screens/CourseDetailScreen';
-import MissionDetailScreen from '../screens/MissionDetailScreen';
 import FriendsScreen from '../screens/FriendsScreen';
-import ConversationScreen from '../screens/ConversationScreen';
-import GroupsScreen from '../screens/GroupsScreen';
-import GroupConversationScreen from '../screens/GroupConversationScreen';
-import ContactProfileScreen from '../screens/ContactProfileScreen';
-import UnsupportedEntityScreen from '../screens/UnsupportedEntityScreen';
-import ProfileScreen from '../screens/account/ProfileScreen';
-import WalletsScreen from '../screens/account/WalletsScreen';
-import NostrScreen from '../screens/account/NostrScreen';
-import OnChainScreen from '../screens/account/OnChainScreen';
-import DisplayScreen from '../screens/account/DisplayScreen';
-import AppearanceScreen from '../screens/account/AppearanceScreen';
-import NearbyScreen from '../screens/account/NearbyScreen';
-import SecurityScreen from '../screens/account/SecurityScreen';
-import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
+
+// Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
+// Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
+// spinner for that screen and never tears down siblings (keeps `freezeOnBlur` +
+// persisted nav state intact). Imperative deep-link routes
+// (`navigationRef.navigate(...)`) mount these the same way a user tap does, so
+// the Suspense resolves the import before the screen renders — every entry
+// point in this file (navigateToHuntFound / navigateToHuntPiggyDetail /
+// navigateToContactProfile / navigateToUnsupportedEntity / navigateToSend /
+// navigateFromNotification) continues to work.
+const LessonsScreen = lazyScreen(() => import('../screens/LessonsScreen'));
+const MapScreen = lazyScreen(() => import('../screens/MapScreen'));
+const PlacesScreen = lazyScreen(() => import('../screens/PlacesScreen'));
+const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'));
+const HuntScreen = lazyScreen(() => import('../screens/HuntScreen'));
+const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'));
+const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
+const HuntPiggyDetailScreen = lazyScreen(() => import('../screens/HuntPiggyDetailScreen'));
+const MyPigletsScreen = lazyScreen(() => import('../screens/MyPigletsScreen'));
+const EventsScreen = lazyScreen(() => import('../screens/EventsScreen'));
+const EventDetailScreen = lazyScreen(() => import('../screens/EventDetailScreen'));
+const CourseDetailScreen = lazyScreen(() => import('../screens/CourseDetailScreen'));
+const MissionDetailScreen = lazyScreen(() => import('../screens/MissionDetailScreen'));
+const ConversationScreen = lazyScreen(() => import('../screens/ConversationScreen'));
+const GroupsScreen = lazyScreen(() => import('../screens/GroupsScreen'));
+const GroupConversationScreen = lazyScreen(() => import('../screens/GroupConversationScreen'));
+const ContactProfileScreen = lazyScreen(() => import('../screens/ContactProfileScreen'));
+const UnsupportedEntityScreen = lazyScreen(() => import('../screens/UnsupportedEntityScreen'));
+const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
+const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
+const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
+const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
+const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
+const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceScreen'));
+const NearbyScreen = lazyScreen(() => import('../screens/account/NearbyScreen'));
+const SecurityScreen = lazyScreen(() => import('../screens/account/SecurityScreen'));
+const AboutScreen = lazyScreen(() => import('../screens/account/AboutScreen'));
 
 let __appNavigatorFirstRenderLogged = false;
 
@@ -74,6 +87,27 @@ let __appNavigatorFirstRenderLogged = false;
  * cleanly. Use `navigateToHuntFound(lnurl)` from outside the React tree.
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+/**
+ * Open the SendSheet on the Home (wallet) tab pre-filled with a pay
+ * payload — a bolt11 invoice (`lnbc…`), a Lightning Address (`user@host`),
+ * or a resolved LNURL-pay endpoint URL. Consumed by `App.tsx`'s Linking
+ * listener for scan-to-pay (#756), the outbound mirror of
+ * `navigateToHuntFound` (scan-to-claim / withdraw, #341).
+ *
+ * HomeScreen reads `route.params.sendToAddress` and feeds it straight into
+ * SendSheet's `processInput`, which already decodes bolt11 + Lightning
+ * Address. Returns false if the nav tree isn't mounted yet so the caller
+ * can retry on cold start.
+ */
+export const navigateToSend = (initialAddress: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: { screen: 'Home', params: { sendToAddress: initialAddress } },
+  });
+  return true;
+};
 
 export const navigateToHuntFound = (lnurl: string): boolean => {
   if (!navigationRef.isReady()) return false;
@@ -120,6 +154,108 @@ export const navigateToHuntPiggyDetail = (coord: string): boolean => {
   return true;
 };
 
+// Open a contact's full-page profile from outside the React tree —
+// the App.tsx deep-link / NFC handler for `nostr:npub…` / `nostr:nprofile…`
+// (#754). `contact` is a ready-built ContactProfileBodyData; when the
+// kind-0 fetch hasn't resolved yet the caller passes a pubkey-only stub
+// and the screen fills in the bio + Lightning address itself. Returns
+// false until the nav tree is ready so a cold-start tap can retry.
+export const navigateToContactProfile = (contact: ContactProfileBodyData): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('ContactProfile', { contact });
+  return true;
+};
+
+// Graceful fallback for a scanned tag / nostr: link whose entity type
+// has no in-app screen (e.g. a kind-1 note, or a `nostr:` URI we can't
+// decode). Mirrors the Hunt deep-link retry contract — returns false
+// until the nav tree mounts. Used by the App.tsx nostr: router (#754).
+export const navigateToUnsupportedEntity = (entity: string, detail?: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('UnsupportedEntity', { entity, detail });
+  return true;
+};
+
+/**
+ * Route from a tapped OS notification (#279). Reads the `data` payload the
+ * notificationService attached and opens the relevant surface:
+ *  - dm            → the 1:1 Conversation thread
+ *  - group         → the GroupConversation thread
+ *  - payment / zap → the Home (wallet) tab
+ *
+ * Called from the notification-response listener in App.tsx. Returns false
+ * if the nav tree isn't ready yet (caller retries on cold start).
+ */
+export const navigateFromNotification = (data: {
+  kind?: string;
+  conversationPubkey?: string;
+  groupId?: string;
+  walletId?: string;
+  cacheCoord?: string;
+}): boolean => {
+  if (!navigationRef.isReady()) return false;
+  if (data.conversationPubkey) {
+    // `name` is required by the route type but the screen fills the real
+    // header from its own profile fetch, so seed it empty.
+    navigationRef.navigate('Conversation', { pubkey: data.conversationPubkey, name: '' });
+    return true;
+  }
+  if (data.groupId) {
+    navigationRef.navigate('GroupConversation', { groupId: data.groupId });
+    return true;
+  }
+  // Find-log on one of my caches (#740) → open that cache detail. The
+  // background detect-and-ping path passes the sentinel `__background__`
+  // coord (it didn't resolve to a specific cache) — fall through to the
+  // Geo-caches list in that case instead of pushing a doomed detail.
+  if (data.kind === 'cache') {
+    if (data.cacheCoord && data.cacheCoord !== '__background__') {
+      return navigateToHuntPiggyDetail(data.cacheCoord);
+    }
+    navigationRef.navigate('Main', {
+      screen: 'MainTabs',
+      params: { screen: 'Explore', params: { screen: 'Hunt' } },
+    });
+    return true;
+  }
+  // Generic message ping with no thread id (the background detect-and-ping
+  // path, which doesn't decrypt) → open the Messages list.
+  if (data.kind === 'dm' || data.kind === 'group') {
+    navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    return true;
+  }
+  // payment / zap (or anything else) → wallet home.
+  navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Home' } });
+  return true;
+};
+
+/**
+ * Keep notificationService's "active thread" in sync with the focused route
+ * (#279), so DM / group notifications are suppressed for the thread the user
+ * is currently viewing. Done centrally here (off the back of the existing
+ * onStateChange) rather than per-screen, to avoid growing the over-cap
+ * Conversation / GroupConversation screen files (#703).
+ */
+function syncActiveThreadFromNav(): void {
+  const route = navigationRef.getCurrentRoute();
+  if (route?.name === 'Conversation') {
+    setActiveThread((route.params as { pubkey?: string } | undefined)?.pubkey ?? null);
+  } else if (route?.name === 'GroupConversation') {
+    setActiveThread((route.params as { groupId?: string } | undefined)?.groupId ?? null);
+  } else {
+    setActiveThread(null);
+  }
+  // Active-cache suppression (#740) — if the focused screen is the
+  // detail view for a specific cache, find-logs against that coord stay
+  // silent. Independent of the thread gate so a DM and a cache can't
+  // collide on the same identifier.
+  if (route?.name === 'HuntPiggyDetail') {
+    setActiveCache((route.params as { coord?: string } | undefined)?.coord ?? null);
+  } else {
+    setActiveCache(null);
+  }
+}
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
@@ -148,6 +284,9 @@ function ExploreStackNavigator() {
 
 function HomeTabs() {
   const { colors } = useTheme();
+  const t = useTranslation();
+  // Reserve the real system-bar inset so the edge-to-edge tab bar clears gesture/3-button nav (see #862).
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -164,8 +303,8 @@ function HomeTabs() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.divider,
-          height: Platform.OS === 'android' ? 80 : 70,
-          paddingBottom: Platform.OS === 'android' ? 20 : 10,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 6,
         },
         tabBarActiveTintColor: colors.brandPink,
@@ -180,6 +319,7 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
+          tabBarLabel: t('tabs.home'),
           tabBarButtonTestID: 'tab-home',
           tabBarAccessibilityLabel: 'Home tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -196,6 +336,7 @@ function HomeTabs() {
         name="Messages"
         component={MessagesScreen}
         options={{
+          tabBarLabel: t('tabs.messages'),
           tabBarButtonTestID: 'tab-messages',
           tabBarAccessibilityLabel: 'Messages tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -212,6 +353,7 @@ function HomeTabs() {
         name="Explore"
         component={ExploreStackNavigator}
         options={{
+          tabBarLabel: t('tabs.explore'),
           tabBarButtonTestID: 'tab-explore',
           tabBarAccessibilityLabel: 'Explore tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -268,6 +410,7 @@ function HomeTabs() {
         name="Friends"
         component={FriendsScreen}
         options={{
+          tabBarLabel: t('tabs.friends'),
           tabBarButtonTestID: 'tab-friends',
           tabBarAccessibilityLabel: 'Friends tab',
           tabBarIcon: ({ focused, color, size }) => (
@@ -400,6 +543,8 @@ export default function AppNavigator() {
         // Fire-and-forget — failures are swallowed inside the util so
         // a flaky AsyncStorage write can't crash navigation.
         void persistNavigationState(state);
+        // Suppress notifications for the thread the user is now viewing.
+        syncActiveThreadFromNav();
       }}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>

@@ -1,6 +1,17 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { MapPin, Zap, Receipt, UserRound, ImagePlus, Camera, Smile } from 'lucide-react-native';
+import {
+  MapPin,
+  Zap,
+  Receipt,
+  UserRound,
+  ImagePlus,
+  Camera,
+  Smile,
+  BarChart3,
+  Mic,
+  Wallet,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -25,6 +36,23 @@ interface Props {
   onSendImage?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
+  // Optional: opens the PollComposerSheet. Omitted (= tile hidden) when
+  // the host chat doesn't support polls — currently always available
+  // when the rest of the composer is, so the tile is shown by default.
+  onSharePoll?: () => void;
+  /**
+   * Opens the NWC wallet picker to share a connected wallet with the peer
+   * (#431). Omitted in builds/contexts without wallet sharing.
+   */
+  onShareWallet?: () => void;
+  /**
+   * Opens the voice-note recording sheet (#235). Same surface as
+   * Image / Camera / GIF / Location — the sheet records a clip and
+   * uploads it to Blossom; the resulting URL is sent as the message
+   * body so other Nostr clients render an inline audio player from
+   * the file extension.
+   */
+  onSendVoiceNote?: () => void;
 }
 
 interface Tile {
@@ -55,6 +83,9 @@ const AttachPanel: React.FC<Props> = ({
   onSendImage,
   onTakePhoto,
   onSendGif,
+  onSharePoll,
+  onSendVoiceNote,
+  onShareWallet,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -91,6 +122,14 @@ const AttachPanel: React.FC<Props> = ({
         testID: 'attach-send-gif',
         accessibilityLabel: 'Send a GIF',
       },
+      onSendVoiceNote && {
+        key: 'voice',
+        label: 'Voice',
+        icon: <Mic size={26} color={colors.white} />,
+        onPress: onSendVoiceNote,
+        testID: 'attach-tile-voice',
+        accessibilityLabel: 'Record and send a voice note',
+      },
       {
         key: 'location',
         label: 'Location',
@@ -125,6 +164,22 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onShareContact,
         testID: 'attach-share-contact',
         accessibilityLabel: "Share a contact's profile",
+      },
+      onShareWallet && {
+        key: 'wallet',
+        label: 'Wallet',
+        icon: <Wallet size={26} color={colors.white} />,
+        onPress: onShareWallet,
+        testID: 'attach-share-wallet',
+        accessibilityLabel: 'Share a connected NWC wallet',
+      },
+      onSharePoll && {
+        key: 'poll',
+        label: 'Poll',
+        icon: <BarChart3 size={26} color={colors.white} />,
+        onPress: onSharePoll,
+        testID: 'attach-share-poll',
+        accessibilityLabel: 'Share a poll for the recipient to vote on',
       },
     ] as (Tile | false | undefined)[]
   ).filter((t): t is Tile => Boolean(t));

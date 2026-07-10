@@ -2,6 +2,8 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import { hasPrize } from '../utils/cachePrize';
 
 interface Props {
   /** Whether the cache is a Lightning Piggy (carries the NIP-32 LP label). */
@@ -35,13 +37,14 @@ interface Props {
  */
 export const LpPayoutBadge: React.FC<Props> = ({ isLpPiggy, payoutSats, offset }) => {
   const colors = useThemeColors();
-  if (!isLpPiggy || payoutSats == null) return null;
+  const t = useTranslation();
+  if (!hasPrize({ isLpPiggy, payoutSats })) return null;
   return (
     <View
       style={[styles.badge, { backgroundColor: colors.surface }, offset]}
       accessible
       accessibilityRole="image"
-      accessibilityLabel="Lightning payout available"
+      accessibilityLabel={t('lpPayoutBadge.lightningPayoutAvailable')}
     >
       <Zap size={13} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
     </View>

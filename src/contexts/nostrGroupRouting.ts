@@ -6,6 +6,7 @@ import {
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 import { notifyGroupMessage } from './nostrEventBus';
+import type { Group } from '../types/groups';
 
 /**
  * Outcome of attempting to route a kind-14 rumor as a group message.
@@ -17,7 +18,9 @@ import { notifyGroupMessage } from './nostrEventBus';
  * from "group-shaped, no local match" (must NOT fall through).
  */
 export type GroupRouteResult =
-  | { kind: 'routed' } // appended to a known group
+  // appended; carries the group + message so the LIVE caller can fire an
+  // OS notification (#279). Only live deliveries notify — see nostrLiveDmSub.
+  | { kind: 'routed'; group: Group; message: GroupMessage }
   | { kind: 'group-no-match' } // group-shaped but no matching local group
   | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
 
@@ -121,5 +124,5 @@ export async function tryRouteGroupRumor(
     // tick is the practical recovery path; no automatic replay today.
     return { kind: 'group-no-match' };
   }
-  return { kind: 'routed' };
+  return { kind: 'routed', group, message };
 }

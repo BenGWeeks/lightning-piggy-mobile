@@ -12,7 +12,8 @@ import { bech32 } from 'bech32';
  * specific APIs` for the rationale.
  */
 
-const FETCH_TIMEOUT_MS = 8_000;
+// 20s — prize claims round-trip a relay + the issuer's wallet; 8s was too tight on slow links (#734).
+const FETCH_TIMEOUT_MS = 20_000;
 
 export interface LnurlWithdrawParams {
   /** Endpoint the finder POSTs the bolt11 invoice to. */
@@ -49,14 +50,20 @@ export const decodeLnurlWithdraw = (input: string): string => {
     s = s.slice('lightning:'.length).trim();
   }
 
-  // `lnurlw://host/path` is the cleartext form some wallets emit.
+  // LUD-17 cleartext forms (`lnurlw://host/path`, and the rare spec-allowed
+  // `lnurl://host/path`). Per LUD-17 these map to `http://` for `.onion` Tor
+  // hosts and `https://` everywhere else — rewriting `.onion` to https breaks
+  // Tor-only withdraw endpoints. The host is the authority up to the first
+  // `/ : ? #`; strip any port before the `.onion` test.
+  const cleartextToHttp = (rest: string): string => {
+    const host = rest.split(/[/:?#]/, 1)[0].toLowerCase();
+    return (host.endsWith('.onion') ? 'http://' : 'https://') + rest;
+  };
   if (/^lnurlw:\/\//i.test(s)) {
-    return 'https://' + s.slice('lnurlw://'.length);
+    return cleartextToHttp(s.slice('lnurlw://'.length));
   }
-
-  // `lnurl://host/path` (rare but spec-allowed).
   if (/^lnurl:\/\//i.test(s)) {
-    return 'https://' + s.slice('lnurl://'.length);
+    return cleartextToHttp(s.slice('lnurl://'.length));
   }
 
   // bech32 form. HRP is "lnurl"; we accept any case but bech32 itself
@@ -175,10 +182,12 @@ export const claimLnurlWithdraw = async (
   params: LnurlWithdrawParams,
   getInvoice: (sats: number, memo: string) => Promise<string>,
 ): Promise<{ sats: number; bolt11: string }> => {
-  // Always claim the maximum the issuer offers. Min/max being equal is
-  // the common case (single-amount Piggy); when they differ we still
-  // pick max — finders want the biggest claim available, not the
-  // smallest. The bolt11 we generate has the exact amount baked in.
+  // Claims `params.maxWithdrawable`. There is no separate amount argument by
+  // design: to claim a specific amount, the caller pre-clamps the params so
+  // `minWithdrawable === maxWithdrawable === <chosen msats>` (both UI callers do
+  // this from the amount picker). With an un-clamped range this claims the max,
+  // which is the right default for a single-amount voucher. The bolt11 we
+  // generate has the exact amount baked in.
   const sats = msatToSats(params.maxWithdrawable);
   if (sats <= 0) {
     throw new LnurlWithdrawError(

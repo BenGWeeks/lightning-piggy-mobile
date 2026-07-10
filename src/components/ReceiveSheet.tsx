@@ -22,14 +22,16 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { buildBip21 } from '../utils/bip21';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
-import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { walletLabel } from '../types/wallet';
 import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
@@ -70,6 +72,7 @@ const ReceiveSheet: React.FC<Props> = ({
   onSent,
 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createReceiveSheetStyles(colors), [colors]);
   const {
     makeInvoiceForWallet,
@@ -77,12 +80,11 @@ const ReceiveSheet: React.FC<Props> = ({
     activeWalletId,
     activeWallet,
     wallets,
-    btcPrice,
     currency,
     getReceiveAddress,
     expectPayment,
-    lastIncomingPayment,
   } = useWallet();
+  const { btcPrice, lastIncomingPayment } = useWalletLive();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('address');
@@ -99,8 +101,13 @@ const ReceiveSheet: React.FC<Props> = ({
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
+  // On-chain → Lightning via Boltz forward submarine swap (issue #92).
+  // Only ever opens for an LN (NWC) wallet — gated by `isOnchainWallet`
+  // checks at the render call site below.
+  const [boltzReceiveOpen, setBoltzReceiveOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  const { sendDirectMessage, contacts } = useNostr();
+  const { sendDirectMessage } = useNostr();
+  const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // No explicit snapPoints — gorhom v5's default enableDynamicSizing=true
@@ -111,7 +118,17 @@ const ReceiveSheet: React.FC<Props> = ({
     () => wallets.find((w) => w.id === selectedWalletId) ?? null,
     [wallets, selectedWalletId],
   );
-  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
+  const walletName = selectedWallet
+    ? walletLabel(selectedWallet)
+    : t('receiveSheet.walletFallback');
+  // List all wallets in the picker rather than gating on `isConnected` —
+  // receiving doesn't need a live connection (an on-chain wallet always has an
+  // address, and most NWC wallets mint an invoice on demand). If a chosen
+  // wallet genuinely can't produce one (e.g. a read-only NWC without
+  // `make_invoice`), that surfaces as an error at generate time — which is
+  // better than silently hiding it and locking the invoice to the active
+  // wallet, where the user couldn't choose where funds landed at all.
+  const receivableWallets = wallets;
   // Lightning Address is a per-wallet field (#169). Each NWC wallet can
   // carry its own lud16 (either parsed from the NWC URL or set manually
   // in Wallet Settings) — the Receive flow must read the *selected*
@@ -134,7 +151,7 @@ const ReceiveSheet: React.FC<Props> = ({
         const inv = await makeInvoiceForWallet(
           wId,
           sats,
-          memo?.trim() || 'Sent with Lightning Piggy',
+          memo?.trim() || t('receiveSheet.defaultMemo'),
         );
         setInvoice(inv);
 
@@ -172,7 +189,7 @@ const ReceiveSheet: React.FC<Props> = ({
         const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
         Toast.show({
           type: 'error',
-          text1: "Couldn't generate invoice",
+          text1: t('receiveSheet.invoiceGenerateFailed'),
           text2: message.slice(0, 120),
           position: 'top',
           visibilityTime: 4000,
@@ -197,14 +214,33 @@ const ReceiveSheet: React.FC<Props> = ({
       if (wallet?.walletType === 'onchain') {
         return { step: 'main', mode: 'address' };
       }
-      if (presetFriend || presetGroup) {
-        // "Send invoice to friend" / "Send invoice to group" entry point:
-        // skip straight to amount entry so the user doesn't land on the
-        // main receive/address view they can't use, then need a second
-        // tap on "Enter custom amount". Group flow needs an amount-bound
-        // bolt11 invoice anyway — sharing a static lud16 to a group has
-        // no useful "pay me" semantics.
+      if (presetGroup) {
+        // "Send invoice to group" entry point: skip straight to amount
+        // entry — the group flow needs an amount-bound bolt11 invoice
+        // (sharing a static lud16 to a group has no useful "pay me"
+        // semantics), so the main receive/address view is unusable.
         return { step: 'amount', mode: 'amount' };
+      }
+      if (presetFriend) {
+        // The 1:1 DM flow deliberately does NOT skip the main view: it
+        // lands there like the Home receive sheet does, so the "To:"
+        // wallet picker is visible BEFORE the user commits to an
+        // amount, and the lightning address can be sent as-is (an
+        // amount-less request). Previously it jumped straight to
+        // amount entry, which hid which wallet the invoice would pay
+        // into. Only skip when there is genuinely nothing to show or
+        // choose: exactly one RESOLVED wallet and it has no lightning
+        // address. (=== 1, not <= 1: WalletContext initialises
+        // `wallets` to [] before hydration, and an empty list must not
+        // skip the main view for a user who has several wallets once
+        // hydrated. Requiring `wallet` non-null covers the cold-start
+        // render where `wallets` is populated but `activeWalletId`
+        // hasn't hydrated yet — a null wallet must not be treated as
+        // "no lightning address".)
+        if (wallet && !wallet.lightningAddress && wallets.length === 1) {
+          return { step: 'amount', mode: 'amount' };
+        }
+        return { step: 'main', mode: 'address' };
       }
       if (!wallet?.lightningAddress) {
         // No per-wallet LN address (#168/#169). Nothing useful to show
@@ -214,7 +250,7 @@ const ReceiveSheet: React.FC<Props> = ({
       }
       return { step: 'main', mode: 'address' };
     },
-    [presetFriend, presetGroup],
+    [presetFriend, presetGroup, wallets],
   );
 
   // Open/close the sheet — intentionally depends only on `visible`.
@@ -379,8 +415,8 @@ const ReceiveSheet: React.FC<Props> = ({
         if (!result.success) {
           Toast.show({
             type: 'error',
-            text1: 'Send failed',
-            text2: result.error ?? 'Could not send to friend.',
+            text1: t('receiveSheet.sendFailed'),
+            text2: result.error ?? t('receiveSheet.couldNotSendToFriend'),
             position: 'top',
             visibilityTime: 4000,
           });
@@ -389,8 +425,8 @@ const ReceiveSheet: React.FC<Props> = ({
         Toast.show({
           type: 'success',
           text1: sharedAddress
-            ? `Lightning address sent to ${friend.name}`
-            : `Invoice sent to ${friend.name}`,
+            ? t('receiveSheet.lightningAddressSentTo', { name: friend.name })
+            : t('receiveSheet.invoiceSentTo', { name: friend.name }),
           position: 'top',
           visibilityTime: 2500,
         });
@@ -441,8 +477,8 @@ const ReceiveSheet: React.FC<Props> = ({
       if (!result.success) {
         Toast.show({
           type: 'error',
-          text1: 'Send failed',
-          text2: result.error ?? 'Could not send to group.',
+          text1: t('receiveSheet.sendFailed'),
+          text2: result.error ?? t('receiveSheet.couldNotSendToGroup'),
           position: 'top',
           visibilityTime: 4000,
         });
@@ -451,7 +487,7 @@ const ReceiveSheet: React.FC<Props> = ({
       onSent?.(payload);
       Toast.show({
         type: 'success',
-        text1: `Invoice sent to ${presetGroup.name}`,
+        text1: t('receiveSheet.invoiceSentTo', { name: presetGroup.name }),
         position: 'top',
         visibilityTime: 2500,
       });
@@ -476,9 +512,16 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const handleSheetChange = useCallback(
     (index: number) => {
-      if (index === -1) onClose();
+      // Presenting the Boltz receive sheet (a second BottomSheetModal) on top
+      // collapses THIS sheet to index -1. That collapse is not a user dismiss —
+      // and closing here calls onClose() → the parent sets visible=false → this
+      // component returns null and unmounts, taking the still-open
+      // <BoltzReceiveSheet> child (rendered in this tree) down with it. That
+      // stranded the Boltz lockup QR the instant it opened (#92). Only treat a
+      // genuine collapse to -1 as a dismiss when no child sheet is open.
+      if (index === -1 && !boltzReceiveOpen) onClose();
     },
-    [onClose],
+    [onClose, boltzReceiveOpen],
   );
 
   const renderBackdrop = useCallback(
@@ -522,12 +565,12 @@ const ReceiveSheet: React.FC<Props> = ({
               // Receive flow keeps the generic "Custom amount".
               title={
                 presetFriend
-                  ? `Request from ${presetFriend.name}`
+                  ? t('receiveSheet.requestFrom', { name: presetFriend.name })
                   : presetGroup
-                    ? `Request from ${presetGroup.name}`
-                    : 'Custom amount'
+                    ? t('receiveSheet.requestFrom', { name: presetGroup.name })
+                    : t('receiveSheet.customAmount')
               }
-              confirmLabel="Generate invoice"
+              confirmLabel={t('receiveSheet.generateInvoice')}
               // Memo only makes sense for an amount-bound bolt11 (it's
               // the bolt11 `description` field), and only when there's
               // a clear "what's it for" context — i.e. requesting a
@@ -557,14 +600,17 @@ const ReceiveSheet: React.FC<Props> = ({
             />
           ) : (
             <View style={styles.innerContent}>
-              <Text style={styles.title}>Receive</Text>
+              <Text style={styles.title}>{t('receiveSheet.receive')}</Text>
 
               {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
+              {receivableWallets.length > 1 ? (
                 <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>To:</Text>
+                  <Text style={styles.walletLabel}>{t('receiveSheet.to')}</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
+                      testID="receive-wallet-dropdown-toggle"
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: dropdownOpen }}
                       style={styles.walletDropdown}
                       onPress={() => setDropdownOpen(!dropdownOpen)}
                     >
@@ -577,36 +623,42 @@ const ReceiveSheet: React.FC<Props> = ({
                     </TouchableOpacity>
                     {dropdownOpen && (
                       <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected || w.walletType === 'onchain')
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
+                        {receivableWallets.map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            testID={`receive-wallet-option-${w.id}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: selectedWalletId === w.id }}
+                            accessibilityLabel={t('receiveSheet.selectWalletA11y', {
+                              wallet: walletLabel(w),
+                            })}
+                            style={[
+                              styles.walletDropdownItem,
+                              selectedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
                               style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
+                                styles.walletDropdownItemText,
+                                selectedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
                             >
-                              <Text
-                                style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
-                                ]}
-                              >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
+                              {walletLabel(w)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     )}
                   </View>
                 </View>
               ) : (
-                <Text style={styles.walletLabel}>To: {walletName}</Text>
+                <Text style={styles.walletLabel}>
+                  {t('receiveSheet.toWallet', { wallet: walletName })}
+                </Text>
               )}
 
               {/* QR Code */}
@@ -621,7 +673,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     )}
                   </View>
                 ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
-                  <Text style={styles.noInvoice}>Enter an amount to generate QR code</Text>
+                  <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
                 ) : mode === 'address' && lightningAddress ? (
                   <View>
                     <QRCode value={`lightning:${lightningAddress}`} size={200} />
@@ -645,8 +697,8 @@ const ReceiveSheet: React.FC<Props> = ({
                 ) : (
                   <Text style={styles.noInvoice}>
                     {mode === 'address'
-                      ? 'No lightning address set'
-                      : 'Enter an amount to generate invoice'}
+                      ? t('receiveSheet.noLightningAddress')
+                      : t('receiveSheet.enterAmountForInvoice')}
                   </Text>
                 )}
               </View>
@@ -662,12 +714,12 @@ const ReceiveSheet: React.FC<Props> = ({
                   mode === 'amount' && currentSats > 0 ? (
                     `${currentSats.toLocaleString()} sats`
                   ) : (
-                    'Loading address...'
+                    t('receiveSheet.loadingAddress')
                   )
                 ) : mode === 'address' ? (
                   lightningAddress
                 ) : (
-                  'Lightning invoice'
+                  t('receiveSheet.lightningInvoice')
                 )}
               </Text>
               {mode === 'amount' && invoice && memoValue ? (
@@ -705,7 +757,9 @@ const ReceiveSheet: React.FC<Props> = ({
                       // misconfiguration as a disabled button instead.
                       (!!presetGroup && !onSendToGroup)
                     }
-                    accessibilityLabel={`Send to ${presetFriend?.name ?? presetGroup?.name}`}
+                    accessibilityLabel={t('receiveSheet.sendTo', {
+                      name: presetFriend?.name ?? presetGroup?.name,
+                    })}
                     testID="receive-send-to-friend"
                   >
                     {sendingToFriend ? (
@@ -714,7 +768,9 @@ const ReceiveSheet: React.FC<Props> = ({
                       <>
                         <Send size={20} color={colors.white} />
                         <Text style={[styles.actionButtonText, styles.actionButtonTextPrimary]}>
-                          Send to {presetFriend?.name ?? presetGroup?.name}
+                          {t('receiveSheet.sendTo', {
+                            name: presetFriend?.name ?? presetGroup?.name,
+                          })}
                         </Text>
                       </>
                     )}
@@ -728,14 +784,14 @@ const ReceiveSheet: React.FC<Props> = ({
                     disabled={!copyValue}
                   >
                     <Copy size={20} color={colors.brandPink} />
-                    <Text style={styles.actionButtonText}>Copy</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.copy')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                     onPress={handleShare}
                     disabled={!copyValue}
                   >
-                    <Text style={styles.actionButtonText}>Share</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.share')}</Text>
                     <Share2 size={20} color={colors.brandPink} />
                   </TouchableOpacity>
                   <Pressable
@@ -749,12 +805,12 @@ const ReceiveSheet: React.FC<Props> = ({
                       handleSendToFriend();
                     }}
                     disabled={!friendShareValue}
-                    accessibilityLabel="Send to a friend"
+                    accessibilityLabel={t('receiveSheet.sendToFriend')}
                     testID={
                       isOnchainWallet ? 'receive-friend-share-onchain' : 'receive-send-to-friend'
                     }
                   >
-                    <Text style={styles.actionButtonText}>Friend</Text>
+                    <Text style={styles.actionButtonText}>{t('receiveSheet.friend')}</Text>
                     <Send size={20} color={colors.brandPink} />
                   </Pressable>
                 </View>
@@ -764,20 +820,22 @@ const ReceiveSheet: React.FC<Props> = ({
                 <View style={styles.amountSummary}>
                   <View style={styles.amountSummaryLine}>
                     <Text style={styles.amountSummaryValue}>{currentSats.toLocaleString()}</Text>
-                    <Text style={styles.amountSummaryUnit}>SATS</Text>
+                    <Text style={styles.amountSummaryUnit}>{t('receiveSheet.satsUnit')}</Text>
                   </View>
                   {btcPrice ? (
                     <Text style={styles.amountSummaryFiat}>
-                      Aprox {formatFiat(satsToFiat(currentSats, btcPrice), currency)}
+                      {t('receiveSheet.approxFiat', {
+                        value: formatFiat(satsToFiat(currentSats, btcPrice), currency),
+                      })}
                     </Text>
                   ) : null}
                   <TouchableOpacity
                     style={styles.changeAmountButton}
                     onPress={() => setStep('amount')}
                     testID="receive-change-amount"
-                    accessibilityLabel="Change amount"
+                    accessibilityLabel={t('receiveSheet.changeAmount')}
                   >
-                    <Text style={styles.changeAmountText}>Change amount</Text>
+                    <Text style={styles.changeAmountText}>{t('receiveSheet.changeAmount')}</Text>
                   </TouchableOpacity>
                   {!isOnchainWallet && !presetGroup && lightningAddress ? (
                     <TouchableOpacity
@@ -788,13 +846,19 @@ const ReceiveSheet: React.FC<Props> = ({
                         setMode('address');
                       }}
                       testID="receive-show-address"
-                      accessibilityLabel="Show lightning address"
+                      accessibilityLabel={t('receiveSheet.showLightningAddress')}
                     >
-                      <Text style={styles.secondaryActionText}>Show my address</Text>
+                      <Text style={styles.secondaryActionText}>
+                        {t('receiveSheet.showMyAddress')}
+                      </Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>
-              ) : !presetFriend && !presetGroup && !loading ? (
+              ) : !presetGroup && !loading ? (
+                // Shown for the standalone Receive flow AND the 1:1 DM
+                // flow (presetFriend) — in a DM the user can either send
+                // their address as-is via "Send to <name>" or add an
+                // amount here to request a specific sum.
                 <TouchableOpacity
                   style={styles.enterAmountButton}
                   onPress={() => {
@@ -802,9 +866,29 @@ const ReceiveSheet: React.FC<Props> = ({
                     setStep('amount');
                   }}
                   testID="receive-enter-custom-amount"
-                  accessibilityLabel="Enter an amount"
+                  accessibilityLabel={t('receiveSheet.enterAnAmount')}
                 >
-                  <Text style={styles.enterAmountText}>Enter an amount</Text>
+                  <Text style={styles.enterAmountText}>{t('receiveSheet.enterAnAmount')}</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {/* Issue #92 — on-chain → Lightning via Boltz forward
+               *  submarine swap. Symmetric to the LN→on-chain path that
+               *  TransferSheet already exposes. Only meaningful when the
+               *  selected wallet is a connected NWC wallet (on-chain
+               *  wallets already display a native receive address; the
+               *  preset DM/group flows have a single-purpose CTA already).
+               *  Tapping opens BoltzReceiveSheet on top of this one. */}
+              {!presetFriend && !presetGroup && !isOnchainWallet && selectedWallet?.isConnected ? (
+                <TouchableOpacity
+                  style={styles.secondaryActionButton}
+                  onPress={() => setBoltzReceiveOpen(true)}
+                  testID="receive-via-onchain-boltz"
+                  accessibilityLabel={t('receiveSheet.receiveOnchainBoltzA11y')}
+                >
+                  <Text style={styles.secondaryActionText}>
+                    {t('receiveSheet.receiveOnchainBoltz')}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -815,8 +899,21 @@ const ReceiveSheet: React.FC<Props> = ({
         visible={friendPickerOpen}
         onClose={() => setFriendPickerOpen(false)}
         onSelect={handleFriendPicked}
-        title="Send invoice to a friend"
-        subtitle="They'll get an encrypted Nostr DM with a Pay button."
+        title={t('receiveSheet.sendInvoiceToFriend')}
+        subtitle={t('receiveSheet.friendPickerSubtitle')}
+      />
+      <BoltzReceiveSheet
+        visible={boltzReceiveOpen}
+        // Opening this sheet collapsed the parent ReceiveSheet's own sheet to
+        // -1 (see handleSheetChange); with the self-dismiss now guarded, that
+        // parent stays mounted-but-hidden behind. Closing Boltz therefore also
+        // closes ReceiveSheet so we return cleanly to Home instead of leaving
+        // an invisible, un-re-presentable ReceiveSheet stuck open (#92).
+        onClose={() => {
+          setBoltzReceiveOpen(false);
+          onClose();
+        }}
+        walletId={selectedWalletId}
       />
     </>
   );

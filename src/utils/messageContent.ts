@@ -2,6 +2,9 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
+import { isPollVoteMessage, parsePoll } from './pollMessage';
+import { legacyPollToStored, type DisplayPoll } from './nip88Poll';
+import { parseLiveLocationMarker, type LiveLocationMarker } from '../services/liveLocationService';
 import { isBitcoinAddress } from '../services/boltzService';
 import { parseBip21, ParsedBip21 } from './bip21';
 
@@ -61,6 +64,132 @@ export function extractImageUrl(text: string): string | null {
   const trimmed = text.trim();
   const match = trimmed.match(IMAGE_URL_REGEX);
   return match ? match[0] : null;
+}
+
+// Audio / voice-note URLs (#235). Same "entire body is the URL" rule as
+// images so surrounding text isn't swallowed. Our recorder emits AAC
+// (.m4a); Blossom servers commonly serve it back as `.mp4` (Primal does),
+// so accept both, plus the other common audio extensions for notes from
+// other clients.
+const AUDIO_URL_REGEX = /^(https?:\/\/\S+?\.(?:m4a|mp4|aac|mp3|ogg|opus|wav))(?:\?\S*)?$/i;
+
+export function extractAudioUrl(text: string): string | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const match = trimmed.match(AUDIO_URL_REGEX);
+  return match ? match[0] : null;
+}
+
+// Encrypted voice-note URL encoder (#235). Lives in ./encryptedFileUrl (a
+// dependency-free module) so nip17Unwrap can use it without pulling in this
+// file's heavier graph; re-exported here for existing importers.
+export { encodeEncryptedFileUrl } from './encryptedFileUrl';
+
+export interface ParsedVoiceNote {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect a voice note: either an `#lpe=1` encrypted-file URL whose mime is
+ * `audio/*` (new path), or a plain audio URL (legacy / unencrypted / other
+ * clients). Returns null for anything else. Backward-compatible — plaintext
+ * audio URLs already in threads keep working.
+ */
+export function parseVoiceNote(text: string): ParsedVoiceNote | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0) {
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    // Require `lpe` to equal exactly '1'. A substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). If a kind-15 file
+      // arrives with a different `alg`, bail to plain-text rendering rather
+      // than show a voice-note card that would fail when the user hits play.
+      // `alg` is always emitted by our encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
+      // Only audio here — encrypted images are handled separately (#688).
+      if (!keyHex || !nonceHex || !mime.startsWith('audio/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
+  }
+  const plain = extractAudioUrl(trimmed);
+  return plain ? { url: plain, mime: 'audio/mp4', encrypted: false } : null;
+}
+
+/**
+ * Derive the NIP-17 wire kind for a group message from its stored text.
+ *
+ * Group sends split two ways (see `useGroupComposerActions`): a text/chat
+ * message goes out as kind-14, while a voice/image file goes out as an
+ * encrypted kind-15 (`createGroupFileRumor`) whose payload is folded into the
+ * message text as an `#lpe=1` encrypted-file URL. So a stored group message
+ * whose text parses as an *encrypted* file is kind-15; everything else
+ * (including plain audio/image URLs pasted as chat text) is kind-14.
+ *
+ * The info sheet uses this instead of a hard-coded 14 so it reports the real
+ * kind for kind-15 file bubbles.
+ */
+export function deriveGroupWireKind(text: string): 14 | 15 {
+  const isEncryptedFile =
+    parseVoiceNote(text)?.encrypted === true || parseImageMessage(text)?.encrypted === true;
+  return isEncryptedFile ? 15 : 14;
+}
+
+export interface ParsedImageMessage {
+  /** Fetch URL with the fragment stripped. */
+  url: string;
+  mime: string;
+  encrypted: boolean;
+  keyHex?: string;
+  nonceHex?: string;
+}
+
+/**
+ * Detect an image message (#688): either an `#lpe=1` encrypted-file URL whose
+ * mime is `image/*` (NIP-17 kind-15, fetch ciphertext + AES-256-GCM decrypt),
+ * or a plain image URL (legacy / unencrypted / other clients — rendered
+ * directly). Returns null for anything else. Mirrors `parseVoiceNote`; the
+ * plain branch preserves today's `extractImageUrl` behaviour so DMs already in
+ * threads keep rendering.
+ */
+export function parseImageMessage(text: string): ParsedImageMessage | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const hashIdx = trimmed.indexOf('#');
+  if (hashIdx >= 0) {
+    const params = new URLSearchParams(trimmed.slice(hashIdx + 1));
+    // Require `lpe` to equal exactly '1' — a substring test would also fire
+    // on unrelated fragments like `#lpe=10` and try to decrypt them.
+    if (params.get('lpe') === '1') {
+      const url = trimmed.slice(0, hashIdx);
+      const keyHex = params.get('k') ?? undefined;
+      const nonceHex = params.get('n') ?? undefined;
+      const mime = params.get('m') ?? 'application/octet-stream';
+      // We only implement AES-GCM (see encryptedFile.ts). A kind-15 file with
+      // a different `alg` falls back to plain rendering rather than show an
+      // image card that fails to decrypt. `alg` is always emitted by our
+      // encoder, so absence is tolerated.
+      const alg = params.get('alg') ?? 'aes-gcm';
+      if (alg !== 'aes-gcm') return null;
+      // Only images here — encrypted audio is handled by parseVoiceNote.
+      if (!keyHex || !nonceHex || !mime.startsWith('image/')) return null;
+      return { url, mime, encrypted: true, keyHex, nonceHex };
+    }
+  }
+  const plain = extractImageUrl(trimmed);
+  return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
 }
 
 export function extractInvoice(text: string): DecodedInvoice | null {
@@ -147,11 +276,57 @@ export function formatRelativeFuture(epochMs: number): string {
 export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
-  | { kind: 'location'; location: SharedLocation };
+  | { kind: 'location'; location: SharedLocation }
+  // `pollId` is the vote target / tally key. Set for a structured NIP-88 poll
+  // (the poll rumor id, supplied by the item mapping); undefined for a legacy
+  // text poll and for group polls, where the renderer falls back to the
+  // message id (votes keyed by it in the text MVP).
+  | { kind: 'poll'; poll: DisplayPoll; pollId?: string }
+  // Vote messages render as nothing in the conversation list — they're
+  // already aggregated into the referenced poll's tally. Marking the kind
+  // explicitly (rather than dropping at the items level) lets the parent
+  // keep upstream message bookkeeping simple while the bubble decides to
+  // render `null`. Foreign clients still see them as plain text.
+  | { kind: 'pollVote' }
+  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker }
+  // Generic, future-proof fallback for an inner Nostr event whose kind the app
+  // doesn't render (now or in future). `rawKind` is the numeric Nostr kind so
+  // the bubble can say "Unsupported message type (kind N)" instead of leaving a
+  // blank bubble. Produced by the normalizer (buildConversationItems) when a
+  // stored message's wireKind isn't one we know how to display.
+  | { kind: 'unsupported'; rawKind: number };
 
 export function classifyMessageContent(text: string): BubbleContent {
+  // Poll detection runs before generic url / geo parsing because the
+  // [POLL] header is unambiguous and cheap to check, and we don't want
+  // a poll body that happens to mention a GIF URL or `geo:` link to
+  // re-route into a different bubble variant.
+  const poll = parsePoll(text);
+  // Legacy text-encoded poll (the #203 MVP, still read for back-compat): adapt
+  // to the shared display shape so one PollBubble renders both wire formats.
+  // Structured NIP-88 polls (kind 1068) are routed by wireKind upstream, never
+  // through this text classifier. The correlation id (`pollId`) is supplied by
+  // the caller — legacy polls key their tally by the message id.
+  if (poll) {
+    const stored = legacyPollToStored('', poll);
+    return {
+      kind: 'poll',
+      poll: {
+        question: stored.question,
+        options: stored.options,
+        pollType: stored.pollType,
+        endsAt: stored.endsAt,
+      },
+    };
+  }
+  if (isPollVoteMessage(text)) return { kind: 'pollVote' };
   const gifUrl = extractGifUrl(text);
   if (gifUrl) return { kind: 'gif', url: gifUrl };
+  // Live-location marker check MUST precede the plain `geo:` snapshot
+  // check — start/end markers also embed a `geo:` URI so they would
+  // otherwise classify as a snapshot and lose the live-share metadata.
+  const marker = parseLiveLocationMarker(text);
+  if (marker) return { kind: 'liveLocationMarker', marker };
   const loc = parseGeoMessage(text);
   if (loc) return { kind: 'location', location: loc };
   return { kind: 'text', text };

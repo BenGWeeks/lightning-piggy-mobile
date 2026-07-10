@@ -1,0 +1,179 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Hunt — delete a Piglet (cancel is a no-op, confirm removes the row)
+---
+# Follow-up to #985 (feat(hunt): delete a Piglet). Covers the two paths Ben
+# asked for on the review, using the existing testIDs:
+#   • piglet-delete            — the trash button on a Hidden row
+#   • branded-alert-button-0   — the confirm dialog's Cancel
+#   • branded-alert-button-1   — the confirm dialog's Delete
+#
+# We drive this against a *Private* (device-only) Piglet we create in-flow,
+# so:
+#   • it lands in My Piglets → HIDDEN (where the delete button lives) with a
+#     "Private" badge, and
+#   • its delete is a genuine local-record removal (the draft path) — NO
+#     relay writes, NO NIP-09 kind-5 — so the flow is safe to run against a
+#     real signed-in identity (see .maestro/README.adoc safety rules).
+#
+# The shared `piglet-delete` testID is on EVERY Hidden row, so we scope every
+# tap to OUR row with `rightOf: text: 'Maestro Delete Piglet'` (a semantic
+# relative selector, not a coordinate) — the emulator's seeded wallet may
+# already hold other Hidden Piglets, and we must never delete one of those.
+#
+# Prereqs (same as flow-042): a logged-in account + a real LNURL-withdraw via
+# env so the Prize step validates. Run:
+#   maestro test .maestro/hunt/flow-123-delete-a-piglet.yaml \
+#     -e LNURL_W=$MAESTRO_TEST_LNURL_W
+# NEVER hardcode the LNURL bearer in this file.
+#
+# STATUS: written + statically checked (selectors match real source testIDs;
+# YAML well-formed). On-device run is PENDING — the emulator was busy with
+# another task when this landed.
+
+- launchApp:
+    permissions:
+      location: allow
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Explore → Geo-caches → My Piglets (same warm-state navigation as flow-042:
+# the Explore stack may restore to its home OR straight to Geo-caches, so we
+# only route via the See-all when My-Piglets isn't already showing).
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 3000
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-my-piglets-button'
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 8000
+      - scrollUntilVisible:
+          element:
+            id: 'explore-card-hunt'
+          direction: DOWN
+          timeout: 20000
+          visibilityPercentage: 20
+      - tapOn:
+          id: 'explore-card-hunt'
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-my-piglets-button'
+    timeout: 15000
+- tapOn:
+    id: 'hunt-my-piglets-button'
+- extendedWaitUntil:
+    visible:
+      id: 'my-piglets-hide-cta'
+    timeout: 12000
+- tapOn:
+    id: 'my-piglets-hide-cta'
+
+# --- Create a throwaway Private Piglet named "Maestro Delete Piglet" ---
+
+# Step 1 Hardware → Next
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-step-next'
+    timeout: 12000
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 2 Prize — paste + validate the LNURL-withdraw
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-lnurl-input'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-lnurl-input'
+- inputText: '${LNURL_W}'
+- tapOn:
+    id: 'hunt-piggy-validate-button'
+- extendedWaitUntil:
+    visible: 'Looks good'
+    timeout: 15000
+- pressKey: Back
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 3 Location — drop pin at the device's current GPS
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-pin-here-button'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-pin-here-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 4 Details — title (required)
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-name-input'
+    timeout: 10000
+- tapOn:
+    id: 'hunt-piggy-name-input'
+- inputText: 'Maestro Delete Piglet'
+- pressKey: Back
+- scrollUntilVisible:
+    element:
+      id: 'hunt-piggy-step-next'
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 30
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+# Step 5 Publish — leave the Public toggle OFF (default) → Save. Public-off
+# keeps it device-only (a Private/draft Piglet — the local-delete path).
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-piggy-public-toggle'
+    timeout: 10000
+- tapOn:
+    text: 'Save'
+- extendedWaitUntil:
+    visible: 'Saved locally'
+    timeout: 10000
+
+# Back to My Piglets — our Private Piglet must now be listed.
+- tapOn:
+    id: 'hunt-create-back-button'
+- extendedWaitUntil:
+    visible: 'My Piglets'
+    timeout: 8000
+- assertVisible: 'Maestro Delete Piglet'
+
+# --- Path A: CANCEL is a no-op — the row survives ---
+- tapOn:
+    id: 'piglet-delete'
+    rightOf:
+      text: 'Maestro Delete Piglet'
+- extendedWaitUntil:
+    visible: 'Delete this Piglet?'
+    timeout: 6000
+- tapOn:
+    id: 'branded-alert-button-0'
+- waitForAnimationToEnd:
+    timeout: 2000
+# Still there — cancel changed nothing.
+- assertVisible: 'Maestro Delete Piglet'
+
+# --- Path B: CONFIRM removes the row ---
+- tapOn:
+    id: 'piglet-delete'
+    rightOf:
+      text: 'Maestro Delete Piglet'
+- extendedWaitUntil:
+    visible: 'Delete this Piglet?'
+    timeout: 6000
+- tapOn:
+    id: 'branded-alert-button-1'
+# The row disappears optimistically (a draft delete is local-only).
+- extendedWaitUntil:
+    notVisible: 'Maestro Delete Piglet'
+    timeout: 10000

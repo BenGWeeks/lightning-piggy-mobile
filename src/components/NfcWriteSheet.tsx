@@ -18,14 +18,15 @@ import { Nfc, AlertCircle, Copy, Eye, EyeOff, Lock } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Toast } from './BrandedToast';
 import {
-  writeNpubToTag,
   writeLnurlToTag,
   writeHuntTagToTag,
   cancelNfcOperation,
   isNfcEnabled,
   type HuntTagPayload,
 } from '../services/nfcService';
+import { writeNostrProfileToTag } from '../services/nfcNostrWrite';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
@@ -39,6 +40,15 @@ interface Props {
   mode?: 'npub' | 'piglet';
   /** npub mode — the Nostr identity to write + the name shown in copy. */
   npub?: string;
+  /**
+   * npub mode (preferred) — a `nostr:nprofile1…` reference (pubkey +
+   * outbox relay hints, NIP-65) to write instead of the bare npub.
+   * When supplied it takes precedence over `npub` so a cold first-contact
+   * scanner resolves the profile even on niche relays (#755). Bare-bech32
+   * (`nprofile1…`) or `nostr:`-prefixed forms both accepted. Falls back to
+   * `npub` when absent.
+   */
+  nostrRef?: string;
   displayName?: string;
   /** piglet mode — the LNURL-withdraw link to write to the tag.
    * Legacy single-record path used when `huntPayload` is absent. */
@@ -74,6 +84,7 @@ const NfcWriteSheet: React.FC<Props> = ({
   onClose,
   mode = 'npub',
   npub = '',
+  nostrRef = '',
   displayName = '',
   lnurl = '',
   huntPayload,
@@ -83,6 +94,7 @@ const NfcWriteSheet: React.FC<Props> = ({
 }) => {
   const isPiglet = mode === 'piglet';
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<WriteState>('ready');
   const [errorMessage, setErrorMessage] = useState('');
@@ -164,8 +176,8 @@ const NfcWriteSheet: React.FC<Props> = ({
         setState('error');
         setErrorMessage(
           Platform.OS === 'android'
-            ? 'NFC is turned off. Please enable NFC in your device settings.'
-            : 'NFC is turned off. Go to Settings to enable NFC.',
+            ? t('nfcWriteSheet.nfcOffAndroid')
+            : t('nfcWriteSheet.nfcOffIos'),
         );
       }
       return;
@@ -211,7 +223,10 @@ const NfcWriteSheet: React.FC<Props> = ({
           writeResult = result;
         }
       } else {
-        await writeNpubToTag(npub, onTagDetected);
+        // Prefer the nprofile reference (pubkey + relay hints) so the tag
+        // resolves on cold first contact; fall back to the bare npub when
+        // the caller didn't supply one (#755).
+        await writeNostrProfileToTag(nostrRef || npub, onTagDetected);
       }
       if (mountedRef.current) {
         if (writeResult?.lock) {
@@ -228,7 +243,7 @@ const NfcWriteSheet: React.FC<Props> = ({
     } catch (err) {
       if (mountedRef.current) {
         setState('error');
-        const msg = err instanceof Error ? err.message : 'Failed to write to NFC tag';
+        const msg = err instanceof Error ? err.message : t('nfcWriteSheet.writeFailedGeneric');
         setErrorMessage(msg);
       }
     }
@@ -253,7 +268,9 @@ const NfcWriteSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>{isPiglet ? 'Write the Piglet tag' : 'Write to NFC'}</Text>
+        <Text style={styles.title}>
+          {isPiglet ? t('nfcWriteSheet.titlePiglet') : t('nfcWriteSheet.titleNpub')}
+        </Text>
 
         {state === 'ready' && (
           <View style={styles.stateContainer}>
@@ -261,9 +278,7 @@ const NfcWriteSheet: React.FC<Props> = ({
               <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
             </View>
             <Text style={styles.instruction}>
-              {isPiglet
-                ? 'Hold the Piglet to the back of your phone'
-                : 'Hold your phone against an NFC tag'}
+              {isPiglet ? t('nfcWriteSheet.holdPiglet') : t('nfcWriteSheet.holdPhone')}
             </Text>
             <Text style={styles.description}>
               {isPiglet
@@ -276,11 +291,11 @@ const NfcWriteSheet: React.FC<Props> = ({
                   // Copilot #572 r3 caught the stale `huntPayload`
                   // gate that lied to private hiders.
                   Platform.OS !== 'android'
-                  ? "This writes the prize link onto the tag. iOS doesn't support our reversible lock yet, so the chip stays open — anyone with an NFC writer could repoint it."
+                  ? t('nfcWriteSheet.readyDescPigletIos')
                   : lockTag
-                    ? 'This writes the prize link onto the tag and password-locks the chip so no-one can overwrite it. Keep the Piglet still against the phone until it confirms.'
-                    : 'This writes the prize link onto the tag and leaves the chip open. Anyone with an NFC writer can later overwrite it — turn on Lock the tag on the previous screen to password-protect.'
-                : `This will write ${displayName}'s Nostr identity (npub) to the tag. Anyone with a Nostr-compatible app can tap the tag to view the profile.`}
+                    ? t('nfcWriteSheet.readyDescPigletLocked')
+                    : t('nfcWriteSheet.readyDescPigletUnlocked')
+                : t('nfcWriteSheet.readyDescNpub', { name: displayName })}
             </Text>
             {!isPiglet && (
               <Text style={styles.npubPreview} numberOfLines={1}>
@@ -292,14 +307,14 @@ const NfcWriteSheet: React.FC<Props> = ({
               color={colors.brandPink}
               style={styles.waitingIndicator}
             />
-            <Text style={styles.waitingText}>Waiting for NFC tag...</Text>
+            <Text style={styles.waitingText}>{t('nfcWriteSheet.waitingForTag')}</Text>
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={handleClose}
-              accessibilityLabel="Cancel NFC write"
+              accessibilityLabel={t('nfcWriteSheet.cancelWrite')}
               testID="nfc-write-cancel"
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('nfcWriteSheet.cancel')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -307,7 +322,7 @@ const NfcWriteSheet: React.FC<Props> = ({
         {state === 'writing' && (
           <View style={styles.stateContainer}>
             <ActivityIndicator size="large" color={colors.brandPink} />
-            <Text style={styles.instruction}>Writing to tag...</Text>
+            <Text style={styles.instruction}>{t('nfcWriteSheet.writingToTag')}</Text>
           </View>
         )}
 
@@ -317,27 +332,29 @@ const NfcWriteSheet: React.FC<Props> = ({
               <Text style={styles.checkmark}>&#10003;</Text>
             </View>
             <Text style={styles.instruction}>
-              {isPiglet && lastLock ? 'Successfully written and locked' : 'Successfully written!'}
+              {isPiglet && lastLock ? t('nfcWriteSheet.successLocked') : t('nfcWriteSheet.success')}
             </Text>
             <Text style={styles.description}>
               {isPiglet
                 ? lastLock
-                  ? 'The prize link is on the tag and the chip is password-protected so no-one can overwrite it. Save the PIN below — you’ll need it to repoint the tag later.'
+                  ? t('nfcWriteSheet.successDescPigletLocked')
                   : Platform.OS !== 'android'
-                    ? "The prize link is on the tag. iOS doesn't support our reversible lock yet, so the chip is left open — anyone with an NFC writer could later repoint it."
-                    : 'The prize link is on the tag. Anyone with an NFC writer can still overwrite it — flip the Lock toggle on the previous screen to password-protect this chip on a re-write.'
-                : `${displayName}'s npub has been written to the NFC tag. Anyone can now tap this tag to view the profile.`}
+                    ? t('nfcWriteSheet.successDescPigletIos')
+                    : t('nfcWriteSheet.successDescPigletUnlocked')
+                : t('nfcWriteSheet.successDescNpub', { name: displayName })}
             </Text>
             {isPiglet && lastLock ? (
               <View style={styles.pinCard} testID="nfc-write-pin-card">
                 <View style={styles.pinHeaderRow}>
                   <Lock size={13} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.pinHeaderText}>Your PIN</Text>
+                  <Text style={styles.pinHeaderText}>{t('nfcWriteSheet.yourPin')}</Text>
                 </View>
                 <TouchableOpacity
                   style={styles.pinValueRow}
                   onPress={() => setPinRevealed((v) => !v)}
-                  accessibilityLabel={pinRevealed ? 'Hide PIN' : 'Reveal PIN'}
+                  accessibilityLabel={
+                    pinRevealed ? t('nfcWriteSheet.hidePin') : t('nfcWriteSheet.revealPin')
+                  }
                   testID="nfc-write-pin-reveal"
                 >
                   <Text style={styles.pinValueText}>{pinRevealed ? lastLock.pin : '••••••••'}</Text>
@@ -351,23 +368,23 @@ const NfcWriteSheet: React.FC<Props> = ({
                   style={styles.pinCopyButton}
                   onPress={async () => {
                     await Clipboard.setStringAsync(lastLock.pin);
-                    Toast.show({ type: 'success', text1: 'PIN copied' });
+                    Toast.show({ type: 'success', text1: t('nfcWriteSheet.pinCopied') });
                   }}
-                  accessibilityLabel="Copy PIN"
+                  accessibilityLabel={t('nfcWriteSheet.copyPin')}
                   testID="nfc-write-pin-copy"
                 >
                   <Copy size={14} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.pinCopyButtonText}>Copy</Text>
+                  <Text style={styles.pinCopyButtonText}>{t('nfcWriteSheet.copy')}</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
             <TouchableOpacity
               style={styles.doneButton}
               onPress={handleClose}
-              accessibilityLabel="Close NFC write sheet"
+              accessibilityLabel={t('nfcWriteSheet.closeSheet')}
               testID="nfc-write-done"
             >
-              <Text style={styles.doneButtonText}>Done</Text>
+              <Text style={styles.doneButtonText}>{t('nfcWriteSheet.done')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -380,24 +397,24 @@ const NfcWriteSheet: React.FC<Props> = ({
                 <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
               </View>
             </View>
-            <Text style={styles.instruction}>Write failed</Text>
+            <Text style={styles.instruction}>{t('nfcWriteSheet.writeFailed')}</Text>
             <Text style={styles.description}>{errorMessage}</Text>
             <View style={styles.errorButtons}>
               <TouchableOpacity
                 style={styles.retryButton}
                 onPress={handleRetry}
-                accessibilityLabel="Retry NFC write"
+                accessibilityLabel={t('nfcWriteSheet.retryWrite')}
                 testID="nfc-write-retry"
               >
-                <Text style={styles.retryButtonText}>Try Again</Text>
+                <Text style={styles.retryButtonText}>{t('nfcWriteSheet.tryAgain')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={handleClose}
-                accessibilityLabel="Cancel NFC write"
+                accessibilityLabel={t('nfcWriteSheet.cancelWrite')}
                 testID="nfc-write-error-cancel"
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>{t('nfcWriteSheet.cancel')}</Text>
               </TouchableOpacity>
             </View>
           </View>

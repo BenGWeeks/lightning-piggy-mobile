@@ -1,32 +1,29 @@
-import React, { useCallback, useState } from 'react';
-import * as ImagePicker from 'expo-image-picker';
+import React, { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import {
-  getCurrentLocation,
-  formatGeoMessage,
-  formatCoordsForDisplay,
-} from '../services/locationService';
-import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
-import type { PickedFriend } from '../components/FriendPickerSheet';
-import type { Gif } from '../services/giphyService';
+import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
+import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
+import type { EncryptedUpload } from '../services/imageUploadService';
 import type { ConversationMessageInput } from '../utils/conversationItems';
+import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/dmDeliveryStatus';
+import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
+import { useComposerActions } from './useComposerActions';
+import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
+
+// Upper bound before the optimistic bubble's pending Clock flips to the red
+// failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
+// publish timeout + TWO publish-level DM_PUBLISH_TIMEOUT_MS windows (8s each —
+// the publish layer force-reconnects stale relays and retries once when the
+// first attempt lands nothing), with headroom for a slow-but-real accept, so a
+// genuine send — including a retried one — still lands delivered.
+const SEND_SETTLE_WATCHDOG_MS = 20_000;
 
 /**
- * Send/upload/share actions for the 1:1 ConversationScreen (#235 onward),
- * plus their in-flight flags. Extracted from the screen so the screen file
- * stays focused on layout + wiring (and under the #703 size cap), and so this
- * orchestration — optimistic UI, EXIF stripping, picker dismissal, Blossom
- * upload, permission prompts — lives in one cohesive, reusable unit.
- *
- * The hook consumes `useNostr()` directly (owning its context dependency).
- * The caller passes only the screen-owned bits: the conversation peer, the
- * composer draft, the message-list setter, and the panel/picker setters.
- *
- * Layering note: this sits ABOVE the context's raw send methods
- * (`sendDirectMessage`) — the context publishes the event; this hook adds the
- * UX around it (optimistic bubble, error alerts, attachment flows).
+ * 1:1 ConversationScreen composer actions. A thin wrapper over the shared
+ * `useComposerActions` (#235): it provides the 1:1 send strategy
+ * (`sendDirectMessage` / `sendFileMessage` + an optimistic DM-row append, and a
+ * "share location with X?" confirm dialog) and re-exposes the shared handlers.
+ * The group sibling is `useGroupComposerActions`.
  */
 export function useConversationComposerActions(params: {
   pubkey: string;
@@ -37,6 +34,7 @@ export function useConversationComposerActions(params: {
   setAttachPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const {
     pubkey,
@@ -47,22 +45,24 @@ export function useConversationComposerActions(params: {
     setAttachPanelOpen,
     setContactPickerOpen,
     setGifPickerOpen,
+    setVoiceSheetOpen,
   } = params;
 
-  const { isLoggedIn, sendDirectMessage, appendLocalDmMessage, signEvent, contacts, relays } =
-    useNostr();
+  const { sendDirectMessage, sendFileMessage, sendNwcShare, appendLocalDmMessage } = useNostr();
 
-  const [sending, setSending] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [sharingLocation, setSharingLocation] = useState(false);
-
+  // Optimistically append a locally-sent row; the relay echo dedups in
+  // mergeConversationMessages. Also persisted via appendLocalDmMessage so the
+  // delivery tick (#856) survives a thread reload. The `deliveryStatus` rides
+  // on the same row — only the local- send copy carries it, never the relay
+  // echo, so the persisted tick is authoritative.
   const appendOptimisticLocal = useCallback(
-    (text: string) => {
+    (text: string, deliveryStatus?: DeliveryStatus) => {
       const optimistic = {
         id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         fromMe: true,
         text,
         createdAt: Math.floor(Date.now() / 1000),
+        deliveryStatus,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
@@ -70,40 +70,157 @@ export function useConversationComposerActions(params: {
     [appendLocalDmMessage, pubkey, setMessages],
   );
 
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setSending(true);
-    try {
-      const result = await sendDirectMessage(pubkey, text);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send message.');
-        return;
+  // Optimistic send (#857). The bubble paints IMMEDIATELY with a pending Clock,
+  // then settles to its final tick when the publish resolves — green single (≥1
+  // relay) / double (all relays) / red failed (0 relays). Delivery status lives
+  // in an eventId-keyed store (dmDeliveryStore), NOT on the message row, so the
+  // ~10s relay-echo `fetchConversation` + `mergeConversationMessages` swapping
+  // `local-` → the real eventId can't strip it: the store is keyed by the stable
+  // rumor eventId, which is identical on the optimistic row and the echo.
+  //
+  // The optimistic row's `id` is `local-${rumorId}` (a temporary row id), and
+  // the row carries the stable rumor id as `rumorId`. The echo is deduped by
+  // text+window in mergeConversationMessages (its id is the OUTER wrap id, not
+  // the rumor id — so it's NOT an id-equality swap), and the tick follows the
+  // message because the delivery store is keyed by `rumorId`, which both rows
+  // share. A failed send keeps the bubble (red tick + Re-publish), and the
+  // draft is cleared on send either way (Ben-confirmed standard-messaging
+  // behaviour) — retry is via the bubble.
+  const sendText = useCallback(
+    async (text: string): Promise<boolean> => {
+      const createdAt = Math.floor(Date.now() / 1000);
+      let eventId: string | null = null;
+      // Target relays for THIS send, captured from onRumorReady. Carried onto the
+      // pending + watchdog-failed statuses so the message-info sheet lists the
+      // relays the send was attempted against even before any settles (or if it
+      // hangs and never settles) — without this a pending/hung send showed an
+      // empty relay breakdown (the missing-relays bug).
+      let targetRelays: string[] = [];
+      // Watchdog: if the send hasn't settled the bubble within the window,
+      // flip the pending Clock to the red failed tick (#857). This is the
+      // authoritative settle guarantee — the underlying publish can hang in
+      // ways the publish-level timeout doesn't catch (a relay socket the OS
+      // never resolves OR rejects), and the bubble must never be stuck pending
+      // forever. A genuine late accept still overrides failed → delivered (the
+      // store allows that; it only blocks settled → pending). Seeds the failed
+      // status with the target relays so the sheet still lists them as failed.
+      const watchdog = setTimeout(() => {
+        if (eventId)
+          setDmDeliveryStatus(eventId, failedDelivery({ eventId, relays: targetRelays }));
+      }, SEND_SETTLE_WATCHDOG_MS);
+      try {
+        const result = await sendDirectMessage(pubkey, text, {
+          onRumorReady: ({ eventId: id, kind, relays }) => {
+            eventId = id;
+            targetRelays = relays;
+            // Paint the pending bubble immediately. The ROW id stays `local-`
+            // so mergeConversationMessages' text+window dedup collapses it
+            // against the relay echo (whose id is the OUTER wrap id, not this
+            // rumor id). The delivery store is keyed by the rumor eventId via
+            // `rumorId`, which both this row and the echo carry — so the tick
+            // follows the message across the swap. Persisted so the bubble
+            // survives a reload.
+            const optimistic = {
+              id: `local-${id}`,
+              rumorId: id,
+              fromMe: true,
+              text,
+              createdAt,
+              wireKind: kind,
+            };
+            setMessages((prev) => [...prev, optimistic]);
+            void appendLocalDmMessage(pubkey, optimistic);
+            setDmDeliveryStatus(id, pendingDelivery({ eventId: id, kind, relays }));
+          },
+          onDeliveryFinalized: (delivery) => {
+            // Slow relays settled — upgrade the tick (e.g. single → double).
+            if (eventId) setDmDeliveryStatus(eventId, delivery);
+          },
+        });
+        // Settle the bubble. `delivery` is present for any send that reached
+        // the publish stage; a hard pre-publish error (not logged in, signer
+        // cancelled) has none → mark failed so the bubble shows a red tick.
+        if (eventId) {
+          setDmDeliveryStatus(
+            eventId,
+            result.delivery ?? failedDelivery({ eventId, relays: targetRelays }),
+          );
+        } else if (!result.success) {
+          // Never reached the rumor stage (e.g. not logged in) — no bubble was
+          // painted, so fall back to the alert.
+          Alert.alert('Send failed', result.error ?? 'Could not send message.');
+        }
+        return result.success;
+      } finally {
+        clearTimeout(watchdog);
       }
-      setDraft('');
-      appendOptimisticLocal(text);
-    } finally {
-      setSending(false);
-    }
-  }, [draft, sending, sendDirectMessage, pubkey, appendOptimisticLocal, setDraft]);
+    },
+    [pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
+  );
 
-  const handleShareLocation = useCallback(async () => {
-    if (sharingLocation) return;
-    setAttachPanelOpen(false);
-    setSharingLocation(true);
-    try {
-      const result = await getCurrentLocation();
-      if (!result.ok) {
-        Alert.alert('Could not share location', result.message);
-        return;
+  const sendFile = useCallback(
+    async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
+      const result = await sendFileMessage(pubkey, file);
+      if (!result.success) {
+        const what = kind === 'image' ? 'image' : 'voice note';
+        Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
+        return false;
       }
-      const loc = result.location;
-      await new Promise<void>((resolve) => {
-        // `pressed` guards against `onDismiss` firing while a button's
-        // onPress is still awaiting `sendDirectMessage`. Without it, the
-        // outer Promise can resolve early, clear `sharingLocation`, and
-        // re-enable the Attach button mid-publish — a classic double-submit
-        // window we don't want.
+      // Optimistic bubble stores the same encoded URL so it renders right away.
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text: encodeEncryptedFileUrl({
+          url: file.url,
+          mime: file.mime,
+          keyHex: file.keyHex,
+          nonceHex: file.nonceHex,
+        }),
+        createdAt: Math.floor(Date.now() / 1000),
+        deliveryStatus: result.delivery,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
+      return true;
+    },
+    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage],
+  );
+
+  // Share an NWC wallet (#431). The connection string is a bearer secret sent
+  // ONLY inside the encrypted NIP-17 gift wrap (via `sendNwcShare`). Mirrors
+  // `sendFile`: publish first, then append the optimistic "Add NWC Wallet" card
+  // on success — the row carries `wireKind: NWC_SHARE_KIND` + the serialized
+  // card so `buildConversationItems` rebuilds the card (and the local- row
+  // dedupes against the self-wrap echo on the next fetch, which serializes
+  // identically). The caller (ConversationScreen) shows the access warning
+  // BEFORE invoking this.
+  const shareNwcWallet = useCallback(
+    async (card: NwcShareCard): Promise<boolean> => {
+      const result = await sendNwcShare(pubkey, card);
+      if (!result.success) {
+        Alert.alert('Could not share wallet', result.error ?? 'Please try again.');
+        return false;
+      }
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text: serializeNwcShare(card),
+        createdAt: Math.floor(Date.now() / 1000),
+        wireKind: NWC_SHARE_KIND,
+        deliveryStatus: result.delivery,
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
+      return true;
+    },
+    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage],
+  );
+
+  // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
+  // resolving after a button already did.
+  const confirmLocation = useCallback(
+    (loc: SharedLocation) =>
+      new Promise<boolean>((resolve) => {
         let pressed = false;
         Alert.alert(
           `Share location with ${name}?`,
@@ -114,160 +231,49 @@ export function useConversationComposerActions(params: {
               style: 'cancel',
               onPress: () => {
                 pressed = true;
-                resolve();
+                resolve(false);
               },
             },
             {
               text: 'Share',
               style: 'default',
-              onPress: async () => {
+              onPress: () => {
                 pressed = true;
-                const text = formatGeoMessage(loc);
-                const sendResult = await sendDirectMessage(pubkey, text);
-                if (!sendResult.success) {
-                  Alert.alert('Send failed', sendResult.error ?? 'Could not send location.');
-                } else {
-                  appendOptimisticLocal(text);
-                }
-                resolve();
+                resolve(true);
               },
             },
           ],
           {
             cancelable: true,
             onDismiss: () => {
-              if (!pressed) resolve();
+              if (!pressed) resolve(false);
             },
           },
         );
-      });
-    } finally {
-      setSharingLocation(false);
-    }
-  }, [sharingLocation, name, pubkey, sendDirectMessage, appendOptimisticLocal, setAttachPanelOpen]);
-
-  // Shared send-image path for both gallery and camera entry points.
-  // Strips EXIF from the picked image, uploads to the user's configured
-  // Blossom server (or nostr.build fallback), then DMs the returned URL
-  // to the conversation partner.
-  const uploadAndSendImage = useCallback(
-    async (localUri: string, pickerBase64?: string | null) => {
-      setUploadingImage(true);
-      try {
-        const scrubbed = await stripImageMetadata(localUri, pickerBase64);
-        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        const sendResult = await sendDirectMessage(pubkey, url);
-        if (!sendResult.success) {
-          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
-          return;
-        }
-        appendOptimisticLocal(url);
-      } catch (error) {
-        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
-      } finally {
-        setUploadingImage(false);
-      }
-    },
-    [signEvent, sendDirectMessage, pubkey, appendOptimisticLocal],
+      }),
+    [name],
   );
 
-  const handlePickAndSendImage = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachPanelOpen(false);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to send images.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      // Needed so stripImageMetadata can pass animated GIFs through
-      // without re-encoding (expo-image-manipulator has no animated
-      // output format). No-op for JPEG/PNG — those get re-encoded.
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage, setAttachPanelOpen]);
-
-  const handleTakeAndSendPhoto = useCallback(async () => {
-    if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachPanelOpen(false);
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      // Camera never captures GIF, but keep the shape consistent with the
-      // gallery path — harmless for JPEG output.
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage, setAttachPanelOpen]);
-
-  // Share another contact's Nostr profile into this conversation. Payload
-  // mirrors the ContactProfileSheet → "Share with friend" format: a
-  // human-readable first line plus a NIP-21 `nostr:nprofile…` URI that
-  // other Nostr clients (Damus, Amethyst, Primal, …) render as a
-  // clickable profile mention.
-  const handleShareContactPicked = useCallback(
-    async (friend: PickedFriend) => {
-      // Dismiss both sheets in reverse stack order (top first).
-      setContactPickerOpen(false);
-      setAttachPanelOpen(false);
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
-      const nprofile = nprofileEncode(friend.pubkey, relayHints);
-      const label = friend.name || 'a contact';
-      const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Share failed', result.error ?? 'Could not share contact.');
-        return;
-      }
-      appendOptimisticLocal(payload);
-    },
-    [
-      pubkey,
-      sendDirectMessage,
-      contacts,
-      relays,
-      appendOptimisticLocal,
-      setContactPickerOpen,
-      setAttachPanelOpen,
-    ],
+  // Memoise the strategy so the shared hook's callbacks (which depend on it)
+  // keep stable identities across renders. (1:1 needs no canSend preflight —
+  // the peer pubkey is always present from the route params.)
+  const strategy = useMemo(
+    () => ({ sendText, sendFile, confirmLocation }),
+    [sendText, sendFile, confirmLocation],
   );
 
-  const handleSendGif = useCallback(
-    async (gif: Gif) => {
-      setGifPickerOpen(false);
-      setAttachPanelOpen(false);
-      const payload = gif.url;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
-        return;
-      }
-      appendOptimisticLocal(payload);
-    },
-    [pubkey, sendDirectMessage, appendOptimisticLocal, setGifPickerOpen, setAttachPanelOpen],
-  );
+  const actions = useComposerActions({
+    strategy,
+    draft,
+    setDraft,
+    setAttachPanelOpen,
+    setGifPickerOpen,
+    setContactPickerOpen,
+    setVoiceSheetOpen,
+  });
 
-  return {
-    sending,
-    uploadingImage,
-    sharingLocation,
-    appendOptimisticLocal,
-    handleSend,
-    handleShareLocation,
-    handlePickAndSendImage,
-    handleTakeAndSendPhoto,
-    handleShareContactPicked,
-    handleSendGif,
-  };
+  // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish
+  // (#856). It runs the full send path (publish + optimistic row + tick), so a
+  // re-publish is indistinguishable from a fresh send and gets its own bubble.
+  return { ...actions, appendOptimisticLocal, resendText: sendText, shareNwcWallet };
 }

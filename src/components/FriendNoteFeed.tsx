@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { FlashList } from '@shopify/flash-list';
 import NotePreview from './NotePreview';
 import { subscribeAuthorNotes, type RawAuthorNote } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
 
 // Embeds a friend's recent kind-1 notes below the profile description
@@ -17,6 +19,9 @@ import type { Palette } from '../styles/palettes';
 interface Props {
   authorPubkey: string;
   limit?: number;
+  // Bumped by the parent's pull-to-refresh to re-open the subscription and
+  // re-query for new posts (the sub is otherwise opened once per focus).
+  reloadNonce?: number;
 }
 
 const RENDER_CAP = 20;
@@ -24,8 +29,9 @@ const RENDER_CAP = 20;
 // sub stays open in the background but the UI shifts to the empty state.
 const FIRST_EVENT_GRACE_MS = 6000;
 
-const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
+const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30, reloadNonce = 0 }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { relays } = useNostr();
   const [notes, setNotes] = useState<RawAuthorNote[]>([]);
@@ -58,79 +64,88 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
     [readRelaysKey],
   );
 
-  useEffect(() => {
-    if (!authorPubkey || readRelays.length === 0) {
-      setLoading(false);
-      return;
-    }
-    mountTimeRef.current = Date.now();
-    firstEventLoggedRef.current = false;
-    setLoading(true);
-    setNotes([]);
-
-    const seen = new Set<string>();
-    const unsubscribe = subscribeAuthorNotes({
-      authorPubkey,
-      relays: readRelays,
-      limit,
-      onEose: () => setLoading(false),
-      onEvent: (note) => {
-        if (seen.has(note.id)) return;
-        seen.add(note.id);
-        if (__DEV__ && !firstEventLoggedRef.current) {
-          firstEventLoggedRef.current = true;
-          console.log(
-            `[Perf] ContactProfileScreen feed first event: ${Date.now() - mountTimeRef.current}ms`,
-          );
-        }
-        setNotes((prev) => {
-          // Binary-insert into a desc-sorted-by-created_at array
-          // (newest-first) instead of pushing + full-sort on every
-          // event. With 5 relays × limit = up to 150 events on a
-          // wide-following user, the full-sort cost was O(n² log n)
-          // total; binary insert + splice is O(n²) and avoids the
-          // log factor.
-          let lo = 0;
-          let hi = prev.length;
-          while (lo < hi) {
-            const mid = (lo + hi) >>> 1;
-            if (prev[mid].created_at > note.created_at) lo = mid + 1;
-            else hi = mid;
-          }
-          if (lo >= RENDER_CAP) return prev; // newer events already saturate the cap
-          const next = prev.slice();
-          next.splice(lo, 0, note);
-          if (next.length > RENDER_CAP) next.length = RENDER_CAP;
-          return next;
-        });
+  // Gate the relay subscription on screen focus (audit HIGH 2). The
+  // previous bare `useEffect` opened the sub at mount — which, on a cold
+  // start that restores onto ContactProfileScreen (persisted nav state),
+  // fired a relay subscription before the screen was even visible,
+  // adding 633–1045 ms of JS-thread work at +4–5 s. `useFocusEffect`
+  // defers it until the profile is actually on-screen; behaviour while
+  // focused is identical (same sub, same grace timer, same teardown).
+  useFocusEffect(
+    useCallback(() => {
+      if (!authorPubkey || readRelays.length === 0) {
         setLoading(false);
-      },
-    });
+        return;
+      }
+      mountTimeRef.current = Date.now();
+      firstEventLoggedRef.current = false;
+      setLoading(true);
+      setNotes([]);
 
-    // Grace timer to drop the spinner so the user sees "No posts yet"
-    // rather than a perpetual loader on quiet pubkeys.
-    const graceTimer = setTimeout(() => {
-      setLoading(false);
-    }, FIRST_EVENT_GRACE_MS);
+      const seen = new Set<string>();
+      const unsubscribe = subscribeAuthorNotes({
+        authorPubkey,
+        relays: readRelays,
+        limit,
+        onEose: () => setLoading(false),
+        onEvent: (note) => {
+          if (seen.has(note.id)) return;
+          seen.add(note.id);
+          if (__DEV__ && !firstEventLoggedRef.current) {
+            firstEventLoggedRef.current = true;
+            console.log(
+              `[Perf] ContactProfileScreen feed first event: ${Date.now() - mountTimeRef.current}ms`,
+            );
+          }
+          setNotes((prev) => {
+            // Binary-insert into a desc-sorted-by-created_at array
+            // (newest-first) instead of pushing + full-sort on every
+            // event. With 5 relays × limit = up to 150 events on a
+            // wide-following user, the full-sort cost was O(n² log n)
+            // total; binary insert + splice is O(n²) and avoids the
+            // log factor.
+            let lo = 0;
+            let hi = prev.length;
+            while (lo < hi) {
+              const mid = (lo + hi) >>> 1;
+              if (prev[mid].created_at > note.created_at) lo = mid + 1;
+              else hi = mid;
+            }
+            if (lo >= RENDER_CAP) return prev; // newer events already saturate the cap
+            const next = prev.slice();
+            next.splice(lo, 0, note);
+            if (next.length > RENDER_CAP) next.length = RENDER_CAP;
+            return next;
+          });
+          setLoading(false);
+        },
+      });
 
-    return () => {
-      clearTimeout(graceTimer);
-      unsubscribe();
-    };
-  }, [authorPubkey, readRelays, limit]);
+      // Grace timer to drop the spinner so the user sees "No posts yet"
+      // rather than a perpetual loader on quiet pubkeys.
+      const graceTimer = setTimeout(() => {
+        setLoading(false);
+      }, FIRST_EVENT_GRACE_MS);
+
+      return () => {
+        clearTimeout(graceTimer);
+        unsubscribe();
+      };
+    }, [authorPubkey, readRelays, limit, reloadNonce]),
+  );
 
   if (!authorPubkey) return null;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Recent posts</Text>
+      <Text style={styles.heading}>{t('friendNoteFeed.recentPosts')}</Text>
       {loading && notes.length === 0 ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={colors.brandPink} />
         </View>
       ) : notes.length === 0 ? (
         <Text style={styles.emptyText} testID="contact-profile-feed-empty">
-          No posts yet
+          {t('friendNoteFeed.noPostsYet')}
         </Text>
       ) : (
         <FlashList
