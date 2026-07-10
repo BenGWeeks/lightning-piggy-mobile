@@ -160,7 +160,7 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
         )}
       />
       {/* Page dots + the centred card's name. */}
-      <View style={styles.dots}>
+      <View style={styles.dots} testID="wallet-card-picker-dots">
         {themeList.map((theme) => (
           <View
             key={theme.id}
@@ -168,7 +168,13 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
           />
         ))}
       </View>
-      <Text style={styles.name}>{cardThemes[centredTheme]?.name ?? ''}</Text>
+      <Text
+        style={styles.name}
+        testID="wallet-card-picker-name"
+        accessibilityLabel={`Selected card theme: ${cardThemes[centredTheme]?.name ?? ''}`}
+      >
+        {cardThemes[centredTheme]?.name ?? ''}
+      </Text>
     </View>
   );
 };
