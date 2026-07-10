@@ -93,7 +93,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             });
 
         if (signerType === 'nsec') {
-          const secretKey = await getMemoisedSecretKey(pubkey!);
+          const secretKey = await getMemoisedSecretKey(pubkey);
           if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
@@ -232,7 +232,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         });
 
         if (signerType === 'nsec') {
-          const secretKey = await getMemoisedSecretKey(pubkey!);
+          const secretKey = await getMemoisedSecretKey(pubkey);
           if (!secretKey) return { success: false, error: 'Key not found' };
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
           return { success: true };
