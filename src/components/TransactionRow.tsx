@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -98,6 +98,19 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   onPressTx,
 }) => {
   const t = useTranslation();
+  // Avatar error state — declared before the early `header` return to satisfy
+  // the Rules of Hooks (hooks must not be called after a conditional return).
+  // Tracks the zap-counterparty picture URL; reset when it changes so a
+  // refreshed/corrected URL gets a clean retry rather than staying hidden.
+  // (The description-contact avatar path uses the same state — if both are
+  // present only the zap picture shows, so tracking it is sufficient.)
+  const zapAvatarUrl =
+    row.kind === 'tx' ? (row.tx.zapCounterparty?.profile?.picture ?? null) : null;
+  const [avatarError, setAvatarError] = useState(false);
+  useEffect(() => {
+    setAvatarError(false);
+  }, [zapAvatarUrl]);
+
   if (row.kind === 'header') {
     return <Text style={styles.dayHeader}>{row.label}</Text>;
   }
@@ -161,7 +174,7 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
       accessibilityLabel={t('transactionList.openDetailsFor', { name: primary })}
     >
       <View style={styles.avatarWrap}>
-        {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
+        {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) && !avatarError ? (
           <Image
             source={{ uri: counterpartyAvatar }}
             style={styles.avatar}
@@ -169,6 +182,7 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
             recyclingKey={counterpartyAvatar}
             autoplay={false}
             contentFit="cover"
+            onError={() => setAvatarError(true)}
           />
         ) : (
           <TransactionTypeIcon
