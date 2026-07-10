@@ -48,7 +48,16 @@ jest.mock('./nostrGroupRouting', () => ({
   tryRouteGroupRumor: jest.fn(async () => ({ kind: 'not-group' })),
 }));
 jest.mock('./knownWrapIdsCap', () => ({ capKnownWrapIds: jest.fn() }));
-jest.mock('./nostrDecryptPacing', () => ({ yieldToEventLoop: jest.fn(async () => {}) }));
+jest.mock('./nostrDecryptPacing', () => ({
+  createYieldScheduler: jest.fn(() => ({
+    maybeYield: jest.fn(async () => {}),
+    get yieldCount() {
+      return 0;
+    },
+    dispose: jest.fn(),
+  })),
+  NIP17_LOOP_YIELD_EVERY: 2,
+}));
 
 // nsec unwrap returns a handcrafted rumor; partner/text derive from it.
 jest.mock('../utils/nip17Unwrap', () => ({

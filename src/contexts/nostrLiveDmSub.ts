@@ -29,7 +29,7 @@ import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
 import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
 import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
-import { yieldToEventLoop } from './nostrDecryptPacing';
+import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
 import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
 import {
@@ -41,6 +41,7 @@ import {
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
+import type { RefreshDmInboxOptions } from './nostrContextTypes';
 
 // --- Live-sub self-re-arm on relay drop / app resume (#934) ---
 // The app-wide SimplePool deliberately does NOT auto-reconnect
@@ -102,6 +103,10 @@ export interface LiveDmSubscriptionParams {
   // when follows update, re-surfacing + re-notifying entries that now pass.
   followGateBuffer: LiveSubFollowGateBuffer;
   setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
+  /** Optional: called once after a RECONNECT re-arm settles, to flush any
+   * wraps missed while the socket was down. Not fired on the initial cold arm
+   * (the normal cold-start + deferred-backfill path covers that). See #1035. */
+  onReconnect?: (opts?: RefreshDmInboxOptions) => Promise<void>;
 }
 
 /**
@@ -124,6 +129,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     setAmberNip44Permission,
     followGateBuffer,
     setDeferredReplay,
+    onReconnect,
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
@@ -143,6 +149,16 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
+  // Budget-gated yield scheduler for the live-sub receive path (#1035).
+  // Created once per subscription lifetime — shared across re-arms so the
+  // elapsed-budget window carries over and a relay reconnect that delivers a
+  // small burst doesn't reset the timer and pay zero yields. Disposed on
+  // teardown. safetyEvery mirrors NIP17_LOOP_YIELD_EVERY so a pathological
+  // stream can't monopolise the thread indefinitely even if performance.now
+  // resolution is coarse. Single fresh wraps in the foreground never blow the
+  // ~4 ms budget and cost zero RAF round-trips (~16 ms each); a cold-start
+  // burst yields only when the budget is actually exhausted.
+  const wrapYieldScheduler = createYieldScheduler({ safetyEvery: NIP17_LOOP_YIELD_EVERY });
   // Self-re-arm state (#934). `armGeneration` is bumped on every (re)arm and on
   // teardown; each underlying sub's `onWrapsClose` captures the generation live
   // at arm time, so a close belonging to a sub we already superseded (or a
@@ -527,15 +543,15 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
     };
 
-    // Yield to the event loop before each per-wrap decryption. The
-    // live sub fans out wraps from the relay one at a time, but
-    // when the sub catches up a backlog after cold start, multiple
-    // wraps land in the same JS task — each sync `unwrapWrapNsec`
-    // is ~1-3 ms and they pile up to tens-of-ms of unbroken
-    // blocking, dropping bottom-sheet animation frames. A single
-    // setTimeout(0) per wrap costs ~0 ms but lets RN re-flush
-    // pending UI events between decryptions. See issue #496.
-    await yieldToEventLoop();
+    // Budget-gated yield before each per-wrap decryption (#1035 / #496).
+    // Replaces the unconditional `yieldToEventLoop()` (one RAF ≈ 16 ms per
+    // wrap regardless of load). `wrapYieldScheduler.maybeYield()` yields only
+    // when accumulated JS work since the last yield has blown the ~4 ms frame
+    // budget — a single fresh foreground wrap costs zero extra RAFs, while a
+    // burst still yields at the right cadence. The safety cap (every
+    // NIP17_LOOP_YIELD_EVERY wraps) backstops edge cases where decrypt runs
+    // faster than performance.now resolution on some devices.
+    await wrapYieldScheduler.maybeYield();
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
@@ -740,6 +756,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
 
+  // How long after a RECONNECT re-arm we wait before firing refreshDmInbox to
+  // flush the blind window. Gives the relay time to deliver the first batch of
+  // backlogged wraps over the newly-opened WebSocket before the refresh runs;
+  // chosen to cover one relay round-trip on a slow connection while staying
+  // short enough that the user sees missed messages within a second of resume.
+  const RECONNECT_REFRESH_SETTLE_MS = 1_500;
+
   // Open (or re-open) the underlying relay subscription. Bumps the generation
   // FIRST, then tears down any prior sub — so the prior sub's `onWrapsClose`,
   // which fires synchronously on close, sees a stale generation and no-ops
@@ -748,6 +771,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (cancelled) return;
     clearReconnectTimer();
     const generation = ++armGeneration;
+    // isReconnect distinguishes a reconnect re-arm (after a socket drop or
+    // Doze resume — #1035) from the initial cold arm. On reconnect, wraps
+    // sent while the socket was down can rank below COLD_INITIAL_WRAP_LIMIT
+    // (200) in the relay's newest-first ordering because NIP-17 randomises
+    // the gift-wrap's `created_at` up to 48 h back (#469). Raising the limit
+    // or querying with a `since` cursor would fight the deliberate no-since
+    // design (which exists precisely to avoid #469 ranking gaps); instead we
+    // fire a single `refreshDmInbox` after the re-arm settles — it queries
+    // with limit 1000 and the full ingest engine, so it catches everything
+    // the live sub's reconnect-window limit misses. The initial cold arm is
+    // already covered by `dmColdStartBackfill`, so we only fire here on
+    // reconnect (initialArmed = true before armSub is called by scheduleReconnect /
+    // the AppState handler).
+    const isReconnect = initialArmed;
     if (unsubscribe) {
       try {
         unsubscribe();
@@ -787,6 +824,30 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       console.log(
         `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
       );
+    }
+    // Reconnect blind-window flush (#1035): after a socket drop or Doze resume
+    // re-arm, fire refreshDmInbox once the relay has had a moment to deliver
+    // the newly-subscribed backlog. This catches wraps sent while the sub was
+    // deaf that landed below COLD_INITIAL_WRAP_LIMIT in the relay's ordering
+    // because NIP-17 randomises gift-wrap `created_at` up to 48 h back (#469).
+    // Rationale for refreshDmInbox over a higher wrapsLimit: raising the live-
+    // sub limit would replay the full backlog on the JS thread every reconnect,
+    // whereas refreshDmInbox uses the decrypt-once gate (DB known-ids) so only
+    // genuinely new wraps pay decrypt cost. The settle delay gives the relay
+    // time to push the first burst before the refresh REQ lands — without it
+    // the refresh and the live-sub REQ race and the refresh wins, leaving the
+    // live-sub backlog duplicating the refresh's work.
+    if (isReconnect && onReconnect) {
+      setTimeout(() => {
+        if (cancelled || generation !== armGeneration) return;
+        if (__DEV__)
+          console.log(
+            '[Nostr] live DM reconnect — triggering refreshDmInbox to close blind window (#1035)',
+          );
+        onReconnect({ force: true }).catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live DM reconnect refresh failed:', e);
+        });
+      }, RECONNECT_REFRESH_SETTLE_MS);
     }
   };
 
@@ -899,6 +960,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the next identity's inbox.
     setDeferredReplay(null);
     followGateBuffer.clear();
+    wrapYieldScheduler.dispose();
     if (unsubscribe) unsubscribe();
   };
 }
