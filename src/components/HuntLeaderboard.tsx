@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -84,6 +84,15 @@ const LeaderboardRow: React.FC<{
   const display = name ?? shortNpub(entry.pubkey);
   const medalColor = rank < MEDAL_COLORS.length ? MEDAL_COLORS[rank] : null;
 
+  // Mirror the ContactListItem / ConversationRow onError pattern: reset on
+  // URL change so a recycled row whose previous picture errored doesn't
+  // permanently show the fallback when the pubkey (and thus picture URL) changes.
+  const [avatarError, setAvatarError] = useState(false);
+  useEffect(() => {
+    setAvatarError(false);
+  }, [picture]);
+  const showAvatar = !!picture && !avatarError && isSupportedImageUrl(picture);
+
   return (
     <TouchableOpacity
       style={styles.leaderRow}
@@ -101,13 +110,14 @@ const LeaderboardRow: React.FC<{
           <Text style={styles.rankText}>{rank + 1}</Text>
         )}
       </View>
-      {picture && isSupportedImageUrl(picture) ? (
+      {showAvatar ? (
         <Image
           source={{ uri: picture }}
           style={styles.avatar}
           cachePolicy="memory-disk"
           recyclingKey={picture}
           autoplay={false}
+          onError={() => setAvatarError(true)}
         />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback]}>

@@ -279,10 +279,16 @@ export const parseFoundLogEvent = (event: VerifiedEvent): ParsedFoundLog | null 
   if (event.kind !== GC_FOUND_LOG_KIND) return null;
   const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
   if (!coord) return null;
-  // Validate coord shape: must be `<kind>:<pubkey>:<d>` with the listing kind.
-  // A bare non-empty string would cause a navigation crash in CacheDetail.
+  // Validate coord shape: must be `<kind>:<pubkey>:<d>` with the listing kind,
+  // and all three segments must be non-empty. `Number()` is used instead of
+  // `parseInt` so that a token like "37516abc" (which parseInt silently truncates
+  // to 37516) is rejected — only a bare decimal integer is accepted.
+  // A bare non-empty string, an empty pubkey segment ("37516::d"), or a coord
+  // pointing at a different NIP kind would all cause a navigation crash in
+  // CacheDetail, so we reject them here.
   const coordParts = coord.split(':');
-  if (coordParts.length !== 3 || Number.parseInt(coordParts[0], 10) !== GC_LISTING_KIND) {
+  const [kindStr, pubkeyPart, dPart] = coordParts;
+  if (coordParts.length !== 3 || !pubkeyPart || !dPart || Number(kindStr) !== GC_LISTING_KIND) {
     return null;
   }
   // `amount` is written in integer sats by `buildFoundLog` — parse with

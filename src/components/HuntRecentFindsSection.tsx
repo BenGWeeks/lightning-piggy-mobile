@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, FlatList } from 'react-native';
 import { Image } from 'expo-image';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -177,6 +177,16 @@ const FindCard: React.FC<{
         ? t('huntCommunity.ageHours', { count: Math.floor(ageMins / 60) })
         : t('huntCommunity.ageDays', { count: Math.floor(ageMins / (60 * 24)) });
 
+  // Mirror ContactListItem / ConversationRow: track decode errors per URL so
+  // a supported URL that fails at runtime falls back to the placeholder icon.
+  // Reset on URL change so a card reused for a different finder doesn't
+  // permanently display the error-fallback from the previous pubkey.
+  const [avatarError, setAvatarError] = useState(false);
+  useEffect(() => {
+    setAvatarError(false);
+  }, [picture]);
+  const showAvatar = !!picture && !avatarError && isSupportedImageUrl(picture);
+
   return (
     <TouchableOpacity
       style={styles.findCard}
@@ -184,13 +194,14 @@ const FindCard: React.FC<{
       testID={`hunt-recent-finds-card-${index}`}
       accessibilityLabel={t('huntCommunity.findRowA11y', { name: display, cache: cacheName })}
     >
-      {picture && isSupportedImageUrl(picture) ? (
+      {showAvatar ? (
         <Image
           source={{ uri: picture }}
           style={styles.findCardAvatar}
           cachePolicy="memory-disk"
           recyclingKey={picture}
           autoplay={false}
+          onError={() => setAvatarError(true)}
         />
       ) : (
         <View style={[styles.findCardAvatar, styles.findCardAvatarFallback]}>

@@ -439,4 +439,24 @@ describe('parseFoundLogEvent', () => {
     // Non-empty but otherwise garbage.
     expect(parseFoundLogEvent(makeFoundLog([['a', 'notacoord']]))).toBeNull();
   });
+
+  it('rejects a coord with an empty pubkey segment (e.g. "37516::d")', () => {
+    // A relay could write "37516::some-d" — three colon-separated parts but
+    // the pubkey is an empty string. This would previously pass the length=3
+    // check and let an empty-pubkey coord through to CacheDetail.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516::some-d']]))).toBeNull();
+  });
+
+  it('rejects a coord with an empty d segment (e.g. "37516:pubkey:")', () => {
+    // Three parts, but the d-tag is empty — an addressable-event coord with
+    // no identifier makes no sense and should be treated as malformed.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:abc123:']]))).toBeNull();
+  });
+
+  it('rejects a kind token that parseInt would silently truncate (e.g. "37516abc")', () => {
+    // `parseInt("37516abc", 10)` returns 37516, which would incorrectly pass
+    // the GC_LISTING_KIND check. `Number("37516abc")` returns NaN, so the
+    // strict Number() comparison correctly rejects it.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516abc:hider:piggy']]))).toBeNull();
+  });
 });
