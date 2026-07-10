@@ -868,6 +868,38 @@
     "back": "Назад",
     "couldntClaim": "Не вдалося отримати"
   },
+  "huntCommunity": {
+    "nearby": "Поблизу",
+    "recentlyAdded": "Нещодавно додані",
+    "recentlyFound": "Нещодавно знайдені",
+    "topHiders": "Найкращі ховачі",
+    "topFinders": "Найкращі шукачі",
+    "filterAll": "Усі",
+    "filterFriends": "Друзі",
+    "aGeoCache": "геосхованку",
+    "foundCache": "Знайдено {{cache}}",
+    "cachesHidden": "{{count}} схованих кешів",
+    "cacheHiddenOne": "1 схованка захована",
+    "cachesFound": "{{count}} знайдених кешів",
+    "cacheFoundOne": "1 схованка знайдена",
+    "ageMinutes": "{{count}} хв тому",
+    "ageHours": "{{count}} год тому",
+    "ageDays": "{{count}} дн тому",
+    "emptyRecentlyAdded": "Ще немає опублікованих геосхованок. Нові з’являться тут.",
+    "emptyRecentlyFound": "Ще немає знахідок. Отримані кеші з’являться тут.",
+    "emptyFriendsFinds": "Жоден із ваших друзів ще не отримав кеш.",
+    "emptyHiders": "Ще немає ховачів — сховайте перший Piglet.",
+    "emptyFinders": "Ще немає шукачів — знайдіть кеш, щоб потрапити до списку.",
+    "leaderRowA11y": "Місце {{rank}}: {{name}}, {{count}} кешів",
+    "leaderRowA11yOne": "Місце {{rank}}: {{name}}, 1 схованка",
+    "findRowA11y": "{{name}} знайшов {{cache}}",
+    "viewLeaderboard": "Рейтинг"
+  },
+  "huntLeaderboard": {
+    "title": "Рейтинг",
+    "tagline": "Найкращі ховачі та шукачі мережі",
+    "backToGeoCaches": "Назад до Геосхованок"
+  },
   "huntScreen": {
     "backToExplore": "Назад до Огляду",
     "geocaches": "Геосхованки",

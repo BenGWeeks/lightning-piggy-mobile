@@ -29,6 +29,7 @@ import BrandPatternBackground from '../components/BrandPatternBackground';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
+import HuntCommunitySections from '../components/HuntCommunitySections';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
@@ -334,6 +335,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     [caches, isTrusted],
   );
 
+  // Anchor for the "Recently added" rail's distance labels — prefer the
+  // live fix, fall back to the capture-once subscription anchor.
+  const communityPos = useMemo(() => {
+    if (livePos) return { lat: livePos.lat, lon: livePos.lon };
+    if (pos) return { lat: pos.lat, lon: pos.lon };
+    return null;
+  }, [livePos, pos]);
+
   const filteredCaches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return sortedCaches;
@@ -424,6 +433,15 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         }
         ListHeaderComponent={
           <View>
+            {/* Community engagement rails + leaderboard link — sit above the
+                distance-sorted nearby list so discovery isn't limited to
+                whatever happens to be within ~5 km. */}
+            <HuntCommunitySections
+              pos={communityPos}
+              onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+              navigation={navigation}
+            />
+            <Text style={styles.nearbyHeader}>{t('huntCommunity.nearby')}</Text>
             <View style={styles.searchRow}>
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
@@ -626,6 +644,14 @@ const createStyles = (colors: Palette) =>
       // 10 dp below the map = same gap between search and rows below =
       // same gap between rows. Three identical vertical rhythms so the
       // page reads as a tidy stack rather than three different spacings.
+      marginBottom: 10,
+    },
+    nearbyHeader: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: colors.textHeader,
+      marginHorizontal: 16,
+      marginTop: 20,
       marginBottom: 10,
     },
     searchRow: {

@@ -271,6 +271,62 @@ export const longestGeohash = (tags: string[][]): string | null => {
 };
 
 /**
+ * Flat parsed shape of a kind 7516 found-log. `coord` is the addressable
+ * `<kind>:<pubkey>:<d>` of the cache being logged; `finderPubkey` is the
+ * event author. Mirrors `parseCache` so both the community leaderboards
+ * and the recently-found feed can consume a pure, testable value instead
+ * of poking at raw tags. `amountSats` is the self-reported claim amount in
+ * sats (the `amount` tag is written in sats by `buildFoundLog`), null when
+ * absent or non-numeric.
+ */
+export interface ParsedFoundLog {
+  id: string;
+  coord: string;
+  finderPubkey: string;
+  createdAt: number;
+  amountSats: number | null;
+}
+
+// Named parseFoundLogEvent (not parseFoundLog) to avoid colliding with the
+// pre-existing `utils/foundLog.ts` parseFoundLog, which shapes the SAME kind
+// of event for HuntPiggyDetail's log thread — two same-named exports with
+// different return types were a refactor trap (Copilot #1001).
+export const parseFoundLogEvent = (event: VerifiedEvent): ParsedFoundLog | null => {
+  if (event.kind !== GC_FOUND_LOG_KIND) return null;
+  const coord = event.tags.find((t) => t[0] === 'a')?.[1] ?? '';
+  if (!coord) return null;
+  // Validate coord shape: must be `<kind>:<pubkey>:<d>` with the listing kind,
+  // and all three segments must be non-empty. `Number()` is used instead of
+  // `parseInt` so that a token like "37516abc" (which parseInt silently truncates
+  // to 37516) is rejected — only a bare decimal integer is accepted.
+  // A bare non-empty string, an empty pubkey segment ("37516::d"), or a coord
+  // pointing at a different NIP kind would all cause a navigation crash in
+  // CacheDetail, so we reject them here.
+  const coordParts = coord.split(':');
+  const [kindStr, pubkeyPart, dPart] = coordParts;
+  if (coordParts.length !== 3 || !pubkeyPart || !dPart || Number(kindStr) !== GC_LISTING_KIND) {
+    return null;
+  }
+  // `amount` is written in integer sats by `buildFoundLog` — parse with
+  // parseInt (matching `utils/foundLog.ts`) rather than Number+round so a
+  // malformed fractional tag can't be silently reshaped into a different
+  // sats value; gate on Number.isFinite so a genuine `0` survives while
+  // missing / non-numeric tags fall back to null. Reject negatives: sats
+  // represent a payout and cannot be negative (buildFoundLog only writes
+  // amount when sats > 0), so treat them as malformed.
+  const amountRaw = event.tags.find((t) => t[0] === 'amount')?.[1];
+  const amountValue = Number.parseInt(amountRaw ?? '', 10);
+  const amountSats = Number.isFinite(amountValue) && amountValue >= 0 ? amountValue : null;
+  return {
+    id: event.id,
+    coord,
+    finderPubkey: event.pubkey,
+    createdAt: event.created_at,
+    amountSats,
+  };
+};
+
+/**
  * Resolve a coord string back into its (hiderPubkey, d) parts. Coord
  * format is `<kind>:<pubkey>:<d>` per NIP-01.
  */
