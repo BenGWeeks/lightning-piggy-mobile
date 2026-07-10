@@ -12,6 +12,7 @@ import {
   type ParsedEvent,
 } from './nostrPlacesService';
 import { isDevLeftover } from './devEventDenylist';
+import { notifyOwnCachesChanged } from './ownCachesBus';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
  * matches VerifiedEvent's data fields without the runtime brand symbol
@@ -52,7 +53,13 @@ const withGcRelays = (relays: string[] = GC_RELAYS): string[] => [
 export const publishCacheEvent = async (
   signed: SignedEventLike,
   relays: string[] = GC_RELAYS,
-): Promise<void> => publishSignedEvent(signed, withGcRelays(relays));
+): Promise<void> => {
+  await publishSignedEvent(signed, withGcRelays(relays));
+  // Every own-cache mutation (create / edit / expire / NIP-09 delete)
+  // funnels through here — tell useCacheNotifications to re-arm its live
+  // sub now instead of waiting for the safety-net poll (#1016).
+  notifyOwnCachesChanged();
+};
 
 /**
  * Subscribe to nearby caches by geohash prefix. `prefixes` should
