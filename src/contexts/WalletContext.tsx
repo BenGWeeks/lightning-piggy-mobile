@@ -641,10 +641,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       for (const w of walletsRef.current) {
         if (w.walletType === 'nwc') nwcService.disconnect(w.id);
       }
-      // Clear in-memory wallet list immediately so the UI reflects the
-      // switch without ghosting the old wallets.
+      // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
       setWallets([]);
       setActiveWalletId(null);
+      lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
       // Re-hydrate from per-account-keyed storage.
       (async () => {
         if (cancelled) return;
