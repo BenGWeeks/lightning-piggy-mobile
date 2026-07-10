@@ -391,6 +391,7 @@
     "sending": "Sending…",
     "sendFailed": "Send failed",
     "sentToRelays": "Sent to {{ok}} of {{total}} relays",
+    "messageSent": "Message sent",
     "messageReceived": "Message received",
     "statusNotTracked": "Not tracked",
     "statusReceived": "Received",

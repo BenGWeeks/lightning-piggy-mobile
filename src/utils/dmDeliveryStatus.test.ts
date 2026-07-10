@@ -1,4 +1,5 @@
 import {
+  deliverySheetTitle,
   aggregateRelayResults,
   summariseDelivery,
   shortRelayLabel,
@@ -174,5 +175,53 @@ describe('shortRelayLabel', () => {
     expect(shortRelayLabel('wss://relay.damus.io/')).toBe('relay.damus.io');
     expect(shortRelayLabel('ws://localhost:7777')).toBe('localhost:7777');
     expect(shortRelayLabel('relay.example.com')).toBe('relay.example.com');
+  });
+});
+
+describe('deliverySheetTitle', () => {
+  it('titles a received message "message received" regardless of status', () => {
+    expect(deliverySheetTitle('received', undefined)).toEqual({ key: 'messageReceived' });
+    // A received row never carries a real status today, but the contract is
+    // that direction wins — even a populated status must not flip the title.
+    expect(deliverySheetTitle('received', failedDelivery({ eventId: 'e' }))).toEqual({
+      key: 'messageReceived',
+    });
+  });
+
+  it('titles an UNTRACKED sent message "message sent", never "send failed"', () => {
+    // Group sends (and 1:1 rows predating tracking) carry no DeliveryStatus at
+    // all. The bubble only exists because the publish succeeded, so the sheet
+    // must not claim failure — the regression behind the "Send failed /
+    // Not tracked" dialog on every sent group message.
+    expect(deliverySheetTitle('sent', undefined)).toEqual({ key: 'messageSent' });
+  });
+
+  it('titles an in-flight send with seeded relays "sending to N relays"', () => {
+    const status = pendingDelivery({ relays: ['wss://a', 'wss://b'] });
+    expect(deliverySheetTitle('sent', status)).toEqual({ key: 'sendingToRelays', total: 2 });
+  });
+
+  it('titles an in-flight send with no relay list plain "sending"', () => {
+    expect(deliverySheetTitle('sent', pendingDelivery({ eventId: 'e' }))).toEqual({
+      key: 'sending',
+    });
+  });
+
+  it('reserves "send failed" for a TRACKED settled send with an empty breakdown', () => {
+    expect(deliverySheetTitle('sent', failedDelivery({ eventId: 'e' }))).toEqual({
+      key: 'sendFailed',
+    });
+  });
+
+  it('titles a settled tracked send with the ok/total relay breakdown', () => {
+    const status = aggregateRelayResults(
+      [
+        { relay: 'wss://a', ok: true },
+        { relay: 'wss://b', ok: false },
+      ],
+      undefined,
+      2,
+    );
+    expect(deliverySheetTitle('sent', status)).toEqual({ key: 'sentToRelays', ok: 1, total: 2 });
   });
 });

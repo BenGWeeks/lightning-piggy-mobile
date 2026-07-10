@@ -6,9 +6,10 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { Toast } from './BrandedToast';
 import {
-  summariseDelivery,
+  deliverySheetTitle,
   shortRelayLabel,
   protocolLabel,
+  summariseDelivery,
   type MessageInfo,
 } from '../utils/dmDeliveryStatus';
 import { createDeliveryDetailSheetStyles } from '../styles/DeliveryDetailSheet.styles';
@@ -56,23 +57,18 @@ export default function DeliveryDetailSheet({
   const sent = info.direction === 'sent';
   const status = info.deliveryStatus;
   const { ok, total } = status ? summariseDelivery(status) : { ok: 0, total: 0 };
-  // In flight: seeded relays read as `failed` (ok 0 of N), but the send hasn't
-  // settled, so the title says "Sending…" rather than "Sent to 0 of N relays".
   const sending = !!status?.pending;
 
-  // A settled (non-pending) sent status with no relay breakdown (total === 0,
-  // e.g. `failedDelivery({ eventId })` with no relay list) is a tracked FAILURE,
-  // not a success — `delivered` is false and the bubble shows the red tick. Say
-  // "Send failed" so the sheet title doesn't contradict the bubble (Copilot).
-  const title = sent
-    ? sending
-      ? total > 0
-        ? tr('deliveryDetailSheet.sendingToRelays', { total })
-        : tr('deliveryDetailSheet.sending')
-      : total === 0
-        ? tr('deliveryDetailSheet.sendFailed')
-        : tr('deliveryDetailSheet.sentToRelays', { ok, total })
-    : tr('deliveryDetailSheet.messageReceived');
+  // Title decision lives in `deliverySheetTitle` (pure, unit-tested). Key
+  // property: an UNTRACKED sent message (`!status` — group sends, legacy 1:1
+  // rows) titles "Message sent", NOT "Send failed"; "Send failed" is reserved
+  // for a tracked, settled send with an empty relay breakdown (e.g. a
+  // pre-publish `failedDelivery`).
+  const titleDescriptor = deliverySheetTitle(info.direction, status);
+  const title = tr(`deliveryDetailSheet.${titleDescriptor.key}`, {
+    ok: 'ok' in titleDescriptor ? titleDescriptor.ok : undefined,
+    total: 'total' in titleDescriptor ? titleDescriptor.total : undefined,
+  });
 
   // Sorted relays (ok first, then by URL) so the order is stable run-to-run.
   const relays = status
