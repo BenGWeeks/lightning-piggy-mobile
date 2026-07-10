@@ -49,14 +49,20 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
         onPressCache={onPressCache}
       />
       {/* Leaderboard entry point — full boards live on HuntLeaderboardScreen
-          so the main hunt list stays uncluttered. */}
+          so the main hunt list stays uncluttered. Disabled while loading to
+          prevent the leaderboard screen receiving frozen params with
+          loading=true and no entries (skeleton rows that never resolve). */}
       <TouchableOpacity
-        style={styles.leaderboardLink}
+        style={[styles.leaderboardLink, loading && styles.leaderboardLinkDisabled]}
+        disabled={loading}
         onPress={() =>
           navigation.navigate('HuntLeaderboard', {
             hiderLeaderboard,
             finderLeaderboard,
-            loading,
+            // Pass loading=false: by the time the user taps, the settle
+            // window has elapsed (loading is false here), so params will
+            // never freeze in a permanent-skeleton state on the next screen.
+            loading: false,
           })
         }
         testID="hunt-leaderboard-link"
@@ -89,6 +95,9 @@ const createStyles = (colors: Palette) =>
       fontSize: 15,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    leaderboardLinkDisabled: {
+      opacity: 0.4,
     },
   });
 

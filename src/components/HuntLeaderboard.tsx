@@ -70,19 +70,31 @@ const HuntLeaderboard: React.FC<Props> = ({ variant, entries, loading }) => {
   );
 };
 
-/**
- * Memoised leaderboard row — profile fetches from usePubkeyProfile trickle
- * in one-by-one, and without memo every arriving profile re-executes all
- * ~20 rows (each calling usePubkeyProfile). Memo limits re-execution to the
- * row whose data actually changed (#1028).
- */
-const LeaderboardRow: React.FC<{
+interface LeaderboardRowProps {
   entry: LeaderboardEntry;
   rank: number;
   variant: LeaderboardVariant;
   styles: HuntCommunityStyles;
   testID: string;
-}> = React.memo(function LeaderboardRowInner({ entry, rank, variant, styles, testID }) {
+}
+
+/**
+ * Memoised leaderboard row — profile fetches from usePubkeyProfile trickle
+ * in one-by-one, and without memo every arriving profile re-executes all
+ * ~20 rows (each calling usePubkeyProfile). Memo limits re-execution to the
+ * row whose data actually changed (#1028).
+ *
+ * Typed via a standalone interface rather than `React.FC<{…}>` so the
+ * inferred type stays `React.MemoExoticComponent<…>` and avoids the
+ * `React.FC`/`NamedExoticComponent` assignability mismatch.
+ */
+const LeaderboardRow = React.memo(function LeaderboardRowInner({
+  entry,
+  rank,
+  variant,
+  styles,
+  testID,
+}: LeaderboardRowProps) {
   const colors = useThemeColors();
   const t = useTranslation();
   const { name, picture, lud16 } = usePubkeyProfile(entry.pubkey);
