@@ -220,6 +220,20 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImageStyle: 'spaceship',
     backgroundImageResizeMode: 'stretch',
   },
+  'ai-robot': {
+    id: 'ai-robot',
+    name: 'Robot',
+    // Graffiti street-art robot (transparent splatter art), in the same
+    // corner-mascot family as Piggy / Bee / Cat: the art sits over an
+    // emerald→teal gradient rather than filling the card, so it reads as one of
+    // the graffiti cards. See cards/ai-robot.ts for the positioning; no
+    // resizeMode (the bgStyle sizes it, like the other mascots).
+    gradientColors: ['#00C853', '#00695C'],
+    textColor: '#FFFFFF',
+    accentColor: '#69F0AE',
+    backgroundImage: require('../../assets/images/ai-robot.png'),
+    backgroundImageStyle: 'ai-robot',
+  },
 };
 
 // Pickers (Add-wallet wizard + Wallet settings) render this list in order,
