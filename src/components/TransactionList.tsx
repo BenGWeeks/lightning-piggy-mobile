@@ -242,7 +242,6 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
   // on stable props (#1014). `swapStateTick` is a dep so a REAL swap-state
   // change recomputes iconState (a primitive prop) and repaints just the
   // rows whose badge changed.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const renderRow = useCallback(
     ({ item: row }: ListRenderItemInfo<TxRow>) => (
       <TransactionRow
@@ -258,6 +257,7 @@ const TransactionList: React.FC<Props> = ({ transactions, refreshControl }) => {
     ),
     // iconStateFor is a stable per-render closure over live swapRecoveryService
     // reads; swapStateTick re-creates this callback when that state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [styles, contactProfileByPubkey, contactByLud16, btcPrice, currency, onPressTx, swapStateTick],
   );
 
