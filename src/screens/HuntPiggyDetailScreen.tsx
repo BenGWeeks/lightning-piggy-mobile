@@ -308,7 +308,16 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     return () => {
       cancelled = true;
-      flushLogs(); // drain tail so no events are lost on unmount
+      // Drop any buffered logs — after setting cancelled the flushLogs
+      // guard discards them without calling setLogs. On a real unmount
+      // the component is gone so committing is pointless; on a coord
+      // change the next effect opens a fresh subscription and a stale
+      // relay-echo for the previous coord shouldn't populate the new list.
+      pendingLogsRef.current = new Map();
+      if (logFlushTimerRef.current) {
+        clearTimeout(logFlushTimerRef.current);
+        logFlushTimerRef.current = null;
+      }
       closer();
     };
   }, [coord]);
