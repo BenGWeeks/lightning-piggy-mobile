@@ -220,6 +220,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // ----- load listing + subscribe found-logs ------------------------------
 
+  // Coalesce per-log Map clones into one setState per ≤150 ms flush.
+  // Without batching a relay burst fires N × O(prev) Map clones + React
+  // commits on every arriving event. Mirror of the zapsByLog pattern
+  // ~50 lines below. (#1029 Fix 1)
+  const pendingLogsRef = useRef<Map<string, FoundLog>>(new Map());
+  const logFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     const parts = parseCacheCoord(coord);
@@ -228,6 +235,29 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       setLoading(false);
       return;
     }
+
+    const flushLogs = (): void => {
+      if (logFlushTimerRef.current) {
+        clearTimeout(logFlushTimerRef.current);
+        logFlushTimerRef.current = null;
+      }
+      if (pendingLogsRef.current.size === 0) return;
+      const batch = pendingLogsRef.current;
+      pendingLogsRef.current = new Map();
+      setLogs((prev) => {
+        // Dedupe: skip any id already committed so we don't clobber a
+        // newer optimistic insert (the handlePostLog path).
+        let changed = false;
+        const next = new Map(prev);
+        for (const [id, log] of batch) {
+          if (next.has(id)) continue;
+          next.set(id, log);
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    };
+
     (async () => {
       // Paint from disk first (cold deep-link path) to hide relay latency.
       if (!cache) {
@@ -260,15 +290,16 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     })();
     const closer = subscribeFoundLogs(coord, (event) => {
       const log = parseFoundLog(event);
-      setLogs((prev) => {
-        if (prev.has(log.id)) return prev;
-        const next = new Map(prev);
-        next.set(log.id, log);
-        return next;
-      });
+      pendingLogsRef.current.set(log.id, log);
+      if (pendingLogsRef.current.size >= 25) {
+        flushLogs();
+        return;
+      }
+      if (logFlushTimerRef.current === null) logFlushTimerRef.current = setTimeout(flushLogs, 150);
     });
     return () => {
       cancelled = true;
+      flushLogs(); // drain tail so no events are lost on unmount
       closer();
     };
   }, [coord]);
