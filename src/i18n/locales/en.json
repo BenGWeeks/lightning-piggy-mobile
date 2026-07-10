@@ -1859,6 +1859,9 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Selected card theme: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Wallet Settings",
     "tabDesign": "Design",

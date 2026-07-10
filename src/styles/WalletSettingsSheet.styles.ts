@@ -151,10 +151,6 @@ export const createWalletSettingsSheetStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '600',
     },
-    coinosBlock: {
-      marginTop: 16,
-      gap: 8,
-    },
     recoveryCallout: {
       marginTop: 20,
       backgroundColor: colors.brandPinkLight,

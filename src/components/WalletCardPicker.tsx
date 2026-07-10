@@ -6,6 +6,7 @@ import { MiniWalletCard, CARD_ASPECT } from './WalletCard';
 import { themeList, cardThemes } from '../themes/cardThemes';
 import type { CardTheme } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
 import { createWalletCardPickerStyles } from '../styles/WalletCardPicker.styles';
 
 interface Props {
@@ -74,6 +75,7 @@ const CF_DISTANCES = CF_SCALE_BY_DISTANCE.map((_, i) => i);
  */
 const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createWalletCardPickerStyles(colors), [colors]);
   const carouselRef = useRef<ICarouselInstance>(null);
 
@@ -173,7 +175,7 @@ const WalletCardPicker: React.FC<Props> = ({ selectedTheme, onSelect }) => {
       <Text
         style={styles.name}
         testID="wallet-card-picker-name"
-        accessibilityLabel={`Selected card theme: ${cardThemes[centredTheme]?.name ?? ''}`}
+        accessibilityLabel={t('walletCardPicker.selectedTheme', { name: cardThemes[centredTheme]?.name ?? '' })}
       >
         {cardThemes[centredTheme]?.name ?? ''}
       </Text>
