@@ -70,15 +70,33 @@ const flags = {
   xcheck: __DEV__ && process.env.EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK === '1',
 };
 
-/** @internal Test use only — flip routing/cross-check without rebuilding env. */
-export function __setNostrCryptoFlagsForTests(next: { native?: boolean; xcheck?: boolean }): void {
+// Warm-up latch — routing is permitted ONLY after warmUpNativeCrypto() has
+// resolved successfully (the JNA + libnostr_sdk_ffi.so load actually worked).
+// It defaults false, so: (a) an op that runs before warm-up resolves stays on
+// JS, and (b) a module that is linked but fails to load (dlopen/JNA failure)
+// never routes real crypto into a broken path — the catch below leaves this
+// false for the rest of the session. warmUpNativeCrypto() must be awaited at
+// startup for native routing to ever activate (see index.ts).
+let nativeReady = false;
+
+/** @internal Test use only — flip routing/cross-check/warm-up latch without env. */
+export function __setNostrCryptoFlagsForTests(next: {
+  native?: boolean;
+  xcheck?: boolean;
+  ready?: boolean;
+}): void {
   if (!__DEV__) return;
   if (next.native !== undefined) flags.native = next.native;
   if (next.xcheck !== undefined) flags.xcheck = next.xcheck;
+  if (next.ready !== undefined) nativeReady = next.ready;
 }
 
+// Routing gate: the native module is used ONLY when the build-time env flag is
+// set AND warm-up has succeeded (nativeReady). getNostrNative() adds the third
+// guard — it returns null off-Android and when the module isn't linked.
 function nativeIfActive(): NostrNativeApi | null {
-  return flags.native ? getNostrNative() : null;
+  if (!flags.native || !nativeReady) return null;
+  return getNostrNative();
 }
 
 /** True when sk+pk-shaped ops are actually routing to the native module. */
@@ -87,16 +105,27 @@ export function isNativeCryptoActive(): boolean {
 }
 
 /**
- * Pays the native module's one-time JNA + .so load off the JS thread.
- * Resolves false (never rejects) when native crypto isn't linked or can't
- * load — callers just stay on the JS path.
+ * Pays the native module's one-time JNA + .so load off the JS thread and
+ * latches routing on: sets nativeReady=true ONLY when warm-up resolves true,
+ * so every crypto op stays on the pure-JS path until the native module has
+ * proven it can load. Resolves false (never rejects) — a linked-but-broken
+ * module (dlopen/JNA failure), a disabled env flag, or a non-Android platform
+ * all leave nativeReady false and keep callers on JS for the session.
+ *
+ * Must be awaited at startup (index.ts) for native routing to activate; until
+ * it resolves, nativeReady's false default keeps first ops on JS.
  */
 export async function warmUpNativeCrypto(): Promise<boolean> {
-  const native = nativeIfActive();
+  if (!flags.native) return false;
+  // Reach the module directly (not via nativeIfActive, which gates on the very
+  // latch we're about to set) — still platform/linkage-guarded by getNostrNative.
+  const native = getNostrNative();
   if (!native) return false;
   try {
-    return await native.warmUp();
+    nativeReady = (await native.warmUp()) === true;
+    return nativeReady;
   } catch {
+    nativeReady = false;
     return false;
   }
 }

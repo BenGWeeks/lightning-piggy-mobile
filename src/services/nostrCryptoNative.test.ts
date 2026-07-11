@@ -69,7 +69,9 @@ function mockNative(overrides: Partial<NostrNativeApi> = {}): jest.Mocked<NostrN
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetNostrNative.mockReturnValue(null);
-  __setNostrCryptoFlagsForTests({ native: false, xcheck: false });
+  // ready:false is the safe default — the warm-up latch must be set true
+  // explicitly (or by a successful warmUpNativeCrypto) before routing engages.
+  __setNostrCryptoFlagsForTests({ native: false, xcheck: false, ready: false });
 });
 
 describe("JS path (flag off — today's default)", () => {
@@ -101,9 +103,10 @@ describe("JS path (flag off — today's default)", () => {
   });
 });
 
-describe('native routing (flag on)', () => {
+describe('native routing (flag on, warmed up)', () => {
   beforeEach(() => {
-    __setNostrCryptoFlagsForTests({ native: true });
+    // ready:true simulates a successful warm-up so routing is engaged.
+    __setNostrCryptoFlagsForTests({ native: true, ready: true });
   });
 
   it('falls back to JS when the module is not linked', () => {
@@ -195,11 +198,56 @@ describe('native routing (flag on)', () => {
   });
 });
 
+describe('warm-up gate (flag on, not yet/never warmed up)', () => {
+  // These are the safety cases from Copilot #1054: env flag on but warm-up has
+  // either not resolved yet or failed (linked-but-broken module). Routing MUST
+  // stay on JS in both — nativeReady gates every op regardless of the env flag.
+  beforeEach(() => {
+    __setNostrCryptoFlagsForTests({ native: true, ready: false });
+  });
+
+  it('stays on JS when nativeReady is false even with the env flag on', () => {
+    const native = mockNative();
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+    expect(isNativeCryptoActive()).toBe(false);
+    // The gate short-circuits before ever asking for the module, so no native
+    // crypto function is consulted for routing.
+    expect(native.nip44Decrypt).not.toHaveBeenCalled();
+  });
+
+  it('a successful warmUpNativeCrypto latches routing on', async () => {
+    const native = mockNative({ warmUp: jest.fn(async () => true) });
+    expect(isNativeCryptoActive()).toBe(false);
+    await expect(warmUpNativeCrypto()).resolves.toBe(true);
+    expect(isNativeCryptoActive()).toBe(true);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe('native-plaintext');
+    expect(native.nip44Decrypt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed warm-up (dlopen/JNA failure) leaves routing on JS for the session', async () => {
+    mockNative({
+      warmUp: jest.fn(async () => {
+        throw new Error('dlopen failed');
+      }),
+    });
+    await expect(warmUpNativeCrypto()).resolves.toBe(false);
+    expect(isNativeCryptoActive()).toBe(false);
+    // Real crypto still works — it just uses the pure-JS path.
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+  });
+
+  it('a warm-up that resolves false (module declined) does not latch', async () => {
+    mockNative({ warmUp: jest.fn(async () => false) });
+    await expect(warmUpNativeCrypto()).resolves.toBe(false);
+    expect(isNativeCryptoActive()).toBe(false);
+  });
+});
+
 describe('cross-check mode (dev-only)', () => {
   let consoleError: jest.SpyInstance;
 
   beforeEach(() => {
-    __setNostrCryptoFlagsForTests({ native: true, xcheck: true });
+    __setNostrCryptoFlagsForTests({ native: true, xcheck: true, ready: true });
     consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
