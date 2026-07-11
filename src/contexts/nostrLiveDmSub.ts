@@ -158,7 +158,16 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // resolution is coarse. Single fresh wraps in the foreground never blow the
   // ~4 ms budget and cost zero RAF round-trips (~16 ms each); a cold-start
   // burst yields only when the budget is actually exhausted.
-  const wrapYieldScheduler = createYieldScheduler({ safetyEvery: NIP17_LOOP_YIELD_EVERY });
+  //
+  // The AbortController spans the subscription lifetime: teardown aborts it
+  // BEFORE dispose(), which settles any in-flight maybeYield() awaiter (a bare
+  // dispose() only cancels the RAF, leaving the awaiter — and its wrap, whose
+  // id is already in knownWrapIds — hung forever).
+  const wrapYieldAbort = new AbortController();
+  const wrapYieldScheduler = createYieldScheduler({
+    signal: wrapYieldAbort.signal,
+    safetyEvery: NIP17_LOOP_YIELD_EVERY,
+  });
   // Self-re-arm state (#934). `armGeneration` is bumped on every (re)arm and on
   // teardown; each underlying sub's `onWrapsClose` captures the generation live
   // at arm time, so a close belonging to a sub we already superseded (or a
@@ -552,6 +561,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // NIP17_LOOP_YIELD_EVERY wraps) backstops edge cases where decrypt runs
     // faster than performance.now resolution on some devices.
     await wrapYieldScheduler.maybeYield();
+    // Torn down while parked on the yield (abort settles the awaiter): skip
+    // post-teardown decrypt/persist work.
+    if (cancelled) return;
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
@@ -960,6 +972,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the next identity's inbox.
     setDeferredReplay(null);
     followGateBuffer.clear();
+    // Abort first — settles any in-flight maybeYield() awaiter — then detach.
+    wrapYieldAbort.abort();
     wrapYieldScheduler.dispose();
     if (unsubscribe) unsubscribe();
   };
