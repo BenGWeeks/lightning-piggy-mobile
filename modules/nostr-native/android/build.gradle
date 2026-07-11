@@ -24,3 +24,39 @@ dependencies {
   // (declared in the artifact's POM) for the UniFFI JNI dispatch.
   implementation 'org.rust-nostr:nostr-sdk-kmp-android:0.44.3'
 }
+
+// ---------------------------------------------------------------------------
+// Supply-chain guard: fail the build if the rust-nostr binary ever differs
+// from the artifact we audited and benchmarked (#1046 / PR #1048). This is a
+// wallet app consuming a prebuilt native library — a silent artifact swap
+// (registry compromise, MITM, malicious re-publish) must break the build, not
+// ship. Scoped to this one artifact deliberately: android/ is prebuild-
+// generated, so Gradle's whole-project verification-metadata.xml can't be
+// committed, and verifying the full RN dependency tree there would add
+// hundreds of churn-prone entries for no additional wallet-risk coverage.
+// When bumping the dependency version: verify the new AAR's SHA-256 from two
+// independent sources (local Gradle cache + a fresh repo1.maven.org download)
+// before updating this constant.
+def NOSTR_SDK_AAR_SHA256 = 'c375c89a8a27249c933b83fce721f218c64e7cb363fbb60ca2570c941a7ef237'
+
+tasks.register('verifyNostrSdkArtifact') {
+  doLast {
+    def artifact = configurations.releaseRuntimeClasspath
+      .resolvedConfiguration.resolvedArtifacts
+      .find { it.moduleVersion.id.group == 'org.rust-nostr' }
+    if (artifact == null) {
+      throw new GradleException('nostr-native: org.rust-nostr artifact not found on the runtime classpath — dependency renamed?')
+    }
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    artifact.file.eachByte(1024 * 1024) { bytes, len -> digest.update(bytes, 0, len) }
+    def actual = digest.digest().collect { String.format('%02x', it) }.join()
+    if (actual != NOSTR_SDK_AAR_SHA256) {
+      throw new GradleException(
+        "nostr-native: SHA-256 mismatch for ${artifact.file.name} — expected ${NOSTR_SDK_AAR_SHA256}, got ${actual}. " +
+        'The rust-nostr binary is not the audited artifact; refusing to build.')
+    }
+    logger.lifecycle("nostr-native: rust-nostr artifact checksum verified (${actual.take(12)}…)")
+  }
+}
+
+preBuild.dependsOn 'verifyNostrSdkArtifact'
