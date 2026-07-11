@@ -286,7 +286,7 @@ describe('benchmark harness — stat accumulation', () => {
     const alice = freshKeyPair();
     const bob = freshKeyPair();
     const key = nip44GetConversationKey(alice.sk, bob.pk);
-    // Perform 210 encrypts — reservoir should evict the oldest 10
+    // Perform 210 encrypts — the sliding window should evict the oldest 10
     for (let i = 0; i < 210; i++) {
       nip44Encrypt(`msg-${i}`, key);
     }
@@ -327,10 +327,18 @@ describe('benchmark harness — cadence gate (fake timers)', () => {
     const bob = freshKeyPair();
     const key = nip44GetConversationKey(alice.sk, bob.pk);
 
-    // 3 ops in a row — only ONE timer should be armed (summaryScheduled guard)
+    expect(jest.getTimerCount()).toBe(0);
+
+    // First op arms the single summary timer (summaryScheduled guard).
     nip44Encrypt('op1', key);
+    expect(jest.getTimerCount()).toBe(1);
+
+    // 2 more ops in a row — must NOT arm a second/third timer; the guard
+    // should keep exactly one summary timer pending regardless of how many
+    // crypto calls happen before it fires.
     nip44Encrypt('op2', key);
     nip44Encrypt('op3', key);
+    expect(jest.getTimerCount()).toBe(1);
 
     const s = __getStats();
     expect(s.nip44Encrypt.count).toBe(3);

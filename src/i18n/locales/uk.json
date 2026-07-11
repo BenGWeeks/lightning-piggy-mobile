@@ -287,7 +287,8 @@
     "zapUnavailable": "Надіслати zap (недоступно — у співрозмовника немає адреси Lightning)",
     "closeFullscreenGif": "Закрити повноекранний GIF",
     "shareContactTitle": "Поділитися контактом з {{name}}",
-    "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити."
+    "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити.",
+    "typing": "друкує…"
   },
   "courseDetailScreen": {
     "courseNotFound": "Курс не знайдено",
@@ -898,7 +899,9 @@
   "huntLeaderboard": {
     "title": "Рейтинг",
     "tagline": "Найкращі ховачі та шукачі мережі",
-    "backToGeoCaches": "Назад до Геосхованок"
+    "backToGeoCaches": "Назад до Геосхованок",
+    "tabHiders": "Найкращі ховачі",
+    "tabFinders": "Найкращі шукачі"
   },
   "huntScreen": {
     "backToExplore": "Назад до Огляду",

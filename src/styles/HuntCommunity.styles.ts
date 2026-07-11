@@ -47,6 +47,8 @@ export const createHuntCommunityStyles = (colors: Palette) =>
       borderRadius: 12,
       padding: 10,
     },
+    // Anchors the absolutely-positioned LpPayoutBadge to the thumb area.
+    railThumbWrap: { position: 'relative' },
     railThumb: {
       width: '100%',
       height: 84,

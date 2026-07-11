@@ -51,7 +51,7 @@ import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
-import { useGroupMessaging } from './useGroupMessaging';
+import { useGroupMessaging, type GroupSendHooks } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import {
   CONTACTS_CACHE_KEY_BASE,
@@ -209,14 +209,17 @@ interface NostrContextType extends UseReactionActionsResult {
    * seal+wraps it once per recipient (including the sender for cross-device
    * visibility). NSEC-only — Amber group send is a follow-up. See PR #227.
    */
-  sendGroupMessage: (input: {
-    groupId: string;
-    subject: string;
-    memberPubkeys: string[];
-    text?: string;
-    /** Encrypted NIP-17 kind-15 file message (voice note) sent to the group. */
-    file?: EncryptedUpload;
-  }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  sendGroupMessage: (
+    input: {
+      groupId: string;
+      subject: string;
+      memberPubkeys: string[];
+      text?: string;
+      /** Encrypted NIP-17 kind-15 file message (voice note) sent to the group. */
+      file?: EncryptedUpload;
+    },
+    hooks?: GroupSendHooks,
+  ) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
   /**
    * Publish a parameterised-replaceable kind-30200 group-state event for
    * client-side group consensus. Idempotent on (creator, d-tag) — relays

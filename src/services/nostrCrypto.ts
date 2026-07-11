@@ -18,8 +18,9 @@
  *
  * Benchmark harness
  * -----------------
- * When EXPO_PUBLIC_KEEP_PERF_LOGS=1, each wrapped operation records a
- * timing sample. A periodic summary (at most once per 60 s) logs:
+ * In dev builds (`__DEV__`) or when EXPO_PUBLIC_KEEP_PERF_LOGS=1, each
+ * wrapped operation records a timing sample. A periodic summary (at most
+ * once per 60 s) logs:
  *
  *   [PerfBlock] nostrCrypto nip44Decrypt n=42 p50=1ms p95=3ms
  *
@@ -108,7 +109,7 @@ function reportMismatch(op: string, detail: string): void {
   );
 }
 
-// (a circular buffer via splice-and-push is equivalent and simpler).
+// ---------------------------------------------------------------------------
 // Sliding window — keeps the most recent MAX_SAMPLES timing samples per op
 // (oldest sample evicted via shift when the window is full).
 // ---------------------------------------------------------------------------
@@ -117,14 +118,17 @@ const MAX_SAMPLES = 200;
 interface OpStats {
   samples: number[];
   count: number;
+  /** `count` at the last emitted summary — ops with no new samples since
+   *  then are skipped, so a long-idle op doesn't log forever. */
+  countAtLastSummary: number;
 }
 
 const stats: Record<string, OpStats> = {
-  nip44Decrypt: { samples: [], count: 0 },
-  nip44Encrypt: { samples: [], count: 0 },
-  schnorrSign: { samples: [], count: 0 },
-  schnorrVerify: { samples: [], count: 0 },
-  eventHash: { samples: [], count: 0 },
+  nip44Decrypt: { samples: [], count: 0, countAtLastSummary: 0 },
+  nip44Encrypt: { samples: [], count: 0, countAtLastSummary: 0 },
+  schnorrSign: { samples: [], count: 0, countAtLastSummary: 0 },
+  schnorrVerify: { samples: [], count: 0, countAtLastSummary: 0 },
+  eventHash: { samples: [], count: 0, countAtLastSummary: 0 },
 };
 
 /** Append one timing sample, evicting oldest when window is full. */
@@ -164,9 +168,12 @@ function scheduleSummary(): void {
     if (now - lastSummaryAt < SUMMARY_INTERVAL_MS) return;
     lastSummaryAt = now;
     for (const [op, s] of Object.entries(stats)) {
-      if (s.count === 0) continue;
+      if (s.count === s.countAtLastSummary) continue;
+      s.countAtLastSummary = s.count;
       const { p50, p95 } = percentiles(s.samples);
-      console.log(`[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms`);
+      console.log(
+        `[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms (window=${s.samples.length})`,
+      );
     }
   }, delay);
 }
@@ -231,7 +238,7 @@ export function nip44DecryptFrom(
     return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, peerPublicKey));
   }
   const pub = peerPublicKey.toLowerCase();
-  const t0 = Date.now();
+  const t0 = performance.now();
   let result: string | undefined;
   let nativeError: unknown;
   try {
@@ -242,7 +249,7 @@ export function nip44DecryptFrom(
   // Sample successful decrypts only, mirroring the JS path where a throw
   // aborts before recordSample — keeps native/JS p50/p95 comparable.
   if (PERF_ENABLED && nativeError === undefined) {
-    recordSample('nip44Decrypt', Date.now() - t0);
+    recordSample('nip44Decrypt', performance.now() - t0);
     scheduleSummary();
   }
   if (flags.xcheck) {
@@ -287,10 +294,10 @@ export function nip44EncryptForRecipient(
     return nip44Encrypt(plaintext, conversationKey);
   }
   const pub = recipientPubkey.toLowerCase();
-  const t0 = Date.now();
+  const t0 = performance.now();
   const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
   if (PERF_ENABLED) {
-    recordSample('nip44Encrypt', Date.now() - t0);
+    recordSample('nip44Encrypt', performance.now() - t0);
     scheduleSummary();
   }
   if (flags.xcheck) {
@@ -346,7 +353,7 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
   if (native) {
     const memoised = event[verifiedSymbol];
     if (typeof memoised === 'boolean') return memoised;
-    const t0 = Date.now();
+    const t0 = performance.now();
     let valid = false;
     try {
       const hash = getEventHash(event);
@@ -357,7 +364,7 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
       valid = false;
     }
     if (PERF_ENABLED) {
-      recordSample('schnorrVerify', Date.now() - t0);
+      recordSample('schnorrVerify', performance.now() - t0);
       scheduleSummary();
     }
     if (flags.xcheck) {
@@ -406,6 +413,7 @@ export function __resetStats(): void {
   for (const s of Object.values(stats)) {
     s.samples = [];
     s.count = 0;
+    s.countAtLastSummary = 0;
   }
   lastSummaryAt = 0;
   summaryScheduled = false;
@@ -417,8 +425,11 @@ export function __flushSummary(): void {
   summaryScheduled = false;
   for (const [op, s] of Object.entries(stats)) {
     if (s.count === 0) continue;
+    s.countAtLastSummary = s.count;
     const { p50, p95 } = percentiles(s.samples);
-    console.log(`[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms`);
+    console.log(
+      `[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms (window=${s.samples.length})`,
+    );
   }
 }
 
