@@ -1,14 +1,11 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, FlatList } from 'react-native';
-import { MapPin, PiggyBank, Sparkles } from 'lucide-react-native';
+import { View, Text, FlatList } from 'react-native';
+import { Sparkles } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { formatDistance, decodeGeohash, haversineMetres } from '../utils/geohash';
+import HuntRailCard from './HuntRailCard';
 import type { ParsedCache } from '../services/nostrPlacesService';
-import {
-  createHuntCommunityStyles,
-  type HuntCommunityStyles,
-} from '../styles/HuntCommunity.styles';
+import { createHuntCommunityStyles } from '../styles/HuntCommunity.styles';
 
 interface Props {
   caches: ParsedCache[];
@@ -57,65 +54,17 @@ const HuntRecentlyAddedSection: React.FC<Props> = ({ caches, loading, pos, onPre
           keyExtractor={(c) => c.coord}
           contentContainerStyle={styles.rail}
           renderItem={({ item, index }) => (
-            <RailCard
+            <HuntRailCard
               cache={item}
-              index={index}
               pos={pos}
               styles={styles}
               onPress={() => onPressCache(item.coord)}
+              testID={`hunt-recently-added-card-${index}`}
             />
           )}
         />
       )}
     </View>
-  );
-};
-
-const RailCard: React.FC<{
-  cache: ParsedCache;
-  index: number;
-  pos: { lat: number; lon: number } | null;
-  styles: HuntCommunityStyles;
-  onPress: () => void;
-}> = ({ cache, index, pos, styles, onPress }) => {
-  const colors = useThemeColors();
-  const t = useTranslation();
-  const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-  const distance =
-    pos && center
-      ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
-      : null;
-  return (
-    <TouchableOpacity
-      style={styles.railCard}
-      onPress={onPress}
-      testID={`hunt-recently-added-card-${index}`}
-      accessibilityLabel={cache.name}
-    >
-      {cache.imageUrl ? (
-        <Image source={{ uri: cache.imageUrl }} style={styles.railThumb} resizeMode="cover" />
-      ) : (
-        <View
-          style={[
-            styles.railIconWrap,
-            cache.isLpPiggy ? styles.railIconLp : styles.railIconStandard,
-          ]}
-        >
-          {cache.isLpPiggy ? (
-            <PiggyBank size={30} color={colors.white} strokeWidth={2} />
-          ) : (
-            <MapPin size={30} color={colors.white} strokeWidth={2} />
-          )}
-        </View>
-      )}
-      <Text style={styles.railTitle} numberOfLines={1}>
-        {cache.name}
-      </Text>
-      <Text style={styles.railMeta} numberOfLines={1}>
-        {cache.isLpPiggy ? t('huntScreen.piglet') : t('huntScreen.nipGcCache')}
-        {distance != null ? ` · ${formatDistance(distance)}` : ''}
-      </Text>
-    </TouchableOpacity>
   );
 };
 
