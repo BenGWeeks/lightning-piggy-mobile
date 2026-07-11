@@ -105,7 +105,9 @@ function scheduleSummary(): void {
       if (s.count === s.countAtLastSummary) continue;
       s.countAtLastSummary = s.count;
       const { p50, p95 } = percentiles(s.samples);
-      console.log(`[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms`);
+      console.log(
+        `[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms (window=${s.samples.length})`,
+      );
     }
   }, delay);
 }
@@ -236,8 +238,11 @@ export function __flushSummary(): void {
   summaryScheduled = false;
   for (const [op, s] of Object.entries(stats)) {
     if (s.count === 0) continue;
+    s.countAtLastSummary = s.count;
     const { p50, p95 } = percentiles(s.samples);
-    console.log(`[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms`);
+    console.log(
+      `[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms (window=${s.samples.length})`,
+    );
   }
 }
 
