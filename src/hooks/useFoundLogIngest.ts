@@ -37,9 +37,29 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
 
   const pendingLogsRef = useRef<Map<string, FoundLog>>(new Map());
   const logFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Declared here (rather than beside the zap-subscription effect below) so
+  // the found-logs effect can reset them synchronously on every `coord`
+  // instance — see the reset block at the top of the effect.
+  const pendingZapsRef = useRef<{ receiptId: string; logId: string; sats: number }[]>([]);
+  const zapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+
+    // Reset all derived output for this coord instance up front. `logs` /
+    // `zapsByLog` are plain state, but `pendingZapsRef`/`zapFlushTimerRef`
+    // are refs shared across effect instances (like pendingLogsRef above,
+    // whose reset the previous instance's cleanup already handles) — if the
+    // hook is reused with a new `coord`, without this the previous cache's
+    // logs/zaps (and any zaps buffered but not yet flushed) would remain
+    // visible/pending until the new subscriptions happened to overwrite them.
+    setLogs(new Map());
+    setZapsByLog(new Map());
+    pendingZapsRef.current = [];
+    if (zapFlushTimerRef.current) {
+      clearTimeout(zapFlushTimerRef.current);
+      zapFlushTimerRef.current = null;
+    }
 
     const flushLogs = (): void => {
       // Cancelled check MUST run first, before touching the timer ref.
@@ -109,12 +129,20 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
   // Keyed on sorted log ids so a new log re-opens the sub while an
   // unchanged set doesn't. Receipts deduped by receiptId across relays.
   const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
-  const pendingZapsRef = useRef<{ receiptId: string; logId: string; sats: number }[]>([]);
-  const zapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const logIds = logIdsKey ? logIdsKey.split(',') : [];
     if (logIds.length === 0) return undefined;
+    let cancelled = false;
+
     const flush = (): void => {
+      // Cancelled check MUST run first, before touching the timer ref — the
+      // same stale-timer race flushLogs above guards against. pendingZapsRef
+      // / zapFlushTimerRef are shared across effect instances (reused on the
+      // next `logIdsKey` change), so a queued flush callback from a
+      // superseded instance could otherwise clear the *new* instance's
+      // already-scheduled timer, stalling its auto-flush until another zap
+      // happened to arrive.
+      if (cancelled) return;
       if (zapFlushTimerRef.current) {
         clearTimeout(zapFlushTimerRef.current);
         zapFlushTimerRef.current = null;
@@ -135,6 +163,9 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       });
     };
     const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+      // Same reasoning as the found-logs callback above: never buffer into
+      // the shared ref once this effect instance is cancelled.
+      if (cancelled) return;
       pendingZapsRef.current.push({ receiptId, logId, sats });
       if (pendingZapsRef.current.length >= 25) {
         flush();
@@ -143,8 +174,18 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       if (zapFlushTimerRef.current === null) zapFlushTimerRef.current = setTimeout(flush, 150);
     });
     return () => {
+      cancelled = true;
+      // Drop any buffered zaps rather than calling flush() here — same
+      // reasoning as the found-logs cleanup: `logIdsKey` changing (e.g. a
+      // coord change resetting `logs`) opens a fresh subscription reusing
+      // these shared refs, so draining a torn-down instance's batch into
+      // state risks mixing zaps into the wrong cache's totals.
+      pendingZapsRef.current = [];
+      if (zapFlushTimerRef.current) {
+        clearTimeout(zapFlushTimerRef.current);
+        zapFlushTimerRef.current = null;
+      }
       closer();
-      flush();
     };
   }, [logIdsKey]);
 
