@@ -53,8 +53,10 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
     // hook is reused with a new `coord`, without this the previous cache's
     // logs/zaps (and any zaps buffered but not yet flushed) would remain
     // visible/pending until the new subscriptions happened to overwrite them.
-    setLogs(new Map());
-    setZapsByLog(new Map());
+    // Functional form keeps the reset render-free on first mount (state is
+    // already an empty Map — returning it unchanged skips the re-render).
+    setLogs((prev) => (prev.size === 0 ? prev : new Map()));
+    setZapsByLog((prev) => (prev.size === 0 ? prev : new Map()));
     pendingZapsRef.current = [];
     if (zapFlushTimerRef.current) {
       clearTimeout(zapFlushTimerRef.current);
