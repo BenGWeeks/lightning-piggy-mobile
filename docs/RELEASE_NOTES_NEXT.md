@@ -23,9 +23,11 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - Settings screens (Security, On-chain, Nearby merchants) now use white section icons and brand-pink toggles and selected rows.
 - Home feels snappier — wallet refreshes that change nothing no longer rebuild the transaction list.
 - Explore map pans more smoothly (marker layers no longer re-render on every GPS fix).
+- Group messages appear in the thread instantly when you hit send.
 
 ### Fixed
 
 - Tapping a sent group message no longer shows a false "Send failed" dialog — delivered messages now read "Message sent".
 - Geo-caches hidden in Lightning Piggy now always show the Piglet icon and pink map pin, even when they have no prize attached (existing caches fix themselves, no republish needed).
 - The app responds to taps immediately after waking from a long background pause.
+- Messages sent while the app was asleep now appear as soon as it reconnects, not just when you open the Messages tab.

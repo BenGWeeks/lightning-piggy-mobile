@@ -849,6 +849,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       setDeferredReplay: (fn) => {
         deferredReplayRef.current = fn;
       },
+      // Close the reconnect blind window (#1035): after a socket drop or Doze
+      // resume re-arm, trigger a full refreshDmInbox (limit 1000, decrypt-once
+      // gate) so wraps sent while the sub was deaf surface promptly.
+      // refreshDmInboxRef gives us a stable ref to the latest closure without
+      // adding `refreshDmInbox` to the deps array (which would re-open the sub
+      // on every inbox refresh).
+      onReconnect: (opts) => refreshDmInboxRef.current?.(opts) ?? Promise.resolve(),
     });
   }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
