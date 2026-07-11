@@ -43,9 +43,15 @@ tasks.register('verifyNostrSdkArtifact') {
   doLast {
     def artifact = configurations.releaseRuntimeClasspath
       .resolvedConfiguration.resolvedArtifacts
-      .find { it.moduleVersion.id.group == 'org.rust-nostr' }
+      .find {
+        // Exact module match (Copilot #1054 review): a group-only match would
+        // silently pin whichever org.rust-nostr artifact resolved first if the
+        // group ever contributes more than one (directly or transitively).
+        it.moduleVersion.id.group == 'org.rust-nostr' &&
+          it.moduleVersion.id.name == 'nostr-sdk-kmp-android'
+      }
     if (artifact == null) {
-      throw new GradleException('nostr-native: org.rust-nostr artifact not found on the runtime classpath — dependency renamed?')
+      throw new GradleException('nostr-native: org.rust-nostr:nostr-sdk-kmp-android artifact not found on the runtime classpath — dependency renamed?')
     }
     def digest = java.security.MessageDigest.getInstance('SHA-256')
     artifact.file.eachByte(1024 * 1024) { bytes, len -> digest.update(bytes, 0, len) }
