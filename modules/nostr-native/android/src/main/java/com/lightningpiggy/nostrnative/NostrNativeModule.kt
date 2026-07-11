@@ -7,6 +7,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import rust.nostr.sdk.Event
 import rust.nostr.sdk.Keys
@@ -101,6 +102,11 @@ class NostrNativeModule : Module() {
           engine.stop()
         } finally {
           clearKeyCaches()
+          // moduleScope's SupervisorJob otherwise outlives the destroyed
+          // module — cancel it once the engine is torn down so this launch
+          // (and any other in-flight engine* calls queued on it) don't leak
+          // past OnDestroy.
+          moduleScope.cancel()
         }
       }
     }

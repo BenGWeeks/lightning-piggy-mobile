@@ -126,7 +126,12 @@ export function subscribeInboxDmsForViewer(input: {
       );
   if (input.skipWraps) {
     // No wrap filter to EOSE — don't hold the combined onEose signal on it.
+    // Must call maybeEose() (not just set the flag): if kind-4 already
+    // reached EOSE first (k4Eosed set before this line runs — e.g. a
+    // synchronous test pool), skipping the call would leave onEose stuck
+    // pending forever since nothing else re-checks the combined condition.
     wrapsEosed = true;
+    maybeEose();
   }
   // Marketplace order / receipt events (kinds 16 & 17) addressed to the viewer
   // via a `#p` tag. These are PLAINTEXT today (not gift-wrapped), carry the

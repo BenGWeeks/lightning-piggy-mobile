@@ -113,7 +113,10 @@ class NostrEngine(private val emit: (name: String, body: Map<String, Any?>) -> U
   suspend fun subscribeWraps(filterJson: String, seedKnownWrapIds: List<String>): String {
     val c = client ?: throw IllegalStateException("engine not started")
     synchronized(knownLock) {
-      for (id in seedKnownWrapIds) knownWrapIds.add(id)
+      // Native ids (event.id().toHex(), below) are always lowercase hex;
+      // normalise the JS-seeded ids the same way so a mixed-case id from the
+      // encrypted store's index doesn't defeat the dedupe add() check.
+      for (id in seedKnownWrapIds) knownWrapIds.add(id.lowercase())
       capKnownWrapIds()
     }
     val output = c.subscribe(Filter.fromJson(filterJson), null)
@@ -141,8 +144,15 @@ class NostrEngine(private val emit: (name: String, body: Map<String, Any?>) -> U
       }
     }
     synchronized(batchLock) {
-      batch = JSONArray()
+      // Cancel an in-flight scheduled flush explicitly — oldScope.cancel()
+      // above is cooperative and won't interrupt a flush() that has already
+      // passed its delay() and is running its (non-suspending) synchronized
+      // body, which could otherwise still emit onEngineRumorBatch after stop
+      // returns. flush() also re-checks `scope` itself as a belt-and-braces
+      // guard for that same in-between window.
+      flushJob?.cancel()
       flushJob = null
+      batch = JSONArray()
       lastFlushAtMs = 0L
     }
     synchronized(knownLock) { knownWrapIds.clear() }
@@ -207,6 +217,11 @@ class NostrEngine(private val emit: (name: String, body: Map<String, Any?>) -> U
   private fun flush() {
     val payload: String
     synchronized(batchLock) {
+      // scope is nulled at the top of stop() before flushJob is cancelled
+      // (see stop()'s comment) — a flush already past cancellation's
+      // cooperative check-point lands here and must drop the batch rather
+      // than emit on a stopped engine.
+      if (scope == null) return
       if (batch.length() == 0) return
       payload = batch.toString()
       batch = JSONArray()
