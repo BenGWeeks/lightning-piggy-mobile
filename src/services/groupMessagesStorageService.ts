@@ -104,16 +104,18 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
  * updated message list on success (the unmodified list, unchanged, if
  * `messageId` wasn't found).
  *
- * On an AsyncStorage read/write error this REJECTS rather than returning
- * `[]` — matching `appendGroupMessage`'s propagate-on-failure contract
- * elsewhere in this module (and `identitiesStore`'s write-through
- * functions). A transient storage error must never be conflated with "the
- * thread is now empty": a caller that unconditionally did
- * `setMessages(await removeGroupMessage(...))` would otherwise wipe the
- * visible thread on a blip that touched none of the underlying data.
- * Callers MUST catch and treat a rejection as "the row could not be
- * retracted from local storage" — leave any optimistic in-memory removal
- * as-is and do not call setMessages with this function's result.
+ * On an AsyncStorage write error this REJECTS rather than returning `[]` —
+ * matching `appendGroupMessage`'s propagate-on-failure contract elsewhere in
+ * this module (and `identitiesStore`'s write-through functions). A transient
+ * storage error must never be conflated with "the thread is now empty": a
+ * caller that unconditionally did `setMessages(await removeGroupMessage(...))`
+ * would otherwise wipe the visible thread on a blip that touched none of the
+ * underlying data. Callers MUST catch and treat a rejection as "the row could
+ * not be retracted from local storage" — leave any optimistic in-memory
+ * removal as-is and do not call setMessages with this function's result.
+ * Note: `loadGroupMessages` swallows its own read/parse errors and resolves
+ * to `[]` rather than throwing, so in practice only the `setItem` write below
+ * can cause this function to reject.
  */
 export async function removeGroupMessage(
   groupId: string,
@@ -121,6 +123,7 @@ export async function removeGroupMessage(
 ): Promise<GroupMessage[]> {
   const existing = await loadGroupMessages(groupId);
   const filtered = existing.filter((m) => m.id !== messageId);
+  if (filtered.length === existing.length) return existing;
   await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
   return filtered;
 }

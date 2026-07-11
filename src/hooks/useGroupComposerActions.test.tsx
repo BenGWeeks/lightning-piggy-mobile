@@ -130,11 +130,23 @@ describe('useGroupComposerActions — onRumorReady fires before any signing (#10
 
     // The in-memory setMessages call happened immediately from onRumorReady.
     expect(setMessages).toHaveBeenCalled();
+    // The cross-screen notify must NOT fire until the AsyncStorage append
+    // has actually settled — GroupConversationScreen/GroupsContext reload
+    // from storage on this event, so notifying too early can clobber the
+    // just-painted optimistic row with a stale snapshot (the bug fixed by
+    // reordering notifyGroupMessage to run inside appendGroupMessage's
+    // resolution handler, not synchronously alongside the optimistic paint).
+    expect(mockNotifyGroupMessage).not.toHaveBeenCalled();
     // appendGroupMessage was called (fire-and-forget storage write).
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(mockAppendGroupMessage).toHaveBeenCalled();
+    // Only now — after the storage write has settled — does the notify fire.
+    expect(mockNotifyGroupMessage).toHaveBeenCalledWith(
+      GROUP_ID,
+      expect.objectContaining({ text: 'hello' }),
+    );
   });
 });
 

@@ -75,13 +75,19 @@ export function useGroupComposerActions(params: {
         text,
         createdAt: Math.floor(Date.now() / 1000),
       };
-      // Paint the bubble immediately in UI state — storage is async.
+      // Paint the bubble immediately in UI state — storage is async. The
+      // cross-screen `notifyGroupMessage` event, however, must NOT fire yet:
+      // `GroupConversationScreen`/`GroupsContext` listeners reload from
+      // AsyncStorage when it fires, so notifying before the append settles
+      // can clobber the just-painted row with a storage snapshot that
+      // doesn't include it yet (flicker). Notify only once the write has
+      // actually landed, mirroring the pre-#1033 ordering.
       setMessages((prev) => [...prev, local]);
-      notifyGroupMessage(group.id, local);
       setTimeout(scrollToEnd, 0);
       const persisted = appendGroupMessage(group.id, local)
         .then((next) => {
           setMessages(next);
+          notifyGroupMessage(group.id, local);
           return true;
         })
         .catch((err: unknown) => {
@@ -288,9 +294,22 @@ export function useGroupComposerActions(params: {
         }
         return { success: false, error: result.error ?? 'Send failed' };
       }
+      // Sent, but not saved locally: relay send is still a success (matches
+      // pre-#1033 semantics — the invoice was published), but the user needs
+      // to know it wasn't persisted, or a later reload can silently lose it.
+      if (optimistic.current && !(await optimistic.current.persisted)) {
+        alertSavedOnRelayOnly();
+      }
       return { success: true };
     },
-    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow, removeOptimisticRow],
+    [
+      group,
+      myPubkey,
+      sendGroupMessage,
+      appendOptimisticGroupRow,
+      removeOptimisticRow,
+      alertSavedOnRelayOnly,
+    ],
   );
 
   // `sendText` is also exposed so poll-share / poll-vote can post arbitrary

@@ -154,12 +154,18 @@ describe('removeGroupMessage — failure-path retraction (#1033)', () => {
     expect(after.find((m) => m.id === 'local_1_aaa')).toBeUndefined();
   });
 
-  it('is a no-op when the id is not found — returns the unmodified list', async () => {
+  it('is a no-op when the id is not found — returns the unmodified list and skips the write', async () => {
     const t = 1700000000;
     await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'only', t));
+    const setItemSpy = AsyncStorage.setItem as jest.Mock;
+    setItemSpy.mockClear();
     const after = await removeGroupMessage(GROUP, 'nonexistent');
     expect(after).toHaveLength(1);
     expect(after[0].id).toBe('a'.repeat(64));
+    // A true no-op (nothing to remove) must not write back to AsyncStorage —
+    // there's nothing to persist, and skipping the write avoids an
+    // unnecessary rejection surface on an otherwise no-op call.
+    expect(setItemSpy).not.toHaveBeenCalled();
   });
 
   it('returns an empty array when the group has no messages', async () => {
