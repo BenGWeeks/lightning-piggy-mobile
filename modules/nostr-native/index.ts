@@ -22,9 +22,51 @@ export interface NostrNativeApi {
   schnorrVerify(signatureHex: string, messageHashHex: string, publicKeyHex: string): boolean;
 }
 
-const NostrNative = requireOptionalNativeModule<NostrNativeApi>('NostrNative');
+/** Payload of the `onEngineRumorBatch` event: a JSON array (serialised once
+ * on the native side — one string across the bridge instead of N nested
+ * maps) of `{ rumor, sender, wrapId, wrapCreatedAt }` entries. */
+export interface EngineRumorBatchEvent {
+  rumorsJson: string;
+}
+
+type EngineEventName = 'onEngineRumorBatch' | 'onEngineReconnect';
+
+/**
+ * Relay-engine surface (Stage 2 M2 of #1036) — present only in dev clients /
+ * builds compiled from this milestone onward, hence the separate
+ * `getNostrEngine()` feature-detection below (an M1-era binary has the
+ * crypto functions but NOT these).
+ */
+export interface NostrEngineApi {
+  /** Build + connect the rust-nostr relay pool for this viewer (nsec only —
+   * the native NIP-59 unwrap needs the secret key in-process). */
+  engineStart(relays: string[], viewerPubkeyHex: string, privkeyHex: string): Promise<boolean>;
+  /** Open the kind-1059 wrap subscription. `filterJson` is a standard NIP-01
+   * filter (no `since` — #469); `knownWrapIds` seeds the native dedupe set. */
+  engineSubscribeWraps(filterJson: string, knownWrapIds: string[]): Promise<string>;
+  /** Tear down the pool and clear the native single-entry key cache. */
+  engineStop(): Promise<void>;
+  addListener(
+    eventName: EngineEventName,
+    listener: (event: EngineRumorBatchEvent) => void,
+  ): { remove(): void };
+}
+
+const NostrNative = requireOptionalNativeModule<NostrNativeApi & Partial<NostrEngineApi>>(
+  'NostrNative',
+);
 
 /** Null when the native module isn't linked (iOS, Expo Go, stale dev client). */
 export function getNostrNative(): NostrNativeApi | null {
   return NostrNative;
+}
+
+/**
+ * Null when the module is unlinked OR predates the M2 engine functions (a
+ * stale dev client with only the M1 crypto surface must fall back to the JS
+ * relay path rather than crash on a missing native function).
+ */
+export function getNostrEngine(): NostrEngineApi | null {
+  if (!NostrNative || typeof NostrNative.engineStart !== 'function') return null;
+  return NostrNative as NostrNativeApi & NostrEngineApi;
 }

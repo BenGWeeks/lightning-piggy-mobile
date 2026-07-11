@@ -52,7 +52,16 @@ export function subscribeInboxDmsForViewer(input: {
   // NOT auto-reconnect (enableReconnect stays default-false app-wide), so
   // a long-lived caller must react to this itself. NB it also fires on an
   // intentional close via the returned cleanup — callers must guard.
+  // When `skipWraps` is set it attaches to the kind-4 subscription instead
+  // (see below) so the caller's re-arm still has a close signal.
   onWrapsClose?: (reasons: string[]) => void;
+  // Native-engine mode (Stage 2 M2 of #1036): the rust-nostr pool owns the
+  // kind-1059 filter, so the JS pool must not open a competing wrap sub —
+  // only kind-4 and the kind-16/17 order stream. `onWrapsClose` then rides
+  // the kind-4 sub: it is the remaining long-lived JS filter, and the
+  // self-re-arm (#934/#958) must keep working for it (the engine reconnects
+  // its own sockets independently).
+  skipWraps?: boolean;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
@@ -88,28 +97,37 @@ export function subscribeInboxDmsForViewer(input: {
           maybeEose();
         }
       },
+      // skipWraps mode: the close-driven self-re-arm signal moves here —
+      // kind-4 is then the long-lived JS filter that can go deaf (#934).
+      onclose: input.skipWraps ? input.onWrapsClose : undefined,
     },
   );
-  const subWraps = pool.subscribeMany(
-    input.relays,
-    {
-      kinds: [1059],
-      '#p': [input.viewerPubkey],
-      // No `since` — NIP-59 random timestamps would drop fresh wraps. Bound the
-      // backlog re-stream with `wrapsLimit` instead (see the input doc above).
-      limit: input.wrapsLimit ?? DM_INBOX_LIMIT,
-    } as Filter,
-    {
-      onevent,
-      oneose: () => {
-        if (!wrapsEosed) {
-          wrapsEosed = true;
-          maybeEose();
-        }
-      },
-      onclose: input.onWrapsClose,
-    },
-  );
+  const subWraps = input.skipWraps
+    ? null
+    : pool.subscribeMany(
+        input.relays,
+        {
+          kinds: [1059],
+          '#p': [input.viewerPubkey],
+          // No `since` — NIP-59 random timestamps would drop fresh wraps. Bound the
+          // backlog re-stream with `wrapsLimit` instead (see the input doc above).
+          limit: input.wrapsLimit ?? DM_INBOX_LIMIT,
+        } as Filter,
+        {
+          onevent,
+          oneose: () => {
+            if (!wrapsEosed) {
+              wrapsEosed = true;
+              maybeEose();
+            }
+          },
+          onclose: input.onWrapsClose,
+        },
+      );
+  if (input.skipWraps) {
+    // No wrap filter to EOSE — don't hold the combined onEose signal on it.
+    wrapsEosed = true;
+  }
   // Marketplace order / receipt events (kinds 16 & 17) addressed to the viewer
   // via a `#p` tag. These are PLAINTEXT today (not gift-wrapped), carry the
   // buyer's pubkey in `#p`, and have real `created_at`s — so we bound the
@@ -128,7 +146,7 @@ export function subscribeInboxDmsForViewer(input: {
   return () => {
     for (const s of [subK4, subWraps, subOrders]) {
       try {
-        s.close();
+        s?.close();
       } catch {
         // best-effort
       }

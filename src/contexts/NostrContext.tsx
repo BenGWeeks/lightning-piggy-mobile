@@ -45,6 +45,7 @@ import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
+import { stopNativeDmEngineGlobal } from './nativeDmEngine';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
@@ -1191,6 +1192,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // coupling to the active-identity teardown logic (#288).
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
+    // Belt-and-braces (Stage 2 M2 key lifecycle): the live sub's teardown
+    // stops its own engine handle, but a logout must never race a native
+    // rust-nostr pool still holding this account's parsed key — force the
+    // native stop + single-entry key-cache clear.
+    void stopNativeDmEngineGlobal();
     setAmberNip44Permission('unknown');
     nip04PlaintextCache.clear();
     // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
@@ -1328,6 +1334,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // caches (per-account namespaced) are kept on disk so a switch
       // back is instant.
       clearMemoisedSecretKey();
+      // Same Stage 2 M2 belt-and-braces as logout: the switched-away
+      // identity's key must not survive in the native engine / key cache.
+      void stopNativeDmEngineGlobal();
       nip04PlaintextCache.clear();
       setAmberNip44Permission('unknown');
       setProfile(null);

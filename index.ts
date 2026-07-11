@@ -73,3 +73,15 @@ if (__DEV__ && process.env.EXPO_PUBLIC_NATIVE_CRYPTO_BENCH === '1') {
       .catch((error) => console.log('[PerfBlock] cryptoBench failed to run:', error));
   }, 8000);
 }
+
+// Dev-only relay-engine benchmark (#1049): drains a synthetic 200-wrap
+// backlog from the local bench relay (scripts/bench-engine-relay.mjs)
+// through the JS unwrap path and the native engine. Same bundle-time
+// inlining + __DEV__ + lazy-import guards as the crypto bench above.
+if (__DEV__ && process.env.EXPO_PUBLIC_NATIVE_ENGINE_BENCH === '1') {
+  setTimeout(() => {
+    import('./src/utils/nativeEngineBench')
+      .then((bench) => bench.runNativeEngineBench())
+      .catch((error) => console.log('[PerfBlock] engineBench failed to run:', error));
+  }, 8000);
+}
