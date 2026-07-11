@@ -1,0 +1,26 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.lightningpiggy.nostrnative'
+version = '0.1.0'
+
+android {
+  namespace "com.lightningpiggy.nostrnative"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // rust-nostr's published UniFFI Kotlin bindings with prebuilt
+  // libnostr_sdk_ffi.so for all four Android ABIs — no local Rust
+  // toolchain, same consume-prebuilt-artifact model as bdk-rn. The
+  // protocol-only `org.rust-nostr:nostr` artifact was retired at 0.35.0
+  // (bindings consolidated into nostr-sdk), so this is the smallest
+  // current artifact that carries nip44 + schnorr. Pulls in jna@aar
+  // (declared in the artifact's POM) for the UniFFI JNI dispatch.
+  implementation 'org.rust-nostr:nostr-sdk-kmp-android:0.44.3'
+}

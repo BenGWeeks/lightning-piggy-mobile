@@ -58,3 +58,16 @@ console.warn = (...args: unknown[]) => {
 // the environment is set up appropriately
 perfLog('registerRootComponent called');
 registerRootComponent(App);
+
+// Dev-only crypto benchmark for the #1046 native module bring-up. The
+// EXPO_PUBLIC_* literal is inlined at bundle time, so in every normal build
+// this whole block is dead code; when set, the lazy import keeps the bench
+// (and its @noble/nostr-tools vector setup) off the cold-start path, and the
+// delay lets startup settle so timings aren't polluted by launch work.
+if (process.env.EXPO_PUBLIC_NATIVE_CRYPTO_BENCH === '1') {
+  setTimeout(() => {
+    import('./src/utils/nostrCryptoBench')
+      .then((bench) => bench.runNostrCryptoBench())
+      .catch((error) => console.log('[PerfBlock] cryptoBench failed to run:', error));
+  }, 8000);
+}

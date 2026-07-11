@@ -27,21 +27,86 @@
  * No logging on the hot path itself.
  */
 
+import { bytesToHex } from '@noble/hashes/utils.js';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   finalizeEvent,
   getEventHash,
+  verifiedSymbol,
   verifyEvent,
   type Event as NostrEvent,
   type VerifiedEvent,
   type UnsignedEvent,
 } from 'nostr-tools/pure';
 
+import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
+
 // ---------------------------------------------------------------------------
 // Perf gate — matches perfLog.ts pattern exactly (gated on build-time env,
 // not __DEV__ alone so it fires in EXPO_PUBLIC_KEEP_PERF_LOGS preview APKs).
 // ---------------------------------------------------------------------------
 const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
+
+// ---------------------------------------------------------------------------
+// Native routing (Stage 2 M1, #1046) — rust-nostr via modules/nostr-native.
+//
+// EXPO_PUBLIC_NATIVE_CRYPTO=1 routes the sk+pk-shaped operations below to
+// the native module when it is linked (Android dev/EAS builds); everything
+// else — and every platform where the module is absent — keeps the exact JS
+// path. EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK=1 additionally runs BOTH
+// implementations per op in dev and logs any divergence loudly.
+//
+// Both env literals are inlined at bundle time, so a normal build (flags
+// unset) keeps today's JS behaviour with zero routing overhead beyond one
+// boolean check. The conversation-key-shaped nip44Decrypt/nip44Encrypt
+// cannot route natively (rust-nostr's FFI derives the conversation key
+// internally from sk+pk and does not accept a raw key), which is why the
+// sk+pk wrappers below exist and call sites prefer them.
+// ---------------------------------------------------------------------------
+
+const flags = {
+  native: process.env.EXPO_PUBLIC_NATIVE_CRYPTO === '1',
+  xcheck: __DEV__ && process.env.EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK === '1',
+};
+
+/** @internal Test use only — flip routing/cross-check without rebuilding env. */
+export function __setNostrCryptoFlagsForTests(next: { native?: boolean; xcheck?: boolean }): void {
+  if (!__DEV__) return;
+  if (next.native !== undefined) flags.native = next.native;
+  if (next.xcheck !== undefined) flags.xcheck = next.xcheck;
+}
+
+function nativeIfActive(): NostrNativeApi | null {
+  return flags.native ? getNostrNative() : null;
+}
+
+/** True when sk+pk-shaped ops are actually routing to the native module. */
+export function isNativeCryptoActive(): boolean {
+  return nativeIfActive() !== null;
+}
+
+/**
+ * Pays the native module's one-time JNA + .so load off the JS thread.
+ * Resolves false (never rejects) when native crypto isn't linked or can't
+ * load — callers just stay on the JS path.
+ */
+export async function warmUpNativeCrypto(): Promise<boolean> {
+  const native = nativeIfActive();
+  if (!native) return false;
+  try {
+    return await native.warmUp();
+  } catch {
+    return false;
+  }
+}
+
+// Never log key material or plaintext — lengths/verdicts are enough to find
+// a divergence without leaking a DM into logcat.
+function reportMismatch(op: string, detail: string): void {
+  console.error(
+    `[NostrCrypto] XCHECK MISMATCH op=${op} ${detail} — native and JS implementations disagree`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Reservoir sampler — keeps at most MAX_SAMPLES timing samples per op.
@@ -148,16 +213,100 @@ export function nip44Encrypt(plaintext: string, conversationKey: Uint8Array): st
 }
 
 /**
+ * sk+pk-shaped NIP-44 decrypt: derive the conversation key and decrypt in
+ * one call. This is the native-routable twin of nip44Decrypt — rust-nostr's
+ * FFI takes (secretKey, peerPubkey) and derives the conversation key
+ * internally. Throws on invalid ciphertext in BOTH implementations; native
+ * errors are NOT retried on JS (that would double the cost of every junk
+ * wrap a relay feeds us — callers already catch-and-skip).
+ */
+export function nip44DecryptFrom(
+  ciphertext: string,
+  secretKey: Uint8Array,
+  peerPublicKey: string,
+): string {
+  const native = nativeIfActive();
+  if (!native) {
+    return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, peerPublicKey));
+  }
+  const pub = peerPublicKey.toLowerCase();
+  const t0 = Date.now();
+  let result: string | undefined;
+  let nativeError: unknown;
+  try {
+    result = native.nip44Decrypt(bytesToHex(secretKey), pub, ciphertext);
+  } catch (error) {
+    nativeError = error;
+  }
+  if (PERF_ENABLED) {
+    recordSample('nip44Decrypt', Date.now() - t0);
+    scheduleSummary();
+  }
+  if (flags.xcheck) {
+    let jsResult: string | undefined;
+    let jsError: unknown;
+    try {
+      jsResult = nip44.v2.decrypt(ciphertext, nip44GetConversationKey(secretKey, pub));
+    } catch (error) {
+      jsError = error;
+    }
+    if (nativeError === undefined && jsError === undefined && result !== jsResult) {
+      reportMismatch(
+        'nip44DecryptFrom',
+        `plaintext differs (len ${result?.length} vs ${jsResult?.length})`,
+      );
+    } else if ((nativeError === undefined) !== (jsError === undefined)) {
+      reportMismatch(
+        'nip44DecryptFrom',
+        `one impl threw (native: ${nativeError ? 'threw' : 'ok'}, js: ${jsError ? 'threw' : 'ok'})`,
+      );
+    }
+  }
+  if (nativeError !== undefined) throw nativeError;
+  return result as string;
+}
+
+/**
  * Convenience wrapper: derive conversation key from sk+pk and encrypt in one
- * call. Matches `nip44EncryptForRecipient` in nostrService.ts.
+ * call. Matches `nip44EncryptForRecipient` in nostrService.ts. Routes to the
+ * native module when active; NIP-44 payloads are nonce-randomised so the two
+ * implementations can't be compared byte-for-byte — the cross-check instead
+ * requires the JS impl to decrypt the native payload back to the plaintext.
  */
 export function nip44EncryptForRecipient(
   plaintext: string,
   senderSecretKey: Uint8Array,
   recipientPubkey: string,
 ): string {
-  const conversationKey = nip44GetConversationKey(senderSecretKey, recipientPubkey);
-  return nip44Encrypt(plaintext, conversationKey);
+  const native = nativeIfActive();
+  if (!native) {
+    const conversationKey = nip44GetConversationKey(senderSecretKey, recipientPubkey);
+    return nip44Encrypt(plaintext, conversationKey);
+  }
+  const pub = recipientPubkey.toLowerCase();
+  const t0 = Date.now();
+  const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
+  if (PERF_ENABLED) {
+    recordSample('nip44Encrypt', Date.now() - t0);
+    scheduleSummary();
+  }
+  if (flags.xcheck) {
+    try {
+      const roundTrip = nip44.v2.decrypt(payload, nip44GetConversationKey(senderSecretKey, pub));
+      if (roundTrip !== plaintext) {
+        reportMismatch(
+          'nip44EncryptForRecipient',
+          'js-decrypt(native-payload) differs from plaintext',
+        );
+      }
+    } catch (error) {
+      reportMismatch(
+        'nip44EncryptForRecipient',
+        `js-decrypt(native-payload) threw: ${(error as Error)?.message ?? 'unknown'}`,
+      );
+    }
+  }
+  return payload;
 }
 
 /**
@@ -181,8 +330,43 @@ export function nostrFinalizeEvent(
 /**
  * Verify a signed Nostr event (schnorr signature check). Wraps
  * nostr-tools' `verifyEvent`; benchmarked as schnorrVerify.
+ *
+ * Native path replicates verifyEvent's exact semantics: memoised via
+ * nostr-tools' verifiedSymbol (so SimplePool and our pool.verifyEvent
+ * override still see the marker), id must equal the recomputed hash, and
+ * any malformed input verifies false rather than throwing. Only the
+ * schnorr check itself (the ~25 ms part) moves to rust-nostr — the
+ * canonical-serialisation sha256 stays in JS (getEventHash, ~µs).
  */
 export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
+  const native = nativeIfActive();
+  if (native) {
+    const memoised = event[verifiedSymbol];
+    if (typeof memoised === 'boolean') return memoised;
+    const t0 = Date.now();
+    let valid = false;
+    try {
+      const hash = getEventHash(event);
+      valid =
+        hash === event.id &&
+        native.schnorrVerify(event.sig.toLowerCase(), hash, event.pubkey.toLowerCase());
+    } catch {
+      valid = false;
+    }
+    if (PERF_ENABLED) {
+      recordSample('schnorrVerify', Date.now() - t0);
+      scheduleSummary();
+    }
+    if (flags.xcheck) {
+      // Compare BEFORE stamping the symbol so the JS verifier actually runs.
+      const jsValid = verifyEvent({ ...event });
+      if (jsValid !== valid) {
+        reportMismatch('nostrVerifyEvent', `native=${valid} js=${jsValid} id=${event.id}`);
+      }
+    }
+    event[verifiedSymbol] = valid;
+    return valid;
+  }
   if (!PERF_ENABLED) {
     return verifyEvent(event);
   }

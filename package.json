@@ -31,6 +31,7 @@
     "@gorhom/bottom-sheet": "^5.2.8",
     "@maplibre/maplibre-react-native": "^11.2.1",
     "@noble/ciphers": "2.1.1",
+    "@noble/curves": "2.0.1",
     "@noble/hashes": "^2.0.1",
     "@op-engineering/op-sqlite": "^16.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
