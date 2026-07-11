@@ -18,8 +18,9 @@
  *
  * Benchmark harness
  * -----------------
- * When EXPO_PUBLIC_KEEP_PERF_LOGS=1, each wrapped operation records a
- * timing sample. A periodic summary (at most once per 60 s) logs:
+ * In __DEV__ builds — or in release builds with EXPO_PUBLIC_KEEP_PERF_LOGS=1
+ * (preview APKs) — each wrapped operation records a timing sample. A
+ * periodic summary (at most once per 60 s) logs:
  *
  *   [PerfBlock] nostrCrypto nip44Decrypt n=42 p50=1ms p95=3ms
  *
