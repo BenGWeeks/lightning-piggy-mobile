@@ -49,3 +49,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/check-file-size.sh
+
+  perf-antipatterns:
+    name: Perf anti-patterns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-perf-antipatterns.sh

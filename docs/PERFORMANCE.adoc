@@ -395,6 +395,81 @@ real behaviour.
 - CI-driven regression gating is *out of scope* for now per #611's revised
   dev-only scope.
 
+== Authoring best practices (the rules)
+
+The condensed version lives in `CLAUDE.md` -> "Performance rules" (what every
+contributor and agent reads); this section carries the rationale. The
+mechanical subset is CI-gated by `scripts/check-perf-antipatterns.sh`
+(grandfathered per-file baseline, mirroring `check-file-size.sh` - shrink the
+counts, never grow them). The rules map 1:1 onto Stevie's 12-category audit,
+so a clean audit and a rule-following codebase are the same thing.
+
+[cols="1,3,2"]
+|===
+|Rule |Why |Canonical example
+
+|Batch event ingest (never per-event `setState`)
+|A relay burst delivers 50+ events synchronously; a `new Map(prev)` clone per
+event is O(N) copy + React commit x50, pinning the JS thread for seconds
+(#554's wedge mechanism).
+|`src/utils/useCoalescedMap.ts` (<=150 ms coalesced flush; leading-edge for
+the first event)
+
+|Focus-gated subscriptions, one owner per dataset
+|Blurred tabs holding live relay subs waste JS-thread parse work forever;
+sibling screens opening duplicate subs double it.
+|`useFocusEffect` arming in `useHuntCommunity`; data-via-params fix in #1028
+
+|Staggered resume handlers
+|Five independent `AppState 'active'` handlers firing concurrently after a
+long Doze is the #554 storm. Latency-insensitive work waits ~3 s (cancellable
+timer); only the DM re-arm is immediate.
+|`useCacheNotifications` stagger (#1031)
+
+|Bounded relay filters
+|An unbounded REQ backfills the relay's whole index through the JS thread on
+every mount. Always `limit`, plus `since` where event semantics allow. NIP-59
+gift wraps randomise `created_at` up to 48 h back, so kind-1059 must NOT use
+`since` (#469) - bound by `limit` and reconcile on re-arm instead.
+|30-day window on recent-caches queries (#1029)
+
+|Budget-gated yielding in heavy loops
+|An unconditional `yieldToEventLoop()` costs a 16 ms RAF per item - 3x the
+cost of the work it paces on single items. The scheduler yields only when the
+~4 ms frame budget is spent.
+|`createYieldScheduler` (`src/services/nostrDecryptPacing.ts`)
+
+|Memoised rows, expo-image, virtualized lists
+|Unmemoised rows re-execute the whole list per trickling profile fetch; bare
+RN `Image` re-decodes per mount; `ScrollView` renders everything eagerly.
+|`React.memo(LeaderboardRow)` (#1028); `expo-image` +
+`cachePolicy="memory-disk"`
+
+|Memoised context values
+|One inline `value={{...}}` literal re-renders every consumer on every parent
+render - the classic invisible cascade.
+|`NostrContext` / `WalletContext` provider values
+
+|Lazy screens
+|Eager imports of detail screens put their parse cost (and their native-module
+imports) on cold start.
+|`lazyScreen(...)` in `AppNavigator.tsx`
+
+|No new crypto on the JS thread
+|All Nostr crypto is pure-JS (`nostr-tools` + `@noble/*`) today: 2x NIP-44
+decrypts per received wrap, 2x(N+1) sign+encrypt per group send. The ceiling
+fix is native (epic #1036: Stage 1 JSI crypto primitives, Stage 2 rust-nostr
+engine via the bdk-rn UniFFI pattern - one Rust core, generated Kotlin AND
+Swift bindings). Until then, treat every added crypto call in a hot path as a
+regression.
+|`bdk-rn` as the in-repo precedent
+
+|Prove perf-sensitive changes
+|Means hide regressions; a claim without p50/p95 is a vibe.
+|`[PerfBlock]` markers (preview builds), `scripts/perf-*.sh` before/after in
+the PR body
+|===
+
 == Stevie's project notes (plugin agent)
 
 The performance-audit agent *Stevie the Speedster* now ships generically in
