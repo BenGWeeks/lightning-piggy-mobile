@@ -1,24 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Image,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
-import {
-  ChevronLeft,
-  ChevronRight,
-  MapPin,
-  PiggyBank,
-  Search,
-  SlidersHorizontal,
-} from 'lucide-react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { ChevronLeft, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -27,22 +10,16 @@ import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import HuntCommunitySections from '../components/HuntCommunitySections';
+import HuntNearbySection from '../components/HuntNearbySection';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
 import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
-import {
-  decodeGeohash,
-  encodeGeohash,
-  formatDistance,
-  geohashNeighbours,
-  haversineMetres,
-} from '../utils/geohash';
+import { decodeGeohash, encodeGeohash, geohashNeighbours, haversineMetres } from '../utils/geohash';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFilter';
 
@@ -380,10 +357,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>{t('huntScreen.tagline')}</Text>
       </View>
 
-      <FlatList
-        data={filteredCaches}
-        keyExtractor={({ cache }) => cache.coord}
-        contentContainerStyle={styles.listContent}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        testID="hunt-screen-scroll"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -392,118 +368,63 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             colors={[colors.brandPink]}
           />
         }
-        ListHeaderComponent={
-          <View>
-            {/* Mini-map scrolls with the content — same pattern as
-                PlacesScreen (ListHeaderComponent). MapLibre is native so
-                vertical pans on the map are consumed by the map's gesture
-                recogniser before they reach the FlatList's RefreshControl,
-                meaning the old pull-to-refresh race (issue #570, WebView era)
-                no longer applies. LibreMiniMap carries its own
-                marginHorizontal: 16 so the map lands at a 16 dp inset without
-                any additional offset here. Passes `filteredCaches` so the map
-                pins match the list visually (#19). */}
-            <View style={styles.miniMapContainer}>
-              <LibreMiniMap
-                // Mini-map follows GPS — camera anchor should track live
-                // position, not the stale one-shot fetch `pos`.
-                lat={livePos?.lat ?? pos?.lat ?? null}
-                lon={livePos?.lon ?? pos?.lon ?? null}
-                userLat={livePos?.lat ?? null}
-                userLon={livePos?.lon ?? null}
-                userAvatarUri={profile?.picture ?? null}
-                // Only fall back to the initial-fetch accuracy when there's
-                // no live fix yet; once livePos exists, trust its accuracy
-                // (including null) so we never render a halo around live
-                // coords with stale accuracy.
-                userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
-                merchants={[]}
-                caches={filteredCaches.map((c) => c.cache)}
-                events={[]}
-                onTapMap={() => navigation.navigate('Map')}
-                onSelectCache={(c) => setSelectedCache(c)}
-                onOpenLegend={() => setLegendVisible(true)}
-                // One zoom level wider than the default 13 so the Geo-caches
-                // hub map shows a bigger catchment without the user having to
-                // pinch-zoom out.
-                defaultZoom={12}
-              />
-            </View>
-            {/* Community engagement rails + leaderboard link — sit above the
-                distance-sorted nearby list so discovery isn't limited to
-                whatever happens to be within ~5 km. */}
-            <HuntCommunitySections
-              pos={communityPos}
-              onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
-              navigation={navigation}
-            />
-            <Text style={styles.nearbyHeader}>{t('huntCommunity.nearby')}</Text>
-            <View style={styles.searchRow}>
-              <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder={t('huntScreen.searchPlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="hunt-search-input"
-              />
-              <TouchableOpacity
-                style={styles.filterIconButton}
-                onPress={() => setFilterSheetOpen(true)}
-                testID="hunt-filter-button"
-                accessibilityLabel={
-                  activeFilterCount > 0
-                    ? t('huntScreen.filtersActive', { count: activeFilterCount })
-                    : t('huntScreen.filters')
-                }
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
-                {activeFilterCount > 0 ? (
-                  <View style={styles.filterIconBadge}>
-                    <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            </View>
-          </View>
-        }
-        renderItem={({ item, index }) => (
-          <CacheRow
-            cache={item.cache}
-            distance={item.distance}
-            index={index}
-            colors={colors}
-            styles={styles}
-            onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.cache.coord })}
+      >
+        {/* Mini-map scrolls with the content — same pattern as
+            PlacesScreen. MapLibre is native so vertical pans on the map are
+            consumed by the map's gesture recogniser before they reach the
+            ScrollView's RefreshControl, meaning the old pull-to-refresh race
+            (issue #570, WebView era) no longer applies. LibreMiniMap carries
+            its own marginHorizontal: 16 so the map lands at a 16 dp inset
+            without any additional offset here. Passes `filteredCaches` so the
+            map pins match the rail visually (#19). */}
+        <View style={styles.miniMapContainer}>
+          <LibreMiniMap
+            // Mini-map follows GPS — camera anchor should track live
+            // position, not the stale one-shot fetch `pos`.
+            lat={livePos?.lat ?? pos?.lat ?? null}
+            lon={livePos?.lon ?? pos?.lon ?? null}
+            userLat={livePos?.lat ?? null}
+            userLon={livePos?.lon ?? null}
+            userAvatarUri={profile?.picture ?? null}
+            // Only fall back to the initial-fetch accuracy when there's
+            // no live fix yet; once livePos exists, trust its accuracy
+            // (including null) so we never render a halo around live
+            // coords with stale accuracy.
+            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+            merchants={[]}
+            caches={filteredCaches.map((c) => c.cache)}
+            events={[]}
+            onTapMap={() => navigation.navigate('Map')}
+            onSelectCache={(c) => setSelectedCache(c)}
+            onOpenLegend={() => setLegendVisible(true)}
+            // One zoom level wider than the default 13 so the Geo-caches
+            // hub map shows a bigger catchment without the user having to
+            // pinch-zoom out.
+            defaultZoom={12}
           />
-        )}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.center} testID="hunt-discover-loading">
-              <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.subtle}>{t('huntScreen.lookingForCaches')}</Text>
-            </View>
-          ) : searchQuery.trim() !== '' ? (
-            <Text style={styles.emptySearchText}>
-              {t('huntScreen.noMatch', { query: searchQuery.trim() })}
-            </Text>
-          ) : (
-            <View style={styles.center} testID="hunt-discover-empty-state">
-              <PiggyBank size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-              <Text style={styles.emptyTitle}>{t('huntScreen.noCachesNearby')}</Text>
-              <Text style={styles.subtle}>
-                {t('huntScreen.emptyPrefix')}
-                <Text style={{ fontWeight: '700', color: colors.brandPink }}>+</Text>
-                {t('huntScreen.emptySuffix')}
-              </Text>
-            </View>
-          )
-        }
-      />
+        </View>
+        {/* Nearby rail directly under the map — what's around you is the
+            page's primary question, and the map pins + rail cards answer it
+            as one unit (the search field scopes both). */}
+        <HuntNearbySection
+          items={filteredCaches}
+          loading={loading}
+          pos={communityPos}
+          searchQuery={searchQuery}
+          onChangeSearch={setSearchQuery}
+          activeFilterCount={activeFilterCount}
+          onOpenFilters={() => setFilterSheetOpen(true)}
+          onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+        />
+        {/* Community engagement rails + leaderboard link — below the nearby
+            rail so discovery isn't limited to whatever happens to be within
+            ~5 km. */}
+        <HuntCommunitySections
+          pos={communityPos}
+          onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+          navigation={navigation}
+        />
+      </ScrollView>
       <HuntFilterSheet
         visible={filterSheetOpen}
         onClose={() => setFilterSheetOpen(false)}
@@ -552,56 +473,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const CacheRow: React.FC<{
-  cache: ParsedCache;
-  distance: number;
-  // Deterministic-by-position testID so Maestro can target row 0 without coords.
-  index: number;
-  colors: Palette;
-  styles: ReturnType<typeof createStyles>;
-  onPress: () => void;
-}> = ({ cache, distance, index, colors, styles, onPress }) => {
-  const t = useTranslation();
-  return (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={onPress}
-      testID={`hunt-discover-row-${cache.d}`}
-      accessibilityLabel={cache.name}
-    >
-      <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
-      <View style={styles.iconContainer}>
-        {cache.imageUrl ? (
-          <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-        ) : (
-          <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
-            {cache.isLpPiggy ? (
-              <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-            ) : (
-              <MapPin size={22} color={colors.white} strokeWidth={2} />
-            )}
-          </View>
-        )}
-        <LpPayoutBadge isLpPiggy={cache.isLpPiggy} payoutSats={cache.payoutSats} />
-      </View>
-      <View style={styles.rowMain}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {cache.name}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {cache.isLpPiggy ? t('huntScreen.piglet') : t('huntScreen.nipGcCache')}
-          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
-          {cache.cacheType ? ` · ${cache.cacheType}` : ''}
-          {cache.size ? ` · ${cache.size}` : ''}
-          {cache.difficulty ? ` · D${cache.difficulty}` : ''}
-          {cache.terrain ? ` / T${cache.terrain}` : ''}
-        </Text>
-      </View>
-      <ChevronRight size={20} color={colors.textSupplementary} />
-    </TouchableOpacity>
-  );
-};
-
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -641,111 +512,15 @@ const createStyles = (colors: Palette) =>
       // gives breathing room before the community sections.
       marginBottom: 10,
     },
-    nearbyHeader: {
-      fontSize: 15,
-      fontWeight: '800',
-      color: colors.textHeader,
-      marginHorizontal: 16,
-      marginTop: 20,
-      marginBottom: 10,
-    },
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginHorizontal: 16,
-      marginBottom: 10,
-      backgroundColor: colors.surface,
-      borderRadius: 100,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-    },
-    searchInput: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.textHeader,
-      paddingVertical: 4,
-    },
-    filterIconButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginLeft: 8,
-    },
-    filterIconBadge: {
-      position: 'absolute',
-      top: -2,
-      right: -2,
-      minWidth: 16,
-      height: 16,
-      paddingHorizontal: 4,
-      borderRadius: 8,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    filterIconBadgeText: {
-      color: colors.white,
-      fontSize: 10,
-      fontWeight: '800',
-    },
     // paddingTop: 16 — header-to-map gap, in sync with PlacesScreen's
     // `listContent` and ExploreHome's `scrollContent.paddingTop` so the
     // three Explore-stack screens share the same opening rhythm. No
     // paddingHorizontal — rows / search / headers each carry their own
     // marginHorizontal: 16 so adding it here would double-inset to 32 dp.
-    listContent: { paddingTop: 16, paddingBottom: 32 },
-    center: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
-    subtle: { fontSize: 14, color: colors.textSupplementary, textAlign: 'center', lineHeight: 20 },
-    emptyTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 6,
-      textAlign: 'center',
-    },
-    emptySearchText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      padding: 24,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      marginHorizontal: 16,
-      marginBottom: 10,
-    },
-    iconWrap: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    iconLp: { backgroundColor: colors.brandPink },
+    scrollContent: { paddingTop: 16, paddingBottom: 32 },
     // Brand violet for NIP-GC caches — matches the new map pin (and
     // every other surface). Was textSupplementary (slate) which read
     // as "muted/disabled" and clashed with the now-coloured map pin.
-    iconStandard: { backgroundColor: '#7A5CFF' },
-    iconContainer: { position: 'relative' },
-    thumb: {
-      width: 44,
-      height: 44,
-      borderRadius: 8,
-      backgroundColor: colors.divider,
-    },
-    rowMain: { flex: 1 },
-    rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
-    rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
   });
 
 export default HuntScreen;
