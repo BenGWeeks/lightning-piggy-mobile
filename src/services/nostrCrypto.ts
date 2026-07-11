@@ -23,8 +23,8 @@
  *
  *   [PerfBlock] nostrCrypto nip44Decrypt n=42 p50=1ms p95=3ms
  *
- * Overhead on the hot path: one Date.now() pair + one array push per call.
- * No logging on the hot path itself.
+ * Overhead on the hot path: one performance.now() pair + one array push per
+ * call. No logging on the hot path itself.
  */
 
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -108,10 +108,9 @@ function reportMismatch(op: string, detail: string): void {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Reservoir sampler — keeps at most MAX_SAMPLES timing samples per op.
-// We use insertion-order so the window is the most recent MAX_SAMPLES calls
 // (a circular buffer via splice-and-push is equivalent and simpler).
+// Sliding window — keeps the most recent MAX_SAMPLES timing samples per op
+// (oldest sample evicted via shift when the window is full).
 // ---------------------------------------------------------------------------
 const MAX_SAMPLES = 200;
 
@@ -141,8 +140,10 @@ function recordSample(op: string, ms: number): void {
 function percentiles(arr: number[]): { p50: number; p95: number } {
   if (arr.length === 0) return { p50: 0, p95: 0 };
   const sorted = arr.slice().sort((a, b) => a - b);
-  const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
-  const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? sorted[sorted.length - 1] ?? 0;
+  // (len - 1) * p matches the repo's existing percentile convention
+  // (friendsOfFriendsService.bench.ts) — `len * p` skews indexes high.
+  const p50 = sorted[Math.floor((sorted.length - 1) * 0.5)] ?? 0;
+  const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)] ?? 0;
   return { p50, p95 };
 }
 
@@ -191,9 +192,9 @@ export function nip44Decrypt(ciphertext: string, conversationKey: Uint8Array): s
   if (!PERF_ENABLED) {
     return nip44.v2.decrypt(ciphertext, conversationKey);
   }
-  const t0 = Date.now();
+  const t0 = performance.now();
   const result = nip44.v2.decrypt(ciphertext, conversationKey);
-  recordSample('nip44Decrypt', Date.now() - t0);
+  recordSample('nip44Decrypt', performance.now() - t0);
   scheduleSummary();
   return result;
 }
@@ -205,9 +206,9 @@ export function nip44Encrypt(plaintext: string, conversationKey: Uint8Array): st
   if (!PERF_ENABLED) {
     return nip44.v2.encrypt(plaintext, conversationKey);
   }
-  const t0 = Date.now();
+  const t0 = performance.now();
   const result = nip44.v2.encrypt(plaintext, conversationKey);
-  recordSample('nip44Encrypt', Date.now() - t0);
+  recordSample('nip44Encrypt', performance.now() - t0);
   scheduleSummary();
   return result;
 }
@@ -322,9 +323,9 @@ export function nostrFinalizeEvent(
   if (!PERF_ENABLED) {
     return finalizeEvent(event, secretKey);
   }
-  const t0 = Date.now();
+  const t0 = performance.now();
   const result = finalizeEvent(event, secretKey);
-  recordSample('schnorrSign', Date.now() - t0);
+  recordSample('schnorrSign', performance.now() - t0);
   scheduleSummary();
   return result;
 }
@@ -372,9 +373,9 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
   if (!PERF_ENABLED) {
     return verifyEvent(event);
   }
-  const t0 = Date.now();
+  const t0 = performance.now();
   const result = verifyEvent(event);
-  recordSample('schnorrVerify', Date.now() - t0);
+  recordSample('schnorrVerify', performance.now() - t0);
   scheduleSummary();
   return result;
 }
@@ -389,15 +390,15 @@ export function nostrGetEventHash(
   if (!PERF_ENABLED) {
     return getEventHash(event as UnsignedEvent);
   }
-  const t0 = Date.now();
+  const t0 = performance.now();
   const result = getEventHash(event as UnsignedEvent);
-  recordSample('eventHash', Date.now() - t0);
+  recordSample('eventHash', performance.now() - t0);
   scheduleSummary();
   return result;
 }
 
 // ---------------------------------------------------------------------------
-// Test-only exports (prefixed __) — flush summary immediately + reset state.
+// Test-only exports (prefixed __) — force a summary flush, or reset state.
 // ---------------------------------------------------------------------------
 
 /** @internal Test use only — reset all accumulated stats. */

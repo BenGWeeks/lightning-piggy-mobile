@@ -39,6 +39,25 @@ function freshKeyPair(): { sk: Uint8Array; pk: string } {
   return { sk, pk: getPublicKey(sk) };
 }
 
+// File-level perf-harness reset (#1047 review): __DEV__ is true under Jest,
+// so PERF_ENABLED is true and every wrapped crypto call in ANY describe below
+// — not just the "benchmark harness" ones — calls scheduleSummary(). Its
+// delay is computed from `lastSummaryAt`; once one test lets a summary flush
+// set that to a real timestamp, the next test's call computes a genuine
+// ~60s delay and arms a real, untracked setTimeout that outlives the test
+// (an open handle that can slow or hang the run). Resetting via
+// __resetStats() before/after every test in the file (not just the harness
+// describes, which already did this locally) pins the computed delay back
+// near 0 instead. Additive only — no source change needed since
+// __resetStats() already exists as the test-only reset.
+beforeEach(() => {
+  __resetStats();
+});
+
+afterEach(() => {
+  __resetStats();
+});
+
 // ---------------------------------------------------------------------------
 // A) Correctness tests
 // ---------------------------------------------------------------------------
@@ -183,7 +202,6 @@ describe('nostrGetEventHash', () => {
 // so console.log calls inside the transpiled module are stripped at Babel time.
 // We therefore test the harness behaviour via __getStats() (which reads the
 // in-memory counters directly) rather than asserting console.log output.
-// The log format is verified via a targeted integration check with warn.
 
 describe('benchmark harness — stat accumulation', () => {
   beforeEach(() => {
