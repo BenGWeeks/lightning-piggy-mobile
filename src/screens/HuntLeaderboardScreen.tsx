@@ -44,15 +44,15 @@ const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
   // rather than crashing on destructuring.
   const { hiderLeaderboard = [], finderLeaderboard = [], loading = false } = route.params ?? {};
 
-  // Params are frozen at navigation time, so a `loading: true` arriving here
-  // can never flip to false (only possible via stale restored nav state — the
-  // entry row is disabled while live-loading). Honour it only while there is
-  // board data to skeleton over; with both boards empty, fall through to the
-  // empty-state text instead of skeleton rows that never resolve.
-  const effectiveLoading = loading && (hiderLeaderboard.length > 0 || finderLeaderboard.length > 0);
-
   // "Top hiders" is the default tab — mirrors the order used on the website.
   const [activeTab, setActiveTab] = useState<LeaderboardTab>('hiders');
+
+  // Params are frozen at navigation time, so a `loading: true` arriving here
+  // can never flip to false (only possible via stale restored nav state — the
+  // entry row is disabled while live-loading). Gate loading per active board so
+  // an empty tab can't get stuck showing skeleton rows forever.
+  const activeEntries = activeTab === 'hiders' ? hiderLeaderboard : finderLeaderboard;
+  const effectiveLoading = loading && activeEntries.length > 0;
 
   return (
     <View style={styles.container} testID="hunt-leaderboard-screen">
