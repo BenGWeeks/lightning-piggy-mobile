@@ -22,6 +22,7 @@ import { tagsToContacts } from '../utils/contacts';
 import { publishWrapsTrackingRelays } from './nostrDmPublish';
 import type { DmSendResult, OnDeliveryFinalized } from './nostrDmPublish';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
+import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
 
 export type { DmSendResult };
 // Re-exported for back-compat: the canonical home is ./nip89ClientTag.
@@ -1137,38 +1138,32 @@ export function createGroupChatRumor(input: {
 }
 
 /**
- * NIP-17 multi-recipient send via nostr-tools `wrapManyEvents`. Builds a
- * kind-14 rumor once, then seal+wraps it for each recipient (the helper
- * spec-conformantly re-wraps for the sender as well so they see their own
- * message on other devices). All wraps are then published in parallel.
- *
- * NSEC-only path. Amber path requires per-event signEvent IPC which the
- * NIP-59 helpers don't support out of the box; tracked as a follow-up.
+ * NIP-17 multi-recipient send (nsec path). Inlines `wrapManyEvents` with
+ * `yieldToEventLoop()` between recipients (#1033) — same nip59.wrapEvent
+ * helper, same self-wrap-first + recipient-dedup semantics, but yields an
+ * RAF frame between wraps so per-recipient crypto doesn't block the UI.
  */
 export async function sendNip17ToManyWithNsec(input: {
   senderSecretKey: Uint8Array;
   rumor: { kind: number; created_at: number; tags: string[][]; content: string };
   recipientPubkeys: string[];
   relays: string[];
-  onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
+  onDeliveryFinalized?: OnDeliveryFinalized;
 }): Promise<DmSendResult> {
   trackRelays(input.relays);
-  // Dedup recipients (sender is included by wrapManyEvents internally).
-  const dedupedRecipients = Array.from(new Set(input.recipientPubkeys.map((p) => p.toLowerCase())));
-  const wraps = nip59.wrapManyEvents(
-    input.rumor as Parameters<typeof nip59.wrapManyEvents>[0],
-    input.senderSecretKey,
-    dedupedRecipients,
+  const senderPublicKey = getPublicKey(input.senderSecretKey);
+  const eventId = getEventHash({ ...input.rumor, pubkey: senderPublicKey });
+  // Self-wrap first (matching wrapManyEvents); sender deduped out if also in recipients.
+  const recipients = Array.from(
+    new Set([senderPublicKey.toLowerCase(), ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
   );
-  // Rumor id (stable kind-14/15 inner-event id) + kind for the detail sheet.
-  const eventId = getEventHash({ ...input.rumor, pubkey: getPublicKey(input.senderSecretKey) });
-  return publishWrapsTrackingRelays(
-    wraps.map((w) => w as VerifiedEvent),
-    input.relays,
-    pool,
-    { eventId, kind: input.rumor.kind },
-    input.onDeliveryFinalized,
-  );
+  const signedWraps: VerifiedEvent[] = [];
+  for (let i = 0; i < recipients.length; i++) {
+    if (i > 0) await yieldToEventLoop();
+    const wrap = nip59.wrapEvent(input.rumor as Parameters<typeof nip59.wrapEvent>[0], input.senderSecretKey, recipients[i]); // prettier-ignore
+    signedWraps.push(wrap as VerifiedEvent);
+  }
+  return publishWrapsTrackingRelays(signedWraps, input.relays, pool, { eventId, kind: input.rumor.kind }, input.onDeliveryFinalized); // prettier-ignore
 }
 
 /**
