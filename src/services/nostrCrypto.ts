@@ -238,7 +238,9 @@ export function nip44DecryptFrom(
   } catch (error) {
     nativeError = error;
   }
-  if (PERF_ENABLED) {
+  // Sample successful decrypts only, mirroring the JS path where a throw
+  // aborts before recordSample — keeps native/JS p50/p95 comparable.
+  if (PERF_ENABLED && nativeError === undefined) {
     recordSample('nip44Decrypt', Date.now() - t0);
     scheduleSummary();
   }

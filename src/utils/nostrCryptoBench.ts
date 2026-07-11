@@ -87,17 +87,27 @@ export async function runNostrCryptoBench(): Promise<void> {
     if (i % 10 === 9) await yieldToLoop();
   }
 
+  // Every timed op's result is asserted: consuming the value prevents any
+  // optimizer from eliding the work under measurement, and a correctness
+  // regression aborts the bench instead of producing bogus numbers.
+  const assertOp = (ok: boolean, what: string) => {
+    if (!ok) throw new Error(`cryptoBench ${what} produced a wrong result`);
+  };
+
   // --- JS baseline ---
   const jsDecrypt = await measure((i) => {
     // Conversation-key derivation (ECDH+HKDF) is part of the per-wrap cost
     // in unwrapWrapNsec (ephemeral wrap keys), so derive per op like prod.
     const key = nip44.v2.utils.getConversationKey(secretKey, counterpartyPubkeys[i]);
-    nip44.v2.decrypt(ciphertexts[i], key);
+    assertOp(nip44.v2.decrypt(ciphertexts[i], key) === plaintext, 'js decrypt');
   });
   logBlock('nip44-decrypt', 'js', jsDecrypt);
 
   const jsVerify = await measure((i) => {
-    schnorr.verify(hexToBytes(signatures[i]), hexToBytes(hashes[i]), hexToBytes(publicKeyHex));
+    assertOp(
+      schnorr.verify(hexToBytes(signatures[i]), hexToBytes(hashes[i]), hexToBytes(publicKeyHex)),
+      'js verify',
+    );
   });
   logBlock('schnorr-verify', 'js', jsVerify);
 
@@ -124,12 +134,15 @@ export async function runNostrCryptoBench(): Promise<void> {
   }
 
   const nativeDecrypt = await measure((i) => {
-    native.nip44Decrypt(secretKeyHex, counterpartyPubkeys[i], ciphertexts[i]);
+    assertOp(
+      native.nip44Decrypt(secretKeyHex, counterpartyPubkeys[i], ciphertexts[i]) === plaintext,
+      'native decrypt',
+    );
   });
   logBlock('nip44-decrypt', 'native', nativeDecrypt);
 
   const nativeVerify = await measure((i) => {
-    native.schnorrVerify(signatures[i], hashes[i], publicKeyHex);
+    assertOp(native.schnorrVerify(signatures[i], hashes[i], publicKeyHex), 'native verify');
   });
   logBlock('schnorr-verify', 'native', nativeVerify);
 
