@@ -1,9 +1,6 @@
 import {
   generateSecretKey,
   getPublicKey,
-  finalizeEvent,
-  getEventHash,
-  verifyEvent,
   validateEvent,
   type Event as NostrEvent,
   type VerifiedEvent,
@@ -14,7 +11,12 @@ import { fetchProfilesBatch } from './nostrProfileBatch';
 import { pool, connectedRelays, trackRelays } from './nostrPool';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
-import * as nip44 from 'nostr-tools/nip44';
+import {
+  nip44EncryptForRecipient,
+  nostrFinalizeEvent,
+  nostrGetEventHash,
+  nostrVerifyEvent,
+} from './nostrCrypto';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
@@ -130,7 +132,7 @@ pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
   if (event.kind === 0 || SKIP_VERIFY_KINDS.has(event.kind)) {
     ok = validateEvent(event);
   } else {
-    ok = verifyEvent(event);
+    ok = nostrVerifyEvent(event);
   }
   if (ok && typeof event.id === 'string') rememberVerified(event.id);
   return ok;
@@ -323,7 +325,7 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     if (!event) return null;
     // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
     // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (!verifyEvent(event)) {
+    if (!nostrVerifyEvent(event)) {
       console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
       return null;
     }
@@ -622,7 +624,7 @@ export async function signAndPublishEvent(
   relays: string[],
 ): Promise<void> {
   trackRelays(relays);
-  const signed = finalizeEvent(event, secretKey);
+  const signed = nostrFinalizeEvent(event, secretKey);
   await Promise.any(pool.publish(relays, signed));
 }
 
@@ -776,7 +778,7 @@ export function signEvent(
   event: { kind: number; created_at: number; tags: string[][]; content: string },
   secretKey: Uint8Array,
 ) {
-  return finalizeEvent(event, secretKey);
+  return nostrFinalizeEvent(event, secretKey);
 }
 
 export function createContactListEvent(
@@ -1152,7 +1154,7 @@ export async function sendNip17ToManyWithNsec(input: {
 }): Promise<DmSendResult> {
   trackRelays(input.relays);
   const senderPublicKey = getPublicKey(input.senderSecretKey);
-  const eventId = getEventHash({ ...input.rumor, pubkey: senderPublicKey });
+  const eventId = nostrGetEventHash({ ...input.rumor, pubkey: senderPublicKey });
   // Self-wrap first (matching wrapManyEvents); sender deduped out if also in recipients.
   const recipients = Array.from(
     new Set([senderPublicKey.toLowerCase(), ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
@@ -1224,7 +1226,7 @@ export async function sendNip17ToManyWithSigner(input: {
   // Compute the rumor id once. The rumor is never signed (nostr-tools
   // calls this a "rumor" precisely because it has no signature) — only
   // its id is needed so receivers can dedupe across multiple wraps.
-  const rumorWithId = { ...input.rumor, id: getEventHash(input.rumor) };
+  const rumorWithId = { ...input.rumor, id: nostrGetEventHash(input.rumor) };
   const rumorJson = JSON.stringify(rumorWithId);
 
   // Spec: each seal/wrap uses a randomized created_at within the past
@@ -1257,7 +1259,7 @@ export async function sendNip17ToManyWithSigner(input: {
       const ephemeralKey = generateSecretKey();
       const sealJson = JSON.stringify(signedSeal);
       const wrapContent = nip44EncryptForRecipient(sealJson, ephemeralKey, recipient);
-      const wrap = finalizeEvent(
+      const wrap = nostrFinalizeEvent(
         {
           kind: 1059, // GiftWrap (NIP-59)
           created_at: randomNow(),
@@ -1289,21 +1291,6 @@ export async function sendNip17ToManyWithSigner(input: {
     errors: [...errors, ...publishResult.errors],
     delivery: publishResult.delivery,
   };
-}
-
-/**
- * NIP-44 v2 encrypt, matching the primitive nostr-tools' nip59 uses
- * internally. Exposed here so the Amber NIP-17 path can construct the
- * gift wrap (which is signed with an ephemeral key, never the user's
- * key, so it doesn't need to round-trip through Amber).
- */
-function nip44EncryptForRecipient(
-  plaintext: string,
-  senderSecretKey: Uint8Array,
-  recipientPubkey: string,
-): string {
-  const conversationKey = nip44.v2.utils.getConversationKey(senderSecretKey, recipientPubkey);
-  return nip44.v2.encrypt(plaintext, conversationKey);
 }
 
 /**

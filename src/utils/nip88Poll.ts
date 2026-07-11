@@ -1,4 +1,4 @@
-import { getEventHash } from 'nostr-tools/pure';
+import { nostrGetEventHash } from '../services/nostrCrypto';
 
 /**
  * Structured NIP-88 polls, gift-wrapped inside NIP-17 DMs (#203).
@@ -273,7 +273,7 @@ export function serializePollFromRumor(rumor: PollRumor): string | null {
   if (!poll) return null;
   let pollId: string;
   try {
-    pollId = getEventHash(rumor);
+    pollId = nostrGetEventHash(rumor);
   } catch {
     return null;
   }
