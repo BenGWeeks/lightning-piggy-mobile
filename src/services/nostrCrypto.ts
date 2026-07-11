@@ -52,14 +52,17 @@ const MAX_SAMPLES = 200;
 interface OpStats {
   samples: number[];
   count: number;
+  /** `count` at the last emitted summary — ops with no new samples since
+   *  then are skipped, so a long-idle op doesn't log forever. */
+  countAtLastSummary: number;
 }
 
 const stats: Record<string, OpStats> = {
-  nip44Decrypt: { samples: [], count: 0 },
-  nip44Encrypt: { samples: [], count: 0 },
-  schnorrSign: { samples: [], count: 0 },
-  schnorrVerify: { samples: [], count: 0 },
-  eventHash: { samples: [], count: 0 },
+  nip44Decrypt: { samples: [], count: 0, countAtLastSummary: 0 },
+  nip44Encrypt: { samples: [], count: 0, countAtLastSummary: 0 },
+  schnorrSign: { samples: [], count: 0, countAtLastSummary: 0 },
+  schnorrVerify: { samples: [], count: 0, countAtLastSummary: 0 },
+  eventHash: { samples: [], count: 0, countAtLastSummary: 0 },
 };
 
 /** Append one timing sample, evicting oldest when window is full. */
@@ -99,7 +102,8 @@ function scheduleSummary(): void {
     if (now - lastSummaryAt < SUMMARY_INTERVAL_MS) return;
     lastSummaryAt = now;
     for (const [op, s] of Object.entries(stats)) {
-      if (s.count === 0) continue;
+      if (s.count === s.countAtLastSummary) continue;
+      s.countAtLastSummary = s.count;
       const { p50, p95 } = percentiles(s.samples);
       console.log(`[PerfBlock] nostrCrypto ${op} n=${s.count} p50=${p50}ms p95=${p95}ms`);
     }
@@ -220,6 +224,7 @@ export function __resetStats(): void {
   for (const s of Object.values(stats)) {
     s.samples = [];
     s.count = 0;
+    s.countAtLastSummary = 0;
   }
   lastSummaryAt = 0;
   summaryScheduled = false;
