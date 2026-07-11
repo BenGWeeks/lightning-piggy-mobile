@@ -245,7 +245,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       // (cancelled = true on unmount / coord change). Simply return without
       // touching pendingLogsRef — the cleanup path already cleared it, and
       // mutating the shared ref here could wipe logs buffered by the *next*
-      // effect instance that started after the coord change. (Copilot.)
+      // effect instance that started after the coord change.
       if (cancelled) return;
       if (pendingLogsRef.current.size === 0) return;
       const batch = pendingLogsRef.current;
@@ -254,7 +254,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         // Dedupe: skip any id already committed so we don't clobber a
         // newer optimistic insert (the handlePostLog path). Only allocate
         // `next` when we actually find a new id — a relay echo of ids that
-        // are already in `prev` avoids the O(prev.size) clone entirely. (Copilot.)
+        // are already in `prev` avoids the O(prev.size) clone entirely.
         let next: Map<string, FoundLog> | null = null;
         for (const [id, log] of batch) {
           if (prev.has(id)) continue;
@@ -296,6 +296,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     })();
     const closer = subscribeFoundLogs(coord, (event) => {
+      // A relay event can arrive after cleanup (queued delivery, or a closer
+      // that isn't synchronous) — never buffer into the shared ref once this
+      // effect instance is cancelled, or stale logs from the previous coord
+      // could surface under the next one.
+      if (cancelled) return;
       const log = parseFoundLog(event);
       pendingLogsRef.current.set(log.id, log);
       if (pendingLogsRef.current.size >= 25) {
