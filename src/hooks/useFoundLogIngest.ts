@@ -194,7 +194,7 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       }
       closer();
     };
-  }, [logIdsKey]);
+  }, [logIdsKey, coord]);
 
   // ----- derived views + optimistic insert --------------------------------
 
