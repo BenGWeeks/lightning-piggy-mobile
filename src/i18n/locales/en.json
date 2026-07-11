@@ -926,7 +926,9 @@
   "huntLeaderboard": {
     "title": "Leaderboard",
     "tagline": "Top hiders and finders across the network",
-    "backToGeoCaches": "Back to Geo-caches"
+    "backToGeoCaches": "Back to Geo-caches",
+    "tabHiders": "Top hiders",
+    "tabFinders": "Top finders"
   },
   "huntScreen": {
     "backToExplore": "Back to Explore",
