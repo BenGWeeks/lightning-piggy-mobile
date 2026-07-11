@@ -12,6 +12,13 @@ interface Props {
   cache: ParsedCache;
   /** Live user position so the card can show distance when known. */
   pos: { lat: number; lon: number } | null;
+  /**
+   * Precomputed distance in metres — pass it when the caller already
+   * computed one (the Nearby rail sorts on it), so the label always
+   * matches the sort order. When omitted, falls back to computing from
+   * `pos` + the cache geohash (the Recently-added rail).
+   */
+  distanceMetres?: number | null;
   styles: HuntCommunityStyles;
   onPress: () => void;
   testID: string;
@@ -29,14 +36,23 @@ interface Props {
  * Piglets. Shared by the "Recently added" and "Nearby" rails so the
  * two read as one visual system.
  */
-const HuntRailCard: React.FC<Props> = ({ cache, pos, styles, onPress, testID, positionTestID }) => {
+const HuntRailCard: React.FC<Props> = ({
+  cache,
+  pos,
+  distanceMetres,
+  styles,
+  onPress,
+  testID,
+  positionTestID,
+}) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
-  const distance =
+  const computed =
     pos && center
       ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
       : null;
+  const distance = distanceMetres !== undefined ? distanceMetres : computed;
   return (
     <TouchableOpacity
       style={styles.railCard}
@@ -73,7 +89,7 @@ const HuntRailCard: React.FC<Props> = ({ cache, pos, styles, onPress, testID, po
       </Text>
       <Text style={styles.railMeta} numberOfLines={1}>
         {cache.isLpPiggy ? t('huntScreen.piglet') : t('huntScreen.nipGcCache')}
-        {distance != null ? ` · ${formatDistance(distance)}` : ''}
+        {distance != null && Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
       </Text>
     </TouchableOpacity>
   );

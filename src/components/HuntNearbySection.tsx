@@ -114,6 +114,7 @@ const HuntNearbySection: React.FC<Props> = ({
             <HuntRailCard
               cache={item.cache}
               pos={pos}
+              distanceMetres={item.distance}
               styles={railStyles}
               onPress={() => onPressCache(item.cache.coord)}
               testID={`hunt-discover-row-${item.cache.d}`}
