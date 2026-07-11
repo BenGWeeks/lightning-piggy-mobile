@@ -1155,7 +1155,7 @@ export async function sendNip17ToManyWithNsec(input: {
   const eventId = getEventHash({ ...input.rumor, pubkey: senderPublicKey });
   // Self-wrap first (matching wrapManyEvents); sender deduped out if also in recipients.
   const recipients = Array.from(
-    new Set([senderPublicKey, ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
+    new Set([senderPublicKey.toLowerCase(), ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
   );
   const signedWraps: VerifiedEvent[] = [];
   for (let i = 0; i < recipients.length; i++) {

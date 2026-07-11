@@ -21,14 +21,16 @@ import { useComposerActions } from './useComposerActions';
  * Optimistic-send semantics (#1033):
  *   The group path now mirrors the 1:1 path — the optimistic bubble is painted
  *   IMMEDIATELY when `onRumorReady` fires (before any signing), not after the
- *   full `sendGroupMessage` round-trip. On failure, unlike the 1:1 delivery-
- *   store model (which keeps a red-tick bubble), the group path has no per-relay
- *   breakdown store today, so we: (a) show a BrandedAlert (existing behaviour,
- *   unchanged) AND (b) remove the just-appended optimistic row from storage/state
- *   so a never-published message doesn't linger in the thread.
- *   The 'Saved on relay, not on device' case in `appendGroupMessage` is
- *   unchanged — it fires only when the relay send SUCCEEDED but local storage
- *   threw, so no removal is needed there.
+ *   full `sendGroupMessage` round-trip. The row is captured synchronously and
+ *   the async storage write is exposed as a settle-promise, so outcomes stay
+ *   truthful regardless of how the two races interleave:
+ *   - Relay send FAILED → send-failure Alert; await the storage write, then
+ *     remove the row from state+storage (a never-published message must not
+ *     linger, and removal after the write settles can't be raced by a late
+ *     `setMessages` from the write).
+ *   - Relay send OK, storage write FAILED → 'Saved on relay, not on device'
+ *     Alert (only now is "your message was sent" true) and return false so the
+ *     caller keeps the draft for retry — the pre-#1033 semantics.
  */
 export function useGroupComposerActions(params: {
   group: Group | undefined;
@@ -60,11 +62,13 @@ export function useGroupComposerActions(params: {
   //
   // With the #1033 optimistic-bubble change this is called from inside the
   // `onRumorReady` hook (synchronously, before signing), not after the send.
-  // The in-memory row is painted immediately; storage is async. Returns the
-  // appended row so the failure path can reference its id for removal.
+  // The in-memory row is painted immediately and returned synchronously so the
+  // failure path always has its id; the async storage write is exposed as
+  // `persisted` (never rejects) so callers can await it and judge the outcome
+  // once the relay send has resolved.
   const appendOptimisticGroupRow = useCallback(
-    async (text: string): Promise<{ ok: boolean; row: GroupMessage | null }> => {
-      if (!group || !myPubkey) return { ok: false, row: null };
+    (text: string): { row: GroupMessage; persisted: Promise<boolean> } | null => {
+      if (!group || !myPubkey) return null;
       const local: GroupMessage = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         senderPubkey: myPubkey,
@@ -75,24 +79,29 @@ export function useGroupComposerActions(params: {
       setMessages((prev) => [...prev, local]);
       notifyGroupMessage(group.id, local);
       setTimeout(scrollToEnd, 0);
-      try {
-        const next = await appendGroupMessage(group.id, local);
-        setMessages(next);
-        return { ok: true, row: local };
-      } catch (err) {
-        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
-        Alert.alert(
-          'Saved on relay, not on device',
-          'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
-        );
-        // Storage failed but the send already completed — keep the in-memory
-        // row; return ok:false so the caller knows storage failed, but we do
-        // NOT remove the row (the message got to the relay).
-        return { ok: false, row: local };
-      }
+      const persisted = appendGroupMessage(group.id, local)
+        .then((next) => {
+          setMessages(next);
+          return true;
+        })
+        .catch((err: unknown) => {
+          if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+          return false;
+        });
+      return { row: local, persisted };
     },
     [group, myPubkey, setMessages, scrollToEnd],
   );
+
+  // Relay send succeeded but the local storage write didn't — only here is
+  // "your message was sent" actually true, so the alert lives with the caller
+  // outcome, not inside appendOptimisticGroupRow.
+  const alertSavedOnRelayOnly = useCallback((): void => {
+    Alert.alert(
+      'Saved on relay, not on device',
+      'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
+    );
+  }, []);
 
   // Remove a previously-appended optimistic row on a complete send failure.
   // Only called when the relay send itself failed (not the local-storage path),
@@ -114,10 +123,12 @@ export function useGroupComposerActions(params: {
     async (text: string): Promise<boolean> => {
       if (!group || !myPubkey) return false;
 
-      // Optimistic bubble: painted synchronously from onRumorReady, before
-      // any signing. rowRef is captured from the async appendOptimisticGroupRow
-      // resolution so the failure path can remove the correct row (#1033).
-      let rowRef: GroupMessage | null = null;
+      // Optimistic bubble: painted synchronously from onRumorReady, before any
+      // signing — the row id is captured synchronously (a `.current` box, not
+      // narrowed away by TS closure analysis) so failure cleanup is reliable.
+      const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
+        current: null,
+      };
 
       const result = await sendGroupMessage(
         {
@@ -128,12 +139,7 @@ export function useGroupComposerActions(params: {
         },
         {
           onRumorReady: () => {
-            // Fire-and-forget: the async storage write happens in the background;
-            // the in-memory row is visible instantly. We capture rowRef so the
-            // failure path below can remove it if the send ultimately fails.
-            void appendOptimisticGroupRow(text).then(({ row }) => {
-              rowRef = row;
-            });
+            optimistic.current = appendOptimisticGroupRow(text);
           },
         },
       );
@@ -141,17 +147,30 @@ export function useGroupComposerActions(params: {
       if (!result.success) {
         Alert.alert('Send failed', result.error ?? 'Unknown error');
         // Remove the optimistic row we painted before signing — the message
-        // never went out. Yield one microtask first so appendOptimisticGroupRow
-        // has a chance to resolve and populate rowRef (it's nearly instant,
-        // but the signing round-trip that preceded this failure gave it ample
-        // time; the yield is a safety net for edge cases).
-        await Promise.resolve();
-        if (rowRef) await removeOptimisticRow((rowRef as GroupMessage).id);
+        // never went out. Await the storage write first so its trailing
+        // setMessages can't re-add the row after removal.
+        if (optimistic.current) {
+          await optimistic.current.persisted;
+          await removeOptimisticRow(optimistic.current.row.id);
+        }
+        return false;
+      }
+      // Sent, but not saved locally: keep the draft (return false) so the user
+      // can retry/refresh — pre-#1033 semantics.
+      if (optimistic.current && !(await optimistic.current.persisted)) {
+        alertSavedOnRelayOnly();
         return false;
       }
       return true;
     },
-    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow, removeOptimisticRow],
+    [
+      group,
+      myPubkey,
+      sendGroupMessage,
+      appendOptimisticGroupRow,
+      removeOptimisticRow,
+      alertSavedOnRelayOnly,
+    ],
   );
 
   const sendFile = useCallback(
@@ -165,7 +184,9 @@ export function useGroupComposerActions(params: {
         nonceHex: file.nonceHex,
       });
 
-      let rowRef: GroupMessage | null = null;
+      const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
+        current: null,
+      };
 
       const result = await sendGroupMessage(
         {
@@ -176,9 +197,7 @@ export function useGroupComposerActions(params: {
         },
         {
           onRumorReady: () => {
-            void appendOptimisticGroupRow(fileText).then(({ row }) => {
-              rowRef = row;
-            });
+            optimistic.current = appendOptimisticGroupRow(fileText);
           },
         },
       );
@@ -186,13 +205,28 @@ export function useGroupComposerActions(params: {
       if (!result.success) {
         const what = kind === 'image' ? 'image' : 'voice note';
         Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
-        await Promise.resolve();
-        if (rowRef) await removeOptimisticRow((rowRef as GroupMessage).id);
+        if (optimistic.current) {
+          await optimistic.current.persisted;
+          await removeOptimisticRow(optimistic.current.row.id);
+        }
+        return false;
+      }
+      // Sent-but-not-saved: return false so the voice sheet / attach panel
+      // stays open for retry, matching sendText's draft-keeping semantics.
+      if (optimistic.current && !(await optimistic.current.persisted)) {
+        alertSavedOnRelayOnly();
         return false;
       }
       return true;
     },
-    [group, myPubkey, sendGroupMessage, appendOptimisticGroupRow, removeOptimisticRow],
+    [
+      group,
+      myPubkey,
+      sendGroupMessage,
+      appendOptimisticGroupRow,
+      removeOptimisticRow,
+      alertSavedOnRelayOnly,
+    ],
   );
 
   // Preflight so the shared hook can skip an expensive encrypt+upload (voice /
@@ -220,7 +254,9 @@ export function useGroupComposerActions(params: {
     async (payload: string): Promise<{ success: boolean; error?: string }> => {
       if (!group || !myPubkey) return { success: false, error: 'Group unavailable.' };
 
-      let rowRef: GroupMessage | null = null;
+      const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
+        current: null,
+      };
 
       const result = await sendGroupMessage(
         {
@@ -231,17 +267,18 @@ export function useGroupComposerActions(params: {
         },
         {
           onRumorReady: () => {
-            void appendOptimisticGroupRow(payload).then(({ row }) => {
-              rowRef = row;
-            });
+            optimistic.current = appendOptimisticGroupRow(payload);
           },
         },
       );
 
       if (!result.success) {
-        // On failure: remove the optimistic row so the thread stays clean.
-        await Promise.resolve();
-        if (rowRef) await removeOptimisticRow((rowRef as GroupMessage).id);
+        // On failure: remove the optimistic row so the thread stays clean
+        // (await the storage write first so it can't re-add the row).
+        if (optimistic.current) {
+          await optimistic.current.persisted;
+          await removeOptimisticRow(optimistic.current.row.id);
+        }
         return { success: false, error: result.error ?? 'Send failed' };
       }
       return { success: true };
