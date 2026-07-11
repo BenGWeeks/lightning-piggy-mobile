@@ -287,7 +287,8 @@
     "zapUnavailable": "Надіслати zap (недоступно — у співрозмовника немає адреси Lightning)",
     "closeFullscreenGif": "Закрити повноекранний GIF",
     "shareContactTitle": "Поділитися контактом з {{name}}",
-    "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити."
+    "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити.",
+    "typing": "друкує…"
   },
   "courseDetailScreen": {
     "courseNotFound": "Курс не знайдено",
