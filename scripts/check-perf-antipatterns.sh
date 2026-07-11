@@ -29,16 +29,29 @@ declare -A MAP_CLONE_BASELINE=(
   ["src/screens/MyPigletsScreen.tsx"]=3
 )
 
-# Check 2: react-native Image imports
+# Check 2: react-native Image imports (multi-line aware — full sweep 2026-07-11)
 declare -A RN_IMAGE_BASELINE=(
+  ["src/components/AddWalletWizard.tsx"]=1
   ["src/components/BootSplash.tsx"]=1
   ["src/components/DecryptedImage.tsx"]=1
   ["src/components/HuntRecentlyAddedSection.tsx"]=1
+  ["src/components/TransferSheet.tsx"]=1
   ["src/components/WalletCard.tsx"]=1
+  ["src/screens/account/AboutScreen.tsx"]=1
+  ["src/screens/account/AccountScreenLayout.tsx"]=1
   ["src/screens/account/ProfileScreen.tsx"]=1
   ["src/screens/CourseDetailScreen.tsx"]=1
+  ["src/screens/EventDetailScreen.tsx"]=1
+  ["src/screens/EventsScreen.tsx"]=1
+  ["src/screens/ExploreHomeScreen.tsx"]=1
+  ["src/screens/GroupsScreen.tsx"]=1
+  ["src/screens/HomeScreen.tsx"]=1
+  ["src/screens/HuntCreateScreen.tsx"]=1
+  ["src/screens/HuntPiggyDetailScreen.tsx"]=1
+  ["src/screens/HuntScreen.tsx"]=1
   ["src/screens/LessonsScreen.tsx"]=1
   ["src/screens/MissionDetailScreen.tsx"]=1
+  ["src/screens/MyPigletsScreen.tsx"]=1
   ["src/screens/UnsupportedEntityScreen.tsx"]=1
 )
 
@@ -70,9 +83,12 @@ map_clones=$(git ls-files 'src/**/*.ts' 'src/**/*.tsx' \
 check_pattern "per-event Map clone" "$map_clones" MAP_CLONE_BASELINE \
   "Batch relay/event ingest with src/utils/useCoalescedMap.ts instead of cloning per event."
 
+# Multi-line aware (Prettier wraps long RN import lists): slurp each file
+# (-0777) and count import statements whose brace list contains a bare
+# `Image` token and whose module specifier is 'react-native'.
 rn_images=$(git ls-files 'src/**/*.tsx' \
   | grep -v '\.test\.' \
-  | xargs grep -cE "^import[^;]*[{,][[:space:]]*Image[[:space:],}][^;]*from 'react-native'" 2>/dev/null \
+  | xargs perl -0777 -ne "my \$c = () = /import[^;]*?\{[^}]*\bImage\b[^}]*\}[^;]*?from\s*'react-native'/gs; print \"\$ARGV:\$c\n\"" 2>/dev/null \
   | grep -v ':0$' || true)
 check_pattern "react-native Image import" "$rn_images" RN_IMAGE_BASELINE \
   "Use expo-image with cachePolicy=\"memory-disk\" (see docs/PERFORMANCE.adoc)."
