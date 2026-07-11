@@ -287,7 +287,8 @@
     "zapUnavailable": "Enviar un zap (no disponible — el contacto no tiene dirección Lightning)",
     "closeFullscreenGif": "Cerrar el GIF a pantalla completa",
     "shareContactTitle": "Compartir un contacto con {{name}}",
-    "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir."
+    "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir.",
+    "typing": "escribiendo…"
   },
   "nwcShareSheet": {
     "title": "Compartir una cartera",

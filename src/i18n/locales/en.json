@@ -287,7 +287,8 @@
     "zapUnavailable": "Send a zap (unavailable — peer has no Lightning Address)",
     "closeFullscreenGif": "Close full-screen GIF",
     "shareContactTitle": "Share a contact with {{name}}",
-    "shareContactSubtitle": "They'll see it as a Nostr profile card they can open."
+    "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
+    "typing": "typing…"
   },
   "nwcShareSheet": {
     "title": "Share a wallet",
