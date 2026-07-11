@@ -91,6 +91,7 @@ jest.mock('./nostrDmCache', () => ({
 
 import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
+import { createYieldScheduler } from './nostrDecryptPacing';
 
 const VIEWER = 'f'.repeat(64);
 const ALICE = 'a'.repeat(64);
@@ -274,5 +275,53 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     expect(surfaced).toBeTruthy();
     expect(surfaced!.text).toMatch(/^🛒 Order Placed/);
     expect(surfaced!.text).not.toContain('{');
+  });
+
+  it('un-claims a wrap id from knownWrapIds when teardown lands while parked on the yield (Copilot #1039 review)', async () => {
+    // knownWrapIds is claimed eagerly (#505) before the per-wrap budget-gated
+    // yield. If teardown (relay-list change / logout) lands while a wrap is
+    // parked on that yield, the id must NOT be left "known" — knownWrapIdsRef
+    // survives this effect's re-runs (same viewer), so an orphaned claim
+    // would silently starve every future live-sub instance of a wrap the
+    // store never actually received.
+    let releaseYield: (() => void) | null = null;
+    (createYieldScheduler as jest.Mock).mockReturnValueOnce({
+      maybeYield: () => new Promise<void>((resolve) => (releaseYield = resolve)),
+      get yieldCount() {
+        return 0;
+      },
+      dispose: jest.fn(),
+    });
+
+    const knownWrapIdsRef = { current: { pubkey: null as string | null, set: new Set<string>() } };
+    const followPubkeysRef = { current: new Set<string>([ALICE]) };
+    const teardown = startLiveDmSubscription(makeParams({ knownWrapIdsRef, followPubkeysRef }));
+    await flush();
+    expect(capturedOnEvent).toBeTruthy();
+
+    const now = Math.floor(Date.now() / 1000);
+    capturedOnEvent!({
+      id: 'parked-wrap',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'x',
+      rumor: {
+        kind: 14,
+        created_at: now,
+        content: 'hi',
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    });
+    // Claimed synchronously, before the (parked) yield.
+    expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(true);
+
+    // Teardown lands while still parked on the yield.
+    teardown();
+    releaseYield!();
+    await flush();
+
+    expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(false);
   });
 });

@@ -520,8 +520,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // faster than performance.now resolution on some devices.
     await wrapYieldScheduler.maybeYield();
     // Torn down while parked on the yield (abort settles the awaiter): skip
-    // post-teardown decrypt/persist work.
-    if (cancelled) return;
+    // post-teardown decrypt/persist work. `knownWrapIds` was already eagerly
+    // claimed for this wrap at the top of the handler (#505) — undo that
+    // claim here (Copilot #1039 review) so a wrap that was never actually
+    // decrypted/persisted/surfaced isn't permanently orphaned as "known".
+    // `knownWrapIdsRef` survives this effect's re-runs (relay-list change →
+    // fresh live-sub instance, same viewer), so without this a torn-down
+    // in-flight wrap would be silently skipped by every future live-sub
+    // instance for the rest of the session even though the store never got
+    // it — undetectable because it never resurfaces even on the next arm.
+    if (cancelled) {
+      knownWrapIds.delete(wrap.id);
+      return;
+    }
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
