@@ -59,10 +59,9 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
           navigation.navigate('HuntLeaderboard', {
             hiderLeaderboard,
             finderLeaderboard,
-            // Pass loading=false: by the time the user taps, the settle
-            // window has elapsed (loading is false here), so params will
-            // never freeze in a permanent-skeleton state on the next screen.
-            loading: false,
+            // The row is disabled while loading, so this is false at tap
+            // time — pass the live value rather than asserting it.
+            loading,
           })
         }
         testID="hunt-leaderboard-link"
