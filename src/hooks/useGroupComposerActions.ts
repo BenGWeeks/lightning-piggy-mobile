@@ -105,7 +105,14 @@ export function useGroupComposerActions(params: {
 
   // Remove a previously-appended optimistic row on a complete send failure.
   // Only called when the relay send itself failed (not the local-storage path),
-  // so the message truly never went out. Updates both state and storage.
+  // so the message truly never went out. Updates in-memory state directly via
+  // the filter above (never from removeGroupMessage's return value — see that
+  // function's doc: it rejects on a storage error rather than returning `[]`,
+  // specifically so a transient AsyncStorage blip can't be mistaken for "the
+  // thread is now empty"). A storage-write failure here just means the
+  // retraction didn't persist; the row is still gone from the UI, and we
+  // swallow the error since there's no user-facing action to take on a
+  // failed cleanup of an already-failed send.
   const removeOptimisticRow = useCallback(
     async (rowId: string): Promise<void> => {
       if (!group) return;

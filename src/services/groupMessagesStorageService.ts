@@ -101,21 +101,28 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
  * signing — mirrors the 1:1 path's "keep the bubble on failure" semantics
  * adapted for group storage: we show a BrandedAlert AND remove the row so
  * a never-published message doesn't linger in the thread. Returns the
- * updated message list (empty array on storage errors, so callers can
- * always call setMessages on the result).
+ * updated message list on success (the unmodified list, unchanged, if
+ * `messageId` wasn't found).
+ *
+ * On an AsyncStorage read/write error this REJECTS rather than returning
+ * `[]` — matching `appendGroupMessage`'s propagate-on-failure contract
+ * elsewhere in this module (and `identitiesStore`'s write-through
+ * functions). A transient storage error must never be conflated with "the
+ * thread is now empty": a caller that unconditionally did
+ * `setMessages(await removeGroupMessage(...))` would otherwise wipe the
+ * visible thread on a blip that touched none of the underlying data.
+ * Callers MUST catch and treat a rejection as "the row could not be
+ * retracted from local storage" — leave any optimistic in-memory removal
+ * as-is and do not call setMessages with this function's result.
  */
 export async function removeGroupMessage(
   groupId: string,
   messageId: string,
 ): Promise<GroupMessage[]> {
-  try {
-    const existing = await loadGroupMessages(groupId);
-    const filtered = existing.filter((m) => m.id !== messageId);
-    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
-    return filtered;
-  } catch {
-    return [];
-  }
+  const existing = await loadGroupMessages(groupId);
+  const filtered = existing.filter((m) => m.id !== messageId);
+  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+  return filtered;
 }
 
 // Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return

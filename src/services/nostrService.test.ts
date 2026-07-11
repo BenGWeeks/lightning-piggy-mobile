@@ -171,13 +171,23 @@ describe('pool.verifyEvent — skip-verify kinds (#739 Fix 5)', () => {
 // inspect it without needing live relay connections.
 // ---------------------------------------------------------------------------
 
-// jest.mock must be at module scope (hoisted) but we need access to the
-// captured wraps inside tests — use a module-level variable.
-const capturedWraps: unknown[] = [];
+// jest.mock factories are hoisted above the rest of the module (including
+// this file's own top-level `const`s), and babel-plugin-jest-hoist forbids a
+// factory from closing over an out-of-scope variable unless its name starts
+// with `mock` (case-insensitive) — the one exemption to the hoisting rule.
+// Without the `mock` prefix this only works by accident: the factory body
+// itself runs at hoist time (before the `const` below is initialized), but
+// the inner `jest.fn(async (wraps) => { ... })` closure is merely *defined*
+// then — it isn't *called* until a test invokes `publishWrapsTrackingRelays`
+// well after the module (and this `const`) has finished initializing. That
+// ordering happens to save it here, but it's fragile and exactly the kind of
+// TDZ footgun the `mock` prefix exists to avoid, so we opt into the sanctioned
+// pattern instead of relying on call-timing.
+const mockCapturedWraps: unknown[] = [];
 jest.mock('./nostrDmPublish', () => ({
   publishWrapsTrackingRelays: jest.fn(async (wraps: unknown[]) => {
-    capturedWraps.length = 0;
-    capturedWraps.push(...wraps);
+    mockCapturedWraps.length = 0;
+    mockCapturedWraps.push(...wraps);
     return {
       wrapsPublished: wraps.length,
       errors: [],
@@ -189,7 +199,7 @@ jest.mock('./nostrDmPublish', () => ({
 // yieldToEventLoop uses requestAnimationFrame. jest-expo exposes it globally
 // via jsdom / react-native preset; spy on it so we can assert it fires.
 beforeEach(() => {
-  capturedWraps.length = 0;
+  mockCapturedWraps.length = 0;
 });
 
 describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', () => {
@@ -224,7 +234,7 @@ describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', ()
       relays: ['wss://test'],
     });
 
-    expect(capturedWraps).toHaveLength(expectedCount);
+    expect(mockCapturedWraps).toHaveLength(expectedCount);
   });
 
   it('every produced wrap is kind 1059 (NIP-59 gift-wrap)', async () => {
@@ -235,7 +245,7 @@ describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', ()
       relays: ['wss://test'],
     });
 
-    for (const w of capturedWraps) {
+    for (const w of mockCapturedWraps) {
       expect((w as { kind: number }).kind).toBe(1059);
     }
   });
@@ -249,7 +259,7 @@ describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', ()
     });
 
     const pTagged = new Set(
-      capturedWraps.map((w) => {
+      mockCapturedWraps.map((w) => {
         const tags = (w as { tags: string[][] }).tags;
         const pTag = tags.find((t) => t[0] === 'p');
         return pTag ? pTag[1] : null;
@@ -263,7 +273,7 @@ describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', ()
     // Self (sender) must also be covered.
     expect(pTagged.has(senderPubkey)).toBe(true);
     // No duplicate p-tags (each recipient gets exactly one wrap).
-    expect(pTagged.size).toBe(capturedWraps.length);
+    expect(pTagged.size).toBe(mockCapturedWraps.length);
   });
 
   it('deduplicates recipient who equals the sender (no double self-wrap)', async () => {
@@ -280,7 +290,7 @@ describe('sendNip17ToManyWithNsec — inlined wrapEvent loop parity (#1033)', ()
       relays: ['wss://test'],
     });
 
-    expect(capturedWraps).toHaveLength(expectedCount);
+    expect(mockCapturedWraps).toHaveLength(expectedCount);
   });
 
   it('yieldToEventLoop is called between recipients (not on the first wrap)', async () => {

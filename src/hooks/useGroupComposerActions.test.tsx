@@ -186,6 +186,43 @@ describe('useGroupComposerActions — failure path removes the optimistic row (#
     expect(mockRemoveGroupMessage).toHaveBeenCalledWith(GROUP_ID, expect.any(String));
   });
 
+  it('does not wipe the visible thread when removeGroupMessage rejects on a transient storage error', async () => {
+    // removeGroupMessage now rejects (rather than resolving to []) on a
+    // storage write failure — see groupMessagesStorageService.ts. This test
+    // pins the caller-side half of that contract: removeOptimisticRow must
+    // never let a rejected/empty result reach setMessages, since doing so
+    // would wipe the entire visible thread on a transient blip that never
+    // touched the persisted data.
+    mockRemoveGroupMessage.mockRejectedValue(new Error('transient storage error'));
+
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'rumor-fail-storage', kind: 14 });
+      return { success: false, error: 'all relays rejected' };
+    });
+
+    const { result, setMessages } = setup();
+    await act(async () => {
+      await result.current.sendText('hello');
+    });
+
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(GROUP_ID, expect.any(String));
+
+    // The regression this guards against: a caller that did
+    // `setMessages(await removeGroupMessage(...))` and treated a rejection
+    // (or the old `[]`-on-error contract) as "the thread is now empty" would
+    // show up here as a bare `[]` reaching setMessages. This hook never does
+    // that — removeOptimisticRow only ever removes one specific row via the
+    // functional-updater form, and the rejected removeGroupMessage call is
+    // caught and ignored, so no setMessages call should ever be a plain
+    // (non-function) empty array.
+    for (const call of setMessages.mock.calls) {
+      const arg = call[0];
+      if (Array.isArray(arg)) {
+        expect(arg.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('shows a BrandedAlert and removes the row on a partial send failure', async () => {
     mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
       hooks?.onRumorReady?.({ rumorId: 'rumor-partial', kind: 14 });

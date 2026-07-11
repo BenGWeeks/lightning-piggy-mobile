@@ -166,6 +166,34 @@ describe('removeGroupMessage — failure-path retraction (#1033)', () => {
     const after = await removeGroupMessage(GROUP, 'local_1_aaa');
     expect(after).toEqual([]);
   });
+
+  it('rejects (does NOT return []) when the AsyncStorage write fails, and leaves the persisted thread untouched', async () => {
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'first', 1700000000));
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'second', 1700000001));
+
+    // NOTE: the async-storage-mock's setItem is already a jest.fn(), so
+    // `jest.spyOn` returns that same mock rather than wrapping it — and a
+    // later `.mockRestore()` on it wipes its real implementation for good
+    // (there's no separate "original" to restore to), silently breaking
+    // every subsequent test's persistence. `mockRejectedValueOnce` alone,
+    // with no restore, is self-healing: it auto-reverts to the underlying
+    // implementation once its one-shot queue is consumed.
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('transient storage error'));
+
+    // The critical contract: a storage-write failure must surface as a
+    // rejection, NOT as a resolved `[]` — a caller that did
+    // `setMessages(await removeGroupMessage(...))` without this contract
+    // would otherwise wipe the entire visible thread on a transient blip.
+    await expect(removeGroupMessage(GROUP, 'local_1_aaa')).rejects.toThrow(
+      'transient storage error',
+    );
+
+    // Because the write never committed, the thread persisted in storage
+    // must be completely unchanged — both rows still present.
+    const persisted = await loadGroupMessages(GROUP);
+    expect(persisted).toHaveLength(2);
+    expect(persisted.map((m) => m.id).sort()).toEqual(['a'.repeat(64), 'local_1_aaa'].sort());
+  });
 });
 
 describe('GROUP_MESSAGES_KEY_PREFIX — logout-wipe contract', () => {
