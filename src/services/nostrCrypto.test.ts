@@ -183,7 +183,6 @@ describe('nostrGetEventHash', () => {
 // so console.log calls inside the transpiled module are stripped at Babel time.
 // We therefore test the harness behaviour via __getStats() (which reads the
 // in-memory counters directly) rather than asserting console.log output.
-// The log format is verified via a targeted integration check with warn.
 
 describe('benchmark harness — stat accumulation', () => {
   beforeEach(() => {
