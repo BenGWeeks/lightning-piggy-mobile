@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
-import { NSEC_KEY } from './nostrAuthKeys';
+import { getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
@@ -106,9 +105,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
@@ -227,9 +225,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
@@ -309,9 +306,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
@@ -435,9 +431,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         };
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,

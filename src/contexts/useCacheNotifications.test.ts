@@ -1,7 +1,8 @@
 /**
  * Unit tests for the foreground cache-activity notification hook.
  *
- * Pins the two behaviours Copilot flagged on #760:
+ * Pins the behaviours Copilot flagged on #760 and the resume-burst stagger
+ * fix from #554:
  *
  *   1. Distinct notification copy per surface — a kind-7516 found-log
  *      says "New find on your cache" and fans out on the in-app event
@@ -12,6 +13,10 @@
  *      historical replay a relay sends for a *later* re-subscribe (coord
  *      set changed mid-session) can't slip past the gate and fire stale
  *      notifications.
+ *   3. Resume-burst stagger (#554): on AppState → active the coord refetch
+ *      is delayed by RESUME_REFETCH_DELAY_MS (3 s) so it doesn't compete
+ *      with latency-sensitive work (DM re-arm, wallet refresh) on the JS
+ *      thread. Timer is cancelled by backgrounding and by unmount.
  */
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { AppState } from 'react-native';
@@ -86,9 +91,18 @@ function makeEvent(
   } as VerifiedEvent;
 }
 
+// Base wall-clock the fake-timer epoch is anchored to. A large value keeps
+// the created_at arithmetic in the freshness-gate tests positive and avoids
+// divide-by-zero / negative-timestamp edge cases in surrounding hook maths.
+const FAKE_NOW_BASE = 1_000_000_000_000;
+
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
+  // Install fake timers and advance Date.now() together — `now` seeds
+  // the epoch so that jest.advanceTimersByTime(N) also moves Date.now()
+  // forward by N ms. This is required for the REFETCH_MIN_GAP_MS throttle
+  // (which calls Date.now() internally) to be controllable from tests (#554).
+  jest.useFakeTimers({ now: FAKE_NOW_BASE });
   // Spy AppState.addEventListener so the tests can read `.mock.calls` (the
   // hook registers a 'change' listener) and get back a real subscription
   // shape. Without this it's a real RN function and `.mock` is undefined
@@ -101,7 +115,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  (Date.now as jest.Mock).mockRestore?.();
+  jest.useRealTimers();
   (AppState.addEventListener as jest.Mock).mockRestore?.();
 });
 
@@ -156,9 +170,11 @@ describe('useCacheNotifications', () => {
   });
 
   it('re-baselines the freshness gate on re-arm so pre-resubscribe replay stays silent', async () => {
-    // First arm at T0 with coord A only.
+    // First arm at T0 with coord A only. Use setSystemTime to move the fake
+    // timer epoch — fake timers control Date.now() via jest.useFakeTimers({ now })
+    // so we must use setSystemTime (not spyOn) to shift it (#554 test refactor).
     const t0 = 1_000_000_000; // seconds
-    (Date.now as jest.Mock).mockReturnValue(t0 * 1000);
+    jest.setSystemTime(t0 * 1000);
     mockedFetch.mockResolvedValueOnce([{ coord: COORD_A }]);
 
     renderHook(() =>
@@ -168,9 +184,10 @@ describe('useCacheNotifications', () => {
 
     // Coord set changes (a cache published mid-session) and an AppState
     // 'active' hop, ~1h later, re-arms the subscription. Jumping well past
-    // REFETCH_MIN_GAP_MS (10s) so the throttle doesn't swallow the refetch.
+    // REFETCH_MIN_GAP_MS (10s) + RESUME_REFETCH_DELAY_MS (3s) so both
+    // throttle and stagger resolve in this tick.
     const t1 = t0 + 3600;
-    (Date.now as jest.Mock).mockReturnValue(t1 * 1000);
+    jest.setSystemTime(t1 * 1000);
     mockedFetch.mockResolvedValueOnce([{ coord: COORD_A }, { coord: COORD_B }]);
 
     const appStateCall = (AppState.addEventListener as jest.Mock).mock.calls.find(
@@ -178,6 +195,9 @@ describe('useCacheNotifications', () => {
     );
     await act(async () => {
       appStateCall![1]('active');
+      // Resume-burst stagger (#554): the refetch is deferred by 3 s — advance
+      // past it so the coord fetch actually runs within this test.
+      jest.advanceTimersByTime(3_100);
     });
     await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(2));
 
@@ -194,6 +214,94 @@ describe('useCacheNotifications', () => {
     expect(mockedFire).toHaveBeenCalledWith(
       expect.objectContaining({ cacheCoord: COORD_B, title: 'New find on your cache' }),
     );
+  });
+});
+
+describe('resume-burst stagger (#554)', () => {
+  /** Extract the AppState 'change' listener registered by the hook. */
+  function getAppStateListener(): (s: string) => void {
+    const call = (AppState.addEventListener as jest.Mock).mock.calls.find((c) => c[0] === 'change');
+    return call![1];
+  }
+
+  it('does NOT call refetchAndRearm before 3 s after AppState active', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    renderHook(() =>
+      useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://relay'] }),
+    );
+    // Wait for the mount-time refetch so fetch-call-count is stable.
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    // Advance past REFETCH_MIN_GAP_MS (10 s) so the throttle won't block,
+    // then fire 'active' and advance to just BEFORE the 3 s stagger fires.
+    jest.advanceTimersByTime(10_100);
+    await act(async () => {
+      getAppStateListener()('active');
+      jest.advanceTimersByTime(2_900); // 2.9 s — stagger has NOT fired yet
+    });
+
+    // No second fetch should have been triggered yet (#554 — tap-dead wedge).
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('DOES call refetchAndRearm after the 3 s stagger elapses', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    renderHook(() =>
+      useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://relay'] }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    jest.advanceTimersByTime(10_100); // past REFETCH_MIN_GAP_MS
+    await act(async () => {
+      getAppStateListener()('active');
+      jest.advanceTimersByTime(3_100); // past RESUME_REFETCH_DELAY_MS
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+  });
+
+  it('cancels the stagger timer when the app re-backgrounds before it fires', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    renderHook(() =>
+      useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://relay'] }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    jest.advanceTimersByTime(10_100); // past REFETCH_MIN_GAP_MS
+    const listener = getAppStateListener();
+
+    await act(async () => {
+      listener('active'); // stagger timer starts (3 s)
+      jest.advanceTimersByTime(1_500); // mid-stagger
+      listener('background'); // re-backgrounded — timer must be cleared
+      jest.advanceTimersByTime(3_000); // stagger would have fired here
+    });
+
+    // The re-background must have cancelled the timer: no second fetch.
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the stagger timer on unmount so it does not fire after teardown', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { unmount } = renderHook(() =>
+      useCacheNotifications({ pubkey: VIEWER, getReadRelays: () => ['wss://relay'] }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    jest.advanceTimersByTime(10_100); // past REFETCH_MIN_GAP_MS
+    const listener = getAppStateListener();
+
+    await act(async () => {
+      listener('active'); // stagger timer starts
+      jest.advanceTimersByTime(1_500); // mid-stagger
+    });
+    // Unmount (effect cleanup) must clear the timer.
+    unmount();
+    await act(async () => {
+      jest.advanceTimersByTime(3_000); // stagger would have fired
+    });
+
+    // No second fetch should have run after unmount.
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 });
 

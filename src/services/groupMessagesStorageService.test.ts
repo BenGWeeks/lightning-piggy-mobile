@@ -10,6 +10,7 @@ import {
   appendGroupMessage,
   clearGroupMessages,
   loadGroupMessages,
+  removeGroupMessage,
   GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
@@ -139,6 +140,65 @@ describe('appendGroupMessage — basic ordering & cap', () => {
     await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'hi', 1700000000));
     await clearGroupMessages(GROUP);
     expect(await loadGroupMessages(GROUP)).toEqual([]);
+  });
+});
+
+describe('removeGroupMessage — failure-path retraction (#1033)', () => {
+  it('removes the row with the given id and returns the remaining messages', async () => {
+    const t = 1700000000;
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'first', t));
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'second', t + 1));
+    await appendGroupMessage(GROUP, wrap('b'.repeat(64), 'third', t + 2));
+    const after = await removeGroupMessage(GROUP, 'local_1_aaa');
+    expect(after).toHaveLength(2);
+    expect(after.find((m) => m.id === 'local_1_aaa')).toBeUndefined();
+  });
+
+  it('is a no-op when the id is not found — returns the unmodified list and skips the write', async () => {
+    const t = 1700000000;
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'only', t));
+    const setItemSpy = AsyncStorage.setItem as jest.Mock;
+    setItemSpy.mockClear();
+    const after = await removeGroupMessage(GROUP, 'nonexistent');
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe('a'.repeat(64));
+    // A true no-op (nothing to remove) must not write back to AsyncStorage —
+    // there's nothing to persist, and skipping the write avoids an
+    // unnecessary rejection surface on an otherwise no-op call.
+    expect(setItemSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty array when the group has no messages', async () => {
+    const after = await removeGroupMessage(GROUP, 'local_1_aaa');
+    expect(after).toEqual([]);
+  });
+
+  it('rejects (does NOT return []) when the AsyncStorage write fails, and leaves the persisted thread untouched', async () => {
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'first', 1700000000));
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'second', 1700000001));
+
+    // NOTE: the async-storage-mock's setItem is already a jest.fn(), so
+    // `jest.spyOn` returns that same mock rather than wrapping it — and a
+    // later `.mockRestore()` on it wipes its real implementation for good
+    // (there's no separate "original" to restore to), silently breaking
+    // every subsequent test's persistence. `mockRejectedValueOnce` alone,
+    // with no restore, is self-healing: it auto-reverts to the underlying
+    // implementation once its one-shot queue is consumed.
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('transient storage error'));
+
+    // The critical contract: a storage-write failure must surface as a
+    // rejection, NOT as a resolved `[]` — a caller that did
+    // `setMessages(await removeGroupMessage(...))` without this contract
+    // would otherwise wipe the entire visible thread on a transient blip.
+    await expect(removeGroupMessage(GROUP, 'local_1_aaa')).rejects.toThrow(
+      'transient storage error',
+    );
+
+    // Because the write never committed, the thread persisted in storage
+    // must be completely unchanged — both rows still present.
+    const persisted = await loadGroupMessages(GROUP);
+    expect(persisted).toHaveLength(2);
+    expect(persisted.map((m) => m.id).sort()).toEqual(['a'.repeat(64), 'local_1_aaa'].sort());
   });
 });
 
