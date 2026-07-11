@@ -69,7 +69,7 @@ const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
 
       {/* Segmented chip tabs — same pink-active / outlined-inactive pattern
           as the All ⟷ Friends toggle in HuntRecentFindsSection. */}
-      <View style={styles.tabRow}>
+      <View style={styles.tabRow} accessibilityRole="tablist">
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'hiders' && styles.tabButtonActive]}
           onPress={() => setActiveTab('hiders')}

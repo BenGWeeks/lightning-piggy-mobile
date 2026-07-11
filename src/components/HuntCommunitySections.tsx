@@ -67,6 +67,7 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
         }
         testID="hunt-leaderboard-link"
         accessibilityLabel={t('huntCommunity.viewLeaderboard')}
+        accessibilityState={{ disabled: loading }}
       >
         <Trophy size={18} color={colors.brandPink} strokeWidth={2.5} />
         <Text style={styles.leaderboardLinkText}>{t('huntCommunity.viewLeaderboard')}</Text>
