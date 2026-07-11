@@ -12,6 +12,14 @@ export const createConversationScreenStyles = (colors: Palette) =>
       backgroundColor: colors.background,
     },
     flex: { flex: 1 },
+    // Ephemeral "typing…" line shown just above the composer (#dm-typing).
+    typingIndicator: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontStyle: 'italic',
+      paddingHorizontal: 16,
+      paddingBottom: 4,
+    },
     header: {
       flexDirection: 'row',
       alignItems: 'center',

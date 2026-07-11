@@ -72,6 +72,7 @@ import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
+import { useTypingIndicator } from '../hooks/useTypingIndicator';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -476,6 +477,9 @@ const ConversationScreen: React.FC = () => {
     onZapMessage: () => setSendSheetOpen(true),
   });
 
+  // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
+  const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => (
       <ConversationMessageRow
@@ -718,9 +722,22 @@ const ConversationScreen: React.FC = () => {
             screens render through the same component so the keyboard
             wrapper, animated paddingBottom, and attach-panel placement
             can't drift again the way they did between v22 and v26. */}
+        {isPeerTyping && (
+          <Text
+            style={styles.typingIndicator}
+            testID="peer-typing-indicator"
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={t('conversationScreen.typing')}
+          >
+            {t('conversationScreen.typing')}
+          </Text>
+        )}
         <ConversationComposer
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={(text) => {
+            setDraft(text);
+            notifyTyping();
+          }}
           onSend={handleSend}
           onStartVoiceNote={() => setVoiceSheetOpen(true)}
           sending={sending}
