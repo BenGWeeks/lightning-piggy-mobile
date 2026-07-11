@@ -304,4 +304,60 @@ describe('startLiveDmSubscription — self-re-arm on drop / resume (#934)', () =
     jest.advanceTimersByTime(2_000);
     expect(onReconnect).toHaveBeenCalledTimes(2);
   });
+
+  it('cancels the pending settle timer when the sub drops again before it fires, so onReconnect does not fire mid-backoff (#1039 review)', async () => {
+    const onReconnect = jest.fn(async () => {});
+    startLiveDmSubscription(makeParams({ onReconnect }));
+    await flush();
+
+    // First drop → base backoff (5s) → reconnect re-arm, which schedules a
+    // 1.5s settle timer.
+    capturedOnWrapsClose!([]);
+    jest.advanceTimersByTime(5_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+
+    // Second drop arrives 500ms later — well before the settle window
+    // (1.5s) elapses. `armGeneration` is NOT bumped by onWrapsClose (only
+    // armSub bumps it), so without cancelling the timer explicitly its
+    // generation check alone would not catch this: the stale timer would
+    // still be scheduled to fire at the now-superseded settle deadline.
+    jest.advanceTimersByTime(500);
+    capturedOnWrapsClose!([]);
+
+    // Advance past where the first (now-cancelled) settle timer would have
+    // fired (1000ms further = original settle deadline). The second backoff
+    // (10s, exponential) is still pending, so the socket is down — onReconnect
+    // must NOT fire while stacked/stale.
+    jest.advanceTimersByTime(1_000);
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    // Second backoff completes (10s total from the second drop; 1s already
+    // elapsed above) → re-arm → a fresh settle timer for this arm only.
+    jest.advanceTimersByTime(9_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(3);
+
+    // That fresh settle timer fires exactly once.
+    jest.advanceTimersByTime(1_500);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the pending settle timer on teardown so it cannot fire after the sub is gone (#1039 review)', async () => {
+    const onReconnect = jest.fn(async () => {});
+    const teardown = startLiveDmSubscription(makeParams({ onReconnect }));
+    await flush();
+
+    // Drop → backoff → reconnect re-arm, which schedules the settle timer.
+    capturedOnWrapsClose!([]);
+    jest.advanceTimersByTime(5_000);
+    expect(mockSubscribe).toHaveBeenCalledTimes(2);
+
+    // Tear down before the settle window elapses. Teardown's own
+    // unsubscribe() also fires onWrapsClose synchronously (stale
+    // generation, no-ops), but the settle timer itself must be cleared too.
+    teardown();
+
+    // Advance well past the settle window — onReconnect must never fire.
+    jest.advanceTimersByTime(10_000);
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
 });

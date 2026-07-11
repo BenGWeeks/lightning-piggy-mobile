@@ -175,6 +175,14 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   let armGeneration = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Reconnect-refresh settle timer (#1039 review): armSub schedules this after
+  // a reconnect re-arm to fire onReconnect once the socket has had a moment to
+  // deliver its first backlog burst. `onWrapsClose` bumps neither `armGeneration`
+  // nor cancels this timer on its own, so if the sub drops again before the
+  // settle window elapses, the stale timer would otherwise still fire (same
+  // generation) and call onReconnect while the socket is down / mid-backoff.
+  // Tracked so it can be cleared on the next drop and on teardown.
+  let reconnectSettleTimer: ReturnType<typeof setTimeout> | null = null;
   // Wall-clock ms of the last AppState-resume-triggered re-arm, for the
   // leading-edge debounce below (rapid foreground/background churn coalesces).
   let lastResumeArmMs = 0;
@@ -768,6 +776,16 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
 
+  // Clears the pending reconnect-refresh settle timer, if any (#1039 review).
+  // Called on the next drop/close and on teardown so a torn-down or
+  // re-armed sub can never leave a stale settle timer stacked behind it.
+  const clearReconnectSettleTimer = (): void => {
+    if (reconnectSettleTimer) {
+      clearTimeout(reconnectSettleTimer);
+      reconnectSettleTimer = null;
+    }
+  };
+
   // How long after a RECONNECT re-arm we wait before firing refreshDmInbox to
   // flush the blind window. Gives the relay time to deliver the first batch of
   // backlogged wraps over the newly-opened WebSocket before the refresh runs;
@@ -782,6 +800,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const armSub = (): void => {
     if (cancelled) return;
     clearReconnectTimer();
+    // A prior arm's reconnect-refresh settle timer (if still pending) belongs
+    // to a generation we're about to supersede — drop it so re-arm cycles
+    // never stack settle timers (#1039 review).
+    clearReconnectSettleTimer();
     const generation = ++armGeneration;
     // isReconnect distinguishes a reconnect re-arm (after a socket drop or
     // Doze resume — #1035) from the initial cold arm. On reconnect, wraps
@@ -825,6 +847,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // to a superseded / torn-down sub (stale generation) or we were cancelled.
       onWrapsClose: () => {
         if (cancelled || generation !== armGeneration) return;
+        // The sub dropped again before its reconnect-refresh settle window
+        // elapsed — cancel the pending settle timer so it can't fire
+        // onReconnect while the socket is down / during backoff (#1039
+        // review). `armGeneration` isn't bumped until the next `armSub`, so
+        // without this the stale timer's generation check alone wouldn't
+        // catch it.
+        clearReconnectSettleTimer();
         // Lifetime-based health: a sub that survived a while was genuinely
         // connected, so its drop retries from the base delay; a rapid-fail
         // (offline) keeps climbing the exponential ladder.
@@ -850,7 +879,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the refresh and the live-sub REQ race and the refresh wins, leaving the
     // live-sub backlog duplicating the refresh's work.
     if (isReconnect && onReconnect) {
-      setTimeout(() => {
+      reconnectSettleTimer = setTimeout(() => {
+        reconnectSettleTimer = null;
+        // Still armed on the same generation this timer was scheduled for?
+        // A drop/close in the interim clears this timer (see onWrapsClose),
+        // and teardown clears it too, but the generation check is kept as a
+        // defense-in-depth guard against firing after the sub was superseded
+        // or torn down (#1039 review).
         if (cancelled || generation !== armGeneration) return;
         if (__DEV__)
           console.log(
@@ -964,6 +999,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the sub, not resurrect it). Also stop the AppState-resume re-arm.
     armGeneration += 1;
     clearReconnectTimer();
+    clearReconnectSettleTimer();
     appStateSub.remove();
     flushPendingInbox();
     // Drop the follow-gate deferral buffer + unregister the replay hook
