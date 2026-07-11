@@ -31,7 +31,8 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { recentCaches, finds, cacheByCoord, loading } = useHuntCommunity();
+  const { recentCaches, finds, cacheByCoord, hiderLeaderboard, finderLeaderboard, loading } =
+    useHuntCommunity();
 
   return (
     <View testID="hunt-community-sections">
@@ -48,12 +49,25 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
         onPressCache={onPressCache}
       />
       {/* Leaderboard entry point — full boards live on HuntLeaderboardScreen
-          so the main hunt list stays uncluttered. */}
+          so the main hunt list stays uncluttered. Disabled while loading
+          because params freeze at navigation time: navigating before the
+          boards have settled would hand the leaderboard screen a snapshot
+          that never updates. */}
       <TouchableOpacity
-        style={styles.leaderboardLink}
-        onPress={() => navigation.navigate('HuntLeaderboard')}
+        style={[styles.leaderboardLink, loading && styles.leaderboardLinkDisabled]}
+        disabled={loading}
+        onPress={() =>
+          navigation.navigate('HuntLeaderboard', {
+            hiderLeaderboard,
+            finderLeaderboard,
+            // The row is disabled while loading, so this is false at tap
+            // time — pass the live value rather than asserting it.
+            loading,
+          })
+        }
         testID="hunt-leaderboard-link"
         accessibilityLabel={t('huntCommunity.viewLeaderboard')}
+        accessibilityState={{ disabled: loading }}
       >
         <Trophy size={18} color={colors.brandPink} strokeWidth={2.5} />
         <Text style={styles.leaderboardLinkText}>{t('huntCommunity.viewLeaderboard')}</Text>
@@ -82,6 +96,9 @@ const createStyles = (colors: Palette) =>
       fontSize: 15,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    leaderboardLinkDisabled: {
+      opacity: 0.4,
     },
   });
 

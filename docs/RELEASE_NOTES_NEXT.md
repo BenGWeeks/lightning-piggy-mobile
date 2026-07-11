@@ -29,3 +29,4 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 - Tapping a sent group message no longer shows a false "Send failed" dialog — delivered messages now read "Message sent".
 - Geo-caches hidden in Lightning Piggy now always show the Piglet icon and pink map pin, even when they have no prize attached (existing caches fix themselves, no republish needed).
+- The app responds to taps immediately after waking from a long background pause.
