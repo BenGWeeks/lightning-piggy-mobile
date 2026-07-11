@@ -323,5 +323,29 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     await flush();
 
     expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(false);
+
+    // Re-arm: a fresh live-sub instance sharing the same knownWrapIdsRef
+    // (relay-list change, same viewer). The relay re-streams the wrap; it
+    // must be processed and surfaced this time, not deduped away.
+    mockNotifyDm.mockClear();
+    startLiveDmSubscription(makeParams({ knownWrapIdsRef, followPubkeysRef }));
+    await flush();
+    capturedOnEvent!({
+      id: 'parked-wrap',
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: now,
+      tags: [],
+      content: 'x',
+      rumor: {
+        kind: 14,
+        created_at: now,
+        content: 'hi',
+        partnership: { partnerPubkey: ALICE, fromMe: false },
+      },
+    });
+    await flush();
+    expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
+    expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(true);
   });
 });

@@ -127,9 +127,14 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // small burst doesn't reset the timer and pay zero yields. Disposed on
   // teardown. safetyEvery mirrors NIP17_LOOP_YIELD_EVERY so a pathological
   // stream can't monopolise the thread indefinitely even if performance.now
-  // resolution is coarse. Single fresh wraps in the foreground never blow the
-  // ~4 ms budget and cost zero RAF round-trips (~16 ms each); a cold-start
-  // burst yields only when the budget is actually exhausted.
+  // resolution is coarse. NB (Copilot #1039 review): the budget gate is
+  // wall-clock since the last yield, NOT accumulated JS work — the shared
+  // scheduler's designed semantics (nostrDecryptPacing; dmWrapIngest uses it
+  // identically). In this event-driven usage a sporadic wrap arriving after
+  // an idle gap therefore pays ONE RAF before decrypt — the same cost as the
+  // unconditional per-wrap yieldToEventLoop() this replaced, so no
+  // regression — while wraps landing inside a burst amortise to one yield
+  // per ~4 ms of work instead of one RAF each (where the #1035 win is).
   //
   // The AbortController spans the subscription lifetime: teardown aborts it
   // BEFORE dispose(), which settles any in-flight maybeYield() awaiter (a bare
@@ -512,12 +517,14 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
 
     // Budget-gated yield before each per-wrap decryption (#1035 / #496).
     // Replaces the unconditional `yieldToEventLoop()` (one RAF ≈ 16 ms per
-    // wrap regardless of load). `wrapYieldScheduler.maybeYield()` yields only
-    // when accumulated JS work since the last yield has blown the ~4 ms frame
-    // budget — a single fresh foreground wrap costs zero extra RAFs, while a
-    // burst still yields at the right cadence. The safety cap (every
-    // NIP17_LOOP_YIELD_EVERY wraps) backstops edge cases where decrypt runs
-    // faster than performance.now resolution on some devices.
+    // wrap regardless of load). The gate is wall-clock since the last yield
+    // (the shared scheduler's semantics — see the creation-site comment), so
+    // a sporadic foreground wrap after an idle gap still pays one RAF (same
+    // as the unconditional yield this replaced — no regression); the win is
+    // in bursts, which amortise to one yield per ~4 ms of work instead of
+    // one RAF per wrap. The safety cap (every NIP17_LOOP_YIELD_EVERY wraps)
+    // backstops edge cases where decrypt runs faster than performance.now
+    // resolution on some devices.
     await wrapYieldScheduler.maybeYield();
     // Torn down while parked on the yield (abort settles the awaiter): skip
     // post-teardown decrypt/persist work. `knownWrapIds` was already eagerly
