@@ -49,9 +49,10 @@ const HuntCommunitySections: React.FC<Props> = ({ pos, onPressCache, navigation 
         onPressCache={onPressCache}
       />
       {/* Leaderboard entry point — full boards live on HuntLeaderboardScreen
-          so the main hunt list stays uncluttered. Disabled while loading to
-          prevent the leaderboard screen receiving frozen params with
-          loading=true and no entries (skeleton rows that never resolve). */}
+          so the main hunt list stays uncluttered. Disabled while loading
+          because params freeze at navigation time: navigating before the
+          boards have settled would hand the leaderboard screen a snapshot
+          that never updates. */}
       <TouchableOpacity
         style={[styles.leaderboardLink, loading && styles.leaderboardLinkDisabled]}
         disabled={loading}

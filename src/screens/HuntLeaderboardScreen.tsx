@@ -44,6 +44,13 @@ const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
   // rather than crashing on destructuring.
   const { hiderLeaderboard = [], finderLeaderboard = [], loading = false } = route.params ?? {};
 
+  // Params are frozen at navigation time, so a `loading: true` arriving here
+  // can never flip to false (only possible via stale restored nav state — the
+  // entry row is disabled while live-loading). Honour it only while there is
+  // board data to skeleton over; with both boards empty, fall through to the
+  // empty-state text instead of skeleton rows that never resolve.
+  const effectiveLoading = loading && (hiderLeaderboard.length > 0 || finderLeaderboard.length > 0);
+
   // "Top hiders" is the default tab — mirrors the order used on the website.
   const [activeTab, setActiveTab] = useState<LeaderboardTab>('hiders');
 
@@ -103,9 +110,13 @@ const HuntLeaderboardScreen: React.FC<Props> = ({ navigation, route }) => {
         testID="hunt-leaderboard-scroll"
       >
         {activeTab === 'hiders' ? (
-          <HuntLeaderboard variant="hiders" entries={hiderLeaderboard} loading={loading} />
+          <HuntLeaderboard variant="hiders" entries={hiderLeaderboard} loading={effectiveLoading} />
         ) : (
-          <HuntLeaderboard variant="finders" entries={finderLeaderboard} loading={loading} />
+          <HuntLeaderboard
+            variant="finders"
+            entries={finderLeaderboard}
+            loading={effectiveLoading}
+          />
         )}
       </ScrollView>
     </View>
