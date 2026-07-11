@@ -68,10 +68,18 @@ function withTimeout(p: Promise<void>, label: string): Promise<void> {
       () => reject(new Error(`${label} timed out after ${PHASE_TIMEOUT_MS} ms`)),
       PHASE_TIMEOUT_MS,
     );
-    p.then(() => {
-      clearTimeout(timer);
-      resolve();
-    }, reject);
+    // Clear the timer on BOTH settle paths — a rejection must not leave the
+    // timeout scheduled to fire a second, misleading rejection later.
+    p.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
   });
 }
 
@@ -148,7 +156,16 @@ async function runEnginePhase(secretKeyHex: string, pubkeyHex: string): Promise<
   const finished = new Promise<void>((resolve) => (done = resolve));
   const sub = engine.addListener('onEngineRumorBatch', (event) => {
     if (firstAt === 0) firstAt = Date.now();
-    const entries = JSON.parse(event.rumorsJson) as { rumor: { content: string } }[];
+    // Guarded parse: a malformed payload should abort the bench loudly, not
+    // blow up inside the event callback as an unhandled exception.
+    let entries: { rumor: { content: string } }[];
+    try {
+      entries = JSON.parse(event.rumorsJson) as { rumor: { content: string } }[];
+    } catch (e) {
+      console.error('[PerfBlock] engineBench native emitted an unparseable batch — aborting:', e);
+      done();
+      return;
+    }
     for (const entry of entries) {
       if (!entry.rumor.content.startsWith('engine-bench')) {
         console.error('[PerfBlock] engineBench native produced a wrong rumor — aborting');

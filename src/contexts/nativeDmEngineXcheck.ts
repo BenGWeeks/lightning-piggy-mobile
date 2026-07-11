@@ -35,7 +35,10 @@ export function createEngineXcheck(): EngineXcheck {
   const engine = new Map<string, number>();
   const reported = new Set<string>();
 
-  const record = (map: Map<string, number>, wrapId: string): void => {
+  const record = (map: Map<string, number>, rawWrapId: string): void => {
+    // Normalise case so a mixed-case id from one path can never register as
+    // a false divergence against the other's lowercase form.
+    const wrapId = rawWrapId.toLowerCase();
     if (!map.has(wrapId)) map.set(wrapId, Date.now());
     if (map.size > MAX_TRACKED) {
       const oldest = map.keys().next().value;

@@ -29,7 +29,9 @@ export interface EngineRumorBatchEvent {
   rumorsJson: string;
 }
 
-type EngineEventName = 'onEngineRumorBatch' | 'onEngineReconnect';
+/** Reconnect carries no payload — typed separately below so a handler can't
+ * accidentally read `rumorsJson` off it. */
+export type EngineReconnectEvent = Record<string, never>;
 
 /**
  * Relay-engine surface (Stage 2 M2 of #1036) — present only in dev clients /
@@ -47,8 +49,12 @@ export interface NostrEngineApi {
   /** Tear down the pool and clear the native single-entry key cache. */
   engineStop(): Promise<void>;
   addListener(
-    eventName: EngineEventName,
+    eventName: 'onEngineRumorBatch',
     listener: (event: EngineRumorBatchEvent) => void,
+  ): { remove(): void };
+  addListener(
+    eventName: 'onEngineReconnect',
+    listener: (event: EngineReconnectEvent) => void,
   ): { remove(): void };
 }
 
