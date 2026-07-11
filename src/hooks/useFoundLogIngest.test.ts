@@ -141,6 +141,36 @@ describe('useFoundLogIngest — coord changes', () => {
     expect(result.current.zapTotalsByLog.size).toBe(0);
   });
 
+  it('an all-duplicate zap batch flushes without cloning zapsByLog (identity preserved)', () => {
+    const { result } = renderHook<UseFoundLogIngestResult, { coord: string }>(
+      ({ coord }) => useFoundLogIngest(coord),
+      {
+        initialProps: { coord: 'coordA' },
+      },
+    );
+
+    // Seed one log + one zap receipt.
+    act(() => {
+      logsHandlers[0](makeLog('log1') as unknown as VerifiedEvent);
+      jest.advanceTimersByTime(150);
+    });
+    act(() => {
+      zapsHandlers[zapsHandlers.length - 1]({ receiptId: 'r1', logId: 'log1', sats: 21 });
+      jest.advanceTimersByTime(150);
+    });
+    const before = result.current.zapsByLog;
+    expect(before.get('log1')?.get('r1')).toBe(21);
+
+    // The same receipt echoed again from another relay — the flush must
+    // dedupe it WITHOUT allocating a new outer Map (lazy-clone path).
+    act(() => {
+      zapsHandlers[zapsHandlers.length - 1]({ receiptId: 'r1', logId: 'log1', sats: 21 });
+      jest.advanceTimersByTime(150);
+    });
+    expect(result.current.zapsByLog).toBe(before);
+    expect(result.current.zapTotalsByLog.get('log1')).toBe(21);
+  });
+
   it('drops a log buffered (but not yet flushed) for the old coord on a coord change', () => {
     const { result, rerender } = renderHook<UseFoundLogIngestResult, { coord: string }>(
       ({ coord }) => useFoundLogIngest(coord),

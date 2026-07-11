@@ -153,15 +153,20 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       const batch = pendingZapsRef.current;
       pendingZapsRef.current = [];
       setZapsByLog((prev) => {
-        const next = new Map(prev);
+        // Mirror the found-log flush: only allocate the cloned outer Map on
+        // the first genuinely new (logId, receiptId) pair — a batch of
+        // duplicate receipts echoed from multiple relays exits without the
+        // O(prev.size) clone entirely.
+        let next: Map<string, Map<string, number>> | null = null;
         for (const { receiptId, logId, sats } of batch) {
-          const inner = next.get(logId);
+          const inner = (next ?? prev).get(logId);
           if (inner && inner.has(receiptId)) continue; // already counted
+          if (next === null) next = new Map(prev);
           const nextInner = new Map(inner ?? []);
           nextInner.set(receiptId, sats);
           next.set(logId, nextInner);
         }
-        return next;
+        return next ?? prev;
       });
     };
     const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
