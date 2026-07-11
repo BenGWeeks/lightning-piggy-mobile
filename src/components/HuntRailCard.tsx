@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { MapPin, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -68,7 +69,14 @@ const HuntRailCard: React.FC<Props> = ({
       {positionTestID ? <View testID={positionTestID} pointerEvents="none" /> : null}
       <View style={styles.railThumbWrap}>
         {cache.imageUrl ? (
-          <Image source={{ uri: cache.imageUrl }} style={styles.railThumb} resizeMode="cover" />
+          <ExpoImage
+            source={{ uri: cache.imageUrl }}
+            style={styles.railThumb}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={cache.imageUrl}
+            autoplay={false}
+          />
         ) : (
           <View
             style={[
