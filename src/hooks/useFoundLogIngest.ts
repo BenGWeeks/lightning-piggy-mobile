@@ -194,7 +194,13 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       }
       closer();
     };
-  }, [logIdsKey, coord]);
+    // Deliberately keyed on logIdsKey ONLY (not coord): on a coord change,
+    // logIdsKey still holds the previous cache's ids for one render (the logs
+    // reset lands in the other effect), so re-running here early would open a
+    // fresh subscription for the OLD ids. Waiting for logIdsKey to update
+    // means the old sub lingers one beat, which is harmless — receipts for
+    // absent logs are never rendered — while subscribing stale ids is not.
+  }, [logIdsKey]);
 
   // ----- derived views + optimistic insert --------------------------------
 
