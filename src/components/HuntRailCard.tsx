@@ -47,10 +47,12 @@ const HuntRailCard: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
   const computed =
-    pos && center
-      ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+    distanceMetres === undefined && pos && cache.geohash
+      ? (() => {
+          const center = decodeGeohash(cache.geohash);
+          return haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng });
+        })()
       : null;
   const distance = distanceMetres !== undefined ? distanceMetres : computed;
   return (
