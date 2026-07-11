@@ -140,8 +140,10 @@ function recordSample(op: string, ms: number): void {
 function percentiles(arr: number[]): { p50: number; p95: number } {
   if (arr.length === 0) return { p50: 0, p95: 0 };
   const sorted = arr.slice().sort((a, b) => a - b);
-  const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
-  const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? sorted[sorted.length - 1] ?? 0;
+  // (len - 1) * p matches the repo's existing percentile convention
+  // (friendsOfFriendsService.bench.ts) — `len * p` skews indexes high.
+  const p50 = sorted[Math.floor((sorted.length - 1) * 0.5)] ?? 0;
+  const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)] ?? 0;
   return { p50, p95 };
 }
 
@@ -396,7 +398,7 @@ export function nostrGetEventHash(
 }
 
 // ---------------------------------------------------------------------------
-// Test-only exports (prefixed __) — flush summary immediately + reset state.
+// Test-only exports (prefixed __) — force a summary flush, or reset state.
 // ---------------------------------------------------------------------------
 
 /** @internal Test use only — reset all accumulated stats. */
