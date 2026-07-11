@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { ChevronLeft, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -26,6 +26,13 @@ import { isHiddenInProd, stripHiddenForPersist } from '../utils/exploreContentFi
 interface Props {
   navigation: ExploreNavigation;
 }
+
+// Stable empty-array reference for the outer FlatList's `data` — every row
+// this screen renders (map, Nearby rail, community rails) lives in
+// `ListHeaderComponent` instead, so there's nothing to virtualize at the
+// list-item level. A module-level constant (vs. an inline `[]` literal)
+// avoids handing FlatList a new array identity every render.
+const EMPTY_DATA: never[] = [];
 
 /**
  * **Geo-caches** sub-screen — single-purpose discovery + creation
@@ -357,7 +364,21 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>{t('huntScreen.tagline')}</Text>
       </View>
 
-      <ScrollView
+      {/* Outer container is a FlatList (not a ScrollView) with no row data of
+          its own — everything lives in ListHeaderComponent below — so the
+          horizontal rails inside HuntNearbySection / HuntCommunitySections
+          stay virtualized. Nesting those FlatLists inside a plain ScrollView
+          would trip RN's "VirtualizedLists should never be nested inside
+          plain ScrollViews" warning and disable their windowing; a FlatList
+          parent with ListHeaderComponent is the same pattern PlacesScreen
+          and the map-scrolls-with-content commit (#1044) already use.
+          `data={EMPTY_DATA}` + `renderItem={null}` is the "single dummy
+          item" shape Copilot's review suggested, minus the dummy item —
+          ListHeaderComponent renders regardless of `data.length`, so an
+          empty array is enough. */}
+      <FlatList
+        data={EMPTY_DATA}
+        renderItem={null}
         contentContainerStyle={styles.scrollContent}
         testID="hunt-screen-scroll"
         keyboardShouldPersistTaps="handled"
@@ -369,63 +390,66 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             colors={[colors.brandPink]}
           />
         }
-      >
-        {/* Mini-map scrolls with the content — same pattern as
-            PlacesScreen. MapLibre is native so vertical pans on the map are
-            consumed by the map's gesture recogniser before they reach the
-            ScrollView's RefreshControl, meaning the old pull-to-refresh race
-            (issue #570, WebView era) no longer applies. LibreMiniMap carries
-            its own marginHorizontal: 16 so the map lands at a 16 dp inset
-            without any additional offset here. Passes `filteredCaches` so the
-            map pins match the rail visually (#19). */}
-        <View style={styles.miniMapContainer}>
-          <LibreMiniMap
-            // Mini-map follows GPS — camera anchor should track live
-            // position, not the stale one-shot fetch `pos`.
-            lat={livePos?.lat ?? pos?.lat ?? null}
-            lon={livePos?.lon ?? pos?.lon ?? null}
-            userLat={livePos?.lat ?? null}
-            userLon={livePos?.lon ?? null}
-            userAvatarUri={profile?.picture ?? null}
-            // Only fall back to the initial-fetch accuracy when there's
-            // no live fix yet; once livePos exists, trust its accuracy
-            // (including null) so we never render a halo around live
-            // coords with stale accuracy.
-            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
-            merchants={[]}
-            caches={filteredCaches.map((c) => c.cache)}
-            events={[]}
-            onTapMap={() => navigation.navigate('Map')}
-            onSelectCache={(c) => setSelectedCache(c)}
-            onOpenLegend={() => setLegendVisible(true)}
-            // One zoom level wider than the default 13 so the Geo-caches
-            // hub map shows a bigger catchment without the user having to
-            // pinch-zoom out.
-            defaultZoom={12}
-          />
-        </View>
-        {/* Nearby rail directly under the map — what's around you is the
-            page's primary question, and the map pins + rail cards answer it
-            as one unit (the search field scopes both). */}
-        <HuntNearbySection
-          items={filteredCaches}
-          loading={loading}
-          pos={communityPos}
-          searchQuery={searchQuery}
-          onChangeSearch={setSearchQuery}
-          activeFilterCount={activeFilterCount}
-          onOpenFilters={() => setFilterSheetOpen(true)}
-          onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
-        />
-        {/* Community engagement rails + leaderboard link — below the nearby
-            rail so discovery isn't limited to whatever happens to be within
-            ~5 km. */}
-        <HuntCommunitySections
-          pos={communityPos}
-          onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
-          navigation={navigation}
-        />
-      </ScrollView>
+        ListHeaderComponent={
+          <>
+            {/* Mini-map scrolls with the content — same pattern as
+                PlacesScreen. MapLibre is native so vertical pans on the map are
+                consumed by the map's gesture recogniser before they reach the
+                FlatList's RefreshControl, meaning the old pull-to-refresh race
+                (issue #570, WebView era) no longer applies. LibreMiniMap carries
+                its own marginHorizontal: 16 so the map lands at a 16 dp inset
+                without any additional offset here. Passes `filteredCaches` so the
+                map pins match the rail visually (#19). */}
+            <View style={styles.miniMapContainer}>
+              <LibreMiniMap
+                // Mini-map follows GPS — camera anchor should track live
+                // position, not the stale one-shot fetch `pos`.
+                lat={livePos?.lat ?? pos?.lat ?? null}
+                lon={livePos?.lon ?? pos?.lon ?? null}
+                userLat={livePos?.lat ?? null}
+                userLon={livePos?.lon ?? null}
+                userAvatarUri={profile?.picture ?? null}
+                // Only fall back to the initial-fetch accuracy when there's
+                // no live fix yet; once livePos exists, trust its accuracy
+                // (including null) so we never render a halo around live
+                // coords with stale accuracy.
+                userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+                merchants={[]}
+                caches={filteredCaches.map((c) => c.cache)}
+                events={[]}
+                onTapMap={() => navigation.navigate('Map')}
+                onSelectCache={(c) => setSelectedCache(c)}
+                onOpenLegend={() => setLegendVisible(true)}
+                // One zoom level wider than the default 13 so the Geo-caches
+                // hub map shows a bigger catchment without the user having to
+                // pinch-zoom out.
+                defaultZoom={12}
+              />
+            </View>
+            {/* Nearby rail directly under the map — what's around you is the
+                page's primary question, and the map pins + rail cards answer it
+                as one unit (the search field scopes both). */}
+            <HuntNearbySection
+              items={filteredCaches}
+              loading={loading}
+              pos={communityPos}
+              searchQuery={searchQuery}
+              onChangeSearch={setSearchQuery}
+              activeFilterCount={activeFilterCount}
+              onOpenFilters={() => setFilterSheetOpen(true)}
+              onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+            />
+            {/* Community engagement rails + leaderboard link — below the nearby
+                rail so discovery isn't limited to whatever happens to be within
+                ~5 km. */}
+            <HuntCommunitySections
+              pos={communityPos}
+              onPressCache={(coord) => navigation.navigate('HuntPiggyDetail', { coord })}
+              navigation={navigation}
+            />
+          </>
+        }
+      />
       <HuntFilterSheet
         visible={filterSheetOpen}
         onClose={() => setFilterSheetOpen(false)}

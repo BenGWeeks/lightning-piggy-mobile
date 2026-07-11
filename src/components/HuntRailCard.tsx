@@ -51,7 +51,10 @@ const HuntRailCard: React.FC<Props> = ({
     distanceMetres === undefined && pos && cache.geohash
       ? (() => {
           const center = decodeGeohash(cache.geohash);
-          return haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng });
+          return haversineMetres(
+            { lat: pos.lat, lon: pos.lon },
+            { lat: center.lat, lon: center.lng },
+          );
         })()
       : null;
   const distance = distanceMetres !== undefined ? distanceMetres : computed;
