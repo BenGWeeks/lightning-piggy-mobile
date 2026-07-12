@@ -77,8 +77,14 @@ check_pattern() {
 
 # Count occurrences per tracked source file (tests excluded — test fixtures may
 # legitimately build Maps).
+# Exempt files implement the sanctioned COALESCED-flush pattern: their clones
+# run once per <=150 ms flush (or per batch), not per incoming event — the
+# same criterion that exempts useCoalescedMap itself. A file only belongs
+# here if its clones are provably flush-scoped; per-event clones never do.
 map_clones=$(git ls-files 'src/**/*.ts' 'src/**/*.tsx' \
-  | grep -v '\.test\.' | grep -v '^src/utils/useCoalescedMap\.ts$' \
+  | grep -v '\.test\.' \
+  | grep -v '^src/utils/useCoalescedMap\.ts$' \
+  | grep -v '^src/hooks/useFoundLogIngest\.ts$' \
   | xargs grep -c "new Map(prev" 2>/dev/null | grep -v ':0$' || true)
 check_pattern "per-event Map clone" "$map_clones" MAP_CLONE_BASELINE \
   "Batch relay/event ingest with src/utils/useCoalescedMap.ts instead of cloning per event."

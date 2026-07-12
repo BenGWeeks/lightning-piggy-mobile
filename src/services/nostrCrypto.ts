@@ -43,8 +43,9 @@ import {
 import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
 
 // ---------------------------------------------------------------------------
-// Perf gate — matches perfLog.ts pattern exactly (gated on build-time env,
-// not __DEV__ alone so it fires in EXPO_PUBLIC_KEEP_PERF_LOGS preview APKs).
+// Perf gate — active in dev (__DEV__) AND in EXPO_PUBLIC_KEEP_PERF_LOGS
+// preview APKs, so the benchmark markers fire in both; production release
+// builds (neither set) skip the sampling entirely.
 // ---------------------------------------------------------------------------
 const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 
@@ -70,15 +71,50 @@ const flags = {
   xcheck: __DEV__ && process.env.EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK === '1',
 };
 
-/** @internal Test use only — flip routing/cross-check without rebuilding env. */
-export function __setNostrCryptoFlagsForTests(next: { native?: boolean; xcheck?: boolean }): void {
+// Warm-up latch — routing is permitted ONLY after warmUpNativeCrypto() has
+// resolved successfully (the JNA + libnostr_sdk_ffi.so load actually worked).
+// It defaults false, so: (a) an op that runs before warm-up resolves stays on
+// JS, and (b) a module that is linked but fails to load (dlopen/JNA failure)
+// never routes real crypto into a broken path — the catch below leaves this
+// false for the rest of the session. warmUpNativeCrypto() is fire-and-forgotten
+// at startup (see index.ts) — it need not be awaited; the false default keeps
+// first ops on JS until it latches, so there is no unready-native window.
+let nativeReady = false;
+
+// Single-entry hex cache for the viewer's secret key. The native FFI takes the
+// key as hex, but the sk is a stable reference across a session (from the
+// memoised key cache), so re-running bytesToHex on every decrypt/encrypt — which
+// inbox ingest does thousands of times — is avoidable overhead that erodes the
+// native speed-up. Keyed on reference identity: a new sk (account switch)
+// misses and refreshes.
+let cachedSk: Uint8Array | null = null;
+let cachedSkHex = '';
+function skHex(sk: Uint8Array): string {
+  if (sk !== cachedSk) {
+    cachedSk = sk;
+    cachedSkHex = bytesToHex(sk);
+  }
+  return cachedSkHex;
+}
+
+/** @internal Test use only — flip routing/cross-check/warm-up latch without env. */
+export function __setNostrCryptoFlagsForTests(next: {
+  native?: boolean;
+  xcheck?: boolean;
+  ready?: boolean;
+}): void {
   if (!__DEV__) return;
   if (next.native !== undefined) flags.native = next.native;
   if (next.xcheck !== undefined) flags.xcheck = next.xcheck;
+  if (next.ready !== undefined) nativeReady = next.ready;
 }
 
+// Routing gate: the native module is used ONLY when the build-time env flag is
+// set AND warm-up has succeeded (nativeReady). getNostrNative() adds the third
+// guard — it returns null off-Android and when the module isn't linked.
 function nativeIfActive(): NostrNativeApi | null {
-  return flags.native ? getNostrNative() : null;
+  if (!flags.native || !nativeReady) return null;
+  return getNostrNative();
 }
 
 /** True when sk+pk-shaped ops are actually routing to the native module. */
@@ -87,16 +123,28 @@ export function isNativeCryptoActive(): boolean {
 }
 
 /**
- * Pays the native module's one-time JNA + .so load off the JS thread.
- * Resolves false (never rejects) when native crypto isn't linked or can't
- * load — callers just stay on the JS path.
+ * Pays the native module's one-time JNA + .so load off the JS thread and
+ * latches routing on: sets nativeReady=true ONLY when warm-up resolves true,
+ * so every crypto op stays on the pure-JS path until the native module has
+ * proven it can load. Resolves false (never rejects) — a linked-but-broken
+ * module (dlopen/JNA failure), a disabled env flag, or a non-Android platform
+ * all leave nativeReady false and keep callers on JS for the session.
+ *
+ * Fire-and-forgotten at startup (index.ts) to warm native routing; it does
+ * not need awaiting — until it resolves, nativeReady's false default keeps
+ * first ops on JS, so there is no unready-native window.
  */
 export async function warmUpNativeCrypto(): Promise<boolean> {
-  const native = nativeIfActive();
+  if (!flags.native) return false;
+  // Reach the module directly (not via nativeIfActive, which gates on the very
+  // latch we're about to set) — still platform/linkage-guarded by getNostrNative.
+  const native = getNostrNative();
   if (!native) return false;
   try {
-    return await native.warmUp();
+    nativeReady = (await native.warmUp()) === true;
+    return nativeReady;
   } catch {
+    nativeReady = false;
     return false;
   }
 }
@@ -233,16 +281,22 @@ export function nip44DecryptFrom(
   secretKey: Uint8Array,
   peerPublicKey: string,
 ): string {
+  // Normalise the pubkey up front so the native and JS-fallback paths derive
+  // an identical conversation key regardless of routing (an uppercase pubkey
+  // must not decrypt differently, and xcheck must compare like with like).
+  const pub = peerPublicKey.toLowerCase();
   const native = nativeIfActive();
   if (!native) {
-    return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, peerPublicKey));
+    return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, pub));
   }
-  const pub = peerPublicKey.toLowerCase();
-  const t0 = performance.now();
+  // Gate the timestamp on PERF_ENABLED — t0 is only read inside the
+  // PERF_ENABLED sample guard below, so skip the call on the hot path when
+  // logging is off (mirrors the pure-JS wrappers' early-return).
+  const t0 = PERF_ENABLED ? performance.now() : 0;
   let result: string | undefined;
   let nativeError: unknown;
   try {
-    result = native.nip44Decrypt(bytesToHex(secretKey), pub, ciphertext);
+    result = native.nip44Decrypt(skHex(secretKey), pub, ciphertext);
   } catch (error) {
     nativeError = error;
   }
@@ -288,14 +342,15 @@ export function nip44EncryptForRecipient(
   senderSecretKey: Uint8Array,
   recipientPubkey: string,
 ): string {
+  // Normalise up front so JS-fallback and native derive the same conversation
+  // key regardless of routing (see nip44DecryptFrom).
+  const pub = recipientPubkey.toLowerCase();
   const native = nativeIfActive();
   if (!native) {
-    const conversationKey = nip44GetConversationKey(senderSecretKey, recipientPubkey);
-    return nip44Encrypt(plaintext, conversationKey);
+    return nip44Encrypt(plaintext, nip44GetConversationKey(senderSecretKey, pub));
   }
-  const pub = recipientPubkey.toLowerCase();
-  const t0 = performance.now();
-  const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
+  const t0 = PERF_ENABLED ? performance.now() : 0;
+  const payload = native.nip44Encrypt(skHex(senderSecretKey), pub, plaintext);
   if (PERF_ENABLED) {
     recordSample('nip44Encrypt', performance.now() - t0);
     scheduleSummary();
@@ -353,7 +408,7 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
   if (native) {
     const memoised = event[verifiedSymbol];
     if (typeof memoised === 'boolean') return memoised;
-    const t0 = performance.now();
+    const t0 = PERF_ENABLED ? performance.now() : 0;
     let valid = false;
     try {
       const hash = getEventHash(event);

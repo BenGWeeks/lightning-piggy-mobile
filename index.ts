@@ -21,6 +21,9 @@ perfHeartbeatStart();
 
 import App from './App';
 perfLog('App.tsx imported');
+// Facade warm-up entry point — invoked after registerRootComponent below to
+// latch native-crypto routing (no-op unless EXPO_PUBLIC_NATIVE_CRYPTO is set).
+import { warmUpNativeCrypto } from './src/services/nostrCrypto';
 
 // Suppress the dev-tools / debugger warning banners. The "Open debugger
 // to view warnings" overlay keeps intercepting taps + stealing focus on
@@ -58,6 +61,16 @@ console.warn = (...args: unknown[]) => {
 // the environment is set up appropriately
 perfLog('registerRootComponent called');
 registerRootComponent(App);
+
+// Native crypto warm-up (#1046). Fire-and-forget so it never blocks startup:
+// warmUp pays the one-time JNA + libnostr_sdk_ffi.so load off the JS thread and
+// latches the facade's nativeReady flag. This is what makes native routing
+// meaningful — until it resolves true, EVERY crypto op stays on the pure-JS
+// path (nativeReady defaults false), so a linked-but-broken module can never
+// route real crypto into a failing path. No-op unless EXPO_PUBLIC_NATIVE_CRYPTO
+// is set and the Android module is linked (warmUpNativeCrypto short-circuits to
+// false otherwise), so this costs nothing in a normal build.
+void warmUpNativeCrypto();
 
 // Dev-only crypto benchmark for the #1046 native module bring-up. The
 // EXPO_PUBLIC_* literal is inlined at bundle time, so in every normal build
