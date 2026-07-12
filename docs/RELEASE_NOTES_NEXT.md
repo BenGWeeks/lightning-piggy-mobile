@@ -17,7 +17,7 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - **App language is now its own setting.** Account → **Language** (moved out of Appearance) — switch between System / English / Español / Українська.
 - **"Typing…" in chats.** You'll see when the other person is typing in a 1:1 message thread.
 - **Tabbed leaderboard.** Explore → Geo-caches → Leaderboard now has **Top hiders** / **Top finders** tabs instead of one long list.
-- **The Geo-caches map scrolls with the page**, and Nearby merchants is a horizontal rail — the map no longer takes up a fixed chunk of the screen.
+- **The Geo-caches map scrolls with the page**, and Nearby merchants now show in a horizontal rail — the map no longer takes up a fixed chunk of the screen.
 - **Experimental (testers): native crypto.** Account → Nostr → **Experimental** has a "Native crypto (rust-nostr)" switch. Turning it on (Android only, restart to apply) runs message encryption and signature checks through a native module instead of JavaScript — much faster on busy inboxes. Watch for anything odd in messaging and turn it back off if so. Off by default; the row shows "Unavailable on this device" where it can't run.
 
 ### Improved
