@@ -97,9 +97,26 @@ export function setNativeCryptoEnabled(enabled: boolean): void {
 // It defaults false, so: (a) an op that runs before warm-up resolves stays on
 // JS, and (b) a module that is linked but fails to load (dlopen/JNA failure)
 // never routes real crypto into a broken path — the catch below leaves this
-// false for the rest of the session. warmUpNativeCrypto() must be awaited at
-// startup for native routing to ever activate (see index.ts).
+// false for the rest of the session. warmUpNativeCrypto() is fire-and-forgotten
+// at startup (see index.ts) — it need not be awaited; the false default keeps
+// first ops on JS until it latches, so there is no unready-native window.
 let nativeReady = false;
+
+// Single-entry hex cache for the viewer's secret key. The native FFI takes the
+// key as hex, but the sk is a stable reference across a session (from the
+// memoised key cache), so re-running bytesToHex on every decrypt/encrypt — which
+// inbox ingest does thousands of times — is avoidable overhead that erodes the
+// native speed-up. Keyed on reference identity: a new sk (account switch)
+// misses and refreshes.
+let cachedSk: Uint8Array | null = null;
+let cachedSkHex = '';
+function skHex(sk: Uint8Array): string {
+  if (sk !== cachedSk) {
+    cachedSk = sk;
+    cachedSkHex = bytesToHex(sk);
+  }
+  return cachedSkHex;
+}
 
 /** @internal Test use only — flip routing/cross-check/warm-up latch without env. */
 export function __setNostrCryptoFlagsForTests(next: {
@@ -315,7 +332,7 @@ export function nip44DecryptFrom(
   let result: string | undefined;
   let nativeError: unknown;
   try {
-    result = native.nip44Decrypt(bytesToHex(secretKey), pub, ciphertext);
+    result = native.nip44Decrypt(skHex(secretKey), pub, ciphertext);
   } catch (error) {
     nativeError = error;
   }
@@ -369,7 +386,7 @@ export function nip44EncryptForRecipient(
     return nip44Encrypt(plaintext, nip44GetConversationKey(senderSecretKey, pub));
   }
   const t0 = PERF_ENABLED ? performance.now() : 0;
-  const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
+  const payload = native.nip44Encrypt(skHex(senderSecretKey), pub, plaintext);
   if (PERF_ENABLED) {
     recordSample('nip44Encrypt', performance.now() - t0);
     scheduleSummary();
