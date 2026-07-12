@@ -1,7 +1,8 @@
 /**
  * Platform-guard tests for modules/nostr-native/index.ts (Copilot #1054).
  *
- * Lives under src/ so jest.config's testMatch (`src/ ** /*.test.ts`) picks it
+ * Lives under src/ so jest.config's testMatch — the `.test.{ts,tsx}` files
+ * under the `<rootDir>/src` tree — picks it
  * up — the module under test is in modules/nostr-native. It verifies
  * getNostrNative()'s hard Platform.OS === 'android' guard: even when
  * requireOptionalNativeModule resolves to a non-null module (a future iOS
