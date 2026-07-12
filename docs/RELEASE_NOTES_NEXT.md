@@ -14,20 +14,20 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Hunt community sections.** The Geo-caches screen now shows "Recently added" and "Recently found" rails, plus a Leaderboard page (top hiders and top finders) — Explore → Geo-caches → scroll down.
-- **Cover-flow card picker.** Wallet Settings → Card Design is now a swipeable cover-flow of all card themes.
-- **AI Robot wallet card.** A new chrome-and-green robot design in the card picker.
+- **App language is now its own setting.** Account → **Language** (moved out of Appearance) — switch between System / English / Español / Українська.
+- **"Typing…" in chats.** You'll see when the other person is typing in a 1:1 message thread.
+- **Tabbed leaderboard.** Explore → Geo-caches → Leaderboard now has **Top hiders** / **Top finders** tabs instead of one long list.
+- **The Geo-caches map scrolls with the page**, and Nearby merchants now show in a horizontal rail — the map no longer takes up a fixed chunk of the screen.
+- **Experimental (testers): native crypto.** Account → Nostr → **Experimental** has a "Native crypto (rust-nostr)" switch. Turning it on (Android only, restart to apply) runs message encryption and signature checks through a native module instead of JavaScript — much faster on busy inboxes. Watch for anything odd in messaging and turn it back off if so. Off by default; the row shows "Unavailable on this device" where it can't run.
 
 ### Improved
 
-- Settings screens (Security, On-chain, Nearby merchants) now use white section icons and brand-pink toggles and selected rows.
-- Home feels snappier — wallet refreshes that change nothing no longer rebuild the transaction list.
-- Explore map pans more smoothly (marker layers no longer re-render on every GPS fix).
-- Group messages appear in the thread instantly when you hit send.
+- **Group messages appear the instant you hit send** — no waiting for encryption to finish first.
+- **Snappier taps after the app wakes up** from a long time in the background.
+- **Sending is faster** — the app no longer re-reads your key from secure storage on every message.
+- **Geo-cache pages are smoother** as recently-added / recently-found and their icons stream in.
 
 ### Fixed
 
-- Tapping a sent group message no longer shows a false "Send failed" dialog — delivered messages now read "Message sent".
-- Geo-caches hidden in Lightning Piggy now always show the Piglet icon and pink map pin, even when they have no prize attached (existing caches fix themselves, no republish needed).
-- The app responds to taps immediately after waking from a long background pause.
-- Messages sent while the app was asleep now appear as soon as it reconnects, not just when you open the Messages tab.
+- **Messages sent while your app was asleep now arrive as soon as it reconnects**, instead of only when you open the Messages tab.
+- Ukrainian: the "typing…" label is now translated.
