@@ -1414,7 +1414,15 @@
     "grantAmberPermissionLabel": "Надати Amber дозвіл NIP-44",
     "grantPermissionInAmber": "Надати дозвіл в Amber",
     "noProfilePubkey": "Немає pubkey профілю — спершу увійдіть.",
-    "amberRoundTripMismatch": "Невідповідність round-trip Amber — можливо, дозвіл не встановлено."
+    "amberRoundTripMismatch": "Невідповідність round-trip Amber — можливо, дозвіл не встановлено.",
+    "experimental": "Експериментальне",
+    "nativeCryptoHint": "Виконує шифрування NIP-44 та перевірку підписів через нативний модуль rust-nostr замість JavaScript. Функція для тестувальників — стежте за журналами [PerfBlock] nostrCrypto і вимкніть, якщо щось працює не так.",
+    "nativeCryptoLabel": "Нативна криптографія (rust-nostr)",
+    "nativeCryptoRestartCaption": "Перезапустіть застосунок, щоб застосувати.",
+    "nativeCryptoUnavailable": "Недоступно на цьому пристрої",
+    "nativeCryptoA11y": "Увімкнути нативну криптографію",
+    "nativeCryptoActiveYes": "Активна цього сеансу: так",
+    "nativeCryptoActiveNo": "Активна цього сеансу: ні"
   },
   "offlineBanner": {
     "a11yLabel": "Ви офлайн. Деякі дані можуть бути застарілими.",
