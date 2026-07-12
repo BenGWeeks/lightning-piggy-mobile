@@ -1,4 +1,4 @@
-import { nip44GetConversationKey, nip44Decrypt, nostrGetEventHash } from '../services/nostrCrypto';
+import { nip44DecryptFrom, nostrGetEventHash } from '../services/nostrCrypto';
 import type { RawGiftWrapEvent } from '../services/nostrService';
 import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
@@ -216,8 +216,7 @@ export function unwrapWrapNsec(
   // Layer 1: wrap.content → seal, keyed by the ephemeral wrap pubkey.
   let sealJson: string;
   try {
-    const wrapKey = nip44GetConversationKey(secretKey, wrap.pubkey);
-    sealJson = nip44Decrypt(wrap.content, wrapKey);
+    sealJson = nip44DecryptFrom(wrap.content, secretKey, wrap.pubkey);
   } catch (error) {
     return skip(`wrap decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
@@ -227,8 +226,7 @@ export function unwrapWrapNsec(
   // Layer 2: seal.content → rumor, keyed by the seal (sender) pubkey.
   let rumorJson: string;
   try {
-    const sealKey = nip44GetConversationKey(secretKey, seal.pubkey);
-    rumorJson = nip44Decrypt(seal.content, sealKey);
+    rumorJson = nip44DecryptFrom(seal.content, secretKey, seal.pubkey);
   } catch (error) {
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }

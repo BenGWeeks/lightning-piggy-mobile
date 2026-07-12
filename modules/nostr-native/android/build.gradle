@@ -1,0 +1,68 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.lightningpiggy.nostrnative'
+version = '0.1.0'
+
+android {
+  namespace "com.lightningpiggy.nostrnative"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // rust-nostr's published UniFFI Kotlin bindings with prebuilt
+  // libnostr_sdk_ffi.so for all four Android ABIs — no local Rust
+  // toolchain, same consume-prebuilt-artifact model as bdk-rn. The
+  // protocol-only `org.rust-nostr:nostr` artifact was retired at 0.35.0
+  // (bindings consolidated into nostr-sdk), so this is the smallest
+  // current artifact that carries nip44 + schnorr. Pulls in jna@aar
+  // (declared in the artifact's POM) for the UniFFI JNI dispatch.
+  implementation 'org.rust-nostr:nostr-sdk-kmp-android:0.44.3'
+}
+
+// ---------------------------------------------------------------------------
+// Supply-chain guard: fail the build if the rust-nostr binary ever differs
+// from the artifact we audited and benchmarked (#1046 / PR #1048). This is a
+// wallet app consuming a prebuilt native library — a silent artifact swap
+// (registry compromise, MITM, malicious re-publish) must break the build, not
+// ship. Scoped to this one artifact deliberately: android/ is prebuild-
+// generated, so Gradle's whole-project verification-metadata.xml can't be
+// committed, and verifying the full RN dependency tree there would add
+// hundreds of churn-prone entries for no additional wallet-risk coverage.
+// When bumping the dependency version: verify the new AAR's SHA-256 from two
+// independent sources (local Gradle cache + a fresh repo1.maven.org download)
+// before updating this constant.
+def NOSTR_SDK_AAR_SHA256 = 'c375c89a8a27249c933b83fce721f218c64e7cb363fbb60ca2570c941a7ef237'
+
+tasks.register('verifyNostrSdkArtifact') {
+  doLast {
+    def artifact = configurations.releaseRuntimeClasspath
+      .resolvedConfiguration.resolvedArtifacts
+      .find {
+        // Exact module match (Copilot #1054 review): a group-only match would
+        // silently pin whichever org.rust-nostr artifact resolved first if the
+        // group ever contributes more than one (directly or transitively).
+        it.moduleVersion.id.group == 'org.rust-nostr' &&
+          it.moduleVersion.id.name == 'nostr-sdk-kmp-android'
+      }
+    if (artifact == null) {
+      throw new GradleException('nostr-native: org.rust-nostr:nostr-sdk-kmp-android artifact not found on the runtime classpath — dependency renamed?')
+    }
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    artifact.file.eachByte(1024 * 1024) { bytes, len -> digest.update(bytes, 0, len) }
+    def actual = digest.digest().collect { String.format('%02x', it) }.join()
+    if (actual != NOSTR_SDK_AAR_SHA256) {
+      throw new GradleException(
+        "nostr-native: SHA-256 mismatch for ${artifact.file.name} — expected ${NOSTR_SDK_AAR_SHA256}, got ${actual}. " +
+        'The rust-nostr binary is not the audited artifact; refusing to build.')
+    }
+    logger.lifecycle("nostr-native: rust-nostr artifact checksum verified (${actual.take(12)}…)")
+  }
+}
+
+preBuild.dependsOn 'verifyNostrSdkArtifact'

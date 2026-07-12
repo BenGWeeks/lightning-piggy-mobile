@@ -286,7 +286,7 @@ describe('benchmark harness — stat accumulation', () => {
     const alice = freshKeyPair();
     const bob = freshKeyPair();
     const key = nip44GetConversationKey(alice.sk, bob.pk);
-    // Perform 210 encrypts — reservoir should evict the oldest 10
+    // Perform 210 encrypts — the sliding window should evict the oldest 10
     for (let i = 0; i < 210; i++) {
       nip44Encrypt(`msg-${i}`, key);
     }
