@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Switch } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import { X as XIcon } from 'lucide-react-native';
@@ -19,6 +19,11 @@ import { useNostrDmInbox } from '../../contexts/DmInboxContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createNostrScreenStyles } from '../../styles/NostrScreen.styles';
+import { isNativeCryptoActive, isNativeCryptoAvailable } from '../../services/nostrCrypto';
+import {
+  loadNativeCryptoEnabled,
+  saveNativeCryptoEnabled,
+} from '../../services/nativeCryptoPreference';
 
 type RelayRow = {
   url: string;
@@ -54,7 +59,10 @@ const NostrScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
-      const tick = () => setConnStatus(new Map(getRelayConnectionStatus()));
+      const tick = () => {
+        setConnStatus(new Map(getRelayConnectionStatus()));
+        setNativeCryptoActive(isNativeCryptoActive());
+      };
       tick();
       const id = setInterval(tick, 3000);
       return () => clearInterval(id);
@@ -129,8 +137,26 @@ const NostrScreen: React.FC = () => {
   );
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
 
+  // Experimental: native crypto tester toggle (#1057). Availability is a
+  // stable capability probe (Android + module linked) — compute it once.
+  // `nativeCryptoActive` is read on each focus tick (below) so a tester can
+  // watch it flip to "yes" only AFTER restarting with the pref on.
+  const nativeCryptoAvailable = useMemo(() => isNativeCryptoAvailable(), []);
+  const [nativeCryptoOn, setNativeCryptoOn] = useState(false);
+  const [nativeCryptoActive, setNativeCryptoActive] = useState(false);
+
   useEffect(() => {
     getBlossomServer().then(setBlossomServerInput);
+    loadNativeCryptoEnabled().then(setNativeCryptoOn);
+    setNativeCryptoActive(isNativeCryptoActive());
+  }, []);
+
+  // Toggling only WRITES the pref — routing is applied once at startup
+  // (index.ts), so this deliberately does not call setNativeCryptoEnabled;
+  // the row's caption tells the tester to restart to apply.
+  const handleToggleNativeCrypto = useCallback(async (next: boolean) => {
+    setNativeCryptoOn(next);
+    await saveNativeCryptoEnabled(next);
   }, []);
 
   const handleBlossomSave = async () => {
@@ -320,6 +346,37 @@ const NostrScreen: React.FC = () => {
           </TouchableOpacity>
         </>
       )}
+
+      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
+        {t('nostrScreen.experimental')}
+      </Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.nativeCryptoHint')}</Text>
+      <View
+        style={[styles.experimentalRow, !nativeCryptoAvailable && styles.experimentalRowDisabled]}
+      >
+        <View style={styles.experimentalTextBlock}>
+          <Text style={styles.experimentalLabel}>{t('nostrScreen.nativeCryptoLabel')}</Text>
+          <Text style={styles.experimentalSubtitle}>
+            {nativeCryptoAvailable
+              ? t('nostrScreen.nativeCryptoRestartCaption')
+              : t('nostrScreen.nativeCryptoUnavailable')}
+          </Text>
+        </View>
+        <Switch
+          value={nativeCryptoAvailable && nativeCryptoOn}
+          onValueChange={handleToggleNativeCrypto}
+          disabled={!nativeCryptoAvailable}
+          accessibilityLabel={t('nostrScreen.nativeCryptoA11y')}
+          testID="nostr-native-crypto-toggle"
+          trackColor={{ false: colors.divider, true: colors.brandPink }}
+          thumbColor={nativeCryptoAvailable && nativeCryptoOn ? colors.white : undefined}
+        />
+      </View>
+      <Text style={styles.experimentalActive} testID="nostr-native-crypto-active">
+        {nativeCryptoActive
+          ? t('nostrScreen.nativeCryptoActiveYes')
+          : t('nostrScreen.nativeCryptoActiveNo')}
+      </Text>
     </AccountScreenLayout>
   );
 };

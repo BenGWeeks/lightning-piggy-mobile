@@ -1446,7 +1446,15 @@
     "grantAmberPermissionLabel": "Conceder permiso NIP-44 de Amber",
     "grantPermissionInAmber": "Conceder permiso en Amber",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
-    "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado."
+    "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
+    "experimental": "Experimental",
+    "nativeCryptoHint": "Ejecuta el cifrado NIP-44 y la verificación de firmas a través del módulo nativo rust-nostr en lugar de JavaScript. Función para testers: observa los registros [PerfBlock] nostrCrypto y desactívala si algo falla.",
+    "nativeCryptoLabel": "Cripto nativa (rust-nostr)",
+    "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
+    "nativeCryptoUnavailable": "No disponible en este dispositivo",
+    "nativeCryptoA11y": "Activar cripto nativa",
+    "nativeCryptoActiveYes": "Activa en esta sesión: sí",
+    "nativeCryptoActiveNo": "Activa en esta sesión: no"
   },
   "offlineBanner": {
     "a11yLabel": "Estás sin conexión. Algunos datos pueden estar desactualizados.",

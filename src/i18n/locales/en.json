@@ -1446,7 +1446,15 @@
     "grantAmberPermissionLabel": "Grant Amber NIP-44 permission",
     "grantPermissionInAmber": "Grant permission in Amber",
     "noProfilePubkey": "No profile pubkey — log in first.",
-    "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set."
+    "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set.",
+    "experimental": "Experimental",
+    "nativeCryptoHint": "Runs NIP-44 encryption and signature checks through the native rust-nostr module instead of JavaScript. Tester feature — watch the [PerfBlock] nostrCrypto logs and turn it off if anything misbehaves.",
+    "nativeCryptoLabel": "Native crypto (rust-nostr)",
+    "nativeCryptoRestartCaption": "Restart the app to apply.",
+    "nativeCryptoUnavailable": "Unavailable on this device",
+    "nativeCryptoA11y": "Enable native crypto",
+    "nativeCryptoActiveYes": "Active this session: yes",
+    "nativeCryptoActiveNo": "Active this session: no"
   },
   "offlineBanner": {
     "a11yLabel": "You're offline. Some data may be stale.",

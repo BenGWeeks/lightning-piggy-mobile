@@ -15,15 +15,24 @@ import {
   type Event as NostrEvent,
 } from 'nostr-tools/pure';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
 import {
   __setNostrCryptoFlagsForTests,
   isNativeCryptoActive,
+  isNativeCryptoAvailable,
   nip44DecryptFrom,
   nip44EncryptForRecipient,
   nostrVerifyEvent,
+  setNativeCryptoEnabled,
   warmUpNativeCrypto,
 } from './nostrCrypto';
+import {
+  loadNativeCryptoEnabled,
+  saveNativeCryptoEnabled,
+  __resetForTests as __resetNativeCryptoPref,
+} from './nativeCryptoPreference';
 
 jest.mock('../../modules/nostr-native', () => ({
   getNostrNative: jest.fn(() => null),
@@ -308,5 +317,81 @@ describe('cross-check mode (dev-only)', () => {
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining('XCHECK MISMATCH op=nostrVerifyEvent'),
     );
+  });
+});
+
+describe('setNativeCryptoEnabled (runtime pref → routing, #1057)', () => {
+  it('enabling flips routing to native once warmed up', () => {
+    const native = mockNative();
+    // Env flag is unset in the test env, so routing starts on JS; warm-up
+    // latch is set so the ONLY thing gating native is flags.native.
+    __setNostrCryptoFlagsForTests({ native: false, ready: true });
+    expect(isNativeCryptoActive()).toBe(false);
+
+    setNativeCryptoEnabled(true);
+    expect(isNativeCryptoActive()).toBe(true);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe('native-plaintext');
+    expect(native.nip44Decrypt).toHaveBeenCalledTimes(1);
+  });
+
+  it('disabling (env flag unset) flips routing back to JS', () => {
+    mockNative();
+    __setNostrCryptoFlagsForTests({ native: true, ready: true });
+    expect(isNativeCryptoActive()).toBe(true);
+
+    setNativeCryptoEnabled(false);
+    expect(isNativeCryptoActive()).toBe(false);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+  });
+});
+
+describe('isNativeCryptoAvailable (capability probe, #1057)', () => {
+  it('is false when the native module is absent', () => {
+    mockGetNostrNative.mockReturnValue(null);
+    expect(isNativeCryptoAvailable()).toBe(false);
+  });
+
+  it('is true when the module is linked, regardless of enabled/warm state', () => {
+    mockNative();
+    // Not enabled and not warmed up — active is false, but the DEVICE is
+    // capable, which is exactly the distinction the Settings toggle needs.
+    __setNostrCryptoFlagsForTests({ native: false, ready: false });
+    expect(isNativeCryptoAvailable()).toBe(true);
+    expect(isNativeCryptoActive()).toBe(false);
+  });
+});
+
+describe('startup wiring: pref → setNativeCryptoEnabled → warm-up (#1057)', () => {
+  // Reproduces index.ts's startup block against the REAL preference service
+  // (AsyncStorage-backed) and facade, proving the persisted pref actually
+  // engages native routing after warm-up — without importing index.ts's heavy
+  // registerRootComponent graph.
+  beforeEach(async () => {
+    __resetNativeCryptoPref();
+    await AsyncStorage.clear();
+    __setNostrCryptoFlagsForTests({ native: false, xcheck: false, ready: false });
+  });
+
+  it('a persisted pref of true engages native routing after warm-up', async () => {
+    const native = mockNative({ warmUp: jest.fn(async () => true) });
+    await saveNativeCryptoEnabled(true);
+    __resetNativeCryptoPref(); // force a real storage read, like a fresh launch
+
+    // The exact index.ts sequence:
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    await warmUpNativeCrypto();
+
+    expect(native.warmUp).toHaveBeenCalled();
+    expect(isNativeCryptoActive()).toBe(true);
+  });
+
+  it('a persisted pref of false leaves routing on JS', async () => {
+    const native = mockNative();
+    // Nothing persisted → loadNativeCryptoEnabled defaults false.
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    await warmUpNativeCrypto();
+
+    expect(native.warmUp).not.toHaveBeenCalled();
+    expect(isNativeCryptoActive()).toBe(false);
   });
 });

@@ -66,10 +66,31 @@ const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 // sk+pk wrappers below exist and call sites prefer them.
 // ---------------------------------------------------------------------------
 
+// Build-time enable: the env literal is inlined at bundle time. When set it
+// force-enables native routing for the whole build; the runtime Settings
+// pref (#1057) can only ever turn native ON in addition to it, never override
+// it off — so a build compiled with the flag stays native regardless of pref.
+const ENV_NATIVE_CRYPTO = process.env.EXPO_PUBLIC_NATIVE_CRYPTO === '1';
+
 const flags = {
-  native: process.env.EXPO_PUBLIC_NATIVE_CRYPTO === '1',
+  native: ENV_NATIVE_CRYPTO,
   xcheck: __DEV__ && process.env.EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK === '1',
 };
+
+/**
+ * Apply the persisted tester preference (#1057) to routing. Called ONCE at
+ * startup (index.ts) after the pref hydrates, before warmUpNativeCrypto().
+ * `flags.native` becomes `EXPO_PUBLIC_NATIVE_CRYPTO === '1' || <pref>`, so the
+ * env flag always wins and the pref can only add native, never remove it.
+ *
+ * This is the ONLY runtime path that flips routing — deliberately not called
+ * when the Settings toggle changes (that just writes the pref; the row carries
+ * a "restart to apply" caption), so there is no mid-session re-routing and the
+ * crypto hot path never consults AsyncStorage.
+ */
+export function setNativeCryptoEnabled(enabled: boolean): void {
+  flags.native = ENV_NATIVE_CRYPTO || enabled;
+}
 
 // Warm-up latch — routing is permitted ONLY after warmUpNativeCrypto() has
 // resolved successfully (the JNA + libnostr_sdk_ffi.so load actually worked).
@@ -120,6 +141,21 @@ function nativeIfActive(): NostrNativeApi | null {
 /** True when sk+pk-shaped ops are actually routing to the native module. */
 export function isNativeCryptoActive(): boolean {
   return nativeIfActive() !== null;
+}
+
+/**
+ * Capability probe (#1057) — CAN this device ever run native crypto, ignoring
+ * whether it's enabled or warmed up. getNostrNative() already returns null
+ * off-Android and when the module isn't linked (iOS, Expo Go, stale dev
+ * client), so this is the honest "is the native module present" signal used
+ * to enable/disable the Settings toggle.
+ *
+ * Distinct from isNativeCryptoActive(): a tester can toggle native ON on a
+ * capable device (available=true) yet still see active=false until they
+ * restart and warm-up latches routing for the new session.
+ */
+export function isNativeCryptoAvailable(): boolean {
+  return getNostrNative() !== null;
 }
 
 /**
