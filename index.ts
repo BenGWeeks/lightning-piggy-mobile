@@ -72,10 +72,10 @@ registerRootComponent(App);
 // meaningful — until it resolves true, EVERY crypto op stays on the pure-JS
 // path (nativeReady defaults false), so a linked-but-broken module can never
 // route real crypto into a failing path. The pref is read ONCE here (not on the
-// hot path), so with the env flag unset AND the pref off this is a no-op, and
-// the toggle only takes effect on the next launch (its "restart to apply"
+// hot path) — one AsyncStorage read at launch regardless of the pref value —
+// and the toggle only takes effect on the next launch (its "restart to apply"
 // caption). warmUpNativeCrypto short-circuits to false when routing is off, so
-// this costs nothing in a normal build.
+// beyond that single pref read this adds no cost in a normal build.
 void (async () => {
   try {
     setNativeCryptoEnabled(await loadNativeCryptoEnabled());
