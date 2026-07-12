@@ -58,6 +58,10 @@ export interface LiveDmReconnectDeps {
    * owning the flag itself so it stays in lock-step with the single `cancelled`
    * boolean `nostrLiveDmSub.ts`'s `handleInboxEvent` also guards on. */
   isCancelled: () => boolean;
+  /** Optional: skip the kind-1059 wrap filter on the JS sub (the native
+   * relay engine owns it — Stage 2 M2, #1036). Read at every (re)arm so a
+   * `rearm()` after a native-engine start failure restores the wrap filter. */
+  skipWraps?: () => boolean;
 }
 
 export interface LiveDmReconnectController {
@@ -65,6 +69,11 @@ export interface LiveDmReconnectController {
    * resolved the kind-4 `since` cursor (loadLastSeen) — re-arms reuse the
    * same cursor for the controller's lifetime, same as before extraction. */
   start(sinceK4Cursor: number | undefined): void;
+  /** Re-open the subscription immediately (fresh generation, `skipWraps`
+   * re-read). Used by the native-engine fallback (#1036 Stage 2 M2) to
+   * restore the JS wrap filter when the engine fails to start. No-ops
+   * before `start()` has armed the first sub. */
+  rearm(): void;
   /** Invalidate any in-flight close signal + pending reconnect/settle timers
    * and stop the AppState-resume re-arm. Call BEFORE `closeSubscription()` so
    * the close it triggers synchronously is stale-generation and no-ops. */
@@ -83,7 +92,7 @@ export interface LiveDmReconnectController {
 export function createLiveDmReconnectController(
   deps: LiveDmReconnectDeps,
 ): LiveDmReconnectController {
-  const { viewerPubkey, readRelays, onEvent, onReconnect, isCancelled } = deps;
+  const { viewerPubkey, readRelays, onEvent, onReconnect, isCancelled, skipWraps } = deps;
 
   let unsubscribe: (() => void) | null = null;
   // The kind-4 `since` cursor loaded once by the caller before the first
@@ -169,10 +178,16 @@ export function createLiveDmReconnectController(
       unsubscribe = null;
     }
     const armedAtMs = Date.now();
+    // Engine mode (#1036 Stage 2 M2): the native pool owns the kind-1059
+    // filter; the JS sub keeps kind-4/16/17 (the close-driven re-arm signal
+    // moves to the kind-4 sub — see subscribeInboxDmsForViewer). Read per-arm
+    // so a rearm() after a native-engine start failure restores the filter.
+    const skipWrapsNow = skipWraps?.() ?? false;
     unsubscribe = subscribeInboxDmsForViewer({
       viewerPubkey,
       relays: readRelays,
       sinceK4: sinceK4Cursor,
+      skipWraps: skipWrapsNow,
       // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
       // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
       // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
@@ -199,7 +214,7 @@ export function createLiveDmReconnectController(
     });
     if (__DEV__) {
       console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
+        `[Nostr] live DM sub (${skipWrapsNow ? 'kind 4 — wraps on native engine' : 'kinds 4 + 1059'}) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
       );
     }
     // Reconnect blind-window flush (#1035): after a socket drop or Doze resume
@@ -280,6 +295,10 @@ export function createLiveDmReconnectController(
       if (isCancelled()) return;
       armSub();
       initialArmed = true;
+    },
+    rearm() {
+      if (!initialArmed) return;
+      armSub();
     },
     stopReconnecting() {
       armGeneration += 1;

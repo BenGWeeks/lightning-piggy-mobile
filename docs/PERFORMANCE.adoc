@@ -385,6 +385,34 @@ AVD instead. This means dev now exercises the same GPS code path as
 production, so location-related perf measurements actually represent
 real behaviour.
 
+== Native Nostr pipeline (epic #1036)
+
+Stage 2 moves the hottest Nostr work off the JS thread into
+`modules/nostr-native` (rust-nostr's published Kotlin bindings — see the
+architecture decision on #1036):
+
+- *M1 (crypto, #1046)*: nip44 encrypt/decrypt + schnorr sign/verify as sync
+  JSI functions behind the `src/services/nostrCrypto.ts` facade, flag
+  `EXPO_PUBLIC_NATIVE_CRYPTO=1`. Emulator benchmark: ~51× on nip44-decrypt.
+- *M2 (relay engine, #1049)*: a rust-nostr relay pool owns the kind-1059
+  gift-wrap subscription — sockets, verification and the two-layer NIP-59
+  unwrap all run natively; JS receives ≤150 ms-coalesced batches of
+  plaintext rumors. Flag `EXPO_PUBLIC_NATIVE_ENGINE=1`, *nsec + Android
+  only* (Amber/NIP-46 wraps can only be decrypted by their remote signer;
+  iOS is a later milestone). `EXPO_PUBLIC_NATIVE_ENGINE_XCHECK=1` (dev)
+  runs both paths and diffs delivered wrap ids. Benchmark:
+  `node scripts/bench-engine-relay.mjs` on the host, then a dev build with
+  `EXPO_PUBLIC_NATIVE_ENGINE_BENCH=1` — `[PerfBlock] engineBench` lines
+  report wall-clock + JS-heartbeat gaps for a 200-wrap backlog drain on
+  each path.
+
+Guidance shift once the engine is on: the receive-path JS-thread rules in
+this document (yield pacing, decrypt-once gating, coalesced `setState`)
+still apply to the JS fallback path — which remains the default and the
+only path for Amber/NIP-46 and iOS — but for engine-mode nsec accounts the
+per-wrap decrypt cost leaves the JS thread entirely, so reconnect-backlog
+freezes show up (if at all) as batch-ingest gaps, not crypto gaps.
+
 == Future work
 
 - `dumpsys gfxinfo` reset/sample is wired into `perf-explore-cold-start.sh`

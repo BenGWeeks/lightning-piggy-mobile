@@ -5,14 +5,7 @@ import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import {
-  partnerFromRumor,
-  unwrapWrapNsec,
-  unwrapWrapViaNip44,
-  textForRumor,
-  rumorEventId,
-  type DecodedRumor,
-} from '../utils/nip17Unwrap';
+import { unwrapWrapNsec, unwrapWrapViaNip44, type DecodedRumor } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
 import {
   selectDmWrapIds,
@@ -21,16 +14,22 @@ import {
   type DmMessageRow,
 } from '../services/dmDb';
 import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
-import { dmRowPreview } from '../utils/dmRowPreview';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
-import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
+import { createLiveRumorSurfacer } from './liveDmRumorSurface';
+import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
 import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
-import { DM_INBOX_CAP, inboxLastSeenKey, loadLastSeen, mergeInboxEntries } from './nostrDmCache';
+import {
+  COLD_INITIAL_WRAP_LIMIT,
+  DM_INBOX_CAP,
+  inboxLastSeenKey,
+  loadLastSeen,
+  mergeInboxEntries,
+} from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
@@ -75,9 +74,13 @@ export interface LiveDmSubscriptionParams {
   // when follows update, re-surfacing + re-notifying entries that now pass.
   followGateBuffer: LiveSubFollowGateBuffer;
   setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
-  /** Optional: called once after a RECONNECT re-arm settles, to flush any
-   * wraps missed while the socket was down. Not fired on the initial cold arm
-   * (the normal cold-start + deferred-backfill path covers that). See #1035. */
+  /** Optional: called once after a RECONNECT re-arm settles (JS sub — see
+   * nostrLiveDmReconnect.ts) or after the native engine reports a relay
+   * reconnect (settle-delayed — see liveDmEngineBridge.ts), to flush any
+   * wraps missed while the socket was down (wraps sent while down can rank
+   * below the sub's `limit` because of #469 random timestamps). Not fired on
+   * the initial cold arm (the normal cold-start + deferred-backfill path
+   * covers that). See #1035. */
   onReconnect?: (opts?: RefreshDmInboxOptions) => Promise<void>;
 }
 
@@ -202,6 +205,56 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
+
+  // Shared post-unwrap surface path (group-route → follow-gate → persist →
+  // surface → notify), extracted verbatim to liveDmRumorSurface.ts so the
+  // engine path — which delivers already-unwrapped rumors — runs the exact
+  // same policy as the JS unwrap path below. The trailing `.catch` in
+  // chainWrite is load-bearing: without it a single throw leaves `writeChain`
+  // rejected and every later `.then(...)` skips its onFulfilled.
+  const chainWrite = (task: () => Promise<void>): void => {
+    writeChain = writeChain.then(task).catch((e) => {
+      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+    });
+  };
+  const surfaceRumor = createLiveRumorSurfacer({
+    viewerPubkey,
+    isCancelled: () => cancelled,
+    shouldAbort: () => cancelled || viewerPubkey !== pubkey || activeSigner !== signerType,
+    followPubkeysRef,
+    followGateBuffer,
+    isFreshArrival,
+    queueInboxEntry,
+    knownWrapIds,
+    chainWrite,
+  });
+
+  // --- Native relay engine (Stage 2 M2, #1036 — see liveDmEngineBridge) ---
+  // 'engine': the rust-nostr pool owns the kind-1059 socket, verification and
+  //   NIP-59 unwrap natively; the JS sub skips its wrap filter (kind-4/16/17
+  //   stay on the JS pool). nsec + Android + EXPO_PUBLIC_NATIVE_ENGINE=1 only.
+  // 'xcheck' (dev): BOTH paths run; the engine is observe-only and a differ
+  //   compares delivered wrap ids. 'off': today's JS path, byte-identical.
+  const engineBridge = createLiveDmEngineBridge({
+    activeSigner,
+    viewerPubkey,
+    readRelays,
+    wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
+    knownWrapIds,
+    isCancelled: () => cancelled,
+    surfaceRumor,
+    onReconnect,
+    onEngineUnavailable: () => {
+      // Native start failed — restore the JS wrap filter so the inbox
+      // never goes deaf behind the flag. rearm() re-opens the sub, which
+      // re-reads the skipWraps getter (now false). Only reachable after
+      // engineBridge.start(), i.e. after reconnectController.start().
+      engineActive = false;
+      reconnectController.rearm();
+    },
+  });
+  // Flips false if the native start fails (see onEngineUnavailable above).
+  let engineActive = engineBridge.mode === 'engine';
 
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
     // Earliest-possible short-circuit for NIP-17 wraps we already
@@ -586,147 +639,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
       return;
     }
-    if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
-
-    // Group-route first — multi-recipient rumors are owned by the
-    // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
-    // appendGroupMessage + notifyGroupMessage internally so an open
-    // GroupConversationScreen auto-refreshes.
-    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
-    if (routeResult.kind !== 'not-group') {
-      // OS notification (#279) — fired HERE (live path) not inside
-      // tryRouteGroupRumor (which also runs on batch refresh). Only for
-      // genuinely-fresh messages (backlog has old timestamps → silent),
-      // skip my own, and suppressed when the user is viewing this group.
-      if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
-        const sender = routeResult.message.senderPubkey;
-        // claimWrapNotification: dedupe vs the background watch (#279).
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrap.id)) {
-          void fireMessageNotification({
-            kind: 'group',
-            threadId: routeResult.group.id,
-            title: routeResult.group.name || 'New group message',
-            body: routeResult.message.text,
-            data: { groupId: routeResult.group.id },
-          });
-        }
-      }
-      if (__DEV__)
-        console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`);
-      return;
-    }
-
-    const partnership = partnerFromRumor(rumor, viewerPubkey);
-    if (!partnership) {
-      if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-partnership`);
-      return;
-    }
-
-    // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
-    // sender plaintext off AsyncStorage. Group rumors above don't
-    // hit this gate because group membership is its own auth signal.
-    if (!followPubkeysRef.current.has(partnership.partnerPubkey)) {
-      if (__DEV__)
-        console.log(
-          `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
-        );
-      // Defer fresh inbound for replay once follows hydrate (#851 F2). Skip my
-      // own echoes and historical backlog (silent); persistence is left to the
-      // next refreshDmInbox — see replayDeferredFollowGate.
-      if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
-        // For a structured rumor (order kind 16/17, or an NWC wallet share)
-        // `textForRumor` returns non-human JSON; surface a readable, SECRET-FREE
-        // preview so a raw blob (or, for a share, a bearer connection string)
-        // never leaks into the conversation list OR the notification body when
-        // the sender isn't followed (mirrors the non-deferred path below). Plain
-        // DM rumors pass through unchanged.
-        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind);
-        followGateBuffer.defer({
-          partnerPubkey: partnership.partnerPubkey,
-          entry: {
-            id: wrap.id,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: deferredText,
-            wireKind: rumor.kind,
-          },
-          notify: { title: 'New message', body: deferredText },
-        });
-      }
-      return;
-    }
-
-    const wrapText = textForRumor(rumor);
-    const wrapRow: DmMessageRow = {
-      owner: viewerPubkey,
-      eventId: wrap.id,
-      conversation: partnership.partnerPubkey,
-      createdAt: rumor.created_at,
-      sender: partnership.fromMe ? viewerPubkey : partnership.partnerPubkey,
-      content: wrapText,
-      fromMe: partnership.fromMe,
-      wireKind: rumor.kind,
-    };
-    const inboxEntry: DmInboxEntry = {
-      id: wrap.id,
-      partnerPubkey: partnership.partnerPubkey,
-      fromMe: partnership.fromMe,
-      createdAt: rumor.created_at,
-      // For a structured rumor (order kind 16/17, or an NWC wallet share)
-      // `wrapText` is non-human JSON; surface a readable, secret-free preview.
-      // Plain DM rumors pass through unchanged.
-      text: dmRowPreview(wrapText, rumor.kind),
-      wireKind: rumor.kind,
-      // Inner rumor id (#857) — the delivery-store key for our own sent rows,
-      // stable across the optimistic bubble + this live echo.
-      rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
-    };
-
-    // Serialise store upserts so concurrent live wraps don't race each other.
-    // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
-    writeChain = writeChain
-      .then(async () => {
-        if (cancelled) return;
-        // Encrypted store write (#848) — idempotent by (owner, event_id), so
-        // a wrap delivered by both the live sub and a near-simultaneous
-        // refresh lands as one row (the old file read→merge→write dance and
-        // its #811 clobbering hazard are gone). The store is the ONLY
-        // at-rest persistence (#850) — the plaintext inbox blob is retired.
-        await upsertDmMessages([wrapRow]);
-        knownWrapIds?.add(wrap.id);
-      })
-      .catch((e) => {
-        if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
-      });
-    // Surface to the UI without awaiting the persist chain (#934 item 2) —
-    // same reasoning as the kind-4 path above. knownWrapIds was already
-    // eagerly claimed at the top of this handler, so dedup doesn't depend
-    // on the chain either.
-    if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
-
-    queueInboxEntry(inboxEntry);
-    notifyDmMessage(partnership.partnerPubkey);
-    // OS notification (#279) — only genuinely-fresh inbound (backlog has
-    // old rumor timestamps and stays silent), never my own echo;
-    // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrap.id)) {
-      void fireMessageNotification({
-        kind: 'dm',
-        threadId: partnership.partnerPubkey,
-        title: 'New message',
-        // Use the already-redacted preview, not raw `rumor.content`: a
-        // structured rumor (order JSON, or an NWC wallet-share bearer
-        // connection string) must never surface its payload in a push body.
-        body: inboxEntry.text,
-        data: { conversationPubkey: partnership.partnerPubkey },
-      });
-    }
-    if (__DEV__)
-      console.log(
-        `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
-      );
+    // Dev cross-check: record every wrap the JS path successfully unwrapped
+    // so the differ can flag divergence from the engine's deliveries.
+    engineBridge.recordJsUnwrap(wrap.id);
+    // Post-unwrap policy — extracted verbatim to liveDmRumorSurface.ts and
+    // shared with the native-engine path. Starts with the same
+    // cancelled/identity guard that used to sit here.
+    await surfaceRumor(rumor, wrap.id);
   };
 
   // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
@@ -739,6 +658,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   const reconnectController = createLiveDmReconnectController({
     viewerPubkey,
     readRelays,
+    // Engine mode: the native pool owns the kind-1059 filter; the JS sub
+    // keeps kind-4/16/17 (and the close-driven re-arm moves to the kind-4
+    // sub — see subscribeInboxDmsForViewer). Read per-arm so the fallback
+    // re-arm restores the wrap filter if the engine fails to start.
+    skipWraps: () => engineActive,
     onEvent: (ev) => {
       // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
       handleInboxEvent(ev).catch((e) => {
@@ -799,6 +723,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
     if (cancelled) return;
     reconnectController.start(sinceK4Cursor);
+    // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
+    // seed so the engine's native dedupe set is seeded with the same ids.
+    // No-op in 'off' mode; falls back to a JS re-arm on failure.
+    await engineBridge.start();
   })();
 
   return () => {
@@ -817,6 +745,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the next identity's inbox.
     setDeferredReplay(null);
     followGateBuffer.clear();
+    // Stop the native engine — tears the rust-nostr pool down AND clears the
+    // module's single-entry key cache, so a logout / account switch never
+    // leaves the old identity's secret in native memory (Stage 2 M2 key
+    // lifecycle).
+    engineBridge.stop();
     // Abort first — settles any in-flight maybeYield() awaiter — then detach.
     wrapYieldAbort.abort();
     wrapYieldScheduler.dispose();

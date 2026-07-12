@@ -1,8 +1,14 @@
 package com.lightningpiggy.nostrnative
 
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import rust.nostr.sdk.Event
 import rust.nostr.sdk.Keys
 import rust.nostr.sdk.Nip44Version
@@ -36,8 +42,22 @@ class NostrNativeModule : Module() {
   // viewer secret key thousands of times per session; re-parsing per call
   // would pay an FFI allocation + hex parse each op. Counterparty pubkeys
   // rotate per gift wrap (ephemeral), so caching those would not pay.
+  // The relay engine's key lives in this same cache (via `keys()`), and
+  // `engineStop` clears BOTH entries — logout / account wipe must not leave
+  // parsed key material behind in native memory.
   private var cachedSecret: Pair<String, SecretKey>? = null
   private var cachedKeys: Pair<String, Keys>? = null
+
+  // Runs the engine's suspend entry points (start/subscribe/stop) off the
+  // module queue; the engine owns its own inner scope for the long-lived
+  // notification + reconnect-watch loops.
+  private val moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val engine = NostrEngine { name, body -> sendEvent(name, body) }
+
+  private fun clearKeyCaches() {
+    cachedSecret = null
+    cachedKeys = null
+  }
 
   private fun requireHex64(value: String, what: String): String {
     if (!HEX_64.matches(value)) {
@@ -69,6 +89,27 @@ class NostrNativeModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("NostrNative")
+
+    // Relay-engine event stream (Stage 2 M2, #1036): batched plaintext
+    // rumors and a debounced reconnect signal. See NostrEngine.kt.
+    Events("onEngineRumorBatch", "onEngineReconnect")
+
+    OnDestroy {
+      // Dev-client reloads recreate the module — never leave a pool (or key
+      // material) running behind a dead JS context.
+      moduleScope.launch {
+        try {
+          engine.stop()
+        } finally {
+          clearKeyCaches()
+          // moduleScope's SupervisorJob otherwise outlives the destroyed
+          // module — cancel it once the engine is torn down so this launch
+          // (and any other in-flight engine* calls queued on it) don't leak
+          // past OnDestroy.
+          moduleScope.cancel()
+        }
+      }
+    }
 
     // Forces the JNA classloading + libnostr_sdk_ffi.so dlopen on the
     // module's background queue so the first sync crypto call on the JS
@@ -122,6 +163,47 @@ class NostrNativeModule : Module() {
       val json =
         """{"id":"$messageHashHex","pubkey":"$publicKeyHex","created_at":0,"kind":1,"tags":[],"content":"","sig":"$signatureHex"}"""
       Event.fromJson(json).verifySignature()
+    }
+
+    // --- Relay engine (Stage 2 M2 of #1036) ---------------------------------
+    // nsec-only: the NIP-59 unwrap needs the secret key in-process, so JS
+    // only starts the engine for the local-key signer. The key routes through
+    // the same single-entry cache as the M1 crypto functions and is cleared
+    // by engineStop.
+
+    AsyncFunction("engineStart") { relays: List<String>, viewerPubkeyHex: String, privkeyHex: String, promise: Promise ->
+      moduleScope.launch {
+        try {
+          requireHex64(viewerPubkeyHex, "viewerPubkey")
+          engine.start(relays, viewerPubkeyHex, keys(privkeyHex))
+          promise.resolve(true)
+        } catch (t: Throwable) {
+          promise.reject(CodedException("ERR_ENGINE_START", t.message ?: "engine start failed", t))
+        }
+      }
+    }
+
+    AsyncFunction("engineSubscribeWraps") { filterJson: String, knownWrapIds: List<String>, promise: Promise ->
+      moduleScope.launch {
+        try {
+          promise.resolve(engine.subscribeWraps(filterJson, knownWrapIds))
+        } catch (t: Throwable) {
+          promise.reject(CodedException("ERR_ENGINE_SUBSCRIBE", t.message ?: "subscribe failed", t))
+        }
+      }
+    }
+
+    AsyncFunction("engineStop") { promise: Promise ->
+      moduleScope.launch {
+        try {
+          engine.stop()
+        } catch (_: Throwable) {
+          // best-effort — the key-cache clear below must run regardless
+        } finally {
+          clearKeyCaches()
+        }
+        promise.resolve(null)
+      }
     }
   }
 }

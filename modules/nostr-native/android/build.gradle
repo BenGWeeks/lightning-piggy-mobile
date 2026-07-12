@@ -23,6 +23,10 @@ dependencies {
   // current artifact that carries nip44 + schnorr. Pulls in jna@aar
   // (declared in the artifact's POM) for the UniFFI JNI dispatch.
   implementation 'org.rust-nostr:nostr-sdk-kmp-android:0.44.3'
+  // The engine's notification/reconnect loops. nostr-sdk-kmp's POM only
+  // declares coroutines at runtime scope, so the compile classpath needs it
+  // explicitly; Gradle aligns the version with the transitive runtime one.
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
 }
 
 // ---------------------------------------------------------------------------
