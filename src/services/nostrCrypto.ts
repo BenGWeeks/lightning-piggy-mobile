@@ -267,7 +267,10 @@ export function nip44DecryptFrom(
     return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, peerPublicKey));
   }
   const pub = peerPublicKey.toLowerCase();
-  const t0 = performance.now();
+  // Gate the timestamp on PERF_ENABLED — t0 is only read inside the
+  // PERF_ENABLED sample guard below, so skip the call on the hot path when
+  // logging is off (mirrors the pure-JS wrappers' early-return).
+  const t0 = PERF_ENABLED ? performance.now() : 0;
   let result: string | undefined;
   let nativeError: unknown;
   try {
@@ -323,7 +326,7 @@ export function nip44EncryptForRecipient(
     return nip44Encrypt(plaintext, conversationKey);
   }
   const pub = recipientPubkey.toLowerCase();
-  const t0 = performance.now();
+  const t0 = PERF_ENABLED ? performance.now() : 0;
   const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
   if (PERF_ENABLED) {
     recordSample('nip44Encrypt', performance.now() - t0);
@@ -382,7 +385,7 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
   if (native) {
     const memoised = event[verifiedSymbol];
     if (typeof memoised === 'boolean') return memoised;
-    const t0 = performance.now();
+    const t0 = PERF_ENABLED ? performance.now() : 0;
     let valid = false;
     try {
       const hash = getEventHash(event);
