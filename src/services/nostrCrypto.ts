@@ -43,8 +43,9 @@ import {
 import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
 
 // ---------------------------------------------------------------------------
-// Perf gate — matches perfLog.ts pattern exactly (gated on build-time env,
-// not __DEV__ alone so it fires in EXPO_PUBLIC_KEEP_PERF_LOGS preview APKs).
+// Perf gate — active in dev (__DEV__) AND in EXPO_PUBLIC_KEEP_PERF_LOGS
+// preview APKs, so the benchmark markers fire in both; production release
+// builds (neither set) skip the sampling entirely.
 // ---------------------------------------------------------------------------
 const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 
@@ -112,8 +113,9 @@ export function isNativeCryptoActive(): boolean {
  * module (dlopen/JNA failure), a disabled env flag, or a non-Android platform
  * all leave nativeReady false and keep callers on JS for the session.
  *
- * Must be awaited at startup (index.ts) for native routing to activate; until
- * it resolves, nativeReady's false default keeps first ops on JS.
+ * Fire-and-forgotten at startup (index.ts) to warm native routing; it does
+ * not need awaiting — until it resolves, nativeReady's false default keeps
+ * first ops on JS, so there is no unready-native window.
  */
 export async function warmUpNativeCrypto(): Promise<boolean> {
   if (!flags.native) return false;
@@ -262,11 +264,14 @@ export function nip44DecryptFrom(
   secretKey: Uint8Array,
   peerPublicKey: string,
 ): string {
+  // Normalise the pubkey up front so the native and JS-fallback paths derive
+  // an identical conversation key regardless of routing (an uppercase pubkey
+  // must not decrypt differently, and xcheck must compare like with like).
+  const pub = peerPublicKey.toLowerCase();
   const native = nativeIfActive();
   if (!native) {
-    return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, peerPublicKey));
+    return nip44Decrypt(ciphertext, nip44GetConversationKey(secretKey, pub));
   }
-  const pub = peerPublicKey.toLowerCase();
   // Gate the timestamp on PERF_ENABLED — t0 is only read inside the
   // PERF_ENABLED sample guard below, so skip the call on the hot path when
   // logging is off (mirrors the pure-JS wrappers' early-return).
@@ -320,12 +325,13 @@ export function nip44EncryptForRecipient(
   senderSecretKey: Uint8Array,
   recipientPubkey: string,
 ): string {
+  // Normalise up front so JS-fallback and native derive the same conversation
+  // key regardless of routing (see nip44DecryptFrom).
+  const pub = recipientPubkey.toLowerCase();
   const native = nativeIfActive();
   if (!native) {
-    const conversationKey = nip44GetConversationKey(senderSecretKey, recipientPubkey);
-    return nip44Encrypt(plaintext, conversationKey);
+    return nip44Encrypt(plaintext, nip44GetConversationKey(senderSecretKey, pub));
   }
-  const pub = recipientPubkey.toLowerCase();
   const t0 = PERF_ENABLED ? performance.now() : 0;
   const payload = native.nip44Encrypt(bytesToHex(senderSecretKey), pub, plaintext);
   if (PERF_ENABLED) {
