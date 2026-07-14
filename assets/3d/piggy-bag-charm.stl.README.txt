@@ -1,0 +1,24 @@
+PLACEHOLDER - action required before merge
+==========================================
+
+The file that used to live here (piggy-bag-charm.stl) was NOT an STL. It was a
+saved GitHub "blob view" HTML page (~187 KB of markup) that had been committed
+with a .stl extension, most likely by saving the rendered file page instead of
+using "Download raw file". Every "Save STL" tap therefore exported a renamed
+web page that no slicer could open.
+
+TO FIX:
+  1. Download the real raw file (1.88 MB) from the source repo:
+       BenGWeeks/lightning-piggy-3d
+       Piggy Bag Charm/Lightning Piggy Bag Charm.stl
+     Use the "Download raw file" button, or the raw URL - NOT "Save Page As".
+  2. Save it as: assets/3d/piggy-bag-charm.stl
+  3. Verify:  file assets/3d/piggy-bag-charm.stl
+     Expect "data" (binary STL) or a file starting with "solid" (ASCII STL),
+     NOT "HTML document".
+  4. Delete this README.
+  5. Run the tests:  npx jest src/utils/stlAsset.test.ts
+
+The new guard in src/utils/stlAsset.ts + HuntCreateScreen.tsx will refuse to
+share/save the asset (with a clear error) if a non-STL is ever committed here
+again, so this class of bug cannot ship silently.

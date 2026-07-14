@@ -23,6 +23,7 @@ import * as Location from 'expo-location';
 import { StorageAccessFramework as SAF, readAsStringAsync } from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
 import { File, Paths } from 'expo-file-system';
+import { validateStl, base64ToBytes } from '../utils/stlAsset';
 import * as Sharing from 'expo-sharing';
 import {
   Camera,
@@ -854,9 +855,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     );
     await asset.downloadAsync();
     if (!asset.localUri) throw new Error('STL asset has no localUri after download');
+    const source = new File(asset.localUri);
+
+    // Guard against shipping a corrupt asset. The bundled file was once a
+    // saved GitHub blob-view HTML page renamed to .stl, so every "Save STL"
+    // handed the user a file no slicer could open. Read a prefix and validate
+    // it, failing loudly rather than silently exporting a renamed web page.
+    // We read via the legacy base64 reader (already imported for the SAF
+    // flow) so this doesn't depend on a newer File API.
+    const b64 = await readAsStringAsync(source.uri, { encoding: 'base64' });
+    const bytes = base64ToBytes(b64);
+    const check = validateStl(bytes);
+    if (!check.ok) {
+      throw new Error(`Bundled STL failed validation: ${check.reason}`);
+    }
+
+    // Copy into the cache dir with a friendly name so OS pickers don't show
+    // the require()-mangled asset filename.
     const target = new File(Paths.cache, 'piggy-bag-charm.stl');
     if (target.exists) target.delete();
-    const source = new File(asset.localUri);
     source.copy(target);
     return target;
   }, []);
@@ -876,8 +893,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // SAF flow: prompt the user to pick a directory, create the STL inside
     // it, then base64-copy the bytes across. Two SAF round-trips because
     // there's no "copy a file:// into a SAF URI" primitive — we have to
-    // read+write through JS. The STL is small (a few hundred KB) so the
-    // base64 round-trip is fine; for larger files we'd chunk it.
+    // read+write through JS. The STL is a couple of MB, so the base64
+    // round-trip is acceptable; for much larger files we'd chunk it.
     const target = await stageStlInCache();
     const perm = await SAF.requestDirectoryPermissionsAsync();
     if (!perm.granted) return;
