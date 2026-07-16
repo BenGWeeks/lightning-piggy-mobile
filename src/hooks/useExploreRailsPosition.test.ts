@@ -1,0 +1,196 @@
+/**
+ * Unit tests for the Explore-rails one-shot position hook (#1064).
+ *
+ * The defect this hook exists for: the rails' previous acquisition was
+ * a single un-retried `getCurrentPositionAsync` — when that rejected,
+ * `pos` kept the persisted cache-anchor seed for the whole session, so
+ * the rails queried around wherever the user last panned a map to.
+ * The contract pinned down here:
+ *
+ *   1. Permission denied flips `locationDenied` and stops the ladder.
+ *   2. A watch first-fix rescues the session when the one-shot rejects
+ *      (the #1064 wedge), and the watch is removed after that fix.
+ *   3. Newest-wins ordering across the racing channels.
+ *   4. Both fresh-fix channels failing with nothing landed flips
+ *      `locationDenied`; a landed last-known keeps it false.
+ *   5. Unmount removes a still-armed watch.
+ */
+import { renderHook, act, waitFor } from '@testing-library/react-native';
+import * as Location from 'expo-location';
+import { peekCachedAnchorSync } from '../services/btcMapService';
+import { useExploreRailsPosition } from './useExploreRailsPosition';
+
+jest.mock('expo-location', () => ({
+  __esModule: true,
+  requestForegroundPermissionsAsync: jest.fn(),
+  getLastKnownPositionAsync: jest.fn(),
+  getCurrentPositionAsync: jest.fn(),
+  watchPositionAsync: jest.fn(),
+  Accuracy: { Balanced: 3, High: 4 },
+}));
+
+jest.mock('../services/btcMapService', () => ({
+  __esModule: true,
+  peekCachedAnchorSync: jest.fn(() => null),
+}));
+
+const mockedLocation = Location as jest.Mocked<typeof Location>;
+const mockedPeekAnchor = peekCachedAnchorSync as jest.MockedFunction<typeof peekCachedAnchorSync>;
+
+const grant = () =>
+  mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+    status: 'granted',
+  } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
+
+type WatchCb = (p: {
+  coords: { latitude: number; longitude: number; accuracy: number };
+  timestamp: number;
+}) => void;
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockedPeekAnchor.mockReturnValue(null);
+});
+
+describe('useExploreRailsPosition', () => {
+  it('seeds pos from the cached anchor with a null accuracy', () => {
+    mockedPeekAnchor.mockReturnValue({ lat: 52.5, lon: 5.5 });
+    mockedLocation.requestForegroundPermissionsAsync.mockReturnValue(
+      new Promise(() => {}) as ReturnType<typeof Location.requestForegroundPermissionsAsync>,
+    );
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    expect(result.current.pos).toEqual({ lat: 52.5, lon: 5.5, accuracy: null });
+  });
+
+  it('flips `locationDenied` when permission is refused and stops the ladder', async () => {
+    mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+      status: 'denied',
+    } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    await waitFor(() => {
+      expect(result.current.locationDenied).toBe(true);
+    });
+    expect(result.current.pos).toBeNull();
+    expect(mockedLocation.getCurrentPositionAsync).not.toHaveBeenCalled();
+    expect(mockedLocation.watchPositionAsync).not.toHaveBeenCalled();
+  });
+
+  it('recovers via the watch first-fix when the one-shot rejects (#1064 wedge)', async () => {
+    grant();
+    // The exact stuck-session shape: stale anchor seed, no last-known,
+    // getCurrentPositionAsync rejects.
+    mockedPeekAnchor.mockReturnValue({ lat: 52.5, lon: 5.5 });
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    mockedLocation.getCurrentPositionAsync.mockRejectedValue(new Error('timeout'));
+
+    let watchCb: WatchCb | null = null;
+    const removeMock = jest.fn();
+    mockedLocation.watchPositionAsync.mockImplementation(async (_opts, cb) => {
+      watchCb = cb as unknown as WatchCb;
+      return { remove: removeMock } as unknown as Location.LocationSubscription;
+    });
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    // Rails start on the stale seed.
+    expect(result.current.pos).toEqual({ lat: 52.5, lon: 5.5, accuracy: null });
+    await waitFor(() => {
+      expect(mockedLocation.watchPositionAsync).toHaveBeenCalled();
+    });
+
+    // The watch delivers the real position — rails must adopt it...
+    await act(async () => {
+      watchCb?.({ coords: { latitude: 52.29, longitude: 0.05, accuracy: 12 }, timestamp: 2000 });
+    });
+    expect(result.current.pos).toEqual({ lat: 52.29, lon: 0.05, accuracy: 12 });
+    expect(result.current.locationDenied).toBe(false);
+    // ...and the first-fix watch stops streaming.
+    expect(removeMock).toHaveBeenCalled();
+  });
+
+  it('drops a watch fix older than the one-shot fix already applied', async () => {
+    grant();
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    mockedLocation.getCurrentPositionAsync.mockResolvedValue({
+      coords: { latitude: 2, longitude: 2, accuracy: 20 },
+      timestamp: 5000,
+    } as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>);
+
+    let watchCb: WatchCb | null = null;
+    mockedLocation.watchPositionAsync.mockImplementation(async (_opts, cb) => {
+      watchCb = cb as unknown as WatchCb;
+      return { remove: jest.fn() } as unknown as Location.LocationSubscription;
+    });
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    await waitFor(() => {
+      expect(result.current.pos).toEqual({ lat: 2, lon: 2, accuracy: 20 });
+    });
+
+    // Stale watch fix (older timestamp) must not regress pos.
+    await act(async () => {
+      watchCb?.({ coords: { latitude: 9, longitude: 9, accuracy: 5 }, timestamp: 3000 });
+    });
+    expect(result.current.pos).toEqual({ lat: 2, lon: 2, accuracy: 20 });
+  });
+
+  it('flips `locationDenied` when both fresh-fix channels fail and nothing landed', async () => {
+    grant();
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    mockedLocation.getCurrentPositionAsync.mockRejectedValue(new Error('timeout'));
+    mockedLocation.watchPositionAsync.mockRejectedValue(new Error('no provider'));
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    await waitFor(() => {
+      expect(result.current.locationDenied).toBe(true);
+    });
+    expect(result.current.pos).toBeNull();
+  });
+
+  it('keeps `locationDenied` false when last-known landed even if both fresh channels fail', async () => {
+    grant();
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue({
+      coords: { latitude: 1, longitude: 1, accuracy: 50 },
+      timestamp: 1000,
+    } as Awaited<ReturnType<typeof Location.getLastKnownPositionAsync>>);
+    mockedLocation.getCurrentPositionAsync.mockRejectedValue(new Error('timeout'));
+    mockedLocation.watchPositionAsync.mockRejectedValue(new Error('no provider'));
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    await waitFor(() => {
+      expect(result.current.pos).toEqual({ lat: 1, lon: 1, accuracy: 50 });
+    });
+    expect(result.current.locationDenied).toBe(false);
+  });
+
+  it('removes a still-armed watch on unmount', async () => {
+    grant();
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    // One-shot resolves; the watch never fires, so it stays armed.
+    mockedLocation.getCurrentPositionAsync.mockResolvedValue({
+      coords: { latitude: 0, longitude: 0, accuracy: 100 },
+      timestamp: 1000,
+    } as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>);
+    const removeMock = jest.fn();
+    mockedLocation.watchPositionAsync.mockResolvedValue({
+      remove: removeMock,
+    } as unknown as Location.LocationSubscription);
+
+    const { unmount } = renderHook(() => useExploreRailsPosition());
+
+    await waitFor(() => {
+      expect(mockedLocation.watchPositionAsync).toHaveBeenCalled();
+    });
+
+    unmount();
+
+    expect(removeMock).toHaveBeenCalledTimes(1);
+  });
+});
