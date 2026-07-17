@@ -222,3 +222,81 @@ export const formatDistance = (metres: number): string => {
   if (km < 10) return `${km.toFixed(1)} km`;
   return `${Math.round(km)} km`;
 };
+
+/**
+ * Geohash prefixes covering a viewport bbox, for NIP-GC `#g` filters
+ * (#1065).
+ *
+ * `#g` is exact-match, so the returned tiles must sit at a precision the
+ * publishers actually tag — LP (and treasures.to-compatible clients)
+ * emit `g` at precisions 3–9, hence the 3..5 walk here. Starting from
+ * `maxPrecision` (small tiles) and coarsening until the covering set
+ * fits `maxTiles` keeps the relay filter bounded at any zoom. When even
+ * the coarsest precision can't cover the viewport within budget (a
+ * continental / world zoom), fall back to the tile under the viewport
+ * centre plus its 8 neighbours — mirroring the merchant fetch's
+ * radius-clamp semantics: "load around the view centre, not the world".
+ * Antimeridian-crossing bboxes take the fallback path too (the step
+ * enumeration doesn't wrap; MapLibre viewports in practice don't cross
+ * it for our markets).
+ */
+export const geohashPrefixesForBbox = (
+  bbox: { minLat: number; maxLat: number; minLon: number; maxLon: number },
+  maxTiles = 9,
+  maxPrecision = 5,
+  minPrecision = 3,
+): string[] => {
+  // Cell size in degrees at precision p: 5 bits/char alternating
+  // lon-first → lon gets ceil(5p/2) bits, lat gets floor(5p/2).
+  const cellSize = (p: number): { lonDeg: number; latDeg: number } => {
+    const bits = 5 * p;
+    const lonBits = Math.ceil(bits / 2);
+    const latBits = Math.floor(bits / 2);
+    return { lonDeg: 360 / 2 ** lonBits, latDeg: 180 / 2 ** latBits };
+  };
+  const centreFallback = (): string[] => {
+    const lat = (bbox.minLat + bbox.maxLat) / 2;
+    // Wrapped mid-longitude: an antimeridian-crossing bbox (minLon >
+    // maxLon) averages to the wrong side of the planet with a plain
+    // (min+max)/2 — e.g. 170..-170 → 0. Add a turn before halving,
+    // then normalise back into [-180, 180).
+    const rawLon =
+      bbox.minLon > bbox.maxLon
+        ? (bbox.minLon + bbox.maxLon + 360) / 2
+        : (bbox.minLon + bbox.maxLon) / 2;
+    const lon = ((rawLon + 540) % 360) - 180;
+    const centre = encodeGeohash(lat, lon, minPrecision);
+    // Centre tile first so a slice can never drop the one tile that
+    // matters most (geohashNeighbours' ordering is unspecified).
+    return [centre, ...geohashNeighbours(centre).filter((t) => t !== centre)].slice(0, maxTiles);
+  };
+  if (bbox.minLon > bbox.maxLon || bbox.minLat > bbox.maxLat) return centreFallback();
+  for (let p = maxPrecision; p >= minPrecision; p -= 1) {
+    const { lonDeg, latDeg } = cellSize(p);
+    // Iterate cell INDICES (floor(min/cell) .. floor(max/cell), inclusive)
+    // rather than stepping centres against a float bound — index iteration
+    // always yields ≥1 cell per axis, so a degenerate bbox (min == max,
+    // even sitting exactly on a grid line) still covers the tile
+    // containing the point instead of returning an empty set.
+    const latLo = Math.floor(bbox.minLat / latDeg);
+    const latHi = Math.floor(bbox.maxLat / latDeg);
+    const lonLo = Math.floor(bbox.minLon / lonDeg);
+    const lonHi = Math.floor(bbox.maxLon / lonDeg);
+    const tiles: string[] = [];
+    let overflow = false;
+    for (let li = latLo; li <= latHi && !overflow; li += 1) {
+      for (let lj = lonLo; lj <= lonHi; lj += 1) {
+        const clampedLat = Math.max(-90, Math.min(90, li * latDeg + latDeg / 2));
+        const clampedLon = Math.max(-180, Math.min(180, lj * lonDeg + lonDeg / 2));
+        const gh = encodeGeohash(clampedLat, clampedLon, p);
+        if (!tiles.includes(gh)) tiles.push(gh);
+        if (tiles.length > maxTiles) {
+          overflow = true;
+          break;
+        }
+      }
+    }
+    if (!overflow) return tiles;
+  }
+  return centreFallback();
+};
