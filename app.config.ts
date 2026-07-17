@@ -34,13 +34,37 @@ const getAndroidPackage = () => {
   return 'com.lightningpiggy.app';
 };
 
+const getIconPath = () => {
+  if (IS_DEV) return './assets/icon-dev.png';
+  if (IS_PREVIEW) return './assets/icon-preview.png';
+  return './assets/icon.png';
+};
+
+// Android adaptive-icon background load-fallback colour (each gradient's
+// approximate midtone) per variant: dev blue, preview purple, production pink.
+const getAdaptiveIconBackgroundColor = () => {
+  if (IS_DEV) return '#3F86C9';
+  if (IS_PREVIEW) return '#8B5CF6';
+  return '#D6007E';
+};
+
+// Android adaptive-icon radial-gradient background image per variant.
+const getAdaptiveIconBackgroundImage = () => {
+  if (IS_DEV) return './assets/android-icon-background-dev.png';
+  if (IS_PREVIEW) return './assets/android-icon-background-preview.png';
+  return './assets/android-icon-background.png';
+};
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
   slug: 'lightning-piggy-app',
   version: pkg.version,
   orientation: 'portrait',
-  icon: './assets/icon.png',
+  // Per-variant app icon (PiggyBank glyph on brand colour): radial gradients
+  // for all three — pink (production), blue (dev), purple (preview) — so the
+  // three installs stay instantly distinguishable on the home screen.
+  icon: getIconPath(),
   userInterfaceStyle: 'light',
   // Splash screen: the pig + brand wordmark on brand-pink. Same asset
   // IntroScreen uses so first-time users get a continuous pig → Home
@@ -224,16 +248,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   android: {
     adaptiveIcon: {
-      // Dev variant uses a flat blue backgroundColor and preview uses
-      // a flat purple — both drop the backgroundImage so the flat color
-      // dominates and the icon is recognisable in the launcher next to
-      // a production install. backgroundImage takes precedence in Expo's
-      // adaptive-icon template, so we deliberately omit it for the two
-      // non-prod variants. Production keeps the layered pink/blue
-      // background image.
-      backgroundColor: IS_DEV ? '#4A90D9' : IS_PREVIEW ? '#8B5CF6' : '#E6F4FE',
+      // Each variant gets its own radial-gradient background image (matching
+      // the iOS icon): production pink, dev blue, preview purple — so the three
+      // installs stay distinguishable on the launcher. The white PiggyBank +
+      // bolt is the shared foreground layer. `backgroundColor` is only the
+      // load fallback (each gradient's approximate midtone). Regenerate all of
+      // these with `bash scripts/generate-app-icons.sh`.
+      backgroundColor: getAdaptiveIconBackgroundColor(),
       foregroundImage: './assets/android-icon-foreground.png',
-      ...(IS_DEV || IS_PREVIEW ? {} : { backgroundImage: './assets/android-icon-background.png' }),
+      backgroundImage: getAdaptiveIconBackgroundImage(),
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
