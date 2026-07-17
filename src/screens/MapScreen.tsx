@@ -50,10 +50,17 @@ import {
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
-import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
+import { useMapPins } from '../hooks/useMapPins';
+import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
+import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
-import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
+import {
+  decodeGeohash,
+  encodeGeohash,
+  geohashNeighbours,
+  geohashPrefixesForBbox,
+} from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
@@ -180,7 +187,11 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   // Multiple categories OR together (intersection semantics would
   // filter most merchants out since each has 0-2 categories).
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
-  const cachesCloserRef = useRef<(() => void) | null>(null);
+  // Viewport-keyed nearby-caches subscription (#1065; closed on unmount).
+  const { resubscribeForPrefixes } = useNearbyCacheSubscription({
+    enqueue: caches.enqueue,
+    flush: caches.flush,
+  });
   const [error, setError] = useState<string | null>(null);
 
   // ------- permissions + initial position --------------------------------
@@ -259,27 +270,15 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         // label) AND standard NIP-GC caches (treasures.to /
         // TapTheSatsMap / etc.) as a different pin glyph alongside
         // BTC Map merchants. See project memory `treasures.to interop`.
-        // Use 9-tile neighbourhood at precision 5 (centre + 8 surrounding
-        // tiles) so caches sitting just over a tile boundary still match.
-        // The plain-prefix path missed published Piglets in adjacent tiles
-        // (e.g. user in u1219, caches in u1218/u1213) — see #631.
-        const myTile = encodeGeohash(lat, lon, 5);
-        const prefixes = geohashNeighbours(myTile);
-        cachesCloserRef.current?.();
-        cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
-          // Hide the project's own test-account ("Piggy") Piglets on the
-          // map in the production app; dev/preview keep them for Maestro.
-          if (isHiddenInProd(cache.hiderPubkey)) return;
-          caches.enqueue(cache.coord, cache);
-        });
+        // 9-tile neighbourhood at precision 5 so boundary-adjacent caches
+        // still match (#631); re-keyed per viewport by onLibreBounds (#1065).
+        resubscribeForPrefixes(geohashNeighbours(encodeGeohash(lat, lon, 5)));
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
     })();
     return () => {
       cancelled = true;
-      cachesCloserRef.current?.();
-      caches.flush();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -326,58 +325,16 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     return [...seen].sort();
   }, [places]);
 
-  // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
-  // filtering `caches.map.values()` twice every render (Copilot review on #825).
-  const cacheCounts = useMemo(() => {
-    let piglets = 0;
-    let others = 0;
-    for (const c of caches.map.values()) {
-      if (c.isLpPiggy) piglets++;
-      else others++;
-    }
-    return { piglets, others };
-  }, [caches.map]);
-
-  // Filtered arrays for LibreMiniMap. Same predicates the WebView path
-  // used to send across the bridge — now plain memoised derived state.
-  const visibleMerchants = useMemo(() => {
-    return places.filter((p) => {
-      const typeOk = acceptsLightning(p)
-        ? filters.lightning
-        : acceptsOnchain(p)
-          ? filters.onchain
-          : filters.lightning || filters.onchain;
-      if (!typeOk) return false;
-      if (categoryFilter.size === 0) return true;
-      const cats = p.categories ?? [];
-      return cats.some((c) => categoryFilter.has(c));
-    });
-  }, [places, filters.lightning, filters.onchain, categoryFilter]);
-
-  // Re-evaluate the NIP-40 expiry filter as time advances even if nothing else
-  // changes — a cache can expire while the map just sits open. A 60s tick is
-  // plenty (expiry is a slow day/year-scale boundary) and, unlike putting a
-  // per-render `Date.now()` in the memo deps (which would recompute
-  // visibleCaches every render), keeps the memo cached between ticks (#763).
-  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const t = setInterval(() => setNowSec(Date.now() / 1000), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const visibleCaches = useMemo(() => {
-    // Drop NIP-40-expired caches — relays that don't honour expiration keep
-    // serving them, so the client filters them out. The Geo-caches list
-    // (HuntScreen) already does this; the map must too, else an expired Piglet
-    // lingers on the map after it's gone from the list (#762).
-    return [...caches.map.values()].filter(
-      (c) =>
-        !isHiddenInProd(c.hiderPubkey) &&
-        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
-        isTrusted(c.hiderPubkey) &&
-        (c.expiresAt === null || c.expiresAt > nowSec),
-    );
-  }, [caches.map, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
+  // Cap centre as state, not a ref — see the viewportCentre note in useMapPins.
+  const [viewportCentre, setViewportCentre] = useState<{ lat: number; lon: number } | null>(null);
+  const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
+    places,
+    cachesMap: caches.map,
+    filters,
+    categoryFilter,
+    isTrusted,
+    viewportCentre,
+  });
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -398,7 +355,10 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         lastBbox.current = next;
+        setViewportCentre(bboxCentre(next));
         refreshPlaces(next);
+        // Re-key the caches sub for the new viewport (#1065) — no-op unless the tiles changed.
+        resubscribeForPrefixes(geohashPrefixesForBbox(next));
         // Viewport-persist on every camera-settle is on the to-do list
         // (#552 follow-up — needs a matching hydrate effect on mount,
         // wire through to Camera.initialViewState). Removed the stub
@@ -406,7 +366,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         // reads it back.
       }, 500);
     },
-    [refreshPlaces],
+    [refreshPlaces, resubscribeForPrefixes],
   );
 
   // Back target: when opened from a DM live-location card the route carries

@@ -197,3 +197,69 @@ describe('geohashNeighbours', () => {
     expect(n).toContain('b');
   });
 });
+
+describe('geohashPrefixesForBbox', () => {
+  const { geohashPrefixesForBbox, encodeGeohash: enc } = jest.requireActual('./geohash');
+
+  it('covers a city-scale bbox at precision 5 within budget', () => {
+    // ~10 km around Longstanton, Cambridge.
+    const tiles = geohashPrefixesForBbox({
+      minLat: 52.26,
+      maxLat: 52.31,
+      minLon: 0.02,
+      maxLon: 0.07,
+    });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    expect(tiles.every((t: string) => t.length === 5)).toBe(true);
+    // The user's own tile must be in the covering set.
+    expect(tiles).toContain(enc(52.2836, 0.0439, 5));
+  });
+
+  it('coarsens to a lower precision for a country-scale bbox', () => {
+    // Roughly Denmark.
+    const tiles = geohashPrefixesForBbox({ minLat: 54.5, maxLat: 57.8, minLon: 8, maxLon: 12.7 });
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    const precision = tiles[0].length;
+    expect(precision).toBeGreaterThanOrEqual(3);
+    expect(precision).toBeLessThan(5);
+    // Johnnymoonshine's Livø Havn Piglet (56.887, 9.099) must be covered.
+    expect(tiles).toContain(enc(56.887, 9.099, precision));
+  });
+
+  it('falls back to centre + neighbours at min precision for a world bbox', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: -60, maxLat: 75, minLon: -170, maxLon: 170 });
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    expect(tiles.every((t: string) => t.length === 3)).toBe(true);
+  });
+
+  it('never returns tiles below precision 3 (publishers only tag 3..9)', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: 30, maxLat: 70, minLon: -20, maxLon: 40 });
+    expect(tiles.every((t: string) => t.length >= 3)).toBe(true);
+  });
+});
+
+describe('geohashPrefixesForBbox edge cases (Copilot review on #1069)', () => {
+  const { geohashPrefixesForBbox, encodeGeohash: enc } = jest.requireActual('./geohash');
+
+  it('returns the containing tile for a degenerate bbox exactly on a grid boundary', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: 0, maxLat: 0, minLon: 0, maxLon: 0 });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles).toContain(enc(0, 0, 5));
+  });
+
+  it('falls back around a wrapped mid-longitude for an antimeridian-crossing bbox', () => {
+    // minLon > maxLon: crosses the antimeridian. Naive averaging would
+    // centre on lon 0; the wrapped midpoint is ±180.
+    const tiles = geohashPrefixesForBbox({ minLat: -10, maxLat: 10, minLon: 170, maxLon: -170 });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles[0]).toBe(enc(0, -180, 3));
+    expect(tiles).not.toContain(enc(0, 0, 3));
+  });
+
+  it('keeps the centre tile first in the fallback so a small maxTiles cannot drop it', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: -60, maxLat: 75, minLon: -170, maxLon: 170 }, 1);
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toBe(enc(7.5, 0, 3));
+  });
+});
