@@ -83,7 +83,10 @@ public class NostrNativeModule: Module {
 
     // Relay-engine event stream (Stage 2 M2 contract): batched plaintext
     // rumors and a debounced reconnect signal. See NostrEngine.swift.
-    Events("onEngineRumorBatch", "onEngineReconnect")
+    // Module-qualified: the generated rust-nostr bindings define an `Events`
+    // TYPE (event collection) in this same pod target, which would otherwise
+    // shadow Expo's Events(...) DSL function.
+    ExpoModulesCore.Events("onEngineRumorBatch", "onEngineReconnect")
 
     OnDestroy {
       // Dev-client reloads recreate the module — never leave a pool (or key
@@ -180,17 +183,17 @@ public class NostrNativeModule: Module {
   }
 }
 
-internal final class NostrInputException: GenericException<String> {
+internal final class NostrInputException: GenericException<String>, @unchecked Sendable {
   override var code: String { "ERR_NOSTR_INPUT" }
   override var reason: String { param }
 }
 
-internal final class EngineStartException: GenericException<String> {
+internal final class EngineStartException: GenericException<String>, @unchecked Sendable {
   override var code: String { "ERR_ENGINE_START" }
   override var reason: String { param }
 }
 
-internal final class EngineSubscribeException: GenericException<String> {
+internal final class EngineSubscribeException: GenericException<String>, @unchecked Sendable {
   override var code: String { "ERR_ENGINE_SUBSCRIBE" }
   override var reason: String { param }
 }
