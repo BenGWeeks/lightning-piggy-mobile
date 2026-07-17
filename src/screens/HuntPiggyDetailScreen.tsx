@@ -45,7 +45,7 @@ import {
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { parseFoundLog, type FoundLog } from '../utils/foundLog';
+import type { FoundLog } from '../utils/foundLog';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
@@ -63,16 +63,12 @@ import { decodeGeohash, formatDistance } from '../utils/geohash';
 import { useCompassNavigation } from '../hooks/useCompassNavigation';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { shortNpub } from '../utils/shortNpub';
-import {
-  fetchCache,
-  publishCacheEvent,
-  subscribeFoundLogs,
-} from '../services/nostrPlacesPublisher';
+import { fetchCache, publishCacheEvent } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
-import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
 import NfcReadSheet from '../components/NfcReadSheet';
+import { useFoundLogIngest } from '../hooks/useFoundLogIngest';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -119,12 +115,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => !peekCachedCachesSync().some((c) => c.coord === coord),
   );
   const [error, setError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
-  // Zap totals per find-log id. Outer key is the kind-7516 log id;
-  // inner Map is keyed by kind-9735 receipt id so the same zap arriving
-  // from multiple relays only counts once. Sum the inner values for the
-  // total displayed on the row.
-  const [zapsByLog, setZapsByLog] = useState<Map<string, Map<string, number>>>(new Map());
+  // Found-logs + zap-receipt relay ingest (coalesced batching, optimistic
+  // insert) lives in useFoundLogIngest — see its header comment.
+  const { sortedLogs, zapTotalsByLog, addOptimisticLog } = useFoundLogIngest(coord);
   // In-app NIP-57 zap target. `null` keeps the SendSheet closed; an
   // object opens it pre-targeted at that finder and scoped to that log
   // (via the 9734 `e` tag → 9735 `e` tag echo).
@@ -218,7 +211,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // a −45° offset; Navigation2 is cleaner for compass use.)
   const arrowRotation = bearing !== null && heading !== null ? bearing - heading : null;
 
-  // ----- load listing + subscribe found-logs ------------------------------
+  // ----- load listing -----------------------------------------------------
+  // (found-log + zap-receipt subscriptions live in useFoundLogIngest above)
 
   useEffect(() => {
     let cancelled = false;
@@ -258,18 +252,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!cancelled) setLoading(false);
       }
     })();
-    const closer = subscribeFoundLogs(coord, (event) => {
-      const log = parseFoundLog(event);
-      setLogs((prev) => {
-        if (prev.has(log.id)) return prev;
-        const next = new Map(prev);
-        next.set(log.id, log);
-        return next;
-      });
-    });
     return () => {
       cancelled = true;
-      closer();
     };
   }, [coord]);
 
@@ -308,51 +292,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       setRefreshing(false);
     }
   }, [refetchCache]);
-
-  // Re-subscribe to kind-9735 zap receipts on the `#e` tag of find-logs.
-  // Keyed on sorted log ids so a new log re-opens the sub while an
-  // unchanged set doesn't. Receipts deduped by receiptId across relays.
-  const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
-  // Coalesce per-zap Map clones into one setState per ≤150 ms flush.
-  // Without batching a relay burst fires N × O(prev) Map clones. (#739 Fix 4)
-  const pendingZapsRef = useRef<{ receiptId: string; logId: string; sats: number }[]>([]);
-  const zapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const logIds = logIdsKey ? logIdsKey.split(',') : [];
-    if (logIds.length === 0) return undefined;
-    const flush = (): void => {
-      if (zapFlushTimerRef.current) {
-        clearTimeout(zapFlushTimerRef.current);
-        zapFlushTimerRef.current = null;
-      }
-      if (pendingZapsRef.current.length === 0) return;
-      const batch = pendingZapsRef.current;
-      pendingZapsRef.current = [];
-      setZapsByLog((prev) => {
-        const next = new Map(prev);
-        for (const { receiptId, logId, sats } of batch) {
-          const inner = next.get(logId);
-          if (inner && inner.has(receiptId)) continue; // already counted
-          const nextInner = new Map(inner ?? []);
-          nextInner.set(receiptId, sats);
-          next.set(logId, nextInner);
-        }
-        return next;
-      });
-    };
-    const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
-      pendingZapsRef.current.push({ receiptId, logId, sats });
-      if (pendingZapsRef.current.length >= 25) {
-        flush();
-        return;
-      }
-      if (zapFlushTimerRef.current === null) zapFlushTimerRef.current = setTimeout(flush, 150);
-    });
-    return () => {
-      closer();
-      flush();
-    };
-  }, [logIdsKey]);
 
   // ----- composer image picker -------------------------------------------
 
@@ -422,17 +361,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
       // Optimistic insert so the new log shows immediately even before
       // the relay round-trips it back via the subscription.
-      setLogs((prev) => {
-        const next = new Map(prev);
-        next.set(signed.id, {
-          id: signed.id,
-          pubkey: signed.pubkey,
-          createdAt: signed.created_at,
-          content: signed.content,
-          imageUrl: composerPhotoUrl,
-          amountSats: claim?.sats ?? null,
-        });
-        return next;
+      addOptimisticLog({
+        id: signed.id,
+        pubkey: signed.pubkey,
+        createdAt: signed.created_at,
+        content: signed.content,
+        imageUrl: composerPhotoUrl,
+        amountSats: claim?.sats ?? null,
       });
       Toast.show({ type: 'success', text1: 'Log posted ⚡' });
       // Composer stays mounted — just clear so the user could post
@@ -444,26 +379,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setPosting(false);
     }
-  }, [cache, posting, composerText, composerPhotoUrl, signEvent, relays, coord]);
+  }, [cache, posting, composerText, composerPhotoUrl, signEvent, relays, coord, addOptimisticLog]);
 
   // ----- render -----------------------------------------------------------
-
-  const sortedLogs = useMemo(
-    () => [...logs.values()].sort((a, b) => b.createdAt - a.createdAt),
-    [logs],
-  );
-
-  // Per-log zap totals, flattened from the receipt-keyed inner Maps so
-  // the row can render a single sats number cheaply on each draw.
-  const zapTotalsByLog = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const [logId, receipts] of zapsByLog) {
-      let total = 0;
-      for (const sats of receipts.values()) total += sats;
-      if (total > 0) m.set(logId, total);
-    }
-    return m;
-  }, [zapsByLog]);
 
   // Anyone can post a find-log on any cache (LP or vanilla NIP-GC).
   // Ben's framing: find-logs are unlimited and not gated on claim —

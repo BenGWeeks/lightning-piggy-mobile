@@ -43,6 +43,7 @@ import {
 } from '../services/cacheNotifySubscription';
 import { fireCacheNotification } from '../services/notificationService';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
+import { subscribeOwnCachesChanged } from '../services/ownCachesBus';
 import { parseCacheCoord } from '../services/nostrPlacesService';
 import { notifyFoundLog } from './nostrEventBus';
 
@@ -54,17 +55,29 @@ const NOTIFY_SKEW_SEC = 120;
 // the Set to grow unboundedly across the life of the sub.
 const SEEN_CAP = 1000;
 
-// Re-poll the viewer's cache coords once a minute so a cache published
-// mid-session is picked up by the live sub without a full app restart
-// (Copilot review #742). Bounded (5 s maxWait inside fetchCachesByAuthor)
-// and inexpensive (kind-37516 by one pubkey is replaceable + small).
-const REFETCH_COORDS_INTERVAL_MS = 60_000;
-// Minimum gap between actual refetch passes. The 60 s interval and one-time
-// mount call sit well above it; its job is to coalesce AppState 'active'
-// bursts — the OS can deliver several 'active' events back-to-back on resume,
-// each otherwise firing an overlapping fetchCachesByAuthor that piles onto the
-// JS thread during warm re-foreground (#751 warm-path audit #5).
+// Safety-net re-poll of the viewer's cache coords. Same-device publishes
+// re-arm EVENT-DRIVEN via ownCachesBus (#1016), so this interval only
+// covers the rare cross-device case (a cache published/edited from another
+// device mid-session). It was 60 s — ~1,440 seven-relay REQ sweeps a day,
+// measured at 3–5 s of relay wait each and returning nothing for most
+// users; 15 min keeps the cross-device catch-up without the churn.
+const REFETCH_COORDS_INTERVAL_MS = 15 * 60_000;
+// Minimum gap between actual refetch passes. The 15-min safety-net interval
+// and one-time mount call sit well above it; its job is to coalesce AppState
+// 'active' bursts — the OS can deliver several 'active' events back-to-back on
+// resume, each otherwise firing an overlapping fetchCachesByAuthor that piles
+// onto the JS thread during warm re-foreground (#751 warm-path audit #5).
 const REFETCH_MIN_GAP_MS = 10_000;
+// Resume-burst stagger (#554). On AppState → active, five concurrent handlers
+// fire (DM re-arm, wallet refresh, relay reconnect, …). fetchCachesByAuthor
+// against 7 relays costs 3–5 s of JS-thread time and starves tap-dispatch
+// queued during the background pause — users tap UI that feels dead.
+// Cache-coord refetch is latency-insensitive (the live sub stays armed with
+// the previous coord set; the refetch only matters if a NEW cache was
+// published while backgrounded, which is rare). A 3 s stagger yields to the
+// latency-sensitive work (DM re-arm, wallet refresh) and keeps the bridge
+// responsive on resume.
+const RESUME_REFETCH_DELAY_MS = 3_000;
 
 // Per-surface notification copy. Comments and found-logs are separate
 // event kinds now, so the OS notification title should match what actually
@@ -184,18 +197,33 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
 
     /**
      * Re-fetch "my cache coords" and (re-)arm the live sub if the coord
-     * set changed. Called on mount, on a 60 s interval, and on every
-     * AppState → active transition so a cache published mid-session is
-     * picked up without a full app restart. `fetchCachesByAuthor` caps
-     * itself at 5 s so this can't pin the hook against a slow relay.
+     * set changed. Called on mount, event-driven via ownCachesBus when THIS
+     * device publishes/edits/deletes a cache, on a 15-minute safety-net
+     * interval (cross-device changes), and on every AppState → active
+     * transition. `fetchCachesByAuthor` caps itself at 5 s so this can't
+     * pin the hook against a slow relay.
      */
-    const refetchAndRearm = async (): Promise<void> => {
+    // Single-flight state: at most one fetch+rearm pass runs at a time. A
+    // forced pass (own-cache publish, #1016) that lands while another pass is
+    // in flight queues ONE follow-up instead of overlapping it — bypassing the
+    // min-gap throttle must not reintroduce the overlapping-fetch problem the
+    // throttle exists to prevent (Copilot #1018).
+    let refetchInFlight = false;
+    let queuedForce = false;
+    const refetchAndRearm = async (opts?: { force?: boolean }): Promise<void> => {
       if (cancelled) return;
+      if (refetchInFlight) {
+        if (opts?.force) queuedForce = true;
+        return;
+      }
       // Throttle bursts (esp. multiple back-to-back AppState 'active' events on
       // resume) so we don't fire overlapping relay fetches (#751 audit #5).
+      // `force` (a just-published own cache, #1016) skips the gap — the whole
+      // point of the event-driven re-arm is picking the change up NOW.
       const startNow = Date.now();
-      if (startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
+      if (!opts?.force && startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
       lastRefetchStartedAt = startNow;
+      refetchInFlight = true;
       try {
         const myCaches = await fetchCachesByAuthor(pubkey, readRelays);
         if (cancelled) return;
@@ -238,21 +266,58 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
         // Non-fatal — leave the previous sub (if any) in place; the next
         // refetch retries. The background detect-and-ping pass also
         // catches anything we miss here.
+      } finally {
+        refetchInFlight = false;
+        if (queuedForce && !cancelled) {
+          queuedForce = false;
+          void refetchAndRearm({ force: true });
+        }
       }
     };
+
+    // Staggered-resume timer. Populated when AppState fires 'active'; cleared
+    // on unmount and on the NEXT AppState event (background→active bounce must
+    // not stack timers or fire after re-backgrounding — see #554).
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
     void refetchAndRearm();
     const interval = setInterval(() => {
       void refetchAndRearm();
     }, REFETCH_COORDS_INTERVAL_MS);
     const appStateSub = AppState.addEventListener('change', (s: AppStateStatus) => {
-      if (s === 'active') void refetchAndRearm();
+      // Cancel any pending stagger from a prior 'active' event — a quick
+      // active→background→active bounce must not stack timers or fire the
+      // stale timer after the app re-enters the background (#554).
+      if (resumeTimer !== null) {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
+      }
+      if (s !== 'active') return;
+      // Resume-burst stagger (#554): defer the coord refetch so it doesn't
+      // compete with latency-sensitive work (DM re-arm, wallet refresh) that
+      // fires concurrently on resume. Cache-coord refetch is not
+      // latency-sensitive — the live sub stays armed; the refetch matters
+      // only if a cache was published while backgrounded (rare).
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        void refetchAndRearm();
+      }, RESUME_REFETCH_DELAY_MS);
+    });
+    // Event-driven re-arm: this device just published / edited / expired /
+    // deleted one of its own caches (#1016) — refresh the coord set now.
+    const unsubOwnCaches = subscribeOwnCachesChanged(() => {
+      void refetchAndRearm({ force: true });
     });
 
     return () => {
       cancelled = true;
+      if (resumeTimer !== null) {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
+      }
       clearInterval(interval);
       appStateSub.remove();
+      unsubOwnCaches();
       if (unsubscribeComments) unsubscribeComments();
       if (unsubscribeFoundLogs) unsubscribeFoundLogs();
     };

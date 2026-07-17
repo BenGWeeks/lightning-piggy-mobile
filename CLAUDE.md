@@ -57,6 +57,21 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## Performance rules
+
+Everything below exists because the app runs on ONE JS thread — relay events, crypto, and tap dispatch all queue behind each other (see #554's dead-tap wedge). `bash scripts/check-perf-antipatterns.sh` gates the mechanical rules in CI (grandfathered baseline — shrink counts, never grow them). Full rationale + the audit methodology: `docs/PERFORMANCE.adoc` → "Authoring best practices".
+
+- **Never `setState` per relay/emitter event.** Batch ingest through `src/utils/useCoalescedMap.ts` (≤150 ms coalesced flush). Per-event `new Map(prev)` clones are CI-gated.
+- **Screens arm subscriptions with `useFocusEffect`**, never bare `useEffect` — blurred tabs must not keep relay subs alive. One hook instance owns a subscription; sibling screens receive data via params/context, never a duplicate sub (#1028).
+- **AppState `active` handlers stagger.** Only latency-sensitive work (DM re-arm) fires immediately on resume; everything else (cache refetches, polls) schedules via a cancellable ~3 s `setTimeout` (pattern: `useCacheNotifications`, #554/#1031). Never add an unstaggered resume handler.
+- **Relay filters are always bounded** — `limit` plus a `since` window where semantics allow. Exception: kind-1059 gift wraps must NOT use `since` (NIP-59 randomises `created_at` up to 48 h back — #469); bound those by `limit` and reconcile on re-arm.
+- **Heavy loops yield.** Multi-recipient crypto / batch decrypt uses the budget-gated `createYieldScheduler` (`src/services/nostrDecryptPacing.ts`) between units — not unconditional `yieldToEventLoop()` (a forced 16 ms RAF per item).
+- **List rows are `React.memo`'d** with stable props; images in lists use `expo-image` with `cachePolicy="memory-disk"` (bare react-native `Image` is CI-gated); long lists use `FlatList`/`FlashList` with `keyExtractor`, never `ScrollView` over unbounded data.
+- **Context provider `value`s are `useMemo`'d, handlers `useCallback`'d** — one inline object literal re-renders every consumer.
+- **New screens are `lazyScreen`'d** in `AppNavigator`; heavy native modules never import eagerly from tab screens.
+- **Don't add crypto to hot paths.** All Nostr crypto is pure-JS today; the fix is the native pipeline (epic #1036, Stage 1 JSI crypto → Stage 2 rust-nostr engine via the bdk-rn UniFFI pattern), not more JS-thread work.
+- **Perf-sensitive PRs prove it:** `[PerfBlock]` markers (preview builds set `EXPO_PUBLIC_KEEP_PERF_LOGS=1`) or a `scripts/perf-*.sh` p50/p95 before/after in the PR body. Perf reviews go to Stevie (T-Minus-15 plugin agent).
+
 ## Signers
 
 The app supports three Nostr signers, branched on `signerType` in `NostrContext.tsx`:
@@ -76,13 +91,13 @@ The app supports three Nostr signers, branched on `signerType` in `NostrContext.
   - **Contexts** → extract per-responsibility hooks/services. E.g. `NostrContext` → `useDmInbox` / `useProfiles` / `useRelays` (+ the `src/services/dm*` data layer), each its own file; the context just composes them.
   - **Screens** → lift sub-views into components, and non-UI logic into hooks/utils (`useXScreenState`, `src/utils/…`). Styles → `src/styles/<Name>.styles.ts` (see above).
   - **Services** → split by domain (`nostrService` → `nostrRelay` / `nostrDm` / `nostrProfile`).
-- **Known offenders to break up (as of 2026-05-26, when touched; counts by `wc -l`, may read ±1 vs an editor's last-line number):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,173), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,377), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015). (`nwcService.ts` dropped under the cap in #785 once its relay-health layer moved to `src/services/nwcRelayHealth.ts` — baseline entry removed.) The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
+- **Known offenders to break up (counts by `wc -l`, may read ±1 vs an editor's last-line number; update when you touch a file):** `NostrContext.tsx` (3,565 — module-scope helpers extracted; component/hooks still to split toward the cap), `HuntCreateScreen.tsx` (3,121), `WalletContext.tsx` (2,153 — NWC connection watchdog extracted to `useNwcConnectionWatchdog.ts`), `HuntPiggyDetailScreen.tsx` (1,710), `MapScreen.tsx` (1,562), `nostrService.ts` (1,529), `TransferSheet.tsx` (1,418), `ExploreHomeScreen.tsx` (1,306 — rails position acquisition extracted to `useExploreRailsPosition.ts`), `nfcService.ts` (1,242), `SendSheet.tsx` (1,176), `GroupConversationScreen.tsx` (1,015). (`nwcService.ts` dropped under the cap in #785 once its relay-health layer moved to `src/services/nwcRelayHealth.ts` — baseline entry removed.) The CI gate (`scripts/check-file-size.sh`) baselines the same `wc -l` numbers, so doc and check agree.
 
 ## Unit tests
 
 - Coverage scope: **`src/services`, `src/utils`, `src/contexts` only.** Components are excluded — they're best covered by Maestro pixel/flow tests (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort, low-payoff).
 - Runner: Jest via `jest-expo` preset. Per the 2026 review of alternatives (Vitest's RN preset is still WIP, Bun test isn't documented for Expo, node:test has no RN renderer), Jest remains the right choice for RN + Expo SDK 55.
-- Add new tests under `tests/unit/<area>.test.ts`. Co-located `.test.ts` next to source files also works.
+- Add new tests as co-located `.test.ts` files next to the source (e.g. `src/utils/foo.test.ts`). Jest only collects `src/**/*.test.{ts,tsx}` (see `jest.config.js` `testMatch`) — a file under `tests/unit/` is silently never run.
 - Pick targets via `bash scripts/coverage-priorities.sh 20` — ranks files by `(churn × LOC × fanout) / (coverage% + 1)`. Top of the list is where bugs hurt most.
 - The `Coverage` GitHub Actions workflow gates every PR: line-coverage may not drop more than 0.5pp vs main.
 

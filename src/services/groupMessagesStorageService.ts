@@ -95,6 +95,39 @@ export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
 
+/**
+ * Remove a single message row by id. Used by the group send failure path
+ * (#1033) to retract the optimistic `local_*` row that was painted before
+ * signing — mirrors the 1:1 path's "keep the bubble on failure" semantics
+ * adapted for group storage: we show a BrandedAlert AND remove the row so
+ * a never-published message doesn't linger in the thread. Returns the
+ * updated message list on success (the unmodified list, unchanged, if
+ * `messageId` wasn't found).
+ *
+ * On an AsyncStorage write error this REJECTS rather than returning `[]` —
+ * matching `appendGroupMessage`'s propagate-on-failure contract elsewhere in
+ * this module (and `identitiesStore`'s write-through functions). A transient
+ * storage error must never be conflated with "the thread is now empty": a
+ * caller that unconditionally did `setMessages(await removeGroupMessage(...))`
+ * would otherwise wipe the visible thread on a blip that touched none of the
+ * underlying data. Callers MUST catch and treat a rejection as "the row could
+ * not be retracted from local storage" — leave any optimistic in-memory
+ * removal as-is and do not call setMessages with this function's result.
+ * Note: `loadGroupMessages` swallows its own read/parse errors and resolves
+ * to `[]` rather than throwing, so in practice only the `setItem` write below
+ * can cause this function to reject.
+ */
+export async function removeGroupMessage(
+  groupId: string,
+  messageId: string,
+): Promise<GroupMessage[]> {
+  const existing = await loadGroupMessages(groupId);
+  const filtered = existing.filter((m) => m.id !== messageId);
+  if (filtered.length === existing.length) return existing;
+  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+  return filtered;
+}
+
 // Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return
 // the set of message ids that look like NIP-17 wrap ids (64-char hex —
 // `local_*` optimistic rows are excluded). Used by NostrContext to

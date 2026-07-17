@@ -3,6 +3,7 @@ import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
+import type { LeaderboardEntry } from '../utils/huntLeaderboard';
 
 // Main tab param list
 export type MainTabParamList = {
@@ -29,6 +30,7 @@ export type AccountDrawerParamList = {
   AccountOnChain: undefined;
   AccountDisplay: undefined;
   AccountAppearance: undefined;
+  AccountLanguage: undefined;
   AccountNearby: undefined;
   AccountSecurity: undefined;
   AccountAbout: undefined;
@@ -144,6 +146,21 @@ export type ExploreStackParamList = {
   // finder doesn't have to remember to tap the compose button.
   HuntPiggyDetail: { coord: string; openComposer?: boolean };
   MyPiglets: undefined;
+  // Leaderboard data is passed as route params so HuntLeaderboardScreen
+  // can render immediately without opening its own relay subscriptions —
+  // HuntScreen's useHuntCommunity instance (via HuntCommunitySections)
+  // already owns the subscription pair; a second instance would duplicate
+  // ~400 relay events through the JS thread (#1028).
+  //
+  // Staleness trade-off: params are frozen at tap time. That is acceptable
+  // for a leaderboard page — the user tapped "View Leaderboard" to inspect
+  // the board as it stood, and the board updates at most once per 1.5 s
+  // settle window while Hunt is focused, so lag is negligible in practice.
+  HuntLeaderboard: {
+    hiderLeaderboard: LeaderboardEntry[];
+    finderLeaderboard: LeaderboardEntry[];
+    loading: boolean;
+  };
   Events: undefined;
   EventDetail: { coord: string };
 };
@@ -159,3 +176,4 @@ export type MarketProductDetailRoute = RouteProp<ExploreStackParamList, 'MarketP
 export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;
+export type HuntLeaderboardRoute = RouteProp<ExploreStackParamList, 'HuntLeaderboard'>;

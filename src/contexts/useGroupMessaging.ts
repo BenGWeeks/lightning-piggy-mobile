@@ -1,12 +1,12 @@
 import { useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
+import { getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { createGroupFileRumor } from '../services/nostrFileMessage';
+import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
-import { NSEC_KEY } from './nostrAuthKeys';
 
 /**
  * Provider-owned slices the group-messaging callbacks close over: the
@@ -21,21 +21,44 @@ export interface UseGroupMessagingOptions {
   relays: RelayConfig[];
 }
 
+// Early hook for the group optimistic-send flow (#1033). Fires synchronously
+// once the stable rumor eventId is known (before any signing), so the caller
+// can paint the pending bubble keyed by it — parity with the 1:1 path's
+// `SendHooks.onRumorReady` in `useMessageSend.ts`.
+//
+// Failure semantics (group vs 1:1):
+//   1:1 — the delivery-status store keeps the bubble alive even on failure;
+//     the user sees a red tick + Re-publish button (per-relay breakdown).
+//   Group — there is no per-relay delivery store for group messages today, so
+//     we cannot keep a persistent failed-tick bubble. Instead, on failure we:
+//     (a) show a BrandedAlert (existing behaviour, unchanged), AND
+//     (b) remove the just-appended optimistic row from storage + state so a
+//         never-published message doesn't linger in the thread.
+//   The 'Saved on relay, not on device' path (appendGroupMessage throws) is
+//   unchanged: the relay send already succeeded at that point, so the row is
+//   kept and the existing alert fires — we only remove on outright send failure.
+export interface GroupSendHooks {
+  onRumorReady?: (meta: { rumorId: string; kind: number }) => void;
+}
+
 /**
  * The two group callbacks the provider re-exposes through the context
  * value: a NIP-17 group send and the kind-30200 group-state publish.
  */
 export interface UseGroupMessagingResult {
-  sendGroupMessage: (input: {
-    groupId: string;
-    subject: string;
-    memberPubkeys: string[];
-    /** Text body. Optional when sending a `file` (kind-15) message. */
-    text?: string;
-    /** When set, sends an encrypted NIP-17 kind-15 group file message
-     *  (e.g. a voice note, #235) instead of a kind-14 chat message. */
-    file?: EncryptedUpload;
-  }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  sendGroupMessage: (
+    input: {
+      groupId: string;
+      subject: string;
+      memberPubkeys: string[];
+      /** Text body. Optional when sending a `file` (kind-15) message. */
+      text?: string;
+      /** When set, sends an encrypted NIP-17 kind-15 group file message
+       *  (e.g. a voice note, #235) instead of a kind-14 chat message. */
+      file?: EncryptedUpload;
+    },
+    hooks?: GroupSendHooks,
+  ) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
   publishGroupState: (input: {
     groupId: string;
     name: string;
@@ -57,15 +80,22 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
    * the user has pre-granted blanket permission for `sign_event` and
    * `nip44_encrypt`, in which case Amber's ContentResolver fast-path
    * resolves silently. See issue #247.
+   *
+   * `hooks.onRumorReady` (#1033) fires synchronously before any signing,
+   * so the caller can paint the optimistic bubble immediately — the same
+   * pattern as the 1:1 `SendHooks.onRumorReady` in useMessageSend.ts.
    */
   const sendGroupMessage = useCallback(
-    async (input: {
-      groupId: string;
-      subject: string;
-      memberPubkeys: string[];
-      text?: string;
-      file?: EncryptedUpload;
-    }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
+    async (
+      input: {
+        groupId: string;
+        subject: string;
+        memberPubkeys: string[];
+        text?: string;
+        file?: EncryptedUpload;
+      },
+      hooks?: GroupSendHooks,
+    ): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
       const text = (input.text ?? '').trim();
       if (!input.file && !text) return { success: false, error: 'Empty message' };
@@ -93,10 +123,16 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               content: text,
             });
 
+        // Compute the stable rumor eventId before any signing (the rumor is
+        // never signed — hence "rumor" — so the hash is deterministic from
+        // its content fields alone). Fire onRumorReady synchronously so the
+        // caller can paint the optimistic bubble before any async work (#1033).
+        const rumorId = directMessageRumorEventId(rumor);
+        hooks?.onRumorReady?.({ rumorId, kind: rumor.kind });
+
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
@@ -234,9 +270,8 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         });
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return { success: false, error: 'Key not found' };
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) return { success: false, error: 'Key not found' };
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
           return { success: true };
         }

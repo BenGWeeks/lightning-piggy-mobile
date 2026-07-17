@@ -14,19 +14,20 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ### New
 
-- **Receive on-chain, land as Lightning.** Send Bitcoin to your on-chain address and the app swaps it to Lightning for you automatically (via a Boltz submarine swap) — no manual steps.
-- **A celebration when on-chain money lands.** Incoming on-chain payments now show a full-screen celebration overlay, the same as Lightning payments.
-- **Watch your transfer happen.** Sending a payment now replaces the form with a step-by-step progress display so you can see each stage.
-- **React to and zap individual messages.** Long-press any message in a chat to add a reaction or send it a zap.
-- **Full Spanish app.** Switch to Spanish (Account → Appearance → Language) and the whole app is translated, not just the tab labels.
-- **Pick where a received payment lands.** When creating an invoice you can now choose any of your wallets as the destination.
+- **App language is now its own setting.** Account → **Language** (moved out of Appearance) — switch between System / English / Español / Українська.
+- **"Typing…" in chats.** You'll see when the other person is typing in a 1:1 message thread.
+- **Tabbed leaderboard.** Explore → Geo-caches → Leaderboard now has **Top hiders** / **Top finders** tabs instead of one long list.
+- **The Geo-caches map scrolls with the page**, and Nearby merchants now show in a horizontal rail — the map no longer takes up a fixed chunk of the screen.
+- **Experimental (testers): native crypto.** Account → Nostr → **Experimental** has a "Native crypto (rust-nostr)" switch. Turning it on (Android only, restart to apply) runs message encryption and signature checks through a native module instead of JavaScript — much faster on busy inboxes. Watch for anything odd in messaging and turn it back off if so. Off by default; the row shows "Unavailable on this device" where it can't run.
 
 ### Improved
 
-- Monogram tab backgrounds on Messages, Friends and Explore for a more branded look.
-- Smoother pink→purple brand fade behind the wallet card on Home.
+- **Group messages appear the instant you hit send** — no waiting for encryption to finish first.
+- **Snappier taps after the app wakes up** from a long time in the background.
+- **Sending is faster** — the app no longer re-reads your key from secure storage on every message.
+- **Geo-cache pages are smoother** as recently-added / recently-found and their icons stream in.
 
 ### Fixed
 
-- Logging out now wipes group-chat message text and the places cache from the device; removing a wallet clears its cached data.
-- Pasting or typing into the Send address / memo fields no longer drops or duplicates characters.
+- **Messages sent while your app was asleep now arrive as soon as it reconnects**, instead of only when you open the Messages tab.
+- Ukrainian: the "typing…" label is now translated.

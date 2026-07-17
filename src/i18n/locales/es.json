@@ -21,6 +21,7 @@
     "onChain": "On-chain",
     "currency": "Moneda",
     "appearance": "Apariencia",
+    "language": "Idioma",
     "nearbyMerchants": "Comercios cercanos",
     "security": "Seguridad",
     "about": "Acerca de",
@@ -152,21 +153,24 @@
     "themeLightDesc": "Siempre tema claro",
     "themeDark": "Oscuro",
     "themeDarkDesc": "Siempre tema oscuro",
-    "localeSystemDesc": "Seguir el idioma del dispositivo",
-    "alwaysLanguage": "Siempre {{language}}",
     "animBubbles": "Burbujas",
     "animBubblesDesc": "Burbujas ascendentes al enviar",
     "animLightning": "Relámpago",
     "animLightningDesc": "Rayos crepitantes al enviar",
     "themeA11y": "Tema {{label}}",
-    "languageA11y": "Idioma {{label}}",
     "animationA11y": "Animación de envío {{label}}",
     "themeSectionLabel": "Tema",
-    "languageSectionLabel": "Idioma",
     "animationSectionLabel": "Animación de envío",
     "themeHint": "Afecta a todas las pantallas de la app. \"Sistema\" sigue la configuración de claro/oscuro de tu dispositivo y cambia automáticamente cuando esta cambia.",
-    "languageHint": "Traduce el texto de la interfaz de la app. Actualmente activo: {{language}}. Por ahora solo hay un par de pantallas traducidas; llegarán más en próximas actualizaciones (#137).",
     "animationHint": "La animación que se muestra mientras se envía un pago. Ambas cambian de morado a verde cuando el pago se completa."
+  },
+  "languageScreen": {
+    "title": "Idioma",
+    "sectionLabel": "Idioma",
+    "systemDesc": "Seguir el idioma del dispositivo",
+    "alwaysLanguage": "Siempre {{language}}",
+    "a11y": "Idioma {{label}}",
+    "hint": "Traduce el texto de la interfaz de la app. Actualmente activo: {{language}}. Por ahora solo hay un par de pantallas traducidas; llegarán más en próximas actualizaciones (#137)."
   },
   "btcMapAttribution": {
     "a11yLabel": "Con tecnología de BTC Map — abre btcmap.org",
@@ -287,7 +291,8 @@
     "zapUnavailable": "Enviar un zap (no disponible — el contacto no tiene dirección Lightning)",
     "closeFullscreenGif": "Cerrar el GIF a pantalla completa",
     "shareContactTitle": "Compartir un contacto con {{name}}",
-    "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir."
+    "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir.",
+    "typing": "escribiendo…"
   },
   "nwcShareSheet": {
     "title": "Compartir una cartera",
@@ -391,6 +396,7 @@
     "sending": "Enviando…",
     "sendFailed": "Error al enviar",
     "sentToRelays": "Enviado a {{ok}} de {{total}} relays",
+    "messageSent": "Mensaje enviado",
     "messageReceived": "Mensaje recibido",
     "statusNotTracked": "Sin seguimiento",
     "statusReceived": "Recibido",
@@ -894,6 +900,40 @@
     "piggySleeping": "Este Piggy está durmiendo",
     "back": "Atrás",
     "couldntClaim": "No se pudo reclamar"
+  },
+  "huntCommunity": {
+    "nearby": "Cerca",
+    "recentlyAdded": "Añadidos recientemente",
+    "recentlyFound": "Encontrados recientemente",
+    "topHiders": "Mejores escondedores",
+    "topFinders": "Mejores buscadores",
+    "filterAll": "Todos",
+    "filterFriends": "Amigos",
+    "aGeoCache": "un geocaché",
+    "foundCache": "Encontró {{cache}}",
+    "cachesHidden": "{{count}} cachés escondidos",
+    "cacheHiddenOne": "1 caché escondido",
+    "cachesFound": "{{count}} cachés encontrados",
+    "cacheFoundOne": "1 caché encontrado",
+    "ageMinutes": "hace {{count}} min",
+    "ageHours": "hace {{count}} h",
+    "ageDays": "hace {{count}} d",
+    "emptyRecentlyAdded": "Aún no se han publicado geocachés. Los nuevos aparecerán aquí.",
+    "emptyRecentlyFound": "Aún no hay hallazgos. Los cachés reclamados aparecerán aquí.",
+    "emptyFriendsFinds": "Ninguno de tus amigos ha reclamado un caché todavía.",
+    "emptyHiders": "Aún no hay escondedores: sé el primero en esconder un Piglet.",
+    "emptyFinders": "Aún no hay buscadores: reclama un caché para entrar en la lista.",
+    "leaderRowA11y": "Puesto {{rank}}: {{name}}, {{count}} cachés",
+    "leaderRowA11yOne": "Puesto {{rank}}: {{name}}, 1 caché",
+    "findRowA11y": "{{name}} encontró {{cache}}",
+    "viewLeaderboard": "Clasificación"
+  },
+  "huntLeaderboard": {
+    "title": "Clasificación",
+    "tagline": "Los mejores escondedores y buscadores de la red",
+    "backToGeoCaches": "Volver a Geocachés",
+    "tabHiders": "Mejores escondedores",
+    "tabFinders": "Mejores buscadores"
   },
   "huntScreen": {
     "backToExplore": "Volver a Explorar",
@@ -1406,7 +1446,15 @@
     "grantAmberPermissionLabel": "Conceder permiso NIP-44 de Amber",
     "grantPermissionInAmber": "Conceder permiso en Amber",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
-    "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado."
+    "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
+    "experimental": "Experimental",
+    "nativeCryptoHint": "Ejecuta el cifrado NIP-44 y la verificación de firmas a través del módulo nativo rust-nostr en lugar de JavaScript. Función para testers: observa los registros [PerfBlock] nostrCrypto y desactívala si algo falla.",
+    "nativeCryptoLabel": "Cripto nativa (rust-nostr)",
+    "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
+    "nativeCryptoUnavailable": "No disponible en este dispositivo",
+    "nativeCryptoA11y": "Activar cripto nativa",
+    "nativeCryptoActiveYes": "Activa en esta sesión: sí",
+    "nativeCryptoActiveNo": "Activa en esta sesión: no"
   },
   "offlineBanner": {
     "a11yLabel": "Estás sin conexión. Algunos datos pueden estar desactualizados.",
@@ -1867,8 +1915,15 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Tema de tarjeta seleccionado: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Ajustes de la cartera",
+    "tabDesign": "Diseño",
+    "tabDetails": "Detalles",
+    "tabConnection": "Conexión",
+    "noConnectionDetails": "No hay detalles de conexión para esta cartera.",
     "alias": "Alias",
     "aliasPlaceholder": "Nombre de la cartera",
     "lightningAddress": "Dirección Lightning",
@@ -1898,6 +1953,7 @@
     "shareWalletPickTitle": "Compartir cartera con…",
     "extendedPublicKey": "Clave pública extendida",
     "tapToCopy": "Toca para copiar",
+    "copyXpub": "Copiar clave pública extendida",
     "cardDesign": "Diseño de la tarjeta",
     "save": "Guardar",
     "saveWalletSettings": "Guardar ajustes de la cartera",

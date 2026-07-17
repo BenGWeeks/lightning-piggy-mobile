@@ -1,36 +1,30 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Keyboard } from 'react-native';
-import { Alert } from './BrandedAlert';
 import {
-  BottomSheetModal,
-  BottomSheetBackdrop,
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-} from '@gorhom/bottom-sheet';
+  View,
+  Text,
+  TouchableOpacity,
+  Platform,
+  Keyboard,
+  useWindowDimensions,
+} from 'react-native';
+import { Alert } from './BrandedAlert';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
-import { CardTheme } from '../types/wallet';
-import { themeList } from '../themes/cardThemes';
-import { MiniWalletCard } from './WalletCard';
+import type { CardTheme } from '../types/wallet';
+import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import {
   getXpub,
   getNwcUrl,
   getCoinosRecovery,
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
-import { hostFromBaseUrl } from '../services/coinosService';
-import {
-  Copy as CopyIcon,
-  Eye,
-  EyeOff,
-  ShieldAlert,
-  QrCode as QrCodeIcon,
-  Share2,
-} from 'lucide-react-native';
-import QRCode from 'react-native-qrcode-svg';
+import { createWalletSettingsSheetStyles } from '../styles/WalletSettingsSheet.styles';
+import WalletDesignTab from './WalletDesignTab';
+import WalletDetailsTab from './WalletDetailsTab';
+import WalletConnectionTab from './WalletConnectionTab';
 import FriendPickerSheet from './FriendPickerSheet';
 import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
 
@@ -39,10 +33,12 @@ interface Props {
   onClose: () => void;
 }
 
+type SettingsTab = 'design' | 'details' | 'connection';
+
 const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createWalletSettingsSheetStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   // "Share this wallet" flow (NWC only). Reuses #988's gift-wrapped NWC-share
@@ -50,11 +46,39 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // conversation. See useWalletShareFromSettings.
   const { pickerOpen, startShare, closePicker, shareToFriend } = useWalletShareFromSettings(wallet);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
-  // + full 8-card theme grid) is long enough that dynamic sizing pushed
-  // it to 100% and the handle was tight against the status bar.
-  const snapPoints = useMemo(() => ['85%'], []);
+  const { height: windowHeight } = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Content-height snap point, measured per tab. gorhom's own
+  // `enableDynamicSizing` can't size this sheet — its scroll view reports no
+  // intrinsic height, so the sheet collapses to header+footer and squashes the
+  // content. Instead we measure the header, the active tab's scroll content and
+  // the footer, sum them (+ handle + a little slack), clamp between a sensible
+  // floor and 92% of the screen, and drive a single pixel snap point. The sheet
+  // then animates to fit whichever tab is showing. `enableDynamicSizing` stays
+  // OFF, which also avoids the v5 "collapses to a strip when a
+  // BottomSheetTextInput is focused" bug (see docs/TROUBLESHOOTING.adoc).
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const snapPoints = useMemo(() => {
+    const floor = windowHeight * 0.4;
+    const ceiling = windowHeight * 0.92;
+    // Only trust the measured height once ALL three parts have laid out —
+    // otherwise header/content/footer are still 0 and the `+ 24` slack alone
+    // would make it look "measured" and snap to the 40% floor, then jump when
+    // the real sizes arrive. Until then, open at the generous ceiling and let
+    // it settle DOWN to content (smoother than growing up from a thin strip).
+    const allMeasured = headerHeight > 0 && contentHeight > 0 && footerHeight > 0;
+    const target = allMeasured
+      ? Math.min(ceiling, Math.max(floor, headerHeight + contentHeight + footerHeight + 24))
+      : ceiling;
+    return [Math.round(target)];
+  }, [headerHeight, contentHeight, footerHeight, windowHeight]);
+
+  // Active tab of the segmented control. Defaults to Design — the
+  // cover-flow card picker is the showcase surface of this redesign.
+  const [activeTab, setActiveTab] = useState<SettingsTab>('design');
 
   // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
   // Rule 5 of docs/TROUBLESHOOTING.adoc "Bottom sheet doesn't slide up…".
@@ -73,8 +97,10 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
   const [alias, setAlias] = useState('');
   const [lnAddress, setLnAddress] = useState('');
-  const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
-  const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<CardTheme>(defaultCardThemeFor('nwc'));
+  // `undefined` = on-chain load in progress; `null` = not applicable / loaded
+  // but absent; `string` = loaded xpub ready to display.
+  const [xpubDisplay, setXpubDisplay] = useState<string | null | undefined>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
   // CoinOS managed-wallet recovery info (#287). Loaded eagerly when
   // the sheet opens so we can render the username inline and surface a
@@ -94,15 +120,23 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [nwcRevealed, setNwcRevealed] = useState(false);
   const [nwcQrShown, setNwcQrShown] = useState(false);
   // Surface a non-fatal error if something prevents us from rendering
-  // the recovery callout fully (currently unused — kept for parity
-  // with the original API and as a hook for future failure paths).
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  // the recovery callout fully. Currently always null (no failure path sets
+  // it yet) — a plain const rather than unused state; promote to `useState`
+  // when a setter is actually needed.
+  const recoveryError: string | null = null;
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
   // `wallet` as a dep would re-fire on every `wallets` array update (balance
   // polls, NWC reconnect pings, etc.), each time stomping the user's in-
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
+  // Reset to the Design tab when the sheet opens for a different wallet — keyed
+  // ONLY on walletId (not `wallet?.id`), so it fires once per open and can't
+  // re-fire when the wallet hydrates a moment later and stomp a fast tab tap.
+  useEffect(() => {
+    setActiveTab('design');
+  }, [walletId]);
+
   useEffect(() => {
     // Cancellation flag so a fast wallet-switch / sheet dismiss
     // doesn't leak the previous wallet's CoinOS recovery / NWC string
@@ -126,10 +160,18 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     if (wallet) {
       setAlias(wallet.alias);
       setLnAddress(wallet.lightningAddress ?? '');
-      setSelectedTheme(wallet.theme);
+      // Fall back per wallet type when the stored theme is missing or a
+      // stale/unknown id (on-chain → Bitcoin, Lightning/NWC → Lightning Piggy).
+      setSelectedTheme(
+        cardThemes[wallet.theme] ? wallet.theme : defaultCardThemeFor(wallet.walletType),
+      );
 
-      // Load xpub for on-chain wallets
+      // Load xpub for on-chain wallets. Set to `undefined` (loading) before the
+      // async call so switching between two on-chain wallets never shows the
+      // previous wallet's xpub while the new one is resolving — the Connection
+      // tab will show a loading placeholder instead of stale data.
       if (wallet.walletType === 'onchain' && walletId) {
+        setXpubDisplay(undefined);
         getXpub(walletId).then((xpub) => {
           if (cancelled) return;
           setXpubDisplay(xpub);
@@ -173,8 +215,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     return () => {
       cancelled = true;
     };
+    // Depend on `wallet?.id` (not the whole `wallet` object) as well as
+    // `walletId`: this re-runs once if the sheet mounts with `walletId`
+    // set before `wallet` has hydrated into the array (so the fields
+    // populate when it arrives), yet stays stable across balance-poll /
+    // NWC-reconnect updates that replace the wallet object but keep its
+    // id — so it never stomps the user's in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletId]);
+  }, [walletId, wallet?.id]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -188,26 +236,31 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     [],
   );
 
+  // Present/dismiss keyed on whether a wallet EXISTS, not the `wallet` object
+  // itself — the object identity changes on every balance poll / reconnect ping,
+  // and depending on it would re-run this effect (calling present() again) on
+  // every such update. A boolean only flips when the wallet appears/disappears.
+  const hasWallet = !!wallet;
   useEffect(() => {
-    if (walletId && wallet) {
+    if (walletId && hasWallet) {
       bottomSheetRef.current?.present();
     } else {
       bottomSheetRef.current?.dismiss();
     }
-  }, [walletId, wallet]);
+  }, [walletId, hasWallet]);
 
-  if (!walletId || !wallet) return null;
-
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
+    if (!walletId || !wallet) return;
     await updateWalletSettings(walletId, {
       alias: alias.trim() || wallet.alias,
       theme: selectedTheme,
       lightningAddress: lnAddress.trim() || null,
     });
     onClose();
-  };
+  }, [walletId, wallet, alias, selectedTheme, lnAddress, updateWalletSettings, onClose]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = useCallback(() => {
+    if (!walletId || !wallet) return;
     const message =
       wallet.walletType === 'onchain'
         ? t('walletSettingsSheet.removeConfirmMessage', { alias: wallet.alias })
@@ -223,25 +276,46 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         },
       },
     ]);
-  };
+  }, [walletId, wallet, t, removeWallet, onClose]);
 
-  const handleCopyXpub = async () => {
+  const handleCopyXpub = useCallback(async () => {
     if (xpubDisplay) {
       await Clipboard.setStringAsync(xpubDisplay);
       Alert.alert(t('walletSettingsSheet.copiedTitle'), t('walletSettingsSheet.xpubCopied'));
     }
-  };
+  }, [xpubDisplay, t]);
+
+  // Switch tabs, re-masking any credential revealed on the Connection tab
+  // when the user navigates away — so a revealed NWC string / CoinOS
+  // password / QR doesn't linger on-screen after leaving the tab that
+  // shows it (privacy; a returning user has to re-reveal deliberately).
+  const selectTab = useCallback((tab: SettingsTab) => {
+    setActiveTab((prev) => {
+      if (prev === 'connection' && tab !== 'connection') {
+        setNwcRevealed(false);
+        setPasswordRevealed(false);
+        setNwcQrShown(false);
+      }
+      return tab;
+    });
+  }, []);
+
+  if (!walletId || !wallet) return null;
+
+  const tabs: { key: SettingsTab; label: string }[] = [
+    { key: 'design', label: t('walletSettingsSheet.tabDesign') },
+    { key: 'details', label: t('walletSettingsSheet.tabDetails') },
+    { key: 'connection', label: t('walletSettingsSheet.tabConnection') },
+  ];
 
   return (
     <>
       <BottomSheetModal
         ref={bottomSheetRef}
         snapPoints={snapPoints}
-        // v5 defaults `enableDynamicSizing` to true, which overrides
-        // `snapPoints`. Disable it explicitly so the sheet honours the
-        // 85% pin. See docs/TROUBLESHOOTING.adoc
-        // "v5 modal collapses to a thin strip when its
-        // BottomSheetTextInput is focused".
+        // Sized via the measured `snapPoints` above, not gorhom's dynamic sizing
+        // (which collapses a header+scroll+footer sheet). Keep it off — it also
+        // triggers the v5 text-input-focus collapse bug.
         enableDynamicSizing={false}
         enablePanDownToClose
         onChange={handleSheetChange}
@@ -252,305 +326,99 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
+        {/* Fixed header: title + segmented control. Kept outside the scroll
+          view so the tab switcher stays put while the active tab scrolls. */}
+        <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
+          <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
+          <View style={styles.segmentedControl} accessibilityRole="tablist">
+            {tabs.map(({ key, label }) => {
+              const active = activeTab === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => selectTab(key)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={label}
+                  testID={`wallet-settings-tab-${key}`}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         <BottomSheetScrollView
           contentContainerStyle={[
             styles.content,
-            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 24 },
           ]}
           keyboardShouldPersistTaps="handled"
+          onContentSizeChange={(_w: number, h: number) => setContentHeight(h)}
         >
-          <Text style={styles.title}>{t('walletSettingsSheet.title')}</Text>
-
-          <Text style={styles.label}>{t('walletSettingsSheet.alias')}</Text>
-          <BottomSheetTextInput
-            style={styles.input}
-            value={alias}
-            onChangeText={setAlias}
-            placeholder={t('walletSettingsSheet.aliasPlaceholder')}
-            placeholderTextColor={colors.textSupplementary}
-            autoCapitalize="words"
-          />
-
-          {/* NWC wallet: lightning address (LUD-16) */}
-          {wallet.walletType === 'nwc' && (
-            <>
-              <Text style={[styles.label, { marginTop: 20 }]}>
-                {t('walletSettingsSheet.lightningAddress')}
-              </Text>
-              <BottomSheetTextInput
-                style={styles.input}
-                value={lnAddress}
-                onChangeText={setLnAddress}
-                placeholder={t('walletSettingsSheet.lightningAddressPlaceholder')}
-                placeholderTextColor={colors.textSupplementary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                testID="wallet-lightning-address-input"
-                accessibilityLabel={t('walletSettingsSheet.lightningAddress')}
-              />
-              <Text style={styles.hintText}>{t('walletSettingsSheet.lightningAddressHint')}</Text>
-            </>
+          {activeTab === 'design' && (
+            <WalletDesignTab
+              styles={styles}
+              t={t}
+              selectedTheme={selectedTheme}
+              onSelectTheme={setSelectedTheme}
+            />
           )}
 
-          {/* CoinOS managed-wallet recovery callout (#287). Visually
-            prominent block — pink-bordered surface with shield-alert
-            badge — so the recovery credentials read as a "save this
-            now" affordance rather than just another settings row.
-            Sits between Lightning Address and Relay so the user sees
-            it inline with the other wallet identity fields. */}
-          {coinosRecovery && (
-            <View style={styles.recoveryCallout}>
-              <View style={styles.recoveryCalloutHeader}>
-                <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.recoveryCalloutTitle}>
-                  {t('walletSettingsSheet.recoveryInfoTitle')}
-                </Text>
-              </View>
-              <Text style={styles.recoveryCalloutBody}>
-                {t('walletSettingsSheet.recoveryInfoBody', {
-                  host: hostFromBaseUrl(coinosRecovery.baseUrl),
-                })}
-              </Text>
-
-              <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.username')}</Text>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={async () => {
-                  await Clipboard.setStringAsync(coinosRecovery.username);
-                  Alert.alert(
-                    t('walletSettingsSheet.copiedTitle'),
-                    t('walletSettingsSheet.coinosUsernameCopied'),
-                  );
-                }}
-                style={styles.credentialRow}
-                accessibilityLabel={t('walletSettingsSheet.copyCoinosUsername')}
-                testID="settings-coinos-copy-username"
-              >
-                <Text style={styles.credentialText} selectable>
-                  {coinosRecovery.username}
-                </Text>
-                <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-              </TouchableOpacity>
-
-              <Text style={styles.recoveryCalloutLabel}>{t('walletSettingsSheet.password')}</Text>
-              <View style={styles.credentialRow}>
-                <Text style={styles.credentialText} selectable={passwordRevealed}>
-                  {passwordRevealed ? coinosRecovery.password : '••••••••••••'}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setPasswordRevealed((v) => !v)}
-                  accessibilityLabel={
-                    passwordRevealed
-                      ? t('walletSettingsSheet.hideCoinosPassword')
-                      : t('walletSettingsSheet.revealCoinosPassword')
-                  }
-                  testID="settings-coinos-reveal-password"
-                  hitSlop={8}
-                >
-                  {passwordRevealed ? (
-                    <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
-                  ) : (
-                    <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={async () => {
-                    await Clipboard.setStringAsync(coinosRecovery.password);
-                    Alert.alert(
-                      t('walletSettingsSheet.copiedTitle'),
-                      t('walletSettingsSheet.coinosPasswordCopied'),
-                    );
-                  }}
-                  accessibilityLabel={t('walletSettingsSheet.copyCoinosPassword')}
-                  testID="settings-coinos-copy-password"
-                  hitSlop={8}
-                >
-                  <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
-
-              {/* NWC connection isn't repeated inside the CoinOS callout
-                  — the standalone "NWC Connection" row below renders
-                  for every NWC wallet (#588) with the same masked +
-                  copy affordance plus a QR overlay, so duplicating it
-                  here would just be noise. */}
-
-              {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
-            </View>
+          {activeTab === 'details' && (
+            <WalletDetailsTab
+              styles={styles}
+              colors={colors}
+              t={t}
+              walletType={wallet.walletType}
+              alias={alias}
+              onChangeAlias={setAlias}
+              lnAddress={lnAddress}
+              onChangeLnAddress={setLnAddress}
+              onSave={handleSave}
+            />
           )}
 
-          {/* NWC wallet: relay URL (read-only) */}
-          {wallet.walletType === 'nwc' && relayUrl && (
-            <>
-              <Text style={[styles.label, { marginTop: 20 }]}>
-                {t('walletSettingsSheet.relay')}
-              </Text>
-              <Text style={styles.xpubText} numberOfLines={2}>
-                {relayUrl}
-              </Text>
-            </>
+          {activeTab === 'connection' && (
+            <WalletConnectionTab
+              styles={styles}
+              colors={colors}
+              t={t}
+              walletType={wallet.walletType}
+              xpubDisplay={xpubDisplay}
+              onCopyXpub={handleCopyXpub}
+              relayUrl={relayUrl}
+              nwcConnection={nwcConnection}
+              nwcRevealed={nwcRevealed}
+              onToggleNwcRevealed={() => setNwcRevealed((v) => !v)}
+              nwcQrShown={nwcQrShown}
+              onToggleNwcQr={() => setNwcQrShown((v) => !v)}
+              coinosRecovery={coinosRecovery}
+              passwordRevealed={passwordRevealed}
+              onTogglePasswordRevealed={() => setPasswordRevealed((v) => !v)}
+              recoveryError={recoveryError}
+              onShare={startShare}
+            />
           )}
+        </BottomSheetScrollView>
 
-          {/* NWC wallet: full connection string (#588). Behind dots +
-              eye toggle by default — the secret in the URL grants
-              wallet access, so we don't want it sitting on-screen if
-              the user opens settings near a colleague / camera. Copy
-              and QR are separate affordances so paste into a password
-              manager / scan from another device both work without
-              needing to reveal the secret first. Applies to every
-              NWC wallet, not just managed CoinOS ones. */}
-          {wallet.walletType === 'nwc' && nwcConnection && (
-            <>
-              <Text style={[styles.label, { marginTop: 20 }]}>
-                {t('walletSettingsSheet.nwcConnection')}
-              </Text>
-              <View style={styles.nwcRow}>
-                <Text
-                  style={styles.nwcRowText}
-                  selectable={nwcRevealed}
-                  numberOfLines={nwcRevealed ? undefined : 1}
-                >
-                  {nwcRevealed ? nwcConnection : '••••••••••••'}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setNwcRevealed((v) => !v)}
-                  accessibilityLabel={
-                    nwcRevealed
-                      ? t('walletSettingsSheet.hideNwcConnection')
-                      : t('walletSettingsSheet.revealNwcConnection')
-                  }
-                  testID="settings-nwc-reveal"
-                  hitSlop={8}
-                >
-                  {nwcRevealed ? (
-                    <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
-                  ) : (
-                    <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setNwcQrShown((v) => !v)}
-                  accessibilityLabel={
-                    nwcQrShown
-                      ? t('walletSettingsSheet.hideNwcQr')
-                      : t('walletSettingsSheet.showNwcQr')
-                  }
-                  testID="settings-nwc-qr"
-                  hitSlop={8}
-                >
-                  <QrCodeIcon size={18} color={colors.textSupplementary} strokeWidth={2} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={async () => {
-                    await Clipboard.setStringAsync(nwcConnection);
-                    Alert.alert(
-                      t('walletSettingsSheet.copiedTitle'),
-                      t('walletSettingsSheet.nwcConnectionCopied'),
-                    );
-                  }}
-                  accessibilityLabel={t('walletSettingsSheet.copyNwcConnection')}
-                  testID="settings-nwc-copy"
-                  hitSlop={8}
-                >
-                  <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
-              {nwcQrShown && (
-                <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
-                  <QRCode
-                    value={nwcConnection}
-                    size={220}
-                    // Hard-code black-on-white so the QR stays scannable
-                    // in both themes — `colors.textHeader` is near-white
-                    // in dark mode, which against the white qrPanel
-                    // background renders the QR effectively invisible.
-                    backgroundColor="#FFFFFF"
-                    color="#000000"
-                  />
-                  <Text style={styles.qrHint}>{t('walletSettingsSheet.nwcQrHint')}</Text>
-                </View>
-              )}
-              <Text style={styles.hintText}>{t('walletSettingsSheet.nwcConnectionHint')}</Text>
-            </>
-          )}
-
-          {/* NWC wallet: share the connection with a trusted contact (#431).
-              Grouped with the connection settings above (relay / NWC string /
-              QR) because it's connection-sharing. Tapping it shows the trust
-              warning, then a recipient picker; the raw connection secret is
-              never rendered — it only travels inside the gift-wrapped DM. */}
-          {wallet.walletType === 'nwc' && (
-            <TouchableOpacity
-              style={[styles.coinosRow, { marginTop: 20 }]}
-              onPress={startShare}
-              activeOpacity={0.7}
-              accessibilityLabel={t('walletSettingsSheet.shareWallet')}
-              testID="wallet-settings-share"
-            >
-              <Text style={styles.coinosRowText}>{t('walletSettingsSheet.shareWallet')}</Text>
-              <Share2 size={18} color={colors.brandPink} strokeWidth={2} />
-            </TouchableOpacity>
-          )}
-
-          {/* On-chain wallet: show xpub (read-only) */}
-          {wallet.walletType === 'onchain' && xpubDisplay && (
-            <>
-              <Text style={[styles.label, { marginTop: 20 }]}>
-                {t('walletSettingsSheet.extendedPublicKey')}
-              </Text>
-              <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
-                <Text style={styles.xpubText} numberOfLines={3}>
-                  {xpubDisplay}
-                </Text>
-                <Text style={styles.copyHint}>{t('walletSettingsSheet.tapToCopy')}</Text>
-              </TouchableOpacity>
-            </>
-          )}
-
-          <Text style={[styles.label, { marginTop: 20 }]}>
-            {t('walletSettingsSheet.cardDesign')}
-          </Text>
-          <View style={styles.themeGrid}>
-            {themeList.map((theme) => (
-              <MiniWalletCard
-                key={theme.id}
-                theme={theme}
-                selected={selectedTheme === theme.id}
-                onPress={() => setSelectedTheme(theme.id)}
-              />
-            ))}
-          </View>
-
+        {/* Fixed footer: Remove stays outside the tabs, always visible. */}
+        <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
           <TouchableOpacity
-            style={styles.saveButton}
-            onPress={handleSave}
-            testID="wallet-settings-save"
-            accessibilityLabel={t('walletSettingsSheet.saveWalletSettings')}
+            style={styles.disconnectButton}
+            onPress={handleDisconnect}
+            testID="wallet-settings-remove"
+            accessibilityLabel={t('walletSettingsSheet.removeWalletTitle')}
           >
-            <Text style={styles.saveButtonText}>{t('walletSettingsSheet.save')}</Text>
-          </TouchableOpacity>
-
-          {coinosRecovery && (
-            <TouchableOpacity
-              style={[styles.coinosRow, styles.coinosRowDisabled]}
-              disabled
-              accessibilityLabel={t('walletSettingsSheet.migrateSelfCustodyComingSoon')}
-              testID="wallet-settings-migrate"
-            >
-              <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
-                {t('walletSettingsSheet.migrateSelfCustody')}
-              </Text>
-              <Text style={styles.coinosRowHint}>{t('walletSettingsSheet.comingSoon')}</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
             <Text style={styles.disconnectButtonText}>
               {t('walletSettingsSheet.removeWalletTitle')}
             </Text>
           </TouchableOpacity>
-        </BottomSheetScrollView>
+        </View>
       </BottomSheetModal>
 
       {/* Recipient step for "Share this wallet" — settings has no open
@@ -565,212 +433,5 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handle: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      padding: 24,
-      paddingBottom: 40,
-      gap: 8,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
-    label: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textBody,
-      marginBottom: 6,
-    },
-    input: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
-      fontSize: 16,
-      color: colors.textBody,
-    },
-    xpubText: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
-      fontSize: 12,
-      color: colors.textSupplementary,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    nwcRow: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    nwcRowText: {
-      flex: 1,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 13,
-      color: colors.textBody,
-    },
-    qrPanel: {
-      backgroundColor: colors.white,
-      borderRadius: 12,
-      padding: 16,
-      alignItems: 'center',
-      gap: 12,
-      marginTop: 8,
-    },
-    qrHint: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
-    hintText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    copyHint: {
-      fontSize: 12,
-      color: colors.brandPink,
-      fontWeight: '600',
-      marginTop: 4,
-      textAlign: 'right',
-    },
-    themeGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 12,
-      marginTop: 4,
-    },
-    saveButton: {
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 20,
-    },
-    saveButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    disconnectButton: {
-      height: 44,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 8,
-    },
-    disconnectButtonText: {
-      color: colors.red,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    coinosBlock: {
-      marginTop: 16,
-      gap: 8,
-    },
-    recoveryCallout: {
-      marginTop: 20,
-      backgroundColor: colors.brandPinkLight,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-      padding: 16,
-      gap: 8,
-    },
-    recoveryCalloutHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    recoveryCalloutTitle: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    recoveryCalloutBody: {
-      fontSize: 13,
-      color: colors.textBody,
-      lineHeight: 18,
-      marginBottom: 4,
-    },
-    recoveryCalloutLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-      marginTop: 8,
-    },
-    recoveryCalloutLink: {
-      marginTop: 8,
-      paddingVertical: 6,
-      alignSelf: 'flex-start',
-    },
-    recoveryCalloutLinkText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    credentialRow: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    credentialText: {
-      flex: 1,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 15,
-      color: colors.textBody,
-    },
-    coinosRow: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      paddingVertical: 14,
-      paddingHorizontal: 16,
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    coinosRowDisabled: {
-      opacity: 0.55,
-    },
-    coinosRowText: {
-      color: colors.brandPink,
-      fontSize: 15,
-      fontWeight: '600',
-    },
-    coinosRowTextDisabled: {
-      color: colors.textBody,
-    },
-    coinosRowHint: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      fontWeight: '600',
-    },
-    recoveryErrorText: {
-      color: colors.red,
-      fontSize: 13,
-      fontWeight: '600',
-      textAlign: 'center',
-    },
-  });
 
 export default WalletSettingsSheet;

@@ -3,7 +3,8 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState, WalletConnectionHealth } from '../types/wallet';
-import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
+import type { CardThemeConfig } from '../themes/cardThemes';
+import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
@@ -13,12 +14,13 @@ import { useTranslation } from '../contexts/LocaleContext';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
 export const CARD_WIDTH = SCREEN_WIDTH - CARD_MARGIN * 2;
-const CARD_HEIGHT = 200;
+export const CARD_HEIGHT = 200;
+export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT;
 
-// Mini preview is the full card scaled down
+// Mini preview is the full card scaled down. The default 2-up grid width;
+// the cover-flow picker passes a larger value. Height + scale are derived
+// per-instance from the width at render time.
 const MINI_CONTAINER_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // ~47% of sheet width
-const MINI_SCALE = MINI_CONTAINER_WIDTH / CARD_WIDTH;
-const MINI_CONTAINER_HEIGHT = CARD_HEIGHT * MINI_SCALE;
 
 interface WalletCardProps {
   wallet: WalletState;
@@ -31,6 +33,10 @@ interface MiniCardProps {
   theme: CardThemeConfig;
   selected?: boolean;
   onPress?: () => void;
+  // Rendered width. Defaults to the 2-up grid width; the cover-flow picker
+  // passes a larger value. Height + scale are derived to keep the card's
+  // aspect ratio.
+  width?: number;
 }
 
 /** Full card visual — used both directly and scaled for mini previews */
@@ -205,25 +211,32 @@ const CardContent: React.FC<{
 };
 
 /** Mini card for theme selection — renders the full card design scaled down */
-export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPress }) => {
+export const MiniWalletCard: React.FC<MiniCardProps> = ({
+  theme,
+  selected,
+  onPress,
+  width = MINI_CONTAINER_WIDTH,
+}) => {
   const t = useTranslation();
+  const scale = width / CARD_WIDTH;
+  const height = CARD_HEIGHT * scale;
   return (
     <TouchableOpacity
-      style={[styles.miniCardContainer, selected && styles.miniCardSelected]}
+      style={[styles.miniCardContainer, { width, height }, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityLabel={t('walletCard.cardDesign', { name: theme.name })}
       testID={`theme-${theme.id}`}
     >
-      <View style={styles.miniScaleWrapper}>
+      <View style={[styles.miniScaleWrapper, { width, height }]}>
         <View
           style={{
             width: CARD_WIDTH,
             height: CARD_HEIGHT,
             transform: [
-              { translateX: -(CARD_WIDTH * (1 - MINI_SCALE)) / 2 },
-              { translateY: -(CARD_HEIGHT * (1 - MINI_SCALE)) / 2 },
-              { scale: MINI_SCALE },
+              { translateX: -(CARD_WIDTH * (1 - scale)) / 2 },
+              { translateY: -(CARD_HEIGHT * (1 - scale)) / 2 },
+              { scale },
             ],
           }}
         >
@@ -236,10 +249,11 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPre
 
 const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
   // Defensive fallback: persisted wallets may carry a theme key that has
-  // been renamed/removed in subsequent releases. Without a fallback the
-  // app crashes on `theme.gradientColors` of undefined on boot — see the
-  // group-messaging branch test runs.
-  const theme = cardThemes[wallet.theme] ?? cardThemes['lightning-piggy'];
+  // been renamed/removed in subsequent releases (or none at all). Without a
+  // fallback the app crashes on `theme.gradientColors` of undefined on boot —
+  // see the group-messaging branch test runs. Fall back per wallet type:
+  // on-chain → Bitcoin (orange), Lightning/NWC → Lightning Piggy.
+  const theme = cardThemes[wallet.theme] ?? cardThemes[defaultCardThemeFor(wallet.walletType)];
   const t = useTranslation();
 
   return (
@@ -344,9 +358,10 @@ const styles = StyleSheet.create({
     fontSize: 36,
     fontWeight: '700',
   },
+  // width/height are supplied per-instance at render time (defaulting to the
+  // 2-up grid size, or a larger value from the cover-flow picker), so they're
+  // intentionally omitted here to avoid a dead/contradictory hard-coded size.
   miniCardContainer: {
-    width: MINI_CONTAINER_WIDTH,
-    height: MINI_CONTAINER_HEIGHT,
     borderRadius: 16,
     borderWidth: 3,
     borderColor: 'transparent',
@@ -356,8 +371,6 @@ const styles = StyleSheet.create({
     borderColor: '#EC008C',
   },
   miniScaleWrapper: {
-    width: MINI_CONTAINER_WIDTH,
-    height: MINI_CONTAINER_HEIGHT,
     overflow: 'hidden',
   },
 });

@@ -8,7 +8,7 @@ import {
   RefreshControl,
   Linking,
 } from 'react-native';
-import * as Location from 'expo-location';
+import { useExploreRailsPosition } from '../hooks/useExploreRailsPosition';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   CalendarDays,
@@ -25,7 +25,6 @@ import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LpPayoutBadge } from '../components/LpPayoutBadge';
 import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { CacheDetailSheet } from '../components/CacheDetailSheet';
-import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { orderFeaturedFirst } from '../utils/featuredPlaces';
@@ -47,7 +46,6 @@ import {
   formatAddress,
   isBoosted,
   lightningAddressOf,
-  peekCachedAnchorSync,
   peekCachedPlacesSync,
   prefetchDataset,
   refreshDataset,
@@ -142,65 +140,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- location ---------------------------------------------------------
 
-  // Seed pos from the cached anchor so rails render before GPS resolves.
-  // Accuracy is null (suppresses user dot halo) until a real fix lands.
-  const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
-    () => {
-      const anchor = peekCachedAnchorSync();
-      return anchor ? { ...anchor, accuracy: null } : null;
-    },
-  );
-  const [locationDenied, setLocationDenied] = useState(false);
-  // Live position for the user dot — doesn't re-trigger data fetches.
-  const { pos: livePos } = useUserLocation();
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (cancelled) return;
-      if (perm.status !== 'granted') {
-        setLocationDenied(true);
-        return;
-      }
-      // Fast path: last-known position unblocks rails while we wait
-      // for the current fix (emulator GPS HAL can take several seconds).
-      try {
-        const last = await Location.getLastKnownPositionAsync({
-          maxAge: 10 * 60 * 1000, // ≤ 10 min old is fine for our 5 km tiles
-        });
-        if (!cancelled && last) {
-          setPos({
-            lat: last.coords.latitude,
-            lon: last.coords.longitude,
-            accuracy: typeof last.coords.accuracy === 'number' ? last.coords.accuracy : null,
-          });
-        }
-      } catch {
-        // Non-fatal — fall through to getCurrentPositionAsync.
-      }
-      try {
-        const current = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        if (!cancelled) {
-          setPos({
-            lat: current.coords.latitude,
-            lon: current.coords.longitude,
-            accuracy: typeof current.coords.accuracy === 'number' ? current.coords.accuracy : null,
-          });
-        }
-      } catch {
-        // If getCurrentPositionAsync rejects AND we never got a
-        // last-known, mark the rails as denied so they show the
-        // friendlier "grant location" copy.
-        if (!cancelled && !pos) setLocationDenied(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // One-shot position for the rails, seeded from the cached anchor and
+  // replaced by the first real fix (one-shot + first-fix watch racing —
+  // see useExploreRailsPosition for the #1064 rationale). The live GPS
+  // stream is deliberately NOT consumed here: its only consumer on this
+  // screen is the mini-map's camera/user-dot, and ExploreMiniMap
+  // subscribes to useUserLocation() itself — subscribing at the screen
+  // root re-committed this whole tree (measured 240–280 ms) on every
+  // watch fix, one JS-thread stall per 15 s at walking pace.
+  const { pos, locationDenied } = useExploreRailsPosition();
 
   // ----- BTC Map merchants ------------------------------------------------
 
@@ -921,18 +869,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       >
         <ExploreMiniMap
           locationDenied={locationDenied}
-          // Mini-map is non-interactive (zoom-only, follows GPS) — so the
-          // camera anchor SHOULD track the live position, not the stale
-          // one-shot `pos` (seeded from a cached merchant-centroid anchor on
-          // cold start). Falls back to `pos` only while the live fix resolves.
-          lat={livePos?.lat ?? pos?.lat ?? null}
-          lon={livePos?.lon ?? pos?.lon ?? null}
-          userLat={livePos?.lat ?? null}
-          userLon={livePos?.lon ?? null}
-          // Cached anchor accuracy is only useful BEFORE a live fix arrives.
-          // Once livePos exists, trust its accuracy (even if null) so the halo
-          // never renders around live coords using stale data.
-          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
+          // One-shot cached anchor — the mini-map reads the LIVE position via
+          // its own useUserLocation() subscription and uses this only until
+          // the first live fix lands (see the perf note on ExploreMiniMap).
+          fallbackAnchor={pos}
           merchants={merchants}
           caches={cachesArr}
           events={eventsArr}

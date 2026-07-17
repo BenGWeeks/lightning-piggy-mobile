@@ -8,9 +8,11 @@ import {
   buildComment,
   buildFoundLog,
   hasLpLabel,
+  hasLpClientTag,
   longestGeohash,
   parseCache,
   parseCacheCoord,
+  parseFoundLogEvent,
 } from './nostrPlacesService';
 import type { HiddenPiggy } from './piggyStorageService';
 import type { VerifiedEvent } from 'nostr-tools';
@@ -254,6 +256,23 @@ describe('hasLpLabel', () => {
   });
 });
 
+describe('hasLpClientTag', () => {
+  it('returns true for the bare NIP-89 client tag LP stamps on every publish', () => {
+    expect(hasLpClientTag([['client', 'Lightning Piggy']])).toBe(true);
+  });
+
+  it('returns true for a future 4-element client tag (name + 31990 coordinate)', () => {
+    expect(hasLpClientTag([['client', 'Lightning Piggy', '31990:pubkey:d', 'wss://relay']])).toBe(
+      true,
+    );
+  });
+
+  it('returns false for other clients and unrelated tags', () => {
+    expect(hasLpClientTag([['client', 'Damus']])).toBe(false);
+    expect(hasLpClientTag([['d', 'piggy_x']])).toBe(false);
+  });
+});
+
 describe('longestGeohash', () => {
   it('returns the longest g tag value', () => {
     expect(
@@ -334,6 +353,33 @@ describe('parseCache', () => {
     });
     expect(parseCache(noLabel)!.isLpPiggy).toBe(false);
   });
+
+  it('isLpPiggy=true for a prize-less cache carrying only the LP client tag (#1025)', () => {
+    // A cache hidden in Lightning Piggy with no prize never gets the payout
+    // label, but every LP publish stamps the NIP-89 client tag — that alone
+    // must classify it as a Piglet (piglet pin/icon, not the plain NIP-GC pin).
+    const clientOnly = sampleEvent({
+      tags: [
+        ['client', 'Lightning Piggy'],
+        ['d', 'piggy'],
+        ['name', 'Fleet & Lightning'],
+        ['g', 'u1212vz'],
+      ],
+    });
+    expect(parseCache(clientOnly)!.isLpPiggy).toBe(true);
+  });
+
+  it("isLpPiggy=false for another client's tag without the LP label", () => {
+    const otherClient = sampleEvent({
+      tags: [
+        ['client', 'treasures.to'],
+        ['d', 'piggy'],
+        ['name', 'Plain cache'],
+        ['g', 'u1212vz'],
+      ],
+    });
+    expect(parseCache(otherClient)!.isLpPiggy).toBe(false);
+  });
 });
 
 describe('parseCacheCoord', () => {
@@ -349,5 +395,113 @@ describe('parseCacheCoord', () => {
     expect(parseCacheCoord('37516:abcdef')).toBeNull();
     expect(parseCacheCoord('not-a-coord')).toBeNull();
     expect(parseCacheCoord('NaN:abcdef:p')).toBeNull();
+  });
+});
+
+describe('parseFoundLogEvent', () => {
+  const makeFoundLog = (tags: string[][]): VerifiedEvent =>
+    ({
+      id: 'ev1',
+      kind: GC_FOUND_LOG_KIND,
+      pubkey: 'finder_pk',
+      created_at: 1700,
+      tags,
+      content: '',
+    }) as unknown as VerifiedEvent;
+
+  it('flattens the coord + finder + createdAt from a found-log', () => {
+    const log = parseFoundLogEvent(makeFoundLog([['a', '37516:hider:piggy_1']]));
+    expect(log).toMatchObject({
+      id: 'ev1',
+      coord: '37516:hider:piggy_1',
+      finderPubkey: 'finder_pk',
+      createdAt: 1700,
+    });
+  });
+
+  it('returns null without an `a` (coord) tag or on the wrong kind', () => {
+    expect(parseFoundLogEvent(makeFoundLog([]))).toBeNull();
+    expect(parseFoundLogEvent({ ...makeFoundLog([['a', '37516:h:d']]), kind: 1 })).toBeNull();
+  });
+
+  it('reads the sat `amount` tag as sats (matches buildFoundLog / parseCache)', () => {
+    expect(
+      parseFoundLogEvent(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '21'],
+        ]),
+      )?.amountSats,
+    ).toBe(21);
+  });
+
+  it('keeps a genuine 0-sat amount rather than nulling it', () => {
+    // `0` is a real claim amount — only missing / non-numeric tags → null.
+    expect(
+      parseFoundLogEvent(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '0'],
+        ]),
+      )?.amountSats,
+    ).toBe(0);
+  });
+
+  it('nulls a missing or non-numeric amount tag', () => {
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:h:d']]))?.amountSats).toBeNull();
+    expect(
+      parseFoundLogEvent(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', 'nope'],
+        ]),
+      )?.amountSats,
+    ).toBeNull();
+  });
+
+  it('rejects a negative amount tag (malformed relay data)', () => {
+    // buildFoundLog only writes `amount` when sats > 0; a negative value
+    // would produce a confusing UI (negative zap pill), so treat it as null.
+    expect(
+      parseFoundLogEvent(
+        makeFoundLog([
+          ['a', '37516:h:d'],
+          ['amount', '-5'],
+        ]),
+      )?.amountSats,
+    ).toBeNull();
+  });
+
+  it('rejects a coord where the kind does not match GC_LISTING_KIND', () => {
+    // e.g. a malformed relay event pointing at a different NIP kind.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '1:hider:d']]))).toBeNull();
+    expect(parseFoundLogEvent(makeFoundLog([['a', 'bad:hider:d']]))).toBeNull();
+  });
+
+  it('rejects a coord that is not <kind>:<pubkey>:<d>', () => {
+    // Only two parts — missing the d-tag segment.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:onlytwo']]))).toBeNull();
+    // Non-empty but otherwise garbage.
+    expect(parseFoundLogEvent(makeFoundLog([['a', 'notacoord']]))).toBeNull();
+  });
+
+  it('rejects a coord with an empty pubkey segment (e.g. "37516::d")', () => {
+    // A relay could write "37516::some-d" — three colon-separated parts but
+    // the pubkey is an empty string. This would previously pass the length=3
+    // check and let an empty-pubkey coord through to CacheDetail.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516::some-d']]))).toBeNull();
+  });
+
+  it('rejects a coord with an empty d segment (e.g. "37516:pubkey:")', () => {
+    // Three parts, but the d-tag is empty — an addressable-event coord with
+    // no identifier makes no sense and should be treated as malformed.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516:abc123:']]))).toBeNull();
+  });
+
+  it('rejects a kind token that parseInt would silently truncate (e.g. "37516abc")', () => {
+    // `parseInt("37516abc", 10)` returns 37516, which would incorrectly pass
+    // the GC_LISTING_KIND check. `Number("37516abc")` returns NaN, so the
+    // strict Number() comparison correctly rejects it.
+    expect(parseFoundLogEvent(makeFoundLog([['a', '37516abc:hider:piggy']]))).toBeNull();
   });
 });

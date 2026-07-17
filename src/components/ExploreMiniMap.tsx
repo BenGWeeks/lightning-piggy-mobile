@@ -5,8 +5,10 @@ import { MapPin } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { createExploreMiniMapStyles } from '../styles/ExploreMiniMap.styles';
 import type { BtcMapPlace } from '../services/btcMapService';
+import type { LiveUserLocation } from '../hooks/useLiveUserLocation';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 
 // Stable empty-array placeholders for the marker-stagger gate (#815). While
@@ -20,11 +22,11 @@ const NO_EVENTS: ParsedEvent[] = [];
 
 interface Props {
   locationDenied: boolean;
-  lat: number | null;
-  lon: number | null;
-  userLat: number | null;
-  userLon: number | null;
-  userAccuracyMetres: number | null;
+  /** One-shot anchor from the parent screen (cached merchant-centroid on
+   *  cold start). The camera falls back to it only until the live GPS fix
+   *  resolves — the live position is subscribed to HERE, not in the parent
+   *  (see the perf note on the component). */
+  fallbackAnchor: LiveUserLocation | null;
   merchants: BtcMapPlace[];
   caches: ParsedCache[];
   events: ParsedEvent[];
@@ -49,14 +51,18 @@ interface Props {
  * While unfocused we render a lightweight placeholder occupying the same
  * layout slot (mirrors LibreMiniMap's own null-`lat` empty-View placeholder)
  * so the rail layout below doesn't jump on focus changes.
+ *
+ * Perf: the live GPS position is subscribed to HERE (not lifted to
+ * ExploreHomeScreen) so a fresh fix re-renders only this component — the
+ * mini-map is the sole consumer of `pos` on the Explore hub. When the
+ * subscription lived at the screen root, every watch tick re-committed the
+ * whole 1,300-line Explore tree at a measured 240–280 ms per fix (walking
+ * pace = one JS-thread stall every 15 s), felt as the tabs going
+ * unresponsive.
  */
 export const ExploreMiniMap: React.FC<Props> = ({
   locationDenied,
-  lat,
-  lon,
-  userLat,
-  userLon,
-  userAccuracyMetres,
+  fallbackAnchor,
   merchants,
   caches,
   events,
@@ -70,6 +76,18 @@ export const ExploreMiniMap: React.FC<Props> = ({
   const t = useTranslation();
   const styles = useMemo(() => createExploreMiniMapStyles(colors), [colors]);
   const isFocused = useIsFocused();
+  // Live position for the camera anchor + user dot. Mini-map is
+  // non-interactive (zoom-only, follows GPS) so the camera SHOULD track the
+  // live position, not the stale one-shot anchor — the anchor stands in only
+  // while the live fix is still resolving. Cached-anchor accuracy is only
+  // meaningful BEFORE a live fix arrives: once livePos exists, trust its
+  // accuracy (even if null) so the halo never wraps live coords in stale data.
+  const { pos: livePos } = useUserLocation();
+  const lat = livePos?.lat ?? fallbackAnchor?.lat ?? null;
+  const lon = livePos?.lon ?? fallbackAnchor?.lon ?? null;
+  const userLat = livePos?.lat ?? null;
+  const userLon = livePos?.lon ?? null;
+  const userAccuracyMetres = livePos ? livePos.accuracy : (fallbackAnchor?.accuracy ?? null);
 
   // Marker stagger (#815). On (re)focus MapLibre re-creates its GL context and
   // reconciles markers; handing it ~160 merchant pins in the SAME first commit

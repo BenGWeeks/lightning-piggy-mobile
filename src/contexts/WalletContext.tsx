@@ -44,6 +44,7 @@ import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 const WALLET_MODULE_LOAD_T0 = Date.now();
 let firstWalletConnectLogged = false;
 import { perfLog } from '../utils/perfLog';
+import { useNwcConnectionWatchdog } from './useNwcConnectionWatchdog';
 perfLog('WalletContext module-eval');
 let __walletProviderFirstRenderLogged = false;
 let __walletProviderHydratedLogged = false;
@@ -380,7 +381,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
+  // Last transactions-JSON we committed per wallet — state write AND the
+  // `txs_${walletId}` persist. `fetchTransactionsForWallet` compares a fresh
+  // poll's JSON (which it already computes for AsyncStorage) against this and,
+  // when identical, keeps the OLD array identity instead of committing a
+  // rebuilt-but-equal one. The mappers rebuild unconditionally, so before this
+  // every 30 s balance/tx poll churned `wallet.transactions` and re-rendered
+  // every visible TransactionList row for no visible change — measured at
+  // 111 ms of every 140 ms HomeScreen update commit (#1014).
+  const lastTxsJsonRef = useRef(new Map<string, string>());
+
   const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
+    // The optimistic row diverges state from the last persisted JSON — drop
+    // the fingerprint so the next poll can't be wrongly skipped.
+    lastTxsJsonRef.current.delete(walletId);
     setWallets((prev) =>
       prev.map((w) => (w.id === walletId ? { ...w, transactions: [tx, ...w.transactions] } : w)),
     );
@@ -460,6 +474,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               if (txJson) {
                 const tTxParse = Date.now();
                 cachedTxs = JSON.parse(txJson);
+                // Seed the unchanged-poll fingerprint from the persisted JSON
+                // so the first poll after cold start can skip too when the
+                // server list matches what we hydrated (#1014).
+                lastTxsJsonRef.current.set(w.id, txJson);
                 perfLog(
                   `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
                 );
@@ -623,10 +641,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       for (const w of walletsRef.current) {
         if (w.walletType === 'nwc') nwcService.disconnect(w.id);
       }
-      // Clear in-memory wallet list immediately so the UI reflects the
-      // switch without ghosting the old wallets.
+      // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
       setWallets([]);
       setActiveWalletId(null);
+      lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
       // Re-hydrate from per-account-keyed storage.
       (async () => {
         if (cancelled) return;
@@ -638,7 +656,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               let cachedTxs: WalletTransaction[] = [];
               try {
                 const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
-                if (txJson) cachedTxs = JSON.parse(txJson);
+                if (txJson) {
+                  cachedTxs = JSON.parse(txJson);
+                  // Same fingerprint seed as the startup hydration (#1014).
+                  lastTxsJsonRef.current.set(w.id, txJson);
+                }
               } catch (err) {
                 console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
                 await AsyncStorage.removeItem(`txs_${w.id}`);
@@ -749,64 +771,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => sub.remove();
   }, [btcPrice, currency, fetchPrice]);
 
-  // NWC connection status: check WebSocket state every 30 seconds and
-  // reconnect if dropped (prevents idle timeout disconnections).
-  //
-  // The wallets array churns constantly (balance polls, tx refreshes) so
-  // depending on it means the 30s interval gets torn down and re-created
-  // on nearly every state update — missed/duplicated checks, extra churn.
-  // Hold the latest wallets in a ref and let the interval read from it.
-  const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Hold the latest wallets in a ref for consumers (the NWC watchdog, the
+  // fire-and-forget tx fetch) that must read fresh state without re-keying
+  // their effects on the constantly-churning wallets array.
   const walletsRef = useRef(wallets);
   useEffect(() => {
     walletsRef.current = wallets;
   }, [wallets]);
-  useEffect(() => {
-    let checkInProgress = false;
-    connectionCheckInterval.current = setInterval(async () => {
-      // A reconnect on a dead relay can outlast the 30s tick; this guard stops
-      // checks stacking across ticks (#654).
-      if (checkInProgress) return;
-      checkInProgress = true;
-      try {
-        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
-          if (!nwcService.isWalletConnected(w.id) && !nwcService.isRelayInCooldown(w.id)) {
-            // Relay unresponsive (dead / hung) and not currently parked — try to
-            // (re)connect, which re-probes via its initial getBalance. The
-            // cooldown gate (#656) backs off a persistently-dead relay so we
-            // don't hammer it every 30s tick; a recovered relay reconnects once
-            // its cooldown lapses (no app-foreground reconnect-all to rely on).
-            try {
-              const nwcUrl = await walletStorage.getNwcUrl(w.id);
-              if (nwcUrl) await nwcService.connect(w.id, nwcUrl);
-            } catch {
-              // connect threw — the responsiveness read below reflects it
-            }
-          }
-          // Sync stored state to relay *responsiveness* (does it answer?), not
-          // connect()'s socket-level success — so a dead relay stays
-          // Disconnected instead of flapping back to Connected (#654). Also
-          // surface the tri-state health so the card can show amber "Not
-          // responding" when the socket is up but the relay is parked /
-          // rate-limited (#786). Write only on change to avoid re-renders.
-          const isConnected = nwcService.isWalletConnected(w.id);
-          // getWalletHealth needs the SOCKET-only state to tell amber
-          // "Not responding" (socket up, relay parked) from red "Disconnected"
-          // (socket down) — isWalletConnected is already false for the degraded
-          // case, which would force red instead of amber (#786 review).
-          const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
-          if (isConnected !== w.isConnected || health !== w.connectionHealth) {
-            updateWalletInState(w.id, { isConnected, connectionHealth: health });
-          }
-        }
-      } finally {
-        checkInProgress = false;
-      }
-    }, 30 * 1000);
-    return () => {
-      if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
-    };
-  }, [updateWalletInState]);
+  // NWC connection watchdog: 30 s WebSocket-health check + reconnect —
+  // extracted per-responsibility hook (see useNwcConnectionWatchdog).
+  useNwcConnectionWatchdog(walletsRef, updateWalletInState);
 
   const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {
@@ -1001,6 +975,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       await walletStorage.deleteWalletCaches(walletId); // before saveWalletList: no orphaned cache residue if we crash mid-op
+      lastTxsJsonRef.current.delete(walletId); // drop stale fingerprint so a future wallet with the same id starts fresh
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList(currentList.filter((w) => w.id !== walletId));
 
@@ -1123,7 +1098,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
           txs = mapNwcTransactions(raw as NwcRawTransaction[], existing);
         }
-        updateWalletInState(walletId, { transactions: txs });
+        // Unchanged-poll skip (#1014): JSON reused as content fingerprint.
+        // Identical serialisation keeps old `wallet.transactions` identity,
+        // avoiding a re-render of every visible row on each 30 s poll.
+        const txsJson = JSON.stringify(txs);
+        const txsUnchanged = lastTxsJsonRef.current.get(walletId) === txsJson;
+        if (!txsUnchanged) {
+          updateWalletInState(walletId, { transactions: txs });
+        }
 
         // First fetch for this wallet (e.g. a freshly-added NWC wallet, whose
         // history isn't loaded on connect): seed the announced-receipts baseline
@@ -1133,8 +1115,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           seedSeenReceipts(walletId, settledIncomingHashes(txs));
         }
 
-        // Persist to AsyncStorage for fast loading on next startup
-        await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
+        // Persist to AsyncStorage; ref updated after write so a failed
+        // setItem lets the next poll retry rather than skip the persist.
+        if (!txsUnchanged) {
+          await AsyncStorage.setItem(`txs_${walletId}`, txsJson);
+          lastTxsJsonRef.current.set(walletId, txsJson);
+        }
 
         // Kick off background zap sender resolution for any incoming
         // transactions that haven't been resolved yet. `force` (set by
@@ -1175,15 +1161,34 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setWallets((prev) =>
         prev.map((w) => {
           if (w.id !== walletId) return w;
-          const updated = w.transactions.map((tx, i) =>
-            resultsByIdx.has(i) ? { ...tx, zapCounterparty: resultsByIdx.get(i) ?? null } : tx,
-          );
+          // No-op guard (#1014): a forced resolver pass returns null for every
+          // unattributed tx it re-checked; writing `zapCounterparty: null` over
+          // rows that already had no attribution rebuilt the whole array (and
+          // re-rendered every visible row) while changing nothing. Only touch
+          // rows whose attribution actually changes; keep the old array
+          // identity when none do.
+          let changed = false;
+          const updated = w.transactions.map((tx, i) => {
+            if (!resultsByIdx.has(i)) return tx;
+            const next = resultsByIdx.get(i) ?? null;
+            if (next === null && (tx.zapCounterparty ?? null) === null) return tx;
+            changed = true;
+            return { ...tx, zapCounterparty: next };
+          });
+          if (!changed) return w;
           nextTxs = updated;
           return { ...w, transactions: updated };
         }),
       );
       if (nextTxs) {
-        AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
+        // Fingerprint updated in .then() so a failed write doesn't freeze
+        // future polls as "unchanged" (#1014).
+        const json = JSON.stringify(nextTxs);
+        AsyncStorage.setItem(`txs_${walletId}`, json)
+          .then(() => {
+            lastTxsJsonRef.current.set(walletId, json);
+          })
+          .catch(() => {});
       }
     },
     [],

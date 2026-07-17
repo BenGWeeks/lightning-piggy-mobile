@@ -23,7 +23,9 @@ export type CardTheme =
   | 'basketball'
   | 'f1'
   // Deep-space nebula card with a graffiti rocket illustration.
-  | 'spaceship';
+  | 'spaceship'
+  // Friendly AI robot corner-mascot (graffiti family) over an emerald/teal gradient.
+  | 'ai-robot';
 
 export type WalletType = 'nwc' | 'onchain';
 

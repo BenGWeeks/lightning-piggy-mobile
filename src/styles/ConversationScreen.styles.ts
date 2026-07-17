@@ -12,6 +12,14 @@ export const createConversationScreenStyles = (colors: Palette) =>
       backgroundColor: colors.background,
     },
     flex: { flex: 1 },
+    // Ephemeral "typing…" line shown just above the composer (#dm-typing).
+    typingIndicator: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontStyle: 'italic',
+      paddingHorizontal: 16,
+      paddingBottom: 4,
+    },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -85,9 +93,12 @@ export const createConversationScreenStyles = (colors: Palette) =>
       position: 'absolute',
       left: 0,
       right: 0,
-      // Lifts the FAB clear of the ~60 px composer by a comfortable gap
-      // so it doesn't visually crowd the message input.
-      bottom: 92,
+      // The composer is a SIBLING below this wrapper's Animated.View (moved out
+      // in #251), so this container already ends at the composer's top edge —
+      // the FAB only needs a small gap above it, not a full composer's height.
+      // (Was 92 px, a stale value from when the composer lived inside here,
+      // which floated the arrow far too high up the message list.)
+      bottom: 16,
       alignItems: 'center',
     },
     scrollToBottomFab: {

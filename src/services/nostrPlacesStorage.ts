@@ -15,7 +15,12 @@ import { isDevLeftover } from './devEventDenylist';
  * land — the same pattern PR #508 used for NIP-17 DM wrap IDs.
  */
 
-const CACHES_STORAGE_KEY = '@lp:nostr-caches-v1';
+// v2: `isLpPiggy` is baked into the persisted ParsedCache at parse time, so
+// the client-tag classification fix (#1025) would leave hydrated rows showing
+// the old plain-NIP-GC pin until the relay redelivered every listing. Bumping
+// the key drops the v1 blob (it's only a warm-start cache with a 7-day TTL)
+// and everything re-parses fresh.
+const CACHES_STORAGE_KEY = '@lp:nostr-caches-v2';
 const EVENTS_STORAGE_KEY = '@lp:nostr-events-v1';
 // 7-day TTL — caches / events drift slowly, and the live sub
 // authoritatively backfills as soon as the user lands on the rail. A
@@ -43,6 +48,10 @@ const isFresh = (entry: CachedShape<unknown> | null): boolean =>
 const hydrate = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
+    // One-shot cleanup of the superseded v1 blob (#1025 key bump) so it
+    // doesn't sit orphaned on disk forever — removeItem on a missing key
+    // is a no-op, so this is safe to fire on every start.
+    AsyncStorage.removeItem('@lp:nostr-caches-v1').catch(() => {});
     try {
       const [cachesRaw, eventsRaw] = await Promise.all([
         AsyncStorage.getItem(CACHES_STORAGE_KEY),

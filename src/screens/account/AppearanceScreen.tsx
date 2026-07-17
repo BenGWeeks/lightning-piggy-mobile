@@ -1,15 +1,10 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { Sun, Moon, Smartphone, Check, Zap, Droplets, Globe } from 'lucide-react-native';
+import { Sun, Moon, Smartphone, Check, Zap, Droplets } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useTheme } from '../../contexts/ThemeContext';
-import {
-  useLocale,
-  useTranslation,
-  SUPPORTED_LOCALES,
-  type LocalePreference,
-} from '../../contexts/LocaleContext';
+import { useTranslation } from '../../contexts/LocaleContext';
 import {
   useSendingAnimation,
   type SendingAnimationPreference,
@@ -17,22 +12,9 @@ import {
 import { createAppearanceScreenStyles } from '../../styles/AppearanceScreen.styles';
 import type { ThemePreference } from '../../styles/palettes';
 
-// #137: display names for the locale picker. Keep this in sync with
-// SUPPORTED_LOCALES in src/i18n — each new language batch adds one entry.
-const LOCALE_LABELS: Record<(typeof SUPPORTED_LOCALES)[number], string> = {
-  en: 'English',
-  es: 'Español',
-  uk: 'Українська',
-};
-
 const AppearanceScreen: React.FC = () => {
   const { colors, preference, setPreference } = useTheme();
   const t = useTranslation();
-  const {
-    preference: localePreference,
-    setPreference: setLocalePreference,
-    locale: resolvedLocale,
-  } = useLocale();
   const { preference: sendingAnimation, setPreference: setSendingAnimation } =
     useSendingAnimation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
@@ -65,31 +47,6 @@ const AppearanceScreen: React.FC = () => {
         description: t('appearanceScreen.themeDarkDesc'),
         icon: <Moon size={20} color={colors.white} />,
       },
-    ],
-    [colors, t],
-  );
-
-  const localeOptions = useMemo<
-    {
-      value: LocalePreference;
-      label: string;
-      description: string;
-      icon: React.ReactNode;
-    }[]
-  >(
-    () => [
-      {
-        value: 'system',
-        label: t('appearanceScreen.system'),
-        description: t('appearanceScreen.localeSystemDesc'),
-        icon: <Smartphone size={20} color={colors.white} />,
-      },
-      ...SUPPORTED_LOCALES.map((code) => ({
-        value: code,
-        label: LOCALE_LABELS[code],
-        description: t('appearanceScreen.alwaysLanguage', { language: LOCALE_LABELS[code] }),
-        icon: <Globe size={20} color={colors.white} />,
-      })),
     ],
     [colors, t],
   );
@@ -152,42 +109,6 @@ const AppearanceScreen: React.FC = () => {
         })}
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('appearanceScreen.themeHint')}</Text>
-
-      <View style={styles.section}>
-        <Text style={sharedAccountStyles.sectionLabel}>
-          {t('appearanceScreen.languageSectionLabel')}
-        </Text>
-        <View style={styles.optionList}>
-          {localeOptions.map((opt) => {
-            const selected = localePreference === opt.value;
-            return (
-              <TouchableOpacity
-                key={opt.value}
-                style={[styles.optionRow, selected && styles.optionRowSelected]}
-                onPress={() => setLocalePreference(opt.value)}
-                accessibilityLabel={t('appearanceScreen.languageA11y', { label: opt.label })}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                testID={`locale-${opt.value}`}
-              >
-                <View style={styles.optionIcon}>{opt.icon}</View>
-                <View style={styles.optionMain}>
-                  <Text style={styles.optionLabel}>{opt.label}</Text>
-                  <Text style={styles.optionDescription}>{opt.description}</Text>
-                </View>
-                {selected && (
-                  <View testID={`locale-${opt.value}-check`}>
-                    <Check size={20} color={colors.white} />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        <Text style={sharedAccountStyles.fieldHint}>
-          {t('appearanceScreen.languageHint', { language: LOCALE_LABELS[resolvedLocale] })}
-        </Text>
-      </View>
 
       <View style={styles.section}>
         <Text style={sharedAccountStyles.sectionLabel}>

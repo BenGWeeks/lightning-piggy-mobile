@@ -14,27 +14,15 @@ import {
   type MapRef,
 } from '@maplibre/maplibre-react-native';
 import type { Feature, Polygon } from 'geojson';
-import {
-  Plus,
-  Minus,
-  Info,
-  Maximize2,
-  PiggyBank,
-  MapPin,
-  Calendar,
-  LocateFixed,
-  Crosshair,
-  UserRound,
-} from 'lucide-react-native';
-import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
+import { Plus, Minus, Info, Maximize2, LocateFixed, Crosshair } from 'lucide-react-native';
+import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
-import { CacheMapMarker } from './CacheMapMarker';
+import MiniMapMarkers from './MiniMapMarkers';
 
 // `useIsFocused()` throws "Couldn't find a navigation object" when the
 // component renders OUTSIDE a navigator — e.g. inside a Gorhom
@@ -244,13 +232,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const markerDim = uniformMarkerSize
     ? { width: uniformMarkerSize, height: uniformMarkerSize, borderRadius: uniformMarkerSize / 2 }
     : null;
-  const pinGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.5) : 12;
-  const avatarGlyphSize = uniformMarkerSize ? Math.round(uniformMarkerSize * 0.55) : 16;
-  // The avatar image fills its chassis (overflow-clipped), so its own corner
-  // radius must track the chassis diameter — otherwise at `uniformMarkerSize`
-  // the image keeps the default 14px radius inside a larger circle and a sliver
-  // of background peeks at the corners.
-  const avatarImageRadius = uniformMarkerSize ? { borderRadius: uniformMarkerSize / 2 } : null;
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
@@ -499,115 +480,27 @@ const LibreMiniMapInner: React.FC<Props> = ({
             (dev-pinned positions, no-GPS state) — silently misleading
             the user about their precision was the pre-fix behaviour. */}
         {haloFeature && <AccuracyHalo feature={haloFeature} />}
-        {/* Merchants: pin colour signals payment type (pink Lightning,
-            orange on-chain only). Glyph mirrors the BTC Map category
-            icon the user sees on the Places-for-you rail card for the
-            same merchant — `restaurant` shows a fork, `cafe` a cup, etc.
-            Falls back to a Store glyph when BTC Map ships a category we
-            haven't mapped yet. */}
-        {merchants.map((m) => {
-          const ln = acceptsLightning(m);
-          const Icon = btcMapIconComponent(m.icon);
-          return (
-            <Marker
-              key={m.id}
-              id={`merchant-${m.id}`}
-              lngLat={[m.lon, m.lat]}
-              onPress={onSelectMerchant ? () => onSelectMerchant(m) : undefined}
-            >
-              <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain, markerDim]}>
-                <Icon size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
-              </View>
-            </Marker>
-          );
-        })}
-        {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
-            NIP-GC → MapPin purple. */}
-        {cachePoints.map((c) => {
-          const original = cacheByCoord.get(c.id);
-          return (
-            <CacheMapMarker
-              key={c.id}
-              id={c.id}
-              lat={c.lat}
-              lng={c.lng}
-              isLpPiggy={c.isLpPiggy}
-              payoutSats={c.payoutSats}
-              glyphSize={pinGlyphSize}
-              markerDimStyle={markerDim}
-              onPress={onSelectCache && original ? () => onSelectCache(original) : undefined}
-            />
-          );
-        })}
-        {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn
-            at the hider's chosen coordinate so the centred map shows where
-            the Piglet is, not just an empty map. */}
-        {pinMarker ? (
-          <Marker id="pin-marker" lngLat={[pinMarker.lon, pinMarker.lat]}>
-            <View style={[styles.pin, pinMarker.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
-              {pinMarker.isLpPiggy ? (
-                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
-              ) : (
-                <MapPin size={12} color="#fff" strokeWidth={2.5} />
-              )}
-            </View>
-          </Marker>
-        ) : null}
-        {/* Profile marker — the OTHER party's avatar on the DM location
-            cards. 28 px circular chip; the photo z-stacks over a
-            UserRound silhouette so a missing / broken / unsupported URL
-            still reads as a person rather than an empty circle. */}
-        {profileMarker ? (
-          <Marker id="profile-marker" lngLat={[profileMarker.lon, profileMarker.lat]}>
-            <View style={[styles.profileMarker, markerDim]}>
-              <UserRound size={avatarGlyphSize} color={colors.textBody} strokeWidth={2} />
-              {profileMarker.avatarUri && isSupportedImageUrl(profileMarker.avatarUri) ? (
-                <ExpoImage
-                  source={{ uri: profileMarker.avatarUri }}
-                  style={[styles.profileMarkerImage, avatarImageRadius]}
-                  cachePolicy="memory-disk"
-                  recyclingKey={profileMarker.avatarUri}
-                  autoplay={false}
-                />
-              ) : null}
-            </View>
-          </Marker>
-        ) : null}
-        {/* Friends-sharing layer — one circular avatar chip per peer
-            currently sharing their live location with me (Full Map). Same
-            chassis as the single profileMarker; keyed by peer pubkey. */}
-        {profileMarkers?.map((pm) => (
-          <Marker key={pm.key} id={`friend-${pm.key}`} lngLat={[pm.lon, pm.lat]}>
-            <View style={[styles.profileMarker, markerDim]}>
-              <UserRound size={avatarGlyphSize} color={colors.textBody} strokeWidth={2} />
-              {pm.avatarUri && isSupportedImageUrl(pm.avatarUri) ? (
-                <ExpoImage
-                  source={{ uri: pm.avatarUri }}
-                  style={[styles.profileMarkerImage, avatarImageRadius]}
-                  cachePolicy="memory-disk"
-                  recyclingKey={pm.avatarUri}
-                  autoplay={false}
-                />
-              ) : null}
-            </View>
-          </Marker>
-        ))}
-        {/* Events: Calendar glyph in deep-purple. */}
-        {eventPoints.map((e) => {
-          const original = eventByCoord.get(e.id);
-          return (
-            <Marker
-              key={e.id}
-              id={`event-${e.id}`}
-              lngLat={[e.lng, e.lat]}
-              onPress={onSelectEvent && original ? () => onSelectEvent(original) : undefined}
-            >
-              <View style={[styles.pin, styles.pinEvent, markerDim]}>
-                <Calendar size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
-              </View>
-            </Marker>
-          );
-        })}
+        {/* Content markers (merchants / caches / events / pin / profiles) —
+            memoised so the position-driven re-renders of this component
+            (camera anchor, user dot, halo) skip re-reconciling every pin
+            (#1015). Rendering them from a child works because MapLibre
+            markers register via context. */}
+        <MiniMapMarkers
+          merchants={merchants}
+          cachePoints={cachePoints}
+          cacheByCoord={cacheByCoord}
+          eventPoints={eventPoints}
+          eventByCoord={eventByCoord}
+          pinMarker={pinMarker}
+          profileMarker={profileMarker}
+          profileMarkers={profileMarkers}
+          styles={styles}
+          textBodyColor={colors.textBody}
+          uniformMarkerSize={uniformMarkerSize}
+          onSelectMerchant={onSelectMerchant}
+          onSelectCache={onSelectCache}
+          onSelectEvent={onSelectEvent}
+        />
         {/* User position — solid dot, rendered LAST so it draws on top
             of any co-located place pin (e.g. when the user is standing
             at a merchant like Bee Happy Farm) instead of being hidden

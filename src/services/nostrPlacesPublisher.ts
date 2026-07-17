@@ -7,11 +7,14 @@ import {
   GC_LISTING_KIND,
   NIP52_TIME_BASED_KIND,
   parseCache,
+  parseFoundLogEvent,
   parseNip52Event,
   type ParsedCache,
   type ParsedEvent,
+  type ParsedFoundLog,
 } from './nostrPlacesService';
 import { isDevLeftover } from './devEventDenylist';
+import { notifyOwnCachesChanged } from './ownCachesBus';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
  * matches VerifiedEvent's data fields without the runtime brand symbol
@@ -52,7 +55,13 @@ const withGcRelays = (relays: string[] = GC_RELAYS): string[] => [
 export const publishCacheEvent = async (
   signed: SignedEventLike,
   relays: string[] = GC_RELAYS,
-): Promise<void> => publishSignedEvent(signed, withGcRelays(relays));
+): Promise<void> => {
+  await publishSignedEvent(signed, withGcRelays(relays));
+  // Every own-cache mutation (create / edit / expire / NIP-09 delete)
+  // funnels through here — tell useCacheNotifications to re-arm its live
+  // sub now instead of waiting for the safety-net poll (#1016).
+  notifyOwnCachesChanged();
+};
 
 /**
  * Subscribe to nearby caches by geohash prefix. `prefixes` should
@@ -131,6 +140,70 @@ export const subscribeNearbyCaches = (
   };
 };
 
+// 30-day window used by the global "recent" subscriptions below. Chosen to
+// match the community sections' freshness assumption (the "Recently added" rail
+// and Finders leaderboard show activity that's still relevant to hunters) while
+// bounding both relay-side scope (open-ended `{kinds, limit}` filters ask the
+// relay to scan its entire event store) and the mount-time parse burst (a busy
+// relay could return a 400-event backfill if no `since` is set). #1029 Fix 2.
+const RECENT_SINCE_SECS = (): number => Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+
+/**
+ * Subscribe to the most-recently-published caches across the geo-cache
+ * relay backbone — NOT geohash-scoped, so it surfaces global activity for
+ * the "Recently added" rail and the Hiders leaderboard. `limit` bounds the
+ * relay backfill (newest-first per NIP-01) so a busy relay can't firehose
+ * years of history into the client. `since` further bounds the relay-side
+ * scan to the last 30 days, capping the mount-time parse burst and keeping
+ * the result set relevant. The same event stream feeds the hider ranking
+ * (distinct caches per author), so callers only open one sub.
+ *
+ * Returns a closer; call it to terminate the subscription.
+ */
+export const subscribeRecentCaches = (
+  onEvent: (cache: ParsedCache) => void,
+  relays: string[] = GC_RELAYS,
+  limit = 200,
+): (() => void) => {
+  const filter: Filter = { kinds: [GC_LISTING_KIND], limit, since: RECENT_SINCE_SECS() };
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
+    onevent: (e: NostrEvent) => {
+      if (isDevLeftover(e.pubkey)) return;
+      const parsed = parseCache(e as VerifiedEvent);
+      if (parsed) onEvent(parsed);
+    },
+  });
+  return () => sub.close();
+};
+
+/**
+ * Subscribe to the most-recent found-logs across the geo-cache relay
+ * backbone — no author filter, so it feeds the global "Recently found"
+ * feed AND the Finders leaderboard (distinct caches per finder) from one
+ * sub. The friends-only toggle is applied client-side at render time so
+ * flipping it re-filters instantly with no re-subscribe. `limit` bounds
+ * the backfill (newest-first). `since` bounds the relay-side scan to the
+ * last 30 days, capping the mount-time parse burst; the community sections
+ * only surface recent activity so older logs wouldn't be shown anyway.
+ *
+ * Returns a closer; call it to terminate the subscription.
+ */
+export const subscribeRecentFoundLogs = (
+  onEvent: (log: ParsedFoundLog) => void,
+  relays: string[] = GC_RELAYS,
+  limit = 200,
+): (() => void) => {
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], limit, since: RECENT_SINCE_SECS() };
+  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
+    onevent: (e: NostrEvent) => {
+      if (isDevLeftover(e.pubkey)) return;
+      const parsed = parseFoundLogEvent(e as VerifiedEvent);
+      if (parsed) onEvent(parsed);
+    },
+  });
+  return () => sub.close();
+};
+
 export const subscribeFoundLogs = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
@@ -198,7 +271,7 @@ export const subscribeNearbyEvents = (
   relays: string[] = DEFAULT_RELAYS,
   topicTags: string[] = ['bitcoin', 'lightning', 'meetup'],
 ): (() => void) => {
-  const closers: Array<() => void> = [];
+  const closers: (() => void)[] = [];
 
   // (1) Geohash-prefix filter — nearby events (the original behaviour).
   if (prefixes.length > 0) {

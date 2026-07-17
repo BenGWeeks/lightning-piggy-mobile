@@ -12,9 +12,11 @@ import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/n
 
 // Upper bound before the optimistic bubble's pending Clock flips to the red
 // failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
-// publish timeout + the publish-level DM_PUBLISH_TIMEOUT_MS (8s), with headroom
-// for a slow-but-real accept, so a genuine send still lands delivered.
-const SEND_SETTLE_WATCHDOG_MS = 12_000;
+// publish timeout + TWO publish-level DM_PUBLISH_TIMEOUT_MS windows (8s each —
+// the publish layer force-reconnects stale relays and retries once when the
+// first attempt lands nothing), with headroom for a slow-but-real accept, so a
+// genuine send — including a retried one — still lands delivered.
+const SEND_SETTLE_WATCHDOG_MS = 20_000;
 
 /**
  * 1:1 ConversationScreen composer actions. A thin wrapper over the shared

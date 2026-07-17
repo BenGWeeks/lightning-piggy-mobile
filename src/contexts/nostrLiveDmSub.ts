@@ -1,19 +1,11 @@
 import React from 'react';
-import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import {
-  partnerFromRumor,
-  unwrapWrapNsec,
-  unwrapWrapViaNip44,
-  textForRumor,
-  rumorEventId,
-  type DecodedRumor,
-} from '../utils/nip17Unwrap';
+import { unwrapWrapNsec, unwrapWrapViaNip44, type DecodedRumor } from '../utils/nip17Unwrap';
 import { listPersistedGroupWrapIds } from '../services/groupMessagesStorageService';
 import {
   selectDmWrapIds,
@@ -22,14 +14,13 @@ import {
   type DmMessageRow,
 } from '../services/dmDb';
 import { parseOrderEvent, serializeOrder, orderPreviewText } from '../utils/orderEvents';
-import { dmRowPreview } from '../utils/dmRowPreview';
 import { nip04PlaintextCache, getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { notifyDmMessage } from './nostrEventBus';
-import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
+import { createLiveRumorSurfacer } from './liveDmRumorSurface';
+import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
-import { subscribeInboxDmsForViewer } from '../services/dmLiveSubscription';
-import { yieldToEventLoop } from './nostrDecryptPacing';
+import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { capKnownWrapIds } from './knownWrapIdsCap';
 import type { LiveSubFollowGateBuffer, DeferredFollowGateEntry } from './liveSubFollowGate';
 import {
@@ -41,34 +32,15 @@ import {
 } from './nostrDmCache';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
+import type { RefreshDmInboxOptions } from './nostrContextTypes';
+import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
 
-// --- Live-sub self-re-arm on relay drop / app resume (#934) ---
-// The app-wide SimplePool deliberately does NOT auto-reconnect
-// (enableReconnect stays default-false app-wide), so when the wrap
-// subscription's WebSocket silently drops — relay idle timeout, network
-// change, Android Doze suspending the socket on background — the foreground
-// live sub goes deaf and nothing re-opens it. The user then has to
-// pull-to-refresh to see missed DMs (the #934 symptom). We mirror the
-// background DM watch's self-re-arm (#958): the sub's `onWrapsClose` schedules
-// a backoff-scheduled re-open, and an AppState 'active' listener re-arms on
-// resume (Doze can freeze the JS engine before onWrapsClose ever fires). A
-// generation counter guards against re-arming after an intentional teardown
-// (logout / account switch / relay-list change), and re-arms are silent by
-// construction — re-subscribing over healthy sockets reuses the pool's open
-// connections, the `isFreshArrival` gate mutes the backlog replay, and
-// `knownWrapIds` + `claimWrapNotification` prevent duplicate work / alerts.
-const LIVE_SUB_RECONNECT_BASE_DELAY_MS = 5_000;
-const LIVE_SUB_RECONNECT_MAX_DELAY_MS = 5 * 60_000;
-// A subscription that survived at least this long before closing counts as
-// having been healthy — its next drop retries from the base delay; a
-// rapid-fail (offline) keeps climbing the exponential backoff ladder.
-const LIVE_SUB_HEALTHY_MIN_LIFETIME_MS = 60_000;
-// Leading-edge debounce for the AppState `active` re-arm: the first resume
-// re-arms immediately, but rapid foreground/background churn within this window
-// is coalesced (the socket a moment-ago resume opened is still healthy, so
-// re-subscribing again is wasted churn). A real Doze resume is far apart from
-// the prior one, so it always clears this window and re-arms.
-const LIVE_SUB_RESUME_DEBOUNCE_MS = 2_000;
+// Self-re-arm on relay drop / app resume (#934) — the connection lifecycle
+// (open / backoff-reconnect / resume-rearm / the post-reconnect settle timer
+// that flushes the #1035 blind window) is owned by the extracted
+// `createLiveDmReconnectController` (see nostrLiveDmReconnect.ts for the full
+// rationale). This file stays responsible for decoding, decrypting,
+// persisting, and surfacing each event.
 
 /**
  * Snapshot + live-dependency bundle the live-DM subscription closes over.
@@ -102,6 +74,14 @@ export interface LiveDmSubscriptionParams {
   // when follows update, re-surfacing + re-notifying entries that now pass.
   followGateBuffer: LiveSubFollowGateBuffer;
   setDeferredReplay: (fn: ((item: DeferredFollowGateEntry) => void) | null) => void;
+  /** Optional: called once after a RECONNECT re-arm settles (JS sub — see
+   * nostrLiveDmReconnect.ts) or after the native engine reports a relay
+   * reconnect (settle-delayed — see liveDmEngineBridge.ts), to flush any
+   * wraps missed while the socket was down (wraps sent while down can rank
+   * below the sub's `limit` because of #469 random timestamps). Not fired on
+   * the initial cold arm (the normal cold-start + deferred-backfill path
+   * covers that). See #1035. */
+  onReconnect?: (opts?: RefreshDmInboxOptions) => Promise<void>;
 }
 
 /**
@@ -124,6 +104,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     setAmberNip44Permission,
     followGateBuffer,
     setDeferredReplay,
+    onReconnect,
   } = params;
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
@@ -143,20 +124,30 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
   let cancelled = false;
-  // Self-re-arm state (#934). `armGeneration` is bumped on every (re)arm and on
-  // teardown; each underlying sub's `onWrapsClose` captures the generation live
-  // at arm time, so a close belonging to a sub we already superseded (or a
-  // torn-down sub) is stale and must not schedule a reconnect.
-  let armGeneration = 0;
-  let reconnectAttempt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  // Wall-clock ms of the last AppState-resume-triggered re-arm, for the
-  // leading-edge debounce below (rapid foreground/background churn coalesces).
-  let lastResumeArmMs = 0;
-  // True once the initial async arm (which seeds knownWrapIds + loads the
-  // kind-4 `since` cursor) has opened the first sub. The AppState-resume
-  // re-arm no-ops before this so it can't race ahead of the seed.
-  let initialArmed = false;
+  // Budget-gated yield scheduler for the live-sub receive path (#1035).
+  // Created once per subscription lifetime — shared across re-arms so the
+  // elapsed-budget window carries over and a relay reconnect that delivers a
+  // small burst doesn't reset the timer and pay zero yields. Disposed on
+  // teardown. safetyEvery mirrors NIP17_LOOP_YIELD_EVERY so a pathological
+  // stream can't monopolise the thread indefinitely even if performance.now
+  // resolution is coarse. NB (Copilot #1039 review): the budget gate is
+  // wall-clock since the last yield, NOT accumulated JS work — the shared
+  // scheduler's designed semantics (nostrDecryptPacing; dmWrapIngest uses it
+  // identically). In this event-driven usage a sporadic wrap arriving after
+  // an idle gap therefore pays ONE RAF before decrypt — the same cost as the
+  // unconditional per-wrap yieldToEventLoop() this replaced, so no
+  // regression — while wraps landing inside a burst amortise to one yield
+  // per ~4 ms of work instead of one RAF each (where the #1035 win is).
+  //
+  // The AbortController spans the subscription lifetime: teardown aborts it
+  // BEFORE dispose(), which settles any in-flight maybeYield() awaiter (a bare
+  // dispose() only cancels the RAF, leaving the awaiter — and its wrap, whose
+  // id is already in knownWrapIds — hung forever).
+  const wrapYieldAbort = new AbortController();
+  const wrapYieldScheduler = createYieldScheduler({
+    signal: wrapYieldAbort.signal,
+    safetyEvery: NIP17_LOOP_YIELD_EVERY,
+  });
   let writeChain: Promise<void> = Promise.resolve();
   // Wall-clock second the sub opened. We fire OS notifications ONLY for
   // messages whose own timestamp is at/after this (minus a clock-skew
@@ -214,6 +205,56 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
   };
   setDeferredReplay(replayDeferredFollowGate);
+
+  // Shared post-unwrap surface path (group-route → follow-gate → persist →
+  // surface → notify), extracted verbatim to liveDmRumorSurface.ts so the
+  // engine path — which delivers already-unwrapped rumors — runs the exact
+  // same policy as the JS unwrap path below. The trailing `.catch` in
+  // chainWrite is load-bearing: without it a single throw leaves `writeChain`
+  // rejected and every later `.then(...)` skips its onFulfilled.
+  const chainWrite = (task: () => Promise<void>): void => {
+    writeChain = writeChain.then(task).catch((e) => {
+      if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+    });
+  };
+  const surfaceRumor = createLiveRumorSurfacer({
+    viewerPubkey,
+    isCancelled: () => cancelled,
+    shouldAbort: () => cancelled || viewerPubkey !== pubkey || activeSigner !== signerType,
+    followPubkeysRef,
+    followGateBuffer,
+    isFreshArrival,
+    queueInboxEntry,
+    knownWrapIds,
+    chainWrite,
+  });
+
+  // --- Native relay engine (Stage 2 M2, #1036 — see liveDmEngineBridge) ---
+  // 'engine': the rust-nostr pool owns the kind-1059 socket, verification and
+  //   NIP-59 unwrap natively; the JS sub skips its wrap filter (kind-4/16/17
+  //   stay on the JS pool). nsec + Android + EXPO_PUBLIC_NATIVE_ENGINE=1 only.
+  // 'xcheck' (dev): BOTH paths run; the engine is observe-only and a differ
+  //   compares delivered wrap ids. 'off': today's JS path, byte-identical.
+  const engineBridge = createLiveDmEngineBridge({
+    activeSigner,
+    viewerPubkey,
+    readRelays,
+    wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
+    knownWrapIds,
+    isCancelled: () => cancelled,
+    surfaceRumor,
+    onReconnect,
+    onEngineUnavailable: () => {
+      // Native start failed — restore the JS wrap filter so the inbox
+      // never goes deaf behind the flag. rearm() re-opens the sub, which
+      // re-reads the skipWraps getter (now false). Only reachable after
+      // engineBridge.start(), i.e. after reconnectController.start().
+      engineActive = false;
+      reconnectController.rearm();
+    },
+  });
+  // Flips false if the native start fails (see onEngineUnavailable above).
+  let engineActive = engineBridge.mode === 'engine';
 
   const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
     // Earliest-possible short-circuit for NIP-17 wraps we already
@@ -527,15 +568,31 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
     };
 
-    // Yield to the event loop before each per-wrap decryption. The
-    // live sub fans out wraps from the relay one at a time, but
-    // when the sub catches up a backlog after cold start, multiple
-    // wraps land in the same JS task — each sync `unwrapWrapNsec`
-    // is ~1-3 ms and they pile up to tens-of-ms of unbroken
-    // blocking, dropping bottom-sheet animation frames. A single
-    // setTimeout(0) per wrap costs ~0 ms but lets RN re-flush
-    // pending UI events between decryptions. See issue #496.
-    await yieldToEventLoop();
+    // Budget-gated yield before each per-wrap decryption (#1035 / #496).
+    // Replaces the unconditional `yieldToEventLoop()` (one RAF ≈ 16 ms per
+    // wrap regardless of load). The gate is wall-clock since the last yield
+    // (the shared scheduler's semantics — see the creation-site comment), so
+    // a sporadic foreground wrap after an idle gap still pays one RAF (same
+    // as the unconditional yield this replaced — no regression); the win is
+    // in bursts, which amortise to one yield per ~4 ms of work instead of
+    // one RAF per wrap. The safety cap (every NIP17_LOOP_YIELD_EVERY wraps)
+    // backstops edge cases where decrypt runs faster than performance.now
+    // resolution on some devices.
+    await wrapYieldScheduler.maybeYield();
+    // Torn down while parked on the yield (abort settles the awaiter): skip
+    // post-teardown decrypt/persist work. `knownWrapIds` was already eagerly
+    // claimed for this wrap at the top of the handler (#505) — undo that
+    // claim here (Copilot #1039 review) so a wrap that was never actually
+    // decrypted/persisted/surfaced isn't permanently orphaned as "known".
+    // `knownWrapIdsRef` survives this effect's re-runs (relay-list change →
+    // fresh live-sub instance, same viewer), so without this a torn-down
+    // in-flight wrap would be silently skipped by every future live-sub
+    // instance for the rest of the session even though the store never got
+    // it — undetectable because it never resurfaces even on the next arm.
+    if (cancelled) {
+      knownWrapIds.delete(wrap.id);
+      return;
+    }
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
@@ -582,256 +639,43 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
       return;
     }
-    if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
-
-    // Group-route first — multi-recipient rumors are owned by the
-    // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
-    // appendGroupMessage + notifyGroupMessage internally so an open
-    // GroupConversationScreen auto-refreshes.
-    const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
-    if (routeResult.kind !== 'not-group') {
-      // OS notification (#279) — fired HERE (live path) not inside
-      // tryRouteGroupRumor (which also runs on batch refresh). Only for
-      // genuinely-fresh messages (backlog has old timestamps → silent),
-      // skip my own, and suppressed when the user is viewing this group.
-      if (routeResult.kind === 'routed' && isFreshArrival(routeResult.message.createdAt)) {
-        const sender = routeResult.message.senderPubkey;
-        // claimWrapNotification: dedupe vs the background watch (#279).
-        if (sender.toLowerCase() !== viewerPubkey.toLowerCase() && claimWrapNotification(wrap.id)) {
-          void fireMessageNotification({
-            kind: 'group',
-            threadId: routeResult.group.id,
-            title: routeResult.group.name || 'New group message',
-            body: routeResult.message.text,
-            data: { groupId: routeResult.group.id },
-          });
-        }
-      }
-      if (__DEV__)
-        console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`);
-      return;
-    }
-
-    const partnership = partnerFromRumor(rumor, viewerPubkey);
-    if (!partnership) {
-      if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-partnership`);
-      return;
-    }
-
-    // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
-    // sender plaintext off AsyncStorage. Group rumors above don't
-    // hit this gate because group membership is its own auth signal.
-    if (!followPubkeysRef.current.has(partnership.partnerPubkey)) {
-      if (__DEV__)
-        console.log(
-          `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
-        );
-      // Defer fresh inbound for replay once follows hydrate (#851 F2). Skip my
-      // own echoes and historical backlog (silent); persistence is left to the
-      // next refreshDmInbox — see replayDeferredFollowGate.
-      if (!partnership.fromMe && isFreshArrival(rumor.created_at)) {
-        // For a structured rumor (order kind 16/17, or an NWC wallet share)
-        // `textForRumor` returns non-human JSON; surface a readable, SECRET-FREE
-        // preview so a raw blob (or, for a share, a bearer connection string)
-        // never leaks into the conversation list OR the notification body when
-        // the sender isn't followed (mirrors the non-deferred path below). Plain
-        // DM rumors pass through unchanged.
-        const deferredText = dmRowPreview(textForRumor(rumor), rumor.kind);
-        followGateBuffer.defer({
-          partnerPubkey: partnership.partnerPubkey,
-          entry: {
-            id: wrap.id,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: deferredText,
-            wireKind: rumor.kind,
-          },
-          notify: { title: 'New message', body: deferredText },
-        });
-      }
-      return;
-    }
-
-    const wrapText = textForRumor(rumor);
-    const wrapRow: DmMessageRow = {
-      owner: viewerPubkey,
-      eventId: wrap.id,
-      conversation: partnership.partnerPubkey,
-      createdAt: rumor.created_at,
-      sender: partnership.fromMe ? viewerPubkey : partnership.partnerPubkey,
-      content: wrapText,
-      fromMe: partnership.fromMe,
-      wireKind: rumor.kind,
-    };
-    const inboxEntry: DmInboxEntry = {
-      id: wrap.id,
-      partnerPubkey: partnership.partnerPubkey,
-      fromMe: partnership.fromMe,
-      createdAt: rumor.created_at,
-      // For a structured rumor (order kind 16/17, or an NWC wallet share)
-      // `wrapText` is non-human JSON; surface a readable, secret-free preview.
-      // Plain DM rumors pass through unchanged.
-      text: dmRowPreview(wrapText, rumor.kind),
-      wireKind: rumor.kind,
-      // Inner rumor id (#857) — the delivery-store key for our own sent rows,
-      // stable across the optimistic bubble + this live echo.
-      rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
-    };
-
-    // Serialise store upserts so concurrent live wraps don't race each other.
-    // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
-    writeChain = writeChain
-      .then(async () => {
-        if (cancelled) return;
-        // Encrypted store write (#848) — idempotent by (owner, event_id), so
-        // a wrap delivered by both the live sub and a near-simultaneous
-        // refresh lands as one row (the old file read→merge→write dance and
-        // its #811 clobbering hazard are gone). The store is the ONLY
-        // at-rest persistence (#850) — the plaintext inbox blob is retired.
-        await upsertDmMessages([wrapRow]);
-        knownWrapIds?.add(wrap.id);
-      })
-      .catch((e) => {
-        if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
-      });
-    // Surface to the UI without awaiting the persist chain (#934 item 2) —
-    // same reasoning as the kind-4 path above. knownWrapIds was already
-    // eagerly claimed at the top of this handler, so dedup doesn't depend
-    // on the chain either.
-    if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
-
-    queueInboxEntry(inboxEntry);
-    notifyDmMessage(partnership.partnerPubkey);
-    // OS notification (#279) — only genuinely-fresh inbound (backlog has
-    // old rumor timestamps and stays silent), never my own echo;
-    // suppressed when the user is viewing this thread. claimWrapNotification
-    // dedupes vs the background watch running in the same JS context.
-    if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrap.id)) {
-      void fireMessageNotification({
-        kind: 'dm',
-        threadId: partnership.partnerPubkey,
-        title: 'New message',
-        // Use the already-redacted preview, not raw `rumor.content`: a
-        // structured rumor (order JSON, or an NWC wallet-share bearer
-        // connection string) must never surface its payload in a push body.
-        body: inboxEntry.text,
-        data: { conversationPubkey: partnership.partnerPubkey },
-      });
-    }
-    if (__DEV__)
-      console.log(
-        `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
-      );
+    // Dev cross-check: record every wrap the JS path successfully unwrapped
+    // so the differ can flag divergence from the engine's deliveries.
+    engineBridge.recordJsUnwrap(wrap.id);
+    // Post-unwrap policy — extracted verbatim to liveDmRumorSurface.ts and
+    // shared with the native-engine path. Starts with the same
+    // cancelled/identity guard that used to sit here.
+    await surfaceRumor(rumor, wrap.id);
   };
 
   // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
-  let unsubscribe: (() => void) | null = null;
-  // The kind-4 `since` cursor loaded once by the initial seed below; re-arms
-  // (#934) reuse it. Re-streaming kind-4 from the same cursor on a re-arm is
-  // safe: the closure-scoped `seen` Set, the RAM plaintext cache, and the
-  // idempotent encrypted-store upsert all dedupe the re-fetched bytes.
-  let sinceK4Cursor: number | undefined;
-
-  const clearReconnectTimer = (): void => {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-  };
-
-  // Open (or re-open) the underlying relay subscription. Bumps the generation
-  // FIRST, then tears down any prior sub — so the prior sub's `onWrapsClose`,
-  // which fires synchronously on close, sees a stale generation and no-ops
-  // (never schedules a reconnect for a sub we intentionally superseded). Idempotent.
-  const armSub = (): void => {
-    if (cancelled) return;
-    clearReconnectTimer();
-    const generation = ++armGeneration;
-    if (unsubscribe) {
-      try {
-        unsubscribe();
-      } catch {
-        // best-effort
-      }
-      unsubscribe = null;
-    }
-    const armedAtMs = Date.now();
-    unsubscribe = subscribeInboxDmsForViewer({
-      viewerPubkey,
-      relays: readRelays,
-      sinceK4: sinceK4Cursor,
-      // Bound the kind-1059 backlog re-stream so arming the live sub doesn't
-      // re-ingest the full wrap history on the JS thread (#751). Deeper backlog
-      // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
-      wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
-      onEvent: (ev) => {
-        // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
-        handleInboxEvent(ev).catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
-        });
-      },
-      // The wrap sub closed on every relay — the socket dropped and we've gone
-      // deaf to new DMs (#934). Re-arm with backoff, unless this close belongs
-      // to a superseded / torn-down sub (stale generation) or we were cancelled.
-      onWrapsClose: () => {
-        if (cancelled || generation !== armGeneration) return;
-        // Lifetime-based health: a sub that survived a while was genuinely
-        // connected, so its drop retries from the base delay; a rapid-fail
-        // (offline) keeps climbing the exponential ladder.
-        if (Date.now() - armedAtMs >= LIVE_SUB_HEALTHY_MIN_LIFETIME_MS) reconnectAttempt = 0;
-        scheduleReconnect(generation);
-      },
-    });
-    if (__DEV__) {
-      console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4Cursor ?? 'default-7d'}`,
-      );
-    }
-  };
-
-  // Schedule a backoff-delayed re-arm after a socket drop (#934). Guards
-  // against a stale generation, an intentional teardown, and a reconnect
-  // already pending.
-  const scheduleReconnect = (generation: number): void => {
-    if (cancelled || generation !== armGeneration || reconnectTimer) return;
-    const delay = Math.min(
-      LIVE_SUB_RECONNECT_BASE_DELAY_MS * 2 ** Math.min(reconnectAttempt, 10),
-      LIVE_SUB_RECONNECT_MAX_DELAY_MS,
-    );
-    reconnectAttempt += 1;
-    if (__DEV__)
-      console.warn(`[Nostr] live DM sub closed — re-arming in ${Math.round(delay / 1000)}s`);
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (cancelled) return;
-      armSub();
-    }, delay);
-  };
-
-  // Re-arm on app resume (#934). Android Doze can suspend the relay WebSocket
-  // (and freeze the JS engine) while backgrounded, so on return to `active`
-  // the socket is often dead WITHOUT `onWrapsClose` ever having fired. Re-arm
-  // proactively from the shortest backoff. No-ops until the initial seed has
-  // armed the first sub, so a resume can't race ahead of the knownWrapIds seed.
-  const appStateSub = AppState.addEventListener('change', (next) => {
-    if (cancelled || !initialArmed) return;
-    if (next === 'active') {
-      // Debounce rapid foreground/background churn (#986 review): re-arming on
-      // every resume re-subscribes repeatedly when the user flicks between
-      // apps, even though a socket opened a second ago is still healthy. A
-      // genuine Doze resume is always far past this window, so it still re-arms.
-      const now = Date.now();
-      if (now - lastResumeArmMs < LIVE_SUB_RESUME_DEBOUNCE_MS) return;
-      lastResumeArmMs = now;
-      reconnectAttempt = 0;
-      armSub();
-    }
+  //
+  // Connection lifecycle (open / backoff-reconnect / resume-rearm / the
+  // post-reconnect settle timer) is owned by the extracted controller
+  // (#1039 review — see nostrLiveDmReconnect.ts). It's constructed here,
+  // armed once the async seed below resolves the kind-4 cursor, and torn
+  // down from this effect's cleanup.
+  const reconnectController = createLiveDmReconnectController({
+    viewerPubkey,
+    readRelays,
+    // Engine mode: the native pool owns the kind-1059 filter; the JS sub
+    // keeps kind-4/16/17 (and the close-driven re-arm moves to the kind-4
+    // sub — see subscribeInboxDmsForViewer). Read per-arm so the fallback
+    // re-arm restores the wrap filter if the engine fails to start.
+    skipWraps: () => engineActive,
+    onEvent: (ev) => {
+      // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
+      handleInboxEvent(ev).catch((e) => {
+        if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
+      });
+    },
+    onReconnect,
+    isCancelled: () => cancelled,
   });
 
   (async () => {
     // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
-    sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
+    const sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
     if (cancelled) return;
     // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
     // (#848 — one indexed id-only query, no plaintext leaves the DB). The
@@ -878,20 +722,22 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
     if (cancelled) return;
-    armSub();
-    initialArmed = true;
+    reconnectController.start(sinceK4Cursor);
+    // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
+    // seed so the engine's native dedupe set is seeded with the same ids.
+    // No-op in 'off' mode; falls back to a JS re-arm on failure.
+    await engineBridge.start();
   })();
 
   return () => {
     cancelled = true;
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
-    // the `unsubscribe()` below fires `onWrapsClose` synchronously, and without
-    // bumping the generation that intentional close would schedule a bogus
-    // reconnect (a logout / account switch / relay-list change must fully stop
-    // the sub, not resurrect it). Also stop the AppState-resume re-arm.
-    armGeneration += 1;
-    clearReconnectTimer();
-    appStateSub.remove();
+    // stopReconnecting() bumps the generation and stops the AppState-resume
+    // re-arm BEFORE closeSubscription() below fires `onWrapsClose`
+    // synchronously — without that ordering, the intentional close would
+    // schedule a bogus reconnect (a logout / account switch / relay-list
+    // change must fully stop the sub, not resurrect it).
+    reconnectController.stopReconnecting();
     flushPendingInbox();
     // Drop the follow-gate deferral buffer + unregister the replay hook
     // atomically with sub teardown (#851 F2). A wipe / account switch tears
@@ -899,6 +745,14 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // the next identity's inbox.
     setDeferredReplay(null);
     followGateBuffer.clear();
-    if (unsubscribe) unsubscribe();
+    // Stop the native engine — tears the rust-nostr pool down AND clears the
+    // module's single-entry key cache, so a logout / account switch never
+    // leaves the old identity's secret in native memory (Stage 2 M2 key
+    // lifecycle).
+    engineBridge.stop();
+    // Abort first — settles any in-flight maybeYield() awaiter — then detach.
+    wrapYieldAbort.abort();
+    wrapYieldScheduler.dispose();
+    reconnectController.closeSubscription();
   };
 }

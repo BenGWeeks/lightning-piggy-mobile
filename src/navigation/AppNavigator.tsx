@@ -60,6 +60,7 @@ const HuntCreateScreen = lazyScreen(() => import('../screens/HuntCreateScreen'))
 const HuntFoundScreen = lazyScreen(() => import('../screens/HuntFoundScreen'));
 const HuntPiggyDetailScreen = lazyScreen(() => import('../screens/HuntPiggyDetailScreen'));
 const MyPigletsScreen = lazyScreen(() => import('../screens/MyPigletsScreen'));
+const HuntLeaderboardScreen = lazyScreen(() => import('../screens/HuntLeaderboardScreen'));
 const EventsScreen = lazyScreen(() => import('../screens/EventsScreen'));
 const EventDetailScreen = lazyScreen(() => import('../screens/EventDetailScreen'));
 const CourseDetailScreen = lazyScreen(() => import('../screens/CourseDetailScreen'));
@@ -75,6 +76,7 @@ const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
 const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceScreen'));
+const LanguageScreen = lazyScreen(() => import('../screens/account/LanguageScreen'));
 const NearbyScreen = lazyScreen(() => import('../screens/account/NearbyScreen'));
 const SecurityScreen = lazyScreen(() => import('../screens/account/SecurityScreen'));
 const AboutScreen = lazyScreen(() => import('../screens/account/AboutScreen'));
@@ -280,6 +282,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />
       <ExploreStack.Screen name="HuntPiggyDetail" component={HuntPiggyDetailScreen} />
       <ExploreStack.Screen name="MyPiglets" component={MyPigletsScreen} />
+      <ExploreStack.Screen name="HuntLeaderboard" component={HuntLeaderboardScreen} />
       <ExploreStack.Screen name="Events" component={EventsScreen} />
       <ExploreStack.Screen name="EventDetail" component={EventDetailScreen} />
     </ExploreStack.Navigator>
@@ -463,6 +466,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
+      <AccountDrawer.Screen name="AccountLanguage" component={LanguageScreen} />
       <AccountDrawer.Screen name="AccountNearby" component={NearbyScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />

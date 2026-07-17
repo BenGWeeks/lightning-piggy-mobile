@@ -152,9 +152,10 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       });
       // Pending immediately.
       expect(getDmDeliveryStatus(EVENT_ID)?.pending).toBe(true);
-      // After the watchdog window, the bubble settles to failed (not pending).
+      // After the watchdog window (20s — covers the publish layer's
+      // stale-socket retry, two 8s attempts), the bubble settles to failed.
       act(() => {
-        jest.advanceTimersByTime(13_000);
+        jest.advanceTimersByTime(21_000);
       });
       const status = getDmDeliveryStatus(EVENT_ID);
       expect(status?.pending).toBeFalsy();

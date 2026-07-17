@@ -21,6 +21,7 @@
     "onChain": "On-chain",
     "currency": "Currency",
     "appearance": "Appearance",
+    "language": "Language",
     "nearbyMerchants": "Nearby merchants",
     "security": "Security",
     "about": "About",
@@ -152,21 +153,24 @@
     "themeLightDesc": "Always light theme",
     "themeDark": "Dark",
     "themeDarkDesc": "Always dark theme",
-    "localeSystemDesc": "Follow your device language",
-    "alwaysLanguage": "Always {{language}}",
     "animBubbles": "Bubbles",
     "animBubblesDesc": "Rising bubbles while sending",
     "animLightning": "Lightning",
     "animLightningDesc": "Crackling bolts while sending",
     "themeA11y": "{{label}} theme",
-    "languageA11y": "{{label}} language",
     "animationA11y": "{{label}} sending animation",
     "themeSectionLabel": "Theme",
-    "languageSectionLabel": "Language",
     "animationSectionLabel": "Sending animation",
     "themeHint": "Affects every screen in the app. \"System\" follows your device's light/dark setting and switches automatically when it changes.",
-    "languageHint": "Translates the app's UI text. Currently active: {{language}}. Only a couple of screens are translated so far — more land in follow-up updates (#137).",
     "animationHint": "The animation shown while a payment is being sent. Both fade from purple to green when the payment succeeds."
+  },
+  "languageScreen": {
+    "title": "Language",
+    "sectionLabel": "Language",
+    "systemDesc": "Follow your device language",
+    "alwaysLanguage": "Always {{language}}",
+    "a11y": "{{label}} language",
+    "hint": "Translates the app's UI text. Currently active: {{language}}. Only a couple of screens are translated so far — more land in follow-up updates (#137)."
   },
   "btcMapAttribution": {
     "a11yLabel": "Powered by BTC Map — opens btcmap.org",
@@ -287,7 +291,8 @@
     "zapUnavailable": "Send a zap (unavailable — peer has no Lightning Address)",
     "closeFullscreenGif": "Close full-screen GIF",
     "shareContactTitle": "Share a contact with {{name}}",
-    "shareContactSubtitle": "They'll see it as a Nostr profile card they can open."
+    "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
+    "typing": "typing…"
   },
   "nwcShareSheet": {
     "title": "Share a wallet",
@@ -391,6 +396,7 @@
     "sending": "Sending…",
     "sendFailed": "Send failed",
     "sentToRelays": "Sent to {{ok}} of {{total}} relays",
+    "messageSent": "Message sent",
     "messageReceived": "Message received",
     "statusNotTracked": "Not tracked",
     "statusReceived": "Received",
@@ -894,6 +900,40 @@
     "piggySleeping": "This Piggy is sleeping",
     "back": "Back",
     "couldntClaim": "Couldn't claim"
+  },
+  "huntCommunity": {
+    "nearby": "Nearby",
+    "recentlyAdded": "Recently added",
+    "recentlyFound": "Recently found",
+    "topHiders": "Top hiders",
+    "topFinders": "Top finders",
+    "filterAll": "All",
+    "filterFriends": "Friends",
+    "aGeoCache": "a geo-cache",
+    "foundCache": "Found {{cache}}",
+    "cachesHidden": "{{count}} caches hidden",
+    "cacheHiddenOne": "1 cache hidden",
+    "cachesFound": "{{count}} caches found",
+    "cacheFoundOne": "1 cache found",
+    "ageMinutes": "{{count}}m ago",
+    "ageHours": "{{count}}h ago",
+    "ageDays": "{{count}}d ago",
+    "emptyRecentlyAdded": "No geo-caches published yet. Newly hidden caches show up here.",
+    "emptyRecentlyFound": "No finds yet. Claimed caches show up here as they happen.",
+    "emptyFriendsFinds": "None of your friends have claimed a cache yet.",
+    "emptyHiders": "No hiders yet — be the first to hide a Piglet.",
+    "emptyFinders": "No finders yet — claim a cache to get on the board.",
+    "leaderRowA11y": "Rank {{rank}}: {{name}}, {{count}} caches",
+    "leaderRowA11yOne": "Rank {{rank}}: {{name}}, 1 cache",
+    "findRowA11y": "{{name}} found {{cache}}",
+    "viewLeaderboard": "Leaderboard"
+  },
+  "huntLeaderboard": {
+    "title": "Leaderboard",
+    "tagline": "Top hiders and finders across the network",
+    "backToGeoCaches": "Back to Geo-caches",
+    "tabHiders": "Top hiders",
+    "tabFinders": "Top finders"
   },
   "huntScreen": {
     "backToExplore": "Back to Explore",
@@ -1406,7 +1446,15 @@
     "grantAmberPermissionLabel": "Grant Amber NIP-44 permission",
     "grantPermissionInAmber": "Grant permission in Amber",
     "noProfilePubkey": "No profile pubkey — log in first.",
-    "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set."
+    "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set.",
+    "experimental": "Experimental",
+    "nativeCryptoHint": "Runs NIP-44 encryption and signature checks through the native rust-nostr module instead of JavaScript. Tester feature — watch the [PerfBlock] nostrCrypto logs and turn it off if anything misbehaves.",
+    "nativeCryptoLabel": "Native crypto (rust-nostr)",
+    "nativeCryptoRestartCaption": "Restart the app to apply.",
+    "nativeCryptoUnavailable": "Unavailable on this device",
+    "nativeCryptoA11y": "Enable native crypto",
+    "nativeCryptoActiveYes": "Active this session: yes",
+    "nativeCryptoActiveNo": "Active this session: no"
   },
   "offlineBanner": {
     "a11yLabel": "You're offline. Some data may be stale.",
@@ -1867,8 +1915,15 @@
     "typeLightning": "Lightning",
     "typeOnchain": "On-chain"
   },
+  "walletCardPicker": {
+    "selectedTheme": "Selected card theme: {{name}}"
+  },
   "walletSettingsSheet": {
     "title": "Wallet Settings",
+    "tabDesign": "Design",
+    "tabDetails": "Details",
+    "tabConnection": "Connection",
+    "noConnectionDetails": "No connection details for this wallet.",
     "alias": "Alias",
     "aliasPlaceholder": "Wallet name",
     "lightningAddress": "Lightning Address",
@@ -1898,6 +1953,7 @@
     "shareWalletPickTitle": "Share wallet with…",
     "extendedPublicKey": "Extended Public Key",
     "tapToCopy": "Tap to copy",
+    "copyXpub": "Copy extended public key",
     "cardDesign": "Card Design",
     "save": "Save",
     "saveWalletSettings": "Save wallet settings",

@@ -11,6 +11,7 @@ import {
   Link as LinkIcon,
   Coins,
   Palette as PaletteIcon,
+  Languages,
   Bell,
   ShieldCheck,
   Info,
@@ -78,6 +79,12 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
     label: t('accountDrawerContent.appearance'),
     icon: <PaletteIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-appearance',
+  },
+  {
+    name: 'AccountLanguage',
+    label: t('accountDrawerContent.language'),
+    icon: <Languages size={22} color={colors.textBody} />,
+    testID: 'drawer-row-language',
   },
   {
     name: 'AccountNearby',
