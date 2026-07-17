@@ -188,6 +188,9 @@
     "nipGcCacheMarker": "Marcador de caché NIP-GC",
     "lightningPayoutAvailable": "Pago Lightning disponible"
   },
+  "cacheClusterMarker": {
+    "label": "{{count}} geocachés cerca — toca para acercar"
+  },
   "coinosRecoverySheet": {
     "title": "Guarda tu información de recuperación",
     "subtitle": "Si pierdes este dispositivo, inicia sesión en {{host}} con este usuario y contraseña para recuperar tus fondos. Lightning Piggy no los guarda en ningún otro sitio por ti.",
