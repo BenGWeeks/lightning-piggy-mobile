@@ -8,6 +8,7 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { CacheMapMarker } from './CacheMapMarker';
+import { CacheClusterMarker } from './CacheClusterMarker';
 import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 /**
@@ -39,6 +40,10 @@ export interface MiniMapMarkersProps {
     payoutSats: number | null;
   }[];
   cacheByCoord: ReadonlyMap<string, ParsedCache>;
+  /** Grouped nearby caches (#1071) — one count chip per cluster; tap
+   *  zooms to the group's expansion zoom (the parent owns the camera). */
+  cacheClusters?: { id: number; lat: number; lng: number; count: number; expansionZoom: number }[];
+  onPressCacheCluster?: (c: { lat: number; lng: number; expansionZoom: number }) => void;
   eventPoints: { lat: number; lng: number; id: string }[];
   eventByCoord: ReadonlyMap<string, ParsedEvent>;
   pinMarker?: { lat: number; lon: number; isLpPiggy?: boolean } | null;
@@ -58,6 +63,8 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
   merchants,
   cachePoints,
   cacheByCoord,
+  cacheClusters,
+  onPressCacheCluster,
   eventPoints,
   eventByCoord,
   pinMarker,
@@ -129,6 +136,24 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
           />
         );
       })}
+      {/* Cache clusters (#1071): count chips for groups of nearby caches;
+          tapping zooms to where the group separates. */}
+      {cacheClusters?.map((cl) => (
+        <CacheClusterMarker
+          key={`cluster-${cl.id}`}
+          id={cl.id}
+          lat={cl.lat}
+          lng={cl.lng}
+          count={cl.count}
+          markerDimStyle={markerDim}
+          onPress={
+            onPressCacheCluster
+              ? () =>
+                  onPressCacheCluster({ lat: cl.lat, lng: cl.lng, expansionZoom: cl.expansionZoom })
+              : () => {}
+          }
+        />
+      ))}
       {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn
           at the hider's chosen coordinate so the centred map shows where
           the Piglet is, not just an empty map. */}

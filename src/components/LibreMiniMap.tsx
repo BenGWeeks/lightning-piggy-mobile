@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View, TouchableOpacity, Text } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { NavigationContext } from '@react-navigation/native';
@@ -18,6 +18,7 @@ import { Plus, Minus, Info, Maximize2, LocateFixed, Crosshair } from 'lucide-rea
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
+import { clusterCachePoints } from '../utils/cacheClusters';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -235,6 +236,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
+  // Reactive zoom for cache clustering (#1071). Unlike currentZoomRef
+  // (a plain ref feeding camera calls without re-rendering), cluster
+  // membership genuinely changes with zoom, so the clustering memo needs
+  // a state it can depend on. Updated by the zoom buttons and on camera
+  // settle (pinch-zoom on the interactive full map); half-level rounding
+  // keeps GPS-follow flyTo settles from churning re-renders.
+  const [clusterZoom, setClusterZoom] = useState(defaultZoom);
 
   // Pulse the accuracy halo so the user can pick out their own dot
   // against busy maps. 1.0 → 1.18 → 1.0 over 1.6 s, native-driven so the
@@ -380,8 +388,34 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const zoomBy = (delta: number) => () => {
     const next = Math.max(1, Math.min(20, currentZoomRef.current + delta));
     currentZoomRef.current = next;
+    setClusterZoom(next);
     cameraRef.current?.zoomTo(next, { duration: 200 });
   };
+
+  // Cache pins, grouped: nearby caches collapse into a count chip until
+  // the zoom separates them (#1071). Leaves render through the existing
+  // CacheMapMarker path; clusters render as CacheClusterMarker chips
+  // whose tap flies the camera to the group's expansion zoom.
+  const cacheClusterItems = useMemo(
+    () => clusterCachePoints(cachePoints, clusterZoom),
+    [cachePoints, clusterZoom],
+  );
+  const clusteredCachePoints = useMemo(
+    () => cacheClusterItems.flatMap((item) => (item.kind === 'point' ? [item.point] : [])),
+    [cacheClusterItems],
+  );
+  const cacheClusters = useMemo(
+    () => cacheClusterItems.flatMap((item) => (item.kind === 'cluster' ? [item] : [])),
+    [cacheClusterItems],
+  );
+  const onPressCacheCluster = useCallback(
+    (c: { lat: number; lng: number; expansionZoom: number }) => {
+      currentZoomRef.current = c.expansionZoom;
+      setClusterZoom(c.expansionZoom);
+      cameraRef.current?.flyTo({ center: [c.lng, c.lat], zoom: c.expansionZoom, duration: 350 });
+    },
+    [],
+  );
 
   // Auto-follow GPS for inline mini-maps (non-interactive). When
   // interactive, leave the camera wherever the user panned it — the
@@ -448,29 +482,38 @@ const LibreMiniMapInner: React.FC<Props> = ({
         // their list to what's visible. Only wired when an onBoundsChange
         // prop is provided — keeps the inline mini-map free of the
         // event-marshalling cost.
-        onRegionDidChange={
-          onBoundsChange
-            ? async () => {
-                try {
-                  const bounds = await mapRef.current?.getBounds();
-                  if (!bounds) return;
-                  // MapLibre LngLatBounds shape: [west, south, east, north]
-                  // when accessed via the array indices. Convert to the
-                  // lat/lon bbox the host screens expect.
-                  const arr = bounds as unknown as [number, number, number, number];
-                  onBoundsChange({
-                    minLat: arr[1],
-                    maxLat: arr[3],
-                    minLon: arr[0],
-                    maxLon: arr[2],
-                  });
-                } catch {
-                  // Bounds query can race the camera tear-down on screen
-                  // unmount — swallow.
-                }
-              }
-            : undefined
-        }
+        onRegionDidChange={async () => {
+          // Always: refresh the clustering zoom (#1071) — pinch-zoom on
+          // the interactive map only surfaces here. Rounded to half
+          // levels so GPS-follow flyTo settles don't churn re-renders.
+          try {
+            const z = await mapRef.current?.getZoom();
+            if (typeof z === 'number') {
+              currentZoomRef.current = z;
+              setClusterZoom(Math.round(z * 2) / 2);
+            }
+          } catch {
+            // Zoom query can race the camera tear-down on unmount — swallow.
+          }
+          if (!onBoundsChange) return;
+          try {
+            const bounds = await mapRef.current?.getBounds();
+            if (!bounds) return;
+            // MapLibre LngLatBounds shape: [west, south, east, north]
+            // when accessed via the array indices. Convert to the
+            // lat/lon bbox the host screens expect.
+            const arr = bounds as unknown as [number, number, number, number];
+            onBoundsChange({
+              minLat: arr[1],
+              maxLat: arr[3],
+              minLon: arr[0],
+              maxLon: arr[2],
+            });
+          } catch {
+            // Bounds query can race the camera tear-down on screen
+            // unmount — swallow.
+          }
+        }}
       >
         <Camera ref={cameraRef} initialViewState={{ center: [lon, lat], zoom: defaultZoom }} />
         {/* Accuracy halo — geographic polygon so the map's projection
@@ -487,7 +530,9 @@ const LibreMiniMapInner: React.FC<Props> = ({
             markers register via context. */}
         <MiniMapMarkers
           merchants={merchants}
-          cachePoints={cachePoints}
+          cachePoints={clusteredCachePoints}
+          cacheClusters={cacheClusters}
+          onPressCacheCluster={onPressCacheCluster}
           cacheByCoord={cacheByCoord}
           eventPoints={eventPoints}
           eventByCoord={eventByCoord}
