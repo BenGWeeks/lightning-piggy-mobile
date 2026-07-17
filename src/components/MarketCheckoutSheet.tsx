@@ -82,9 +82,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const [selectedCoordinate, setSelectedCoordinate] = useState<string | null>(null);
   // BTC spot price per fiat currency the options quote in (null = fetch
   // failed → the option can't be priced in sats and submit stays blocked).
-  const [btcPriceByCurrency, setBtcPriceByCurrency] = useState<Map<string, number | null>>(
-    new Map(),
-  );
+  // Plain Record, not a Map: it holds 1-3 currencies fetched once per
+  // sheet open, and all results commit as a single state write below.
+  const [btcPriceByCurrency, setBtcPriceByCurrency] = useState<
+    Record<string, number | null | undefined>
+  >({});
 
   useEffect(() => {
     if (visible) {
@@ -106,24 +108,33 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const hasShipping = shipping.status === 'ready' && shipping.options.length > 0;
 
   // Fetch a BTC spot price once per distinct fiat currency the options use.
+  // All fetches settle together and commit as ONE state write — no
+  // per-result re-render (and no per-event clone for the perf gate).
   useEffect(() => {
     if (!hasShipping) return;
-    const fiat = new Set(
-      shipping.options
-        .map((o) => o.currency)
-        .filter((c) => c && c !== 'SATS' && c !== 'SAT' && c !== 'BTC'),
-    );
-    for (const currency of fiat) {
-      if (btcPriceByCurrency.has(currency)) continue;
-      getBtcPrice(currency)
-        .then((price) => {
-          setBtcPriceByCurrency((prev) => new Map(prev).set(currency, price));
-        })
-        .catch(() => {
-          setBtcPriceByCurrency((prev) => new Map(prev).set(currency, null));
-        });
-    }
-    // btcPriceByCurrency intentionally omitted: the `has` guard already
+    const fiat = [
+      ...new Set(
+        shipping.options
+          .map((o) => o.currency)
+          .filter((c) => c && c !== 'SATS' && c !== 'SAT' && c !== 'BTC'),
+      ),
+    ].filter((c) => !(c in btcPriceByCurrency));
+    if (fiat.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      fiat.map((currency) =>
+        getBtcPrice(currency)
+          .then((price) => [currency, price] as const)
+          .catch(() => [currency, null] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setBtcPriceByCurrency((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // btcPriceByCurrency intentionally omitted: the `in` guard already
     // prevents refetch loops, and depending on it would refire per result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasShipping, shipping.options]);
@@ -150,7 +161,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       const amount = shippingCostFor(option);
       map.set(
         option.coordinate,
-        shippingCostSats(amount, option.currency, btcPriceByCurrency.get(option.currency) ?? null),
+        shippingCostSats(amount, option.currency, btcPriceByCurrency[option.currency] ?? null),
       );
     }
     return map;
