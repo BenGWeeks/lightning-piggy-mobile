@@ -53,6 +53,7 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
 import { useMapPins } from '../hooks/useMapPins';
 import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
+import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
 import {
   decodeGeohash,
@@ -325,16 +326,15 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [places]);
 
   // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
-  // Derived pin arrays + footer counts for LibreMiniMap — filters,
-  // Web-of-Trust, NIP-40 expiry ticking, and the #1067 nearest-N merchant
-  // cap all live in useMapPins.
+  // Cap centre as state, not a ref — see the viewportCentre note in useMapPins.
+  const [viewportCentre, setViewportCentre] = useState<{ lat: number; lon: number } | null>(null);
   const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
     places,
     cachesMap: caches.map,
     filters,
     categoryFilter,
     isTrusted,
-    viewportBboxRef: lastBbox,
+    viewportCentre,
   });
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
@@ -356,6 +356,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         lastBbox.current = next;
+        setViewportCentre(bboxCentre(next));
         refreshPlaces(next);
         // Re-key the caches subscription for the new viewport (#1065) —
         // no-op unless the covering prefix set actually changed.

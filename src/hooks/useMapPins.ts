@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type React from 'react';
 import { acceptsLightning, acceptsOnchain } from '../services/btcMapService';
-import type { BtcMapPlace, Bbox } from '../services/btcMapService';
+import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { capMerchantPinsToNearest } from '../utils/mapPins';
@@ -35,16 +34,16 @@ export function useMapPins(args: {
   filters: MapPinFilters;
   categoryFilter: Set<string>;
   isTrusted: (pubkey: string) => boolean;
-  /** Ref to the last settled viewport — read lazily so the memo doesn't
-   *  need (and can't get) reactive updates from a ref mutation; `places`
-   *  changes right after the ref does, which re-runs the memo anyway. */
-  viewportBboxRef: React.MutableRefObject<Bbox | null>;
+  /** Centre of the last settled viewport — reactive state (not a ref)
+   *  so the merchant cap recentres even when a pan's refetch fails and
+   *  `places` keeps its identity (Copilot review on #1068). */
+  viewportCentre: { lat: number; lon: number } | null;
 }): {
   visibleMerchants: BtcMapPlace[];
   visibleCaches: ParsedCache[];
   cacheCounts: { piglets: number; others: number };
 } {
-  const { places, cachesMap, filters, categoryFilter, isTrusted, viewportBboxRef } = args;
+  const { places, cachesMap, filters, categoryFilter, isTrusted, viewportCentre } = args;
 
   const visibleMerchants = useMemo(() => {
     const filtered = places.filter((p) => {
@@ -58,12 +57,8 @@ export function useMapPins(args: {
       const cats = p.categories ?? [];
       return cats.some((c) => categoryFilter.has(c));
     });
-    const bbox = viewportBboxRef.current;
-    const centre = bbox
-      ? { lat: (bbox.minLat + bbox.maxLat) / 2, lon: (bbox.minLon + bbox.maxLon) / 2 }
-      : null;
-    return capMerchantPinsToNearest(filtered, centre);
-  }, [places, filters.lightning, filters.onchain, categoryFilter, viewportBboxRef]);
+    return capMerchantPinsToNearest(filtered, viewportCentre);
+  }, [places, filters.lightning, filters.onchain, categoryFilter, viewportCentre]);
 
   // Re-evaluate the NIP-40 expiry filter as time advances even if nothing
   // else changes — a cache can expire while the map just sits open. A 60 s
