@@ -15,16 +15,25 @@ import type { BtcMapPlace } from '../services/btcMapService';
  */
 export const MAX_MAP_MERCHANT_PINS = 250;
 
-/** Midpoint of a viewport bbox — the cap centre for the pin cap below. */
+/**
+ * Midpoint of a viewport bbox — the cap centre for the pin cap below.
+ * The longitude midpoint is wrapped: an antimeridian-crossing bbox
+ * (minLon > maxLon) would average to the wrong side of the planet with
+ * a plain (min+max)/2 (170..-170 → 0), mis-centring the cap. Same
+ * treatment as geohashPrefixesForBbox's fallback centre.
+ */
 export const bboxCentre = (b: {
   minLat: number;
   maxLat: number;
   minLon: number;
   maxLon: number;
-}): { lat: number; lon: number } => ({
-  lat: (b.minLat + b.maxLat) / 2,
-  lon: (b.minLon + b.maxLon) / 2,
-});
+}): { lat: number; lon: number } => {
+  const rawLon = b.minLon > b.maxLon ? (b.minLon + b.maxLon + 360) / 2 : (b.minLon + b.maxLon) / 2;
+  return {
+    lat: (b.minLat + b.maxLat) / 2,
+    lon: ((rawLon + 540) % 360) - 180,
+  };
+};
 
 /**
  * Cap a merchant list to the `max` pins nearest `centre` (the viewport

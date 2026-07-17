@@ -39,3 +39,22 @@ describe('capMerchantPinsToNearest', () => {
     expect(capMerchantPinsToNearest(list, { lat: 50, lon: 0 })).toHaveLength(MAX_MAP_MERCHANT_PINS);
   });
 });
+
+describe('bboxCentre', () => {
+  const { bboxCentre } = jest.requireActual('./mapPins');
+
+  it('returns the plain midpoint for a normal bbox', () => {
+    expect(bboxCentre({ minLat: 50, maxLat: 54, minLon: -2, maxLon: 2 })).toEqual({
+      lat: 52,
+      lon: 0,
+    });
+  });
+
+  it('wraps the longitude midpoint for an antimeridian-crossing bbox', () => {
+    // 170..-170 crosses the dateline; naive averaging gives 0, the
+    // correct wrapped midpoint is ±180.
+    const c = bboxCentre({ minLat: -10, maxLat: 10, minLon: 170, maxLon: -170 });
+    expect(c.lat).toBe(0);
+    expect(Math.abs(c.lon)).toBe(180);
+  });
+});
