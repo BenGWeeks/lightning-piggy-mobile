@@ -2,24 +2,23 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
 /**
- * JS entry for the NostrNative local Expo module (Stage 2 M1 of #1036).
+ * JS entry for the NostrNative local Expo module (Stage 2 of #1036).
  *
- * Android-only for now: expo-module.config.json lists just "android", so
- * iOS autolinking skips the module entirely and `requireOptionalNativeModule`
- * returns null there — callers (the nostrCrypto facade) fall back to the
- * pure-JS implementation. The ios/ directory already carries the podspec +
- * Swift stub; enabling iOS in a later milestone is a one-line platforms
- * change plus a Mac-verified EAS build.
+ * Android (Kotlin over nostr-sdk-kmp-android, Stage 2 M1/M2) and iOS (Swift
+ * over nostr-sdk-swift, Stage 2 M3) share one rust-nostr 0.44 core and one
+ * contract. Everywhere else (web, Expo Go, stale dev clients) the module is
+ * unlinked, `requireOptionalNativeModule` returns null, and callers (the
+ * nostrCrypto facade) fall back to the pure-JS implementation.
  *
- * getNostrNative() additionally hard-guards on Platform.OS === 'android' so
- * that if iOS autolinking is ever enabled (or the Swift stub accidentally
- * ships) the facade still cannot route real crypto into stub functions that
- * throw — it stays null off-Android until M3 delivers real iOS bindings. This
- * mirrors the repo-local pattern in modules/background-dm-service/index.ts.
+ * getNostrNative() additionally hard-guards on the native platforms so an
+ * unexpected autolink on an unsupported platform can never route real crypto
+ * into it. This mirrors the repo-local pattern in
+ * modules/background-dm-service/index.ts.
  *
  * All crypto functions are synchronous (JSI) to match the deliberately
- * synchronous JS call sites (see unwrapWrapNsec). `warmUp` is async and
- * pays the one-time JNA + libnostr_sdk_ffi.so load off the JS thread.
+ * synchronous JS call sites (see unwrapWrapNsec). `warmUp` is async; on
+ * Android it pays the one-time JNA + libnostr_sdk_ffi.so load off the JS
+ * thread (iOS links statically — there it is just the routing latch).
  */
 export interface NostrNativeApi {
   warmUp(): Promise<boolean>;
@@ -70,23 +69,22 @@ const NostrNative = requireOptionalNativeModule<NostrNativeApi & Partial<NostrEn
 );
 
 /**
- * Null when the native module isn't linked (iOS, Expo Go, stale dev client)
- * OR whenever the platform isn't Android. The explicit Platform guard is
- * belt-and-braces: it keeps the "Android-only" contract from being broken by a
- * future iOS autolink or an accidentally-shipped stub until real iOS bindings
- * land in M3.
+ * Null when the native module isn't linked (Expo Go, web, stale dev client)
+ * OR whenever the platform isn't one with a real implementation (Android
+ * Kotlin / iOS Swift). The explicit allowlist is belt-and-braces against an
+ * unexpected autolink on a platform we haven't verified.
  */
 export function getNostrNative(): NostrNativeApi | null {
-  if (Platform.OS !== 'android') return null;
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return null;
   return NostrNative;
 }
 
 /**
- * Null when the module is unlinked, off-Android, OR predates the M2 engine
- * functions (a stale dev client with only the M1 crypto surface must fall back
- * to the JS relay path rather than crash on a missing native function).
- * Built on getNostrNative() so it inherits the same Platform.OS === 'android'
- * hard-guard.
+ * Null when the module is unlinked, on an unsupported platform, OR predates
+ * the M2 engine functions (a stale dev client with only the M1 crypto surface
+ * — on iOS also a pre-M3 binary with no module at all — must fall back to the
+ * JS relay path rather than crash on a missing native function). Built on
+ * getNostrNative() so it inherits the same platform hard-guard.
  */
 export function getNostrEngine(): NostrEngineApi | null {
   const native = getNostrNative() as (NostrNativeApi & Partial<NostrEngineApi>) | null;

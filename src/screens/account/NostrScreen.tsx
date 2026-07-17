@@ -138,7 +138,7 @@ const NostrScreen: React.FC = () => {
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
 
   // Experimental: native crypto tester toggle (#1057). Availability is a
-  // stable capability probe (Android + module linked) — compute it once.
+  // stable capability probe (native platform + module linked) — compute once.
   // `nativeCryptoActive` is read on each focus tick (below) so a tester can
   // watch it flip to "yes" only AFTER restarting with the pref on.
   const nativeCryptoAvailable = useMemo(() => isNativeCryptoAvailable(), []);

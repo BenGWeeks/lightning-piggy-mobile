@@ -23,7 +23,8 @@
     "perf": "bash scripts/perf-suite.sh",
     "perf:pixel": "bash scripts/perf-suite-pixel.sh",
     "perf:pixel:quick": "SAMPLES=1 bash scripts/perf-suite-pixel.sh",
-    "perf:pixel:long": "SAMPLES=5 bash scripts/perf-suite-pixel.sh"
+    "perf:pixel:long": "SAMPLES=5 bash scripts/perf-suite-pixel.sh",
+    "postinstall": "node scripts/fetch-nostr-sdk-swift.mjs"
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",

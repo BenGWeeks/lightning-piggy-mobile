@@ -1,16 +1,28 @@
+# The vendored xcframework + Generated/NostrSDK.swift are fetched by
+# scripts/fetch-nostr-sdk-swift.mjs (npm postinstall) — CocoaPods
+# prepare_command never runs for development (:path) pods, so pod install
+# cannot fetch them itself. Fail loudly with the fix instead of undefined
+# rust symbols at link time.
+raise 'nostr_sdkFFI.xcframework missing — run `npm install` (or `node scripts/fetch-nostr-sdk-swift.mjs`) before pod install' unless File.exist?(File.join(__dir__, 'nostr_sdkFFI.xcframework'))
+
 Pod::Spec.new do |s|
   s.name           = 'NostrNative'
-  s.version        = '0.1.0'
-  s.summary        = 'rust-nostr crypto primitives for Lightning Piggy'
-  s.description    = 'Native NIP-44 encrypt/decrypt and BIP-340 schnorr sign/verify. iOS stub only — the real implementation (rust-nostr Swift bindings) lands in a later Stage 2 milestone; until then JS falls back to nostr-tools/@noble.'
+  s.version        = '0.44.2'
+  s.summary        = 'rust-nostr crypto + relay engine for Lightning Piggy'
+  s.description    = 'Native NIP-44 encrypt/decrypt, BIP-340 schnorr sign/verify, and the kind-1059 relay engine (Stage 2 of #1036) over rust-nostr UniFFI Swift bindings — prebuilt nostr_sdkFFI.xcframework, no local Rust toolchain.'
   s.author         = 'Lightning Piggy'
   s.homepage       = 'https://github.com/BenGWeeks/lightning-piggy-mobile'
   s.license        = { type: 'MIT' }
   s.platforms      = { ios: '15.1' }
   s.source         = { git: 'https://github.com/BenGWeeks/lightning-piggy-mobile.git' }
   s.static_framework = true
+  s.swift_version  = '5.9'
 
   s.dependency 'ExpoModulesCore'
 
+  # Sweeps in Generated/NostrSDK.swift alongside the module sources; the
+  # generated file's `#if canImport(nostr_sdkFFI)` resolves against the
+  # vendored framework (same topology as bdk-rn's BitcoinDevKit.swift).
   s.source_files = '**/*.{h,m,swift}'
+  s.vendored_frameworks = 'nostr_sdkFFI.xcframework'
 end
