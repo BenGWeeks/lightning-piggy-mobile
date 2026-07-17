@@ -75,6 +75,11 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
       if (lastApplied && isSameFix(lastApplied, next)) return;
       lastApplied = next;
       setPos(next);
+      // A landed fix proves location works — clear a denied flag that a
+      // pessimistic fallback set earlier (e.g. the one-shot timed out for
+      // bookkeeping but then resolved very late). Cheap: setState with an
+      // unchanged boolean bails out of re-rendering.
+      setLocationDenied(false);
     };
 
     (async () => {
@@ -121,9 +126,12 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
           const sub = await Location.watchPositionAsync(
             { accuracy: Location.Accuracy.High },
             (update) => {
-              if (cancelled) return;
-              applyIfNewer(update);
+              // watchLanded also gates re-entry: more fixes can be queued
+              // in the gap before the subscription is actually removed,
+              // and one publish is all the rails want from this channel.
+              if (cancelled || watchLanded) return;
               watchLanded = true;
+              applyIfNewer(update);
               // First accepted fix is all the rails need.
               watch?.remove();
               watch = null;

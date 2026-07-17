@@ -150,6 +150,52 @@ describe('useExploreRailsPosition', () => {
     expect(result.current.locationDenied).toBe(false);
     // ...and the first-fix watch stops streaming.
     expect(removeMock).toHaveBeenCalled();
+
+    // A straggler queued before the removal took effect is ignored —
+    // one publish is all the rails take from the watch channel.
+    await act(async () => {
+      watchCb?.({ coords: { latitude: 53.0, longitude: 1.0, accuracy: 8 }, timestamp: 3000 });
+    });
+    expect(result.current.pos).toEqual({ lat: 52.29, lon: 0.05, accuracy: 12 });
+  });
+
+  it('clears `locationDenied` when a very late one-shot fix finally lands', async () => {
+    jest.useFakeTimers();
+    try {
+      grant();
+      mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+      let resolveLate: (v: Location.LocationObject) => void = () => {};
+      mockedLocation.getCurrentPositionAsync.mockReturnValue(
+        new Promise<Location.LocationObject>((res) => {
+          resolveLate = res;
+        }),
+      );
+      mockedLocation.watchPositionAsync.mockRejectedValue(new Error('no provider'));
+
+      const { result } = renderHook(() => useExploreRailsPosition());
+
+      // Stall past the bookkeeping timeout — denied flips (no seed, no fix).
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+      expect(result.current.locationDenied).toBe(true);
+
+      // The stalled one-shot finally resolves — the fix lands and the
+      // stale denied flag clears.
+      await act(async () => {
+        resolveLate({
+          coords: { latitude: 52.29, longitude: 0.05, accuracy: 10 },
+          timestamp: 99_000,
+        } as Location.LocationObject);
+      });
+      expect(result.current.pos).toEqual({ lat: 52.29, lon: 0.05, accuracy: 10 });
+      expect(result.current.locationDenied).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('drops a watch fix older than the one-shot fix already applied', async () => {
