@@ -33,6 +33,11 @@ export interface ExploreRailsPositionResult {
   locationDenied: boolean;
 }
 
+// Upper bound on how long the one-shot may keep the fallback bookkeeping
+// waiting. Generous vs a normal fix (a few seconds) — it only matters when
+// the one-shot hangs outright.
+const ONE_SHOT_TIMEOUT_MS = 15_000;
+
 export function useExploreRailsPosition(): ExploreRailsPositionResult {
   // Seed pos from the cached anchor so rails render before GPS resolves.
   // Accuracy is null (suppresses user dot halo) until a real fix lands.
@@ -45,6 +50,7 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
   useEffect(() => {
     let cancelled = false;
     let watch: Location.LocationSubscription | null = null;
+    let oneShotTimer: ReturnType<typeof setTimeout> | null = null;
     // Newest-wins ordering across the three racing channels (last-known /
     // one-shot / watch): drop any fix older than the last applied one.
     let lastTimestamp = 0;
@@ -83,13 +89,21 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
         // Non-fatal — the fresh-fix channels below still run.
       }
       // Fresh fix, two parallel channels. `resolves to false` = channel
-      // failed outright (rejection / arm failure), not "no fix yet".
-      const oneShot = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
-        .then((fresh) => {
+      // failed outright (rejection / arm failure / stall), not "no fix
+      // yet". The one-shot is raced against a timeout because on Android
+      // it can STALL as well as reject — an unresolved promise here would
+      // block the Promise.all below and the locationDenied fallback with
+      // it. A late fix still lands via applyIfNewer inside the original
+      // then; the race only bounds the bookkeeping.
+      const oneShot = Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }).then((fresh) => {
           if (!cancelled) applyIfNewer(fresh);
           return true;
-        })
-        .catch(() => false);
+        }),
+        new Promise<boolean>((resolve) => {
+          oneShotTimer = setTimeout(() => resolve(false), ONE_SHOT_TIMEOUT_MS);
+        }),
+      ]).catch(() => false);
       let watchLanded = false;
       const watchArmed = (async () => {
         try {
@@ -117,6 +131,11 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
         }
       })();
       const [oneShotOk, watchOk] = await Promise.all([oneShot, watchArmed]);
+      // The race is settled — don't leave the losing timer armed.
+      if (oneShotTimer !== null) {
+        clearTimeout(oneShotTimer);
+        oneShotTimer = null;
+      }
       // Both fresh-fix channels failed and not even a last-known fix
       // landed: surface the friendlier "grant location" copy instead of
       // an empty shimmer.
@@ -128,6 +147,7 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
     return () => {
       cancelled = true;
       watch?.remove();
+      if (oneShotTimer !== null) clearTimeout(oneShotTimer);
     };
   }, []);
 

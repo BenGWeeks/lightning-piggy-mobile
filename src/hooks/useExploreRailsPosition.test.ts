@@ -153,6 +153,35 @@ describe('useExploreRailsPosition', () => {
     expect(result.current.pos).toBeNull();
   });
 
+  it('flips `locationDenied` when the one-shot STALLS (never settles) and the watch fails', async () => {
+    jest.useFakeTimers();
+    try {
+      grant();
+      mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+      // Stall: a promise that never settles — the timeout race must bound it.
+      mockedLocation.getCurrentPositionAsync.mockReturnValue(
+        new Promise(() => {}) as ReturnType<typeof Location.getCurrentPositionAsync>,
+      );
+      mockedLocation.watchPositionAsync.mockRejectedValue(new Error('no provider'));
+
+      const { result } = renderHook(() => useExploreRailsPosition());
+
+      // Let the permission/last-known microtasks settle, then jump past
+      // the one-shot timeout.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+
+      expect(result.current.locationDenied).toBe(true);
+      expect(result.current.pos).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('keeps `locationDenied` false when last-known landed even if both fresh channels fail', async () => {
     grant();
     mockedLocation.getLastKnownPositionAsync.mockResolvedValue({
