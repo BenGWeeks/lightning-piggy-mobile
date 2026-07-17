@@ -256,27 +256,38 @@ export const geohashPrefixesForBbox = (
   };
   const centreFallback = (): string[] => {
     const lat = (bbox.minLat + bbox.maxLat) / 2;
-    const lon = (bbox.minLon + bbox.maxLon) / 2;
-    return geohashNeighbours(encodeGeohash(lat, lon, minPrecision)).slice(0, maxTiles);
+    // Wrapped mid-longitude: an antimeridian-crossing bbox (minLon >
+    // maxLon) averages to the wrong side of the planet with a plain
+    // (min+max)/2 — e.g. 170..-170 → 0. Add a turn before halving,
+    // then normalise back into [-180, 180).
+    const rawLon =
+      bbox.minLon > bbox.maxLon
+        ? (bbox.minLon + bbox.maxLon + 360) / 2
+        : (bbox.minLon + bbox.maxLon) / 2;
+    const lon = ((rawLon + 540) % 360) - 180;
+    const centre = encodeGeohash(lat, lon, minPrecision);
+    // Centre tile first so a slice can never drop the one tile that
+    // matters most (geohashNeighbours' ordering is unspecified).
+    return [centre, ...geohashNeighbours(centre).filter((t) => t !== centre)].slice(0, maxTiles);
   };
   if (bbox.minLon > bbox.maxLon || bbox.minLat > bbox.maxLat) return centreFallback();
   for (let p = maxPrecision; p >= minPrecision; p -= 1) {
     const { lonDeg, latDeg } = cellSize(p);
+    // Iterate cell INDICES (floor(min/cell) .. floor(max/cell), inclusive)
+    // rather than stepping centres against a float bound — index iteration
+    // always yields ≥1 cell per axis, so a degenerate bbox (min == max,
+    // even sitting exactly on a grid line) still covers the tile
+    // containing the point instead of returning an empty set.
+    const latLo = Math.floor(bbox.minLat / latDeg);
+    const latHi = Math.floor(bbox.maxLat / latDeg);
+    const lonLo = Math.floor(bbox.minLon / lonDeg);
+    const lonHi = Math.floor(bbox.maxLon / lonDeg);
     const tiles: string[] = [];
     let overflow = false;
-    // Enumerate cell centres over the bbox, snapped to the cell grid.
-    for (
-      let lat = Math.floor(bbox.minLat / latDeg) * latDeg + latDeg / 2;
-      lat < bbox.maxLat + latDeg / 2 && !overflow;
-      lat += latDeg
-    ) {
-      for (
-        let lon = Math.floor(bbox.minLon / lonDeg) * lonDeg + lonDeg / 2;
-        lon < bbox.maxLon + lonDeg / 2;
-        lon += lonDeg
-      ) {
-        const clampedLat = Math.max(-90, Math.min(90, lat));
-        const clampedLon = Math.max(-180, Math.min(180, lon));
+    for (let li = latLo; li <= latHi && !overflow; li += 1) {
+      for (let lj = lonLo; lj <= lonHi; lj += 1) {
+        const clampedLat = Math.max(-90, Math.min(90, li * latDeg + latDeg / 2));
+        const clampedLon = Math.max(-180, Math.min(180, lj * lonDeg + lonDeg / 2));
         const gh = encodeGeohash(clampedLat, clampedLon, p);
         if (!tiles.includes(gh)) tiles.push(gh);
         if (tiles.length > maxTiles) {
