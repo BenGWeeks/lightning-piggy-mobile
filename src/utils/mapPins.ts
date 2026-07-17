@@ -15,6 +15,17 @@ import type { BtcMapPlace } from '../services/btcMapService';
  */
 export const MAX_MAP_MERCHANT_PINS = 250;
 
+/** Midpoint of a viewport bbox — the cap centre for the pin cap below. */
+export const bboxCentre = (b: {
+  minLat: number;
+  maxLat: number;
+  minLon: number;
+  maxLon: number;
+}): { lat: number; lon: number } => ({
+  lat: (b.minLat + b.maxLat) / 2,
+  lon: (b.minLon + b.maxLon) / 2,
+});
+
 /**
  * Cap a merchant list to the `max` pins nearest `centre` (the viewport
  * centre). Under the cap the list is returned as-is (no re-sort — the

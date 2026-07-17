@@ -53,6 +53,7 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { useMapPins } from '../hooks/useMapPins';
+import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -268,8 +269,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         const prefixes = geohashNeighbours(myTile);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
-          // Hide the project's own test-account ("Piggy") Piglets on the
-          // map in the production app; dev/preview keep them for Maestro.
+          // Hide test-account ("Piggy") Piglets in prod; dev/preview keep them for Maestro.
           if (isHiddenInProd(cache.hiderPubkey)) return;
           caches.enqueue(cache.coord, cache);
         });
@@ -328,16 +328,15 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [places]);
 
   // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
-  // Derived pin arrays + footer counts for LibreMiniMap — filters,
-  // Web-of-Trust, NIP-40 expiry ticking, and the #1067 nearest-N merchant
-  // cap all live in useMapPins.
+  // Cap centre as state, not a ref — see the viewportCentre note in useMapPins.
+  const [viewportCentre, setViewportCentre] = useState<{ lat: number; lon: number } | null>(null);
   const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
     places,
     cachesMap: caches.map,
     filters,
     categoryFilter,
     isTrusted,
-    viewportBboxRef: lastBbox,
+    viewportCentre,
   });
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
@@ -359,6 +358,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         lastBbox.current = next;
+        setViewportCentre(bboxCentre(next));
         refreshPlaces(next);
         // Viewport-persist on every camera-settle is on the to-do list
         // (#552 follow-up — needs a matching hydrate effect on mount,
