@@ -45,8 +45,11 @@ export function useMapPins(args: {
 } {
   const { places, cachesMap, filters, categoryFilter, isTrusted, viewportCentre } = args;
 
-  const visibleMerchants = useMemo(() => {
-    const filtered = places.filter((p) => {
+  // Two memo stages so a viewport-centre change (every settled pan) only
+  // re-runs the cheap cap, not the full filter pass over a potentially
+  // large fetched list (Copilot review on #1068).
+  const filteredMerchants = useMemo(() => {
+    return places.filter((p) => {
       const typeOk = acceptsLightning(p)
         ? filters.lightning
         : acceptsOnchain(p)
@@ -57,8 +60,11 @@ export function useMapPins(args: {
       const cats = p.categories ?? [];
       return cats.some((c) => categoryFilter.has(c));
     });
-    return capMerchantPinsToNearest(filtered, viewportCentre);
-  }, [places, filters.lightning, filters.onchain, categoryFilter, viewportCentre]);
+  }, [places, filters.lightning, filters.onchain, categoryFilter]);
+  const visibleMerchants = useMemo(
+    () => capMerchantPinsToNearest(filteredMerchants, viewportCentre),
+    [filteredMerchants, viewportCentre],
+  );
 
   // Re-evaluate the NIP-40 expiry filter as time advances even if nothing
   // else changes — a cache can expire while the map just sits open. A 60 s

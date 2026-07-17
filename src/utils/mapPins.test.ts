@@ -1,8 +1,14 @@
 import { capMerchantPinsToNearest, MAX_MAP_MERCHANT_PINS } from './mapPins';
 import type { BtcMapPlace } from '../services/btcMapService';
 
-const place = (id: number, lat: number, lon: number): BtcMapPlace =>
-  ({ id, lat, lon, name: `p${id}`, tags: {} }) as unknown as BtcMapPlace;
+// Minimal but fully-valid BtcMapPlace — the compiler enforces the
+// contract, so an interface change breaks these tests loudly.
+const place = (id: number, lat: number, lon: number): BtcMapPlace => ({
+  id,
+  lat,
+  lon,
+  tags: { name: `p${id}` },
+});
 
 describe('capMerchantPinsToNearest', () => {
   it('returns the same array identity when under the cap', () => {
