@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import { peekCachedAnchorSync } from '../services/btcMapService';
 import { isSameFix } from '../utils/locationFix';
@@ -46,6 +46,12 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
     return anchor ? { ...anchor, accuracy: null } : null;
   });
   const [locationDenied, setLocationDenied] = useState(false);
+  // Whether the state started from an anchor seed. Used by the failure
+  // fallback below: with a seed on screen the rails keep showing the
+  // anchor's area (stale-while-revalidate), so flipping to the "grant
+  // location" empty state would be a regression; without one there is
+  // nothing to show and the denied copy is the friendlier empty state.
+  const hadAnchorSeed = useRef(pos !== null).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +81,11 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') {
+        // Denied is a consistent state: pos goes null too, so the rails'
+        // pos-gated fetches/subscriptions stand down and every surface
+        // shows the "grant location" copy — rather than the rails
+        // querying around a stale anchor the copy calls "near you".
+        setPos(null);
         setLocationDenied(true);
         return;
       }
@@ -136,10 +147,12 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
         clearTimeout(oneShotTimer);
         oneShotTimer = null;
       }
-      // Both fresh-fix channels failed and not even a last-known fix
-      // landed: surface the friendlier "grant location" copy instead of
-      // an empty shimmer.
-      if (!cancelled && !oneShotOk && !watchOk && lastTimestamp === 0) {
+      // Both fresh-fix channels failed, not even a last-known fix landed,
+      // AND there was no anchor seed to keep showing: surface the
+      // friendlier "grant location" copy instead of an empty shimmer.
+      // (With a seed, the rails keep the anchor's area — same
+      // stale-while-revalidate behaviour as before this hook existed.)
+      if (!cancelled && !oneShotOk && !watchOk && lastTimestamp === 0 && !hadAnchorSeed) {
         setLocationDenied(true);
       }
     })();
@@ -149,7 +162,9 @@ export function useExploreRailsPosition(): ExploreRailsPositionResult {
       watch?.remove();
       if (oneShotTimer !== null) clearTimeout(oneShotTimer);
     };
-  }, []);
+    // hadAnchorSeed is a first-render constant (useRef) — listing it keeps
+    // the linter satisfied without changing the mount-only behaviour.
+  }, [hadAnchorSeed]);
 
   return { pos, locationDenied };
 }

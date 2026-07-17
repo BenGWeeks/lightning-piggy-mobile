@@ -79,6 +79,46 @@ describe('useExploreRailsPosition', () => {
     expect(mockedLocation.watchPositionAsync).not.toHaveBeenCalled();
   });
 
+  it('nulls a seeded pos when permission is refused (no "near you" around a stale anchor)', async () => {
+    mockedPeekAnchor.mockReturnValue({ lat: 52.5, lon: 5.5 });
+    mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+      status: 'denied',
+    } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    // Seed paints first…
+    expect(result.current.pos).toEqual({ lat: 52.5, lon: 5.5, accuracy: null });
+    // …then the denied state clears it so downstream pos-gated work stands down.
+    await waitFor(() => {
+      expect(result.current.locationDenied).toBe(true);
+    });
+    expect(result.current.pos).toBeNull();
+  });
+
+  it('keeps the anchor seed (and does not flip denied) when both fresh channels fail', async () => {
+    mockedPeekAnchor.mockReturnValue({ lat: 52.5, lon: 5.5 });
+    grant();
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    mockedLocation.getCurrentPositionAsync.mockRejectedValue(new Error('timeout'));
+    mockedLocation.watchPositionAsync.mockRejectedValue(new Error('no provider'));
+
+    const { result } = renderHook(() => useExploreRailsPosition());
+
+    // Give the async ladder time to finish failing.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(mockedLocation.watchPositionAsync).toHaveBeenCalled();
+    });
+
+    // Stale-while-revalidate: the seeded rails stay up rather than
+    // switching to the misleading "grant location" empty state.
+    expect(result.current.pos).toEqual({ lat: 52.5, lon: 5.5, accuracy: null });
+    expect(result.current.locationDenied).toBe(false);
+  });
+
   it('recovers via the watch first-fix when the one-shot rejects (#1064 wedge)', async () => {
     grant();
     // The exact stuck-session shape: stale anchor seed, no last-known,
