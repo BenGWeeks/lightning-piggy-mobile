@@ -2,8 +2,12 @@
 # scripts/fetch-nostr-sdk-swift.mjs (npm postinstall) — CocoaPods
 # prepare_command never runs for development (:path) pods, so pod install
 # cannot fetch them itself. Fail loudly with the fix instead of undefined
-# rust symbols at link time.
-raise 'nostr_sdkFFI.xcframework missing — run `npm install` (or `node scripts/fetch-nostr-sdk-swift.mjs`) before pod install' unless File.exist?(File.join(__dir__, 'nostr_sdkFFI.xcframework'))
+# rust symbols at link time (or a wall of missing-type compile errors).
+%w[nostr_sdkFFI.xcframework Generated/NostrSDK.swift].each do |artifact|
+  unless File.exist?(File.join(__dir__, artifact))
+    raise "#{artifact} missing — run `npm install` (or `node scripts/fetch-nostr-sdk-swift.mjs`) before pod install"
+  end
+end
 
 Pod::Spec.new do |s|
   s.name           = 'NostrNative'
