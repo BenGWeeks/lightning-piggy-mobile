@@ -327,7 +327,6 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     return [...seen].sort();
   }, [places]);
 
-  // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
   // Cap centre as state, not a ref — see the viewportCentre note in useMapPins.
   const [viewportCentre, setViewportCentre] = useState<{ lat: number; lon: number } | null>(null);
   const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
