@@ -3,7 +3,8 @@ import { acceptsLightning, acceptsOnchain } from '../services/btcMapService';
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
-import { capMerchantPinsToNearest } from '../utils/mapPins';
+import { decodeGeohash } from '../utils/geohash';
+import { MAX_MAP_CACHE_PINS, capMerchantPinsToNearest, capPinsToNearest } from '../utils/mapPins';
 
 /**
  * Derives the pin arrays MapScreen feeds LibreMiniMap from the raw
@@ -83,14 +84,23 @@ export function useMapPins(args: {
     // serving them, so the client filters them out. The Geo-caches list
     // (HuntScreen) already does this; the map must too, else an expired
     // Piglet lingers on the map after it's gone from the list (#762).
-    return [...cachesMap.values()].filter(
+    const filtered = [...cachesMap.values()].filter(
       (c) =>
         !isHiddenInProd(c.hiderPubkey) &&
         (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
         isTrusted(c.hiderPubkey) &&
         (c.expiresAt === null || c.expiresAt > nowSec),
     );
-  }, [cachesMap, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
+    // Rendering cap, same rationale as merchants: the coalesced store
+    // accumulates caches across every visited viewport (by design — a
+    // reset would purge the one-shot by-author Piglets), so bound the
+    // RN-marker set to the nearest-N without dropping data.
+    return capPinsToNearest(filtered, viewportCentre, MAX_MAP_CACHE_PINS, (c) => {
+      if (!c.geohash) return null;
+      const { lat, lng } = decodeGeohash(c.geohash);
+      return { lat, lon: lng };
+    });
+  }, [cachesMap, filters.piglet, filters.nipgcCache, isTrusted, nowSec, viewportCentre]);
 
   // One pass instead of filtering the cache map twice per render
   // (Copilot review on #825).

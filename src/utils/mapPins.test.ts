@@ -58,3 +58,19 @@ describe('bboxCentre', () => {
     expect(Math.abs(c.lon)).toBe(180);
   });
 });
+
+describe('capPinsToNearest (generic)', () => {
+  const { capPinsToNearest } = jest.requireActual('./mapPins');
+
+  it('sorts items without a resolvable position last', () => {
+    const items = [
+      { id: 'far', lat: 55, lon: 5 },
+      { id: 'nowhere', lat: null, lon: null },
+      { id: 'near', lat: 52.01, lon: 0.01 },
+    ];
+    const result = capPinsToNearest(items, { lat: 52, lon: 0 }, 2, (i: (typeof items)[number]) =>
+      i.lat === null || i.lon === null ? null : { lat: i.lat, lon: i.lon },
+    );
+    expect(result.map((i: (typeof items)[number]) => i.id)).toEqual(['near', 'far']);
+  });
+});

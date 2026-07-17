@@ -16,6 +16,15 @@ import type { BtcMapPlace } from '../services/btcMapService';
 export const MAX_MAP_MERCHANT_PINS = 250;
 
 /**
+ * Same bound for cache pins. Caches accumulate across visited viewports
+ * (the coalesced store deliberately never drops entries — clearing it
+ * would purge the user's own one-shot by-author Piglets), so a long pan
+ * session could otherwise re-grow an unbounded RN-marker set. Data
+ * stays; only rendering is capped to the nearest-N.
+ */
+export const MAX_MAP_CACHE_PINS = 250;
+
+/**
  * Midpoint of a viewport bbox — the cap centre for the pin cap below.
  * The longitude midpoint is wrapped: an antimeridian-crossing bbox
  * (minLon > maxLon) would average to the wrong side of the planet with
@@ -36,25 +45,42 @@ export const bboxCentre = (b: {
 };
 
 /**
- * Cap a merchant list to the `max` pins nearest `centre` (the viewport
+ * Cap a pin list to the `max` items nearest `centre` (the viewport
  * centre). Under the cap the list is returned as-is (no re-sort — the
  * map doesn't care about order and keeping identity avoids re-renders).
  * Without a centre (no viewport settled yet) it truncates arbitrarily —
- * bounded is the requirement, nearest is the nicety.
+ * bounded is the requirement, nearest is the nicety. Items whose
+ * position can't be resolved sort last (they're unplottable anyway).
  */
+export function capPinsToNearest<T>(
+  items: T[],
+  centre: { lat: number; lon: number } | null,
+  max: number,
+  positionOf: (item: T) => { lat: number; lon: number } | null,
+): T[] {
+  if (items.length <= max) return items;
+  if (!centre) return items.slice(0, max);
+  return items
+    .map((item) => {
+      const pos = positionOf(item);
+      return {
+        item,
+        distance: pos ? haversineMetres(centre, pos) : Number.POSITIVE_INFINITY,
+      };
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, max)
+    .map((entry) => entry.item);
+}
+
+/** Merchant-typed wrapper over {@link capPinsToNearest}. */
 export function capMerchantPinsToNearest(
   merchants: BtcMapPlace[],
   centre: { lat: number; lon: number } | null,
   max: number = MAX_MAP_MERCHANT_PINS,
 ): BtcMapPlace[] {
-  if (merchants.length <= max) return merchants;
-  if (!centre) return merchants.slice(0, max);
-  return merchants
-    .map((place) => ({
-      place,
-      distance: haversineMetres(centre, { lat: place.lat, lon: place.lon }),
-    }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, max)
-    .map((entry) => entry.place);
+  return capPinsToNearest(merchants, centre, max, (place) => ({
+    lat: place.lat,
+    lon: place.lon,
+  }));
 }
