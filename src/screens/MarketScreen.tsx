@@ -2,12 +2,12 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   TextInput,
   TouchableOpacity,
   FlatList,
   useWindowDimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { ChevronLeft, Search, SlidersHorizontal, X } from 'lucide-react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketModeSelector from '../components/MarketModeSelector';
@@ -181,7 +181,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
         <Image
           source={require('../../assets/images/learn-header-bg.png')}
           style={styles.headerImage}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
         />
         <View style={styles.headerOverlay} />
         <View style={styles.headerRow}>
