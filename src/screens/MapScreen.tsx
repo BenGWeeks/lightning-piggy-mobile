@@ -52,6 +52,7 @@ import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
+import { useMapPins } from '../hooks/useMapPins';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -327,57 +328,17 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [places]);
 
   // Single-pass Piglet / non-Piglet tally for the footer — avoids spreading +
-  // filtering `caches.map.values()` twice every render (Copilot review on #825).
-  const cacheCounts = useMemo(() => {
-    let piglets = 0;
-    let others = 0;
-    for (const c of caches.map.values()) {
-      if (c.isLpPiggy) piglets++;
-      else others++;
-    }
-    return { piglets, others };
-  }, [caches.map]);
-
-  // Filtered arrays for LibreMiniMap. Same predicates the WebView path
-  // used to send across the bridge — now plain memoised derived state.
-  const visibleMerchants = useMemo(() => {
-    return places.filter((p) => {
-      const typeOk = acceptsLightning(p)
-        ? filters.lightning
-        : acceptsOnchain(p)
-          ? filters.onchain
-          : filters.lightning || filters.onchain;
-      if (!typeOk) return false;
-      if (categoryFilter.size === 0) return true;
-      const cats = p.categories ?? [];
-      return cats.some((c) => categoryFilter.has(c));
-    });
-  }, [places, filters.lightning, filters.onchain, categoryFilter]);
-
-  // Re-evaluate the NIP-40 expiry filter as time advances even if nothing else
-  // changes — a cache can expire while the map just sits open. A 60s tick is
-  // plenty (expiry is a slow day/year-scale boundary) and, unlike putting a
-  // per-render `Date.now()` in the memo deps (which would recompute
-  // visibleCaches every render), keeps the memo cached between ticks (#763).
-  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const t = setInterval(() => setNowSec(Date.now() / 1000), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const visibleCaches = useMemo(() => {
-    // Drop NIP-40-expired caches — relays that don't honour expiration keep
-    // serving them, so the client filters them out. The Geo-caches list
-    // (HuntScreen) already does this; the map must too, else an expired Piglet
-    // lingers on the map after it's gone from the list (#762).
-    return [...caches.map.values()].filter(
-      (c) =>
-        !isHiddenInProd(c.hiderPubkey) &&
-        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
-        isTrusted(c.hiderPubkey) &&
-        (c.expiresAt === null || c.expiresAt > nowSec),
-    );
-  }, [caches.map, filters.piglet, filters.nipgcCache, isTrusted, nowSec]);
+  // Derived pin arrays + footer counts for LibreMiniMap — filters,
+  // Web-of-Trust, NIP-40 expiry ticking, and the #1067 nearest-N merchant
+  // cap all live in useMapPins.
+  const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
+    places,
+    cachesMap: caches.map,
+    filters,
+    categoryFilter,
+    isTrusted,
+    viewportBboxRef: lastBbox,
+  });
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
