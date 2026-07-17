@@ -358,8 +358,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         lastBbox.current = next;
         setViewportCentre(bboxCentre(next));
         refreshPlaces(next);
-        // Re-key the caches subscription for the new viewport (#1065) —
-        // no-op unless the covering prefix set actually changed.
+        // Re-key the caches sub for the new viewport (#1065) — no-op unless the tiles changed.
         resubscribeForPrefixes(geohashPrefixesForBbox(next));
         // Viewport-persist on every camera-settle is on the to-do list
         // (#552 follow-up — needs a matching hydrate effect on mount,
