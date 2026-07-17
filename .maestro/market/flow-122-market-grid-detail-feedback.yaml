@@ -1,0 +1,106 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Market — grid → product detail → reviews/comments tabs (#948)
+---
+# Flow: Explore → Market rail "See all" → full Market grid → open a product
+# → assert the product detail (price + buy) → switch the Reviews / Comments
+# feedback tabs.
+#
+# Verifies:
+#   - The Explore "Market" rail "See all →" opens the full Market screen grid
+#     (`market-screen`, with `market-product-card-<id>` tiles).
+#   - Tapping a product tile pushes the product detail
+#     (`market-product-detail-screen`) with a price (`-price`) and a buy
+#     affordance (`-buy`).
+#   - The Reviews / Comments feedback tabs render and switch: the Reviews
+#     body (`product-reviews`) is shown first; tapping the Comments tab
+#     mounts and shows the Comments body (`product-comments`); switching
+#     back restores the Reviews body.
+#
+# Notes:
+#   - We open `robotechy-lightning-piggy` specifically: Robotechy is one of
+#     the sellers WITH a Nostr identity, so the review (kind 31555) /
+#     comment (kind 1111) tabs render for it. It is also `featured: true`,
+#     so featured-first ordering places it as the first grid tile.
+#   - No sign-in is needed: the catalogue + feedback reads are anonymous;
+#     compose is gated separately and not exercised here.
+#   - Selectors are testID / text only — never coordinates (CLAUDE.md).
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Land on the Explore hub.
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# "See all →" on the Market rail opens the full Market screen (grid).
+- tapOn:
+    id: 'explore-card-market'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Grid is up, with product tiles.
+- assertVisible:
+    id: 'market-screen'
+- assertVisible:
+    id: 'market-product-card-robotechy-lightning-piggy'
+
+# Open the product → its detail page.
+- tapOn:
+    id: 'market-product-card-robotechy-lightning-piggy'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- assertVisible:
+    id: 'market-product-detail-screen'
+- assertVisible:
+    id: 'market-product-detail-price'
+- assertVisible:
+    id: 'market-product-detail-buy'
+
+# Reviews + comments live below the fold — scroll the detail until the
+# feedback tabs come into view.
+- scrollUntilVisible:
+    element:
+      id: 'product-feedback-tabs'
+    direction: DOWN
+    timeout: 6000
+
+- assertVisible:
+    id: 'product-feedback-tab-reviews'
+- assertVisible:
+    id: 'product-feedback-tab-comments'
+
+# Reviews is the default tab — its body is mounted and shown.
+- assertVisible:
+    id: 'product-reviews'
+
+# Switch to Comments — the comments body is lazily mounted on first open.
+- tapOn:
+    id: 'product-feedback-tab-comments'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'product-comments'
+
+# Switch back to Reviews — both tabs stay mounted, so the reviews body
+# is shown again with no refetch.
+- tapOn:
+    id: 'product-feedback-tab-reviews'
+- waitForAnimationToEnd:
+    timeout: 500
+- assertVisible:
+    id: 'product-reviews'
+
+# Back to the grid so any chained flow leaves the app on the Market screen.
+- tapOn:
+    id: 'market-product-detail-back'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'market-screen'

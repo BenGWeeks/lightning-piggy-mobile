@@ -1773,6 +1773,14 @@
     "resetText": "Escanear / pegar otra factura",
     "balance": "Saldo: {{balance}} sats ({{fiat}})"
   },
+  "starRating": {
+    "readOnly": "{{value}} de {{max}} estrellas",
+    "input": "Valoración",
+    "rate": {
+      "one": "Valorar con {{count}} estrella",
+      "other": "Valorar con {{count}} estrellas"
+    }
+  },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: propina de {{title}}",
     "shareMessage": "Factura Lightning para propina de {{amount}} sats ({{title}}):\n\n{{invoice}}",
@@ -2043,5 +2051,130 @@
     "refundBroadcastTitle": "Reembolso difundido",
     "refundBroadcastBody": "{{amount}} sats reembolsados ({{txid}}…)",
     "refundFailedTitle": "El reembolso falló"
+  },
+  "market": {
+    "sats": "{{amount}} sats",
+    "free": "Gratis",
+    "fromSeller": "de {{seller}}",
+    "screen": {
+      "title": "Mercado",
+      "tagline": "Compra una Lightning Piggy y merch de Bitcoin",
+      "back": "Volver a Explorar",
+      "showing": "Mostrando: {{label}}",
+      "searchPlaceholder": "Buscar productos o vendedores",
+      "clearSearch": "Borrar búsqueda",
+      "filters": "Filtros",
+      "filtersApplied": "Filtros, {{count}} aplicados",
+      "emptyNoMatch": "Ningún producto coincide con tu búsqueda o filtros.",
+      "emptyNoFriends": "Ninguno de tus amigos de Nostr vende productos de Lightning Piggy todavía.",
+      "emptyNone": "No hay productos disponibles en este momento."
+    },
+    "card": {
+      "featured": "Destacado",
+      "accessibility": "{{title}} — {{amount}} sats de {{seller}}"
+    },
+    "detail": {
+      "back": "Volver al Mercado",
+      "unavailable": "Este producto ya no está disponible.",
+      "backToMarket": "Volver al Mercado",
+      "goBack": "Volver",
+      "buyFrom": "Comprar de {{seller}}",
+      "buyAccessibility": "Comprar {{title}} de {{seller}}",
+      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones."
+    },
+    "modes": {
+      "soon": "Pronto",
+      "comingSoon": "{{label}} — próximamente",
+      "selected": "{{label}}, seleccionado"
+    },
+    "filters": {
+      "title": "Filtros",
+      "clear": "Borrar filtros",
+      "clearAll": "Borrar todos los filtros",
+      "close": "Cerrar filtros",
+      "done": "Listo",
+      "all": "Todos",
+      "merchant": "Comercio",
+      "country": "País",
+      "currency": "Moneda",
+      "chipSelected": "{{label}}, seleccionado"
+    },
+    "feedbackTabs": {
+      "reviews": "Reseñas",
+      "comments": "Comentarios"
+    },
+    "reviews": {
+      "signIn": "Inicia sesión para escribir una reseña",
+      "write": "Escribe una reseña",
+      "updateLabel": "Actualiza tu reseña",
+      "placeholder": "Comparte tu experiencia (opcional)",
+      "addRating": "Añade una valoración primero",
+      "submit": "Enviar reseña",
+      "submitUpdate": "Actualizar reseña",
+      "empty": "Aún no hay reseñas. ¡Sé el primero en reseñar este producto!",
+      "loadError": "No se pudieron cargar las reseñas",
+      "count": {
+        "one": "{{count}} reseña",
+        "other": "{{count}} reseñas"
+      }
+    },
+    "comments": {
+      "placeholder": "Añade un comentario",
+      "post": "Publicar comentario",
+      "signIn": "Inicia sesión para comentar",
+      "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!",
+      "loadError": "No se pudieron cargar los comentarios"
+    },
+    "checkout": {
+      "orderPlaced": "Pedido realizado",
+      "orderSentBody": "Tu pedido se envió a {{seller}}. Cuando envíen una factura Lightning, aparecerá como un pedido pagable en tu chat con ellos.",
+      "openConversation": "Abrir tu conversación con {{seller}}",
+      "goToChat": "Ir al chat para pagar",
+      "unitPrice": "{{amount}} sats cada uno · {{fiat}}",
+      "quantity": "Cantidad",
+      "decreaseQuantity": "Disminuir cantidad",
+      "increaseQuantity": "Aumentar cantidad",
+      "subtotal": "Subtotal",
+      "shipping": "Envío",
+      "total": "Total",
+      "placeOrder": "Realizar pedido",
+      "placeOrderAccessibility": "Realizar pedido con {{seller}}",
+      "signInToBuy": "Inicia sesión para comprar",
+      "hint": "Tu pedido se envía de forma privada (con envoltorio de regalo) al vendedor, que responde con una factura Lightning que pagas dentro de la app.",
+      "websiteFallback": "¿Prefieres la web? Abre {{seller}}",
+      "openWebsiteAccessibility": "Abrir la web de {{seller}}",
+      "toastPlaced": "Pedido realizado",
+      "toastPlacedBody": "Esperando a que {{seller}} envíe una factura…",
+      "errors": {
+        "notSignedIn": "Inicia sesión para realizar un pedido",
+        "noSellerIdentity": "Este vendedor no tiene identidad Nostr para hacerle un pedido",
+        "signingKeyMissing": "No se encontró tu clave de firma. Vuelve a iniciar sesión.",
+        "unsupportedSigner": "Este firmante aún no puede realizar pedidos.",
+        "relayUnreachable": "No se pudo contactar con un relay para realizar tu pedido. Inténtalo de nuevo.",
+        "generic": "Algo salió mal al realizar tu pedido. Inténtalo de nuevo."
+      }
+    },
+    "shipping": {
+      "label": "Envío",
+      "checking": "Comprobando a dónde envía {{seller}}…",
+      "loadError": "No se pudieron cargar las opciones de envío.",
+      "retry": "Reintentar",
+      "retryAccessibility": "Reintentar cargar las opciones de envío",
+      "shipToTitle": "Enviar a",
+      "searchCountries": "Buscar países",
+      "searchCountriesPlaceholder": "Buscar países…",
+      "shipToCountry": "Enviar a {{country}}",
+      "noCountriesMatch": "Ningún país coincide con «{{query}}»",
+      "shipTo": "Enviar a {{country}} — cambiar país",
+      "chooseCountry": "Elegir país",
+      "chooseCountryPlaceholder": "Elegir país…",
+      "noShip": "Todavía no enviamos a {{country}}: escribe a la tienda y pregunta.",
+      "message": "Enviar mensaje a {{seller}}",
+      "worldwide": "Envío a todo el mundo",
+      "shipsTo": "Envía a {{countries}}",
+      "shipsToMore": "Envía a {{countries}} +{{count}}",
+      "optionAccessibility": "Opción de envío {{title}}",
+      "priceFallback": "{{amount}} {{currency}}"
+    }
   }
 }

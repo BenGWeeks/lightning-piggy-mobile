@@ -1773,6 +1773,14 @@
     "resetText": "Scan / paste different invoice",
     "balance": "Balance: {{balance}} sats ({{fiat}})"
   },
+  "starRating": {
+    "readOnly": "{{value}} out of {{max}} stars",
+    "input": "Rating",
+    "rate": {
+      "one": "Rate {{count}} star",
+      "other": "Rate {{count}} stars"
+    }
+  },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: {{title}} tip",
     "shareMessage": "Lightning invoice for {{amount}} sats tip ({{title}}):\n\n{{invoice}}",
@@ -2043,5 +2051,130 @@
     "refundBroadcastTitle": "Refund broadcast",
     "refundBroadcastBody": "{{amount}} sats refunded ({{txid}}…)",
     "refundFailedTitle": "Refund failed"
+  },
+  "market": {
+    "sats": "{{amount}} sats",
+    "free": "Free",
+    "fromSeller": "from {{seller}}",
+    "screen": {
+      "title": "Market",
+      "tagline": "Buy a Lightning Piggy & Bitcoin merch",
+      "back": "Back to Explore",
+      "showing": "Showing: {{label}}",
+      "searchPlaceholder": "Search products or sellers",
+      "clearSearch": "Clear search",
+      "filters": "Filters",
+      "filtersApplied": "Filters, {{count}} applied",
+      "emptyNoMatch": "No products match your search or filters.",
+      "emptyNoFriends": "None of your Nostr friends are selling Lightning Piggy products yet.",
+      "emptyNone": "No products available right now."
+    },
+    "card": {
+      "featured": "Featured",
+      "accessibility": "{{title}} — {{amount}} sats from {{seller}}"
+    },
+    "detail": {
+      "back": "Back to Market",
+      "unavailable": "This product is no longer available.",
+      "backToMarket": "Back to Market",
+      "goBack": "Go back",
+      "buyFrom": "Buy from {{seller}}",
+      "buyAccessibility": "Buy {{title}} from {{seller}}",
+      "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on."
+    },
+    "modes": {
+      "soon": "Soon",
+      "comingSoon": "{{label}} — coming soon",
+      "selected": "{{label}}, selected"
+    },
+    "filters": {
+      "title": "Filters",
+      "clear": "Clear filters",
+      "clearAll": "Clear all filters",
+      "close": "Close filters",
+      "done": "Done",
+      "all": "All",
+      "merchant": "Merchant",
+      "country": "Country",
+      "currency": "Currency",
+      "chipSelected": "{{label}}, selected"
+    },
+    "feedbackTabs": {
+      "reviews": "Reviews",
+      "comments": "Comments"
+    },
+    "reviews": {
+      "signIn": "Sign in to write a review",
+      "write": "Write a review",
+      "updateLabel": "Update your review",
+      "placeholder": "Share your experience (optional)",
+      "addRating": "Add a rating first",
+      "submit": "Submit review",
+      "submitUpdate": "Update review",
+      "empty": "No reviews yet. Be the first to review this product!",
+      "loadError": "Failed to load reviews",
+      "count": {
+        "one": "{{count}} review",
+        "other": "{{count}} reviews"
+      }
+    },
+    "comments": {
+      "placeholder": "Add a comment",
+      "post": "Post comment",
+      "signIn": "Sign in to comment",
+      "empty": "No comments yet. Be the first to start the discussion!",
+      "loadError": "Failed to load comments"
+    },
+    "checkout": {
+      "orderPlaced": "Order placed",
+      "orderSentBody": "Your order was sent to {{seller}}. When they send a Lightning invoice it'll appear as a payable order in your chat with them.",
+      "openConversation": "Open your conversation with {{seller}}",
+      "goToChat": "Go to chat to pay",
+      "unitPrice": "{{amount}} sats each · {{fiat}}",
+      "quantity": "Quantity",
+      "decreaseQuantity": "Decrease quantity",
+      "increaseQuantity": "Increase quantity",
+      "subtotal": "Subtotal",
+      "shipping": "Shipping",
+      "total": "Total",
+      "placeOrder": "Place order",
+      "placeOrderAccessibility": "Place order with {{seller}}",
+      "signInToBuy": "Sign in to buy",
+      "hint": "Your order is sent privately (gift-wrapped) to the seller, who replies with a Lightning invoice you pay in-app.",
+      "websiteFallback": "Prefer the website? Open {{seller}}",
+      "openWebsiteAccessibility": "Open {{seller}} website instead",
+      "toastPlaced": "Order placed",
+      "toastPlacedBody": "Waiting for {{seller}} to send an invoice…",
+      "errors": {
+        "notSignedIn": "Sign in to place an order",
+        "noSellerIdentity": "This seller has no Nostr identity to order from",
+        "signingKeyMissing": "Couldn't find your signing key. Please sign in again.",
+        "unsupportedSigner": "This signer can't place orders yet.",
+        "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
+        "generic": "Something went wrong placing your order. Please try again."
+      }
+    },
+    "shipping": {
+      "label": "Shipping",
+      "checking": "Checking where {{seller}} ships…",
+      "loadError": "Couldn't load shipping options.",
+      "retry": "Retry",
+      "retryAccessibility": "Retry loading shipping options",
+      "shipToTitle": "Ship to",
+      "searchCountries": "Search countries",
+      "searchCountriesPlaceholder": "Search countries…",
+      "shipToCountry": "Ship to {{country}}",
+      "noCountriesMatch": "No countries match “{{query}}”",
+      "shipTo": "Ship to {{country}} — change country",
+      "chooseCountry": "Choose country",
+      "chooseCountryPlaceholder": "Choose country…",
+      "noShip": "We don't ship to {{country}} yet — message the shop and ask.",
+      "message": "Message {{seller}}",
+      "worldwide": "Ships worldwide",
+      "shipsTo": "Ships to {{countries}}",
+      "shipsToMore": "Ships to {{countries}} +{{count}}",
+      "optionAccessibility": "Shipping option {{title}}",
+      "priceFallback": "{{amount}} {{currency}}"
+    }
   }
 }

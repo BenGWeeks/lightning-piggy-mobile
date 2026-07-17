@@ -110,6 +110,14 @@ export type ExploreStackParamList = {
     | undefined;
   Places: undefined;
   PlaceDetail: { placeId: number };
+  // Market — Lightning Piggy product grid ("See all" from the Explore Market
+  // rail); tiles open MarketProductDetail. Static catalogue today (see
+  // src/data/marketProducts.ts, resolved to sellers via src/data/marketVendors.ts).
+  Market: undefined;
+  // Full product page opened from a Market grid tile — product info plus
+  // Nostr reviews (kind 31555) + comments (kind 1111). `productId` keys into
+  // MARKET_PRODUCTS (see src/data/marketProducts.ts).
+  MarketProductDetail: { productId: string };
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces
@@ -164,6 +172,7 @@ export type AccountDrawerNavigation = DrawerNavigationProp<AccountDrawerParamLis
 
 // Route prop shortcuts
 export type CourseDetailRoute = RouteProp<ExploreStackParamList, 'CourseDetail'>;
+export type MarketProductDetailRoute = RouteProp<ExploreStackParamList, 'MarketProductDetail'>;
 export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;

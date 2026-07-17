@@ -195,6 +195,11 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           fromMe: partnership.fromMe,
           createdAt: rumor.created_at,
           text: preview,
+          // Raw render content (order JSON for kind 16/17, else plaintext) so the
+          // conversation thread renders a freshly-decrypted order as its card on
+          // the FIRST open — `text` above is the inbox-list preview, which the
+          // card renderer can't parse (#market).
+          renderText: text,
           wireKind: rumor.kind,
           rumorId,
         });

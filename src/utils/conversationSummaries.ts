@@ -162,8 +162,16 @@ export interface DmInboxEntry {
   partnerPubkey: string;
   fromMe: boolean;
   createdAt: number;
+  /** Inbox-LIST preview text — for a kind-16/17 order/receipt this is a readable
+   * summary ("🛒 Order Placed · 21 sats"), NOT the raw order JSON. */
   text: string;
   wireKind: number;
+  /** Conversation-THREAD render content — the raw `textForRumor` output kept
+   * alongside the preview so a freshly-decrypted row renders correctly on the
+   * first open. For a kind-16/17 order this is the serialized order JSON the
+   * card renderer (`parseStoredOrder`) needs; for a plain DM it equals `text`.
+   * Absent on legacy entries — consumers fall back to `text`. (#market) */
+  renderText?: string;
   /** NIP-17 rumor (inner kind-14/15) event id — stable across the recipient +
    * self wraps and identical to what the sender computed at send time. Keys the
    * delivery-status store so a sent bubble's tick survives the local- → echo id
