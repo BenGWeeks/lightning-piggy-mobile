@@ -78,3 +78,7 @@ modules/*/android/build/
 
 # `.claude/` per-machine artefacts
 .claude/
+
+# rust-nostr Swift bindings — EAS workers re-fetch via postinstall
+modules/nostr-native/ios/nostr_sdkFFI.xcframework/
+modules/nostr-native/ios/Generated/

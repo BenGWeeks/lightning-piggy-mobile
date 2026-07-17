@@ -16,8 +16,8 @@ import type { DecodedRumor } from '../utils/nip17Unwrap';
  * Scope guards (all deliberate):
  *  - nsec only — Amber / NIP-46 gift wraps can only be decrypted by their
  *    remote signer, so those accounts stay on the JS path entirely.
- *  - Android only — expo-module.config.json lists just "android", so
- *    getNostrEngine() returns null elsewhere.
+ *  - Native platforms only — Android (Kotlin, M2) and iOS (Swift, M3);
+ *    getNostrEngine() returns null elsewhere and on pre-M3 iOS binaries.
  *  - Default OFF — EXPO_PUBLIC_NATIVE_ENGINE=1 opts in;
  *    EXPO_PUBLIC_NATIVE_ENGINE_XCHECK=1 (dev-only) runs BOTH paths and
  *    diffs delivered wrap ids (see nativeDmEngineXcheck.ts).
