@@ -18,7 +18,7 @@ import { Plus, Minus, Info, Maximize2, LocateFixed, Crosshair } from 'lucide-rea
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
-import { clusterCachePoints } from '../utils/cacheClusters';
+import { clusterMapPoints } from '../utils/mapClusters';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -394,10 +394,10 @@ const LibreMiniMapInner: React.FC<Props> = ({
 
   // Cache pins, grouped: nearby caches collapse into a count chip until
   // the zoom separates them (#1071). Leaves render through the existing
-  // CacheMapMarker path; clusters render as CacheClusterMarker chips
+  // CacheMapMarker path; clusters render as MapClusterMarker chips
   // whose tap flies the camera to the group's expansion zoom.
   const cacheClusterItems = useMemo(
-    () => clusterCachePoints(cachePoints, clusterZoom),
+    () => clusterMapPoints(cachePoints, clusterZoom),
     [cachePoints, clusterZoom],
   );
   const clusteredCachePoints = useMemo(

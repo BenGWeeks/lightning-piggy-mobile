@@ -8,7 +8,7 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { CacheMapMarker } from './CacheMapMarker';
-import { CacheClusterMarker } from './CacheClusterMarker';
+import { MapClusterMarker } from './MapClusterMarker';
 import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 /**
@@ -142,7 +142,8 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
           but does nothing would mislead users and screen readers. */}
       {onPressCacheCluster
         ? cacheClusters?.map((cl) => (
-            <CacheClusterMarker
+            <MapClusterMarker
+              variant="cache"
               key={`cluster-${cl.id}`}
               id={cl.id}
               lat={cl.lat}

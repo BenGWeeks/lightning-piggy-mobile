@@ -1,31 +1,23 @@
 import Supercluster from 'supercluster';
 
 /**
- * Groups nearby geo-cache pins into count chips until the map is zoomed
- * in far enough to separate them (#1071).
+ * Groups nearby map pins into count chips until the map is zoomed in
+ * far enough to separate them (#1071 geo-caches, #1073 BTC Map places).
  *
  * Engine: supercluster (ISC, pure JS — the same hierarchical greedy
- * clustering every major map library uses internally). Cache pin counts
- * are small (bounded at 250 by the #1068 render cap), so we build the
- * index per call — O(n log n) over ≤250 points is microseconds — and
- * query the whole world at the given zoom rather than threading the
- * viewport through (off-screen markers are already bounded).
+ * clustering every major map library uses internally). Pin counts are
+ * small (both merchants and caches are bounded at 250 by the #1068
+ * render caps), so we build the index per call — O(n log n) over ≤250
+ * points is microseconds — and query the whole world at the given zoom
+ * rather than threading the viewport through (off-screen markers are
+ * already bounded).
  *
- * The 48 px radius means two caches closer than ~a thumb-width at the
+ * The 48 px radius means two pins closer than ~a thumb-width at the
  * current zoom merge into one chip; `maxZoom: 16` guarantees everything
  * separates by street level, whatever the data.
  */
-export interface CacheClusterPoint {
-  lat: number;
-  lng: number;
-  id: string;
-  name: string;
-  isLpPiggy: boolean;
-  payoutSats: number | null;
-}
-
-export type CacheClusterItem =
-  | { kind: 'point'; point: CacheClusterPoint }
+export type MapClusterItem<T> =
+  | { kind: 'point'; point: T }
   | {
       kind: 'cluster';
       id: number;
@@ -39,7 +31,10 @@ export type CacheClusterItem =
 const CLUSTER_RADIUS_PX = 48;
 const CLUSTER_MAX_ZOOM = 16;
 
-export function clusterCachePoints(points: CacheClusterPoint[], zoom: number): CacheClusterItem[] {
+export function clusterMapPoints<T extends { lat: number; lng: number }>(
+  points: T[],
+  zoom: number,
+): MapClusterItem<T>[] {
   if (points.length === 0) return [];
   const index = new Supercluster<{ pointIndex: number }, { pointIndex: number }>({
     radius: CLUSTER_RADIUS_PX,
