@@ -4,7 +4,7 @@ import Supercluster from 'supercluster';
  * Groups nearby geo-cache pins into count chips until the map is zoomed
  * in far enough to separate them (#1071).
  *
- * Engine: supercluster (MIT, pure JS — the same hierarchical greedy
+ * Engine: supercluster (ISC, pure JS — the same hierarchical greedy
  * clustering every major map library uses internally). Cache pin counts
  * are small (bounded at 250 by the #1068 render cap), so we build the
  * index per call — O(n log n) over ≤250 points is microseconds — and

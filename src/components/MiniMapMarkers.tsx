@@ -137,23 +137,24 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
         );
       })}
       {/* Cache clusters (#1071): count chips for groups of nearby caches;
-          tapping zooms to where the group separates. */}
-      {cacheClusters?.map((cl) => (
-        <CacheClusterMarker
-          key={`cluster-${cl.id}`}
-          id={cl.id}
-          lat={cl.lat}
-          lng={cl.lng}
-          count={cl.count}
-          markerDimStyle={markerDim}
-          onPress={
-            onPressCacheCluster
-              ? () =>
-                  onPressCacheCluster({ lat: cl.lat, lng: cl.lng, expansionZoom: cl.expansionZoom })
-              : () => {}
-          }
-        />
-      ))}
+          tapping zooms to where the group separates. Rendered only when
+          the parent wires a handler — a chip that presents as a button
+          but does nothing would mislead users and screen readers. */}
+      {onPressCacheCluster
+        ? cacheClusters?.map((cl) => (
+            <CacheClusterMarker
+              key={`cluster-${cl.id}`}
+              id={cl.id}
+              lat={cl.lat}
+              lng={cl.lng}
+              count={cl.count}
+              markerDimStyle={markerDim}
+              onPress={() =>
+                onPressCacheCluster({ lat: cl.lat, lng: cl.lng, expansionZoom: cl.expansionZoom })
+              }
+            />
+          ))
+        : null}
       {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn
           at the hider's chosen coordinate so the centred map shows where
           the Piglet is, not just an empty map. */}

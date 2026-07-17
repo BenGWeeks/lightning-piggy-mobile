@@ -484,13 +484,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
         // event-marshalling cost.
         onRegionDidChange={async () => {
           // Always: refresh the clustering zoom (#1071) — pinch-zoom on
-          // the interactive map only surfaces here. Rounded to half
+          // the interactive map only surfaces here. Rounded to integer
           // levels so GPS-follow flyTo settles don't churn re-renders.
           try {
             const z = await mapRef.current?.getZoom();
             if (typeof z === 'number') {
               currentZoomRef.current = z;
-              setClusterZoom(Math.round(z * 2) / 2);
+              setClusterZoom(Math.round(z));
             }
           } catch {
             // Zoom query can race the camera tear-down on unmount — swallow.

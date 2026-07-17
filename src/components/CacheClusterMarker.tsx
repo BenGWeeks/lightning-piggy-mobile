@@ -47,7 +47,7 @@ export const CacheClusterMarker: React.FC<CacheClusterMarkerProps> = ({
       <Pressable
         style={[styles.chip, markerDimStyle]}
         onPress={onPress}
-        testID={`cache-cluster-${count}`}
+        testID={`cache-cluster-${id}`}
         accessibilityRole="button"
         accessibilityLabel={t('cacheClusterMarker.label', { count })}
       >
