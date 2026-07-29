@@ -3,16 +3,14 @@ import { View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Marker } from '@maplibre/maplibre-react-native';
 import { PiggyBank, MapPin, Calendar, UserRound } from 'lucide-react-native';
-import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { CacheMapMarker } from './CacheMapMarker';
 import { MapClusterMarker } from './MapClusterMarker';
 import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 /**
- * The content-marker layers of `LibreMiniMap` — merchants, caches, events,
+ * The content-marker layers of `LibreMiniMap` — caches, events,
  * the explicit pin, and the profile chip(s) — extracted and memoised.
  *
  * Why: every GPS fix re-renders LibreMiniMap (camera anchor + user dot +
@@ -30,7 +28,6 @@ import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
  */
 
 export interface MiniMapMarkersProps {
-  merchants: BtcMapPlace[];
   cachePoints: {
     lat: number;
     lng: number;
@@ -54,13 +51,11 @@ export interface MiniMapMarkersProps {
   /** Uniform marker sizing (full Map) — primitives so the memo compare
    *  stays shallow; the derived style objects are computed here. */
   uniformMarkerSize?: number;
-  onSelectMerchant?: (m: BtcMapPlace) => void;
   onSelectCache?: (c: ParsedCache) => void;
   onSelectEvent?: (e: ParsedEvent) => void;
 }
 
 const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
-  merchants,
   cachePoints,
   cacheByCoord,
   cacheClusters,
@@ -73,7 +68,6 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
   styles,
   textBodyColor,
   uniformMarkerSize,
-  onSelectMerchant,
   onSelectCache,
   onSelectEvent,
 }) => {
@@ -93,31 +87,6 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
 
   return (
     <>
-      {/* Merchants: pin colour signals payment type (pink Lightning,
-          orange on-chain only). Glyph mirrors the BTC Map category
-          icon the user sees on the Places-for-you rail card for the
-          same merchant — `restaurant` shows a fork, `cafe` a cup, etc.
-          Falls back to a Store glyph when BTC Map ships a category we
-          haven't mapped yet. */}
-      {merchants.map((m) => {
-        const ln = acceptsLightning(m);
-        const Icon = btcMapIconComponent(m.icon);
-        return (
-          <Marker
-            key={m.id}
-            id={`merchant-${m.id}`}
-            lngLat={[m.lon, m.lat]}
-            onPress={onSelectMerchant ? () => onSelectMerchant(m) : undefined}
-          >
-            <View
-              style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain, markerDim]}
-              testID={`minimap-merchant-${m.id}`}
-            >
-              <Icon size={pinGlyphSize} color="#fff" strokeWidth={2.5} />
-            </View>
-          </Marker>
-        );
-      })}
       {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
           NIP-GC → MapPin purple. */}
       {cachePoints.map((c) => {

@@ -24,6 +24,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createLibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 import MiniMapMarkers from './MiniMapMarkers';
+import { MerchantLayer } from './MerchantLayer';
 
 // `useIsFocused()` throws "Couldn't find a navigation object" when the
 // component renders OUTSIDE a navigator — e.g. inside a Gorhom
@@ -416,6 +417,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
     },
     [],
   );
+  // Merchant cluster taps (#1073) — the native layer resolves the
+  // expansion zoom engine-side; we just fly the camera there.
+  const onExpandMerchantCluster = useCallback((t: { lat: number; lng: number; zoom: number }) => {
+    currentZoomRef.current = t.zoom;
+    setClusterZoom(Math.round(t.zoom));
+    cameraRef.current?.flyTo({ center: [t.lng, t.lat], zoom: t.zoom, duration: 350 });
+  }, []);
 
   // Auto-follow GPS for inline mini-maps (non-interactive). When
   // interactive, leave the camera wherever the user panned it — the
@@ -528,8 +536,15 @@ const LibreMiniMapInner: React.FC<Props> = ({
             (camera anchor, user dot, halo) skip re-reconciling every pin
             (#1015). Rendering them from a child works because MapLibre
             markers register via context. */}
-        <MiniMapMarkers
+        {/* Merchants render as a natively-clustered symbol layer (#1073)
+            — engine-drawn cluster bubbles + per-category pin sprites, no
+            RN views per pin. Caches/events/profiles stay RN markers. */}
+        <MerchantLayer
           merchants={merchants}
+          onSelectMerchant={onSelectMerchant}
+          onExpandCluster={onExpandMerchantCluster}
+        />
+        <MiniMapMarkers
           cachePoints={clusteredCachePoints}
           cacheClusters={cacheClusters}
           onPressCacheCluster={onPressCacheCluster}
@@ -542,7 +557,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
           styles={styles}
           textBodyColor={colors.textBody}
           uniformMarkerSize={uniformMarkerSize}
-          onSelectMerchant={onSelectMerchant}
           onSelectCache={onSelectCache}
           onSelectEvent={onSelectEvent}
         />
