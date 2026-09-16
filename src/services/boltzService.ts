@@ -24,6 +24,8 @@ import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
+import { amountSatsFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
 import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
 import { waitForSwapStatus } from './boltzSwapStatus';
@@ -48,6 +50,7 @@ export const BOLTZ_MAX_SATS = 25_000_000;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SwapFees {
+  pairHash?: string;
   percentage: number;
   minerFee: number;
   minAmount: number;
@@ -168,9 +171,23 @@ export async function getSubmarineSwapFees(): Promise<SwapFees> {
   const pair = data?.BTC?.BTC;
   if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
 
+  const percentage = pair.fees?.percentage;
+  const minerFee = pair.fees?.minerFees;
+  if (
+    typeof percentage !== 'number' ||
+    !Number.isFinite(percentage) ||
+    percentage < 0 ||
+    !Number.isSafeInteger(minerFee) ||
+    minerFee < 0 ||
+    typeof pair.hash !== 'string' ||
+    !pair.hash
+  ) {
+    throw new Error('Invalid Boltz submarine fee quote');
+  }
   return {
-    percentage: pair.fees?.percentage ?? 0.5,
-    minerFee: pair.fees?.minerFees ?? 0,
+    pairHash: pair.hash,
+    percentage,
+    minerFee,
     minAmount: pair.limits?.minimal ?? 10000,
     maxAmount: pair.limits?.maximal ?? 25000000,
   };
@@ -650,6 +667,15 @@ export interface SubmarineSwapResult {
  */
 export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
+  const amount = amountSatsFromBolt11(invoice);
+  if (amount === null || !Number.isSafeInteger(amount) || amount <= 0) {
+    throw new Error('Invalid submarine swap invoice amount');
+  }
+  // Quote independently of the creation response; fail closed if either the
+  // fee schedule or our configured Electrum server is unavailable.
+  const { getBlockHeight } = require('./onchainService') as typeof import('./onchainService');
+  const [fees, currentBlockHeight] = await Promise.all([getSubmarineSwapFees(), getBlockHeight()]);
+  const expectedAmount = amount + calculateSwapFee(amount, fees);
   const refundKeys = generateClaimKeyPair();
 
   const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`, {
@@ -659,6 +685,7 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
       from: 'BTC',
       to: 'BTC',
       invoice,
+      pairHash: fees.pairHash,
       refundPublicKey: toHex(refundKeys.publicKey),
       referralId: 'lightning-piggy',
     }),
@@ -669,7 +696,13 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     throw new Error(`Boltz submarine swap creation failed: ${errBody}`);
   }
 
-  const data = await res.json();
+  const data: unknown = await res.json();
+  verifySubmarineSwap(data, {
+    invoice,
+    refundPublicKey: refundKeys.publicKey,
+    expectedAmount,
+    currentBlockHeight,
+  });
   console.log(
     `[Boltz] Submarine swap created: id=${data.id} address=${data.address} amount=${data.expectedAmount}`,
   );
@@ -677,9 +710,9 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     id: data.id,
     address: data.address,
     expectedAmount: data.expectedAmount,
-    timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
+    timeoutBlockHeight: data.timeoutBlockHeight,
     refundPrivateKey: toHex(refundKeys.privateKey),
-    claimPublicKey: data.claimPublicKey ?? '',
+    claimPublicKey: data.claimPublicKey,
     swapTree: data.swapTree,
   };
 }
