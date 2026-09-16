@@ -6,6 +6,8 @@
  * See: https://github.com/lnurl/luds/blob/luds/16.md
  */
 
+import { amountSatsFromBolt11 } from '../utils/bolt11';
+
 // Bech32 charset for LNURL decoding
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
@@ -421,6 +423,14 @@ export async function fetchInvoice(
   amountSats: number,
   options?: { nostr?: string; comment?: string },
 ): Promise<string> {
+  if (
+    !Number.isSafeInteger(amountSats) ||
+    amountSats <= 0 ||
+    !Number.isSafeInteger(amountSats * 1000)
+  ) {
+    throw new Error('LNURL payment amount must be a positive whole number of sats');
+  }
+
   let callbackUrl: URL;
   try {
     callbackUrl = new URL(callback);
@@ -450,8 +460,14 @@ export async function fetchInvoice(
 
   const data: LnurlInvoiceResponse = await response.json();
 
-  if (!data.pr) {
+  if (typeof data.pr !== 'string' || !data.pr) {
     throw new Error('No invoice returned from LNURL service');
+  }
+
+  // The endpoint is untrusted: the wallet pays the embedded BOLT11 amount,
+  // not the amount query parameter or the value shown in the confirmation.
+  if (amountSatsFromBolt11(data.pr) !== amountSats) {
+    throw new Error('LNURL invoice amount does not match the requested payment — refusing to pay');
   }
 
   return data.pr;
