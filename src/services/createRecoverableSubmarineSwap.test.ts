@@ -3,6 +3,11 @@ import { createSubmarineSwapForward } from './boltzService';
 import { registerPendingSubmarineSwap } from './swapRecoveryService';
 import { createRecoverableSubmarineSwap } from './createRecoverableSubmarineSwap';
 
+jest.mock('expo-secure-store', () => ({
+  setItemAsync: jest.fn(),
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
+}));
+
 jest.mock('./boltzService', () => ({ createSubmarineSwapForward: jest.fn() }));
 jest.mock('./swapRecoveryService', () => ({ registerPendingSubmarineSwap: jest.fn() }));
 const swap = {
