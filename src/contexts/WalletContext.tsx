@@ -28,6 +28,7 @@ import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
+import { hydrateWalletReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
 import type { IncomingPaymentSource } from './incomingPaymentSource';
 import {
@@ -39,6 +40,7 @@ import {
 } from '../types/wallet';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { parseNwcLud16 } from '../utils/nwcLud16';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
@@ -89,18 +91,6 @@ const lastOutgoingReceiptFetch = new Map<string, number>();
 // (now-stale) run for that same wallet so two passes don't compete for
 // the JS thread (#526). Cleared when a run finishes.
 const zapResolverControllers = new Map<string, AbortController>();
-
-function parseNwcLud16(nwcUrl: string | null): string | null {
-  if (!nwcUrl) return null;
-  try {
-    const parsed = new URL(nwcUrl);
-    const lud16 = parsed.searchParams.get('lud16');
-    if (!lud16 || !lud16.includes('@')) return null;
-    return lud16.trim();
-  } catch {
-    return null;
-  }
-}
 
 interface WalletContextType {
   // Multi-wallet state
@@ -290,18 +280,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // The in-memory set alone reset on every JS re-eval and re-announced a payment
   // whose hash wasn't in the (possibly stale) tx cache (#653 follow-up).
   const hydrateSeenReceipts = useCallback(
-    async (walletId: string, cachedTxs: readonly WalletTransaction[]): Promise<void> => {
-      try {
-        const seenRaw = await AsyncStorage.getItem(`seenReceipts_${walletId}`);
-        if (seenRaw) {
-          seedSeenReceipts(walletId, new Set<string>(JSON.parse(seenRaw) as string[]), false);
-        } else {
-          seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
-        }
-      } catch {
-        seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
-      }
-    },
+    (walletId: string, cachedTxs: readonly WalletTransaction[], isCurrent?: () => boolean) =>
+      hydrateWalletReceipts(walletId, cachedTxs, seedSeenReceipts, isCurrent),
     [seedSeenReceipts],
   );
 
@@ -459,6 +439,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await initialiseSendThresholdForNewInstall();
 
         // Load and reconnect all wallets
+        const isStartupCurrent = captureWalletIdentity();
         perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
         perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
@@ -478,7 +459,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 // Seed the unchanged-poll fingerprint from the persisted JSON
                 // so the first poll after cold start can skip too when the
                 // server list matches what we hydrated (#1014).
-                lastTxsJsonRef.current.set(w.id, txJson);
+                if (isStartupCurrent()) lastTxsJsonRef.current.set(w.id, txJson);
                 perfLog(
                   `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
                 );
@@ -506,7 +487,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
             // Seed the announced-receipts set BEFORE the detector runs.
-            await hydrateSeenReceipts(w.id, cachedTxs);
+            await hydrateSeenReceipts(w.id, cachedTxs, isStartupCurrent);
             return {
               ...w,
               isConnected: false,
@@ -516,7 +497,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             };
           }),
         );
-        setWallets(walletStates);
+        if (isStartupCurrent()) setWallets(walletStates);
         if (!__walletProviderHydratedLogged) {
           __walletProviderHydratedLogged = true;
           perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
@@ -528,7 +509,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // `wallets.length === 0` but only one is the disabled state.
         setWalletsHydrated(true);
 
-        if (walletStates.length > 0) {
+        if (isStartupCurrent() && walletStates.length > 0) {
           setActiveWalletId(walletStates[0].id);
         }
 
@@ -566,40 +547,51 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               // NWC wallet: connect via Nostr
               const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-              if (!nwcUrl) return;
+              if (!nwcUrl || !isStartupCurrent()) return;
 
-              const result = await nwcService.connect(wallet.id, nwcUrl, () => {
-                setWallets((prev) =>
-                  prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
-                );
-                if (!firstWalletConnectLogged) {
-                  firstWalletConnectLogged = true;
-                  console.log(
-                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+              const result = await nwcService.connect(
+                wallet.id,
+                nwcUrl,
+                () => {
+                  if (!isStartupCurrent()) return;
+                  setWallets((prev) =>
+                    !isStartupCurrent()
+                      ? prev
+                      : prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
                   );
-                }
-              });
-              if (result.success) {
+                  if (!firstWalletConnectLogged) {
+                    firstWalletConnectLogged = true;
+                    console.log(
+                      `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                    );
+                  }
+                },
+                isStartupCurrent,
+              );
+              if (result.success && isStartupCurrent()) {
                 let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
                 try {
                   info = await nwcService.getInfo(wallet.id);
                 } catch (e) {
                   if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
                 }
+                if (!isStartupCurrent()) return;
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
-                  prev.map((w) =>
-                    w.id === wallet.id
-                      ? {
-                          ...w,
-                          isConnected: true,
-                          balance: result.balance ?? w.balance ?? null,
-                          walletAlias: info?.alias || w.walletAlias || null,
-                          lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
-                        }
-                      : w,
-                  ),
+                  !isStartupCurrent()
+                    ? prev
+                    : prev.map((w) =>
+                        w.id === wallet.id
+                          ? {
+                              ...w,
+                              isConnected: true,
+                              balance: result.balance ?? w.balance ?? null,
+                              walletAlias: info?.alias || w.walletAlias || null,
+                              lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
+                            }
+                          : w,
+                      ),
                 );
               }
             } catch (error) {
@@ -633,7 +625,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     walletsRef.current = wallets;
   }, [wallets]);
-  useWalletIdentityHydration({
+  const captureWalletIdentity = useWalletIdentityHydration({
     walletsRef,
     lastTxsJsonRef,
     hydrateSeenReceipts,

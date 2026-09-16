@@ -34,14 +34,14 @@ function mount() {
     const walletsRef = useRef(wallets);
     walletsRef.current = wallets;
     const lastTxsJsonRef = useRef(new Map<string, string>());
-    useWalletIdentityHydration({
+    const captureIdentity = useWalletIdentityHydration({
       walletsRef,
       lastTxsJsonRef,
       hydrateSeenReceipts,
       setWallets,
       setActiveWalletId,
     });
-    return { wallets, activeWalletId, fingerprints: lastTxsJsonRef.current };
+    return { wallets, activeWalletId, captureIdentity, fingerprints: lastTxsJsonRef.current };
   });
 }
 async function switchTo(pubkey: string | null) {
@@ -71,7 +71,7 @@ it('hydrates the active identity, seeds receipts, and connects its wallets', asy
   await waitFor(() => expect(result.current.wallets[0]?.isConnected).toBe(true));
   expect(result.current.activeWalletId).toBe('B-wallet');
   expect(result.current.wallets[0].balance).toBe(50);
-  expect(hydrateSeenReceipts).toHaveBeenCalledWith('B-wallet', []);
+  expect(hydrateSeenReceipts).toHaveBeenCalledWith('B-wallet', [], expect.any(Function));
   await switchTo('C');
   expect(nwcService.disconnect).toHaveBeenCalledWith('B-wallet');
   await waitFor(() => expect(result.current.activeWalletId).toBe('C-wallet'));
@@ -90,6 +90,7 @@ it('drops an older wallet-list read that finishes after the next switch', async 
     'B-wallet',
     expect.anything(),
     expect.anything(),
+    expect.any(Function),
   );
 });
 
@@ -106,7 +107,11 @@ it('drops delayed transaction caches without restoring stale fingerprints or rec
   await act(async () => slow.resolve('[]'));
   expect(result.current.activeWalletId).toBe('C-wallet');
   expect(result.current.fingerprints.has('B-wallet')).toBe(false);
-  expect(hydrateSeenReceipts).not.toHaveBeenCalledWith('B-wallet', expect.anything());
+  expect(hydrateSeenReceipts).not.toHaveBeenCalledWith(
+    'B-wallet',
+    expect.anything(),
+    expect.any(Function),
+  );
 });
 
 it('uses a generation as well as pubkey for B → C → B', async () => {
@@ -133,15 +138,18 @@ it('does not start a connection after a delayed credential read crosses identiti
     'B-wallet',
     expect.anything(),
     expect.anything(),
+    expect.any(Function),
   );
   await waitFor(() => expect(result.current.activeWalletId).toBe('C-wallet'));
 });
 
-it('closes a late enabled connection and ignores its balance after switching away', async () => {
+it('invalidates a late connection and ignores its callback and balance after switching away', async () => {
   const slow = deferred<{ success: boolean; balance: number }>();
   let enabled: (() => void) | undefined;
-  jest.mocked(nwcService.connect).mockImplementationOnce((_id, _url, callback) => {
+  let isActive: (() => boolean) | undefined;
+  jest.mocked(nwcService.connect).mockImplementationOnce((_id, _url, callback, guard) => {
     enabled = callback;
+    isActive = guard;
     return slow.promise;
   });
   const { result } = mount();
@@ -153,7 +161,7 @@ it('closes a late enabled connection and ignores its balance after switching awa
     enabled!();
     slow.resolve({ success: true, balance: 999 });
   });
-  expect(nwcService.disconnect).toHaveBeenCalledWith('B-wallet');
+  expect(isActive!()).toBe(false);
   await waitFor(() => expect(result.current.activeWalletId).toBe('C-wallet'));
   expect(result.current.wallets[0].balance).not.toBe(999);
 });
@@ -181,4 +189,18 @@ it('unsubscribes and drops pending reads on unmount', async () => {
   await switchTo('C');
   expect(read).toHaveBeenCalledTimes(1);
   expect(nwcService.connect).not.toHaveBeenCalled();
+});
+
+it('invalidates the shared startup guard on switches, including returning to the same pubkey', async () => {
+  const { result, unmount } = mount();
+  const startupCurrent = result.current.captureIdentity();
+  expect(startupCurrent()).toBe(true);
+  await switchTo('B');
+  expect(startupCurrent()).toBe(false);
+  await switchTo('A');
+  expect(startupCurrent()).toBe(false);
+  const latest = result.current.captureIdentity();
+  expect(latest()).toBe(true);
+  unmount();
+  expect(latest()).toBe(false);
 });

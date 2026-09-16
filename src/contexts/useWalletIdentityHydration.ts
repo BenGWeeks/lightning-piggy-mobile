@@ -1,4 +1,11 @@
-import { useEffect, type Dispatch, type SetStateAction, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+  type MutableRefObject,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as walletStorage from '../services/walletStorageService';
@@ -7,7 +14,11 @@ import type { WalletState, WalletTransaction } from '../types/wallet';
 interface WalletIdentityHydrationDeps {
   walletsRef: MutableRefObject<WalletState[]>;
   lastTxsJsonRef: MutableRefObject<Map<string, string>>;
-  hydrateSeenReceipts: (id: string, txs: readonly WalletTransaction[]) => Promise<void>;
+  hydrateSeenReceipts: (
+    id: string,
+    txs: readonly WalletTransaction[],
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   setWallets: Dispatch<SetStateAction<WalletState[]>>;
   setActiveWalletId: Dispatch<SetStateAction<string | null>>;
 }
@@ -22,19 +33,25 @@ export function useWalletIdentityHydration({
   hydrateSeenReceipts,
   setWallets,
   setActiveWalletId,
-}: WalletIdentityHydrationDeps): void {
+}: WalletIdentityHydrationDeps): () => () => boolean {
+  const disposed = useRef(false);
+  const generation = useRef(0);
+  const captureIdentity = useCallback(() => {
+    const ticket = generation.current;
+    const pubkey = walletStorage.getActivePubkey();
+    return () =>
+      !disposed.current &&
+      generation.current === ticket &&
+      walletStorage.getActivePubkey() === pubkey;
+  }, []);
   useEffect(() => {
-    let disposed = false;
-    let generation = 0;
+    disposed.current = false;
     let lastSeenPubkey = walletStorage.getActivePubkey();
     const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey) => {
       if (nextPubkey === lastSeenPubkey) return;
       lastSeenPubkey = nextPubkey;
-      const currentGeneration = ++generation;
-      const isCurrent = () =>
-        !disposed &&
-        generation === currentGeneration &&
-        walletStorage.getActivePubkey() === nextPubkey;
+      generation.current++;
+      const isCurrent = captureIdentity();
       // Disconnect every current NWC connection so we don't leak the
       // previous identity's WebSockets / pay_invoice handlers.
       for (const w of walletsRef.current) {
@@ -80,7 +97,7 @@ export function useWalletIdentityHydration({
               }
               // Seed the announced-receipts set before the detector runs (see
               // the startup-hydration path for the rationale).
-              if (isCurrent()) await hydrateSeenReceipts(w.id, cachedTxs);
+              if (isCurrent()) await hydrateSeenReceipts(w.id, cachedTxs, isCurrent);
               return {
                 ...w,
                 isConnected: false,
@@ -107,29 +124,20 @@ export function useWalletIdentityHydration({
                 }
                 const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
                 if (!nwcUrl || !isCurrent()) return;
-                const closeIfSwitchedAway = () => {
-                  // A late enable can register its provider AFTER the switch's
-                  // disconnect. Do not tear down a newer connection when the
-                  // user has already switched back to this same identity.
-                  if (disposed || walletStorage.getActivePubkey() !== nextPubkey) {
-                    nwcService.disconnect(wallet.id);
-                  }
-                };
-                const result = await nwcService.connect(wallet.id, nwcUrl, () => {
-                  if (!isCurrent()) {
-                    closeIfSwitchedAway();
-                    return;
-                  }
-                  setWallets((prev) =>
-                    isCurrent()
-                      ? prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w))
-                      : prev,
-                  );
-                });
-                if (!isCurrent()) {
-                  closeIfSwitchedAway();
-                  return;
-                }
+                const result = await nwcService.connect(
+                  wallet.id,
+                  nwcUrl,
+                  () => {
+                    if (!isCurrent()) return;
+                    setWallets((prev) =>
+                      isCurrent()
+                        ? prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w))
+                        : prev,
+                    );
+                  },
+                  isCurrent,
+                );
+                if (!isCurrent()) return;
                 if (result.success) {
                   setWallets((prev) =>
                     !isCurrent()
@@ -156,9 +164,17 @@ export function useWalletIdentityHydration({
       })();
     });
     return () => {
-      disposed = true;
-      generation++;
+      disposed.current = true;
+      generation.current++;
       unsubscribe();
     };
-  }, [walletsRef, lastTxsJsonRef, hydrateSeenReceipts, setWallets, setActiveWalletId]);
+  }, [
+    walletsRef,
+    lastTxsJsonRef,
+    hydrateSeenReceipts,
+    setWallets,
+    setActiveWalletId,
+    captureIdentity,
+  ]);
+  return captureIdentity;
 }
