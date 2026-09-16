@@ -12,6 +12,8 @@ import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { getSwapBackendForId } from '../services/swapBackendService';
+import { fetchWithTimeout } from '../services/boltzApi';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
 import { createTransactionDetailSheetStyles } from '../styles/TransactionDetailSheet.styles';
@@ -100,8 +102,6 @@ type BoltzSwapView = {
   terminalSuccess: boolean;
   terminalFailure: boolean;
 };
-
-const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
 const TransactionDetailSheet: React.FC<Props> = ({
   visible,
@@ -216,7 +216,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
       setResolvedSwapId(swapId);
 
       try {
-        const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
+        const res = await fetchWithTimeout(`${await getSwapBackendForId(swapId)}/swap/${swapId}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const status: string = data.status ?? 'unknown';

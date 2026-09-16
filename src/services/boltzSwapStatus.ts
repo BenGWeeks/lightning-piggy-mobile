@@ -8,10 +8,9 @@
 // Extracted from boltzService so that file stays under the size cap and this
 // concern is independently testable.
 
-import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
+import { fetchWithTimeout } from './boltzApi';
+import { getSwapBackendForId, swapWebSocketUrl } from './swapBackendService';
 import { abortableSleep, createAbortError, throwIfAborted } from './nwcErrors';
-
-const BOLTZ_WS = 'wss://api.boltz.exchange/v2/ws';
 
 /**
  * Subscribe to swap status updates via WebSocket, falling back to polling.
@@ -27,6 +26,8 @@ export async function waitForSwapStatus(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<any> {
+  throwIfAborted(signal);
+  const backend = await getSwapBackendForId(swapId);
   return new Promise((resolve, reject) => {
     let settled = false;
     // `fellBack` guards against onerror + onclose both starting a poller
@@ -92,7 +93,7 @@ export async function waitForSwapStatus(
         ws?.close();
       } catch {}
       activeWs = undefined;
-      pollSwapStatus(swapId, isTerminal, remaining(), signal)
+      pollSwapStatus(swapId, isTerminal, remaining(), backend, signal)
         .then((data) => {
           if (!settled) {
             settled = true;
@@ -111,7 +112,7 @@ export async function waitForSwapStatus(
 
     // Try WebSocket first
     try {
-      const ws = new WebSocket(BOLTZ_WS);
+      const ws = new WebSocket(swapWebSocketUrl(backend));
       activeWs = ws;
       let wsConnected = false;
 
@@ -178,12 +179,13 @@ async function pollSwapStatus(
   swapId: string,
   isTerminal: (status: string, data: any) => boolean,
   timeoutMs: number,
+  backend: string,
   signal?: AbortSignal,
 ): Promise<any> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     throwIfAborted(signal);
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`, { signal });
+    const res = await fetchWithTimeout(`${backend}/swap/${swapId}`, { signal });
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
     console.log(`[Boltz] Poll swap ${swapId} status: ${data.status}`);

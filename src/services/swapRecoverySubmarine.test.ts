@@ -227,3 +227,24 @@ describe('submarine swap recovery', () => {
     });
   });
 });
+
+it('uses the pinned private backend for both status and refund funding lookup', async () => {
+  seed();
+  await registerPendingSubmarineSwap(SWAP_ID);
+  mockStore.set(`boltz_backend_${SWAP_ID}`, 'https://family.example/v2');
+  mockFetchWithTimeout.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ status: 'swap.expired' }),
+  });
+  mockFetchWithTimeout.mockResolvedValueOnce({ ok: false, status: 503 });
+  await recoverPendingSwaps();
+  expect(mockFetchWithTimeout).toHaveBeenNthCalledWith(
+    1,
+    `https://family.example/v2/swap/${SWAP_ID}`,
+  );
+  expect(mockFetchWithTimeout).toHaveBeenNthCalledWith(
+    2,
+    `https://family.example/v2/swap/submarine/${SWAP_ID}/transaction`,
+  );
+  expect(mockStore.has(KEY)).toBe(true);
+});

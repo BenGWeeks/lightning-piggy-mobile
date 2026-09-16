@@ -14,6 +14,7 @@ import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
+import { getSwapBackendForId } from './swapBackendService';
 
 /** Shape of the transaction-row data this module needs to classify a row as
  *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
@@ -349,8 +350,6 @@ export async function recordSubmarineSwapLegs(
 // Lockup-output parsing moved to utils/lockupTx (shared with boltzService's
 // submarine refund lookup without an import cycle).
 
-const BOLTZ_API = 'https://api.boltz.exchange/v2';
-
 interface PersistedReverseSwap {
   id: string;
   preimage: string;
@@ -585,7 +584,9 @@ async function recoverSwap(swapId: string): Promise<void> {
   // Query Boltz status. Timed fetch — the recovery pass is single-flight, so
   // a hung request here would block every future recovery trigger (startup,
   // pull-to-refresh, retry) for the whole session.
-  const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+  const res = await boltzService.fetchWithTimeout(
+    `${await getSwapBackendForId(swapId)}/swap/${swapId}`,
+  );
   if (!res.ok) {
     console.warn(`[SwapRecovery] Boltz returned ${res.status} for ${swapId}`);
     if (res.status === 404) {
@@ -771,7 +772,9 @@ type SubmarineFunding =
 async function probeSubmarineFunding(swap: PersistedSubmarineSwap): Promise<SubmarineFunding> {
   let res: Response;
   try {
-    res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swap.id}/transaction`);
+    res = await boltzService.fetchWithTimeout(
+      `${await getSwapBackendForId(swap.id)}/swap/submarine/${swap.id}/transaction`,
+    );
   } catch (e) {
     console.warn(`[SwapRecovery] Submarine lockup probe failed for ${swap.id}:`, e);
     return { state: 'unknown' };
@@ -813,7 +816,9 @@ async function recoverSubmarineSwaps(): Promise<void> {
         continue;
       }
       const swap = JSON.parse(raw) as PersistedSubmarineSwap;
-      const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+      const res = await boltzService.fetchWithTimeout(
+        `${await getSwapBackendForId(swapId)}/swap/${swapId}`,
+      );
       if (!res.ok) {
         if (res.status === 404) {
           const misses = (swap.notFoundCount ?? 0) + 1;
