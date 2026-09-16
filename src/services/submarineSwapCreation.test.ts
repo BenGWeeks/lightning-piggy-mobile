@@ -171,7 +171,7 @@ describe('createSubmarineSwapForward', () => {
   });
 
   it('pins the quote and returns a verified swap with its local refund key', async () => {
-    const swap = await createSubmarineSwapForward(INVOICE);
+    const swap = await createSubmarineSwapForward(INVOICE, 100000);
     expect(swap.expectedAmount).toBe(100600);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     const request = JSON.parse(post![1].body);
@@ -190,18 +190,28 @@ describe('createSubmarineSwapForward', () => {
         return response;
       };
       const fund = jest.fn();
-      await expect(createSubmarineSwapForward(INVOICE).then(fund)).rejects.toThrow();
+      await expect(createSubmarineSwapForward(INVOICE, 100000).then(fund)).rejects.toThrow();
       expect(fund).not.toHaveBeenCalled();
     },
   );
   it('does not create a swap when the independent chain tip is unavailable', async () => {
     jest.mocked(getBlockHeight).mockRejectedValueOnce(new Error('Electrum unavailable'));
-    await expect(createSubmarineSwapForward(INVOICE)).rejects.toThrow(/Electrum/);
+    await expect(createSubmarineSwapForward(INVOICE, 100000)).rejects.toThrow(/Electrum/);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
+  it.each([99999, 100001, 0, -1, 1.5, NaN, Infinity])(
+    'rejects invoice/request mismatch %p before any network work',
+    async (requested) => {
+      await expect(createSubmarineSwapForward(INVOICE, requested)).rejects.toThrow(
+        /requested payment/,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getBlockHeight).not.toHaveBeenCalled();
+    },
+  );
   it('does not create a swap from an incomplete fee quote', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ BTC: { BTC: {} } }) });
-    await expect(createSubmarineSwapForward(INVOICE)).rejects.toThrow(/quote/);
+    await expect(createSubmarineSwapForward(INVOICE, 100000)).rejects.toThrow(/quote/);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 });

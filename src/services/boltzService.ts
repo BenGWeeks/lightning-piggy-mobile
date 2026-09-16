@@ -665,11 +665,18 @@ export interface SubmarineSwapResult {
  *   4. Send BTC on-chain to that address from the hot wallet (caller does this)
  *   5. Boltz detects the on-chain payment and pays the LN invoice
  */
-export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
+export async function createSubmarineSwapForward(
+  invoice: string,
+  requestedAmountSats: number,
+): Promise<SubmarineSwapResult> {
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
   const amount = amountSatsFromBolt11(invoice);
-  if (amount === null || !Number.isSafeInteger(amount) || amount <= 0) {
-    throw new Error('Invalid submarine swap invoice amount');
+  if (
+    !Number.isSafeInteger(requestedAmountSats) ||
+    requestedAmountSats <= 0 ||
+    amount !== requestedAmountSats
+  ) {
+    throw new Error('Submarine swap invoice amount does not match the requested payment');
   }
   // Quote independently of the creation response; fail closed if either the
   // fee schedule or our configured Electrum server is unavailable.
