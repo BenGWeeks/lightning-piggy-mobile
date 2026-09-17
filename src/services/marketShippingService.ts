@@ -32,11 +32,13 @@ export async function fetchShippingOptions(input: {
   const events = await querySyncAbortable(
     pool,
     relays,
-    { kinds: [SHIPPING_OPTION_KIND], authors: [input.merchantPubkey] },
+    { kinds: [SHIPPING_OPTION_KIND], authors: [input.merchantPubkey], limit: 100 },
     { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal },
   );
-  const parsed = events
-    .map(parseShippingOptionEvent)
-    .filter((o): o is ShippingOption => o !== null);
-  return dedupeNewestPerCoordinate(parsed);
+  // Invalid options must not turn into an empty list ("no shipping needed").
+  const parsed = events.map(parseShippingOptionEvent);
+  if (parsed.some((option) => option === null)) {
+    throw new Error('Merchant returned invalid shipping options');
+  }
+  return dedupeNewestPerCoordinate(parsed as ShippingOption[]);
 }

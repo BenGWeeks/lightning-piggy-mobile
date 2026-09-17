@@ -471,3 +471,54 @@ describe('formatDayHeader', () => {
     expect(label).toMatch(/\d/);
   });
 });
+
+describe('buyer-approved order totals', () => {
+  const orderMessage = (id: string, fromMe: boolean, type: string, amountSats: number) => ({
+    id,
+    fromMe,
+    createdAt: DAY2,
+    wireKind: 16,
+    text: JSON.stringify({
+      kind: 16,
+      type,
+      amountSats,
+      orderId: 'same-order',
+      items: [],
+      message: '',
+    }),
+  });
+  it('binds the payment request to the outgoing order, ignoring the merchant amount', () => {
+    const items = buildConversationItems(
+      [
+        orderMessage('request', false, 'payment', 999),
+        orderMessage('approved', true, 'order', 100),
+      ],
+      [],
+    );
+    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
+      expectedAmountSats: 100,
+    });
+  });
+  it('cannot establish an approved amount from a merchant-authored order', () => {
+    const items = buildConversationItems(
+      [orderMessage('request', false, 'payment', 999), orderMessage('forged', false, 'order', 999)],
+      [],
+    );
+    expect(
+      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
+    ).toBeUndefined();
+  });
+  it('fails closed when outgoing orders with the same ID disagree', () => {
+    const items = buildConversationItems(
+      [
+        orderMessage('approved', true, 'order', 100),
+        orderMessage('conflicting', true, 'order', 200),
+        orderMessage('request', false, 'payment', 100),
+      ],
+      [],
+    );
+    expect(
+      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
+    ).toBeUndefined();
+  });
+});

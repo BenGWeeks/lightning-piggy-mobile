@@ -1487,7 +1487,8 @@
     "copyInvoiceA11y": "Copiar factura",
     "copy": "Copiar",
     "qrCodeA11y": "Código QR de la factura Lightning",
-    "scanHint": "Escanea con cualquier cartera Lightning"
+    "scanHint": "Escanea con cualquier cartera Lightning",
+    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",

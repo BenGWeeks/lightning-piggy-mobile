@@ -153,7 +153,7 @@ export function useMarketCheckout(): UseMarketCheckout {
             recipientPubkeys: [vendorPubkey],
             relays: targetRelays,
           });
-          delivered = result.delivery.delivered;
+          delivered = result.wrapsPublished > 0 && result.errors.length === 0;
           sendError = result.errors[0];
         } else if (signerType === 'amber' || signerType === 'nip46') {
           const signer = signerType === 'amber' ? amberService : nostrConnectService;
@@ -176,7 +176,7 @@ export function useMarketCheckout(): UseMarketCheckout {
               return JSON.parse(signedEventJson);
             },
           });
-          delivered = result.delivery.delivered;
+          delivered = result.wrapsPublished > 0 && result.errors.length === 0;
           sendError = result.errors[0];
         } else {
           throw new CheckoutError('unsupportedSigner', 'Unsupported signer — cannot place order');

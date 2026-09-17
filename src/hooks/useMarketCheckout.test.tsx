@@ -35,7 +35,7 @@ beforeEach(() => {
   (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockImplementation(async (options) => {
     await options.signerNip44Encrypt('plaintext', vendor);
     await options.signerSignSeal({ kind: 13, pubkey: buyer });
-    return { delivery: { delivered: true }, errors: [] };
+    return { wrapsPublished: 2, delivery: { delivered: true }, errors: [] };
   });
 });
 
@@ -77,4 +77,17 @@ test('unsupported signers cannot enter checkout', () => {
     relays: [],
   });
   expect(renderHook(() => useMarketCheckout()).result.current.canOrder).toBe(false);
+});
+
+test('a self-wrap success with a failed merchant wrap does not report the order sent', async () => {
+  (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockResolvedValue({
+    wrapsPublished: 1,
+    delivery: { delivered: true },
+    errors: ['vendor publish failed'],
+  });
+  const { result } = renderHook(() => useMarketCheckout());
+  await act(async () => {
+    await expect(result.current.placeOrder(input)).rejects.toThrow('vendor publish failed');
+  });
+  expect(result.current.status).toBe('error');
 });

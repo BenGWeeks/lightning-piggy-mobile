@@ -7,11 +7,13 @@ import Toast from './BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createOrderPaymentActionsStyles } from '../styles/OrderPaymentActions.styles';
+import { matchesExpectedOrderAmount } from '../utils/orderInvoiceAmount';
 import { extractInvoice } from '../utils/messageContent';
 import { payableBolt11, type ParsedOrderEvent } from '../utils/orderEvents';
 
 interface Props {
   order: ParsedOrderEvent;
+  expectedAmountSats?: number;
   fromMe: boolean;
   /** 1:1 settlement predicate (NWC poll + wallet-tx history). Flips Paid. */
   isInvoicePaid?: (paymentHash: string, fromMe: boolean) => boolean;
@@ -42,6 +44,7 @@ interface Props {
  */
 function OrderPaymentActions({
   order,
+  expectedAmountSats,
   fromMe,
   isInvoicePaid,
   onPayInvoice,
@@ -87,6 +90,17 @@ function OrderPaymentActions({
     !paid && decoded?.expiresAt !== null && decoded?.expiresAt !== undefined
       ? decoded.expiresAt * 1000 < Date.now()
       : false;
+
+  // Fail closed for missing history or a missing/mismatched invoice amount,
+  // including external-wallet QR/copy affordances. The merchant cannot set
+  // the expected amount; it comes from our outgoing order in this thread.
+  if (!fromMe && !paid && !matchesExpectedOrderAmount(bolt11, expectedAmountSats)) {
+    return (
+      <Text style={styles.expiredText} testID={`${testIdPrefix}-order-amount-error-${id}`}>
+        {t('orderPaymentActions.amountUnverified')}
+      </Text>
+    );
+  }
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(bolt11);

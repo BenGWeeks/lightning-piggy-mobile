@@ -31,7 +31,7 @@ export interface ShippingOption {
   dTag: string;
   /** Human label; falls back to the `d` tag when the event has no title. */
   title: string;
-  /** Base cost in `currency` units (0 when the event has no/invalid price). */
+  /** Valid non-negative base cost in `currency` units. */
   baseAmount: number;
   /** Upper-cased price currency, e.g. 'GBP', 'USD', 'SATS', 'BTC'. */
   currency: string;
@@ -58,7 +58,7 @@ export interface ShippingOptionEventInput {
 }
 
 const num = (raw: unknown): number | null => {
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
   const n = Number(raw.trim());
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
@@ -76,9 +76,11 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
 
   const title = ev.tags.find((t) => t[0] === 'title')?.[1];
   const priceTag = ev.tags.find((t) => t[0] === 'price');
-  const baseAmount = num(priceTag?.[1]) ?? 0;
+  const baseAmount = num(priceTag?.[1]);
   const currency =
     typeof priceTag?.[2] === 'string' && priceTag[2].trim() ? priceTag[2].trim().toUpperCase() : '';
+
+  if (baseAmount === null || !currency) return null;
 
   // Normalise every value to alpha-2: merchants publish a mix of alpha-2 and
   // alpha-3 (Robotechy's live 30406s carry GBR/IRL/DEU…) — toAlpha2 maps known

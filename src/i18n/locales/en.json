@@ -1480,6 +1480,7 @@
     "payInvoiceA11y": "Pay this order invoice",
     "pay": "Pay",
     "invoiceExpired": "This invoice has expired",
+    "amountUnverified": "Cannot verify this invoice against your original order total. Load the original order before paying; if the amounts differ, ask the seller for a corrected invoice.",
     "hideQrA11y": "Hide invoice QR code",
     "showQrA11y": "Show invoice QR code",
     "hideQr": "Hide QR",

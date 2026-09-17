@@ -74,6 +74,7 @@ export type Item =
       id: string;
       fromMe: boolean;
       order: ParsedOrderEvent;
+      expectedAmountSats?: number;
       createdAt: number;
     }
   | {
@@ -240,6 +241,21 @@ export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
 ): Item[] {
+  // Only the buyer's authenticated outgoing order establishes the approved
+  // total. Never trust the merchant's amount tag on a payment request.
+  const expectedAmounts = new Map<string, number | undefined>();
+  for (const message of messages) {
+    if (!message.fromMe || message.wireKind !== 16) continue;
+    const order = parseStoredOrder(message.text);
+    if (!order || order.type !== 'order') continue;
+    const amount = order.amountSats;
+    if (!Number.isSafeInteger(amount) || (amount ?? 0) <= 0) continue;
+    if (expectedAmounts.has(order.orderId) && expectedAmounts.get(order.orderId) !== amount) {
+      expectedAmounts.set(order.orderId, undefined);
+    } else if (!expectedAmounts.has(order.orderId)) {
+      expectedAmounts.set(order.orderId, amount);
+    }
+  }
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
@@ -252,6 +268,7 @@ export function buildConversationItems(
             id: `dm-${m.id}`,
             fromMe: m.fromMe,
             order,
+            expectedAmountSats: expectedAmounts.get(order.orderId),
             createdAt: m.createdAt,
           },
         ];

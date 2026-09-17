@@ -1459,7 +1459,8 @@
     "copyInvoiceA11y": "Copy invoice",
     "copy": "Copy",
     "qrCodeA11y": "Lightning invoice QR code",
-    "scanHint": "Scan with any Lightning wallet"
+    "scanHint": "Scan with any Lightning wallet",
+    "amountUnverified": "Не вдалося звірити цей рахунок із сумою початкового замовлення. Завантажте початкове замовлення перед оплатою; якщо суми різняться, попросіть продавця виправити рахунок."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",

@@ -53,7 +53,12 @@ describe('parseShippingOptionEvent', () => {
   });
 
   it('treats an option with no country tags as worldwide (empty list)', () => {
-    const option = parseShippingOptionEvent(makeEvent([['d', 'ww']]));
+    const option = parseShippingOptionEvent(
+      makeEvent([
+        ['d', 'ww'],
+        ['price', '0', 'SATS'],
+      ]),
+    );
     expect(option?.countries).toEqual([]);
   });
 
@@ -72,15 +77,38 @@ describe('parseShippingOptionEvent', () => {
     expect(filterShippingOptions([option!], 'DE')).toHaveLength(0);
   });
 
-  it('falls back to the d tag when title is missing, and 0 for a bad price', () => {
+  it('falls back to the d tag for a valid free option', () => {
     const option = parseShippingOptionEvent(
       makeEvent([
-        ['d', 'mystery'],
-        ['price', 'not-a-number', 'USD'],
+        ['d', 'free'],
+        ['price', '0', 'SATS'],
       ]),
     );
-    expect(option?.title).toBe('mystery');
+    expect(option?.title).toBe('free');
     expect(option?.baseAmount).toBe(0);
+  });
+
+  it.each(['', ' ', 'not-a-number', '-1', 'Infinity'])('rejects invalid price %s', (price) => {
+    expect(
+      parseShippingOptionEvent(
+        makeEvent([
+          ['d', 'bad'],
+          ['price', price, 'USD'],
+        ]),
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects absent price or currency', () => {
+    expect(parseShippingOptionEvent(makeEvent([['d', 'bad']]))).toBeNull();
+    expect(
+      parseShippingOptionEvent(
+        makeEvent([
+          ['d', 'bad'],
+          ['price', '0'],
+        ]),
+      ),
+    ).toBeNull();
   });
 
   it('rejects wrong kinds and events without a d tag', () => {
