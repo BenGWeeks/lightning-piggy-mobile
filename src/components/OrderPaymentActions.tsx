@@ -7,11 +7,13 @@ import Toast from './BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createOrderPaymentActionsStyles } from '../styles/OrderPaymentActions.styles';
+import { matchesExpectedOrderAmount } from '../utils/orderInvoiceAmount';
 import { extractInvoice } from '../utils/messageContent';
 import { payableBolt11, type ParsedOrderEvent } from '../utils/orderEvents';
 
 interface Props {
   order: ParsedOrderEvent;
+  expectedAmountSats?: number;
   fromMe: boolean;
   /** 1:1 settlement predicate (NWC poll + wallet-tx history). Flips Paid. */
   isInvoicePaid?: (paymentHash: string, fromMe: boolean) => boolean;
@@ -42,6 +44,7 @@ interface Props {
  */
 function OrderPaymentActions({
   order,
+  expectedAmountSats,
   fromMe,
   isInvoicePaid,
   onPayInvoice,
@@ -63,6 +66,23 @@ function OrderPaymentActions({
   // "show QR + copy, no expiry gating" rather than crashing the card.
   const decoded = useMemo(() => (bolt11 ? extractInvoice(bolt11) : null), [bolt11]);
 
+  // A receipt is only proof of payment for THIS buyer's order: bind it to the
+  // authenticated outgoing order total exactly like a payment request (a
+  // merchant-authored receipt with no matching order, or a different amount,
+  // must not make an unpaid order look settled).
+  const receiptVerified =
+    isReceipt &&
+    (fromMe ||
+      (Number.isSafeInteger(expectedAmountSats) &&
+        (expectedAmountSats ?? 0) > 0 &&
+        (order.amountSats === undefined || order.amountSats === expectedAmountSats)));
+  if (isReceipt && !receiptVerified) {
+    return (
+      <Text style={styles.expiredText} testID={`${testIdPrefix}-order-receipt-unverified-${id}`}>
+        {t('orderPaymentActions.receiptUnverified')}
+      </Text>
+    );
+  }
   if (isReceipt) {
     return (
       <View style={styles.container}>
@@ -87,6 +107,19 @@ function OrderPaymentActions({
     !paid && decoded?.expiresAt !== null && decoded?.expiresAt !== undefined
       ? decoded.expiresAt * 1000 < Date.now()
       : false;
+
+  // Fail closed for missing history or a missing/mismatched invoice amount,
+  // including external-wallet QR/copy affordances AND the "Paid" badge: a
+  // settled payment hash reused in a re-sent invoice with a different amount
+  // must not be honoured as paid. The merchant cannot set the expected
+  // amount; it comes from our outgoing order in this thread.
+  if (!fromMe && !matchesExpectedOrderAmount(bolt11, expectedAmountSats)) {
+    return (
+      <Text style={styles.expiredText} testID={`${testIdPrefix}-order-amount-error-${id}`}>
+        {t('orderPaymentActions.amountUnverified')}
+      </Text>
+    );
+  }
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(bolt11);

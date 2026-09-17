@@ -8,7 +8,11 @@ import type { Translations } from './locales/types';
 // #137 infra: seeded with en + es to prove the pipeline end-to-end (tab
 // bar labels). fr/de/nl (named in the issue) land as their own follow-up
 // batches, same as every other surface — see the issue's "extract in
-// batches per surface" plan.
+// batches per surface" plan. Ukrainian (uk) was seeded by the market
+// batch (#948): its `market` namespace is fully translated, and the rest
+// of the catalogue carries the English source as a fallback until later
+// per-surface batches translate it (enableFallback also folds unset keys
+// back to en).
 //
 // Locale catalogues are plain JSON (not .ts) so a translation-only
 // contribution — the issue explicitly calls this out as a good first
