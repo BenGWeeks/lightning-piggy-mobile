@@ -8,6 +8,7 @@
 // Upgrade path: bump VERSION + the artifact/content hashes below, keeping the Android Maven
 // version in modules/nostr-native/android/build.gradle in lockstep.
 
+import { downloadArtifact as download } from './download-sdk-artifact.mjs';
 import { frameworkContentHash } from './native-sdk-manifest.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -44,12 +45,6 @@ if (process.platform !== 'darwin' && process.env.FETCH_NOSTR_SDK_SWIFT !== '1') 
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const marker = `${VERSION} ${XCFRAMEWORK_SHA256}`;
-
-async function download(url) {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
-}
 
 async function ensureSwiftSource() {
   if (existsSync(swiftPath) && sha256(readFileSync(swiftPath)) === SWIFT_SHA256) return false;

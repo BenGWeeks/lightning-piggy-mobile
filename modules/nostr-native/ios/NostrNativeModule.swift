@@ -22,8 +22,17 @@ public class NostrNativeModule: Module {
   private var cachedSecret: (hex: String, key: SecretKey)?
   private var cachedKeys: (hex: String, keys: Keys)?
 
-  private lazy var engine = NostrEngine { [weak self] name, body in
-    self?.sendEvent(name, body)
+  private let engineLock = NSLock()
+  private var engineStorage: NostrEngine?
+  private var engine: NostrEngine {
+    engineLock.lock()
+    defer { engineLock.unlock() }
+    if let engineStorage { return engineStorage }
+    let created = NostrEngine { [weak self] name, body in
+      self?.sendEvent(name, body)
+    }
+    engineStorage = created
+    return created
   }
 
   private func clearKeyCaches() {
@@ -91,10 +100,12 @@ public class NostrNativeModule: Module {
     OnDestroy {
       // Dev-client reloads recreate the module — never leave a pool (or key
       // material) running behind a dead JS context.
-      let engine = self.engine
-      Task { [weak self] in
-        await engine.stop()
-        self?.clearKeyCaches()
+      self.engineLock.lock()
+      let engine = self.engineStorage
+      self.engineLock.unlock()
+      self.clearKeyCaches()
+      if let engine {
+        Task { await engine.stop() }
       }
     }
 
