@@ -64,10 +64,12 @@ export function querySyncAbortable(
         else finish();
       },
       onclose(reasons) {
-        // nostr-tools hard-close reasons (abstract-relay.js): "relay connection
-        // failed" / "timed out" (never connected), "relay connection closed" +
-        // "websocket closed" (the socket dropped after connecting), and the
-        // pool's "connection skipped by allowConnectingToRelay". A relay that
+        // nostr-tools close reasons, verbatim (abstract-relay.js / pool.js):
+        // "connection failed" / "connection timed out" (optionally "relay "-
+        // prefixed; never connected), "relay connection closed" + "websocket
+        // closed" (the socket dropped after connecting), "auth timed out" (a
+        // NIP-42 challenge never completed), and the pool's "connection skipped
+        // by allowConnectingToRelay". A relay that
         // REFUSED the query — NIP-42 "auth was required and attempted, but
         // failed…", or a CLOSED with the NIP-01 "auth-required:" /
         // "restricted:" prefixes — didn't serve an empty result either.
@@ -79,7 +81,7 @@ export function querySyncAbortable(
           events.length === 0 &&
           reasons.length > 0 &&
           reasons.every((reason) =>
-            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth was required|^auth-required:|^restricted:/.test(
+            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|^auth-required:|^restricted:/.test(
               reason,
             ),
           );

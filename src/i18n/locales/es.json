@@ -2107,7 +2107,9 @@
     "feedbackTabs": {
       "reviews": "Reseñas",
       "comments": "Comentarios",
-      "showMore": "Ver más ({{count}} restantes)"
+      "showMore": "Ver más ({{count}} restantes)",
+      "retry": "Reintentar",
+      "publishFailed": "No se pudo publicar. Inténtalo de nuevo."
     },
     "reviews": {
       "signIn": "Inicia sesión para escribir una reseña",

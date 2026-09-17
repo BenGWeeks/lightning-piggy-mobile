@@ -2107,7 +2107,9 @@
     "feedbackTabs": {
       "reviews": "Reviews",
       "comments": "Comments",
-      "showMore": "Show more ({{count}} remaining)"
+      "showMore": "Show more ({{count}} remaining)",
+      "retry": "Retry",
+      "publishFailed": "Couldn't publish. Please try again."
     },
     "reviews": {
       "signIn": "Sign in to write a review",

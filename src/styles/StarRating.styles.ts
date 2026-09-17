@@ -7,6 +7,9 @@ export const createStarRatingStyles = () =>
     starRow: {
       flexDirection: 'row',
       position: 'relative',
+      // Hug the five glyphs: the row must NOT stretch to the parent's width,
+      // or the overlay's percentage width fills the wrong number of stars.
+      alignSelf: 'flex-start',
     },
     overlay: {
       position: 'absolute',

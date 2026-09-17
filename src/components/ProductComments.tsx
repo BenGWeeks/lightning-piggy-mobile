@@ -14,6 +14,7 @@ import {
   type ProductCommentsStyles as Styles,
 } from '../styles/ProductComments.styles';
 import AuthorInline from './AuthorInline';
+import Toast from './BrandedToast';
 
 interface Props {
   /** The kind-30402 product event the thread is rooted on. */
@@ -90,7 +91,13 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = setTimeout(refetch, 1500);
     } catch {
-      // Swallow — leave the text intact so the user can retry.
+      // The draft is kept; tell the user it didn't go out.
+      Toast.show({
+        type: 'error',
+        text1: t('market.feedbackTabs.publishFailed'),
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
@@ -133,7 +140,17 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       )}
 
       {error ? (
-        <Text style={styles.state}>{t('market.comments.loadError')}</Text>
+        <View>
+          <Text style={styles.state}>{t('market.comments.loadError')}</Text>
+          <TouchableOpacity
+            style={styles.showMore}
+            onPress={refetch}
+            accessibilityRole="button"
+            testID="product-comments-retry"
+          >
+            <Text style={styles.showMoreText}>{t('market.feedbackTabs.retry')}</Text>
+          </TouchableOpacity>
+        </View>
       ) : loading && topLevel.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : topLevel.length === 0 ? (

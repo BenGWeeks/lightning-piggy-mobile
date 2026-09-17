@@ -15,6 +15,7 @@ import {
 } from '../styles/ProductReviews.styles';
 import { StarRating, StarRatingInput } from './StarRating';
 import AuthorInline from './AuthorInline';
+import Toast from './BrandedToast';
 
 interface Props {
   /** Review coordinate `a:30402:<merchant>:<dTag>`. */
@@ -189,7 +190,13 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
       refetchTimer.current = setTimeout(refetch, 1500);
     } catch {
-      // Swallow — a failed publish leaves the form intact to retry.
+      // The form keeps the draft; tell the user it didn't go out.
+      Toast.show({
+        type: 'error',
+        text1: t('market.feedbackTabs.publishFailed'),
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
@@ -219,7 +226,17 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       />
 
       {error ? (
-        <Text style={styles.state}>{t('market.reviews.loadError')}</Text>
+        <View>
+          <Text style={styles.state}>{t('market.reviews.loadError')}</Text>
+          <TouchableOpacity
+            style={styles.showMore}
+            onPress={refetch}
+            accessibilityRole="button"
+            testID="product-reviews-retry"
+          >
+            <Text style={styles.showMoreText}>{t('market.feedbackTabs.retry')}</Text>
+          </TouchableOpacity>
+        </View>
       ) : loading && reviews.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={colors.brandPink} />
       ) : reviews.length === 0 ? (

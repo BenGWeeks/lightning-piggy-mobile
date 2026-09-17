@@ -127,6 +127,19 @@ describe('scoped aggregate connection failures', () => {
     await expect(promise).rejects.toThrow('All relays failed');
   });
 
+  it('accepts every nostr-tools timeout reason, prefixed or not', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b', 'wss://c'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['connection timed out', 'relay connection timed out', 'auth timed out']);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
   it('does not treat a deliberate close as a failure', async () => {
     const { pool, params } = fakePool();
     const promise = querySyncAbortable(

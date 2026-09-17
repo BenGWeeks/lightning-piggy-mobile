@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-
 import { Image } from 'expo-image';
 import {
   BottomSheetModal,
-  BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
@@ -321,7 +321,14 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handle}
       onDismiss={onClose}
     >
-      <BottomSheetView style={styles.container} testID="market-checkout-sheet">
+      {/* Scrollable body: a merchant can publish many shipping options, and a
+          dynamically-sized sheet is capped by the viewport — the list and the
+          Place order button must stay reachable. */}
+      <BottomSheetScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        testID="market-checkout-sheet"
+      >
         {status === 'sent' ? (
           <View style={styles.sentWrap}>
             <View style={styles.sentBadge}>
@@ -530,7 +537,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             </TouchableOpacity>
           </>
         )}
-      </BottomSheetView>
+      </BottomSheetScrollView>
 
       <CountryPickerSheet
         visible={countryPickerVisible}
