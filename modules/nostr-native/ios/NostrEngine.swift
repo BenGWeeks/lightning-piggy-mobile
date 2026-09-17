@@ -27,6 +27,7 @@ actor NostrEngine {
 
   private let emit: @Sendable (String, [String: Any]) -> Void
 
+  private var sessionID = UUID()
   private var client: Client?
   private var notificationTask: Task<Void, Never>?
   private var reconnectTask: Task<Void, Never>?
@@ -63,23 +64,40 @@ actor NostrEngine {
   // reconnect-watch loops. Idempotent-by-replacement: a second start tears
   // down the first engine. Throws on bad input (caller rejects the promise).
   func start(relays: [String], viewerPubkeyHex: String, keys: Keys) async throws {
-    await stop()
+    // Invalidate synchronously, before any suspension: actors are reentrant.
+    let oldClient = resetSession()
+    let sessionID = self.sessionID
+    if let oldClient {
+      await oldClient.disconnect()
+      await oldClient.shutdown()
+    }
+    guard isCurrent(sessionID) else { throw CancellationError() }
     guard keys.publicKey().toHex() == viewerPubkeyHex else {
       throw NostrEngineError.keyMismatch
     }
     let newClient = ClientBuilder().signer(signer: NostrSigner.keys(keys: keys)).build()
-    for url in relays {
-      _ = try await newClient.addRelay(url: RelayUrl.parse(url: url))
+    do {
+      for url in relays {
+        _ = try await newClient.addRelay(url: RelayUrl.parse(url: url))
+        guard isCurrent(sessionID) else { throw CancellationError() }
+      }
+      await newClient.connect()
+      guard isCurrent(sessionID) else { throw CancellationError() }
+    } catch {
+      await newClient.disconnect()
+      await newClient.shutdown()
+      throw error
     }
-    await newClient.connect()
     client = newClient
-    let handler = EngineNotificationHandler(engine: self, client: newClient)
+    let handler = EngineNotificationHandler(engine: self, client: newClient, sessionID: sessionID)
     notificationTask = Task {
-      // Ends when engineStop shuts the pool down (or the pool dies) — same
-      // swallow-and-exit as the Kotlin launch block.
       try? await newClient.handleNotifications(handler: handler)
     }
-    reconnectTask = Task { await self.watchReconnects(client: newClient) }
+    reconnectTask = Task { await self.watchReconnects(client: newClient, sessionID: sessionID) }
+  }
+
+  private func isCurrent(_ sessionID: UUID) -> Bool {
+    self.sessionID == sessionID && !Task.isCancelled
   }
 
   // Open the long-lived wrap subscription. `filterJson` is a standard NIP-01
@@ -97,7 +115,9 @@ actor NostrEngine {
     for id in seedKnownWrapIds {
       _ = addKnownWrapId(id.lowercased())
     }
+    let sessionID = self.sessionID
     let output = try await client.subscribe(filter: Filter.fromJson(json: filterJson), opts: nil)
+    guard isCurrent(sessionID) else { throw CancellationError() }
     return output.id
   }
 
@@ -106,6 +126,15 @@ actor NostrEngine {
   // single-entry native key cache right after — the secret key must not
   // outlive the engine across logout / account switch.
   func stop() async {
+    let oldClient = resetSession()
+    if let oldClient {
+      await oldClient.disconnect()
+      await oldClient.shutdown()
+    }
+  }
+
+  private func resetSession() -> Client? {
+    sessionID = UUID()
     let oldClient = client
     client = nil
     notificationTask?.cancel()
@@ -121,15 +150,13 @@ actor NostrEngine {
     lastFlushAtMs = nil
     knownWrapIds.removeAll()
     knownWrapIdOrder.removeAll()
-    if let oldClient {
-      await oldClient.disconnect()
-      await oldClient.shutdown()
-    }
+    return oldClient
   }
 
   // Called by EngineNotificationHandler for every pool event (pool-verified
   // id + signature, on rust-nostr's tokio threads — never the JS thread).
-  func ingest(event: Event, via client: Client) async {
+  func ingest(event: Event, via client: Client, sessionID: UUID) async {
+    guard isCurrent(sessionID) else { return }
     guard event.kind().asU16() == Self.kindGiftWrap else { return }
     let wrapId = event.id().toHex()
     // Multi-relay duplicates and relay re-streams dedupe here, before paying
@@ -140,6 +167,7 @@ actor NostrEngine {
       // path applies (unwrapWrapNsec returns null).
       return
     }
+    guard isCurrent(sessionID) else { return }
     let senderHex = unwrapped.sender().toHex()
     let rumor = unwrapped.rumor()
     // Sender binding (#830, mirrors bindRumor): the rumor's claimed author
@@ -225,7 +253,7 @@ actor NostrEngine {
   // existing refreshDmInbox to close the reconnect blind window (wraps sent
   // while down can rank below the sub's `limit` because of #469 random
   // timestamps — the pool re-subscribing on reconnect doesn't cover those).
-  private func watchReconnects(client: Client) async {
+  private func watchReconnects(client: Client, sessionID: UUID) async {
     var everConnected: [String: Bool] = [:]
     var sawDrop: [String: Bool] = [:]
     var lastEmitAtMs: UInt64?
@@ -237,6 +265,7 @@ actor NostrEngine {
       }
       var reconnected = false
       let relays = await client.relays()
+      guard isCurrent(sessionID) else { return }
       for (url, relay) in relays {
         let key = url.description
         let connected = relay.status() == RelayStatus.connected
@@ -263,14 +292,16 @@ actor NostrEngine {
 private final class EngineNotificationHandler: HandleNotification, @unchecked Sendable {
   private weak var engine: NostrEngine?
   private let client: Client
+  private let sessionID: UUID
 
-  init(engine: NostrEngine, client: Client) {
+  init(engine: NostrEngine, client: Client, sessionID: UUID) {
     self.engine = engine
     self.client = client
+    self.sessionID = sessionID
   }
 
   func handle(relayUrl: RelayUrl, subscriptionId: String, event: Event) async {
-    await engine?.ingest(event: event, via: client)
+    await engine?.ingest(event: event, via: client, sessionID: sessionID)
   }
 
   func handleMsg(relayUrl: RelayUrl, msg: RelayMessage) async {
