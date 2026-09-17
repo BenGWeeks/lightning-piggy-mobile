@@ -2078,7 +2078,8 @@
     },
     "feedbackTabs": {
       "reviews": "Відгуки",
-      "comments": "Коментарі"
+      "comments": "Коментарі",
+      "showMore": "Показати ще ({{count}} залишилось)"
     },
     "reviews": {
       "signIn": "Увійдіть, щоб написати відгук",

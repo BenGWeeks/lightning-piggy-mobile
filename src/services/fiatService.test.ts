@@ -1,8 +1,10 @@
 import {
   CURRENCIES,
   CURRENCY_LIST,
+  __resetBtcPriceCacheForTests,
   currencySymbol,
   formatFiat,
+  getBtcPrice,
   satsToFiat,
   satsToFiatString,
 } from './fiatService';
@@ -176,5 +178,43 @@ describe('satsToFiatString', () => {
     const out = satsToFiatString(100_000_000, 50_000, 'USD');
     // locale-tolerant: strip grouping/decimal marks (some locales use space/NBSP); 50000.00 → "5000000"
     expect(out.replace(/\D/g, '')).toBe('5000000');
+  });
+});
+
+describe('getBtcPrice stale-rate policy', () => {
+  const ok = (rate: number) =>
+    Promise.resolve({ json: async () => ({ bitcoin: { gbp: rate } }) } as Response);
+  let fetchSpy: jest.SpyInstance;
+  beforeEach(() => {
+    __resetBtcPriceCacheForTests();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchSpy = jest.spyOn(global, 'fetch');
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  it('falls back to an expired cached rate on network failure by default (display path)', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(() => ok(50_000));
+    expect(await getBtcPrice('GBP')).toBe(50_000);
+    jest.setSystemTime(1_000_000 + 6 * 60 * 1000); // past the 5-minute cache
+    fetchSpy.mockRejectedValueOnce(new Error('offline'));
+    expect(await getBtcPrice('GBP')).toBe(50_000);
+  });
+
+  it('returns null instead of an expired rate when allowStale is false (checkout path)', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(() => ok(50_000));
+    expect(await getBtcPrice('GBP', { allowStale: false })).toBe(50_000);
+    jest.setSystemTime(1_000_000 + 6 * 60 * 1000);
+    fetchSpy.mockRejectedValueOnce(new Error('offline'));
+    expect(await getBtcPrice('GBP', { allowStale: false })).toBeNull();
+    // A fresh (< 5 min) cache hit is still served without a fetch.
+    fetchSpy.mockImplementationOnce(() => ok(51_000));
+    expect(await getBtcPrice('GBP', { allowStale: false })).toBe(51_000);
+    expect(await getBtcPrice('GBP', { allowStale: false })).toBe(51_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 });

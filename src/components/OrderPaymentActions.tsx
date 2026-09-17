@@ -92,9 +92,11 @@ function OrderPaymentActions({
       : false;
 
   // Fail closed for missing history or a missing/mismatched invoice amount,
-  // including external-wallet QR/copy affordances. The merchant cannot set
-  // the expected amount; it comes from our outgoing order in this thread.
-  if (!fromMe && !paid && !matchesExpectedOrderAmount(bolt11, expectedAmountSats)) {
+  // including external-wallet QR/copy affordances AND the "Paid" badge: a
+  // settled payment hash reused in a re-sent invoice with a different amount
+  // must not be honoured as paid. The merchant cannot set the expected
+  // amount; it comes from our outgoing order in this thread.
+  if (!fromMe && !matchesExpectedOrderAmount(bolt11, expectedAmountSats)) {
     return (
       <Text style={styles.expiredText} testID={`${testIdPrefix}-order-amount-error-${id}`}>
         {t('orderPaymentActions.amountUnverified')}

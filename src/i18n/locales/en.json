@@ -2106,7 +2106,8 @@
     },
     "feedbackTabs": {
       "reviews": "Reviews",
-      "comments": "Comments"
+      "comments": "Comments",
+      "showMore": "Show more ({{count}} remaining)"
     },
     "reviews": {
       "signIn": "Sign in to write a review",

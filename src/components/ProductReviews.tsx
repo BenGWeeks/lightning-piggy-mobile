@@ -7,6 +7,7 @@ import { useProductReviews } from '../hooks/useProductReviews';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
 import type { ParsedReview } from '../utils/productReviews';
+import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
 import type { Palette } from '../styles/palettes';
 import {
   createProductReviewsStyles,
@@ -159,6 +160,11 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
     onCount?.(aggregate.count);
   }, [aggregate.count, onCount]);
 
+  // Page the rows: the list sits in the product page's outer ScrollView, so a
+  // large review set must not mount every row + profile lookup at once.
+  const [visibleCount, setVisibleCount] = useState(FEEDBACK_PAGE_SIZE);
+  const hiddenCount = Math.max(0, reviews.length - visibleCount);
+
   const ownReview = useMemo(() => {
     if (!pubkey) return undefined;
     // Hex pubkeys are case-insensitive — normalize both sides so an uppercase
@@ -209,7 +215,23 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       ) : reviews.length === 0 ? (
         <Text style={styles.state}>{t('market.reviews.empty')}</Text>
       ) : (
-        reviews.map((r) => <ReviewItem key={r.id || r.pubkey} review={r} styles={styles} />)
+        <>
+          {reviews.slice(0, visibleCount).map((r) => (
+            <ReviewItem key={r.id || r.pubkey} review={r} styles={styles} />
+          ))}
+          {hiddenCount > 0 ? (
+            <TouchableOpacity
+              style={styles.showMore}
+              onPress={() => setVisibleCount((c) => c + FEEDBACK_PAGE_SIZE)}
+              accessibilityRole="button"
+              testID="product-reviews-show-more"
+            >
+              <Text style={styles.showMoreText}>
+                {t('market.feedbackTabs.showMore', { count: hiddenCount })}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
       )}
     </View>
   );

@@ -66,7 +66,21 @@ export const CURRENCIES: readonly string[] = CURRENCY_LIST.map((c) => c.code);
 // no runtime benefit — getBtcPrice already null-checks the response.
 export type FiatCurrency = string;
 
-export async function getBtcPrice(currency: FiatCurrency): Promise<number | null> {
+/**
+ * BTC spot price in `currency`. A rate fetched within the last 5 minutes is
+ * served from cache; otherwise CoinGecko is queried.
+ *
+ * `allowStale` (default true — the display path) lets a network failure fall
+ * back to the last known same-currency rate of ANY age, which is fine for a
+ * balance caption but not for money: pass `false` where the rate prices a
+ * payable amount (Market checkout shipping), so an outage yields `null` and
+ * the caller blocks rather than signing an order at an expired rate.
+ */
+export async function getBtcPrice(
+  currency: FiatCurrency,
+  opts: { allowStale?: boolean } = {},
+): Promise<number | null> {
+  const allowStale = opts.allowStale ?? true;
   if (
     cachedRate &&
     cachedRate.currency === currency &&
@@ -88,8 +102,13 @@ export async function getBtcPrice(currency: FiatCurrency): Promise<number | null
     return null;
   } catch (error) {
     console.warn('Failed to fetch BTC price:', error);
-    return cachedRate?.currency === currency ? cachedRate.rate : null;
+    return allowStale && cachedRate?.currency === currency ? cachedRate.rate : null;
   }
+}
+
+/** Test-only: drop the module-level rate cache. */
+export function __resetBtcPriceCacheForTests(): void {
+  cachedRate = null;
 }
 
 export function satsToFiat(sats: number, btcPrice: number): number {

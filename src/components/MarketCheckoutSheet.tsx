@@ -126,7 +126,8 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     let cancelled = false;
     Promise.all(
       fiat.map((currency) =>
-        getBtcPrice(currency)
+        // No stale fallback: an expired rate must not price a payable total.
+        getBtcPrice(currency, { allowStale: false })
           .then((price) => [currency, price] as const)
           .catch(() => [currency, null] as const),
       ),
@@ -187,7 +188,14 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   // `error` alike. Once ready, only require a country + a compatible option
   // with a priceable sats cost when the merchant actually has options.
   const subtotalSats = product.priceSats * quantity;
-  const totalSats = orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0);
+  // The displayed total is only known once shipping has settled: `ready` with
+  // no options (digital goods) or a priced selection. Until then it renders as
+  // "—" rather than the bare subtotal masquerading as the order total.
+  const shippingSettled =
+    shipping.status === 'ready' && (!hasShipping || selectedShippingSats !== null);
+  const totalSats = shippingSettled
+    ? orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0)
+    : null;
   const shippingBlocksSubmit =
     totalSats === null ||
     shipping.status !== 'ready' ||

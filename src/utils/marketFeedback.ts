@@ -16,6 +16,14 @@ import type { MarketVendor } from '../data/marketVendors';
 import { vendorNostrPubkey } from './marketVendors';
 import { PRODUCT_KIND, productReviewCoord } from './productReviews';
 
+/**
+ * Rows rendered per "page" in the product Reviews / Comments sections. Both
+ * lists live inside the product page's outer ScrollView (no virtualization),
+ * so a 500-event relay result must not mount 500 rows + profile lookups in
+ * one commit — render this many, then a "Show more" affordance.
+ */
+export const FEEDBACK_PAGE_SIZE = 20;
+
 /** Everything needed to query + publish reviews and comments for a product. */
 export interface MarketFeedbackContext {
   /** Seller's Nostr pubkey (hex). */

@@ -18,8 +18,10 @@ interface Props {
    * kind-0 picture, with the curated logo as fallback). Omitted when the
    * caller can't resolve the vendor; the row then shows just the name. */
   vendor?: MarketVendor;
-  /** Tapped to open the product / "Buy" link. */
-  onPress: () => void;
+  /** Tapped to open the product / "Buy" link. Receives the product so callers
+   * can pass ONE stable callback (the card is memoised — a per-row closure
+   * would defeat that and re-render every tile on any parent update). */
+  onPress: (product: MarketProduct) => void;
   /**
    * `rail` — fixed-width vertical card for the Explore horizontal rail.
    * `list` — full-width card for the Market screen list.
@@ -86,7 +88,7 @@ const MarketProductCard: React.FC<Props> = ({
   return (
     <TouchableOpacity
       style={cardStyle}
-      onPress={onPress}
+      onPress={() => onPress(product)}
       accessibilityLabel={t('market.card.accessibility', {
         title: product.title,
         amount: product.priceSats.toLocaleString(),
@@ -128,4 +130,7 @@ const MarketProductCard: React.FC<Props> = ({
   );
 };
 
-export default MarketProductCard;
+// Memoised: grid/rail rows must not re-render (and re-run their vendor-profile
+// lookups) when the parent re-renders for unrelated state such as the filter
+// panel opening (see CLAUDE.md "List rows are React.memo'd").
+export default React.memo(MarketProductCard);

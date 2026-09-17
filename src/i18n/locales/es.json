@@ -2106,7 +2106,8 @@
     },
     "feedbackTabs": {
       "reviews": "Reseñas",
-      "comments": "Comentarios"
+      "comments": "Comentarios",
+      "showMore": "Ver más ({{count}} restantes)"
     },
     "reviews": {
       "signIn": "Inicia sesión para escribir una reseña",

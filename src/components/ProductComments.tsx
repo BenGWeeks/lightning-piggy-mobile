@@ -7,6 +7,7 @@ import { useProductComments } from '../hooks/useProductComments';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
 import type { CommentRoot } from '../utils/productComments';
+import { FEEDBACK_PAGE_SIZE } from '../utils/marketFeedback';
 import {
   createProductCommentsStyles,
   type ProductCommentsStyles as Styles,
@@ -59,6 +60,11 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
   useEffect(() => {
     onCount?.(topLevel.length);
   }, [topLevel.length, onCount]);
+
+  // Page the rows: the list sits in the product page's outer ScrollView, so a
+  // large thread must not mount every row + profile lookup at once.
+  const [visibleCount, setVisibleCount] = useState(FEEDBACK_PAGE_SIZE);
+  const hiddenCount = Math.max(0, topLevel.length - visibleCount);
 
   const submit = async () => {
     if (!content.trim()) return;
@@ -118,7 +124,23 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
       ) : topLevel.length === 0 ? (
         <Text style={styles.state}>{t('market.comments.empty')}</Text>
       ) : (
-        topLevel.map((c) => <CommentItem key={c.id} comment={c} styles={styles} />)
+        <>
+          {topLevel.slice(0, visibleCount).map((c) => (
+            <CommentItem key={c.id} comment={c} styles={styles} />
+          ))}
+          {hiddenCount > 0 ? (
+            <TouchableOpacity
+              style={styles.showMore}
+              onPress={() => setVisibleCount((c) => c + FEEDBACK_PAGE_SIZE)}
+              accessibilityRole="button"
+              testID="product-comments-show-more"
+            >
+              <Text style={styles.showMoreText}>
+                {t('market.feedbackTabs.showMore', { count: hiddenCount })}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
       )}
     </View>
   );

@@ -973,7 +973,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 sellerName={vendor?.name ?? product.sellerName}
                 vendor={vendor}
                 variant="rail"
-                onPress={() => openMarketProduct(product)}
+                onPress={openMarketProduct}
                 testID={`market-product-card-${product.id}`}
               />
             );

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -103,6 +103,16 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const countries = useMemo(() => distinctCountries(baseProducts, sellerOf), [baseProducts]);
   const currencies = useMemo(() => distinctCurrencies(baseProducts), [baseProducts]);
 
+  // Reconcile the category selections with the option lists whenever the
+  // mode-scoped catalogue changes: a merchant / country / currency picked under
+  // one mode may not exist under the next, and a chip that no longer renders
+  // can't be un-selected from its axis — the grid would just sit empty.
+  useEffect(() => {
+    if (merchant !== null && !merchants.includes(merchant)) setMerchant(null);
+    if (country !== null && !countries.includes(country)) setCountry(null);
+    if (currency !== null && !currencies.includes(currency)) setCurrency(null);
+  }, [merchants, countries, currencies, merchant, country, currency]);
+
   const filter = useMemo<MarketFilter>(
     () => ({ query: debouncedQuery, merchant, country, currency }),
     [debouncedQuery, merchant, country, currency],
@@ -160,7 +170,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
             sellerName={vendor?.name ?? item.sellerName}
             vendor={vendor}
             variant="grid"
-            onPress={() => openProduct(item)}
+            onPress={openProduct}
             testID={`market-product-card-${item.id}`}
           />
         </View>

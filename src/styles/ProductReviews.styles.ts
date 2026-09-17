@@ -73,6 +73,8 @@ export const createProductReviewsStyles = (colors: Palette) =>
       paddingVertical: 20,
     },
     loading: { paddingVertical: 24 },
+    showMore: { alignItems: 'center', paddingVertical: 12 },
+    showMoreText: { color: colors.brandPink, fontWeight: '700', fontSize: 14 },
   });
 
 export type ProductReviewsStyles = ReturnType<typeof createProductReviewsStyles>;
