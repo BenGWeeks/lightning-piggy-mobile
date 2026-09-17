@@ -218,6 +218,14 @@ describe('getBtcPrice stale-rate policy', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
+  it('canonicalises the currency key (case / whitespace) so equivalent spellings share a cache entry', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(() => ok(50_000));
+    expect(await getBtcPrice('GBP')).toBe(50_000);
+    expect(await getBtcPrice(' gbp ')).toBe(50_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('caches per currency so a second currency does not evict the first', async () => {
     jest.useFakeTimers({ now: 1_000_000 });
     fetchSpy.mockImplementationOnce(() => ok(50_000));

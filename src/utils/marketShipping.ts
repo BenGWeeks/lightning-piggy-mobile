@@ -172,6 +172,9 @@ export function shippingCostSats(
   btcPriceInCurrency: number | null,
 ): number | null {
   if (!Number.isFinite(amount) || amount < 0) return null;
+  // Zero in any currency is zero sats — a free option must not be blocked by
+  // a missing fiat rate.
+  if (amount === 0) return 0;
   const cur = currency.trim().toUpperCase();
   let sats: number;
   if (cur === 'SATS' || cur === 'SAT') sats = Math.round(amount);

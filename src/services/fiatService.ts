@@ -88,6 +88,8 @@ export async function getBtcPrice(
   opts: { allowStale?: boolean } = {},
 ): Promise<number | null> {
   const allowStale = opts.allowStale ?? true;
+  // Canonical key: callers pass 'GBP', ' gbp ' or 'Gbp' — one cache entry.
+  currency = currency.trim().toUpperCase();
   const cached = cachedRates.get(currency);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.rate;

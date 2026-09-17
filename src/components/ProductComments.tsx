@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator } from 'reac
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useNostr } from '../contexts/NostrContext';
 import { useProductComments } from '../hooks/useProductComments';
 import { usePublishProductFeedback } from '../hooks/usePublishProductFeedback';
 import { relativeTime } from '../utils/relativeTime';
@@ -52,7 +53,13 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount }) =>
   const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
   const { topLevel, loading, error, refetch } = useProductComments(root);
   const { publishComment, publishing, canPublish } = usePublishProductFeedback();
+  const { pubkey } = useNostr();
   const [content, setContent] = useState('');
+  // The account switcher keeps screens mounted — a draft typed under one
+  // identity must never be published by the next (or survive logout).
+  useEffect(() => {
+    setContent('');
+  }, [pubkey]);
 
   // Pending post-publish refetch timer, cleared on unmount so a late fire can
   // never call refetch (and setState) after this component is gone (Copilot

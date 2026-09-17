@@ -131,7 +131,10 @@ const MarketFilterBar: React.FC<Props> = ({
         duration: 200,
         useNativeDriver: true,
       }).start(({ finished }) => {
-        if (finished) setRendered(false);
+        // RN stops the previous animation (finished=false) when a new one
+        // starts on the same value, but guard on the CURRENT open state too so
+        // a stale close callback can never unmount a reopened panel.
+        if (finished && !wasVisible.current) setRendered(false);
       });
     } else if (!visible) {
       // Closed and a width change came through (rotation while closed): keep the

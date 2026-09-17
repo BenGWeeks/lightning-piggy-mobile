@@ -197,6 +197,13 @@ describe('shippingCostFor', () => {
   });
 });
 
+describe('shippingCostSats — free options', () => {
+  it('converts a zero fiat cost to 0 sats without needing a rate', () => {
+    expect(shippingCostSats(0, 'GBP', null)).toBe(0);
+    expect(shippingCostSats(0, 'SATS', null)).toBe(0);
+  });
+});
+
 describe('shippingCostSats', () => {
   it('passes SATS/SAT through and scales BTC by 1e8', () => {
     expect(shippingCostSats(500, 'SATS', null)).toBe(500);

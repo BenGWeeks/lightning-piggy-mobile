@@ -206,7 +206,9 @@ const ProductReviews: React.FC<Props> = ({ coord, onRequestSignIn, onCount }) =>
       ) : null}
 
       <ReviewForm
-        key={coord}
+        // Keyed on the identity too: the account switcher keeps screens
+        // mounted, and a draft must never carry over to another pubkey.
+        key={`${coord}:${pubkey ?? ''}`}
         existing={ownReview}
         styles={styles}
         colors={colors}

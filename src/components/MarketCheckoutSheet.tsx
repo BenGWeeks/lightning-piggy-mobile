@@ -248,6 +248,18 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             setRateAttempt((a) => a + 1);
             return;
           }
+          // Never sign a total the buyer hasn't seen: if the fresh rate moves
+          // the shipping sats, let the sheet re-render with the new total and
+          // require a second tap.
+          if (costSats !== selectedShippingSats) {
+            Toast.show({
+              type: 'info',
+              text1: t('market.checkout.rateUpdated'),
+              position: 'top',
+              visibilityTime: 3000,
+            });
+            return;
+          }
         }
         shippingInput = {
           coordinate: selectedOption.coordinate,

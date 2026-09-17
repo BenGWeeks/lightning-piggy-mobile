@@ -2158,7 +2158,8 @@
         "unsupportedSigner": "Este firmante aún no puede realizar pedidos.",
         "relayUnreachable": "No se pudo contactar con un relay para realizar tu pedido. Inténtalo de nuevo.",
         "generic": "Algo salió mal al realizar tu pedido. Inténtalo de nuevo."
-      }
+      },
+      "rateUpdated": "El coste de envío se ha actualizado. Revisa el nuevo total y vuelve a pulsar Realizar pedido."
     },
     "shipping": {
       "label": "Envío",

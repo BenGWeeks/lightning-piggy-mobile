@@ -2158,7 +2158,8 @@
         "unsupportedSigner": "This signer can't place orders yet.",
         "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
         "generic": "Something went wrong placing your order. Please try again."
-      }
+      },
+      "rateUpdated": "Shipping cost updated. Check the new total and tap Place order again."
     },
     "shipping": {
       "label": "Shipping",

@@ -110,6 +110,23 @@ describe('scoped aggregate connection failures', () => {
     await expect(promise).rejects.toThrow('All relays failed');
   });
 
+  it('treats relay refusals (NIP-42 auth failure, auth-required / restricted CLOSED) as failures', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b', 'wss://c'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose([
+      'auth was required and attempted, but failed with: bad sig',
+      'auth-required: we only serve subscriptions to registered users',
+      'restricted: not allowed',
+    ]);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
   it('does not treat a deliberate close as a failure', async () => {
     const { pool, params } = fakePool();
     const promise = querySyncAbortable(
