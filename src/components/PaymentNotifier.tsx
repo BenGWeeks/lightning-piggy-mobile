@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
+import { getActivePubkey } from '../services/walletStorageService';
 import { firePaymentNotification } from '../services/notificationService';
 
 /**
@@ -36,11 +38,23 @@ export default function PaymentNotifier(): null {
   useEffect(() => {
     if (!lastIncomingPayment) return;
     const { walletId, amountSats, paymentHash, at } = lastIncomingPayment;
+    const owner = getActivePubkey();
+    const notify = (payload: Parameters<typeof firePaymentNotification>[0]) => {
+      const send = () => firePaymentNotification(payload);
+      if (!owner || !paymentHash) return send();
+      return notifyPaymentOnce(
+        owner,
+        walletId,
+        paymentHash.toLowerCase(),
+        send,
+        () => getActivePubkey() === owner,
+      ).catch(() => null);
+    };
     // On-chain receives can lack a payment hash; fall back to a
     // wallet+amount+timestamp key so two distinct same-amount receives to the
     // same wallet (which `walletId:amountSats` alone would collapse) each still
     // notify. `at` is stable per detection, so re-renders dedupe correctly.
-    const dedupeKey = paymentHash ?? `${walletId}:${amountSats}:${at}`;
+    const dedupeKey = `${owner ?? 'signed-out'}:${walletId}:${paymentHash ?? `${amountSats}:${at}`}`;
     if (announced.current.has(dedupeKey)) return;
 
     const tx = wallets
@@ -56,7 +70,7 @@ export default function PaymentNotifier(): null {
         fallbackTimers.current.delete(dedupeKey);
       }
       const zap = tx.zapCounterparty ?? null;
-      void firePaymentNotification({
+      void notify({
         kind: zap ? 'zap' : 'payment',
         amountSats,
         walletId,
@@ -73,7 +87,7 @@ export default function PaymentNotifier(): null {
         fallbackTimers.current.delete(dedupeKey);
         if (announced.current.has(dedupeKey)) return;
         announced.current.add(dedupeKey);
-        void firePaymentNotification({ kind: 'payment', amountSats, walletId });
+        void notify({ kind: 'payment', amountSats, walletId });
       }, TX_SETTLE_GRACE_MS);
       fallbackTimers.current.set(dedupeKey, timer);
     }

@@ -34,7 +34,7 @@
       android:stopWithTask="false">
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="Opt-in realtime direct-message notifications over a user-configured Nostr relay WebSocket, without FCM/push services (the app targets de-googled devices). Runs only while the in-app toggle is enabled; a persistent status notification is always shown." />
+        android:value="Opt-in direct-message notifications and periodic incoming Lightning payment checks over user-configured Nostr relay connections, without FCM/push services (the app targets de-googled devices). Runs only while the in-app toggle is enabled; a persistent status notification is always shown." />
     </service>
 
     <!--

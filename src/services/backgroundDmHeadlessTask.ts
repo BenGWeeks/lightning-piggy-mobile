@@ -25,6 +25,7 @@
  * service ever invokes it), but we guard anyway to keep the contract explicit.
  */
 import { AppRegistry, Platform } from 'react-native';
+import { startBackgroundPaymentWatch } from './backgroundPaymentService';
 import { runBackgroundDmWatch } from './backgroundDmService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { hasNotificationPermission } from './notificationService';
@@ -74,6 +75,7 @@ if (Platform.OS === 'android') {
       await stopForegroundService().catch(() => {});
       return;
     }
+    startBackgroundPaymentWatch();
     return new Promise<void>(() => {
       // Intentionally never resolves — see the comment above. The service is
       // torn down by stopService() (from stopBackgroundDmWatch), which kills

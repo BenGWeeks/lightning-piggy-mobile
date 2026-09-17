@@ -51,6 +51,10 @@
  * for as long as the foreground JS context is alive — already an upgrade over
  * the ~15-min detect-and-ping, just not Doze-immune.
  */
+import {
+  startBackgroundPaymentWatch,
+  stopBackgroundPaymentWatch,
+} from './backgroundPaymentService';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
@@ -551,8 +555,8 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // Expo sticky chip is the only status surface, and the subscription
       // runs inline in this JS context.
       const chipId = await showForegroundServiceNotification({
-        title: 'Lightning Piggy is watching for messages',
-        body: 'Tap to open. This keeps your messages arriving in the background.',
+        title: 'Lightning Piggy is watching for messages and payments',
+        body: 'Tap to open. Watching messages and checking Lightning payments.',
       });
       if (chipId === null) {
         console.warn('[BgDmWatch] not started: foreground chip could not be posted');
@@ -579,6 +583,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
  * persistent chip. Android-only; safe to call when nothing is running.
  */
 export async function stopBackgroundDmWatch(): Promise<void> {
+  stopBackgroundPaymentWatch();
   if (Platform.OS !== 'android') return;
   // Stop the native service first: this tears down the headless JS context
   // (and the subscription running inside it). Best-effort — a transient
@@ -607,8 +612,10 @@ export async function stopBackgroundDmWatch(): Promise<void> {
  */
 export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  stopBackgroundPaymentWatch();
   if (!activeWatch) return;
   await runBackgroundDmWatch();
+  startBackgroundPaymentWatch();
 }
 
 /**

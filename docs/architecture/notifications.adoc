@@ -10,6 +10,16 @@ Messaging or any other Google Play Services component.
 It is the canonical reference for the foundation landed in PR for
 issue https://github.com/BenGWeeks/lightning-piggy-mobile/issues/279[#279].
 
+== Current implementation note
+
+The foundation description below predates the Android foreground service
+(merged in #958). That service now hosts the opt-in background message watch
+and periodic NWC incoming-payment checks. See
+link:../BACKGROUND_PAYMENTS.adoc[Android background payments] for current scope,
+setup, delivery limits and device validation. Payment checks cover Android NWC
+wallets; the foundation background worker itself only checks messages and cache
+activity. Its iOS scheduling estimates below are not a guaranteed delivery bound.
+
 == Why no FCM
 
 Lightning Piggy targets users on de-Googled Android distributions

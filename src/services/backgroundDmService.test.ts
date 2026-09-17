@@ -56,6 +56,10 @@ jest.mock('../utils/nip17Unwrap', () => ({
   partnerFromRumor: (...a: unknown[]) => mockPartnerFromRumor(...a),
   textForRumor: (...a: unknown[]) => mockTextForRumor(...a),
 }));
+jest.mock('./backgroundPaymentService', () => ({
+  startBackgroundPaymentWatch: jest.fn(),
+  stopBackgroundPaymentWatch: jest.fn(),
+}));
 jest.mock('./backgroundDmPreference', () => ({ loadBackgroundDmEnabled: jest.fn() }));
 
 import {
