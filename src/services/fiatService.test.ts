@@ -217,4 +217,31 @@ describe('getBtcPrice stale-rate policy', () => {
     expect(await getBtcPrice('GBP', { allowStale: false })).toBe(51_000);
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
+
+  it('caches per currency so a second currency does not evict the first', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(() => ok(50_000));
+    expect(await getBtcPrice('GBP')).toBe(50_000);
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve({ json: async () => ({ bitcoin: { eur: 58_000 } }) } as Response),
+    );
+    expect(await getBtcPrice('EUR')).toBe(58_000);
+    expect(await getBtcPrice('GBP')).toBe(50_000); // still cached, no refetch
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts a hung request after the timeout and reports no rate', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          (init as RequestInit).signal?.addEventListener('abort', () =>
+            reject(new Error('aborted')),
+          );
+        }),
+    );
+    const pending = getBtcPrice('GBP', { allowStale: false });
+    await jest.advanceTimersByTimeAsync(8_100);
+    expect(await pending).toBeNull();
+  });
 });

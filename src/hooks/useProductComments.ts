@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS, pool } from '../services/nostrService';
@@ -52,36 +53,41 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
   // product actually changes (not on every parent re-render).
   const rootRef = root ? commentRootRef(root) : null;
 
-  useEffect(() => {
-    if (!root) {
-      setEvents([]);
-      setLoading(false);
+  // Focus-armed (repo rule: relay work is armed with useFocusEffect, never a
+  // bare useEffect): the Explore stack uses freezeOnBlur, so a blurred product
+  // page must abort its in-flight query rather than run it to maxWait.
+  useFocusEffect(
+    useCallback(() => {
+      if (!root) {
+        setEvents([]);
+        setLoading(false);
+        setError(false);
+        return;
+      }
+      const controller = new AbortController();
+      setLoading(true);
       setError(false);
-      return;
-    }
-    const controller = new AbortController();
-    setLoading(true);
-    setError(false);
-    querySyncAbortable(pool, readRelays, commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), {
-      maxWait: 5000,
-      rejectOnAllRelaysFailure: true,
-      signal: controller.signal,
-    })
-      .then((evs) => {
-        // The `#A` filter is only a relay-side request — keep only comments
-        // whose ROOT tag is this product before storing/counting them.
-        if (!controller.signal.aborted) setEvents(evs.filter((e) => belongsToRoot(e, root)));
+      querySyncAbortable(pool, readRelays, commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), {
+        maxWait: 5000,
+        rejectOnAllRelaysFailure: true,
+        signal: controller.signal,
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-    // `root` is memoised upstream; `rootRef` is the stable re-run trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootRef, readRelays, tick]);
+        .then((evs) => {
+          // The `#A` filter is only a relay-side request — keep only comments
+          // whose ROOT tag is this product before storing/counting them.
+          if (!controller.signal.aborted) setEvents(evs.filter((e) => belongsToRoot(e, root)));
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setError(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+      return () => controller.abort();
+      // `root` is memoised upstream; `rootRef` is the stable re-run trigger.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rootRef, readRelays, tick]),
+  );
 
   const topLevel = useMemo(() => (root ? topLevelComments(events, root) : []), [events, root]);
   const getDirectReplies = useCallback(

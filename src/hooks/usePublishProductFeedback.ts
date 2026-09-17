@@ -24,7 +24,7 @@ export interface UsePublishProductFeedback {
  * the caller can surface a sign-in prompt.
  */
 export function usePublishProductFeedback(): UsePublishProductFeedback {
-  const { signEvent, relays, isLoggedIn } = useNostr();
+  const { signEvent, relays, isLoggedIn, signerType } = useNostr();
   const [publishing, setPublishing] = useState(false);
 
   const writeRelays = useMemo(() => {
@@ -66,5 +66,9 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
     [publish],
   );
 
-  return { publishReview, publishComment, publishing, canPublish: isLoggedIn };
+  // Gate on a signer that can actually sign (mirrors useMarketCheckout.canOrder):
+  // `signEvent` returns null for an unsupported signer type, which would
+  // otherwise show the compose form and then fail every submit silently.
+  const canPublish = Boolean(isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''));
+  return { publishReview, publishComment, publishing, canPublish };
 }

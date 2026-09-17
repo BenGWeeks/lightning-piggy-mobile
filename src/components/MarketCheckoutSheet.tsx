@@ -12,6 +12,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketCheckoutSheetStyles } from '../styles/MarketCheckoutSheet.styles';
 import { useMarketCheckout } from '../hooks/useMarketCheckout';
+import type { OrderShippingInput } from '../utils/marketOrder';
 import { useShippingOptions } from '../hooks/useShippingOptions';
 import { getBtcPrice } from '../services/fiatService';
 import {
@@ -231,19 +232,35 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     }
     if (shippingBlocksSubmit) return;
     try {
+      let shippingInput: OrderShippingInput | undefined;
+      if (hasShipping && selectedOption && selectedShippingSats !== null) {
+        let costSats: number | null = selectedShippingSats;
+        const cur = selectedOption.currency.trim().toUpperCase();
+        if (cur !== 'SATS' && cur !== 'SAT' && cur !== 'BTC') {
+          // Revalidate at submit: the sheet may have sat open past the rate's
+          // 5-minute TTL, and the signed order total must not use an expired
+          // conversion. Served from cache while fresh, refetched otherwise;
+          // an outage yields null → block and hand off to the retry loop.
+          const fresh = await getBtcPrice(cur, { allowStale: false });
+          setBtcPriceByCurrency((prev) => ({ ...prev, [cur]: fresh }));
+          costSats = shippingCostSats(shippingCostFor(selectedOption), cur, fresh);
+          if (costSats === null) {
+            setRateAttempt((a) => a + 1);
+            return;
+          }
+        }
+        shippingInput = {
+          coordinate: selectedOption.coordinate,
+          costSats,
+          title: selectedOption.title,
+        };
+      }
       await placeOrder({
         vendorPubkey,
         dTag: product.id,
         priceSats: product.priceSats,
         quantity,
-        shipping:
-          hasShipping && selectedOption && selectedShippingSats !== null
-            ? {
-                coordinate: selectedOption.coordinate,
-                costSats: selectedShippingSats,
-                title: selectedOption.title,
-              }
-            : undefined,
+        shipping: shippingInput,
       });
       Toast.show({
         type: 'success',

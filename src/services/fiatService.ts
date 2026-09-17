@@ -1,6 +1,13 @@
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// A pending CoinGecko request must never hang a caller: checkout's rate
+// effect awaits every currency together, so one stuck socket would block
+// order placement (and its bounded retry) indefinitely.
+const FETCH_TIMEOUT_MS = 8000;
 
-let cachedRate: { currency: string; rate: number; timestamp: number } | null = null;
+// Keyed by currency: checkout can price shipping in several currencies within
+// one 5-minute window, and a single slot would evict each one's fresh rate
+// (and its stale fallback) as soon as another currency was fetched.
+const cachedRates = new Map<string, { rate: number; timestamp: number }>();
 
 // Curated fiat list intersected with CoinGecko's `simple/supported_vs_currencies`
 // endpoint. Verified 2026-05-07: every code below is present in the CoinGecko
@@ -81,34 +88,36 @@ export async function getBtcPrice(
   opts: { allowStale?: boolean } = {},
 ): Promise<number | null> {
   const allowStale = opts.allowStale ?? true;
-  if (
-    cachedRate &&
-    cachedRate.currency === currency &&
-    Date.now() - cachedRate.timestamp < CACHE_DURATION
-  ) {
-    return cachedRate.rate;
+  const cached = cachedRates.get(currency);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.rate;
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const response = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currency.toLowerCase()}`,
+      { signal: controller.signal },
     );
     const data = await response.json();
     const rate = data.bitcoin?.[currency.toLowerCase()];
     if (rate) {
-      cachedRate = { currency, rate, timestamp: Date.now() };
+      cachedRates.set(currency, { rate, timestamp: Date.now() });
       return rate;
     }
     return null;
   } catch (error) {
     console.warn('Failed to fetch BTC price:', error);
-    return allowStale && cachedRate?.currency === currency ? cachedRate.rate : null;
+    return allowStale && cached ? cached.rate : null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 /** Test-only: drop the module-level rate cache. */
 export function __resetBtcPriceCacheForTests(): void {
-  cachedRate = null;
+  cachedRates.clear();
 }
 
 export function satsToFiat(sats: number, btcPrice: number): number {

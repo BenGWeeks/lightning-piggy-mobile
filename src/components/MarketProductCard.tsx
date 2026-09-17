@@ -89,6 +89,7 @@ const MarketProductCard: React.FC<Props> = ({
     <TouchableOpacity
       style={cardStyle}
       onPress={() => onPress(product)}
+      accessibilityRole="button"
       accessibilityLabel={t('market.card.accessibility', {
         title: product.title,
         amount: product.priceSats.toLocaleString(),

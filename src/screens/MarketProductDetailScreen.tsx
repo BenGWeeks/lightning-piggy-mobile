@@ -34,8 +34,9 @@ interface Props {
 
 /**
  * Full Market PRODUCT page opened from a grid tile: product image, title,
- * price, seller (avatar + name), description and a buy affordance (opens the
- * seller's shop), followed by Nostr Reviews (kind 31555) + Comments (kind
+ * price, seller (avatar + name), description and a buy affordance (the in-app
+ * checkout sheet for sellers with a Nostr identity; the seller's shop URL as
+ * the fallback otherwise), followed by Nostr Reviews (kind 31555) + Comments (kind
  * 1111) in an underlined tabbed section — mirroring the companion website's
  * product page. Reviews/comments are shown only when the seller has a Nostr
  * identity to root them on.

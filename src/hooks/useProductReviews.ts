@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS, pool } from '../services/nostrService';
@@ -43,33 +44,39 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     return r.length > 0 ? r : DEFAULT_RELAYS;
   }, [relays]);
 
-  useEffect(() => {
-    if (!coord) {
-      setEvents([]);
-      setLoading(false);
+  // Focus-armed (repo rule: screens arm relay work with useFocusEffect, never
+  // a bare useEffect): the Explore stack uses freezeOnBlur, so a blurred
+  // product page must abort its in-flight query rather than let it run to
+  // its maxWait; refocus re-runs the (cheap, bounded) query.
+  useFocusEffect(
+    useCallback(() => {
+      if (!coord) {
+        setEvents([]);
+        setLoading(false);
+        setError(false);
+        return;
+      }
+      const controller = new AbortController();
+      setLoading(true);
       setError(false);
-      return;
-    }
-    const controller = new AbortController();
-    setLoading(true);
-    setError(false);
-    querySyncAbortable(
-      pool,
-      readRelays,
-      { kinds: [REVIEW_KIND], '#d': [coord], limit: 500 },
-      { maxWait: 4000, signal: controller.signal, rejectOnAllRelaysFailure: true },
-    )
-      .then((evs) => {
-        if (!controller.signal.aborted) setEvents(evs);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setError(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [coord, readRelays, tick]);
+      querySyncAbortable(
+        pool,
+        readRelays,
+        { kinds: [REVIEW_KIND], '#d': [coord], limit: 500 },
+        { maxWait: 4000, signal: controller.signal, rejectOnAllRelaysFailure: true },
+      )
+        .then((evs) => {
+          if (!controller.signal.aborted) setEvents(evs);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setError(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+      return () => controller.abort();
+    }, [coord, readRelays, tick]),
+  );
 
   // Exact `d` scoping: the `#d` filter is only a relay-side request, so a
   // review a relay returns for another product must not count here.
