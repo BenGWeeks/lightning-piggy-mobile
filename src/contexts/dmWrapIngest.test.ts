@@ -97,8 +97,10 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
       skipKey: 'skip_key',
     });
     expect(res.entries).toEqual([
-      { id: 'w1', partnerPubkey: ALICE, fromMe: false, createdAt: 100, text: `msg-from-${ALICE.slice(0, 4)}`, renderText: `msg-from-${ALICE.slice(0, 4)}`, wireKind: 14 }, // prettier-ignore
+      { id: 'w1', partnerPubkey: ALICE, fromMe: false, createdAt: 100, text: `msg-from-${ALICE.slice(0, 4)}`, wireKind: 14 }, // prettier-ignore
     ]);
+    // A plain DM's preview IS its render text — no duplicate string stored.
+    expect(res.entries[0]).not.toHaveProperty('renderText');
     expect(res.stored).toBe(1);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0]).toEqual({

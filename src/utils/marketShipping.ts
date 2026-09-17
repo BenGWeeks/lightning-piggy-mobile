@@ -65,9 +65,11 @@ const num = (raw: unknown): number | null => {
 
 /**
  * Parse a kind-30406 event into a {@link ShippingOption}, or null when it
- * isn't one (wrong kind / missing `d`). Country values are collected from
- * EVERY `country` tag (each may carry one or many values), upper-cased and
- * deduped; an event with no country tags ships worldwide (empty array).
+ * isn't one (wrong kind / missing `d` / bad price). Country values are
+ * collected from EVERY `country` tag (each may carry one or many values),
+ * upper-cased and deduped; an event with NO country tags ships worldwide
+ * (empty array), while a country tag that carries no usable value is
+ * malformed and rejects the option (null).
  */
 export function parseShippingOptionEvent(ev: ShippingOptionEventInput): ShippingOption | null {
   if (ev.kind !== SHIPPING_OPTION_KIND || !Array.isArray(ev.tags)) return null;
@@ -87,12 +89,18 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
   // alpha-3 → alpha-2 and upper-cases anything else, so matching is on
   // normalised codes rather than string luck.
   const countries = new Set<string>();
+  let hasCountryTag = false;
   for (const t of ev.tags) {
     if (t[0] !== 'country') continue;
+    hasCountryTag = true;
     for (const v of t.slice(1)) {
       if (typeof v === 'string' && v.trim()) countries.add(toAlpha2(v));
     }
   }
+  // ABSENT country tags = worldwide. A PRESENT tag that yields no usable code
+  // (`['country']`, `['country', '']`) is a malformed restriction — reject it
+  // rather than collapse to [] and offer the option to every destination.
+  if (hasCountryTag && countries.size === 0) return null;
 
   return {
     coordinate: `${SHIPPING_OPTION_KIND}:${ev.pubkey}:${dTag}`,

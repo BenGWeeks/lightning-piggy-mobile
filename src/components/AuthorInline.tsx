@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import * as nip19 from 'nostr-tools/nip19';
@@ -34,7 +34,11 @@ const AuthorInline: React.FC<Props> = ({ pubkey, size = 28, testID }) => {
   const styles = useMemo(() => createAuthorInlineStyles(colors), [colors]);
   const { name, picture } = usePubkeyProfile(pubkey);
   const display = name && name.trim().length > 0 ? name : shortNpub(pubkey);
-  const uri = picture && isSupportedImageUrl(picture) ? picture : null;
+  // A dead kind-0 `picture` (404 / unreachable host) must fall through to the
+  // initial tile rather than a blank circle. Keyed on the URL so a profile
+  // update to a new picture gets a fresh attempt.
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const uri = picture && isSupportedImageUrl(picture) && picture !== failedUri ? picture : null;
   const dimension = { width: size, height: size, borderRadius: size / 2 };
 
   const initial = useMemo(() => display.charAt(0).toUpperCase(), [display]);
@@ -45,6 +49,7 @@ const AuthorInline: React.FC<Props> = ({ pubkey, size = 28, testID }) => {
         {uri ? (
           <Image
             source={{ uri }}
+            onError={() => setFailedUri(uri)}
             style={dimension}
             cachePolicy="memory-disk"
             recyclingKey={uri}

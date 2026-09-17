@@ -19,3 +19,21 @@ test('genuinely absent shipping remains supported with a bounded query', async (
     expect.anything(),
   );
 });
+test('drops options a relay returns from a pubkey other than the merchant', async () => {
+  (querySyncAbortable as jest.Mock).mockResolvedValue([
+    { kind: 30406, pubkey: 'b'.repeat(64), created_at: 1, tags: [['d', 'evil'], ['price', '999', 'GBP']] }, // prettier-ignore
+    { kind: 30406, pubkey: input.merchantPubkey, created_at: 1, tags: [['d', 'std'], ['price', '4.5', 'GBP']] }, // prettier-ignore
+  ]);
+  const options = await fetchShippingOptions(input);
+  expect(options.map((o) => o.dTag)).toEqual(['std']);
+});
+test('an all-relay connection failure is an error, never "no shipping needed"', async () => {
+  (querySyncAbortable as jest.Mock).mockRejectedValue(new Error('All relays failed to connect'));
+  await expect(fetchShippingOptions(input)).rejects.toThrow('All relays failed');
+  expect(querySyncAbortable).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.anything(),
+    expect.anything(),
+    expect.objectContaining({ rejectOnAllRelaysFailure: true }),
+  );
+});

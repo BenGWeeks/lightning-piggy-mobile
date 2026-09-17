@@ -95,6 +95,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       // Pre-select the device-locale country (spec: user can change it).
       setCountryCode(deviceCountryCode());
       setSelectedCoordinate(null);
+      // Fresh spot rates per open: a failed quote (null) must retry, and a
+      // rate older than fiatService's cache window must not price shipping.
+      setBtcPriceByCurrency({});
       reset();
       sheetRef.current?.present();
     } else {

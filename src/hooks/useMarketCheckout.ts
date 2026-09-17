@@ -1,11 +1,10 @@
 import { useCallback, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
-import { NSEC_KEY } from '../contexts/nostrAuthKeys';
+import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
 import {
   buildMarketOrder,
   type MarketOrderLine,
@@ -144,9 +143,17 @@ export function useMarketCheckout(): UseMarketCheckout {
         let sendError: string | undefined;
 
         if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) throw new CheckoutError('signingKeyMissing', 'Signing key not found');
-          const { secretKey } = nostrService.decodeNsec(nsec);
+          // Pubkey-checked read: the shared SecureStore slot must decode to the
+          // ACTIVE identity, or the rumor (authored as `pubkey`) would be sealed
+          // and published with a different key — a stale/corrupt slot or a mid-
+          // switch race must fail closed rather than send a mismatched order.
+          const secretKey = await getMemoisedSecretKey(pubkey);
+          if (!secretKey) {
+            throw new CheckoutError(
+              'signingKeyMissing',
+              'Signing key not found or does not match the active identity',
+            );
+          }
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,

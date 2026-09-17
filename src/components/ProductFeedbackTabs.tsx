@@ -1,10 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { Star, MessageSquare } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { CommentRoot } from '../utils/productComments';
-import type { Palette } from '../styles/palettes';
+import { createProductFeedbackTabsStyles } from '../styles/ProductFeedbackTabs.styles';
 import ProductReviews from './ProductReviews';
 import ProductComments from './ProductComments';
 
@@ -21,14 +21,16 @@ type Tab = 'reviews' | 'comments';
 
 /**
  * Underlined Reviews / Comments tabs (mirroring the companion website's
- * product feedback tabs) with live counts + icons. Both sections stay mounted
- * (the inactive one hidden) so switching tabs never refetches or loses an
- * in-progress compose, and the counts stay live in the tab labels.
+ * product feedback tabs) with live counts + icons. Reviews (the default tab)
+ * mounts immediately; Comments is lazy-mounted on first open so landing on the
+ * product page fires one relay query, not two. Once a section has mounted it
+ * stays mounted (hidden when inactive), so switching back never refetches or
+ * loses an in-progress compose, and the counts stay live in the tab labels.
  */
 const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSignIn }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createProductFeedbackTabsStyles(colors), [colors]);
   const [tab, setTab] = useState<Tab>('reviews');
   const [reviewCount, setReviewCount] = useState(0);
   const [commentCount, setCommentCount] = useState(0);
@@ -94,47 +96,5 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    tabBar: {
-      flexDirection: 'row',
-      gap: 24,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.divider,
-      marginBottom: 16,
-    },
-    tab: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingBottom: 10,
-      paddingTop: 4,
-      marginBottom: -1,
-      borderBottomWidth: 2,
-      borderBottomColor: 'transparent',
-    },
-    tabActive: {
-      borderBottomColor: colors.brandPink,
-    },
-    tabLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    tabLabelActive: {
-      color: colors.textHeader,
-      fontWeight: '800',
-    },
-    body: {
-      marginTop: 4,
-    },
-    visible: {
-      display: 'flex',
-    },
-    hidden: {
-      display: 'none',
-    },
-  });
 
 export default ProductFeedbackTabs;

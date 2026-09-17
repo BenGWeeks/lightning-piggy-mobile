@@ -62,6 +62,21 @@ describe('parseShippingOptionEvent', () => {
     expect(option?.countries).toEqual([]);
   });
 
+  it('rejects a present-but-empty country tag instead of treating it as worldwide', () => {
+    expect(
+      parseShippingOptionEvent(makeEvent([['d', 'bad'], ['price', '1', 'GBP'], ['country']])),
+    ).toBeNull();
+    expect(
+      parseShippingOptionEvent(
+        makeEvent([
+          ['d', 'bad2'],
+          ['price', '1', 'GBP'],
+          ['country', ' '],
+        ]),
+      ),
+    ).toBeNull();
+  });
+
   it('normalises alpha-3 country codes to alpha-2 (Robotechy publishes GBR/IRL/DEU…)', () => {
     // Mirrors Robotechy's live "UK & Ireland" option shape exactly.
     const option = parseShippingOptionEvent(

@@ -29,14 +29,22 @@ export async function fetchShippingOptions(input: {
 }): Promise<ShippingOption[]> {
   const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
   trackRelays(relays);
+  const merchantPubkey = input.merchantPubkey.trim().toLowerCase();
   const events = await querySyncAbortable(
     pool,
     relays,
-    { kinds: [SHIPPING_OPTION_KIND], authors: [input.merchantPubkey], limit: 100 },
-    { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal },
+    { kinds: [SHIPPING_OPTION_KIND], authors: [merchantPubkey], limit: 100 },
+    // An unreachable relay set must surface as an ERROR (retry row, submit
+    // blocked) — never resolve to [] and read as "digital goods, no shipping".
+    { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal, rejectOnAllRelaysFailure: true },
   );
+  // The `authors` filter is only a relay-side request; a misbehaving relay can
+  // still hand back a valid-looking 30406 from another pubkey, whose price
+  // would otherwise become a shipping charge on THIS merchant's order. Drop
+  // anything not signed by the merchant before parsing.
+  const own = events.filter((ev) => ev.pubkey.toLowerCase() === merchantPubkey);
   // Invalid options must not turn into an empty list ("no shipping needed").
-  const parsed = events.map(parseShippingOptionEvent);
+  const parsed = own.map(parseShippingOptionEvent);
   if (parsed.some((option) => option === null)) {
     throw new Error('Merchant returned invalid shipping options');
   }

@@ -3,8 +3,10 @@ import { useMarketCheckout } from './useMarketCheckout';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
+import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
 
 jest.mock('../contexts/NostrContext', () => ({ useNostr: jest.fn() }));
+jest.mock('../contexts/nostrSecretKeyCache', () => ({ getMemoisedSecretKey: jest.fn() }));
 jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 jest.mock('../services/amberService', () => ({}));
 jest.mock('../services/nostrConnectService', () => ({
@@ -14,6 +16,7 @@ jest.mock('../services/nostrConnectService', () => ({
 jest.mock('../services/nostrService', () => ({
   DEFAULT_RELAYS: ['wss://relay.example'],
   sendNip17ToManyWithSigner: jest.fn(),
+  sendNip17ToManyWithNsec: jest.fn(),
 }));
 
 const buyer = 'a'.repeat(64);
@@ -90,4 +93,44 @@ test('a self-wrap success with a failed merchant wrap does not report the order 
     await expect(result.current.placeOrder(input)).rejects.toThrow('vendor publish failed');
   });
   expect(result.current.status).toBe('error');
+});
+
+describe('nsec checkout', () => {
+  const secretKey = new Uint8Array(32).fill(7);
+  beforeEach(() => {
+    (useNostr as jest.Mock).mockReturnValue({
+      pubkey: buyer,
+      isLoggedIn: true,
+      signerType: 'nsec',
+      relays: [],
+    });
+    (nostrService.sendNip17ToManyWithNsec as jest.Mock).mockResolvedValue({
+      wrapsPublished: 2,
+      errors: [],
+    });
+  });
+
+  test('seals with the secret key that belongs to the active pubkey', async () => {
+    (getMemoisedSecretKey as jest.Mock).mockResolvedValue(secretKey);
+    const { result } = renderHook(() => useMarketCheckout());
+    await act(async () => {
+      await result.current.placeOrder(input);
+    });
+    expect(getMemoisedSecretKey).toHaveBeenCalledWith(buyer);
+    expect(nostrService.sendNip17ToManyWithNsec).toHaveBeenCalledWith(
+      expect.objectContaining({ senderSecretKey: secretKey, recipientPubkeys: [vendor] }),
+    );
+    expect(result.current.status).toBe('sent');
+  });
+
+  test('fails closed when the stored key does not belong to the active pubkey', async () => {
+    (getMemoisedSecretKey as jest.Mock).mockResolvedValue(null);
+    const { result } = renderHook(() => useMarketCheckout());
+    await act(async () => {
+      await expect(result.current.placeOrder(input)).rejects.toThrow('does not match');
+    });
+    expect(nostrService.sendNip17ToManyWithNsec).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toBe('market.checkout.errors.signingKeyMissing');
+  });
 });
