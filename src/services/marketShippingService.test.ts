@@ -45,3 +45,9 @@ test('ignores unrelated same-author events of another kind instead of failing ch
   const options = await fetchShippingOptions(input);
   expect(options.map((o) => o.dTag)).toEqual(['std']);
 });
+test('a response holding only another pubkey\'s 30406s fails closed instead of reading as "no shipping"', async () => {
+  (querySyncAbortable as jest.Mock).mockResolvedValue([
+    { kind: 30406, pubkey: 'b'.repeat(64), created_at: 1, tags: [['d', 'evil'], ['price', '999', 'GBP']] }, // prettier-ignore
+  ]);
+  await expect(fetchShippingOptions(input)).rejects.toThrow('another pubkey');
+});

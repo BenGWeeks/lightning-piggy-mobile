@@ -203,8 +203,12 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     : null;
   // Live selection, readable after an await: the submit handler captured a
   // render-time selection and must not sign a different one.
-  const liveSelectionRef = useRef({ coordinate: selectedCoordinate, country: countryCode });
-  liveSelectionRef.current = { coordinate: selectedCoordinate, country: countryCode };
+  const liveSelectionRef = useRef({
+    coordinate: selectedCoordinate,
+    country: countryCode,
+    quantity,
+  });
+  liveSelectionRef.current = { coordinate: selectedCoordinate, country: countryCode, quantity };
 
   // Submit gate (spec §6): until shipping has settled to `ready` we can't know
   // whether shipping is required, so block for every non-ready state —
@@ -259,7 +263,8 @@ const MarketCheckoutSheet: React.FC<Props> = ({
           // queued tap can still land) → don't sign the captured one.
           if (
             liveSelectionRef.current.coordinate !== selectedOption.coordinate ||
-            liveSelectionRef.current.country !== countryCode
+            liveSelectionRef.current.country !== countryCode ||
+            liveSelectionRef.current.quantity !== quantity
           ) {
             return;
           }
@@ -429,7 +434,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <TouchableOpacity
                   style={[styles.stepButton, quantity <= 1 && styles.stepButtonDisabled]}
                   onPress={() => setQuantity((q) => Math.max(1, q - 1))}
-                  disabled={quantity <= 1}
+                  disabled={quantity <= 1 || submitting || isPlacing}
                   accessibilityRole="button"
                   accessibilityLabel={t('market.checkout.decreaseQuantity')}
                   testID="market-checkout-qty-minus"
@@ -446,7 +451,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <TouchableOpacity
                   style={[styles.stepButton, quantity >= MAX_QTY && styles.stepButtonDisabled]}
                   onPress={() => setQuantity((q) => Math.min(MAX_QTY, q + 1))}
-                  disabled={quantity >= MAX_QTY}
+                  disabled={quantity >= MAX_QTY || submitting || isPlacing}
                   accessibilityRole="button"
                   accessibilityLabel={t('market.checkout.increaseQuantity')}
                   testID="market-checkout-qty-plus"

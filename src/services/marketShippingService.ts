@@ -44,9 +44,14 @@ export async function fetchShippingOptions(input: {
   // anything not signed by the merchant before parsing.
   // Likewise `kinds` — an unrelated merchant event of another kind is simply
   // not a shipping option, not a malformed one.
-  const own = events.filter(
-    (ev) => ev.kind === SHIPPING_OPTION_KIND && ev.pubkey.toLowerCase() === merchantPubkey,
-  );
+  const shippingEvents = events.filter((ev) => ev.kind === SHIPPING_OPTION_KIND);
+  const own = shippingEvents.filter((ev) => ev.pubkey.toLowerCase() === merchantPubkey);
+  // A response that holds 30406s but NONE from the merchant isn't "the
+  // merchant publishes no options" — it's a relay serving someone else's.
+  // Fail closed rather than let it read as a digital-goods checkout.
+  if (own.length === 0 && shippingEvents.length > 0) {
+    throw new Error('Relay returned shipping options from another pubkey only');
+  }
   // Invalid options must not turn into an empty list ("no shipping needed").
   const parsed = own.map(parseShippingOptionEvent);
   if (parsed.some((option) => option === null)) {
