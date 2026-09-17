@@ -5,9 +5,10 @@
 // (CocoaPods prepare_command never runs for development pods, so postinstall is
 // the only reliable hook that precedes pod install on EAS Mac workers).
 // The artifacts are gitignored; the podspec raises with a pointer here if missing.
-// Upgrade path: bump VERSION + both hashes below, keeping the Android Maven
+// Upgrade path: bump VERSION + the artifact/content hashes below, keeping the Android Maven
 // version in modules/nostr-native/android/build.gradle in lockstep.
 
+import { frameworkContentHash } from './native-sdk-manifest.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +22,9 @@ const VERSION = '0.44.2';
 const XCFRAMEWORK_URL = `https://github.com/rust-nostr/nostr-sdk-swift/releases/download/${VERSION}/nostr_sdkFFI.xcframework.zip`;
 // Pinned from nostr-sdk-swift's Package.swift binaryTarget checksum at tag 0.44.2.
 const XCFRAMEWORK_SHA256 = '3a3d527eea38a1f78b82ea4e3637445d07ce9fc861e99f660f6bb00a75d48f05';
+// Deterministic manifest hash of the extracted checksum-verified release ZIP.
+const XCFRAMEWORK_CONTENT_SHA256 =
+  'd3500df862fdedf52b562cb52f6f4b1c150710d7aacc9d3767de2841e63e68ab';
 const SWIFT_URL = `https://raw.githubusercontent.com/rust-nostr/nostr-sdk-swift/${VERSION}/Sources/NostrSDK/NostrSDK.swift`;
 const SWIFT_SHA256 = '487bcd3fa99dc453c144a7d8782d7004bf5794c1f10402c3957e89230ccc54f2';
 
@@ -59,7 +63,16 @@ async function ensureSwiftSource() {
 }
 
 async function ensureXcframework() {
-  if (existsSync(markerPath) && readFileSync(markerPath, 'utf8').trim() === marker) return false;
+  try {
+    if (
+      existsSync(markerPath) &&
+      readFileSync(markerPath, 'utf8').trim() === marker &&
+      frameworkContentHash(frameworkDir) === XCFRAMEWORK_CONTENT_SHA256
+    )
+      return false;
+  } catch {
+    // Missing, unreadable or replaced files invalidate the cached SDK.
+  }
   console.log(`[nostr-sdk-swift] downloading nostr_sdkFFI.xcframework ${VERSION} (~39 MB)…`);
   const buf = await download(XCFRAMEWORK_URL);
   const got = sha256(buf);
@@ -74,6 +87,9 @@ async function ensureXcframework() {
     const unpacked = join(tmp, 'nostr_sdkFFI.xcframework');
     if (!existsSync(join(unpacked, 'Info.plist'))) {
       throw new Error('unexpected zip layout: nostr_sdkFFI.xcframework/Info.plist not found');
+    }
+    if (frameworkContentHash(unpacked) !== XCFRAMEWORK_CONTENT_SHA256) {
+      throw new Error('extracted xcframework content manifest mismatch');
     }
     rmSync(frameworkDir, { recursive: true, force: true });
     renameSync(unpacked, frameworkDir);
