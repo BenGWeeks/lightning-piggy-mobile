@@ -52,6 +52,7 @@ import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
 import { useMapPins } from '../hooks/useMapPins';
+import { useDebouncedMapBounds } from '../hooks/useDebouncedMapBounds';
 import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
 import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
@@ -132,8 +133,6 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   // strip that used to sit under the map and ate vertical space.
   const [legendVisible, setLegendVisible] = useState(false);
   const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastBbox = useRef<Bbox | null>(null);
 
   // The full-screen map looks cramped under the bottom tab bar, and the
   // tabs steal vertical space from the WebView. Hide them while we're
@@ -244,8 +243,6 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         // few drive-away pins on first paint. They can zoom in from
         // here; Leaflet refetches on `moveend`/`zoomend` via the
         // bounds bridge.
-        const initBbox = bboxAround(lat, lon, 0.3);
-        lastBbox.current = initBbox;
         // Queue the viewport BEFORE awaiting BTC Map — the WebView
         // bridge fires `ready` in parallel with the (potentially slow)
         // merchant fetch, and we want the map centred on the user
@@ -346,28 +343,11 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, []);
 
-  // Bounds-change handler. 500 ms after the camera settles we re-fetch
-  // the merchant set for the visible bbox and write the centre back to
-  // AsyncStorage so reopening the screen starts where the user left off.
-  const onLibreBounds = useCallback(
-    (bbox: { minLat: number; maxLat: number; minLon: number; maxLon: number }) => {
-      const next: Bbox = bbox;
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(() => {
-        lastBbox.current = next;
-        setViewportCentre(bboxCentre(next));
-        refreshPlaces(next);
-        // Re-key the caches sub for the new viewport (#1065) — no-op unless the tiles changed.
-        resubscribeForPrefixes(geohashPrefixesForBbox(next));
-        // Viewport-persist on every camera-settle is on the to-do list
-        // (#552 follow-up — needs a matching hydrate effect on mount,
-        // wire through to Camera.initialViewState). Removed the stub
-        // write that Copilot caught — no point persisting if nothing
-        // reads it back.
-      }, 500);
-    },
-    [refreshPlaces, resubscribeForPrefixes],
-  );
+  const onLibreBounds = useDebouncedMapBounds((next) => {
+    setViewportCentre(bboxCentre(next));
+    void refreshPlaces(next);
+    resubscribeForPrefixes(geohashPrefixesForBbox(next));
+  });
 
   // Back target: when opened from a DM live-location card the route carries
   // `returnTo`, so return to that conversation; otherwise pop the stack —
