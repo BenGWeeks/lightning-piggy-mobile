@@ -4,6 +4,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
+import * as nostrConnectService from '../services/nostrConnectService';
 import { NSEC_KEY } from '../contexts/nostrAuthKeys';
 import {
   buildMarketOrder,
@@ -42,7 +43,7 @@ class CheckoutError extends Error {
 // publishes it, reusing the SAME nostrService NIP-17 send primitives the DM
 // composer uses (`sendNip17ToManyWithNsec` / `WithSigner`). It deliberately does
 // NOT route through NostrContext's exposed API — that file is at its size
-// baseline (#703) and must not grow — so the nsec/amber dispatch here mirrors
+// baseline (#703) and must not grow — so the signer dispatch here mirrors
 // contexts/useMessageSend rather than adding a new context method.
 //
 // `wrapManyEvents` also wraps a copy to the sender, so the placed order echoes
@@ -154,23 +155,24 @@ export function useMarketCheckout(): UseMarketCheckout {
           });
           delivered = result.delivery.delivered;
           sendError = result.errors[0];
-        } else if (signerType === 'amber') {
+        } else if (signerType === 'amber' || signerType === 'nip46') {
+          const signer = signerType === 'amber' ? amberService : nostrConnectService;
           const result = await nostrService.sendNip17ToManyWithSigner({
             senderPubkey: pubkey,
             rumor,
             recipientPubkeys: [vendorPubkey],
             relays: targetRelays,
             signerNip44Encrypt: (plain, recipient) =>
-              amberService.requestNip44Encrypt(plain, recipient, pubkey),
+              signer.requestNip44Encrypt(plain, recipient, pubkey),
             signerSignSeal: async (unsignedSeal) => {
               // Keep pubkey on the seal — Amber misroutes kind=13 sign_event
               // intents without it (#356). Same rule as the DM send path.
-              const { event: signedEventJson } = await amberService.requestEventSignature(
+              const { event: signedEventJson } = await signer.requestEventSignature(
                 JSON.stringify(unsignedSeal),
                 '',
                 pubkey,
               );
-              if (!signedEventJson) throw new Error('Amber returned an empty signed seal');
+              if (!signedEventJson) throw new Error('Signer returned an empty signed seal');
               return JSON.parse(signedEventJson);
             },
           });
@@ -205,7 +207,9 @@ export function useMarketCheckout(): UseMarketCheckout {
     status,
     error,
     isPlacing: status === 'placing',
-    canOrder: Boolean(pubkey && isLoggedIn),
+    canOrder: Boolean(
+      pubkey && isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''),
+    ),
     placeOrder,
     reset,
   };
