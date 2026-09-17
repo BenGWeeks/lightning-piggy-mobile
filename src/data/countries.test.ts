@@ -1,4 +1,4 @@
-import { COUNTRIES, countryName, isKnownCountry, toAlpha2 } from './countries';
+import { deviceCountryCode, COUNTRIES, countryName, isKnownCountry, toAlpha2 } from './countries';
 
 describe('COUNTRIES', () => {
   it('codes are unique, uppercase ISO 3166-1 alpha-2', () => {
@@ -33,4 +33,32 @@ describe('COUNTRIES', () => {
     expect(isKnownCountry('de')).toBe(true);
     expect(isKnownCountry('ZZ')).toBe(false);
   });
+});
+
+test('includes all 249 distinct ISO destinations', () => {
+  expect(COUNTRIES).toHaveLength(249);
+  expect(new Set(COUNTRIES.map((country) => country.code)).size).toBe(249);
+  expect(new Set(COUNTRIES.map((country) => country.alpha3)).size).toBe(249);
+});
+test.each([
+  ['AX', 'ALA'],
+  ['BM', 'BMU'],
+  ['GG', 'GGY'],
+  ['IM', 'IMN'],
+  ['JE', 'JEY'],
+  ['KY', 'CYM'],
+  ['VI', 'VIR'],
+])('recognizes territory %s and its alpha-3 shipping tag', (alpha2, alpha3) => {
+  expect(isKnownCountry(alpha2)).toBe(true);
+  expect(toAlpha2(alpha3)).toBe(alpha2);
+});
+test('a territory locale can preselect its shipping destination', () => {
+  const spy = jest
+    .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+    .mockReturnValue({ locale: 'en-JE' } as Intl.ResolvedDateTimeFormatOptions);
+  try {
+    expect(deviceCountryCode()).toBe('JE');
+  } finally {
+    spy.mockRestore();
+  }
 });

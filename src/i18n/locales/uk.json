@@ -2058,7 +2058,11 @@
     "modes": {
       "soon": "Скоро",
       "comingSoon": "{{label}} — скоро",
-      "selected": "{{label}}, вибрано"
+      "selected": "{{label}}, вибрано",
+      "preferred": "Рекомендовані продавці Lightning Piggy",
+      "friends": "Мережа довіри: друзі",
+      "friendsOfFriends": "Мережа довіри: друзі друзів",
+      "all": "Мережа довіри: усі"
     },
     "filters": {
       "title": "Фільтри",

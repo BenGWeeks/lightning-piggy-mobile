@@ -2086,7 +2086,11 @@
     "modes": {
       "soon": "Soon",
       "comingSoon": "{{label}} — coming soon",
-      "selected": "{{label}}, selected"
+      "selected": "{{label}}, selected",
+      "preferred": "Lightning Piggy Preferred Sellers",
+      "friends": "WoT: Friends",
+      "friendsOfFriends": "WoT: Friends of Friends",
+      "all": "WoT: All"
     },
     "filters": {
       "title": "Filters",

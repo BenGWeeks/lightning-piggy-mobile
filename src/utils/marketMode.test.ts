@@ -34,10 +34,10 @@ describe('market mode options', () => {
   });
 
   it('labels match the product spec exactly', () => {
-    expect(marketModeOption('preferred').label).toBe('Lightning Piggy Preferred Sellers');
-    expect(marketModeOption('wotFriends').label).toBe('WoT: Friends');
-    expect(marketModeOption('wotFof').label).toBe('WoT: Friends of Friends');
-    expect(marketModeOption('wotAll').label).toBe('WoT: All');
+    expect(marketModeOption('preferred').labelKey).toBe('market.modes.preferred');
+    expect(marketModeOption('wotFriends').labelKey).toBe('market.modes.friends');
+    expect(marketModeOption('wotFof').labelKey).toBe('market.modes.friendsOfFriends');
+    expect(marketModeOption('wotAll').labelKey).toBe('market.modes.all');
   });
 
   it('defaults to the preferred-sellers mode (active)', () => {

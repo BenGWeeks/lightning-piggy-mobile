@@ -2086,7 +2086,11 @@
     "modes": {
       "soon": "Pronto",
       "comingSoon": "{{label}} — próximamente",
-      "selected": "{{label}}, seleccionado"
+      "selected": "{{label}}, seleccionado",
+      "preferred": "Vendedores preferidos de Lightning Piggy",
+      "friends": "Red de confianza: amigos",
+      "friendsOfFriends": "Red de confianza: amigos de amigos",
+      "all": "Red de confianza: todos"
     },
     "filters": {
       "title": "Filtros",

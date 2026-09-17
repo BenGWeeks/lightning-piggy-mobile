@@ -203,7 +203,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.modeBar}>
         <MarketModeSelector value={mode} onChange={setMode} />
         <Text style={styles.modeCaption}>
-          {t('market.screen.showing', { label: marketModeOption(mode).label })}
+          {t('market.screen.showing', { label: t(marketModeOption(mode).labelKey) })}
         </Text>
       </View>
 

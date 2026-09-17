@@ -203,9 +203,17 @@ describe('shippingCostSats', () => {
 });
 
 describe('orderTotalWithShippingSats', () => {
-  it('sums subtotal and shipping, treating invalid parts as 0', () => {
+  it('sums valid amounts and rejects invalid or unsafe totals', () => {
     expect(orderTotalWithShippingSats(1000, 500)).toBe(1500);
-    expect(orderTotalWithShippingSats(1000, NaN)).toBe(1000);
-    expect(orderTotalWithShippingSats(-5, 500)).toBe(500);
+    expect(orderTotalWithShippingSats(1000, NaN)).toBeNull();
+    expect(orderTotalWithShippingSats(-5, 500)).toBeNull();
   });
+});
+
+test('shipping conversion and addition reject overflow', () => {
+  expect(shippingCostSats(1e308, 'BTC', null)).toBeNull();
+  expect(shippingCostSats(1e308, 'GBP', 0.00001)).toBeNull();
+  expect(shippingCostSats(Number.MAX_SAFE_INTEGER + 1, 'SATS', null)).toBeNull();
+  expect(orderTotalWithShippingSats(Number.MAX_SAFE_INTEGER, 1)).toBeNull();
+  expect(orderTotalWithShippingSats(1.1, 2)).toBeNull();
 });

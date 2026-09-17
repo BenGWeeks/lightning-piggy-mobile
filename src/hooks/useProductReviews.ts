@@ -57,7 +57,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
       pool,
       readRelays,
       { kinds: [REVIEW_KIND], '#d': [coord], limit: 500 },
-      { maxWait: 4000, signal: controller.signal },
+      { maxWait: 4000, signal: controller.signal, rejectOnAllRelaysFailure: true },
     )
       .then((evs) => {
         if (!controller.signal.aborted) setEvents(evs);

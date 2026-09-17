@@ -63,6 +63,7 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
     setError(false);
     querySyncAbortable(pool, readRelays, commentFilterForRoot(root, DEFAULT_COMMENTS_LIMIT), {
       maxWait: 5000,
+      rejectOnAllRelaysFailure: true,
       signal: controller.signal,
     })
       .then((evs) => {

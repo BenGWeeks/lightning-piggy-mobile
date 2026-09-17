@@ -27,7 +27,7 @@ export const DEFAULT_MARKET_MODE: MarketMode = 'preferred';
 export interface MarketModeOption {
   mode: MarketMode;
   /** Selector label, e.g. "Lightning Piggy Preferred Sellers". */
-  label: string;
+  labelKey: string;
   /** Whether the mode can be selected yet. Disabled modes render greyed
    * with a "coming soon" affordance and are non-selectable. */
   enabled: boolean;
@@ -39,10 +39,10 @@ export interface MarketModeOption {
  * friends / all tiers are present but disabled placeholders for now.
  */
 export const MARKET_MODE_OPTIONS: readonly MarketModeOption[] = [
-  { mode: 'preferred', label: 'Lightning Piggy Preferred Sellers', enabled: true },
-  { mode: 'wotFriends', label: 'WoT: Friends', enabled: true },
-  { mode: 'wotFof', label: 'WoT: Friends of Friends', enabled: false },
-  { mode: 'wotAll', label: 'WoT: All', enabled: false },
+  { mode: 'preferred', labelKey: 'market.modes.preferred', enabled: true },
+  { mode: 'wotFriends', labelKey: 'market.modes.friends', enabled: true },
+  { mode: 'wotFof', labelKey: 'market.modes.friendsOfFriends', enabled: false },
+  { mode: 'wotAll', labelKey: 'market.modes.all', enabled: false },
 ];
 
 /** Look up a mode option by mode. */

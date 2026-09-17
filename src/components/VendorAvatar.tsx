@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -38,13 +38,17 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
   const pubkey = useMemo(() => vendorNostrPubkey(vendor), [vendor]);
   const { picture } = usePubkeyProfile(pubkey);
 
-  // Prefer the live kind-0 avatar; fall back to the curated logo.
+  const candidateKey = JSON.stringify([picture, vendor.logo]);
+  const [failures, setFailures] = useState<{ key: string; uris: string[] }>({
+    key: candidateKey,
+    uris: [],
+  });
+  const failedUris = failures.key === candidateKey ? failures.uris : [];
   const uri =
-    picture && isSupportedImageUrl(picture)
-      ? picture
-      : isSupportedImageUrl(vendor.logo)
-        ? vendor.logo
-        : null;
+    [picture, vendor.logo].find(
+      (candidate): candidate is string =>
+        !!candidate && isSupportedImageUrl(candidate) && !failedUris.includes(candidate),
+    ) ?? null;
 
   const dimension = { width: size, height: size, borderRadius: size / 2 };
 
@@ -53,6 +57,13 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
       {uri ? (
         <Image
           source={{ uri }}
+          testID={testID ? `${testID}-image` : undefined}
+          onError={() =>
+            setFailures((previous) => ({
+              key: candidateKey,
+              uris: [...(previous.key === candidateKey ? previous.uris : []), uri],
+            }))
+          }
           style={dimension}
           cachePolicy="memory-disk"
           recyclingKey={uri}

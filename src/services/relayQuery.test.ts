@@ -7,6 +7,7 @@ type SubParams = {
   abort?: AbortSignal;
   onevent: (e: NostrEvent) => void;
   oneose: () => void;
+  onclose: (reasons: string[]) => void;
 };
 
 const makeEvent = (id: string): NostrEvent =>
@@ -80,5 +81,59 @@ describe('querySyncAbortable', () => {
     params().oneose();
     await promise;
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('scoped aggregate connection failures', () => {
+  it('rejects all-relay connection failure even when EOSE fires first', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b'],
+      {},
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['connection failed', 'connection timed out']);
+    await expect(result).rejects.toThrow('All relays failed');
+  });
+  it('preserves default resolution on connection failure', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(pool, ['wss://a'], {}, {});
+    params().oneose();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toEqual([]);
+  });
+  it('preserves partial results despite a failure close', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(pool, ['wss://a'], {}, { rejectOnAllRelaysFailure: true });
+    params().onevent(makeEvent('a'));
+    params().oneose();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toHaveLength(1);
+  });
+  it('resolves on EOSE or subscription timeout without a connection failure', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      {},
+      { rejectOnAllRelaysFailure: true, maxWait: 1 },
+    );
+    params().oneose(); // The pool uses this callback for eoseTimeout too.
+    await expect(result).resolves.toEqual([]);
+  });
+  it('abort remains successful even if connection failures subsequently arrive', async () => {
+    const { pool, params } = fakePool();
+    const controller = new AbortController();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      {},
+      { rejectOnAllRelaysFailure: true, signal: controller.signal },
+    );
+    controller.abort();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toEqual([]);
   });
 });

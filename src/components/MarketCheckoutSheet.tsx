@@ -183,7 +183,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   // `idle` (the initial render before the load effect fires), `loading`, and
   // `error` alike. Once ready, only require a country + a compatible option
   // with a priceable sats cost when the merchant actually has options.
+  const subtotalSats = product.priceSats * quantity;
+  const totalSats = orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0);
   const shippingBlocksSubmit =
+    totalSats === null ||
     shipping.status !== 'ready' ||
     (hasShipping && (!countryCode || !selectedOption || selectedShippingSats === null));
 
@@ -194,8 +197,6 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     [],
   );
 
-  const subtotalSats = product.priceSats * quantity;
-  const totalSats = orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0);
   const hasThumb = product.image.length > 0 && !imageFailed;
 
   const handlePlace = useCallback(async () => {
@@ -394,7 +395,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
                   <Text style={styles.summaryValue} testID="market-checkout-subtotal">
-                    {t('market.sats', { amount: subtotalSats.toLocaleString() })}
+                    {t('market.sats', { amount: subtotalSats?.toLocaleString() ?? '—' })}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
@@ -415,7 +416,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <View style={styles.totalValue}>
                 <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
                 <Text style={styles.totalSats} testID="market-checkout-total">
-                  {t('market.sats', { amount: totalSats.toLocaleString() })}
+                  {t('market.sats', { amount: totalSats?.toLocaleString() ?? '—' })}
                 </Text>
               </View>
             </View>

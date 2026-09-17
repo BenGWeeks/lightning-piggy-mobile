@@ -39,6 +39,7 @@ const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
       testID="market-mode-selector"
     >
       {MARKET_MODE_OPTIONS.map((opt) => {
+        const label = t(opt.labelKey);
         const selected = opt.mode === value;
         const disabled = !opt.enabled;
         const chipStyle = [
@@ -62,10 +63,10 @@ const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
             accessibilityState={{ selected, disabled }}
             accessibilityLabel={
               disabled
-                ? t('market.modes.comingSoon', { label: opt.label })
+                ? t('market.modes.comingSoon', { label: label })
                 : selected
-                  ? t('market.modes.selected', { label: opt.label })
-                  : opt.label
+                  ? t('market.modes.selected', { label: label })
+                  : label
             }
             testID={`market-mode-${opt.mode}`}
             activeOpacity={disabled ? 1 : 0.7}
@@ -77,7 +78,7 @@ const MarketModeSelector: React.FC<Props> = ({ value, onChange }) => {
               <Lock size={11} color={colors.textSupplementary} strokeWidth={2.25} />
             ) : null}
             <Text style={textStyle} numberOfLines={1}>
-              {opt.label}
+              {label}
             </Text>
             {disabled ? (
               <View style={styles.soonPill} testID={`market-mode-${opt.mode}-soon`}>

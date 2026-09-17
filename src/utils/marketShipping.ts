@@ -165,20 +165,28 @@ export function shippingCostSats(
 ): number | null {
   if (!Number.isFinite(amount) || amount < 0) return null;
   const cur = currency.trim().toUpperCase();
-  if (cur === 'SATS' || cur === 'SAT') return Math.round(amount);
-  if (cur === 'BTC') return Math.round(amount * 1e8);
-  if (
-    btcPriceInCurrency === null ||
-    !Number.isFinite(btcPriceInCurrency) ||
-    btcPriceInCurrency <= 0
-  )
-    return null;
-  return Math.round((amount / btcPriceInCurrency) * 1e8);
+  let sats: number;
+  if (cur === 'SATS' || cur === 'SAT') sats = Math.round(amount);
+  else if (cur === 'BTC') sats = Math.round(amount * 1e8);
+  else {
+    if (
+      btcPriceInCurrency === null ||
+      !Number.isFinite(btcPriceInCurrency) ||
+      btcPriceInCurrency <= 0
+    )
+      return null;
+    sats = Math.round((amount / btcPriceInCurrency) * 1e8);
+  }
+  return Number.isSafeInteger(sats) && sats >= 0 ? sats : null;
 }
 
-/** All-in order amount: product subtotal + shipping, both already in sats. */
-export function orderTotalWithShippingSats(subtotalSats: number, shippingSats: number): number {
-  const sub = Number.isFinite(subtotalSats) && subtotalSats >= 0 ? subtotalSats : 0;
-  const ship = Number.isFinite(shippingSats) && shippingSats >= 0 ? shippingSats : 0;
-  return Math.round(sub + ship);
+/** All-in order amount. Invalid or unsafe components fail closed. */
+export function orderTotalWithShippingSats(
+  subtotalSats: number,
+  shippingSats: number,
+): number | null {
+  if (!Number.isSafeInteger(subtotalSats) || subtotalSats < 0) return null;
+  if (!Number.isSafeInteger(shippingSats) || shippingSats < 0) return null;
+  const total = subtotalSats + shippingSats;
+  return Number.isSafeInteger(total) ? total : null;
 }

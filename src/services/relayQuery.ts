@@ -21,26 +21,30 @@ export function querySyncAbortable(
   pool: SimplePool,
   relays: string[],
   filter: Filter,
-  params: { maxWait?: number; signal?: AbortSignal },
+  params: { maxWait?: number; signal?: AbortSignal; rejectOnAllRelaysFailure?: boolean },
 ): Promise<NostrEvent[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const events: NostrEvent[] = [];
-    if (params.signal?.aborted) {
+    if (params.signal?.aborted || relays.length === 0) {
       resolve(events);
       return;
     }
     let settled = false;
     let closer: { close: (reason?: string) => void } | undefined;
-    const finish = () => {
+    const onAbort = () => finish();
+    const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
+      params.signal?.removeEventListener('abort', onAbort);
       try {
         closer?.close();
       } catch {
         // sub may already be closing (abort/eose race) — ignore.
       }
-      resolve(events);
+      if (error) reject(error);
+      else resolve(events);
     };
+    params.signal?.addEventListener('abort', onAbort, { once: true });
     closer = pool.subscribeMany(relays, filter, {
       maxWait: params.maxWait,
       abort: params.signal,
@@ -48,13 +52,26 @@ export function querySyncAbortable(
         events.push(event);
       },
       oneose() {
-        finish();
+        // The pool emits aggregate EOSE immediately before aggregate close
+        // when every connection failed. Let onclose inspect those reasons first.
+        if (params.rejectOnAllRelaysFailure) queueMicrotask(() => finish());
+        else finish();
+      },
+      onclose(reasons) {
+        const allFailed =
+          params.rejectOnAllRelaysFailure &&
+          !params.signal?.aborted &&
+          events.length === 0 &&
+          reasons.length > 0 &&
+          reasons.every((reason) =>
+            /^(?:relay )?connection (?:failed|timed out|skipped by allowConnectingToRelay)$|^websocket closed$/.test(
+              reason,
+            ),
+          );
+        finish(allFailed ? new Error('All relays failed to connect') : undefined);
       },
     });
-    // Resolve on abort too. nostr-tools closes the sub on abort, but it sets
-    // `signal.onabort` (single-slot, overwritten when one signal is shared
-    // across several parallel queries) — our additive listener fires for every
-    // query and closes each sub, so a shared signal cancels them all.
-    params.signal?.addEventListener('abort', finish, { once: true });
+    // A synchronous callback can finish before the closer is assigned.
+    if (settled) closer.close();
   });
 }
