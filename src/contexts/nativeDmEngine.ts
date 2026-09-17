@@ -16,8 +16,8 @@ import type { DecodedRumor } from '../utils/nip17Unwrap';
  * Scope guards (all deliberate):
  *  - nsec only — Amber / NIP-46 gift wraps can only be decrypted by their
  *    remote signer, so those accounts stay on the JS path entirely.
- *  - Android only — expo-module.config.json lists just "android", so
- *    getNostrEngine() returns null elsewhere.
+ *  - Native platforms only — Android (Kotlin, M2) and iOS (Swift, M3);
+ *    getNostrEngine() returns null elsewhere and on pre-M3 iOS binaries.
  *  - Default OFF — EXPO_PUBLIC_NATIVE_ENGINE=1 opts in;
  *    EXPO_PUBLIC_NATIVE_ENGINE_XCHECK=1 (dev-only) runs BOTH paths and
  *    diffs delivered wrap ids (see nativeDmEngineXcheck.ts).
@@ -107,6 +107,8 @@ function parseDelivery(raw: unknown): EngineDelivery | null {
   };
 }
 
+let engineGeneration = 0;
+
 /**
  * Start the native engine for this viewer. Returns null when the module is
  * missing/stale or the native start fails — the caller falls back to the JS
@@ -119,8 +121,12 @@ export async function startNativeDmEngine(
 ): Promise<NativeDmEngineHandle | null> {
   const engine = getNostrEngine();
   if (!engine) return null;
+  const generation = ++engineGeneration;
+  const isCurrent = () => generation === engineGeneration;
+  let acceptingEvents = false;
 
   const batchSub = engine.addListener('onEngineRumorBatch', (event: EngineRumorBatchEvent) => {
+    if (!isCurrent() || !acceptingEvents) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(event.rumorsJson);
@@ -137,7 +143,9 @@ export async function startNativeDmEngine(
     }
     if (deliveries.length > 0) opts.onDeliveries(deliveries);
   });
-  const reconnectSub = engine.addListener('onEngineReconnect', () => opts.onReconnect());
+  const reconnectSub = engine.addListener('onEngineReconnect', () => {
+    if (isCurrent() && acceptingEvents) opts.onReconnect();
+  });
 
   const removeListeners = (): void => {
     batchSub.remove();
@@ -146,6 +154,11 @@ export async function startNativeDmEngine(
 
   try {
     await engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex);
+    if (!isCurrent()) {
+      removeListeners();
+      return null;
+    }
+    acceptingEvents = true;
     // Standard NIP-01 filter; rust-nostr's Filter.fromJson parses it as-is.
     // No `since` on wraps — see StartNativeDmEngineOptions.wrapsLimit.
     const filterJson = JSON.stringify({
@@ -154,10 +167,14 @@ export async function startNativeDmEngine(
       limit: opts.wrapsLimit,
     });
     await engine.engineSubscribeWraps(filterJson, [...opts.knownWrapIds]);
+    if (!isCurrent()) {
+      removeListeners();
+      return null;
+    }
   } catch (e) {
     if (__DEV__) console.warn('[NostrEngine] start failed — falling back to JS wrap sub:', e);
     removeListeners();
-    await engine.engineStop().catch(() => {});
+    if (isCurrent()) await engine.engineStop().catch(() => {});
     return null;
   }
 
@@ -167,6 +184,8 @@ export async function startNativeDmEngine(
       if (stopped) return;
       stopped = true;
       removeListeners();
+      if (!isCurrent()) return;
+      engineGeneration++;
       await engine.engineStop().catch(() => {});
     },
   };
@@ -180,6 +199,7 @@ export async function startNativeDmEngine(
  * module is absent or the engine never started.
  */
 export async function stopNativeDmEngineGlobal(): Promise<void> {
+  engineGeneration++;
   const engine = getNostrEngine();
   if (!engine) return;
   await engine.engineStop().catch(() => {});

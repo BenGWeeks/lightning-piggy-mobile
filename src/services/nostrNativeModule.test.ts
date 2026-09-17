@@ -4,11 +4,10 @@
  * Lives under src/ so jest.config's testMatch — the `.test.{ts,tsx}` files
  * under the `<rootDir>/src` tree — picks it
  * up — the module under test is in modules/nostr-native. It verifies
- * getNostrNative()'s hard Platform.OS === 'android' guard: even when
- * requireOptionalNativeModule resolves to a non-null module (a future iOS
- * autolink, or the Swift stub accidentally shipping), the facade can NEVER
- * route into stub crypto functions off Android — getNostrNative() returns null
- * there until real iOS bindings land in M3.
+ * getNostrNative()'s hard platform allowlist (Android Kotlin since M1/M2,
+ * iOS Swift since M3): even when requireOptionalNativeModule resolves to a
+ * non-null module, the facade can NEVER route into it on an unsupported
+ * platform — getNostrNative() returns null there.
  */
 
 // Resolve the native module to a non-null stub so the ONLY thing that can make
@@ -39,9 +38,11 @@ function setOS(os: string): void {
 }
 
 describe('getNostrNative platform guard', () => {
-  it('returns null on iOS even when the native module resolves', () => {
+  it('returns the linked module on iOS (M3 bindings)', () => {
     setOS('ios');
-    expect(getNostrNative()).toBeNull();
+    const mod = getNostrNative();
+    expect(mod).not.toBeNull();
+    expect(typeof mod?.schnorrVerify).toBe('function');
   });
 
   it('returns null on web', () => {

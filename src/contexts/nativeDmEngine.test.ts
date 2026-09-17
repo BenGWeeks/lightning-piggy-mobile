@@ -216,3 +216,54 @@ describe('stopNativeDmEngineGlobal', () => {
     expect(engine.engineStop).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('overlapping engine sessions', () => {
+  it('does not stop the new engine when an older start fails', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    let rejectOld!: (error: Error) => void;
+    engine.engineStart.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((_, reject) => {
+          rejectOld = reject;
+        }),
+    );
+    const oldStart = startNativeDmEngine(startOpts());
+    const current = await startNativeDmEngine(startOpts());
+    rejectOld(new Error('superseded'));
+    expect(await oldStart).toBeNull();
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not subscribe an older start that finishes after replacement', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    let resolveOld!: (value: boolean) => void;
+    engine.engineStart.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const oldStart = startNativeDmEngine(startOpts());
+    const current = await startNativeDmEngine(startOpts());
+    resolveOld(true);
+    expect(await oldStart).toBeNull();
+    expect(engine.engineSubscribeWraps).toHaveBeenCalledTimes(1);
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+  });
+
+  it('an old handle cannot stop a replacement engine', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const old = await startNativeDmEngine(startOpts());
+    const current = await startNativeDmEngine(startOpts());
+    await old!.stop();
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  });
+});
