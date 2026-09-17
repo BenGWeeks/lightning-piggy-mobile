@@ -229,11 +229,20 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     shipping.status !== 'ready' ||
     (hasShipping && (!countryCode || !selectedOption || selectedShippingSats === null));
 
+  // While an order is in flight the sheet must not be dismissable (pan or
+  // backdrop): a hidden sheet finishing a publish could later reopen onto a
+  // stale success/error state or let a second order through.
+  const dismissLocked = submitting || isPlacing;
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
-      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        pressBehavior={dismissLocked ? 'none' : 'close'}
+      />
     ),
-    [],
+    [dismissLocked],
   );
 
   const hasThumb = product.image.length > 0 && !imageFailed;
@@ -343,7 +352,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      enablePanDownToClose
+      enablePanDownToClose={!dismissLocked}
       enableDynamicSizing
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}

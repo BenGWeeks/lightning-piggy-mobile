@@ -6,6 +6,7 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { parseStoredOrder } from '../utils/orderEvents';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -202,9 +203,15 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           // wallet-share rumor's raw text is a bearer connection string that
           // `preview` deliberately redacts, and DmInboxEntry reaches every
           // inbox consumer — that secret stays in the encrypted store only
-          // (the thread re-derives it from the stored row). A plain DM's
-          // preview IS its render text, so `renderText ?? text` covers it.
-          ...((rumor.kind === 16 || rumor.kind === 17) && text !== preview
+          // (the thread re-derives it from the stored row). Gated on the
+          // content actually being canonical order JSON: `textForRumor` falls
+          // back to the raw `rumor.content` for a kind-16/17 that is NOT a
+          // parseable order (a repost, a malformed payload), and that raw text
+          // must stay redacted here too. A plain DM's preview IS its render
+          // text, so `renderText ?? text` covers it.
+          ...((rumor.kind === 16 || rumor.kind === 17) &&
+          text !== preview &&
+          parseStoredOrder(text) !== null
             ? { renderText: text }
             : {}),
           wireKind: rumor.kind,

@@ -183,7 +183,11 @@ describe('satsToFiatString', () => {
 
 describe('getBtcPrice stale-rate policy', () => {
   const ok = (rate: number) =>
-    Promise.resolve({ json: async () => ({ bitcoin: { gbp: rate } }) } as Response);
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ bitcoin: { gbp: rate } }),
+    } as Response);
   let fetchSpy: jest.SpyInstance;
   beforeEach(() => {
     __resetBtcPriceCacheForTests();
@@ -231,11 +235,27 @@ describe('getBtcPrice stale-rate policy', () => {
     fetchSpy.mockImplementationOnce(() => ok(50_000));
     expect(await getBtcPrice('GBP')).toBe(50_000);
     fetchSpy.mockImplementationOnce(() =>
-      Promise.resolve({ json: async () => ({ bitcoin: { eur: 58_000 } }) } as Response),
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ bitcoin: { eur: 58_000 } }),
+      } as Response),
     );
     expect(await getBtcPrice('EUR')).toBe(58_000);
     expect(await getBtcPrice('GBP')).toBe(50_000); // still cached, no refetch
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a non-2xx response as a failure so the display path keeps its stale rate', async () => {
+    jest.useFakeTimers({ now: 1_000_000 });
+    fetchSpy.mockImplementationOnce(() => ok(50_000));
+    expect(await getBtcPrice('GBP')).toBe(50_000);
+    jest.setSystemTime(1_000_000 + 6 * 60 * 1000);
+    fetchSpy.mockImplementationOnce(
+      () =>
+      Promise.resolve({ ok: false, status: 429, json: async () => ({ error: 'rate limited' }) } as Response), // prettier-ignore
+    );
+    expect(await getBtcPrice('GBP')).toBe(50_000); // stale fallback, not null
   });
 
   it('aborts a hung request after the timeout and reports no rate', async () => {

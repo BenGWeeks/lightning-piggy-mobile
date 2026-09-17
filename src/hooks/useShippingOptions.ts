@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { fetchShippingOptions } from '../services/marketShippingService';
 import type { ShippingOption } from '../utils/marketShipping';
@@ -27,36 +28,41 @@ export function useShippingOptions(
   const [options, setOptions] = useState<ShippingOption[]>([]);
   const [attempt, setAttempt] = useState(0);
 
-  useEffect(() => {
-    if (!enabled || !merchantPubkey) {
-      setStatus('idle');
-      setOptions([]);
-      return;
-    }
-    const controller = new AbortController();
-    let cancelled = false;
-    setStatus('loading');
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    fetchShippingOptions({ merchantPubkey, relays: readRelays, signal: controller.signal })
-      .then((fetched) => {
-        if (cancelled) return;
-        setOptions(fetched);
-        setStatus('ready');
-      })
-      .catch(() => {
-        if (cancelled) return;
+  // Focus-armed like the product feedback hooks: under the Explore stack's
+  // freezeOnBlur a blurred checkout must abort its in-flight fetch rather than
+  // commit state off-screen until the timeout.
+  useFocusEffect(
+    useCallback(() => {
+      if (!enabled || !merchantPubkey) {
+        setStatus('idle');
         setOptions([]);
-        setStatus('error');
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-    // `relays` is deliberately not a dependency: it can identity-change on
-    // unrelated context updates mid-checkout, and re-fetching then would reset
-    // the buyer's country/option selection. The set read at open time is fine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, merchantPubkey, attempt]);
+        return;
+      }
+      const controller = new AbortController();
+      let cancelled = false;
+      setStatus('loading');
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      fetchShippingOptions({ merchantPubkey, relays: readRelays, signal: controller.signal })
+        .then((fetched) => {
+          if (cancelled) return;
+          setOptions(fetched);
+          setStatus('ready');
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setOptions([]);
+          setStatus('error');
+        });
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+      // `relays` is deliberately not a dependency: it can identity-change on
+      // unrelated context updates mid-checkout, and re-fetching then would reset
+      // the buyer's country/option selection. The set read at open time is fine.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [enabled, merchantPubkey, attempt]),
+  );
 
   return { status, options, retry: () => setAttempt((a) => a + 1) };
 }

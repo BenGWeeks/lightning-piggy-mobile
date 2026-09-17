@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
-import { DEFAULT_RELAYS, pool } from '../services/nostrService';
+import { DEFAULT_RELAYS, pool, trackRelays } from '../services/nostrService';
 import { querySyncAbortable } from '../services/relayQuery';
 import {
   REVIEW_KIND,
@@ -59,6 +59,8 @@ export function useProductReviews(coord: string | null): UseProductReviews {
       const controller = new AbortController();
       setLoading(true);
       setError(false);
+      // Register the relays we open so nostrService.cleanup() closes them.
+      trackRelays(readRelays);
       querySyncAbortable(
         pool,
         readRelays,

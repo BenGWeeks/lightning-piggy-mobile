@@ -147,6 +147,21 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     expect(rows[0].wireKind).toBe(16);
   });
 
+  it('does not carry raw content for a kind-16 that is not a parseable order', async () => {
+    // textForRumor falls back to rumor.content for a non-order kind-16 (e.g. a
+    // repost or malformed payload); that raw text must not become renderText.
+    const raw = 'nostr+walletconnect://relay?secret=cafebabe';
+    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: 16, content: raw }));
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('m1')],
+      unwrap,
+      passesFollowGate: () => true,
+    });
+    expect(res.entries[0]).not.toHaveProperty('renderText');
+    expect(res.entries[0].text).not.toContain('cafebabe');
+  });
+
   it('never carries an NWC wallet-share secret into the inbox entry as renderText', async () => {
     const secret = 'nostr+walletconnect://relay?secret=deadbeef';
     const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: NWC_SHARE_KIND, content: secret }));

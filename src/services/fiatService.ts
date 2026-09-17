@@ -102,6 +102,9 @@ export async function getBtcPrice(
       `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currency.toLowerCase()}`,
       { signal: controller.signal },
     );
+    // A 429/5xx with a JSON body would otherwise read as "no rate" and skip
+    // the stale fallback below; treat it as the fetch failure it is.
+    if (!response.ok) throw new Error(`BTC price HTTP ${response.status}`);
     const data = await response.json();
     const rate = data.bitcoin?.[currency.toLowerCase()];
     if (rate) {
