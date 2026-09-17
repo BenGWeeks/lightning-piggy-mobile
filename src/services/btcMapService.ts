@@ -286,12 +286,34 @@ const FRESH_TTL_MS = 60 * 60 * 1000;
 // radius reaches the far corner so the search circle fully covers the
 // rectangle (with a little overshoot — extra merchants just outside the
 // viewport, which callers are fine with). Radius is clamped to a sane
-// floor so a pinpoint-zoomed map still returns something.
+// floor so a pinpoint-zoomed map still returns something, and to a
+// ceiling so a continental zoom-out can't request (and JSON.parse, on
+// the JS thread) a huge slice of the worldwide dataset — an unclamped
+// zoom-out fetched 6,344 merchants in one call and was half of the
+// #1067 crash. 250 km ≈ a whole metro region plus its hinterland;
+// past that the map is a density overview, not a merchant browser.
+const MAX_VIEWPORT_SEARCH_RADIUS_KM = 250;
 const bboxToSearch = (b: Bbox): { lat: number; lon: number; radiusKm: number } => {
   const lat = (b.minLat + b.maxLat) / 2;
-  const lon = (b.minLon + b.maxLon) / 2;
-  const cornerMetres = haversineMetres({ lat, lon }, { lat: b.maxLat, lon: b.maxLon });
-  const radiusKm = Math.max(1, Math.ceil(cornerMetres / 1000));
+  // Wrapped longitude midpoint: an antimeridian-crossing bbox
+  // (minLon > maxLon) would centre near 0° with a plain (min+max)/2 and
+  // fetch the wrong part of the world. Same treatment as bboxCentre /
+  // geohashPrefixesForBbox.
+  const rawLon = b.minLon > b.maxLon ? (b.minLon + b.maxLon + 360) / 2 : (b.minLon + b.maxLon) / 2;
+  const lon = ((rawLon + 540) % 360) - 180;
+  // Radius reaches the FARTHEST corner (they differ once the centre's
+  // latitude is off-equator, and haversine's trig wraps Δlon correctly
+  // across the dateline).
+  const cornerMetres = Math.max(
+    haversineMetres({ lat, lon }, { lat: b.maxLat, lon: b.maxLon }),
+    haversineMetres({ lat, lon }, { lat: b.maxLat, lon: b.minLon }),
+    haversineMetres({ lat, lon }, { lat: b.minLat, lon: b.maxLon }),
+    haversineMetres({ lat, lon }, { lat: b.minLat, lon: b.minLon }),
+  );
+  const radiusKm = Math.min(
+    MAX_VIEWPORT_SEARCH_RADIUS_KM,
+    Math.max(1, Math.ceil(cornerMetres / 1000)),
+  );
   return { lat, lon, radiusKm };
 };
 
