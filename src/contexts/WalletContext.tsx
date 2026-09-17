@@ -27,6 +27,8 @@ import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
+import { useWalletIdentityHydration } from './useWalletIdentityHydration';
+import { hydrateWalletReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
 import type { IncomingPaymentSource } from './incomingPaymentSource';
 import {
@@ -38,6 +40,7 @@ import {
 } from '../types/wallet';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { parseNwcLud16 } from '../utils/nwcLud16';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
@@ -88,18 +91,6 @@ const lastOutgoingReceiptFetch = new Map<string, number>();
 // (now-stale) run for that same wallet so two passes don't compete for
 // the JS thread (#526). Cleared when a run finishes.
 const zapResolverControllers = new Map<string, AbortController>();
-
-function parseNwcLud16(nwcUrl: string | null): string | null {
-  if (!nwcUrl) return null;
-  try {
-    const parsed = new URL(nwcUrl);
-    const lud16 = parsed.searchParams.get('lud16');
-    if (!lud16 || !lud16.includes('@')) return null;
-    return lud16.trim();
-  } catch {
-    return null;
-  }
-}
 
 interface WalletContextType {
   // Multi-wallet state
@@ -289,18 +280,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // The in-memory set alone reset on every JS re-eval and re-announced a payment
   // whose hash wasn't in the (possibly stale) tx cache (#653 follow-up).
   const hydrateSeenReceipts = useCallback(
-    async (walletId: string, cachedTxs: readonly WalletTransaction[]): Promise<void> => {
-      try {
-        const seenRaw = await AsyncStorage.getItem(`seenReceipts_${walletId}`);
-        if (seenRaw) {
-          seedSeenReceipts(walletId, new Set<string>(JSON.parse(seenRaw) as string[]), false);
-        } else {
-          seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
-        }
-      } catch {
-        seedSeenReceipts(walletId, settledIncomingHashes(cachedTxs));
-      }
-    },
+    (walletId: string, cachedTxs: readonly WalletTransaction[], isCurrent?: () => boolean) =>
+      hydrateWalletReceipts(walletId, cachedTxs, seedSeenReceipts, isCurrent),
     [seedSeenReceipts],
   );
 
@@ -458,6 +439,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await initialiseSendThresholdForNewInstall();
 
         // Load and reconnect all wallets
+        const isStartupCurrent = captureWalletIdentity();
         perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
         perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
@@ -477,7 +459,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 // Seed the unchanged-poll fingerprint from the persisted JSON
                 // so the first poll after cold start can skip too when the
                 // server list matches what we hydrated (#1014).
-                lastTxsJsonRef.current.set(w.id, txJson);
+                if (isStartupCurrent()) lastTxsJsonRef.current.set(w.id, txJson);
                 perfLog(
                   `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
                 );
@@ -505,7 +487,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
             // Seed the announced-receipts set BEFORE the detector runs.
-            await hydrateSeenReceipts(w.id, cachedTxs);
+            await hydrateSeenReceipts(w.id, cachedTxs, isStartupCurrent);
             return {
               ...w,
               isConnected: false,
@@ -515,7 +497,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             };
           }),
         );
-        setWallets(walletStates);
+        if (isStartupCurrent()) setWallets(walletStates);
         if (!__walletProviderHydratedLogged) {
           __walletProviderHydratedLogged = true;
           perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
@@ -527,7 +509,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // `wallets.length === 0` but only one is the disabled state.
         setWalletsHydrated(true);
 
-        if (walletStates.length > 0) {
+        if (isStartupCurrent() && walletStates.length > 0) {
           setActiveWalletId(walletStates[0].id);
         }
 
@@ -565,40 +547,51 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               // NWC wallet: connect via Nostr
               const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-              if (!nwcUrl) return;
+              if (!nwcUrl || !isStartupCurrent()) return;
 
-              const result = await nwcService.connect(wallet.id, nwcUrl, () => {
-                setWallets((prev) =>
-                  prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
-                );
-                if (!firstWalletConnectLogged) {
-                  firstWalletConnectLogged = true;
-                  console.log(
-                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+              const result = await nwcService.connect(
+                wallet.id,
+                nwcUrl,
+                () => {
+                  if (!isStartupCurrent()) return;
+                  setWallets((prev) =>
+                    !isStartupCurrent()
+                      ? prev
+                      : prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
                   );
-                }
-              });
-              if (result.success) {
+                  if (!firstWalletConnectLogged) {
+                    firstWalletConnectLogged = true;
+                    console.log(
+                      `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                    );
+                  }
+                },
+                isStartupCurrent,
+              );
+              if (result.success && isStartupCurrent()) {
                 let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
                 try {
                   info = await nwcService.getInfo(wallet.id);
                 } catch (e) {
                   if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
                 }
+                if (!isStartupCurrent()) return;
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
-                  prev.map((w) =>
-                    w.id === wallet.id
-                      ? {
-                          ...w,
-                          isConnected: true,
-                          balance: result.balance ?? w.balance ?? null,
-                          walletAlias: info?.alias || w.walletAlias || null,
-                          lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
-                        }
-                      : w,
-                  ),
+                  !isStartupCurrent()
+                    ? prev
+                    : prev.map((w) =>
+                        w.id === wallet.id
+                          ? {
+                              ...w,
+                              isConnected: true,
+                              balance: result.balance ?? w.balance ?? null,
+                              walletAlias: info?.alias || w.walletAlias || null,
+                              lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
+                            }
+                          : w,
+                      ),
                 );
               }
             } catch (error) {
@@ -625,125 +618,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchPrice]);
 
-  // Re-hydrate wallets when the active Nostr identity changes (#288).
-  // The startup useEffect above runs once on mount; it doesn't react to
-  // switchIdentity, so without this effect the previous identity's
-  // wallet list stayed visible after a switch (per-account namespacing
-  // is correct on disk, the UI just wasn't reading it again).
+  // Hold the latest wallets in a ref for consumers (the NWC watchdog, the
+  // fire-and-forget tx fetch) that must read fresh state without re-keying
+  // their effects on the constantly-churning wallets array.
+  const walletsRef = useRef(wallets);
   useEffect(() => {
-    let cancelled = false;
-    let lastSeenPubkey = walletStorage.getActivePubkey();
-    const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey) => {
-      if (nextPubkey === lastSeenPubkey) return;
-      lastSeenPubkey = nextPubkey;
-      // Disconnect every current NWC connection so we don't leak the
-      // previous identity's WebSockets / pay_invoice handlers.
-      for (const w of walletsRef.current) {
-        if (w.walletType === 'nwc') nwcService.disconnect(w.id);
-      }
-      // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
-      setWallets([]);
-      setActiveWalletId(null);
-      lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
-      // Re-hydrate from per-account-keyed storage.
-      (async () => {
-        if (cancelled) return;
-        try {
-          const walletList = await walletStorage.getWalletList();
-          if (cancelled) return;
-          const walletStates: WalletState[] = await Promise.all(
-            walletList.map(async (w) => {
-              let cachedTxs: WalletTransaction[] = [];
-              try {
-                const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
-                if (txJson) {
-                  cachedTxs = JSON.parse(txJson);
-                  // Same fingerprint seed as the startup hydration (#1014).
-                  lastTxsJsonRef.current.set(w.id, txJson);
-                }
-              } catch (err) {
-                console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
-                await AsyncStorage.removeItem(`txs_${w.id}`);
-              }
-              // Hydrate cached balance from disk (matches the startup-
-              // hydration path). Identity-switch is treated identically:
-              // never run BDK init eagerly. Fresh balance comes lazily on
-              // refresh / wallet-detail open.
-              let cachedBalance: number | null = null;
-              try {
-                const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
-                if (bRaw) {
-                  const n = Number(bRaw);
-                  if (Number.isFinite(n)) cachedBalance = n;
-                }
-              } catch {
-                // Ignore corrupted cache.
-              }
-              // Seed the announced-receipts set before the detector runs (see
-              // the startup-hydration path for the rationale).
-              await hydrateSeenReceipts(w.id, cachedTxs);
-              return {
-                ...w,
-                isConnected: false,
-                balance: cachedBalance,
-                walletAlias: null,
-                transactions: cachedTxs,
-              };
-            }),
-          );
-          if (cancelled) return;
-          setWallets(walletStates);
-          if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
-          // Kick off NWC connects in parallel; same fire-and-forget
-          // pattern as the startup hydration. Onchain wallets are NOT
-          // fetched eagerly (BDK init costs ~9 s of JS-thread time on
-          // a real fixture) — they hydrate from `balance_<id>` cache
-          // above and refresh lazily on user action.
-          void Promise.all(
-            walletList.map(async (wallet) => {
-              if (cancelled) return;
-              try {
-                if (wallet.walletType === 'onchain') {
-                  return;
-                }
-                const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-                if (!nwcUrl || cancelled) return;
-                const result = await nwcService.connect(wallet.id, nwcUrl, () => {
-                  setWallets((prev) =>
-                    prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
-                  );
-                });
-                if (cancelled) return;
-                if (result.success) {
-                  setWallets((prev) =>
-                    prev.map((w) =>
-                      w.id === wallet.id
-                        ? {
-                            ...w,
-                            isConnected: true,
-                            balance: result.balance ?? w.balance ?? null,
-                          }
-                        : w,
-                    ),
-                  );
-                }
-              } catch (error) {
-                console.warn(`[Wallet] re-hydrate connect failed for ${wallet.id}:`, error);
-              }
-            }),
-          );
-        } catch (e) {
-          console.warn('[Wallet] re-hydrate failed:', e);
-        }
-      })();
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-    // Subscribe-once effect; `hydrateSeenReceipts` is a stable useCallback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    walletsRef.current = wallets;
+  }, [wallets]);
+  const captureWalletIdentity = useWalletIdentityHydration({
+    walletsRef,
+    lastTxsJsonRef,
+    hydrateSeenReceipts,
+    setWallets,
+    setActiveWalletId,
+  });
 
   // Refresh BTC price every 5 minutes
   useEffect(() => {
@@ -771,13 +659,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => sub.remove();
   }, [btcPrice, currency, fetchPrice]);
 
-  // Hold the latest wallets in a ref for consumers (the NWC watchdog, the
-  // fire-and-forget tx fetch) that must read fresh state without re-keying
-  // their effects on the constantly-churning wallets array.
-  const walletsRef = useRef(wallets);
-  useEffect(() => {
-    walletsRef.current = wallets;
-  }, [wallets]);
   // NWC connection watchdog: 30 s WebSocket-health check + reconnect —
   // extracted per-responsibility hook (see useNwcConnectionWatchdog).
   useNwcConnectionWatchdog(walletsRef, updateWalletInState);
