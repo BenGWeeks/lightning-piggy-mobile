@@ -74,7 +74,7 @@ const ProductFeedbackTabs: React.FC<Props> = ({ coord, commentRoot, onRequestSig
 
   return (
     <View testID="product-feedback-tabs">
-      <View style={styles.tabBar}>
+      <View style={styles.tabBar} accessibilityRole="tablist">
         {renderTab('reviews', t('market.feedbackTabs.reviews'), reviewCount, Star)}
         {renderTab('comments', t('market.feedbackTabs.comments'), commentCount, MessageSquare)}
       </View>
