@@ -188,6 +188,9 @@
     "nipGcCacheMarker": "Маркер схованки NIP-GC",
     "lightningPayoutAvailable": "Доступна виплата Lightning"
   },
+  "cacheClusterMarker": {
+    "label": "{{count}} геосхованок поруч — торкніться, щоб наблизити"
+  },
   "coinosRecoverySheet": {
     "title": "Збережіть дані для відновлення",
     "subtitle": "Якщо ви втратите цей пристрій, увійдіть на {{host}} з цим імʼям користувача та паролем, щоб відновити свої кошти. Lightning Piggy не зберігає їх для вас деінде.",
