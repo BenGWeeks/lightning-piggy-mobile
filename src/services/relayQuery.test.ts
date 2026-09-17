@@ -84,7 +84,47 @@ describe('querySyncAbortable', () => {
   });
 });
 
+describe('querySyncAbortable de-duplication', () => {
+  it('keeps one copy of an event id even if it arrives from several relays', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(pool, ['wss://a', 'wss://b'], { kinds: [1] }, {});
+    params().onevent(makeEvent('a'));
+    params().onevent(makeEvent('a'));
+    params().onevent(makeEvent('b'));
+    params().oneose();
+    expect((await promise).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+});
+
 describe('scoped aggregate connection failures', () => {
+  it('rejects when every relay dropped the socket after connecting ("relay connection closed")', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['relay connection closed', 'websocket closed']);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
+  it('does not treat a deliberate close as a failure', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      { kinds: [1] },
+      {
+        rejectOnAllRelaysFailure: true,
+      },
+    );
+    params().oneose();
+    params().onclose(['closed by caller']);
+    await expect(promise).resolves.toEqual([]);
+  });
+
   it('rejects all-relay connection failure even when EOSE fires first', async () => {
     const { pool, params } = fakePool();
     const result = querySyncAbortable(

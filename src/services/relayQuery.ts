@@ -25,6 +25,10 @@ export function querySyncAbortable(
 ): Promise<NostrEvent[]> {
   return new Promise((resolve, reject) => {
     const events: NostrEvent[] = [];
+    // SimplePool already de-dupes across relays (`_knownIds`), but this is
+    // the one shared read path for reviews / comments / shipping / inbox — a
+    // belt-and-braces Set keeps every caller free of duplicate rows/counts.
+    const seen = new Set<string>();
     if (params.signal?.aborted || relays.length === 0) {
       resolve(events);
       return;
@@ -49,6 +53,8 @@ export function querySyncAbortable(
       maxWait: params.maxWait,
       abort: params.signal,
       onevent(event) {
+        if (seen.has(event.id)) return;
+        seen.add(event.id);
         events.push(event);
       },
       oneose() {
@@ -58,13 +64,18 @@ export function querySyncAbortable(
         else finish();
       },
       onclose(reasons) {
+        // nostr-tools hard-close reasons (abstract-relay.js): "relay connection
+        // failed" / "timed out" (never connected), "relay connection closed" +
+        // "websocket closed" (the socket dropped after connecting), and the
+        // pool's "connection skipped by allowConnectingToRelay". Deliberate
+        // closes ("closed by caller", "… closed by us") are NOT failures.
         const allFailed =
           params.rejectOnAllRelaysFailure &&
           !params.signal?.aborted &&
           events.length === 0 &&
           reasons.length > 0 &&
           reasons.every((reason) =>
-            /^(?:relay )?connection (?:failed|timed out|skipped by allowConnectingToRelay)$|^websocket closed$/.test(
+            /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$/.test(
               reason,
             ),
           );

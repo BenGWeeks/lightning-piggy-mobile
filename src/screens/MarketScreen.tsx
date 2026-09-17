@@ -57,7 +57,9 @@ const sellerPubkeyOf = (product: MarketProduct): string | null => {
  * A marketplace-mode selector at the top chooses which sellers products are
  * sourced from: Lightning Piggy preferred sellers (default), or the user's
  * Nostr web-of-trust friends. Friends-of-friends / all tiers are present but
- * disabled (coming soon). Tapping a product opens its shop URL.
+ * disabled (coming soon). Tapping a tile opens the `MarketProductDetail`
+ * route (reviews / comments, and in-app checkout for sellers with a Nostr
+ * identity — the seller's shop URL is the fallback for those without).
  *
  * Data is the hardcoded {@link MARKET_PRODUCTS} catalogue, ported from the
  * website. A future live Nostr feed (NIP-15 products kind 30018 + NIP-99
@@ -68,7 +70,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
-  const { trustSet } = useTrustGraph();
+  // The explicit "WoT: Friends" mode must filter on the FRIENDS tier, not the
+  // user's persisted WoT tier (`trustSet` widens to FoF / all when that
+  // setting is wider, which would show sellers they don't follow).
+  const { trustSetForTier } = useTrustGraph();
 
   // Derive the square tile width from the live window so rotation / tablet
   // widths stay a clean 2-up grid; a fixed width (not flex) also keeps a lone
@@ -94,9 +99,10 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // Mode-scoped catalogue (preferred sellers / WoT friends), featured-first.
   // This is the set the filter options and the filtered list both derive from.
   const baseProducts = useMemo(() => {
-    const scoped = productsForMode(mode, MARKET_PRODUCTS, trustSet, sellerPubkeyOf);
+    const friends = trustSetForTier('friends');
+    const scoped = productsForMode(mode, MARKET_PRODUCTS, friends, sellerPubkeyOf);
     return featuredFirst(scoped);
-  }, [mode, trustSet]);
+  }, [mode, trustSetForTier]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
   const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
