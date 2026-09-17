@@ -37,3 +37,11 @@ test('an all-relay connection failure is an error, never "no shipping needed"', 
     expect.objectContaining({ rejectOnAllRelaysFailure: true }),
   );
 });
+test('ignores unrelated same-author events of another kind instead of failing checkout', async () => {
+  (querySyncAbortable as jest.Mock).mockResolvedValue([
+    { kind: 1, pubkey: input.merchantPubkey, created_at: 1, tags: [], content: 'gm' },
+    { kind: 30406, pubkey: input.merchantPubkey, created_at: 1, tags: [['d', 'std'], ['price', '4.5', 'GBP']] }, // prettier-ignore
+  ]);
+  const options = await fetchShippingOptions(input);
+  expect(options.map((o) => o.dTag)).toEqual(['std']);
+});

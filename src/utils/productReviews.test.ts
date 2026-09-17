@@ -182,6 +182,22 @@ describe('parseReviewEvent', () => {
   });
 });
 
+describe('parseReviewEvent rejects numeric-prefix ratings', () => {
+  it('skips a thumb rating that is not a whole numeric string', () => {
+    const bad = ev({
+      tags: [
+        ['d', COORD],
+        ['rating', '0.8garbage', 'thumb'],
+      ],
+    });
+    expect(parseReviewEvent(bad)).toBeNull();
+    const withCategory = ev({
+      tags: [['d', COORD], ['rating', '1', 'thumb'], ['rating', '0.5abc', 'quality'], ['rating', '0.5', 'value']], // prettier-ignore
+    });
+    expect(parseReviewEvent(withCategory)?.categories.map((c) => c.category)).toEqual(['value']);
+  });
+});
+
 describe('parseReviewEvent / parseReviews scoped to a coordinate', () => {
   const review = (d: string, pubkey = 'p'.repeat(64)) =>
     ev({

@@ -42,7 +42,11 @@ export async function fetchShippingOptions(input: {
   // still hand back a valid-looking 30406 from another pubkey, whose price
   // would otherwise become a shipping charge on THIS merchant's order. Drop
   // anything not signed by the merchant before parsing.
-  const own = events.filter((ev) => ev.pubkey.toLowerCase() === merchantPubkey);
+  // Likewise `kinds` — an unrelated merchant event of another kind is simply
+  // not a shipping option, not a malformed one.
+  const own = events.filter(
+    (ev) => ev.kind === SHIPPING_OPTION_KIND && ev.pubkey.toLowerCase() === merchantPubkey,
+  );
   // Invalid options must not turn into an empty list ("no shipping needed").
   const parsed = own.map(parseShippingOptionEvent);
   if (parsed.some((option) => option === null)) {

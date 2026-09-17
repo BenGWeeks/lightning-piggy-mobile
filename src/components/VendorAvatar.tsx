@@ -66,7 +66,9 @@ const VendorAvatar: React.FC<Props> = ({ vendor, size = 28, testID }) => {
           }
           style={dimension}
           cachePolicy="memory-disk"
-          recyclingKey={uri}
+          // Identity follows the PROFILE picture (as the other avatar
+          // surfaces do); the curated logo is only the null fallback.
+          recyclingKey={picture ?? uri}
           autoplay={false}
           contentFit="cover"
         />

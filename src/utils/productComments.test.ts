@@ -128,9 +128,17 @@ describe('belongsToRoot', () => {
     ]);
     const other = comment([['A', `30402:${MERCHANT}:another`], ['a', `30402:${MERCHANT}:another`]]); // prettier-ignore
     const missing = comment([['a', PRODUCT_COORD]]);
+    const wrongKind = comment(
+      [
+        ['A', PRODUCT_COORD],
+        ['a', PRODUCT_COORD],
+      ],
+      { kind: 1 },
+    );
     expect(belongsToRoot(mine, root)).toBe(true);
     expect(belongsToRoot(other, root)).toBe(false);
     expect(belongsToRoot(missing, root)).toBe(false);
+    expect(belongsToRoot(wrongKind, root)).toBe(false);
   });
 
   it('matches a URL root on the uppercase I tag', () => {

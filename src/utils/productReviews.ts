@@ -112,6 +112,14 @@ export function buildReviewEvent(input: BuildReviewInput): ReviewEventTemplate {
 }
 
 /**
+ * Whole-string numeric parse. `parseFloat` would accept a numeric PREFIX
+ * (`"0.8garbage"` → 0.8) and let malformed relay data into the aggregate;
+ * anything but a plain decimal is NaN here.
+ */
+const strictNumber = (raw: string): number =>
+  /^\s*-?\d+(?:\.\d+)?\s*$/.test(raw) ? Number(raw) : NaN;
+
+/**
  * Parse a single event into a usable review, or `null` to skip it. When
  * `expectedCoord` is given the event's `d` must equal it exactly — the relay
  * `#d` filter is only a request, and a review rooted on another product must
@@ -128,13 +136,13 @@ export function parseReviewEvent(event: NostrEvent, expectedCoord?: string): Par
   const thumbTag = ratingTags.find((t) => t[2] === 'thumb');
   if (!thumbTag) return null; // no overall rating -> unusable
 
-  const parsedThumb = parseFloat(thumbTag[1]);
+  const parsedThumb = strictNumber(thumbTag[1]);
   if (!Number.isFinite(parsedThumb)) return null; // non-numeric -> skip (don't count as 0)
   const rating = Math.max(0, Math.min(1, parsedThumb));
 
   const categories: CategoryStars[] = ratingTags
     .filter((t) => t[2] && t[2] !== 'thumb')
-    .map((t) => ({ category: t[2], parsed: parseFloat(t[1]) }))
+    .map((t) => ({ category: t[2], parsed: strictNumber(t[1]) }))
     .filter((c) => Number.isFinite(c.parsed)) // drop malformed, don't coerce to 0
     .map((c) => ({
       category: c.category,

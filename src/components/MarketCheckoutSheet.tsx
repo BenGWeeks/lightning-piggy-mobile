@@ -42,6 +42,8 @@ interface Props {
 }
 
 const MAX_QTY = 99;
+const MAX_RATE_RETRIES = 2;
+const RATE_RETRY_MS = 3000;
 
 /**
  * In-app Market checkout (#market). Replaces the old "open the seller's website"
@@ -87,6 +89,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const [btcPriceByCurrency, setBtcPriceByCurrency] = useState<
     Record<string, number | null | undefined>
   >({});
+  // A failed quote (null) is retried a bounded number of times, ~3 s apart, so
+  // a transient rate outage recovers without closing and reopening the sheet.
+  const [rateAttempt, setRateAttempt] = useState(0);
 
   useEffect(() => {
     if (visible) {
@@ -98,9 +103,12 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       // Fresh spot rates per open: a failed quote (null) must retry, and a
       // rate older than fiatService's cache window must not price shipping.
       setBtcPriceByCurrency({});
+      setRateAttempt(0);
       reset();
       sheetRef.current?.present();
     } else {
+      // The picker is an independently presented modal — dismiss it with us.
+      setCountryPickerVisible(false);
       sheetRef.current?.dismiss();
     }
   }, [visible, reset]);
@@ -121,9 +129,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
           .map((o) => o.currency)
           .filter((c) => c && c !== 'SATS' && c !== 'SAT' && c !== 'BTC'),
       ),
-    ].filter((c) => !(c in btcPriceByCurrency));
+    ].filter((c) => !(c in btcPriceByCurrency) || btcPriceByCurrency[c] === null);
     if (fiat.length === 0) return;
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     Promise.all(
       fiat.map((currency) =>
         // No stale fallback: an expired rate must not price a payable total.
@@ -134,14 +143,19 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     ).then((entries) => {
       if (cancelled) return;
       setBtcPriceByCurrency((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+      if (entries.some(([, price]) => price === null) && rateAttempt < MAX_RATE_RETRIES) {
+        retryTimer = setTimeout(() => setRateAttempt((a) => a + 1), RATE_RETRY_MS);
+      }
     });
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-    // btcPriceByCurrency intentionally omitted: the `in` guard already
-    // prevents refetch loops, and depending on it would refire per result.
+    // btcPriceByCurrency intentionally omitted: the null-or-missing guard
+    // already prevents refetch loops, and depending on it would refire per
+    // result; `rateAttempt` is the deliberate retry trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasShipping, shipping.options]);
+  }, [hasShipping, shipping.options, rateAttempt]);
 
   const compatibleOptions = useMemo(
     () => (hasShipping && countryCode ? filterShippingOptions(shipping.options, countryCode) : []),

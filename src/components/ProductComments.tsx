@@ -23,15 +23,23 @@ interface Props {
   onCount?: (count: number) => void;
 }
 
-const CommentItem: React.FC<{ comment: NostrEvent; styles: Styles }> = ({ comment, styles }) => (
-  <View style={styles.item} testID={`product-comment-${comment.id}`}>
-    <View style={styles.itemHeader}>
-      <AuthorInline pubkey={comment.pubkey} size={26} />
-      <Text style={styles.when}>{relativeTime(comment.created_at ?? 0)}</Text>
+const CommentItem = React.memo(function CommentItem({
+  comment,
+  styles,
+}: {
+  comment: NostrEvent;
+  styles: Styles;
+}) {
+  return (
+    <View style={styles.item} testID={`product-comment-${comment.id}`}>
+      <View style={styles.itemHeader}>
+        <AuthorInline pubkey={comment.pubkey} size={26} />
+        <Text style={styles.when}>{relativeTime(comment.created_at ?? 0)}</Text>
+      </View>
+      <Text style={styles.itemText}>{comment.content}</Text>
     </View>
-    <Text style={styles.itemText}>{comment.content}</Text>
-  </View>
-);
+  );
+});
 
 /**
  * Comments tab body: a compose box (or sign-in prompt) and the list of

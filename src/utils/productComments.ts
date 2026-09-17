@@ -82,6 +82,9 @@ export function commentFilterForRoot(root: CommentRoot, limit?: number): Filter 
  * event a relay returns for another root must be dropped before it's stored.
  */
 export function belongsToRoot(comment: NostrEvent, root: CommentRoot): boolean {
+  // The `kinds` filter is only a request too — a same-`A` event of another
+  // kind is not a comment.
+  if (comment.kind !== COMMENT_KIND) return false;
   if (root instanceof URL) return getTagValue(comment, 'I') === root.toString();
   if (isAddressableKind(root.kind)) return getTagValue(comment, 'A') === addressableCoord(root);
   if (isReplaceableKind(root.kind))

@@ -26,16 +26,24 @@ interface Props {
 }
 
 /** A single review row: author, stars, relative time and text. */
-const ReviewItem: React.FC<{ review: ParsedReview; styles: Styles }> = ({ review, styles }) => (
-  <View style={styles.item} testID={`product-review-${review.id || review.pubkey}`}>
-    <View style={styles.itemHeader}>
-      <AuthorInline pubkey={review.pubkey} size={26} />
-      <Text style={styles.when}>{relativeTime(review.createdAt)}</Text>
+const ReviewItem = React.memo(function ReviewItem({
+  review,
+  styles,
+}: {
+  review: ParsedReview;
+  styles: Styles;
+}) {
+  return (
+    <View style={styles.item} testID={`product-review-${review.id || review.pubkey}`}>
+      <View style={styles.itemHeader}>
+        <AuthorInline pubkey={review.pubkey} size={26} />
+        <Text style={styles.when}>{relativeTime(review.createdAt)}</Text>
+      </View>
+      <StarRating value={review.stars} size={14} />
+      {review.text.length > 0 ? <Text style={styles.itemText}>{review.text}</Text> : null}
     </View>
-    <StarRating value={review.stars} size={14} />
-    {review.text.length > 0 ? <Text style={styles.itemText}>{review.text}</Text> : null}
-  </View>
-);
+  );
+});
 
 /** Compose form (signed-in) or a sign-in prompt (signed-out). */
 const ReviewForm: React.FC<{
