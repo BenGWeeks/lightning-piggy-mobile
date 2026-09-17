@@ -2,7 +2,7 @@
 // Kept as a leaf module (no imports from either of those) so the status layer
 // can reuse the timeout-aware fetch without creating an import cycle.
 
-/** Base URL for the Boltz Exchange v2 API. */
+/** Default/legacy provider only; new swaps read swapBackendService settings. */
 export const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
 /** Fetch with a timeout to prevent hanging on slow/unreachable APIs.

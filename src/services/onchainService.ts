@@ -157,6 +157,12 @@ async function getBlockchain(): Promise<Blockchain> {
   return blockchain;
 }
 
+/** Independent chain tip for validating swap refund deadlines; no wallet required. */
+export async function getBlockHeight(): Promise<number> {
+  const chain = await getBlockchain();
+  return chain.getHeight();
+}
+
 /**
  * Heuristic check for a Bitcoin mainnet on-chain address (P2PKH, P2SH,
  * native SegWit v0, Taproot). Doesn't verify checksum — that's done by

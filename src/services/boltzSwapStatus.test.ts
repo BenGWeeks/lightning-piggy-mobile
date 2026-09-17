@@ -1,3 +1,5 @@
+import { getSwapBackendForId } from './swapBackendService';
+
 // Unit coverage for the Boltz swap-status subscription layer.
 //
 // Two invariants matter most and are cheaply testable without a real relay:
@@ -17,6 +19,11 @@ import {
   watchSubmarineSwapStatus,
   type SubmarineSwapPhase,
 } from './boltzSwapStatus';
+
+jest.mock('./swapBackendService', () => ({
+  ...jest.requireActual('./swapBackendService'),
+  getSwapBackendForId: jest.fn(async () => 'https://api.boltz.exchange/v2'),
+}));
 
 // --- Controllable fake WebSocket -------------------------------------------
 
@@ -124,8 +131,10 @@ describe('waitForSwapStatus abort behaviour', () => {
     const controller = new AbortController();
     const promise = waitForSwapStatus('swap2', isTerminal, 10_000, controller.signal);
 
+    await Promise.resolve();
     // A socket was opened but never connected/terminal.
     expect(FakeWebSocket.instances).toHaveLength(1);
+    await Promise.resolve();
     const ws = FakeWebSocket.instances[0];
     ws.emitOpen();
 
@@ -138,6 +147,7 @@ describe('waitForSwapStatus abort behaviour', () => {
   it('resolves with the raw data and tears the socket down on a terminal status', async () => {
     const promise = waitForSwapStatus('swap3', isTerminal, 10_000);
 
+    await Promise.resolve();
     const ws = FakeWebSocket.instances[0];
     ws.emitOpen();
     // subscribe frame sent on open
@@ -160,6 +170,7 @@ describe('watchSubmarineSwapStatus', () => {
     const phases: SubmarineSwapPhase[] = [];
     const promise = watchSubmarineSwapStatus('swap4', (phase) => phases.push(phase), 10_000);
 
+    await Promise.resolve();
     const ws = FakeWebSocket.instances[0];
     ws.emitOpen();
     ws.emitStatus('transaction.mempool'); // detected
@@ -173,4 +184,31 @@ describe('watchSubmarineSwapStatus', () => {
     expect(result.phase).toBe('complete');
     expect(result.rawStatus).toBe('invoice.settled');
   });
+});
+
+it('uses the same pinned provider for WebSocket and polling fallback', async () => {
+  jest.mocked(getSwapBackendForId).mockResolvedValueOnce('https://family.example/boltz/v2');
+  const originalFetch = global.fetch;
+  const fetchMock = jest
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ status: 'invoice.settled' }) });
+  global.fetch = fetchMock;
+  try {
+    const promise = waitForSwapStatus(
+      'private-swap',
+      (status) => status === 'invoice.settled',
+      10000,
+    );
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0];
+    expect(ws.url).toBe('wss://family.example/boltz/v2/ws');
+    ws.onerror?.();
+    await promise;
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://family.example/boltz/v2/swap/private-swap',
+      expect.anything(),
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

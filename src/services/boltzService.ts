@@ -24,8 +24,11 @@ import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
+import { amountSatsFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
-import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
+import { fetchWithTimeout } from './boltzApi';
+import { getSwapBackend, getSwapBackendForId, pinSwapBackend } from './swapBackendService';
 import { waitForSwapStatus } from './boltzSwapStatus';
 
 // Re-exported for back-compat: the HTTP transport and the swap-status
@@ -48,6 +51,7 @@ export const BOLTZ_MAX_SATS = 25_000_000;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SwapFees {
+  pairHash?: string;
   percentage: number;
   minerFee: number;
   minAmount: number;
@@ -139,7 +143,8 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
  * Fetch current reverse swap fee schedule (BTC Lightning → BTC on-chain).
  */
 export async function getReverseSwapFees(): Promise<SwapFees> {
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`);
+  const backend = await getSwapBackend();
+  const res = await fetchWithTimeout(`${backend}/swap/reverse`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
@@ -160,17 +165,32 @@ export const getSwapFees = getReverseSwapFees;
 /**
  * Fetch current submarine swap fee schedule (BTC on-chain → BTC Lightning).
  */
-export async function getSubmarineSwapFees(): Promise<SwapFees> {
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`);
+export async function getSubmarineSwapFees(backend?: string): Promise<SwapFees> {
+  backend ??= await getSwapBackend();
+  const res = await fetchWithTimeout(`${backend}/swap/submarine`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
   const pair = data?.BTC?.BTC;
   if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
 
+  const percentage = pair.fees?.percentage;
+  const minerFee = pair.fees?.minerFees;
+  if (
+    typeof percentage !== 'number' ||
+    !Number.isFinite(percentage) ||
+    percentage < 0 ||
+    !Number.isSafeInteger(minerFee) ||
+    minerFee < 0 ||
+    typeof pair.hash !== 'string' ||
+    !pair.hash
+  ) {
+    throw new Error('Invalid Boltz submarine fee quote');
+  }
   return {
-    percentage: pair.fees?.percentage ?? 0.5,
-    minerFee: pair.fees?.minerFees ?? 0,
+    pairHash: pair.hash,
+    percentage,
+    minerFee,
     minAmount: pair.limits?.minimal ?? 10000,
     maxAmount: pair.limits?.maximal ?? 25000000,
   };
@@ -193,6 +213,7 @@ export async function createReverseSwap(
   onchainAddress: string,
   amountSats: number,
 ): Promise<ReverseSwapResult> {
+  const backend = await getSwapBackend();
   console.log(
     `[Boltz] Creating reverse swap (LN → on-chain) for ${amountSats} sats to ${onchainAddress}`,
   );
@@ -211,7 +232,7 @@ export async function createReverseSwap(
   const claimKeys = generateClaimKeyPair();
   const claimPublicKey = toHex(claimKeys.publicKey);
 
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`, {
+  const res = await fetchWithTimeout(`${backend}/swap/reverse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -242,6 +263,7 @@ export async function createReverseSwap(
     expectedPaymentHash: preimageHash,
     expectedAmountSats: amountSats,
   });
+  await pinSwapBackend(data.id, backend);
   return {
     id: data.id,
     invoice: data.invoice,
@@ -495,7 +517,8 @@ export async function getSubmarineSwapLockup(
   lockupAddress: string,
 ): Promise<{ txId: string; vout: number; amount: number } | null> {
   try {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}/transaction`);
+    const backend = await getSwapBackendForId(swapId);
+    const res = await fetchWithTimeout(`${backend}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();
     const txId = data.transactionId ?? data.id;
@@ -648,17 +671,38 @@ export interface SubmarineSwapResult {
  *   4. Send BTC on-chain to that address from the hot wallet (caller does this)
  *   5. Boltz detects the on-chain payment and pays the LN invoice
  */
-export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
+export async function createSubmarineSwapForward(
+  invoice: string,
+  requestedAmountSats: number,
+): Promise<SubmarineSwapResult> {
+  const backend = await getSwapBackend();
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
+  const amount = amountSatsFromBolt11(invoice);
+  if (
+    !Number.isSafeInteger(requestedAmountSats) ||
+    requestedAmountSats <= 0 ||
+    amount !== requestedAmountSats
+  ) {
+    throw new Error('Submarine swap invoice amount does not match the requested payment');
+  }
+  // Quote independently of the creation response; fail closed if either the
+  // fee schedule or our configured Electrum server is unavailable.
+  const { getBlockHeight } = require('./onchainService') as typeof import('./onchainService');
+  const [fees, currentBlockHeight] = await Promise.all([
+    getSubmarineSwapFees(backend),
+    getBlockHeight(),
+  ]);
+  const expectedAmount = amount + calculateSwapFee(amount, fees);
   const refundKeys = generateClaimKeyPair();
 
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`, {
+  const res = await fetchWithTimeout(`${backend}/swap/submarine`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: 'BTC',
       to: 'BTC',
       invoice,
+      pairHash: fees.pairHash,
       refundPublicKey: toHex(refundKeys.publicKey),
       referralId: 'lightning-piggy',
     }),
@@ -669,17 +713,24 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     throw new Error(`Boltz submarine swap creation failed: ${errBody}`);
   }
 
-  const data = await res.json();
+  const data: unknown = await res.json();
+  verifySubmarineSwap(data, {
+    invoice,
+    refundPublicKey: refundKeys.publicKey,
+    expectedAmount,
+    currentBlockHeight,
+  });
   console.log(
     `[Boltz] Submarine swap created: id=${data.id} address=${data.address} amount=${data.expectedAmount}`,
   );
+  await pinSwapBackend(data.id, backend);
   return {
     id: data.id,
     address: data.address,
     expectedAmount: data.expectedAmount,
-    timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
+    timeoutBlockHeight: data.timeoutBlockHeight,
     refundPrivateKey: toHex(refundKeys.privateKey),
-    claimPublicKey: data.claimPublicKey ?? '',
+    claimPublicKey: data.claimPublicKey,
     swapTree: data.swapTree,
   };
 }
