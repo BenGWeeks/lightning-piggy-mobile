@@ -111,12 +111,18 @@ export function buildReviewEvent(input: BuildReviewInput): ReviewEventTemplate {
   return { kind: REVIEW_KIND, content: input.content?.trim() ?? '', tags };
 }
 
-/** Parse a single event into a usable review, or `null` to skip it. */
-export function parseReviewEvent(event: NostrEvent): ParsedReview | null {
+/**
+ * Parse a single event into a usable review, or `null` to skip it. When
+ * `expectedCoord` is given the event's `d` must equal it exactly — the relay
+ * `#d` filter is only a request, and a review rooted on another product must
+ * never be aggregated into this one.
+ */
+export function parseReviewEvent(event: NostrEvent, expectedCoord?: string): ParsedReview | null {
   if (!event || event.kind !== REVIEW_KIND) return null;
 
   const dTag = event.tags.find((t) => t[0] === 'd');
   if (!dTag || typeof dTag[1] !== 'string' || !isProductReviewCoord(dTag[1])) return null;
+  if (expectedCoord !== undefined && dTag[1] !== expectedCoord) return null;
 
   const ratingTags = event.tags.filter((t) => t[0] === 'rating' && typeof t[1] === 'string');
   const thumbTag = ratingTags.find((t) => t[2] === 'thumb');
@@ -168,12 +174,13 @@ export function dedupeNewestPerAuthor(events: NostrEvent[]): NostrEvent[] {
  * author's last *valid* review and skewing the aggregate. Parsing first means a
  * malformed newer event is discarded and the author's newest VALID review still
  * counts. Authors are keyed case-insensitively (pubkeys are hex) so a
- * differently-cased duplicate can't double-count.
+ * differently-cased duplicate can't double-count. `expectedCoord` scopes the
+ * result to ONE product (see {@link parseReviewEvent}).
  */
-export function parseReviews(events: NostrEvent[]): ParsedReview[] {
+export function parseReviews(events: NostrEvent[], expectedCoord?: string): ParsedReview[] {
   const newestPerAuthor = new Map<string, ParsedReview>();
   for (const event of events) {
-    const review = parseReviewEvent(event);
+    const review = parseReviewEvent(event, expectedCoord);
     if (!review) continue;
     const key = review.pubkey.toLowerCase();
     const existing = newestPerAuthor.get(key);

@@ -71,7 +71,9 @@ export function useProductReviews(coord: string | null): UseProductReviews {
     return () => controller.abort();
   }, [coord, readRelays, tick]);
 
-  const reviews = useMemo(() => parseReviews(events), [events]);
+  // Exact `d` scoping: the `#d` filter is only a relay-side request, so a
+  // review a relay returns for another product must not count here.
+  const reviews = useMemo(() => parseReviews(events, coord ?? undefined), [events, coord]);
   const aggregate = useMemo(() => aggregateReviews(reviews), [reviews]);
 
   return { reviews, aggregate, loading, error, refetch };

@@ -182,6 +182,34 @@ describe('parseReviewEvent', () => {
   });
 });
 
+describe('parseReviewEvent / parseReviews scoped to a coordinate', () => {
+  const review = (d: string, pubkey = 'p'.repeat(64)) =>
+    ev({
+      id: `id-${d}-${pubkey.slice(0, 4)}`,
+      pubkey,
+      tags: [
+        ['d', d],
+        ['rating', '1', 'thumb'],
+      ],
+    });
+  const OTHER_COORD = `a:30402:${MERCHANT}:another-product`;
+
+  it('drops a valid review whose d tag belongs to a different product', () => {
+    expect(parseReviewEvent(review(OTHER_COORD), COORD)).toBeNull();
+    expect(parseReviewEvent(review(COORD), COORD)).not.toBeNull();
+  });
+
+  it('parseReviews only aggregates reviews rooted on the requested coordinate', () => {
+    const reviews = parseReviews(
+      [review(COORD, 'a'.repeat(64)), review(OTHER_COORD, 'b'.repeat(64))],
+      COORD,
+    );
+    expect(reviews.map((r) => r.pubkey)).toEqual(['a'.repeat(64)]);
+    // Unscoped call keeps the old behaviour.
+    expect(parseReviews([review(COORD, 'a'.repeat(64)), review(OTHER_COORD, 'b'.repeat(64))])).toHaveLength(2); // prettier-ignore
+  });
+});
+
 describe('dedupeNewestPerAuthor', () => {
   it('keeps the newest event per author (missing created_at treated as 0)', () => {
     const a1 = ev({ id: 'a1', pubkey: 'A', created_at: 10 });

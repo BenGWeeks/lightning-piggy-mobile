@@ -76,6 +76,19 @@ export function commentFilterForRoot(root: CommentRoot, limit?: number): Filter 
   return filter;
 }
 
+/**
+ * Whether a comment's UPPERCASE root tag is this root — the client-side twin
+ * of {@link commentFilterForRoot}. The relay filter is only a request; an
+ * event a relay returns for another root must be dropped before it's stored.
+ */
+export function belongsToRoot(comment: NostrEvent, root: CommentRoot): boolean {
+  if (root instanceof URL) return getTagValue(comment, 'I') === root.toString();
+  if (isAddressableKind(root.kind)) return getTagValue(comment, 'A') === addressableCoord(root);
+  if (isReplaceableKind(root.kind))
+    return getTagValue(comment, 'A') === `${root.kind}:${root.pubkey}:`;
+  return getTagValue(comment, 'E') === root.id;
+}
+
 /** Whether a comment's LOWERCASE parent tag points directly at the root. */
 export function isTopLevelComment(comment: NostrEvent, root: CommentRoot): boolean {
   if (root instanceof URL) return getTagValue(comment, 'i') === root.toString();

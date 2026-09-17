@@ -2,6 +2,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 import {
   COMMENT_KIND,
   addressableCoord,
+  belongsToRoot,
   buildCommentTags,
   commentFilterForRoot,
   commentRootRef,
@@ -115,6 +116,27 @@ describe('buildCommentTags + isTopLevelComment', () => {
     // The lowercase parent mirrors the root for a top-level comment.
     expect(tags).toContainEqual(['i', 'https://shop.example/x']);
     expect(tags).toContainEqual(['k', 'web']);
+  });
+});
+
+describe('belongsToRoot', () => {
+  it('accepts only comments whose UPPERCASE root tag is this product', () => {
+    const root = product();
+    const mine = comment([
+      ['A', PRODUCT_COORD],
+      ['a', PRODUCT_COORD],
+    ]);
+    const other = comment([['A', `30402:${MERCHANT}:another`], ['a', `30402:${MERCHANT}:another`]]); // prettier-ignore
+    const missing = comment([['a', PRODUCT_COORD]]);
+    expect(belongsToRoot(mine, root)).toBe(true);
+    expect(belongsToRoot(other, root)).toBe(false);
+    expect(belongsToRoot(missing, root)).toBe(false);
+  });
+
+  it('matches a URL root on the uppercase I tag', () => {
+    const url = new URL('https://example.com/p/1');
+    expect(belongsToRoot(comment([['I', url.toString()]]), url)).toBe(true);
+    expect(belongsToRoot(comment([['I', 'https://example.com/p/2']]), url)).toBe(false);
   });
 });
 

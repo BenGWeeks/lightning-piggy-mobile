@@ -5,6 +5,7 @@ import { DEFAULT_RELAYS, pool } from '../services/nostrService';
 import { querySyncAbortable } from '../services/relayQuery';
 import {
   DEFAULT_COMMENTS_LIMIT,
+  belongsToRoot,
   commentFilterForRoot,
   commentRootRef,
   directReplies,
@@ -67,7 +68,9 @@ export function useProductComments(root: CommentRoot | null): UseProductComments
       signal: controller.signal,
     })
       .then((evs) => {
-        if (!controller.signal.aborted) setEvents(evs);
+        // The `#A` filter is only a relay-side request — keep only comments
+        // whose ROOT tag is this product before storing/counting them.
+        if (!controller.signal.aborted) setEvents(evs.filter((e) => belongsToRoot(e, root)));
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
