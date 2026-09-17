@@ -17,15 +17,12 @@ import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import ReceiveSheet from '../components/ReceiveSheet';
-import SendSheet from '../components/SendSheet';
-import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
+import HomeSheets from '../components/HomeSheets';
+import type { HomeSheetActions } from '../hooks/useHomeSheetState';
 import WalletCarousel from '../components/WalletCarousel';
 import BrandGradientBackground from '../components/BrandGradientBackground';
-import AddWalletWizard from '../components/AddWalletWizard';
 import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
-import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
@@ -63,20 +60,12 @@ const HomeScreen: React.FC = () => {
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
 
-  const [receiveOpen, setReceiveOpen] = useState(false);
+  const sheetsRef = useRef<HomeSheetActions>(null);
   // True while the carousel's trailing "Add wallet" card is the active page, so
   // the tx list shows an add-wallet prompt instead of the pinned wallet's
   // history (#666). Kept separate from activeWalletId, which #166 deliberately
   // pins to the last real wallet on the add card to keep Send/Receive usable.
   const [addCardActive, setAddCardActive] = useState(false);
-  const [sendOpen, setSendOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [sendToAddress, setSendToAddress] = useState<string | undefined>();
-  const [sendToPicture, setSendToPicture] = useState<string | undefined>();
-  const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
-  const [sendToName, setSendToName] = useState<string | undefined>();
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // Refresh the own-profile kind-0 on focus so the top-right profile
@@ -115,11 +104,12 @@ const HomeScreen: React.FC = () => {
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
     if (route.params?.sendToAddress) {
-      setSendToAddress(route.params.sendToAddress);
-      setSendToPicture(route.params.sendToPicture);
-      setSendToPubkey(route.params.sendToPubkey);
-      setSendToName(route.params.sendToName);
-      setSendOpen(true);
+      sheetsRef.current?.openSend({
+        address: route.params.sendToAddress,
+        picture: route.params.sendToPicture,
+        pubkey: route.params.sendToPubkey,
+        name: route.params.sendToName,
+      });
       navigation.setParams({
         sendToAddress: undefined,
         sendToPicture: undefined,
@@ -246,7 +236,7 @@ const HomeScreen: React.FC = () => {
   );
 
   const handleSettingsPress = useCallback((walletId: string) => {
-    setSettingsWalletId(walletId);
+    sheetsRef.current?.openSettings(walletId);
   }, []);
 
   const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
@@ -332,7 +322,7 @@ const HomeScreen: React.FC = () => {
           btcPrice={btcPrice}
           currency={currency}
           onWalletChange={handleWalletChange}
-          onAddWallet={() => setWizardOpen(true)}
+          onAddWallet={() => sheetsRef.current?.openWizard()}
           onSettingsPress={handleSettingsPress}
           onAddCardActiveChange={setAddCardActive}
         />
@@ -341,7 +331,10 @@ const HomeScreen: React.FC = () => {
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
-            onPress={() => setReceiveOpen(true)}
+            onPress={() => {
+              perfLog('btn-receive onPress');
+              sheetsRef.current?.openReceive();
+            }}
             disabled={isReceiveDisabled}
             accessibilityLabel={t('homeScreen.receive')}
             testID="btn-receive"
@@ -353,7 +346,7 @@ const HomeScreen: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
-            onPress={() => setTransferOpen(true)}
+            onPress={() => sheetsRef.current?.openTransfer()}
             disabled={isTransferDisabled}
             accessibilityLabel={t('homeScreen.transfer')}
             testID="btn-transfer"
@@ -367,7 +360,7 @@ const HomeScreen: React.FC = () => {
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
             onPress={() => {
               perfLog('btn-send onPress');
-              setSendOpen(true);
+              sheetsRef.current?.openSend();
             }}
             disabled={isSendDisabled}
             accessibilityLabel={t('homeScreen.send')}
@@ -392,13 +385,13 @@ const HomeScreen: React.FC = () => {
         ) : (
           <ScrollView style={styles.transactionsContainer} refreshControl={homeRefreshControl}>
             {!hasWallets ? (
-              <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
+              <WelcomeWalletPrompt onGetStarted={() => sheetsRef.current?.openWizard()} />
             ) : addCardActive || activeWalletId === null ? (
               // On the "Add wallet" card (or no active wallet) show an add-wallet
               // prompt rather than the previous wallet's transactions (#666).
               <View style={styles.emptyState}>
                 <TouchableOpacity
-                  onPress={() => setWizardOpen(true)}
+                  onPress={() => sheetsRef.current?.openWizard()}
                   accessibilityRole="button"
                   accessibilityLabel={t('homeScreen.addWallet')}
                   testID="home-add-wallet-empty"
@@ -415,24 +408,7 @@ const HomeScreen: React.FC = () => {
         )}
       </View>
 
-      <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
-      <SendSheet
-        visible={sendOpen}
-        onClose={() => {
-          setSendOpen(false);
-          setSendToAddress(undefined);
-          setSendToPicture(undefined);
-          setSendToPubkey(undefined);
-          setSendToName(undefined);
-        }}
-        initialAddress={sendToAddress}
-        initialPicture={sendToPicture}
-        recipientPubkey={sendToPubkey}
-        recipientName={sendToName}
-      />
-      <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
-      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
-      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
+      <HomeSheets ref={sheetsRef} />
     </View>
   );
 };
