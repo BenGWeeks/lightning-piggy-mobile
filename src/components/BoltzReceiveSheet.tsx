@@ -319,7 +319,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         const invoice = await makeInvoiceForWallet(walletId, sats, t('boltzReceive.invoiceMemo'));
 
         // Step 2 — create the swap with Boltz.
-        const created = await boltzService.createSubmarineSwapForward(invoice);
+        const created = await boltzService.createSubmarineSwapForward(invoice, sats);
 
         // Step 3 — pre-fetch a refund destination snapshot from one of the
         // user's on-chain wallets. If none exists, warn the user: recovery
