@@ -148,7 +148,13 @@ const MarketFilterBar: React.FC<Props> = ({
   if (!rendered) return null;
 
   return (
-    <Modal visible transparent statusBarTranslucent animationType="none" onRequestClose={onClose}>
+    <Modal
+      visible={rendered}
+      transparent
+      statusBarTranslucent
+      animationType="none"
+      onRequestClose={onClose}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} testID="market-filter-backdrop" />
       <Animated.View
         style={[styles.panel, { width: panelWidth, transform: [{ translateX }] }]}

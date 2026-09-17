@@ -77,6 +77,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
 
   const [quantity, setQuantity] = useState(1);
   const [imageFailed, setImageFailed] = useState(false);
+  // In-flight guard for the WHOLE submit path (rate revalidation + publish):
+  // `isPlacing` only covers the hook's publish, so the ref (synchronous) stops
+  // a double tap and the state disables the button / locks the selection.
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // --- Country-first shipping (#948 Option A) ---
   const shipping = useShippingOptions(visible ? vendorPubkey : null, visible);
@@ -196,6 +201,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const selectedShippingSats = selectedOption
     ? (costSatsByCoordinate.get(selectedOption.coordinate) ?? null)
     : null;
+  // Live selection, readable after an await: the submit handler captured a
+  // render-time selection and must not sign a different one.
+  const liveSelectionRef = useRef({ coordinate: selectedCoordinate, country: countryCode });
+  liveSelectionRef.current = { coordinate: selectedCoordinate, country: countryCode };
 
   // Submit gate (spec §6): until shipping has settled to `ready` we can't know
   // whether shipping is required, so block for every non-ready state —
@@ -231,6 +240,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       return;
     }
     if (shippingBlocksSubmit) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
       let shippingInput: OrderShippingInput | undefined;
       if (hasShipping && selectedOption && selectedShippingSats !== null) {
@@ -243,6 +255,14 @@ const MarketCheckoutSheet: React.FC<Props> = ({
           // an outage yields null → block and hand off to the retry loop.
           const fresh = await getBtcPrice(cur, { allowStale: false });
           setBtcPriceByCurrency((prev) => ({ ...prev, [cur]: fresh }));
+          // Selection changed while we awaited (the section is locked, but a
+          // queued tap can still land) → don't sign the captured one.
+          if (
+            liveSelectionRef.current.coordinate !== selectedOption.coordinate ||
+            liveSelectionRef.current.country !== countryCode
+          ) {
+            return;
+          }
           costSats = shippingCostSats(shippingCostFor(selectedOption), cur, fresh);
           if (costSats === null) {
             setRateAttempt((a) => a + 1);
@@ -283,6 +303,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       });
     } catch {
       // Error surfaced inline via `error`; nothing else to do here.
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }, [
     canOrder,
@@ -297,6 +320,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     hasShipping,
     selectedOption,
     selectedShippingSats,
+    countryCode,
     t,
   ]);
 
@@ -442,9 +466,13 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 retry={shipping.retry}
                 compatibleOptions={compatibleOptions}
                 countryCode={countryCode}
-                onOpenCountryPicker={() => setCountryPickerVisible(true)}
+                onOpenCountryPicker={() => {
+                  if (!submitting) setCountryPickerVisible(true);
+                }}
                 selectedCoordinate={selectedCoordinate}
-                onSelectOption={setSelectedCoordinate}
+                onSelectOption={(coordinate) => {
+                  if (!submitting) setSelectedCoordinate(coordinate);
+                }}
                 costSatsByCoordinate={costSatsByCoordinate}
                 sellerName={sellerName}
                 onMessageShop={handleGoToConversation}
@@ -485,10 +513,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
             <TouchableOpacity
               style={[
                 styles.primaryButton,
-                (isPlacing || (canOrder && shippingBlocksSubmit)) && styles.primaryButtonDisabled,
+                (isPlacing || submitting || (canOrder && shippingBlocksSubmit)) &&
+                  styles.primaryButtonDisabled,
               ]}
               onPress={handlePlace}
-              disabled={isPlacing || (canOrder && shippingBlocksSubmit)}
+              disabled={isPlacing || submitting || (canOrder && shippingBlocksSubmit)}
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel={
@@ -498,7 +527,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               }
               testID="market-checkout-place-order"
             >
-              {isPlacing ? (
+              {isPlacing || submitting ? (
                 <ActivityIndicator size="small" color={colors.white} />
               ) : canOrder ? (
                 <>

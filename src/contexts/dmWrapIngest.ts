@@ -198,11 +198,15 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           // Raw render content (order JSON for kind 16/17, else plaintext) so the
           // conversation thread renders a freshly-decrypted order as its card on
           // the FIRST open — `text` above is the inbox-list preview, which the
-          // card renderer can't parse (#market). Only carried when the preview
-          // actually differs (structured rumors); a plain DM's preview IS its
-          // render text, so the consumer's `renderText ?? text` covers it
-          // without storing the string twice.
-          ...(text !== preview ? { renderText: text } : {}),
+          // card renderer can't parse (#market). ONLY for order kinds: an NWC
+          // wallet-share rumor's raw text is a bearer connection string that
+          // `preview` deliberately redacts, and DmInboxEntry reaches every
+          // inbox consumer — that secret stays in the encrypted store only
+          // (the thread re-derives it from the stored row). A plain DM's
+          // preview IS its render text, so `renderText ?? text` covers it.
+          ...((rumor.kind === 16 || rumor.kind === 17) && text !== preview
+            ? { renderText: text }
+            : {}),
           wireKind: rumor.kind,
           rumorId,
         });
