@@ -10,9 +10,16 @@ import Foundation
 // a CoroutineScope.
 // nsec-only by construction (the unwrap needs the secret key in-process);
 // `start` verifies the supplied key matches the claimed viewer pubkey.
-enum NostrEngineError: Error {
+enum NostrEngineError: Error, CustomStringConvertible {
   case notStarted
   case keyMismatch
+
+  var description: String {
+    switch self {
+    case .notStarted: return "Engine is not started"
+    case .keyMismatch: return "privkey does not match viewerPubkey"
+    }
+  }
 }
 
 actor NostrEngine {
