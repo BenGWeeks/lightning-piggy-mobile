@@ -7,6 +7,7 @@ import Toast from './BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMessageInvoiceActionsStyles } from '../styles/MessageInvoiceActions.styles';
+import { extractInvoice } from '../utils/messageContent';
 
 interface Props {
   /** Bare bolt11 (no `lightning:` prefix), ready to pay / QR-encode / copy. */
@@ -48,6 +49,12 @@ function MessageInvoiceActions({
   const t = useTranslation();
   const styles = useMemo(() => createMessageInvoiceActionsStyles(colors), [colors]);
   const [showQr, setShowQr] = useState(false);
+  // `extractInvoice` returns a raw-only object when bolt11 decoding throws. A
+  // valid invoice always carries a payment hash, so its absence is the decode-
+  // failure signal: never hand an unparseable string to the wallet pay path
+  // (it would be treated as an amountless invoice and prompt for an amount).
+  // QR + copy stay available so the user can inspect it elsewhere.
+  const payable = useMemo(() => extractInvoice(bolt11)?.paymentHash != null, [bolt11]);
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(bolt11);
@@ -61,16 +68,18 @@ function MessageInvoiceActions({
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.payButton}
-        onPress={() => onPayInvoice(bolt11)}
-        accessibilityRole="button"
-        accessibilityLabel={t('messageBubble.payInvoice')}
-        testID={`${testIdPrefix}-pay-${id}`}
-      >
-        <Zap size={16} color={colors.white} fill={colors.white} />
-        <Text style={styles.payButtonText}>{t('messageBubble.pay')}</Text>
-      </TouchableOpacity>
+      {payable ? (
+        <TouchableOpacity
+          style={styles.payButton}
+          onPress={() => onPayInvoice(bolt11)}
+          accessibilityRole="button"
+          accessibilityLabel={t('messageBubble.payInvoice')}
+          testID={`${testIdPrefix}-pay-${id}`}
+        >
+          <Zap size={16} color={colors.white} fill={colors.white} />
+          <Text style={styles.payButtonText}>{t('messageBubble.pay')}</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <View style={styles.secondaryRow}>
         <TouchableOpacity

@@ -266,7 +266,7 @@ export function collectApprovedOrderAmounts(
 
 /**
  * Order ids of RECEIVED payment requests (kind-16 carrying a payable invoice)
- * whose originating outgoing order isn't in `messages` — i.e. it's older than
+ * and receipts (kind-17) whose originating outgoing order isn't in `messages` — i.e. it's older than
  * the loaded thread slice (DM_CONV_CAP). The screen resolves these from the
  * store (`useOutgoingOrderHistory`) so an old order stays payable instead of
  * sticking on "amount unverified". Sorted, so callers can key on the list.
@@ -275,12 +275,13 @@ export function orderIdsNeedingHistory(messages: ConversationMessageInput[]): st
   const outgoing = new Set<string>();
   const wanted = new Set<string>();
   for (const message of messages) {
-    if (message.wireKind !== 16) continue;
+    if (message.wireKind !== 16 && message.wireKind !== 17) continue;
     const order = parseStoredOrder(message.text);
     if (!order) continue;
     if (message.fromMe) {
       if (order.type === 'order') outgoing.add(order.orderId);
-    } else if (payableBolt11(order)) {
+    } else if (payableBolt11(order) || (order.kind === 17 && order.type === 'receipt')) {
+      // A payment request AND a receipt both bind to the buyer's own order.
       wanted.add(order.orderId);
     }
   }

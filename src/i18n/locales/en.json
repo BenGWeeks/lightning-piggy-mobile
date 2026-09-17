@@ -1488,7 +1488,8 @@
     "copyInvoiceA11y": "Copy invoice",
     "copy": "Copy",
     "qrCodeA11y": "Lightning invoice QR code",
-    "scanHint": "Scan with any Lightning wallet"
+    "scanHint": "Scan with any Lightning wallet",
+    "receiptUnverified": "Cannot verify this receipt against your original order. Load the original order to confirm it was paid."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",

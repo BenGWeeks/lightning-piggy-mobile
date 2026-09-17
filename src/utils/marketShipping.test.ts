@@ -62,6 +62,21 @@ describe('parseShippingOptionEvent', () => {
     expect(option?.countries).toEqual([]);
   });
 
+  it('rejects an option whose country tag carries an unknown code', () => {
+    expect(
+      parseShippingOptionEvent(
+        makeEvent([
+          ['d', 'zz'],
+          ['price', '1', 'GBP'],
+          ['country', 'ZZZ'],
+        ]),
+      ),
+    ).toBeNull();
+    expect(
+      parseShippingOptionEvent(makeEvent([['d', 'mix'], ['price', '1', 'GBP'], ['country', 'GB', 'XQ']])), // prettier-ignore
+    ).toBeNull();
+  });
+
   it('rejects a present-but-empty country tag instead of treating it as worldwide', () => {
     expect(
       parseShippingOptionEvent(makeEvent([['d', 'bad'], ['price', '1', 'GBP'], ['country']])),

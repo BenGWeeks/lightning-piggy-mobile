@@ -96,6 +96,37 @@ describe('querySyncAbortable de-duplication', () => {
   });
 });
 
+describe('querySyncAbortable deadline', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('rejects at the deadline when nothing was received and rejectOnAllRelaysFailure is set', async () => {
+    jest.useFakeTimers();
+    const { pool, params, close } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      { kinds: [1] },
+      { maxWait: 1000, rejectOnAllRelaysFailure: true },
+    );
+    expect(params().maxWait).toBe(2000); // pool's own timeout trails ours
+    jest.advanceTimersByTime(1000);
+    await expect(promise).rejects.toThrow('timed out');
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('resolves partial results at the deadline, and [] without the flag', async () => {
+    jest.useFakeTimers();
+    const a = fakePool();
+    const withEvents = querySyncAbortable(a.pool, ['wss://a'], { kinds: [1] }, { maxWait: 1000, rejectOnAllRelaysFailure: true }); // prettier-ignore
+    a.params().onevent(makeEvent('x'));
+    const b = fakePool();
+    const noFlag = querySyncAbortable(b.pool, ['wss://a'], { kinds: [1] }, { maxWait: 1000 });
+    jest.advanceTimersByTime(1000);
+    expect((await withEvents).map((e) => e.id)).toEqual(['x']);
+    expect(await noFlag).toEqual([]);
+  });
+});
+
 describe('scoped aggregate connection failures', () => {
   it('rejects when every relay dropped the socket after connecting ("relay connection closed")', async () => {
     const { pool, params } = fakePool();

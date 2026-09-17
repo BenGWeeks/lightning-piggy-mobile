@@ -35,10 +35,12 @@ export function querySyncAbortable(
     }
     let settled = false;
     let closer: { close: (reason?: string) => void } | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => finish();
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
+      if (deadline) clearTimeout(deadline);
       params.signal?.removeEventListener('abort', onAbort);
       try {
         closer?.close();
@@ -49,8 +51,24 @@ export function querySyncAbortable(
       else resolve(events);
     };
     params.signal?.addEventListener('abort', onAbort, { once: true });
+    // Own the EOSE deadline: nostr-tools reports its per-relay `maxWait` expiry
+    // as a plain `oneose`, indistinguishable from "served everything". With
+    // our own timer a stalled relay set that delivered NOTHING can fail closed
+    // for callers that asked (shipping must not read as "no options"); partial
+    // results still resolve, and callers without the flag keep resolving.
+    if (params.maxWait !== undefined) {
+      deadline = setTimeout(() => {
+        if (params.rejectOnAllRelaysFailure && events.length === 0) {
+          finish(new Error('Relay query timed out with no events'));
+        } else {
+          finish();
+        }
+      }, params.maxWait);
+    }
     closer = pool.subscribeMany(relays, filter, {
-      maxWait: params.maxWait,
+      // The pool's own timeout sits 1 s behind ours so our deadline always
+      // settles first (it still bounds the pool's connection-timeout maths).
+      maxWait: params.maxWait !== undefined ? params.maxWait + 1000 : undefined,
       abort: params.signal,
       onevent(event) {
         if (seen.has(event.id)) return;

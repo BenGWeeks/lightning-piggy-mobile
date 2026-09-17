@@ -17,7 +17,7 @@
 // option's own currency. The buyer's kind-16 type-1 order then carries
 // ["shipping", "30406:<pubkey>:<d>"] so the merchant knows exactly what was
 // chosen, and the order `amount` is the ALL-IN total (subtotal + shipping).
-import { toAlpha2 } from '../data/countries';
+import { isKnownCountry, toAlpha2 } from '../data/countries';
 
 export const SHIPPING_OPTION_KIND = 30406;
 
@@ -101,6 +101,10 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
   // (`['country']`, `['country', '']`) is a malformed restriction — reject it
   // rather than collapse to [] and offer the option to every destination.
   if (hasCountryTag && countries.size === 0) return null;
+  // Every restriction must be a real ISO 3166-1 code: `toAlpha2` passes
+  // unknown tokens through, and a bogus `ZZZ` would otherwise read as a
+  // legitimate "we don't ship there" instead of an invalid option.
+  for (const code of countries) if (!isKnownCountry(code)) return null;
 
   return {
     coordinate: `${SHIPPING_OPTION_KIND}:${ev.pubkey}:${dTag}`,

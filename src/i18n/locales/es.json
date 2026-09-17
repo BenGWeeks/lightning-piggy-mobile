@@ -1488,7 +1488,8 @@
     "copy": "Copiar",
     "qrCodeA11y": "Código QR de la factura Lightning",
     "scanHint": "Escanea con cualquier cartera Lightning",
-    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida."
+    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
+    "receiptUnverified": "No se puede verificar este recibo con tu pedido original. Carga el pedido original para confirmar que se pagó."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",

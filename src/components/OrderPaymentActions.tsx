@@ -66,6 +66,23 @@ function OrderPaymentActions({
   // "show QR + copy, no expiry gating" rather than crashing the card.
   const decoded = useMemo(() => (bolt11 ? extractInvoice(bolt11) : null), [bolt11]);
 
+  // A receipt is only proof of payment for THIS buyer's order: bind it to the
+  // authenticated outgoing order total exactly like a payment request (a
+  // merchant-authored receipt with no matching order, or a different amount,
+  // must not make an unpaid order look settled).
+  const receiptVerified =
+    isReceipt &&
+    (fromMe ||
+      (Number.isSafeInteger(expectedAmountSats) &&
+        (expectedAmountSats ?? 0) > 0 &&
+        (order.amountSats === undefined || order.amountSats === expectedAmountSats)));
+  if (isReceipt && !receiptVerified) {
+    return (
+      <Text style={styles.expiredText} testID={`${testIdPrefix}-order-receipt-unverified-${id}`}>
+        {t('orderPaymentActions.receiptUnverified')}
+      </Text>
+    );
+  }
   if (isReceipt) {
     return (
       <View style={styles.container}>

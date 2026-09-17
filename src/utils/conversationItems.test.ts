@@ -574,6 +574,16 @@ describe('orderIdsNeedingHistory', () => {
       ]),
     ).toEqual(['old-a', 'old-b']);
   });
+  it('includes received kind-17 receipts whose order is not loaded', () => {
+    const receipt = {
+      id: 'rc1',
+      fromMe: false,
+      createdAt: DAY2,
+      wireKind: 17,
+      text: JSON.stringify({ kind: 17, type: 'receipt', orderId: 'old-receipt', items: [], message: '' }), // prettier-ignore
+    };
+    expect(orderIdsNeedingHistory([receipt])).toEqual(['old-receipt']);
+  });
   it('ignores requests without a payable invoice and merchant-authored "orders"', () => {
     expect(
       orderIdsNeedingHistory([
