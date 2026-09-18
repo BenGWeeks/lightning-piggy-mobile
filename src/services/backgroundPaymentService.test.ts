@@ -159,6 +159,22 @@ it('does not open connections without permission or opt-in', async () => {
   await check();
   expect(read).not.toHaveBeenCalled();
 });
+it('tells the host when the scope disappears, but keeps polling while the host stays up', async () => {
+  const onUnwatchable = jest.fn();
+  startBackgroundPaymentWatch(onUnwatchable);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(onUnwatchable).not.toHaveBeenCalled();
+  // Last NWC wallet removed: the next pass finds nothing to watch.
+  jest.mocked(getWalletList).mockResolvedValue([]);
+  await jest.advanceTimersByTimeAsync(60_000);
+  expect(onUnwatchable).toHaveBeenCalledTimes(1);
+  // Host chose to stay up (a DM watch is live): the loop is still alive and
+  // picks a re-added wallet straight back up.
+  expect(isBackgroundPaymentWatchRunning()).toBe(true);
+  jest.mocked(getWalletList).mockResolvedValue([{ id: 'w', walletType: 'nwc' }] as never);
+  await jest.advanceTimersByTimeAsync(60_000);
+  expect(read).toHaveBeenCalledTimes(2);
+});
 it('does not stack polling loops and cancels in-flight work when stopped', async () => {
   let requestSignal: AbortSignal | undefined;
   read.mockImplementation((_url, signal) => {

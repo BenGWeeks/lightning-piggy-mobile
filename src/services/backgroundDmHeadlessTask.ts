@@ -25,11 +25,8 @@
  * service ever invokes it), but we guard anyway to keep the contract explicit.
  */
 import { AppRegistry, Platform } from 'react-native';
-import {
-  canWatchBackgroundPayments,
-  startBackgroundPaymentWatch,
-} from './backgroundPaymentService';
-import { runBackgroundDmWatch } from './backgroundDmService';
+import { canWatchBackgroundPayments } from './backgroundPaymentService';
+import { armBackgroundPaymentWatch, runBackgroundDmWatch } from './backgroundDmService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { hasNotificationPermission } from './notificationService';
 import { stopForegroundService } from '../../modules/background-dm-service';
@@ -85,8 +82,9 @@ if (Platform.OS === 'android') {
       }
     }
     // Self-gates per pass (preference / permission / NWC wallets), so it is
-    // safe to run alongside a DM watch even before any NWC wallet exists.
-    startBackgroundPaymentWatch();
+    // safe to run alongside a DM watch even before any NWC wallet exists;
+    // when the scope disappears and no DM watch is armed it stops the host.
+    armBackgroundPaymentWatch();
     return new Promise<void>(() => {
       // Intentionally never resolves — see the comment above. The service is
       // torn down by stopService() (from stopBackgroundDmWatch), which kills

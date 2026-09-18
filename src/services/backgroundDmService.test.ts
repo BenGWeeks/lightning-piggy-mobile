@@ -69,6 +69,7 @@ jest.mock('./backgroundPaymentService', () => ({
 jest.mock('./backgroundDmPreference', () => ({ loadBackgroundDmEnabled: jest.fn() }));
 
 import {
+  armBackgroundPaymentWatch,
   runBackgroundDmWatch,
   startBackgroundDmWatch,
   stopBackgroundDmWatch,
@@ -560,6 +561,32 @@ describe('rearmBackgroundDmWatchForActiveIdentity (account switch, #288)', () =>
     expect(mockSubscribe.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ viewerPubkey: OTHER }),
     );
+  });
+});
+
+describe('armBackgroundPaymentWatch host reconcile', () => {
+  function capturedOnUnwatchable(): () => void {
+    return mockStartPayments.mock.calls.at(-1)?.[0] as () => void;
+  }
+
+  it('stops the host when the payment scope disappears and no DM watch is armed', async () => {
+    armBackgroundPaymentWatch();
+    capturedOnUnwatchable()();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockStopPayments).toHaveBeenCalled();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the host up for a live DM watch', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await runBackgroundDmWatch();
+    armBackgroundPaymentWatch();
+    capturedOnUnwatchable()();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockDismissForeground).not.toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(true);
   });
 });
 

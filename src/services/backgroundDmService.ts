@@ -488,6 +488,22 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Start the payment poll with the host reconcile hook: when a pass finds the
+ * payment scope gone and no DM subscription is armed either, nothing is
+ * watching — stop the foreground service / chip instead of letting the
+ * never-settling headless task pin them forever (Copilot review, #1100). A
+ * live DM watch keeps the host up; the poll idles cheaply until a wallet
+ * reappears or the 15-min safety re-arm re-evaluates.
+ */
+export function armBackgroundPaymentWatch(): void {
+  startBackgroundPaymentWatch(() => {
+    if (activeWatch) return;
+    console.warn('[BgDmWatch] payment scope gone and no DM watch — stopping the host');
+    void stopBackgroundDmWatch().catch(() => {});
+  });
+}
+
 /** Close the live subscription without touching the foreground chip. */
 function stopBackgroundDmWatchSubscription(): void {
   // Invalidate in-flight close signals + pending reconnects FIRST — the
@@ -568,7 +584,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // Payments poll independently of the DM subscription: an identity with
       // NWC wallets but no DM relays still gets payment alerts (#1100 review).
       const payments = await canWatchBackgroundPayments();
-      if (payments) startBackgroundPaymentWatch();
+      if (payments) armBackgroundPaymentWatch();
       if (!armed && !payments) {
         // Nothing to watch (no identity / no relays / no NWC wallets) — don't
         // leave a chip promising a watch that isn't running.
@@ -630,7 +646,7 @@ export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   stopBackgroundPaymentWatch();
   const armed = await runBackgroundDmWatch();
   const payments = await canWatchBackgroundPayments();
-  if (payments) startBackgroundPaymentWatch();
+  if (payments) armBackgroundPaymentWatch();
   if (!armed && !payments) {
     // The new identity has neither DM relays nor NWC wallets: nothing is
     // watching, so the native service / chip must not stay up draining the

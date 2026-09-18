@@ -101,13 +101,25 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
   }
 }
 
-export function startBackgroundPaymentWatch(): void {
+/**
+ * Start the polling loop. `onUnwatchable` fires after a pass that found the
+ * scope gone (preference off, permission revoked, no active identity or no
+ * NWC wallet left) so the HOST can reconcile — stop the foreground service
+ * when this was the only watcher, or keep it for a live DM subscription
+ * (Copilot review, #1100). The loop itself keeps ticking (each idle pass is
+ * two storage reads) so a wallet added later is picked up without a re-arm;
+ * a host that tears down calls `stopBackgroundPaymentWatch`, which ends it.
+ */
+export function startBackgroundPaymentWatch(onUnwatchable?: () => void): void {
   if (Platform.OS !== 'android' || controller) return;
   const current = new AbortController();
   controller = current;
   const tick = async () => {
     try {
       await checkBackgroundPayments(current.signal);
+      if (controller === current && !current.signal.aborted && onUnwatchable) {
+        if (!(await canWatchBackgroundPayments())) onUnwatchable();
+      }
     } catch {
       /* retry next pass */
     }
