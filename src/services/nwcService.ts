@@ -1,6 +1,7 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
 import type { Nip47GetInfoResponse } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
+import { patchRelayPublish } from './nwcRelayPublishPatch';
 import {
   createReplyTimeoutError,
   isConnectionError,
@@ -138,7 +139,7 @@ export async function connect(
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
-    patchRelayPublish(provider, walletId);
+    patchForegroundRelayPublish(provider, walletId);
 
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
     await pinNip04IfNoInfoEvent(provider, walletId);
@@ -359,50 +360,24 @@ export async function makeInvoice(
 }
 
 /**
- * Patch the relay pool to not wait for NIP-20 OK responses.
- * The LNbits Nostrclient relay proxy doesn't send OK responses
- * (see https://github.com/lnbits/nostrclient/issues/52),
- * causing every publish to timeout. This patches the relay's
- * publish method to resolve immediately after sending.
- *
- * Can be removed once lnbits/nostrclient#68 is merged upstream.
- *
- * When the fire-and-forget publish rejects (e.g. the relay is
- * unreachable), we record the timestamp per-walletId so payInvoice
- * can fast-fail instead of waiting 5 min for a preimage that's
+ * Apply the shared no-wait-for-OK relay patch (`nwcRelayPublishPatch`) with
+ * the FOREGROUND failure handling: when the fire-and-forget publish rejects
+ * (e.g. the relay is unreachable), record the timestamp per-walletId so
+ * payInvoice can fast-fail instead of waiting 5 min for a preimage that's
  * never going to arrive (see #175).
  */
-function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void {
-  try {
-    const pool = (provider as any).client?.pool;
-    if (pool) {
-      const origEnsureRelay = pool.ensureRelay.bind(pool);
-      pool.ensureRelay = async (url: string, opts?: any) => {
-        const relay = await origEnsureRelay(url, opts);
-        if (relay && !relay._publishPatched) {
-          relay._publishPatched = true;
-          const origPublish = relay.publish.bind(relay);
-          relay.publish = (event: any) => {
-            origPublish(event).catch((err: unknown) => {
-              console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
-              markPublishFailure(walletId);
-              // A relay rejection (temp-ban / rate-limit / connectivity) should
-              // park the relay so we stop publishing into a ban instead of
-              // looping on it (#737). A `rate-limited` rejection gets its own
-              // publish-volume back-off that a lucky read can't reset (#785);
-              // otherwise a connection error feeds the reply-timeout cooldown.
-              if (isRateLimitError(err)) recordRateLimited(walletId);
-              else if (isConnectionError(err)) recordRelayOutcome(walletId, err);
-            });
-            return Promise.resolve(); // resolve immediately
-          };
-        }
-        return relay;
-      };
-    }
-  } catch {
-    // If patching fails, continue with default behavior
-  }
+function patchForegroundRelayPublish(provider: NostrWebLNProvider, walletId: string): void {
+  patchRelayPublish(provider, (err) => {
+    console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
+    markPublishFailure(walletId);
+    // A relay rejection (temp-ban / rate-limit / connectivity) should park
+    // the relay so we stop publishing into a ban instead of looping on it
+    // (#737). A `rate-limited` rejection gets its own publish-volume back-off
+    // that a lucky read can't reset (#785); otherwise a connection error
+    // feeds the reply-timeout cooldown.
+    if (isRateLimitError(err)) recordRateLimited(walletId);
+    else if (isConnectionError(err)) recordRelayOutcome(walletId, err);
+  });
 }
 
 /**
@@ -421,7 +396,7 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   }
 
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
-  patchRelayPublish(provider, walletId);
+  patchForegroundRelayPublish(provider, walletId);
   await provider.enable();
   await pinNip04IfNoInfoEvent(provider, walletId);
   providers.set(walletId, provider);

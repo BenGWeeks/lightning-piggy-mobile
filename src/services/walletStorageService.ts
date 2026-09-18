@@ -137,8 +137,10 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
-export async function getWalletList(): Promise<WalletMetadata[]> {
-  const json = await AsyncStorage.getItem(walletListKey());
+export async function getWalletList(
+  owner: string | null = _activePubkey,
+): Promise<WalletMetadata[]> {
+  const json = await AsyncStorage.getItem(perAccountKey(WALLET_LIST_KEY_BASE, owner));
   if (!json) return [];
   try {
     return JSON.parse(json);

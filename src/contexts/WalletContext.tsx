@@ -644,6 +644,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
       setWallets([]);
       setActiveWalletId(null);
+      setLastIncomingPayment(null); // never re-announce the old owner's receive as the new one's
       lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
       // Re-hydrate from per-account-keyed storage.
       (async () => {

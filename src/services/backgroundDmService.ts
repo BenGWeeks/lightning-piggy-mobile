@@ -51,6 +51,12 @@
  * for as long as the foreground JS context is alive — already an upgrade over
  * the ~15-min detect-and-ping, just not Doze-immune.
  */
+import {
+  canWatchBackgroundPayments,
+  isBackgroundPaymentWatchRunning,
+  startBackgroundPaymentWatch,
+  stopBackgroundPaymentWatch,
+} from './backgroundPaymentService';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
@@ -482,6 +488,22 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Start the payment poll with the host reconcile hook: when a pass finds the
+ * payment scope gone and no DM subscription is armed either, nothing is
+ * watching — stop the foreground service / chip instead of letting the
+ * never-settling headless task pin them forever (Copilot review, #1100). A
+ * live DM watch keeps the host up; the poll idles cheaply until a wallet
+ * reappears or the 15-min safety re-arm re-evaluates.
+ */
+export function armBackgroundPaymentWatch(): void {
+  startBackgroundPaymentWatch(() => {
+    if (activeWatch) return;
+    console.warn('[BgDmWatch] payment scope gone and no DM watch — stopping the host');
+    void stopBackgroundDmWatch().catch(() => {});
+  });
+}
+
 /** Close the live subscription without touching the foreground chip. */
 function stopBackgroundDmWatchSubscription(): void {
   // Invalidate in-flight close signals + pending reconnects FIRST — the
@@ -551,17 +573,21 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // Expo sticky chip is the only status surface, and the subscription
       // runs inline in this JS context.
       const chipId = await showForegroundServiceNotification({
-        title: 'Lightning Piggy is watching for messages',
-        body: 'Tap to open. This keeps your messages arriving in the background.',
+        title: 'Lightning Piggy is watching for messages and payments',
+        body: 'Tap to open. Watching messages and checking Lightning payments.',
       });
       if (chipId === null) {
         console.warn('[BgDmWatch] not started: foreground chip could not be posted');
         return;
       }
       const armed = await runBackgroundDmWatch();
-      if (!armed) {
-        // Nothing to watch (no identity / no relays) — don't leave a chip
-        // promising a watch that isn't running.
+      // Payments poll independently of the DM subscription: an identity with
+      // NWC wallets but no DM relays still gets payment alerts (#1100 review).
+      const payments = await canWatchBackgroundPayments();
+      if (payments) armBackgroundPaymentWatch();
+      if (!armed && !payments) {
+        // Nothing to watch (no identity / no relays / no NWC wallets) — don't
+        // leave a chip promising a watch that isn't running.
         await dismissForegroundServiceNotification();
       }
     }
@@ -569,6 +595,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
     // Don't leave a stray chip (or half-armed subscription) behind when the
     // start failed — clean up and log; callers don't handle a rejection here.
     console.warn('[BgDmWatch] start failed — cleaning up:', e);
+    stopBackgroundPaymentWatch();
     stopBackgroundDmWatchSubscription();
     await dismissForegroundServiceNotification();
   }
@@ -579,6 +606,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
  * persistent chip. Android-only; safe to call when nothing is running.
  */
 export async function stopBackgroundDmWatch(): Promise<void> {
+  stopBackgroundPaymentWatch();
   if (Platform.OS !== 'android') return;
   // Stop the native service first: this tears down the headless JS context
   // (and the subscription running inside it). Best-effort — a transient
@@ -607,8 +635,26 @@ export async function stopBackgroundDmWatch(): Promise<void> {
  */
 export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  if (!activeWatch) return;
-  await runBackgroundDmWatch();
+  // No-op unless SOMETHING is running. A payment-only watch (identity with
+  // NWC wallets but no DM relays) counts: the missing DM subscription must
+  // not skip the payment re-arm (#1100 review). Once anything is live the
+  // service is up, so re-evaluate BOTH watchers for the new identity — it may
+  // have relays the previous one lacked, or vice versa.
+  if (!activeWatch && !isBackgroundPaymentWatchRunning()) return;
+  // Abort any in-flight poll for the previous identity; the fresh start
+  // below ticks immediately for the new one.
+  stopBackgroundPaymentWatch();
+  const armed = await runBackgroundDmWatch();
+  const payments = await canWatchBackgroundPayments();
+  if (payments) armBackgroundPaymentWatch();
+  if (!armed && !payments) {
+    // The new identity has neither DM relays nor NWC wallets: nothing is
+    // watching, so the native service / chip must not stay up draining the
+    // battery (Copilot review, #1100). Reconcile the host — the preference
+    // is untouched, so the next launch/login sync re-evaluates as usual.
+    console.warn('[BgDmWatch] re-arm: nothing to watch for the new identity — stopping the host');
+    await stopBackgroundDmWatch();
+  }
 }
 
 /**

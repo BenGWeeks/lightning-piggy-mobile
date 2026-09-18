@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
+import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
+import { getActivePubkey } from '../services/walletStorageService';
 import { firePaymentNotification } from '../services/notificationService';
 
 /**
@@ -36,12 +38,39 @@ export default function PaymentNotifier(): null {
   useEffect(() => {
     if (!lastIncomingPayment) return;
     const { walletId, amountSats, paymentHash, at } = lastIncomingPayment;
+    const owner = getActivePubkey();
     // On-chain receives can lack a payment hash; fall back to a
     // wallet+amount+timestamp key so two distinct same-amount receives to the
     // same wallet (which `walletId:amountSats` alone would collapse) each still
     // notify. `at` is stable per detection, so re-renders dedupe correctly.
-    const dedupeKey = paymentHash ?? `${walletId}:${amountSats}:${at}`;
+    const dedupeKey = `${owner ?? 'signed-out'}:${walletId}:${paymentHash ?? `${amountSats}:${at}`}`;
     if (announced.current.has(dedupeKey)) return;
+    const notify = (payload: Parameters<typeof firePaymentNotification>[0]) => {
+      // `attempted` tells a real failure (OS refused / permission denied —
+      // retry on the next wallets refresh) from a dedupe hit (already claimed
+      // by the background service or an earlier mount — keep it announced).
+      let attempted = false;
+      const send = () => {
+        attempted = true;
+        return firePaymentNotification(payload);
+      };
+      const outcome =
+        !owner || !paymentHash
+          ? send()
+          : notifyPaymentOnce(
+              owner,
+              walletId,
+              paymentHash.toLowerCase(),
+              send,
+              () => getActivePubkey() === owner,
+            );
+      void outcome.then(
+        (id) => {
+          if (id === null && attempted) announced.current.delete(dedupeKey);
+        },
+        () => announced.current.delete(dedupeKey),
+      );
+    };
 
     const tx = wallets
       .find((w) => w.id === walletId)
@@ -56,7 +85,7 @@ export default function PaymentNotifier(): null {
         fallbackTimers.current.delete(dedupeKey);
       }
       const zap = tx.zapCounterparty ?? null;
-      void firePaymentNotification({
+      notify({
         kind: zap ? 'zap' : 'payment',
         amountSats,
         walletId,
@@ -73,7 +102,7 @@ export default function PaymentNotifier(): null {
         fallbackTimers.current.delete(dedupeKey);
         if (announced.current.has(dedupeKey)) return;
         announced.current.add(dedupeKey);
-        void firePaymentNotification({ kind: 'payment', amountSats, walletId });
+        notify({ kind: 'payment', amountSats, walletId });
       }, TX_SETTLE_GRACE_MS);
       fallbackTimers.current.set(dedupeKey, timer);
     }
