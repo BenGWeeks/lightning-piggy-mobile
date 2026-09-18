@@ -19,6 +19,10 @@ const mockDecodeNsec = jest.fn();
 const mockFetchProfile = jest.fn().mockResolvedValue(null);
 const mockPeekSync = jest.fn().mockReturnValue(null);
 const mockGet = jest.fn().mockResolvedValue(null);
+const mockCanWatchPayments = jest.fn();
+const mockPaymentsRunning = jest.fn();
+const mockStartPayments = jest.fn();
+const mockStopPayments = jest.fn();
 
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('nostr-tools/nip44', () => ({}));
@@ -57,8 +61,10 @@ jest.mock('../utils/nip17Unwrap', () => ({
   textForRumor: (...a: unknown[]) => mockTextForRumor(...a),
 }));
 jest.mock('./backgroundPaymentService', () => ({
-  startBackgroundPaymentWatch: jest.fn(),
-  stopBackgroundPaymentWatch: jest.fn(),
+  canWatchBackgroundPayments: () => mockCanWatchPayments(),
+  isBackgroundPaymentWatchRunning: () => mockPaymentsRunning(),
+  startBackgroundPaymentWatch: (...a: unknown[]) => mockStartPayments(...a),
+  stopBackgroundPaymentWatch: (...a: unknown[]) => mockStopPayments(...a),
 }));
 jest.mock('./backgroundDmPreference', () => ({ loadBackgroundDmEnabled: jest.fn() }));
 
@@ -112,6 +118,8 @@ beforeEach(() => {
   mockHasPermission.mockResolvedValue(true);
   mockShowForeground.mockResolvedValue('fg');
   mockDecodeNsec.mockReturnValue({ pubkey: ME, secretKey: SECRET });
+  mockCanWatchPayments.mockResolvedValue(false);
+  mockPaymentsRunning.mockReturnValue(false);
 });
 
 function nsecIdentity() {
@@ -474,6 +482,31 @@ describe('rearmBackgroundDmWatchForActiveIdentity (account switch, #288)', () =>
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     await rearmBackgroundDmWatchForActiveIdentity();
     expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockStopPayments).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+  });
+
+  it('re-arms a payment-only watch and arms DMs for a new identity that has relays', async () => {
+    // Previous identity had NWC wallets but no DM relays, so only the payment
+    // poll was running. The missing DM subscription must not skip the payment
+    // re-arm — and the new identity's relays should now get a DM watch too
+    // (CodeRabbit + Copilot reviews, #1100).
+    mockPaymentsRunning.mockReturnValue(true);
+    mockCanWatchPayments.mockResolvedValue(true);
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await rearmBackgroundDmWatchForActiveIdentity();
+    expect(mockStopPayments).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps payments off after a switch to an identity without NWC wallets', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await runBackgroundDmWatch();
+    mockCanWatchPayments.mockResolvedValue(false);
+    await rearmBackgroundDmWatchForActiveIdentity();
+    expect(mockStopPayments).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).not.toHaveBeenCalled();
   });
 
   it('swaps the running subscription to the new active identity', async () => {
@@ -548,13 +581,36 @@ describe('start / stop lifecycle', () => {
     await startBackgroundDmWatch();
     expect(mockShowForeground).toHaveBeenCalledTimes(1);
     expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).not.toHaveBeenCalled();
     expect(__isWatchActiveForTests()).toBe(false);
   });
 
-  it('cleans up the chip when arming throws', async () => {
+  it('keeps the chip and polls payments when only payments are watchable (fallback)', async () => {
+    // Identity with NWC wallets but no DM relays: payment monitoring runs on
+    // its own and the chip stays up for it (#1100 review).
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockGetUserRelays.mockResolvedValue([]);
+    mockAsyncGetItem.mockResolvedValue(null);
+    mockCanWatchPayments.mockResolvedValue(true);
+    await startBackgroundDmWatch();
+    expect(mockShowForeground).toHaveBeenCalledTimes(1);
+    expect(mockDismissForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts payment polling alongside the DM watch (fallback)', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockResolvedValue(true);
+    await startBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up the chip and the payment poll when arming throws', async () => {
     mockLoadIdentities.mockRejectedValueOnce(new Error('identities store unavailable'));
     await startBackgroundDmWatch();
     expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+    expect(mockStopPayments).toHaveBeenCalled();
     expect(__isWatchActiveForTests()).toBe(false);
   });
 

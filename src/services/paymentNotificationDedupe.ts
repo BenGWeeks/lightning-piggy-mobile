@@ -8,7 +8,10 @@ export function notifyPaymentOnce(
   walletId: string,
   paymentId: string,
   send: () => Promise<string | null>,
-  isCurrent: () => boolean = () => true,
+  // Re-checked inside the serialised queue, right before the claim is written
+  // and again after — may be async so callers can re-read storage-backed
+  // scope (identity / wallet list / credential) per delivery.
+  isCurrent: () => boolean | Promise<boolean> = () => true,
 ): Promise<string | null> {
   const operation = queue
     .catch(() => {})
@@ -18,9 +21,9 @@ export function notifyPaymentOnce(
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(parsed)) throw new Error('Invalid payment notification history');
       const seen = parsed.filter((id): id is string => typeof id === 'string');
-      if (seen.includes(paymentId) || !isCurrent()) return null;
+      if (seen.includes(paymentId) || !(await isCurrent())) return null;
       await AsyncStorage.setItem(key, JSON.stringify([...seen, paymentId].slice(-2048)));
-      if (!isCurrent()) {
+      if (!(await isCurrent())) {
         await AsyncStorage.setItem(key, JSON.stringify(seen));
         return null;
       }

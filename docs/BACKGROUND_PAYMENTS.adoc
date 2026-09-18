@@ -50,8 +50,15 @@ scheduling can lose that alert. Exactly-once delivery across an OS crash is not
 promised. Wallet transaction history remains authoritative.
 
 Stopping the service aborts in-flight requests and timers. Results from a removed
-wallet, changed credential, disabled preference or switched identity are dropped.
+wallet, changed credential, disabled preference or switched identity are dropped,
+and that scope is re-checked per delivery, not just once per response.
 The worker reads explicitly scoped wallet lists without changing UI storage scope.
+
+Payment monitoring does not depend on the message subscription. An identity with
+NWC wallets but no message relays keeps the service alive for payment checks
+alone; an account switch re-evaluates both watchers; the service stops only when
+neither can run. A refused OS post releases the in-app dedupe so the next wallet
+refresh retries, while a payment already claimed by the service is not re-queried.
 
 == Device acceptance check (required before release)
 

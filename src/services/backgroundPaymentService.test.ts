@@ -6,7 +6,9 @@ import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { firePaymentNotification, hasNotificationPermission } from './notificationService';
 import { readBackgroundPayments } from './backgroundPaymentTransport';
 import {
+  canWatchBackgroundPayments,
   checkBackgroundPayments,
+  isBackgroundPaymentWatchRunning,
   startBackgroundPaymentWatch,
   stopBackgroundPaymentWatch,
 } from './backgroundPaymentService';
@@ -99,6 +101,45 @@ it.each(['account', 'removed', 'disabled', 'aborted', 'credential'])(
     expect(fire).not.toHaveBeenCalled();
   },
 );
+it.each(['account', 'credential', 'removed'])(
+  'discards remaining deliveries after %s changes between two transactions',
+  async (change) => {
+    // The preflight after the read passes; the change lands while the FIRST
+    // transaction is being delivered, so the SECOND must be re-validated
+    // (Copilot review, #1100).
+    const second = { ...tx, payment_hash: 'c'.repeat(64) };
+    read.mockResolvedValue([tx, second] as never);
+    fire.mockImplementationOnce(async () => {
+      if (change === 'account')
+        jest.mocked(loadIdentities).mockResolvedValue({ activePubkey: 'other', identities: [] });
+      if (change === 'credential') jest.mocked(getNwcUrl).mockResolvedValue('replacement');
+      if (change === 'removed') jest.mocked(getWalletList).mockResolvedValue([]);
+      return 'notification';
+    });
+    await check();
+    expect(fire).toHaveBeenCalledTimes(1);
+    expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+  },
+);
+it('is watchable only when opted in, permitted, and the identity owns an NWC wallet', async () => {
+  expect(await canWatchBackgroundPayments()).toBe(true);
+  jest.mocked(getWalletList).mockResolvedValue([{ id: 'chain', walletType: 'onchain' }] as never);
+  expect(await canWatchBackgroundPayments()).toBe(false);
+  jest.mocked(getWalletList).mockResolvedValue([{ id: 'w', walletType: 'nwc' }] as never);
+  jest.mocked(loadIdentities).mockResolvedValue({ activePubkey: null, identities: [] } as never);
+  expect(await canWatchBackgroundPayments()).toBe(false);
+  jest.mocked(loadIdentities).mockResolvedValue({ activePubkey: owner, identities: [] });
+  jest.mocked(loadBackgroundDmEnabled).mockResolvedValue(false);
+  expect(await canWatchBackgroundPayments()).toBe(false);
+  expect(read).not.toHaveBeenCalled();
+});
+it('reports whether the polling loop is running', () => {
+  expect(isBackgroundPaymentWatchRunning()).toBe(false);
+  startBackgroundPaymentWatch();
+  expect(isBackgroundPaymentWatchRunning()).toBe(true);
+  stopBackgroundPaymentWatch();
+  expect(isBackgroundPaymentWatchRunning()).toBe(false);
+});
 it('isolates failed wallets and skips on-chain wallets', async () => {
   jest.mocked(getWalletList).mockResolvedValue([
     { id: 'bad', walletType: 'nwc' },

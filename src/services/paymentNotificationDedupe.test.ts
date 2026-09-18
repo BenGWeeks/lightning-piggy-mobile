@@ -37,6 +37,19 @@ it('does not deliver an invalidated account or a claim that cannot be persisted'
   jest.restoreAllMocks();
 });
 
+it('awaits an async scope check before claiming and before sending', async () => {
+  const send = jest.fn().mockResolvedValue('n');
+  await notifyPaymentOnce('a', 'w', 'h', send, async () => false);
+  expect(send).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem('payment_notifications_v1:a:w')).toBeNull();
+  // Scope flips between the claim and the send: the claim must be rolled back.
+  const flip = jest.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+  await notifyPaymentOnce('a', 'w', 'h', send, flip);
+  expect(send).not.toHaveBeenCalled();
+  expect(JSON.parse((await AsyncStorage.getItem('payment_notifications_v1:a:w'))!)).toEqual([]);
+  await notifyPaymentOnce('a', 'w', 'h', send, async () => true);
+  expect(send).toHaveBeenCalledTimes(1);
+});
 it('honours claims stored by an earlier process', async () => {
   await AsyncStorage.setItem('payment_notifications_v1:a:w', JSON.stringify(['hash']));
   const send = jest.fn();

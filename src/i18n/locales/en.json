@@ -1705,7 +1705,7 @@
     "showMessagePaymentDetailsA11y": "Show message and payment details in notifications",
     "backgroundNotifications": "Background messages and payments",
     "backgroundNotificationsHint": "Watch for messages and check incoming NWC Lightning payments about once a minute while the app is closed. No Google services or push server. Shows a persistent status notification and uses extra battery. For reliable delivery while idle, allow Unrestricted battery usage in Android app settings. Requires wallet transaction-history access. On-chain payments are not monitored. Default: OFF.",
-    "watchForMessages": "Watch for messages in the background"
+    "watchForMessages": "Watch for messages and payments in the background"
   },
   "sendAmountSection": {
     "fixedAmount": "Fixed amount",

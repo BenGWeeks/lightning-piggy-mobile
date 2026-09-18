@@ -3,13 +3,11 @@ const mockEnable = jest.fn();
 const mockList = jest.fn();
 const mockClose = jest.fn();
 jest.mock('@getalby/sdk', () => ({
-  NostrWebLNProvider: jest
-    .fn()
-    .mockImplementation(() => ({
-      enable: mockEnable,
-      close: mockClose,
-      client: { listTransactions: mockList },
-    })),
+  NostrWebLNProvider: jest.fn().mockImplementation(() => ({
+    enable: mockEnable,
+    close: mockClose,
+    listTransactions: mockList,
+  })),
 }));
 jest.mock('./nwcEncryption', () => ({
   pinNip04IfNoInfoEvent: jest.fn(),

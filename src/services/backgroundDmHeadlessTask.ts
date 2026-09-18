@@ -25,7 +25,10 @@
  * service ever invokes it), but we guard anyway to keep the contract explicit.
  */
 import { AppRegistry, Platform } from 'react-native';
-import { startBackgroundPaymentWatch } from './backgroundPaymentService';
+import {
+  canWatchBackgroundPayments,
+  startBackgroundPaymentWatch,
+} from './backgroundPaymentService';
 import { runBackgroundDmWatch } from './backgroundDmService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { hasNotificationPermission } from './notificationService';
@@ -69,12 +72,20 @@ if (Platform.OS === 'android') {
     const armed = await runBackgroundDmWatch();
     console.warn(`[BgDmWatch] headless task: watch armed=${armed}`);
     if (!armed) {
-      // Nothing to watch (no identity / no relays / not Android). Holding the
-      // never-settling promise here would pin the foreground service + wake
-      // lock while watching nothing — stop the service and finish instead.
-      await stopForegroundService().catch(() => {});
-      return;
+      // No DM subscription (no identity / no relays). The identity may still
+      // own NWC wallets worth polling — a payment-only user must not lose
+      // alerts for lack of DM relays (#1100 review). Only when NEITHER watcher
+      // can run do we stop: holding the never-settling promise would pin the
+      // foreground service + wake lock while watching nothing.
+      const payments = await canWatchBackgroundPayments().catch(() => false);
+      console.warn(`[BgDmWatch] headless task: payment-only=${payments}`);
+      if (!payments) {
+        await stopForegroundService().catch(() => {});
+        return;
+      }
     }
+    // Self-gates per pass (preference / permission / NWC wallets), so it is
+    // safe to run alongside a DM watch even before any NWC wallet exists.
     startBackgroundPaymentWatch();
     return new Promise<void>(() => {
       // Intentionally never resolves — see the comment above. The service is

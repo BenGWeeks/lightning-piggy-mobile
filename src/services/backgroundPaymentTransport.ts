@@ -43,7 +43,8 @@ export async function readBackgroundPayments(
           if (cancelled) throw new Error('Cancelled');
           // No `from`: some wallets filter creation time, missing invoices made
           // earlier but settled now. Select by settlement time in the worker.
-          const result = await provider.client.listTransactions({
+          // Same public WebLN wrapper nwcService.listTransactions uses.
+          const result = await provider.listTransactions({
             type: 'incoming',
             unpaid: false,
             limit: 100,

@@ -52,6 +52,8 @@
  * the ~15-min detect-and-ping, just not Doze-immune.
  */
 import {
+  canWatchBackgroundPayments,
+  isBackgroundPaymentWatchRunning,
   startBackgroundPaymentWatch,
   stopBackgroundPaymentWatch,
 } from './backgroundPaymentService';
@@ -563,9 +565,13 @@ export async function startBackgroundDmWatch(): Promise<void> {
         return;
       }
       const armed = await runBackgroundDmWatch();
-      if (!armed) {
-        // Nothing to watch (no identity / no relays) — don't leave a chip
-        // promising a watch that isn't running.
+      // Payments poll independently of the DM subscription: an identity with
+      // NWC wallets but no DM relays still gets payment alerts (#1100 review).
+      const payments = await canWatchBackgroundPayments();
+      if (payments) startBackgroundPaymentWatch();
+      if (!armed && !payments) {
+        // Nothing to watch (no identity / no relays / no NWC wallets) — don't
+        // leave a chip promising a watch that isn't running.
         await dismissForegroundServiceNotification();
       }
     }
@@ -573,6 +579,7 @@ export async function startBackgroundDmWatch(): Promise<void> {
     // Don't leave a stray chip (or half-armed subscription) behind when the
     // start failed — clean up and log; callers don't handle a rejection here.
     console.warn('[BgDmWatch] start failed — cleaning up:', e);
+    stopBackgroundPaymentWatch();
     stopBackgroundDmWatchSubscription();
     await dismissForegroundServiceNotification();
   }
@@ -612,10 +619,17 @@ export async function stopBackgroundDmWatch(): Promise<void> {
  */
 export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  // No-op unless SOMETHING is running. A payment-only watch (identity with
+  // NWC wallets but no DM relays) counts: the missing DM subscription must
+  // not skip the payment re-arm (#1100 review). Once anything is live the
+  // service is up, so re-evaluate BOTH watchers for the new identity — it may
+  // have relays the previous one lacked, or vice versa.
+  if (!activeWatch && !isBackgroundPaymentWatchRunning()) return;
+  // Abort any in-flight poll for the previous identity; the fresh start
+  // below ticks immediately for the new one.
   stopBackgroundPaymentWatch();
-  if (!activeWatch) return;
   await runBackgroundDmWatch();
-  startBackgroundPaymentWatch();
+  if (await canWatchBackgroundPayments()) startBackgroundPaymentWatch();
 }
 
 /**
