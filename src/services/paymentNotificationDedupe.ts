@@ -1,7 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Both the headless service and mounted UI share this queue. Persist before
-// posting so a process restart cannot announce an already claimed payment.
+// Both the headless service and mounted UI share this queue: the native
+// BackgroundDmService dispatches its headless task into the application's
+// single ReactHost `currentReactContext` (see BackgroundDmService.kt →
+// startHeadlessTask), so there is exactly one JS runtime per process and this
+// module-level promise chain serialises every claim. Persist before posting so
+// a process restart cannot announce an already claimed payment.
 let queue: Promise<unknown> = Promise.resolve();
 export function notifyPaymentOnce(
   owner: string,

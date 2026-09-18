@@ -628,8 +628,17 @@ export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   // Abort any in-flight poll for the previous identity; the fresh start
   // below ticks immediately for the new one.
   stopBackgroundPaymentWatch();
-  await runBackgroundDmWatch();
-  if (await canWatchBackgroundPayments()) startBackgroundPaymentWatch();
+  const armed = await runBackgroundDmWatch();
+  const payments = await canWatchBackgroundPayments();
+  if (payments) startBackgroundPaymentWatch();
+  if (!armed && !payments) {
+    // The new identity has neither DM relays nor NWC wallets: nothing is
+    // watching, so the native service / chip must not stay up draining the
+    // battery (Copilot review, #1100). Reconcile the host — the preference
+    // is untouched, so the next launch/login sync re-evaluates as usual.
+    console.warn('[BgDmWatch] re-arm: nothing to watch for the new identity — stopping the host');
+    await stopBackgroundDmWatch();
+  }
 }
 
 /**
