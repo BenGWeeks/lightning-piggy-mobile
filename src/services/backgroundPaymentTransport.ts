@@ -1,5 +1,6 @@
 import type { Nip47Transaction } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
+import { patchRelayPublish } from './nwcRelayPublishPatch';
 
 /** A read-only request on a private connection; never replace the UI's client. */
 export async function readBackgroundPayments(
@@ -10,6 +11,12 @@ export async function readBackgroundPayments(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { NostrWebLNProvider } = require('@getalby/sdk') as typeof import('@getalby/sdk');
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
+  // Same no-wait-for-OK patch as nwcService.connect — without it an LNbits
+  // Nostrclient relay (no NIP-20 OK) would hold every list_transactions
+  // publish until the deadline below and the poll would never notify.
+  // Silent on failure: the deadline + next pass cover it, and we never log
+  // the SDK error (it can carry relay/wallet details).
+  patchRelayPublish(provider, () => {});
   const cacheKey = `background-payment-${Date.now()}-${Math.random()}`;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelled = false;

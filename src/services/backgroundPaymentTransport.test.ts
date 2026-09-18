@@ -1,4 +1,5 @@
 import { readBackgroundPayments } from './backgroundPaymentTransport';
+import { patchRelayPublish } from './nwcRelayPublishPatch';
 const mockEnable = jest.fn();
 const mockList = jest.fn();
 const mockClose = jest.fn();
@@ -13,6 +14,7 @@ jest.mock('./nwcEncryption', () => ({
   pinNip04IfNoInfoEvent: jest.fn(),
   clearEncryptionDecision: jest.fn(),
 }));
+jest.mock('./nwcRelayPublishPatch', () => ({ patchRelayPublish: jest.fn() }));
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
@@ -23,6 +25,11 @@ afterEach(() => jest.useRealTimers());
 it('only requests paid incoming history on its own connection and closes it', async () => {
   await readBackgroundPayments('url', new AbortController().signal);
   expect(mockList).toHaveBeenCalledWith({ type: 'incoming', unpaid: false, limit: 100 });
+  // The LNbits no-wait-for-OK patch must be applied to THIS provider before
+  // any request goes out, exactly as nwcService.connect does.
+  const patch = jest.mocked(patchRelayPublish);
+  expect(patch).toHaveBeenCalledTimes(1);
+  expect(patch.mock.invocationCallOrder[0]).toBeLessThan(mockEnable.mock.invocationCallOrder[0]);
   expect(mockClose).toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
 });
