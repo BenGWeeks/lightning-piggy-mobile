@@ -148,13 +148,19 @@ describe('createSubmarineSwapForward', () => {
   const originalFetch = global.fetch;
   let mutate: (response: SubmarineSwapResponse) => unknown;
   let fetchMock: jest.Mock;
+  let xOnlyResponse = false;
   beforeEach(() => {
     jest.mocked(getBlockHeight).mockResolvedValue(HEIGHT);
     mutate = (response) => response;
+    xOnlyResponse = false;
     fetchMock = jest.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') {
         const body = JSON.parse(init.body as string);
-        return { ok: true, json: async () => mutate(fixture(hexToBytes(body.refundPublicKey))) };
+        return {
+          ok: true,
+          json: async () =>
+            mutate(fixture(hexToBytes(body.refundPublicKey), { xOnly: xOnlyResponse })),
+        };
       }
       return {
         ok: true,
@@ -175,6 +181,11 @@ describe('createSubmarineSwapForward', () => {
     jest.clearAllMocks();
   });
 
+  it('normalizes accepted x-only keys for persisted refund recovery', async () => {
+    xOnlyResponse = true;
+    const swap = await createSubmarineSwapForward(INVOICE, 100000);
+    expect(swap.claimPublicKey).toBe('02' + bytesToHex(CLAIM_KEY.slice(1)));
+  });
   it('pins the quote and returns a verified swap with its local refund key', async () => {
     const swap = await createSubmarineSwapForward(INVOICE, 100000);
     expect(swap.expectedAmount).toBe(100600);
