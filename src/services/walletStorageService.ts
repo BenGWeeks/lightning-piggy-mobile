@@ -95,14 +95,11 @@ export function getActivePubkey(): string | null {
   return _activePubkey;
 }
 const WALLET_LIST_KEY_BASE = 'wallet_list';
-function walletListKey(): string {
-  return perAccountKey(WALLET_LIST_KEY_BASE, _activePubkey);
-}
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
 // Per-account: this points at a wallet id from `wallet_list`, which is
-// itself namespaced per identity (see `walletListKey`). A global default
+// itself namespaced per identity (see `getWalletList`). A global default
 // would let one identity's choice clobber the other's, so mirror the
 // same `perAccountKey(...)` scheme. New key (no shipped global value to
 // migrate), so it's namespaced inline without a migration step.
