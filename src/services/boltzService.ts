@@ -562,11 +562,7 @@ export async function refundSwap(
     ecc.pointFromScalar(refundPrivKey, true) as Uint8Array,
   );
   const claimPubKeyCompressed =
-    claimPubKey.length === 33
-      ? claimPubKey
-      : Buffer.from(
-          ecc.xOnlyPointAddTweak(new Uint8Array(claimPubKey), new Uint8Array(32))!.xOnlyPubkey,
-        );
+    claimPubKey.length === 32 ? Buffer.concat([Buffer.from([2]), claimPubKey]) : claimPubKey;
   const aggCtx = keyAggregate([
     new Uint8Array(claimPubKeyCompressed),
     new Uint8Array(refundPubKeyCompressed),
@@ -701,7 +697,8 @@ export async function createSubmarineSwapForward(
     expectedAmount: data.expectedAmount,
     timeoutBlockHeight: data.timeoutBlockHeight,
     refundPrivateKey: toHex(refundKeys.privateKey),
-    claimPublicKey: data.claimPublicKey,
+    claimPublicKey:
+      data.claimPublicKey.length === 64 ? `02${data.claimPublicKey}` : data.claimPublicKey,
     swapTree: data.swapTree,
   };
 }
