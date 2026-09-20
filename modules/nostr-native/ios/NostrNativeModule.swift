@@ -23,10 +23,12 @@ public class NostrNativeModule: Module {
   private var cachedKeys: (hex: String, keys: Keys)?
 
   private let engineLock = NSLock()
+  private var disposed = false
   private var engineStorage: NostrEngine?
-  private var engine: NostrEngine {
+  private func requireEngine() throws -> NostrEngine {
     engineLock.lock()
     defer { engineLock.unlock() }
+    guard !disposed else { throw CancellationError() }
     if let engineStorage { return engineStorage }
     let created = NostrEngine { [weak self] name, body in
       self?.sendEvent(name, body)
@@ -107,11 +109,13 @@ public class NostrNativeModule: Module {
       // Dev-client reloads recreate the module — never leave a pool (or key
       // material) running behind a dead JS context.
       self.engineLock.lock()
+      self.disposed = true
       let engine = self.engineStorage
+      self.engineStorage = nil
       self.engineLock.unlock()
       self.clearKeyCaches()
       if let engine {
-        Task { await engine.stop() }
+        Task { await engine.dispose() }
       }
     }
 
@@ -173,7 +177,7 @@ public class NostrNativeModule: Module {
     AsyncFunction("engineStart") { (relays: [String], viewerPubkeyHex: String, privkeyHex: String) async throws -> Bool in
       do {
         try self.requireHex64(viewerPubkeyHex, "viewerPubkey")
-        try await self.engine.start(
+        try await self.requireEngine().start(
           relays: relays,
           viewerPubkeyHex: viewerPubkeyHex,
           keys: self.keys(privkeyHex)
@@ -186,7 +190,7 @@ public class NostrNativeModule: Module {
 
     AsyncFunction("engineSubscribeWraps") { (filterJson: String, knownWrapIds: [String]) async throws -> String in
       do {
-        return try await self.engine.subscribeWraps(filterJson: filterJson, seedKnownWrapIds: knownWrapIds)
+        return try await self.requireEngine().subscribeWraps(filterJson: filterJson, seedKnownWrapIds: knownWrapIds)
       } catch {
         throw EngineSubscribeException(String(describing: error))
       }

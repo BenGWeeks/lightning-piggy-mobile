@@ -66,3 +66,19 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node --test scripts/native-sdk-manifest.test.mjs scripts/download-sdk-artifact.test.mjs
+
+  ios-engine-lifecycle:
+    name: iOS engine lifecycle
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production actor with SDK test doubles
+        run: >-
+          swiftc -swift-version 5 -parse-as-library
+          scripts/ios-tests/NostrEngineFixtures.swift
+          modules/nostr-native/ios/NostrEngine.swift
+          scripts/ios-tests/NostrEngineLifecycle.swift
+          -o "$RUNNER_TEMP/nostr-engine-lifecycle"
+      - name: Exercise disposal and restart races
+        run: '"$RUNNER_TEMP/nostr-engine-lifecycle"'

@@ -34,6 +34,7 @@ actor NostrEngine {
 
   private let emit: @Sendable (String, [String: Any]) -> Void
 
+  private var disposed = false
   private var sessionID = UUID()
   private var client: Client?
   private var notificationTask: Task<Void, Never>?
@@ -71,6 +72,7 @@ actor NostrEngine {
   // reconnect-watch loops. Idempotent-by-replacement: a second start tears
   // down the first engine. Throws on bad input (caller rejects the promise).
   func start(relays: [String], viewerPubkeyHex: String, keys: Keys) async throws {
+    guard !disposed else { throw CancellationError() }
     // Invalidate synchronously, before any suspension: actors are reentrant.
     let oldClient = resetSession()
     let sessionID = self.sessionID
@@ -104,7 +106,7 @@ actor NostrEngine {
   }
 
   private func isCurrent(_ sessionID: UUID) -> Bool {
-    self.sessionID == sessionID && !Task.isCancelled
+    !disposed && self.sessionID == sessionID && !Task.isCancelled
   }
 
   // Open the long-lived wrap subscription. `filterJson` is a standard NIP-01
@@ -138,6 +140,12 @@ actor NostrEngine {
       await oldClient.disconnect()
       await oldClient.shutdown()
     }
+  }
+
+  // Terminal module teardown; unlike stop(), no subsequent start is allowed.
+  func dispose() async {
+    disposed = true
+    await stop()
   }
 
   private func resetSession() -> Client? {
