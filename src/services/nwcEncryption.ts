@@ -9,6 +9,7 @@ import type { NostrWebLNProvider } from '@getalby/sdk';
 // path is one bounded relay call and lets a wallet whose info event appears
 // later recover automatically.
 const encryptionDecision = new Map<string, 'nip04'>();
+const probeGenerations = new Map<string, object>();
 
 type NwcInternals = {
   client?: { _encryptionType?: string; getWalletServiceInfo?: () => Promise<unknown> };
@@ -62,6 +63,8 @@ export async function pinNip04IfNoInfoEvent(
     return;
   }
 
+  const generation = probeGenerations.get(walletId) ?? {};
+  probeGenerations.set(walletId, generation);
   try {
     await probeWithTimeout(client.getWalletServiceInfo(), PROBE_TIMEOUT_MS);
     // Info event present → let the SDK negotiate normally. Don't cache the
@@ -73,7 +76,7 @@ export async function pinNip04IfNoInfoEvent(
     // time; treat the same way so we don't hang connect() indefinitely.
     if (/no info event|kind ?13194/i.test(msg) || msg === PROBE_TIMEOUT_MARKER) {
       client._encryptionType = 'nip04';
-      encryptionDecision.set(walletId, 'nip04');
+      if (probeGenerations.get(walletId) === generation) encryptionDecision.set(walletId, 'nip04');
     }
   }
 }
@@ -82,4 +85,5 @@ export async function pinNip04IfNoInfoEvent(
 // re-add (e.g. a different NWC URL under the same id) re-probes fresh.
 export function clearEncryptionDecision(walletId: string): void {
   encryptionDecision.delete(walletId);
+  probeGenerations.delete(walletId);
 }
