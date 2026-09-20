@@ -27,12 +27,9 @@ export function notifyPaymentOnce(
       const seen = parsed.filter((id): id is string => typeof id === 'string');
       if (seen.includes(paymentId) || !(await isCurrent())) return null;
       await AsyncStorage.setItem(key, JSON.stringify([...seen, paymentId].slice(-2048)));
-      if (!(await isCurrent())) {
-        await AsyncStorage.setItem(key, JSON.stringify(seen));
-        return null;
-      }
       let result: string | null = null;
       try {
+        if (!(await isCurrent())) return null;
         result = await send();
         return result;
       } finally {

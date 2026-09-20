@@ -212,3 +212,12 @@ it('rejects a late payment after the scope changes away and back', async () => {
   await check();
   expect(fire).not.toHaveBeenCalled();
 });
+
+it('does not start a wallet request when the UI resumes during credential lookup', async () => {
+  jest.mocked(getNwcUrl).mockImplementationOnce(async () => {
+    AppState.currentState = 'active';
+    return 'nwc-secret';
+  });
+  await check();
+  expect(read).not.toHaveBeenCalled();
+});

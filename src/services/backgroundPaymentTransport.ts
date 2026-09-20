@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import type { Nip47Transaction } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent } from './nwcEncryption';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
@@ -8,6 +9,7 @@ export async function readBackgroundPayments(
   url: string,
   signal: AbortSignal,
 ): Promise<Nip47Transaction[]> {
+  if (AppState.currentState === 'active' || signal.aborted) return [];
   // Load the SDK only for an opted-in background request, not during headless task registration.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { NostrWebLNProvider } = require('@getalby/sdk') as typeof import('@getalby/sdk');
@@ -39,6 +41,9 @@ export async function readBackgroundPayments(
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) cancel();
   });
+  const appStateSubscription = AppState.addEventListener('change', (state) => {
+    if (state === 'active') cancel();
+  });
   try {
     return await Promise.race([
       deadline,
@@ -67,6 +72,7 @@ export async function readBackgroundPayments(
       })(),
     ]);
   } finally {
+    appStateSubscription.remove();
     clearTimeout(timer);
     signal.removeEventListener('abort', cancel);
     close();

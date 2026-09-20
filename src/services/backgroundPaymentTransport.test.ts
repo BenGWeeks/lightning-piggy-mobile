@@ -1,3 +1,4 @@
+import { AppState, type AppStateStatus } from 'react-native';
 import { readBackgroundPayments } from './backgroundPaymentTransport';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
 const mockEnable = jest.fn();
@@ -16,6 +17,7 @@ jest.mock('./nwcEncryption', () => ({
 }));
 jest.mock('./nwcRelayPublishPatch', () => ({ patchRelayPublish: jest.fn() }));
 beforeEach(() => {
+  AppState.currentState = 'background';
   jest.useFakeTimers();
   jest.clearAllMocks();
   mockEnable.mockResolvedValue(undefined);
@@ -65,4 +67,21 @@ it('normalizes a wallet response with no transaction array', async () => {
   await expect(
     readBackgroundPayments('wallet', 'url', new AbortController().signal),
   ).resolves.toEqual([]);
+});
+
+it('cancels the private connection when the UI resumes', async () => {
+  let resume!: (state: AppStateStatus) => void;
+  const remove = jest.fn();
+  const listener = jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, fn) => {
+    resume = fn;
+    return { remove };
+  });
+  mockList.mockReturnValue(new Promise(() => {}));
+  const pending = readBackgroundPayments('wallet', 'url', new AbortController().signal);
+  const assertion = expect(pending).rejects.toThrow('cancelled');
+  resume('active');
+  await assertion;
+  expect(mockClose).toHaveBeenCalled();
+  expect(remove).toHaveBeenCalled();
+  listener.mockRestore();
 });

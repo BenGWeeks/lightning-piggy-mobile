@@ -56,3 +56,15 @@ it('honours claims stored by an earlier process', async () => {
   await notifyPaymentOnce('a', 'w', 'hash', send);
   expect(send).not.toHaveBeenCalled();
 });
+
+it('rolls back the persisted claim when post-claim scope validation throws', async () => {
+  const send = jest.fn().mockResolvedValue('notification');
+  const scope = jest
+    .fn()
+    .mockResolvedValueOnce(true)
+    .mockRejectedValueOnce(new Error('keystore locked'));
+  await expect(notifyPaymentOnce('a', 'w', 'h', send, scope)).rejects.toThrow('keystore locked');
+  expect(send).not.toHaveBeenCalled();
+  await notifyPaymentOnce('a', 'w', 'h', send);
+  expect(send).toHaveBeenCalledTimes(1);
+});

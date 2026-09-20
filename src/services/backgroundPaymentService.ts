@@ -8,6 +8,7 @@ import { firePaymentNotification, hasNotificationPermission } from './notificati
 import { notifyPaymentOnce } from './paymentNotificationDedupe';
 import { readBackgroundPayments } from './backgroundPaymentTransport';
 
+const appIsActive = () => AppState.currentState === 'active';
 const INTERVAL_MS = 60_000;
 const CATCHUP_SECONDS = 24 * 60 * 60;
 let controller: AbortController | null = null;
@@ -68,13 +69,14 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
       if (!Number.isSafeInteger(start) || start < 0) continue;
       if (saved === null) await AsyncStorage.setItem(key, String(start));
       // Prime eligibility while the UI is open, without extra wallet traffic.
-      if (AppState.currentState === 'active') continue;
+      if (appIsActive()) continue;
       const url = await getNwcUrl(wallet.id);
       if (!url || signal.aborted) continue;
       // Wallet scope: still listed for this identity, credential unchanged.
       const walletCurrent = async () =>
         (await getWalletList(activePubkey)).some((w) => w.id === wallet.id) &&
         (await getNwcUrl(wallet.id)) === url;
+      if (appIsActive()) return;
       const transactions = await readBackgroundPayments(wallet.id, url, signal);
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
