@@ -7,7 +7,6 @@ import { querySyncAbortable } from './relayQuery';
 import {
   SHIPPING_OPTION_KIND,
   parseShippingOptionEvent,
-  dedupeNewestPerCoordinate,
   type ShippingOption,
 } from '../utils/marketShipping';
 
@@ -53,9 +52,21 @@ export async function fetchShippingOptions(input: {
     throw new Error('Relay returned shipping options from another pubkey only');
   }
   // Invalid options must not turn into an empty list ("no shipping needed").
-  const parsed = own.map(parseShippingOptionEvent);
+  const newest = new Map<string, (typeof own)[number]>();
+  for (const event of own) {
+    const d = event.tags.find((tag) => tag[0] === 'd')?.[1];
+    if (!d) throw new Error('Merchant returned invalid shipping options');
+    const previous = newest.get(d);
+    if (
+      !previous ||
+      event.created_at > previous.created_at ||
+      (event.created_at === previous.created_at && event.id < previous.id)
+    )
+      newest.set(d, event);
+  }
+  const parsed = [...newest.values()].map(parseShippingOptionEvent);
   if (parsed.some((option) => option === null)) {
     throw new Error('Merchant returned invalid shipping options');
   }
-  return dedupeNewestPerCoordinate(parsed as ShippingOption[]);
+  return parsed as ShippingOption[];
 }

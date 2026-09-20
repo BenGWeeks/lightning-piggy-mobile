@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import {
@@ -208,7 +208,9 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     country: countryCode,
     quantity,
   });
-  liveSelectionRef.current = { coordinate: selectedCoordinate, country: countryCode, quantity };
+  useLayoutEffect(() => {
+    liveSelectionRef.current = { coordinate: selectedCoordinate, country: countryCode, quantity };
+  }, [selectedCoordinate, countryCode, quantity]);
 
   // Submit gate (spec §6): until shipping has settled to `ready` we can't know
   // whether shipping is required, so block for every non-ready state —

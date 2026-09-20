@@ -254,3 +254,20 @@ test('shipping conversion and addition reject overflow', () => {
   expect(orderTotalWithShippingSats(Number.MAX_SAFE_INTEGER, 1)).toBeNull();
   expect(orderTotalWithShippingSats(1.1, 2)).toBeNull();
 });
+
+it.each(['GBP&extra=value', 'USD?x=y', 'NOPE'])(
+  'rejects unsupported or injected currency %s',
+  (currency) => {
+    expect(
+      parseShippingOptionEvent({
+        kind: 30406,
+        pubkey: 'a'.repeat(64),
+        created_at: 1,
+        tags: [
+          ['d', 'standard'],
+          ['price', '1', currency],
+        ],
+      }),
+    ).toBeNull();
+  },
+);

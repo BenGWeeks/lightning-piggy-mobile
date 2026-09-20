@@ -71,7 +71,7 @@ export function querySyncAbortable(
         if (params.rejectOnAllRelaysFailure) queueMicrotask(() => finish());
         else finish();
       },
-      onclose(reasons) {
+      onclose(reasons: Array<string | { url: string; reason: string }>) {
         // nostr-tools close reasons, verbatim (abstract-relay.js / pool.js):
         // "connection failed" / "connection timed out" (optionally "relay "-
         // prefixed; never connected), "relay connection closed" + "websocket
@@ -90,7 +90,7 @@ export function querySyncAbortable(
           reasons.length > 0 &&
           reasons.every((reason) =>
             /^(?:relay )?connection (?:failed|timed out|closed|skipped by allowConnectingToRelay)$|^websocket closed$|^auth timed out$|^auth was required|^auth-required:|^restricted:/.test(
-              reason,
+              typeof reason === 'string' ? reason : reason.reason,
             ),
           );
         finish(allFailed ? new Error('All relays failed to connect') : undefined);

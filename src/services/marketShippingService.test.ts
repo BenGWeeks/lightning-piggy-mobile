@@ -51,3 +51,28 @@ test('a response holding only another pubkey\'s 30406s fails closed instead of r
   ]);
   await expect(fetchShippingOptions(input)).rejects.toThrow('another pubkey');
 });
+
+test('validates only the newest addressable revision', async () => {
+  const old = {
+    id: 'old',
+    kind: 30406,
+    pubkey: input.merchantPubkey,
+    created_at: 1,
+    tags: [['d', 'std']],
+  };
+  const current = {
+    ...old,
+    id: 'new',
+    created_at: 2,
+    tags: [
+      ['d', 'std'],
+      ['price', '4.5', 'GBP'],
+    ],
+  };
+  (querySyncAbortable as jest.Mock).mockResolvedValue([current, old]);
+  await expect(fetchShippingOptions(input)).resolves.toEqual([
+    expect.objectContaining({ baseAmount: 4.5 }),
+  ]);
+  (querySyncAbortable as jest.Mock).mockResolvedValue([current, { ...old, created_at: 3 }]);
+  await expect(fetchShippingOptions(input)).rejects.toThrow('invalid shipping');
+});

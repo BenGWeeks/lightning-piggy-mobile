@@ -247,3 +247,10 @@ it('tolerates a synchronous EOSE without a subscription handle', async () => {
   } as unknown as SimplePool;
   await expect(querySyncAbortable(pool, ['wss://a'], {}, {})).resolves.toEqual([]);
 });
+
+it('recognizes structured relay close reasons as total failure', async () => {
+  const { pool, params } = fakePool();
+  const promise = querySyncAbortable(pool, ['wss://a'], {}, { rejectOnAllRelaysFailure: true });
+  params().onclose([{ url: 'wss://a', reason: 'connection failed' }] as never);
+  await expect(promise).rejects.toThrow('All relays failed');
+});

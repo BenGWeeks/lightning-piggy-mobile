@@ -1,3 +1,4 @@
+import { CURRENCIES } from '../services/fiatService';
 // Country-first shipping selection for the in-app Market checkout (#948
 // Option A). PURE half — no React, no I/O (coverage scope: src/utils); the
 // relay fetch lives in services/marketShippingService, the UI in
@@ -82,7 +83,7 @@ export function parseShippingOptionEvent(ev: ShippingOptionEventInput): Shipping
   const currency =
     typeof priceTag?.[2] === 'string' && priceTag[2].trim() ? priceTag[2].trim().toUpperCase() : '';
 
-  if (baseAmount === null || !currency) return null;
+  if (baseAmount === null || ![...CURRENCIES, 'SATS', 'SAT', 'BTC'].includes(currency)) return null;
 
   // Normalise every value to alpha-2: merchants publish a mix of alpha-2 and
   // alpha-3 (Robotechy's live 30406s carry GBR/IRL/DEU…) — toAlpha2 maps known
