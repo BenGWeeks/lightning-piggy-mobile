@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
+import { useNearbyCacheSubscription } from './useNearbyCacheSubscription';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 let mockFocus: () => (() => void) | void;
 jest.mock('@react-navigation/native', () => ({

@@ -56,12 +56,7 @@ import { useDebouncedMapBounds } from '../hooks/useDebouncedMapBounds';
 import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
 import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
-import {
-  decodeGeohash,
-  encodeGeohash,
-  geohashNeighbours,
-  geohashPrefixesForBbox,
-} from '../utils/geohash';
+import { encodeGeohash, geohashNeighbours, geohashPrefixesForBbox } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
