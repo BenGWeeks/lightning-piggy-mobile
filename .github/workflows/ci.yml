@@ -56,3 +56,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/check-perf-antipatterns.sh
+
+  native-sdk-tests:
+    name: Native SDK artifact tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: node --test scripts/native-sdk-manifest.test.mjs scripts/download-sdk-artifact.test.mjs
