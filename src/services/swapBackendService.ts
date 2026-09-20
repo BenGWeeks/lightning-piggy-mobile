@@ -1,3 +1,4 @@
+import { parseBoltzPair } from './boltzPair';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
@@ -37,22 +38,11 @@ export async function getSwapBackend(): Promise<string> {
 export async function checkAndSaveSwapBackend(input: string): Promise<string> {
   const backend = normalizeSwapBackend(input);
   await Promise.all(
-    ['reverse', 'submarine'].map(async (direction) => {
+    (['reverse', 'submarine'] as const).map(async (direction) => {
       const response = await fetchWithTimeout(`${backend}/swap/${direction}`);
       if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
       const pairs = await response.json();
-      const pair = pairs?.BTC?.BTC;
-      if (
-        !pair ||
-        !Number.isFinite(pair.limits?.minimal) ||
-        !Number.isFinite(pair.limits?.maximal) ||
-        pair.limits.minimal < 0 ||
-        pair.limits.maximal < pair.limits.minimal ||
-        !Number.isFinite(pair.fees?.percentage) ||
-        pair.fees.percentage < 0
-      ) {
-        throw new Error('The server must support Boltz v2 Bitcoin/Lightning swaps.');
-      }
+      parseBoltzPair(pairs?.BTC?.BTC, direction);
     }),
   );
   await AsyncStorage.setItem(SETTING_KEY, backend);

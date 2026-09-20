@@ -1,3 +1,4 @@
+import { parseBoltzPair } from './boltzPair';
 /**
  * Boltz Exchange reverse submarine swap service.
  *
@@ -148,15 +149,7 @@ export async function getReverseSwapFees(): Promise<SwapFees> {
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
-  const pair = data?.BTC?.BTC;
-  if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
-
-  return {
-    percentage: pair.fees?.percentage ?? 0.5,
-    minerFee: pair.fees?.minerFees?.claim ?? pair.fees?.minerFees ?? 0,
-    minAmount: pair.limits?.minimal ?? 10000,
-    maxAmount: pair.limits?.maximal ?? 25000000,
-  };
+  return parseBoltzPair(data?.BTC?.BTC, 'reverse');
 }
 
 /** @deprecated Use getReverseSwapFees instead */
@@ -171,29 +164,7 @@ export async function getSubmarineSwapFees(backend?: string): Promise<SwapFees> 
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
-  const pair = data?.BTC?.BTC;
-  if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
-
-  const percentage = pair.fees?.percentage;
-  const minerFee = pair.fees?.minerFees;
-  if (
-    typeof percentage !== 'number' ||
-    !Number.isFinite(percentage) ||
-    percentage < 0 ||
-    !Number.isSafeInteger(minerFee) ||
-    minerFee < 0 ||
-    typeof pair.hash !== 'string' ||
-    !pair.hash
-  ) {
-    throw new Error('Invalid Boltz submarine fee quote');
-  }
-  return {
-    pairHash: pair.hash,
-    percentage,
-    minerFee,
-    minAmount: pair.limits?.minimal ?? 10000,
-    maxAmount: pair.limits?.maximal ?? 25000000,
-  };
+  return parseBoltzPair(data?.BTC?.BTC, 'submarine');
 }
 
 /**

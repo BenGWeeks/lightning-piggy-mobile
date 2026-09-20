@@ -157,6 +157,7 @@ describe('createSubmarineSwapForward', () => {
           BTC: {
             BTC: {
               hash: 'quote-hash',
+              limits: { minimal: 1, maximal: 25000000 },
               fees: { percentage: 0.5, minerFees: 100 },
             },
           },

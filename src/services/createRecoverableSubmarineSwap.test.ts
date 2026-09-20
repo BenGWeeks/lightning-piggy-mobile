@@ -51,3 +51,10 @@ it('does not return funding instructions when persistence fails', async () => {
   );
   expect(registerPendingSubmarineSwap).not.toHaveBeenCalled();
 });
+
+it('does not return funding instructions when index registration fails', async () => {
+  jest.mocked(registerPendingSubmarineSwap).mockRejectedValueOnce(new Error('Index full'));
+  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source')).rejects.toThrow(
+    'Index full',
+  );
+});

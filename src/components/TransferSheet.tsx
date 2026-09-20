@@ -1,3 +1,4 @@
+import { useTransferSwapFees } from '../utils/useTransferSwapFees';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -223,36 +224,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     dest.walletType === 'nwc' &&
     !dest.lightningAddress;
 
-  // Cache Boltz fees — fetch once when transfer type changes, not per keystroke
-  const [cachedBoltzFees, setCachedBoltzFees] = useState<boltzService.SwapFees | null>(null);
-
-  useEffect(() => {
-    if (transferType === 'ln-to-onchain') {
-      let cancelled = false;
-      boltzService
-        .getReverseSwapFees()
-        .then((fees) => {
-          if (!cancelled) setCachedBoltzFees(fees);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
-    } else if (transferType === 'onchain-to-ln') {
-      let cancelled = false;
-      boltzService
-        .getSubmarineSwapFees()
-        .then((fees) => {
-          if (!cancelled) setCachedBoltzFees(fees);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
-    } else {
-      setCachedBoltzFees(null);
-    }
-  }, [transferType]);
+  const cachedBoltzFees = useTransferSwapFees(transferType, visible);
 
   // Update fee estimate display based on cached fees + current amount
   useEffect(() => {
@@ -444,6 +416,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
     if (!transferType) return;
+    if ((transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && !cachedBoltzFees)
+      return;
 
     // A plain local (not React state) so the value is readable in the
     // `finally` block: on a Boltz hand-off we leave the "swap underway —
@@ -974,13 +948,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   const isBoltzTransfer = transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln';
-  const boltzMin = cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS;
-  const belowBoltzMin = isBoltzTransfer && currentSats > 0 && currentSats < boltzMin;
+  const boltzMin = cachedBoltzFees?.minAmount;
+  const belowBoltzMin =
+    isBoltzTransfer && currentSats > 0 && boltzMin !== undefined && currentSats < boltzMin;
   const canTransfer =
     sourceId &&
     destId &&
     currentSats > 0 &&
     transferType !== null &&
+    (!isBoltzTransfer || cachedBoltzFees !== null) &&
     !belowBoltzMin &&
     !crossProfileLnNoAddress;
 
@@ -1316,7 +1292,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {/* Boltz minimum amount warning */}
                 {belowBoltzMin && (
                   <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzMin.toLocaleString()} sats.
+                    Boltz swaps require a minimum of {boltzMin?.toLocaleString()} sats.
                   </Text>
                 )}
 

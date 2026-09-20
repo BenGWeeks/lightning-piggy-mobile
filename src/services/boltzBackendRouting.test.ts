@@ -54,7 +54,15 @@ afterAll(() => {
 });
 const quote = {
   ok: true,
-  json: async () => ({ BTC: { BTC: { hash: 'quote', fees: { percentage: 0.5, minerFees: 2 } } } }),
+  json: async () => ({
+    BTC: {
+      BTC: {
+        hash: 'quote',
+        limits: { minimal: 1, maximal: 100000 },
+        fees: { percentage: 0.5, minerFees: 2 },
+      },
+    },
+  }),
 };
 const reply = (id: string) => ({
   ok: true,

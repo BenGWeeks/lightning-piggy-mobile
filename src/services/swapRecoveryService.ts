@@ -388,8 +388,8 @@ const SUBMARINE_INDEX_KEY = 'boltz_submarine_index';
 // (e.g. two swaps created back-to-back) cannot clobber each other's entries.
 // A dropped entry would leave a stranded swap that swapRecoveryService never
 // retries, so Boltz auto-refunds at timeout and the user loses the funds.
-// Each call chains onto `indexMutex`; failures are caught inside each op so
-// one bad write doesn't poison the chain for subsequent callers.
+// Each call chains onto `indexMutex`; failures reach the caller without
+// poisoning the chain for subsequent registrations.
 let indexMutex: Promise<void> = Promise.resolve();
 
 function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
@@ -401,19 +401,9 @@ function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** Registration must be durable before callers fund a swap. */
 export async function registerPendingSwap(swapId: string): Promise<void> {
-  return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      if (!ids.includes(swapId)) {
-        ids.push(swapId);
-        await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
-      }
-    } catch (e) {
-      console.warn('[SwapRecovery] Failed to register swap:', e);
-    }
-  });
+  return mutateIndex(SWAP_INDEX_KEY, (ids) => (ids.includes(swapId) ? ids : [...ids, swapId]));
 }
 
 export async function unregisterPendingSwap(swapId: string): Promise<void> {
@@ -431,13 +421,12 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
 
 async function mutateIndex(key: string, mutate: (ids: string[]) => string[]): Promise<void> {
   return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(key);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
-    } catch (e) {
-      console.warn(`[SwapRecovery] Failed to mutate ${key}:`, e);
+    const existing = await SecureStore.getItemAsync(key);
+    const ids: unknown = existing ? JSON.parse(existing) : [];
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
+      throw new Error('Invalid pending swap index');
     }
+    await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
   });
 }
 

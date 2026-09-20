@@ -21,7 +21,13 @@ jest.mock('expo-secure-store', () => ({
 const originalFetch = global.fetch;
 const mockFetch = jest.fn();
 const pair = {
-  BTC: { BTC: { limits: { minimal: 100, maximal: 100000 }, fees: { percentage: 0.5 } } },
+  BTC: {
+    BTC: {
+      hash: 'quote',
+      limits: { minimal: 100, maximal: 100000 },
+      fees: { percentage: 0.5, minerFees: 2 },
+    },
+  },
 };
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -128,3 +134,41 @@ it.each([undefined, null, '', '../swap', 'x'.repeat(129)])(
     expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
   },
 );
+
+it.each([
+  ['submarine', { hash: '' }],
+  ['submarine', { hash: undefined }],
+  ['submarine', { fees: { percentage: 0.5 } }],
+  ['submarine', { fees: { percentage: 0.5, minerFees: -1 } }],
+  ['submarine', { fees: { percentage: 0.5, minerFees: 1.5 } }],
+  ['reverse', { fees: { percentage: 0.5, minerFees: { claim: '100' } } }],
+  ['reverse', { fees: { percentage: 0.5, minerFees: {} } }],
+])('does not save an unusable %s quote (%j)', async (direction, fields) => {
+  await checkAndSaveSwapBackend('https://old.example');
+  mockFetch.mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () =>
+      url.endsWith(`/${direction}`) ? { BTC: { BTC: { ...pair.BTC.BTC, ...fields } } } : pair,
+  }));
+  await expect(checkAndSaveSwapBackend('https://new.example')).rejects.toThrow('fee quote');
+  expect(await getSwapBackend()).toBe('https://old.example/v2');
+});
+it('accepts reverse object miner fees and submarine integer miner fees', async () => {
+  mockFetch.mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () =>
+      url.endsWith('/reverse')
+        ? {
+            BTC: {
+              BTC: {
+                ...pair.BTC.BTC,
+                fees: { percentage: 0.5, minerFees: { claim: 100, lockup: 150 } },
+              },
+            },
+          }
+        : pair,
+  }));
+  await expect(checkAndSaveSwapBackend('https://valid.example')).resolves.toBe(
+    'https://valid.example/v2',
+  );
+});
