@@ -84,3 +84,28 @@ it('does not start an already cancelled connection', async () => {
   });
   expect(NostrWebLNProvider).not.toHaveBeenCalled();
 });
+
+it('disconnect supersedes an in-flight reconnect without replacing the new provider', async () => {
+  await connect('lifecycle', URL);
+  old.client.connected = false;
+  const slow = deferred<void>();
+  const started = deferred<void>();
+  fresh.enable.mockImplementationOnce(() => {
+    started.resolve();
+    return slow.promise;
+  });
+  const pending = getBalance('lifecycle').catch(() => undefined);
+  await started.promise;
+  disconnect('lifecycle');
+  const newest = provider(333);
+  jest
+    .mocked(NostrWebLNProvider)
+    .mockImplementationOnce(() => newest as unknown as NostrWebLNProvider);
+  await connect('lifecycle', URL);
+  slow.resolve();
+  await pending;
+  expect(fresh.close).toHaveBeenCalled();
+  expect(newest.close).not.toHaveBeenCalled();
+  await expect(getBalance('lifecycle')).resolves.toBe(333);
+  old.client.connected = true;
+});

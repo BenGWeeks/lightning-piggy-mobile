@@ -1,3 +1,4 @@
+import { readCachedWalletBalance } from '../services/walletBalanceCache';
 import React, {
   createContext,
   useContext,
@@ -383,6 +384,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Startup: load prefs, migrate, reconnect all wallets
   useEffect(() => {
+    let isStartupCurrent = captureWalletIdentity();
     (async () => {
       try {
         // Load user preferences
@@ -421,6 +423,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // 2 s timeout means a wedged NostrContext still falls
         // through to legacy-key behaviour matching pre-#288 installs.
         await walletStorage.awaitActivePubkeyHydrated();
+        isStartupCurrent = captureWalletIdentity();
 
         // Migrate legacy single-wallet data — now safely runs against
         // the correct per-account key.
@@ -439,7 +442,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await initialiseSendThresholdForNewInstall();
 
         // Load and reconnect all wallets
-        const isStartupCurrent = captureWalletIdentity();
         perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
         perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
@@ -476,16 +478,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // open Send sheet for that wallet). Closes the cold-start
             // "Send button feels frozen for 12 s" symptom: BDK is the
             // dominant blocker, and BDK isn't needed to paint Home.
-            let cachedBalance: number | null = null;
-            try {
-              const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
-              if (bRaw) {
-                const n = Number(bRaw);
-                if (Number.isFinite(n)) cachedBalance = n;
-              }
-            } catch {
-              // Corrupted balance cache — ignore; live fetch will repopulate.
-            }
+            const cachedBalance = await readCachedWalletBalance(w.id);
             // Seed the announced-receipts set BEFORE the detector runs.
             await hydrateSeenReceipts(w.id, cachedTxs, isStartupCurrent);
             return {
@@ -497,16 +490,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             };
           }),
         );
-        if (isStartupCurrent()) setWallets(walletStates);
+        if (!isStartupCurrent()) return;
+        setWallets(walletStates);
         if (!__walletProviderHydratedLogged) {
           __walletProviderHydratedLogged = true;
           perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
         }
-        // Mark the initial AsyncStorage read complete BEFORE flipping
-        // `isLoading`. Consumers gating cold-start UI (e.g. HomeScreen's
-        // Send/Receive button styles) need to know "we tried to load and
-        // found N wallets" vs "we haven't tried yet" — both have
-        // `wallets.length === 0` but only one is the disabled state.
+        // Only the current identity may publish hydration completion.
         setWalletsHydrated(true);
 
         if (isStartupCurrent() && walletStates.length > 0) {
@@ -608,6 +598,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
+        if (!isStartupCurrent()) return;
         // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
         setWalletsHydrated(true);
         setIsLoading(false);
@@ -629,6 +620,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     walletsRef,
     lastTxsJsonRef,
     hydrateSeenReceipts,
+    setIsLoading,
+    setWalletsHydrated,
     setWallets,
     setActiveWalletId,
   });
@@ -661,7 +654,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // NWC connection watchdog: 30 s WebSocket-health check + reconnect —
   // extracted per-responsibility hook (see useNwcConnectionWatchdog).
-  useNwcConnectionWatchdog(walletsRef, updateWalletInState);
+  useNwcConnectionWatchdog(walletsRef, updateWalletInState, captureWalletIdentity);
 
   const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {

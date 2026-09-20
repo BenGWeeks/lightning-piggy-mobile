@@ -229,6 +229,8 @@ export async function connect(
 
 export function disconnect(walletId: string): void {
   connectionAttempts.delete(walletId);
+  reconnectsInFlight.delete(walletId);
+  nwcUrls.delete(walletId);
   const provider = providers.get(walletId);
   if (provider) {
     try {
@@ -441,19 +443,29 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   const url = nwcUrls.get(walletId);
   if (!url) throw new Error('No NWC URL stored for reconnect');
 
-  const existing = providers.get(walletId);
-  if (existing) {
-    try {
-      existing.close();
-    } catch {}
-  }
-
+  const attempt = {};
+  connectionAttempts.set(walletId, attempt);
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
-  patchRelayPublish(provider, walletId);
-  await provider.enable();
-  await pinNip04IfNoInfoEvent(provider, walletId);
-  providers.set(walletId, provider);
-  return provider;
+  const assertCurrent = () => {
+    if (connectionAttempts.get(walletId) !== attempt || nwcUrls.get(walletId) !== url) {
+      throw new Error('Connection superseded');
+    }
+  };
+  try {
+    providers.get(walletId)?.close();
+    patchRelayPublish(provider, walletId);
+    await provider.enable();
+    assertCurrent();
+    await pinNip04IfNoInfoEvent(provider, walletId);
+    assertCurrent();
+    providers.set(walletId, provider);
+    return provider;
+  } catch (error) {
+    try {
+      provider.close();
+    } catch {}
+    throw error;
+  }
 }
 
 /**
@@ -473,7 +485,7 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
     if (!pending) {
       if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
       pending = reconnect(walletId).finally(() => {
-        reconnectsInFlight.delete(walletId);
+        if (reconnectsInFlight.get(walletId) === pending) reconnectsInFlight.delete(walletId);
       });
       reconnectsInFlight.set(walletId, pending);
     }

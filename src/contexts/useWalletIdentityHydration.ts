@@ -12,6 +12,8 @@ import * as walletStorage from '../services/walletStorageService';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 
 interface WalletIdentityHydrationDeps {
+  setIsLoading?: (value: boolean) => void;
+  setWalletsHydrated?: (value: boolean) => void;
   walletsRef: MutableRefObject<WalletState[]>;
   lastTxsJsonRef: MutableRefObject<Map<string, string>>;
   hydrateSeenReceipts: (
@@ -28,6 +30,8 @@ interface WalletIdentityHydrationDeps {
  * The cold-start preferences/migration flow remains in WalletContext.
  */
 export function useWalletIdentityHydration({
+  setIsLoading,
+  setWalletsHydrated,
   walletsRef,
   lastTxsJsonRef,
   hydrateSeenReceipts,
@@ -58,6 +62,8 @@ export function useWalletIdentityHydration({
         if (w.walletType === 'nwc') nwcService.disconnect(w.id);
       }
       // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
+      setIsLoading?.(true);
+      setWalletsHydrated?.(false);
       setWallets([]);
       setActiveWalletId(null);
       lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
@@ -109,6 +115,8 @@ export function useWalletIdentityHydration({
           );
           if (!isCurrent()) return;
           setWallets(walletStates);
+          setWalletsHydrated?.(true);
+          setIsLoading?.(false);
           if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
           // Kick off NWC connects in parallel; same fire-and-forget
           // pattern as the startup hydration. Onchain wallets are NOT
@@ -160,6 +168,10 @@ export function useWalletIdentityHydration({
           );
         } catch (e) {
           console.warn('[Wallet] re-hydrate failed:', e);
+          if (isCurrent()) {
+            setWalletsHydrated?.(true);
+            setIsLoading?.(false);
+          }
         }
       })();
     });
@@ -169,6 +181,8 @@ export function useWalletIdentityHydration({
       unsubscribe();
     };
   }, [
+    setIsLoading,
+    setWalletsHydrated,
     walletsRef,
     lastTxsJsonRef,
     hydrateSeenReceipts,
