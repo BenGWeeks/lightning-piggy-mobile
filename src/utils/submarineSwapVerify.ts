@@ -62,15 +62,19 @@ export function verifySubmarineSwap(
   if (!hash || !/^[0-9a-f]{64}$/i.test(hash)) throw new Error('Invalid swap invoice payment hash');
   if (
     typeof swap.claimPublicKey !== 'string' ||
-    !/^(02|03)[0-9a-f]{64}$/i.test(swap.claimPublicKey) ||
-    !ecc.isPoint(Buffer.from(swap.claimPublicKey, 'hex'))
+    !/^(?:(?:02|03))?[0-9a-f]{64}$/i.test(swap.claimPublicKey)
   ) {
     throw new Error('Invalid Boltz claim public key');
   }
+  // X-only keys lift to even Y; compressed keys retain their parity for BIP-327.
+  const claimKey = Buffer.from(
+    swap.claimPublicKey.length === 64 ? `02${swap.claimPublicKey}` : swap.claimPublicKey,
+    'hex',
+  );
+  if (!ecc.isPoint(claimKey)) throw new Error('Invalid Boltz claim public key');
   if (input.refundPublicKey.length !== 33 || !ecc.isPoint(input.refundPublicKey)) {
     throw new Error('Invalid local refund public key');
   }
-  const claimKey = Buffer.from(swap.claimPublicKey, 'hex');
   const refundKey = Buffer.from(input.refundPublicKey);
   const claimScript = bitcoin.script.compile([
     bitcoin.opcodes.OP_HASH160,

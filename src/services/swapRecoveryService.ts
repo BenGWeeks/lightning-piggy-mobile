@@ -403,18 +403,7 @@ function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
 }
 
 export async function registerPendingSwap(swapId: string): Promise<void> {
-  return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      if (!ids.includes(swapId)) {
-        ids.push(swapId);
-        await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
-      }
-    } catch (e) {
-      console.warn('[SwapRecovery] Failed to register swap:', e);
-    }
-  });
+  return mutateIndex(SWAP_INDEX_KEY, (ids) => (ids.includes(swapId) ? ids : [...ids, swapId]));
 }
 
 export async function unregisterPendingSwap(swapId: string): Promise<void> {
@@ -432,13 +421,12 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
 
 async function mutateIndex(key: string, mutate: (ids: string[]) => string[]): Promise<void> {
   return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(key);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
-    } catch (e) {
-      console.warn(`[SwapRecovery] Failed to mutate ${key}:`, e);
+    const existing = await SecureStore.getItemAsync(key);
+    const ids: unknown = existing ? JSON.parse(existing) : [];
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
+      throw new Error('Invalid pending swap index');
     }
+    await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
   });
 }
 

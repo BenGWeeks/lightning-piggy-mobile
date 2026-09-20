@@ -227,3 +227,18 @@ describe('submarine swap recovery', () => {
     });
   });
 });
+
+it('propagates index write failures and permits subsequent registration', async () => {
+  const store = jest.requireMock('expo-secure-store');
+  store.setItemAsync.mockRejectedValueOnce(new Error('Index full'));
+  await expect(registerPendingSubmarineSwap('new-swap')).rejects.toThrow('Index full');
+  await registerPendingSubmarineSwap('later-swap');
+  expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toContain('later-swap');
+});
+it('rejects a corrupt recovery index rather than overwriting it', async () => {
+  mockStore.set('boltz_submarine_index', '{}');
+  await expect(registerPendingSubmarineSwap('new-swap')).rejects.toThrow(
+    'Invalid pending swap index',
+  );
+  expect(mockStore.get('boltz_submarine_index')).toBe('{}');
+});
