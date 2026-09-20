@@ -671,7 +671,7 @@ export async function createSubmarineSwapForward(
       invoice,
       pairHash: fees.pairHash,
       refundPublicKey: toHex(refundKeys.publicKey),
-      referralId: 'lightning-piggy',
+      // Match the un-referred quote used for the pair hash and expected amount.
     }),
   });
 
