@@ -192,6 +192,7 @@ describe('createSubmarineSwapForward', () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     const request = JSON.parse(post![1].body);
     expect(request.pairHash).toBe('quote-hash');
+    expect(request).not.toHaveProperty('referralId');
     expect(bytesToHex(secp256k1.getPublicKey(hexToBytes(swap.refundPrivateKey), true))).toBe(
       request.refundPublicKey,
     );
