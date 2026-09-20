@@ -974,8 +974,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   const isBoltzTransfer = transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln';
-  const belowBoltzMin =
-    isBoltzTransfer && currentSats > 0 && currentSats < boltzService.BOLTZ_MIN_SATS;
+  const boltzMin = cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS;
+  const belowBoltzMin = isBoltzTransfer && currentSats > 0 && currentSats < boltzMin;
   const canTransfer =
     sourceId &&
     destId &&
@@ -1043,11 +1043,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           <AmountEntryScreen
             initialSats={currentSats}
             title="Move amount"
-            minSats={
-              isBoltzTransfer
-                ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
-                : undefined
-            }
+            minSats={isBoltzTransfer ? boltzMin : undefined}
             maxSats={isBoltzTransfer ? cachedBoltzFees?.maxAmount : undefined}
             confirmLabel="Done"
             onBack={() => setStep('main')}
@@ -1320,8 +1316,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {/* Boltz minimum amount warning */}
                 {belowBoltzMin && (
                   <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzService.BOLTZ_MIN_SATS.toLocaleString()}{' '}
-                    sats.
+                    Boltz swaps require a minimum of {boltzMin.toLocaleString()} sats.
                   </Text>
                 )}
 
