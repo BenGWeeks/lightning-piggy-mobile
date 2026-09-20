@@ -51,20 +51,10 @@ export function querySyncAbortable(
       else resolve(events);
     };
     params.signal?.addEventListener('abort', onAbort, { once: true });
-    // Own the EOSE deadline: nostr-tools reports its per-relay `maxWait` expiry
-    // as a plain `oneose`, indistinguishable from "served everything". With
-    // our own timer a stalled relay set that delivered NOTHING can fail closed
-    // for callers that asked (shipping must not read as "no options"); partial
-    // results still resolve, and callers without the flag keep resolving.
-    if (params.maxWait !== undefined) {
-      deadline = setTimeout(() => {
-        if (params.rejectOnAllRelaysFailure && events.length === 0) {
-          finish(new Error('Relay query timed out with no events'));
-        } else {
-          finish();
-        }
-      }, params.maxWait);
-    }
+    // A quiet deadline is not proof that every relay failed: another relay
+    // may have served a valid empty result while aggregate EOSE is still pending.
+    // Explicit all-relay failures are rejected by onclose below.
+    if (params.maxWait !== undefined) deadline = setTimeout(() => finish(), params.maxWait);
     closer = pool.subscribeMany(relays, filter, {
       // The pool's own timeout sits 1 s behind ours so our deadline always
       // settles first (it still bounds the pool's connection-timeout maths).
@@ -107,6 +97,12 @@ export function querySyncAbortable(
       },
     });
     // A synchronous callback can finish before the closer is assigned.
-    if (settled) closer.close();
+    if (settled) {
+      try {
+        closer?.close();
+      } catch {
+        /* already closed synchronously */
+      }
+    }
   });
 }

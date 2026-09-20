@@ -99,7 +99,7 @@ describe('querySyncAbortable de-duplication', () => {
 describe('querySyncAbortable deadline', () => {
   afterEach(() => jest.useRealTimers());
 
-  it('rejects at the deadline when nothing was received and rejectOnAllRelaysFailure is set', async () => {
+  it('does not confuse an aggregate quiet deadline with proven all-relay failure', async () => {
     jest.useFakeTimers();
     const { pool, params, close } = fakePool();
     const promise = querySyncAbortable(
@@ -110,7 +110,7 @@ describe('querySyncAbortable deadline', () => {
     );
     expect(params().maxWait).toBe(2000); // pool's own timeout trails ours
     jest.advanceTimersByTime(1000);
-    await expect(promise).rejects.toThrow('timed out');
+    await expect(promise).resolves.toEqual([]);
     expect(close).toHaveBeenCalled();
   });
 
@@ -237,4 +237,13 @@ describe('scoped aggregate connection failures', () => {
     params().onclose(['connection failed']);
     await expect(result).resolves.toEqual([]);
   });
+});
+
+it('tolerates a synchronous EOSE without a subscription handle', async () => {
+  const pool = {
+    subscribeMany: (_r: unknown, _f: unknown, params: SubParams) => {
+      params.oneose();
+    },
+  } as unknown as SimplePool;
+  await expect(querySyncAbortable(pool, ['wss://a'], {}, {})).resolves.toEqual([]);
 });

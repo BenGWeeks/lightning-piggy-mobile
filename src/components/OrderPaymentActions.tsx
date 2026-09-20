@@ -72,10 +72,9 @@ function OrderPaymentActions({
   // must not make an unpaid order look settled).
   const receiptVerified =
     isReceipt &&
-    (fromMe ||
-      (Number.isSafeInteger(expectedAmountSats) &&
-        (expectedAmountSats ?? 0) > 0 &&
-        (order.amountSats === undefined || order.amountSats === expectedAmountSats)));
+    Number.isSafeInteger(expectedAmountSats) &&
+    (expectedAmountSats ?? 0) > 0 &&
+    order.amountSats === expectedAmountSats;
   if (isReceipt && !receiptVerified) {
     return (
       <Text style={styles.expiredText} testID={`${testIdPrefix}-order-receipt-unverified-${id}`}>
