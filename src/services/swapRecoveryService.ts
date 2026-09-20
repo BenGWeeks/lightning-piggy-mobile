@@ -389,8 +389,7 @@ const SUBMARINE_INDEX_KEY = 'boltz_submarine_index';
 // (e.g. two swaps created back-to-back) cannot clobber each other's entries.
 // A dropped entry would leave a stranded swap that swapRecoveryService never
 // retries, so Boltz auto-refunds at timeout and the user loses the funds.
-// Each call chains onto `indexMutex`; failures are caught inside each op so
-// one bad write doesn't poison the chain for subsequent callers.
+// The lock propagates registration errors without poisoning subsequent operations.
 let indexMutex: Promise<void> = Promise.resolve();
 
 function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
@@ -435,7 +434,9 @@ export async function registerPendingSubmarineSwap(swapId: string): Promise<void
 }
 
 export async function unregisterPendingSubmarineSwap(swapId: string): Promise<void> {
-  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId));
+  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId)).catch(() => {
+    // A completed refund must not appear failed because best-effort index cleanup failed.
+  });
 }
 
 /**
