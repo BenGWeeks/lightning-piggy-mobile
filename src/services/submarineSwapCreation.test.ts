@@ -32,14 +32,16 @@ function fixture(
     scriptRefundKey?: Uint8Array;
     timeout?: number;
     reverseKeys?: boolean;
+    xOnly?: boolean;
   } = {},
 ): SubmarineSwapResponse {
+  const claimKey = opts.xOnly ? Uint8Array.from([2, ...CLAIM_KEY.slice(1)]) : CLAIM_KEY;
   const timeout = opts.timeout ?? HEIGHT + 144;
   const claim = Script.encode([
     'HASH160',
     ripemd160(opts.hash ?? HASH),
     'EQUALVERIFY',
-    CLAIM_KEY.slice(1),
+    claimKey.slice(1),
     'CHECKSIG',
   ]);
   const refund = Script.encode([
@@ -48,7 +50,7 @@ function fixture(
     timeout,
     'CHECKLOCKTIMEVERIFY',
   ]);
-  const keys = opts.reverseKeys ? [refundKey, CLAIM_KEY] : [CLAIM_KEY, refundKey];
+  const keys = opts.reverseKeys ? [refundKey, claimKey] : [claimKey, refundKey];
   const address = p2tr(
     keyAggExport(keyAggregate(keys)),
     [
@@ -63,7 +65,7 @@ function fixture(
     address,
     expectedAmount: 100600,
     timeoutBlockHeight: timeout,
-    claimPublicKey: bytesToHex(CLAIM_KEY),
+    claimPublicKey: bytesToHex(opts.xOnly ? claimKey.slice(1) : claimKey),
     swapTree: {
       claimLeaf: { version: 0xc0, output: bytesToHex(claim) },
       refundLeaf: { version: 0xc0, output: bytesToHex(refund) },
@@ -80,6 +82,9 @@ const input = {
 describe('submarine swap trust boundary', () => {
   it('accepts an independently generated valid swap', () => {
     expect(() => verifySubmarineSwap(fixture(), input)).not.toThrow();
+  });
+  it('accepts an independently constructed x-only claim-key swap', () => {
+    expect(() => verifySubmarineSwap(fixture(REFUND_KEY, { xOnly: true }), input)).not.toThrow();
   });
   it('rejects an internally consistent tree committing to another invoice', () => {
     expect(() =>
