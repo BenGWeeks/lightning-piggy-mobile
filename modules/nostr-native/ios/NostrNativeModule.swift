@@ -35,6 +35,12 @@ public class NostrNativeModule: Module {
     return created
   }
 
+  private func existingEngine() -> NostrEngine? {
+    engineLock.lock()
+    defer { engineLock.unlock() }
+    return engineStorage
+  }
+
   private func clearKeyCaches() {
     cacheLock.lock()
     defer { cacheLock.unlock() }
@@ -188,7 +194,7 @@ public class NostrNativeModule: Module {
 
     AsyncFunction("engineStop") { () async -> Void in
       // best-effort — the key-cache clear must run regardless of engine state
-      await self.engine.stop()
+      if let engine = self.existingEngine() { await engine.stop() }
       self.clearKeyCaches()
     }
   }
