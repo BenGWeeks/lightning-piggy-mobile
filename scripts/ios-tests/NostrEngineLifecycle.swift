@@ -3,7 +3,7 @@ import Foundation
   static func main() async throws {
     let engine = NostrEngine { _, _ in }
     let pending = Task { try await engine.start(relays: [], viewerPubkeyHex: "viewer", keys: Keys()) }
-    while !(await lifecycleProbe.connectStarted) { await Task.yield() }
+    while !(await lifecycleProbe.connectSuspended) { await Task.yield() }
     await engine.dispose()
     await lifecycleProbe.release()
     do { try await pending.value; fatalError("Disposed start unexpectedly succeeded") }

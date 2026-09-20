@@ -2,14 +2,13 @@
 // No network, secret keys, or Rust artifacts are used by this regression test.
 import Foundation
 actor LifecycleProbe {
-  var connectStarted = false
+  var connectSuspended = false
   var suspendConnect = true
   var continuation: CheckedContinuation<Void, Never>?
   var builds = 0
   var shutdowns = 0
   func connect() async {
-    connectStarted = true
-    if suspendConnect { await withCheckedContinuation { continuation = $0 } }
+    if suspendConnect { await withCheckedContinuation { continuation = $0; connectSuspended = true } }
   }
   func release() { suspendConnect = false; continuation?.resume(); continuation = nil }
   func shutdown() { shutdowns += 1 }
