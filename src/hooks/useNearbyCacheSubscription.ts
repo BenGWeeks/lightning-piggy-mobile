@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useRef } from 'react';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
@@ -32,11 +33,14 @@ export function useNearbyCacheSubscription(args: {
 }): { resubscribeForPrefixes: (prefixes: string[]) => void } {
   const { enqueue, flush } = args;
   const closerRef = useRef<(() => void) | null>(null);
+  const focusedRef = useRef(false);
+  const prefixesRef = useRef<string[]>([]);
   const keyRef = useRef<string | null>(null);
 
   const resubscribeForPrefixes = useCallback(
     (prefixes: string[]) => {
-      if (prefixes.length === 0) return;
+      prefixesRef.current = prefixes;
+      if (!focusedRef.current || prefixes.length === 0) return;
       const key = [...prefixes].sort().join(',');
       if (key === keyRef.current) return;
       keyRef.current = key;
@@ -46,7 +50,8 @@ export function useNearbyCacheSubscription(args: {
         (cache) => {
           // Hide the project's own test-account ("Piggy") Piglets on the
           // map in the production app; dev/preview keep them for Maestro.
-          if (isHiddenInProd(cache.hiderPubkey)) return;
+          if (!focusedRef.current || keyRef.current !== key || isHiddenInProd(cache.hiderPubkey))
+            return;
           enqueue(cache.coord, cache);
         },
         undefined,
@@ -56,15 +61,18 @@ export function useNearbyCacheSubscription(args: {
     [enqueue],
   );
 
-  useEffect(
-    () => () => {
-      closerRef.current?.();
-      closerRef.current = null;
-      // Drain whatever the coalescer still holds so a quick unmount
-      // doesn't drop the tail of a backlog flush.
-      flush();
-    },
-    [flush],
+  useFocusEffect(
+    useCallback(() => {
+      focusedRef.current = true;
+      resubscribeForPrefixes(prefixesRef.current);
+      return () => {
+        focusedRef.current = false;
+        closerRef.current?.();
+        closerRef.current = null;
+        keyRef.current = null;
+        flush();
+      };
+    }, [flush, resubscribeForPrefixes]),
   );
 
   return { resubscribeForPrefixes };
