@@ -168,6 +168,7 @@ export async function saveNwcUrl(walletId: string, url: string): Promise<void> {
   try {
     await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
   } finally {
+    clearEncryptionDecision(`background:${walletId}`);
     invalidateBackgroundPaymentScope();
   }
 }
@@ -182,6 +183,7 @@ export async function deleteNwcUrl(walletId: string): Promise<void> {
   try {
     await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
   } finally {
+    clearEncryptionDecision(`background:${walletId}`);
     invalidateBackgroundPaymentScope();
   }
 }
