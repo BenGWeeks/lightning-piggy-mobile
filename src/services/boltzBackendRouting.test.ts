@@ -66,7 +66,12 @@ const quote = {
 };
 const reply = (id: string) => ({
   ok: true,
-  json: async () => ({ id, invoice: 'invoice', expectedAmount: 50000 }),
+  json: async () => ({
+    id,
+    invoice: 'invoice',
+    expectedAmount: 50000,
+    claimPublicKey: '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+  }),
 });
 
 it.each(['reverse', 'submarine'])('routes %s fees to the selected server', async (direction) => {
