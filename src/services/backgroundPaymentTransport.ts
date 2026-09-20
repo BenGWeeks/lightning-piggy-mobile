@@ -1,9 +1,10 @@
 import type { Nip47Transaction } from '@getalby/sdk';
-import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
+import { pinNip04IfNoInfoEvent } from './nwcEncryption';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
 
 /** A read-only request on a private connection; never replace the UI's client. */
 export async function readBackgroundPayments(
+  walletId: string,
   url: string,
   signal: AbortSignal,
 ): Promise<Nip47Transaction[]> {
@@ -17,7 +18,7 @@ export async function readBackgroundPayments(
   // Silent on failure: the deadline + next pass cover it, and we never log
   // the SDK error (it can carry relay/wallet details).
   patchRelayPublish(provider, () => {});
-  const cacheKey = `background-payment-${Date.now()}-${Math.random()}`;
+  const cacheKey = `background:${walletId}`;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelled = false;
   const close = () => {
@@ -56,12 +57,11 @@ export async function readBackgroundPayments(
             unpaid: false,
             limit: 100,
           });
-          return result.transactions;
+          return Array.isArray(result.transactions) ? result.transactions : [];
         } finally {
           // enable/probe can settle after cancellation; close any late socket.
           if (cancelled) {
             close();
-            clearEncryptionDecision(cacheKey);
           }
         }
       })(),
@@ -69,7 +69,6 @@ export async function readBackgroundPayments(
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', cancel);
-    clearEncryptionDecision(cacheKey);
     close();
   }
 }

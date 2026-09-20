@@ -1,3 +1,4 @@
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 /**
  * Persisted on/off preference for the Android background DM watch (#279
  * realtime upgrade). Split out from `backgroundDmService` so the Settings
@@ -25,8 +26,15 @@ export async function loadBackgroundDmEnabled(): Promise<boolean> {
 
 /** Persist the preference. */
 export async function setBackgroundDmEnabled(enabled: boolean): Promise<void> {
-  cached = enabled;
-  await AsyncStorage.setItem(BACKGROUND_DM_ENABLED_KEY, enabled ? 'true' : 'false').catch(() => {});
+  invalidateBackgroundPaymentScope();
+  try {
+    cached = enabled;
+    await AsyncStorage.setItem(BACKGROUND_DM_ENABLED_KEY, enabled ? 'true' : 'false').catch(
+      () => {},
+    );
+  } finally {
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 /** Test hook: drop the in-memory cache so tests don't poison each other. */

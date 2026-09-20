@@ -212,10 +212,10 @@ class BackgroundDmService : Service() {
     if (manager.getNotificationChannel(CHANNEL_ID) != null) return
     val channel = NotificationChannel(
       CHANNEL_ID,
-      "Background message watch",
+      "Background messages and payments",
       NotificationManager.IMPORTANCE_LOW,
     ).apply {
-      description = "The persistent status shown while Lightning Piggy watches for messages"
+      description = "The persistent status shown while Lightning Piggy watches messages and checks payments"
       setShowBadge(false)
       // Match the JS-side channel definition (notificationService.ts) exactly:
       // channel attributes are effectively immutable after first creation, so

@@ -181,9 +181,10 @@ async function initialiseInternal(): Promise<void> {
     // upgrade): Android requires a foreground service to show an ongoing
     // notification, but it should be a silent status chip, not an alert.
     await Notifications.setNotificationChannelAsync(CHANNEL_BACKGROUND_SERVICE, {
-      name: 'Background message watch',
+      name: 'Background messages and payments',
       importance: Notifications.AndroidImportance.LOW,
-      description: 'The persistent status shown while Lightning Piggy watches for messages',
+      description:
+        'The persistent status shown while Lightning Piggy watches messages and checks payments',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }

@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 it('only requests paid incoming history on its own connection and closes it', async () => {
-  await readBackgroundPayments('url', new AbortController().signal);
+  await readBackgroundPayments('wallet', 'url', new AbortController().signal);
   expect(mockList).toHaveBeenCalledWith({ type: 'incoming', unpaid: false, limit: 100 });
   // The LNbits no-wait-for-OK patch must be applied to THIS provider before
   // any request goes out, exactly as nwcService.connect does.
@@ -35,7 +35,7 @@ it('only requests paid incoming history on its own connection and closes it', as
 });
 it('bounds a stalled wallet and cleans up', async () => {
   mockList.mockReturnValue(new Promise(() => {}));
-  const request = readBackgroundPayments('url', new AbortController().signal);
+  const request = readBackgroundPayments('wallet', 'url', new AbortController().signal);
   const assertion = expect(request).rejects.toThrow('timed out');
   await jest.advanceTimersByTimeAsync(25_000);
   await assertion;
@@ -50,7 +50,7 @@ it('cancels on stop and does not issue history requests after a late enable', as
     }),
   );
   const controller = new AbortController();
-  const request = readBackgroundPayments('url', controller.signal);
+  const request = readBackgroundPayments('wallet', 'url', controller.signal);
   const assertion = expect(request).rejects.toThrow('cancelled');
   controller.abort();
   await assertion;
@@ -58,4 +58,11 @@ it('cancels on stop and does not issue history requests after a late enable', as
   await jest.advanceTimersByTimeAsync(0);
   expect(mockList).not.toHaveBeenCalled();
   expect(mockClose.mock.calls.length).toBeGreaterThanOrEqual(2);
+});
+
+it('normalizes a wallet response with no transaction array', async () => {
+  mockList.mockResolvedValue({});
+  await expect(
+    readBackgroundPayments('wallet', 'url', new AbortController().signal),
+  ).resolves.toEqual([]);
 });

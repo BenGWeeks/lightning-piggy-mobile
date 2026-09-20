@@ -1,3 +1,4 @@
+import { captureBackgroundPaymentScope } from './backgroundPaymentScope';
 import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities } from './identitiesStore';
@@ -20,11 +21,23 @@ let timer: ReturnType<typeof setTimeout> | null = null;
  * subscription (#1100 review).
  */
 export async function canWatchBackgroundPayments(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
-  if (!(await loadBackgroundDmEnabled()) || !(await hasNotificationPermission())) return false;
-  const { activePubkey } = await loadIdentities();
-  if (!activePubkey) return false;
-  return (await getWalletList(activePubkey)).some((w) => w.walletType === 'nwc');
+  try {
+    if (Platform.OS !== 'android') return false;
+    if (!(await loadBackgroundDmEnabled()) || !(await hasNotificationPermission())) return false;
+    const { activePubkey } = await loadIdentities();
+    if (!activePubkey) return false;
+    for (const wallet of await getWalletList(activePubkey)) {
+      if (wallet.walletType !== 'nwc') continue;
+      try {
+        if ((await getNwcUrl(wallet.id))?.trim()) return true;
+      } catch {
+        /* try another wallet */
+      }
+    }
+  } catch {
+    /* unavailable scope cannot sustain a payment-only host */
+  }
+  return false;
 }
 
 export function isBackgroundPaymentWatchRunning(): boolean {
@@ -33,13 +46,16 @@ export function isBackgroundPaymentWatchRunning(): boolean {
 
 /** One pass; explicit account reads never mutate the foreground wallet scope. */
 export async function checkBackgroundPayments(signal: AbortSignal): Promise<void> {
+  const generationCurrent = captureBackgroundPaymentScope();
   if (Platform.OS !== 'android' || signal.aborted) return;
   if (!(await loadBackgroundDmEnabled()) || !(await hasNotificationPermission())) return;
   const { activePubkey } = await loadIdentities();
   if (!activePubkey) return;
   // Pass-wide scope: the preference and active identity this pass was read for.
   const scopeCurrent = async () =>
-    (await loadBackgroundDmEnabled()) && (await loadIdentities()).activePubkey === activePubkey;
+    (await loadBackgroundDmEnabled()) &&
+    (await loadIdentities()).activePubkey === activePubkey &&
+    generationCurrent();
   const wallets = await getWalletList(activePubkey);
   for (const wallet of wallets) {
     if (signal.aborted) return;
@@ -59,7 +75,7 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
       const walletCurrent = async () =>
         (await getWalletList(activePubkey)).some((w) => w.id === wallet.id) &&
         (await getNwcUrl(wallet.id)) === url;
-      const transactions = await readBackgroundPayments(url, signal);
+      const transactions = await readBackgroundPayments(wallet.id, url, signal);
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
@@ -90,7 +106,11 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
               walletId: wallet.id,
               amountSats: tx.amount / 1000,
             }),
-          async () => !signal.aborted && (await scopeCurrent()) && (await walletCurrent()),
+          async () =>
+            !signal.aborted &&
+            (await scopeCurrent()) &&
+            (await walletCurrent()) &&
+            generationCurrent(),
         );
       }
     } catch {

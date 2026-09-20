@@ -1,3 +1,4 @@
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { loadIdentities } from './identitiesStore';
@@ -177,7 +178,7 @@ it('tells the host when the scope disappears, but keeps polling while the host s
 });
 it('does not stack polling loops and cancels in-flight work when stopped', async () => {
   let requestSignal: AbortSignal | undefined;
-  read.mockImplementation((_url, signal) => {
+  read.mockImplementation((_walletId, _url, signal) => {
     requestSignal = signal;
     return new Promise(() => {});
   });
@@ -187,4 +188,27 @@ it('does not stack polling loops and cancels in-flight work when stopped', async
   expect(read).toHaveBeenCalledTimes(1);
   stopBackgroundPaymentWatch();
   expect(requestSignal?.aborted).toBe(true);
+});
+
+it.each(['missing', 'unreadable'])(
+  'stops a payment-only watcher when the last credential is %s',
+  async (failure) => {
+    const stopHost = jest.fn(() => stopBackgroundPaymentWatch());
+    if (failure === 'missing') jest.mocked(getNwcUrl).mockResolvedValue(null);
+    else jest.mocked(getNwcUrl).mockRejectedValue(new Error('locked'));
+    expect(await canWatchBackgroundPayments()).toBe(false);
+    startBackgroundPaymentWatch(stopHost);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(stopHost).toHaveBeenCalledTimes(1);
+    expect(isBackgroundPaymentWatchRunning()).toBe(false);
+  },
+);
+it('rejects a late payment after the scope changes away and back', async () => {
+  read.mockImplementationOnce(async () => {
+    invalidateBackgroundPaymentScope();
+    invalidateBackgroundPaymentScope();
+    return [tx] as never;
+  });
+  await check();
+  expect(fire).not.toHaveBeenCalled();
 });
