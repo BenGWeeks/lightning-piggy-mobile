@@ -487,8 +487,8 @@ export async function getSubmarineSwapLockup(
   swapId: string,
   lockupAddress: string,
 ): Promise<{ txId: string; vout: number; amount: number } | null> {
+  const backend = await getSwapBackendForId(swapId);
   try {
-    const backend = await getSwapBackendForId(swapId);
     const res = await fetchWithTimeout(`${backend}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();

@@ -131,3 +131,8 @@ it('gets refund lockups from the original provider after the setting changes', a
     expect.anything(),
   );
 });
+
+it('surfaces pinned-provider storage errors instead of reporting an absent refund', async () => {
+  jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(new Error('keystore locked'));
+  await expect(getSubmarineSwapLockup('swap', 'address')).rejects.toThrow('keystore locked');
+});
