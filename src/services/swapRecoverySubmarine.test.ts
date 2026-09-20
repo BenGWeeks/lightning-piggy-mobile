@@ -33,6 +33,7 @@ import { extractLockupFromTxHex } from '../utils/lockupTx';
 import {
   recoverPendingSwaps,
   registerPendingSubmarineSwap,
+  unregisterPendingSubmarineSwap,
   setSubmarineRefundHandler,
   type PersistedSubmarineSwap,
 } from './swapRecoveryService';
@@ -262,4 +263,10 @@ it('rejects a corrupt recovery index rather than overwriting it', async () => {
     'Invalid pending swap index',
   );
   expect(mockStore.get('boltz_submarine_index')).toBe('{}');
+});
+
+it('does not report a completed refund as failed when index cleanup fails', async () => {
+  const store = jest.requireMock('expo-secure-store');
+  store.setItemAsync.mockRejectedValueOnce(new Error('Index unavailable'));
+  await expect(unregisterPendingSubmarineSwap(SWAP_ID)).resolves.toBeUndefined();
 });

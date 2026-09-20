@@ -435,7 +435,9 @@ export async function registerPendingSubmarineSwap(swapId: string): Promise<void
 }
 
 export async function unregisterPendingSubmarineSwap(swapId: string): Promise<void> {
-  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId));
+  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId)).catch(() => {
+    // A completed refund must not appear failed because best-effort index cleanup failed.
+  });
 }
 
 /**
