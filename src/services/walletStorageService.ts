@@ -137,8 +137,10 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
-export async function getWalletList(): Promise<WalletMetadata[]> {
-  const json = await AsyncStorage.getItem(walletListKey());
+export async function getWalletList(
+  owner: string | null = _activePubkey,
+): Promise<WalletMetadata[]> {
+  const json = await AsyncStorage.getItem(perAccountKey(WALLET_LIST_KEY_BASE, owner));
   if (!json) return [];
   try {
     return JSON.parse(json);
@@ -147,8 +149,11 @@ export async function getWalletList(): Promise<WalletMetadata[]> {
   }
 }
 
-export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
-  await AsyncStorage.setItem(walletListKey(), JSON.stringify(wallets));
+export async function saveWalletList(
+  wallets: WalletMetadata[],
+  owner: string | null = _activePubkey,
+): Promise<void> {
+  await AsyncStorage.setItem(perAccountKey(WALLET_LIST_KEY_BASE, owner), JSON.stringify(wallets));
 }
 
 // --- NWC ---
@@ -348,6 +353,7 @@ export function generateWalletId(): string {
  * Idempotent — safe to call on every startup.
  */
 export async function migrateLegacy(): Promise<void> {
+  const owner = _activePubkey;
   // 1. Legacy single-wallet → multi-wallet migration.
   // Order: write the new wallet list + persist the NWC URL first, then delete
   // the legacy key. If a crash interrupts the migration, the legacy key is
@@ -355,7 +361,7 @@ export async function migrateLegacy(): Promise<void> {
   // could permanently lose the user's NWC URL on a partial write.
   const legacyUrl = await SecureStore.getItemAsync(LEGACY_NWC_KEY);
   if (legacyUrl) {
-    const existingList = await getWalletList();
+    const existingList = await getWalletList(owner);
     if (existingList.length === 0) {
       const id = generateWalletId();
       const wallet: WalletMetadata = {
@@ -367,7 +373,7 @@ export async function migrateLegacy(): Promise<void> {
         lightningAddress: null,
       };
       await saveNwcUrl(id, legacyUrl);
-      await saveWalletList([wallet]);
+      await saveWalletList([wallet], owner);
       await setOnboarded();
       // Only after the new records are durably written do we drop the
       // legacy key. If this delete fails, next startup sees existingList
@@ -383,7 +389,7 @@ export async function migrateLegacy(): Promise<void> {
   }
 
   // 2. Backfill walletType for wallets that predate on-chain support
-  const wallets = await getWalletList();
+  const wallets = await getWalletList(owner);
   let needsSave = false;
   const updated = wallets.map((w) => {
     if (!w.walletType) {
@@ -393,7 +399,7 @@ export async function migrateLegacy(): Promise<void> {
     return w;
   });
   if (needsSave) {
-    await saveWalletList(updated);
+    await saveWalletList(updated, owner);
   }
 
   // 3. Versioned migrations. See #169 for the original driver.
@@ -413,7 +419,7 @@ export async function migrateLegacy(): Promise<void> {
     // remove the global storage key — nothing reads it anymore.
     const globalAddress = await AsyncStorage.getItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
     if (globalAddress) {
-      const list = await getWalletList();
+      const list = await getWalletList(owner);
       if (list.length === 0) {
         // Defer: older builds let users set a lightning address before
         // adding any wallet. Dropping the key now would throw that
@@ -429,7 +435,7 @@ export async function migrateLegacy(): Promise<void> {
         const anyChange = backfilled.some(
           (w, i) => w.lightningAddress !== list[i].lightningAddress,
         );
-        if (anyChange) await saveWalletList(backfilled);
+        if (anyChange) await saveWalletList(backfilled, owner);
         await AsyncStorage.removeItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
       }
     }

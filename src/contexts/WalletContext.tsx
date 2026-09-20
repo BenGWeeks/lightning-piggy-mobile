@@ -428,6 +428,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Migrate legacy single-wallet data — now safely runs against
         // the correct per-account key.
         await walletStorage.migrateLegacy();
+        if (!isStartupCurrent()) return;
 
         // Re-check onboarding after migration (migration sets it)
         if (!onboarded) {
@@ -439,7 +440,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // confirmation default — runs after migrateLegacy so the install-
         // state signals (wallet_list, onboarding_complete) are stable.
         // Idempotent; short-circuits once initialised (#82 acceptance).
+        if (!isStartupCurrent()) return;
         await initialiseSendThresholdForNewInstall();
+        if (!isStartupCurrent()) return;
 
         // Load and reconnect all wallets
         perfLog('WalletProvider startup: getWalletList begin');
