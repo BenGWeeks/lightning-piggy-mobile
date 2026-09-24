@@ -22,6 +22,10 @@ const HomeSheets = forwardRef<HomeSheetActions>(function HomeSheets(_props, ref)
     <React.Profiler
       id="HomeSheets"
       onRender={(id, phase, duration) => {
+        // Retained sheets re-render on every balance/price tick; gate at the
+        // same 100 ms jank floor as HomeScreen's Profiler so only slow commits
+        // (e.g. a heavy lazy first open) are logged.
+        if (duration <= 100) return;
         if (__DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1') {
           console.log(`[PerfBlock] render:${id} ${phase}=${duration.toFixed(1)}ms`);
         }

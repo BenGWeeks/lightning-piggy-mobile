@@ -38,6 +38,7 @@ import {
 import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useSendSheetInput } from '../hooks/useSendSheetInput';
+import { useSendInputMode } from '../hooks/useSendInputMode';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSend';
@@ -49,7 +50,7 @@ import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressO
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
-import SendModeTabs, { type SendInputMode } from './SendModeTabs';
+import SendModeTabs from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
 import { perfLog } from '../utils/perfLog';
@@ -69,7 +70,6 @@ interface Props {
   zapEventId?: string;
 }
 
-type InputMode = SendInputMode;
 type Step = 'main' | 'amount';
 
 let __sendSheetFirstVisibleLogged = false;
@@ -108,7 +108,6 @@ const SendSheet: React.FC<Props> = ({
   const [decoded, setDecoded] = useState<DecodedInvoice | null>(null);
   const [sending, setSending] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const [inputMode, setInputMode] = useState<InputMode>('scan');
   const [pasteText, setPasteText] = useState('');
   // Remount key for the paste BottomSheetTextInput. The field is intentionally
   // uncontrolled during typing (`defaultValue`, no `value` prop) so a slow
@@ -128,6 +127,11 @@ const SendSheet: React.FC<Props> = ({
   // See pasteTextKey above — same uncontrolled-remount pattern; programmatic
   // sets go through applyMemo, onChangeText stays a bare setMemo.
   const [memoKey, setMemoKey] = useState(0);
+  const { inputMode, resetInputModeForOpen, selectInputMode } = useSendInputMode({
+    visible,
+    permission,
+    hasInput: scanned || pasteText.length > 0,
+  });
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
@@ -203,9 +207,10 @@ const SendSheet: React.FC<Props> = ({
       setScanned(false);
       setSending(false);
       // Default to the paste tab unless the camera is actually usable — opening
-      // on a scanner that can't start (permission unresolved/denied) is a
-      // dead-end; the user can still switch to Scan, which prompts for access.
-      setInputMode(initialAddress || !permission?.granted ? 'paste' : 'scan');
+      // on a scanner that can't start (permission denied) is a dead-end; the
+      // user can still switch to Scan, which prompts for access. A first open
+      // before permission resolves may still move to Scan (useSendInputMode).
+      resetInputModeForOpen(initialAddress);
       applyPasteText(initialAddress || '');
       setSatsValue('');
       setStep('main');
@@ -271,9 +276,9 @@ const SendSheet: React.FC<Props> = ({
     setIsLnurl(false);
     setIsOnchainAddress(false);
     setStep('main');
-    setInputMode('paste');
+    selectInputMode('paste');
     applyPasteText(prefill);
-  }, [applyPasteText]);
+  }, [applyPasteText, selectInputMode]);
 
   // Resolution failed (typo / unreachable): toast the friendly error, then
   // hand the user straight back to the editable address (#871).
@@ -843,7 +848,7 @@ const SendSheet: React.FC<Props> = ({
               )}
 
               {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
-              {!scanned && <SendModeTabs mode={inputMode} onChange={setInputMode} />}
+              {!scanned && <SendModeTabs mode={inputMode} onChange={selectInputMode} />}
 
               {/* Scanner, paste input, or NFC reader */}
               {!scanned ? (

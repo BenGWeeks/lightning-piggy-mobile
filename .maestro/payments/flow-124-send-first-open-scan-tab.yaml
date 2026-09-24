@@ -1,0 +1,54 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: First Send after a cold start opens on the Scan tab when camera is granted (#1093 regression guard)
+---
+# What this guards:
+#
+# #1092 lazy-mounts SendSheet on first open. Its open effect then runs in the
+# same commit as expo-camera's useCameraPermissions() mount, while the hook
+# still reports `null`, so the first Send of every session defaulted to the
+# Paste tab even with camera access granted. useSendInputMode now moves that
+# untouched first open to Scan once permission resolves as granted.
+#
+# Precondition: signed in with at least one wallet (Home shows btn-send).
+# No payment is made — the flow only opens and closes the sheet.
+#
+# Run: maestro test .maestro/payments/flow-124-send-first-open-scan-tab.yaml
+
+# Cold start (stopApp) with camera pre-granted; keep the signed-in state.
+- launchApp:
+    stopApp: true
+    clearState: false
+    permissions:
+      camera: allow
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+- tapOn:
+    id: 'tab-home'
+- extendedWaitUntil:
+    visible:
+      id: 'btn-send'
+    timeout: 20000
+
+# First Send of this process — SendSheet mounts now.
+- tapOn:
+    id: 'btn-send'
+- extendedWaitUntil:
+    visible:
+      id: 'send-scan-camera'
+    timeout: 10000
+- assertVisible:
+    id: 'send-tab-scan'
+    selected: true
+- assertNotVisible:
+    id: 'send-paste-input'
+- assertNotVisible:
+    id: 'send-scan-grant-permission'
+
+# Close via the sheet's hardware-back handler (no payment action).
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'send-scan-camera'
