@@ -32,7 +32,11 @@ actor NostrEngine {
   private static let reconnectEmitDebounceMs: UInt64 = 10_000
   private static let kindGiftWrap: UInt16 = 1059
 
-  private let emit: @Sendable (String, [String: Any]) -> Void
+  // Exactly ExpoModulesCore's `Module.sendEvent(_:_:)` body type, so the
+  // module forwards events without an implicit [String: Any] -> [String: Any?]
+  // collection conversion at the Expo boundary.
+  typealias EventBody = [String: Any?]
+  private let emit: @Sendable (String, EventBody) -> Void
 
   private var disposed = false
   private var sessionID = UUID()
@@ -50,7 +54,7 @@ actor NostrEngine {
   private var flushGeneration = 0
   private var lastFlushAtMs: UInt64?
 
-  init(emit: @escaping @Sendable (String, [String: Any]) -> Void) {
+  init(emit: @escaping @Sendable (String, EventBody) -> Void) {
     self.emit = emit
   }
 

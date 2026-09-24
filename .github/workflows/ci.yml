@@ -101,3 +101,80 @@ jobs:
           -o "$RUNNER_TEMP/nostr-engine-lifecycle"
       - name: Exercise disposal and restart races
         run: '"$RUNNER_TEMP/nostr-engine-lifecycle"'
+
+  # The lifecycle job above compiles against hand-written SDK doubles; this
+  # one compiles modules/nostr-native against the real checksum-pinned
+  # rust-nostr 0.44.2 artifacts and the installed ExpoModulesCore, and links
+  # the full app for the iOS Simulator. No path filter on purpose: a required
+  # status check must report on every PR or it blocks merge as "pending".
+  ios-native-build:
+    name: iOS native pod build
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      # Pinned to the Xcode release docs/TROUBLESHOOTING.adoc validates
+      # (RN 0.83.6 prebuilt core links clean on 26.5).
+      XCODE_VERSION: '26.5'
+      APP_VARIANT: development
+      # Hard-fail npm ci's postinstall if the pinned Swift SDK can't be
+      # fetched + verified, instead of the JS-only "continue without" path.
+      FETCH_NOSTR_SDK_SWIFT_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: |
+          xcode="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [ ! -d "$xcode" ]; then
+            echo "::error::Xcode ${XCODE_VERSION} is not installed on this runner image"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+          pod --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install (fetches rust-nostr Swift SDK via postinstall)
+        run: npm ci
+      - name: Verify pinned Swift SDK artifacts
+        run: |
+          marker=modules/nostr-native/ios/nostr_sdkFFI.xcframework/.lightning-piggy-version
+          test -f modules/nostr-native/ios/Generated/NostrSDK.swift
+          grep -q '^0\.44\.2 ' "$marker" || { echo "::error::unexpected SDK marker: $(cat "$marker")"; exit 1; }
+          # Re-runs the checksum + content-manifest checks on what's on disk;
+          # a re-download here would mean postinstall left unverified files.
+          out=$(node scripts/fetch-nostr-sdk-swift.mjs)
+          echo "$out"
+          grep -q 'already present' <<<"$out"
+      - name: Expo prebuild + pod install
+        run: npx expo prebuild --platform ios
+      - name: Check prebuild kept the committed dependency set
+        # prebuild may rewrite package.json deps from its template and
+        # reinstall; the build below must test exactly what's committed.
+        run: git diff --exit-code -- package.json package-lock.json
+      - name: Check NostrNative pod integration
+        run: grep -q 'NostrNative (0\.44\.2)' ios/Podfile.lock
+      - name: Build app for iOS Simulator
+        run: |
+          workspace=$(ls -d ios/*.xcworkspace)
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Check rust-nostr FFI symbols were linked
+        run: |
+          app=$(ls -d "$RUNNER_TEMP"/DerivedData/Build/Products/Debug-iphonesimulator/*.app)
+          name=$(basename "$app" .app)
+          # Xcode's Debug builds may move app code into <name>.debug.dylib.
+          count=0
+          for bin in "$app/$name" "$app/$name.debug.dylib"; do
+            [ -f "$bin" ] || continue
+            n=$(nm -U "$bin" | grep -c 'uniffi_nostr_sdk_ffi_' || true)
+            echo "$bin: $n uniffi_nostr_sdk_ffi_ symbols"
+            count=$((count + n))
+          done
+          [ "$count" -gt 0 ] || { echo "::error::rust-nostr FFI not linked into $name"; exit 1; }
