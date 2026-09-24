@@ -111,10 +111,12 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
               amountSats: tx.amount,
             }),
           async () =>
+            !appIsActive() &&
             !signal.aborted &&
             (await scopeCurrent()) &&
             (await walletCurrent()) &&
-            generationCurrent(),
+            generationCurrent() &&
+            !appIsActive(),
         );
       }
     } catch {

@@ -241,3 +241,25 @@ it('does not start a wallet request when the UI resumes during credential lookup
   await check();
   expect(read).not.toHaveBeenCalled();
 });
+
+it('does not notify when the app resumes while the wallet request is in flight', async () => {
+  read.mockImplementationOnce(async () => {
+    AppState.currentState = 'active';
+    return [tx] as never;
+  });
+  await check();
+  expect(fire).not.toHaveBeenCalled();
+  AppState.currentState = 'background';
+  await check();
+  expect(fire).toHaveBeenCalledTimes(1);
+});
+
+it('stops notifications from the same batch when the app resumes after a delivery', async () => {
+  read.mockResolvedValue([tx, { ...tx, payment_hash: 'c'.repeat(64) }] as never);
+  fire.mockImplementationOnce(async () => {
+    AppState.currentState = 'active';
+    return 'notification';
+  });
+  await check();
+  expect(fire).toHaveBeenCalledTimes(1);
+});
