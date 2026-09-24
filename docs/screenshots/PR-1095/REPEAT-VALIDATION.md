@@ -22,4 +22,8 @@ Screenshots are original captures:
 - `07-reverse-repeat-complete.png`: current completion message, Coinos 12,912-sat balance.
 - `08-repeat-history.png`: two Lightning debits and two incoming swap payments.
 
-Remaining UI observation: opening the latest Coinos outgoing transaction's detail sheet showed a generic `Pending` badge despite the backend settlement and accepted Bitcoin claim. The Move completion panel was correct. This history/detail discrepancy remains to investigate; screenshots and backend results do not claim all transaction-detail states are fixed. Physical Graphene/iOS behavior and interruption/provider-switch scenarios are not established by these runs.
+The original run found a Coinos history/detail discrepancy: outgoing payments supplied `state: settled` without `settled_at`, but the app discarded state and showed `Pending`. Fixed in **e26acd3e** by preserving explicit settlement independently of timestamps. The SDK already returns fees in sats; the duplicate conversion was also removed.
+
+Read-only emulator verification of the same existing payment on e26acd3e passed: `Confirmed` visible, `Pending` absent, `55 sats` fee and `-11,000 sats` amount visible. Original capture: `09-coinos-settlement-confirmed.png`. No additional payment, invoice, or swap was created. Full Jest suite: 188 suites / 2,204 tests passed; TypeScript, changed-file ESLint (zero errors), Prettier and file-size checks passed. Pending/unknown responses and preimages alone are not treated as settlement.
+
+Physical Graphene/iOS behavior and interruption/provider-switch scenarios are not established by these runs.
