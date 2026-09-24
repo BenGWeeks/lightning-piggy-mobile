@@ -80,7 +80,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - run: node --test scripts/native-sdk-manifest.test.mjs scripts/download-sdk-artifact.test.mjs
+      - run: >-
+          node --test scripts/native-sdk-manifest.test.mjs scripts/download-sdk-artifact.test.mjs
+          scripts/fetch-nostr-sdk-swift.test.mjs
 
   ios-engine-lifecycle:
     name: iOS engine lifecycle

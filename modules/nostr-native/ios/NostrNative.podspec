@@ -24,9 +24,11 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
 
-  # Sweeps in Generated/NostrSDK.swift alongside the module sources; the
-  # generated file's `#if canImport(nostr_sdkFFI)` resolves against the
-  # vendored framework (same topology as bdk-rn's BitcoinDevKit.swift).
-  s.source_files = '**/*.{h,m,swift}'
+  # Module sources + Generated/NostrSDK.swift; the generated file's
+  # `#if canImport(nostr_sdkFFI)` resolves against the vendored framework
+  # (same topology as bdk-rn's BitcoinDevKit.swift). Explicit, non-recursive
+  # globs: the xcframework's per-slice Headers/*.h and any `.nostr-sdk-swift-*`
+  # extract dir left by a killed postinstall must never become pod sources.
+  s.source_files = ['*.swift', 'Generated/*.swift']
   s.vendored_frameworks = 'nostr_sdkFFI.xcframework'
 end

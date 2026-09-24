@@ -53,8 +53,24 @@ if (process.platform !== 'darwin' && process.env.FETCH_NOSTR_SDK_SWIFT !== '1') 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const marker = `${VERSION} ${XCFRAMEWORK_SHA256}`;
 
+const swiftIsCurrent = () =>
+  existsSync(swiftPath) && sha256(readFileSync(swiftPath)) === SWIFT_SHA256;
+
+function frameworkIsCurrent() {
+  try {
+    return (
+      existsSync(markerPath) &&
+      readFileSync(markerPath, 'utf8').trim() === marker &&
+      frameworkContentHash(frameworkDir) === XCFRAMEWORK_CONTENT_SHA256
+    );
+  } catch {
+    // Missing, unreadable or replaced files invalidate the cached SDK.
+    return false;
+  }
+}
+
 async function ensureSwiftSource() {
-  if (existsSync(swiftPath) && sha256(readFileSync(swiftPath)) === SWIFT_SHA256) return false;
+  if (swiftIsCurrent()) return false;
   console.log(`[nostr-sdk-swift] downloading NostrSDK.swift ${VERSION}…`);
   const buf = await download(SWIFT_URL);
   const got = sha256(buf);
@@ -65,16 +81,7 @@ async function ensureSwiftSource() {
 }
 
 async function ensureXcframework() {
-  try {
-    if (
-      existsSync(markerPath) &&
-      readFileSync(markerPath, 'utf8').trim() === marker &&
-      frameworkContentHash(frameworkDir) === XCFRAMEWORK_CONTENT_SHA256
-    )
-      return false;
-  } catch {
-    // Missing, unreadable or replaced files invalidate the cached SDK.
-  }
+  if (frameworkIsCurrent()) return false;
   console.log(`[nostr-sdk-swift] downloading nostr_sdkFFI.xcframework ${VERSION} (~39 MB)…`);
   const buf = await download(XCFRAMEWORK_URL);
   const got = sha256(buf);
@@ -112,8 +119,23 @@ try {
   }
 } catch (err) {
   console.error(`[nostr-sdk-swift] fetch failed: ${err.message}`);
-  console.error(
-    '[nostr-sdk-swift] iOS builds of modules/nostr-native will fail until this succeeds — re-run: node scripts/fetch-nostr-sdk-swift.mjs',
+  // Hard-fail only where the artifacts are about to be consumed: EAS iOS
+  // workers, or any build that opts in with FETCH_NOSTR_SDK_SWIFT_REQUIRED=1.
+  // JS-only / Android work on a Mac must survive an offline, proxied or
+  // GitHub-outage `npm install`. There, drop any unverified (stale or
+  // partial) artifact instead, so the podspec's missing-artifact guard stops
+  // `pod install` with the fix rather than building against a mismatched SDK.
+  const required =
+    process.env.EAS_BUILD_PLATFORM === 'ios' || process.env.FETCH_NOSTR_SDK_SWIFT_REQUIRED === '1';
+  if (required) {
+    console.error(
+      '[nostr-sdk-swift] required for this iOS build — re-run: node scripts/fetch-nostr-sdk-swift.mjs',
+    );
+    process.exit(1);
+  }
+  if (!swiftIsCurrent()) rmSync(swiftPath, { force: true });
+  if (!frameworkIsCurrent()) rmSync(frameworkDir, { recursive: true, force: true });
+  console.warn(
+    '[nostr-sdk-swift] continuing without the iOS bindings — pod install / iOS builds will fail until this succeeds: node scripts/fetch-nostr-sdk-swift.mjs',
   );
-  process.exit(1);
 }

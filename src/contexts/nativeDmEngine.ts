@@ -109,6 +109,25 @@ function parseDelivery(raw: unknown): EngineDelivery | null {
 
 let engineGeneration = 0;
 
+// Every native engine call (start / subscribe / stop) is dispatched only
+// after the previous one settles. Native gives no ordering between
+// AsyncFunction calls (iOS runs each in its own Task, Android launches each
+// on Dispatchers.IO), so without this a logout's engineStop can land BEFORE
+// an in-flight engineStart, which then leaves a connected pool + parsed key
+// behind with no JS handle left to stop it. With FIFO dispatch a superseded
+// start is always followed natively by the stop that superseded it (or by a
+// newer start, which replaces it), so its stale branch can return without
+// its own engineStop — which would kill the newer session. Relies on start /
+// subscribe settling promptly: both platforms' connect() only spawns the
+// socket tasks, it never waits for a relay.
+let engineQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueEngineCall<T>(call: () => Promise<T>): Promise<T> {
+  const result = engineQueue.then(call);
+  engineQueue = result.catch(() => {});
+  return result;
+}
+
 /**
  * Start the native engine for this viewer. Returns null when the module is
  * missing/stale or the native start fails — the caller falls back to the JS
@@ -152,9 +171,21 @@ export async function startNativeDmEngine(
     reconnectSub.remove();
   };
 
+  // Superseded while queued: never dispatch — a later stop / start already
+  // owns the native engine. Superseded while in flight: the superseding call
+  // is queued behind this one (see engineQueue), so no cleanup here.
+  const dispatchIfCurrent = async (call: () => Promise<unknown>): Promise<boolean> =>
+    enqueueEngineCall(async () => {
+      if (!isCurrent()) return false;
+      await call();
+      return true;
+    });
+
   try {
-    await engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex);
-    if (!isCurrent()) {
+    const started = await dispatchIfCurrent(() =>
+      engine.engineStart(opts.relays, opts.viewerPubkeyHex, opts.secretKeyHex),
+    );
+    if (!started || !isCurrent()) {
       removeListeners();
       return null;
     }
@@ -166,15 +197,17 @@ export async function startNativeDmEngine(
       '#p': [opts.viewerPubkeyHex],
       limit: opts.wrapsLimit,
     });
-    await engine.engineSubscribeWraps(filterJson, [...opts.knownWrapIds]);
-    if (!isCurrent()) {
+    const subscribed = await dispatchIfCurrent(() =>
+      engine.engineSubscribeWraps(filterJson, [...opts.knownWrapIds]),
+    );
+    if (!subscribed || !isCurrent()) {
       removeListeners();
       return null;
     }
   } catch (e) {
     if (__DEV__) console.warn('[NostrEngine] start failed — falling back to JS wrap sub:', e);
     removeListeners();
-    if (isCurrent()) await engine.engineStop().catch(() => {});
+    if (isCurrent()) await enqueueEngineCall(() => engine.engineStop()).catch(() => {});
     return null;
   }
 
@@ -186,7 +219,7 @@ export async function startNativeDmEngine(
       removeListeners();
       if (!isCurrent()) return;
       engineGeneration++;
-      await engine.engineStop().catch(() => {});
+      await enqueueEngineCall(() => engine.engineStop()).catch(() => {});
     },
   };
 }
@@ -195,12 +228,13 @@ export async function startNativeDmEngine(
  * Belt-and-braces global stop for the logout / account-wipe path: the live
  * sub's teardown stops its own engine handle, but a wipe must never race a
  * pool holding the just-wiped account's key — this forces the native stop +
- * key-cache clear regardless of subscription state. Safe no-op when the
- * module is absent or the engine never started.
+ * key-cache clear regardless of subscription state. Queued behind any
+ * in-flight start, so it reaches native after that start and tears it down.
+ * Safe no-op when the module is absent or the engine never started.
  */
 export async function stopNativeDmEngineGlobal(): Promise<void> {
   engineGeneration++;
   const engine = getNostrEngine();
   if (!engine) return;
-  await engine.engineStop().catch(() => {});
+  await enqueueEngineCall(() => engine.engineStop()).catch(() => {});
 }

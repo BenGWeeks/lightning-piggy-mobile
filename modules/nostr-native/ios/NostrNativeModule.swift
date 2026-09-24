@@ -120,8 +120,10 @@ public class NostrNativeModule: Module {
     }
 
     // No .so/JNA load to front-run on iOS (static linkage), but the facade
-    // gates routing on warmUp resolving true — keep the contract, and return
-    // false (never reject) if the Rust core is somehow unusable.
+    // gates routing on warmUp resolving true — keep the contract. Unlike
+    // Android there is no load failure to map to false: the core is linked
+    // into the binary, so this always resolves true (a Rust panic across the
+    // FFI aborts the process rather than surfacing here).
     AsyncFunction("warmUp") { () -> Bool in
       _ = SecretKey.generate()
       return true
