@@ -147,6 +147,7 @@ const SendSheet: React.FC<Props> = ({
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
   const dismissedInFlightRef = useRef(false);
+  const reversePaymentDispatchedRef = useRef(false);
 
   // Programmatic value changes for the uncontrolled paste/memo fields go through
   // these helpers, which bump the remount key so the input picks up the new
@@ -379,6 +380,7 @@ const SendSheet: React.FC<Props> = ({
     setProgressState('sending');
     setInFlightIsSwap(false);
     dismissedInFlightRef.current = false;
+    reversePaymentDispatchedRef.current = false;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -399,14 +401,19 @@ const SendSheet: React.FC<Props> = ({
           // below maps SwapSettlingError / ReplyTimeoutError to the
           // swap-aware "Boltz swap in progress" overlay instead of "Payment
           // failed".
+          if (!boltzFees) throw new Error(t('sendSheet.feeUnavailable'));
           setInFlightIsSwap(true);
           await executeReverseSwap({
             walletId: walletId!,
             destinationAddress: invoiceData,
             amountSats: currentSats,
+            approvedQuote: boltzFees,
             signal,
             payInvoice: payInvoiceForWallet,
             onReplyTimeout: handleReplyTimeout,
+            onPaymentDispatched: () => {
+              reversePaymentDispatchedRef.current = true;
+            },
           });
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
@@ -593,12 +600,6 @@ const SendSheet: React.FC<Props> = ({
       if (dismissedInFlightRef.current) return;
       setProgressState('success');
     } catch (error) {
-      // User-initiated cancel via PaymentProgressOverlay's Cancel button:
-      // the overlay has already been hidden by handleCancelPayment, so
-      // just let the send complete silently without surfacing an error.
-      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
-        return;
-      }
       // Reply-timeout (ambiguous pay outcome) and a post-commit reverse-swap
       // settling error both mean "the money may have moved; it'll settle" —
       // surface "Still in flight", never "Payment failed" (#891).
@@ -606,6 +607,12 @@ const SendSheet: React.FC<Props> = ({
         if (dismissedInFlightRef.current) return;
         setProgressError(undefined);
         setProgressState('in-flight-extended');
+        return;
+      }
+      // User-initiated cancel via PaymentProgressOverlay's Cancel button:
+      // the overlay has already been hidden by handleCancelPayment, so
+      // just let the send complete silently without surfacing an error.
+      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
       }
       // A relay/transport connectivity failure (relay unreachable, publish
@@ -618,8 +625,19 @@ const SendSheet: React.FC<Props> = ({
         setProgressState('connection-lost');
         return;
       }
+      // Stale reverse-swap quote: nothing was created or paid. Show the
+      // server's refreshed fee; the form keeps the amount and the user must
+      // review it and tap Send again.
+      const quoteChanged = boltzService.isQuoteChangedError(error) ? error.quote : null;
+      if (quoteChanged) setBoltzFees(quoteChanged);
       if (dismissedInFlightRef.current) return;
-      const message = error instanceof Error ? error.message : t('sendSheet.paymentFailed');
+      const message = quoteChanged
+        ? t('sendSheet.quoteChanged', {
+            fee: boltzService.calculateSwapFee(currentSats, quoteChanged).toLocaleString(),
+          })
+        : error instanceof Error
+          ? error.message
+          : t('sendSheet.paymentFailed');
       setProgressError(message);
       setProgressState('error');
     } finally {
@@ -642,12 +660,10 @@ const SendSheet: React.FC<Props> = ({
   }, []);
 
   const handleCancelPayment = useCallback(() => {
-    // Abort the NWC pay_invoice chain and hide the overlay so the user
-    // can edit / retry / close from the filled-in SendSheet. Keep
-    // `sending` true-ish in the background until the aborted promise
-    // resolves in handleSend's finally, which will flip it off.
+    // Cancelling a reply cannot recall an already dispatched hold invoice.
+    // Keep the in-flight warning visible until the user chooses background recovery.
     paymentAbortRef.current?.abort();
-    setProgressState('hidden');
+    setProgressState(reversePaymentDispatchedRef.current ? 'in-flight-extended' : 'hidden');
     setProgressError(undefined);
     setSending(false);
   }, []);

@@ -6,7 +6,9 @@
 // amount — so both the reverse-swap recovery claim and the submarine refund
 // must parse the hex and find the output paying the expected lockup address.
 // Matching on OUR recorded address (rather than trusting any reported index)
-// also verifies the lockup actually pays the script we can spend.
+// also verifies the lockup actually pays the script we can spend. The txid is
+// likewise derived from the parsed hex, never the server's advertised id — a
+// refund must spend the outpoint this exact transaction creates.
 import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
 
@@ -17,7 +19,7 @@ bitcoin.initEccLib(ecc);
 export function extractLockupFromTxHex(
   txHex: string,
   lockupAddress: string,
-): { vout: number; amount: number } | null {
+): { txId: string; vout: number; amount: number } | null {
   try {
     const tx = bitcoin.Transaction.fromHex(txHex);
     const expectedScript = bitcoin.address.toOutputScript(lockupAddress);
@@ -27,7 +29,7 @@ export function extractLockupFromTxHex(
         script.length === expectedScript.length &&
         script.every((b, j) => b === expectedScript[j])
       ) {
-        return { vout: i, amount: Number(tx.outs[i].value) };
+        return { txId: tx.getId(), vout: i, amount: Number(tx.outs[i].value) };
       }
     }
     return null;

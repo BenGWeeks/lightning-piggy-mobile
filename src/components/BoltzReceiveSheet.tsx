@@ -272,7 +272,10 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
    * still allowed (Boltz support can recover funds in that case) but the
    * user gets a warning.
    */
-  const pickRefundDestination = useCallback(async (): Promise<string | null> => {
+  const pickRefundDestination = useCallback(async (): Promise<{
+    address: string;
+    walletId: string;
+  } | null> => {
     // Honour the user's chosen default first; fall back to the first
     // on-chain wallet if the default is unset / no longer exists. The default
     // ID is only a hint, so treat an AsyncStorage read failure (full disk /
@@ -290,7 +293,10 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       onchainWallets.find((w) => w.id === defaultId) ?? onchainWallets[0] ?? null;
     if (!onchainWallet) return null;
     try {
-      return await onchainService.getNextReceiveAddress(onchainWallet.id);
+      return {
+        address: await onchainService.getNextReceiveAddress(onchainWallet.id),
+        walletId: onchainWallet.id,
+      };
     } catch (e) {
       console.warn('[BoltzReceive] Failed to fetch refund address:', e);
       return null;
@@ -319,7 +325,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         const invoice = await makeInvoiceForWallet(walletId, sats, t('boltzReceive.invoiceMemo'));
 
         // Step 2 — create the swap with Boltz.
-        const created = await boltzService.createSubmarineSwapForward(invoice);
+        const created = await boltzService.createSubmarineSwapForward(invoice, sats);
 
         // Step 3 — pre-fetch a refund destination snapshot from one of the
         // user's on-chain wallets. If none exists, warn the user: recovery
@@ -349,7 +355,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             claimPublicKey: created.claimPublicKey,
             timeoutBlockHeight: created.timeoutBlockHeight,
             swapTree: created.swapTree,
-            refundDestinationAddress: refundDestination ?? undefined,
+            refundDestinationAddress: refundDestination?.address,
+            sourceWalletId: refundDestination?.walletId,
             createdAt: Date.now(),
           }),
           // Device-only accessibility so the refundPrivateKey in this record
@@ -398,7 +405,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         });
         return;
       }
-      const refundTxId = await boltzService.refundSwap(swap, lockup, dest);
+      const refundTxId = await boltzService.refundSwap(swap, lockup, dest.address);
       setRefundedTxId(refundTxId);
       Toast.show({
         type: 'success',

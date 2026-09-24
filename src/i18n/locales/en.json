@@ -1765,6 +1765,9 @@
     "loadingFees": "Loading fees...",
     "swapFee": "Swap fee: ~{{fee}} sats · ~10-60 min",
     "feeUnavailable": "Fee estimate unavailable",
+    "quoteChanged": "Nothing was sent. The swap fee is now ~{{fee}} sats. Review it and tap Send to continue.",
+    "quoteChangedTitle": "Swap Fee Changed",
+    "moveQuoteChanged": "Nothing was sent. The swap fee is now ~{{fee}} sats. Review it and tap Move to continue.",
     "zapMessagePlaceholder": "Zap message (optional)",
     "commentPlaceholder": "Comment (optional)",
     "zapMessageLabel": "Zap message",
@@ -2043,5 +2046,18 @@
     "refundBroadcastTitle": "Refund broadcast",
     "refundBroadcastBody": "{{amount}} sats refunded ({{txid}}…)",
     "refundFailedTitle": "Refund failed"
+  },
+  "swapBackend": {
+    "quoteFailed": "Swap fees could not be loaded. Check your connection or VPN, then retry.",
+    "retryQuote": "Retry fees",
+    "loadingQuote": "Loading swap fees…",
+    "title": "Swap server URL",
+    "hint": "Use a Boltz-compatible Bitcoin mainnet server over HTTPS. Connect your VPN first for a private server. This device’s new swaps use the saved server; existing swaps keep their original server.",
+    "save": "Check and save",
+    "checking": "Checking…",
+    "default": "Use Boltz default URL",
+    "saved": "Swap server saved. New swaps will use this server.",
+    "saveError": "Server not saved. Check the URL and connection.",
+    "loadError": "Could not load the saved server. No server has been changed."
   }
 }

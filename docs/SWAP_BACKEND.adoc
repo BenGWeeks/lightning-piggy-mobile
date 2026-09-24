@@ -1,0 +1,63 @@
+= Choosing a swap backend
+
+Account → On-chain → Swap server URL configures the Boltz-compatible server
+used for new Bitcoin mainnet ↔ Lightning swaps on this device, across accounts.
+The default is `https://api.boltz.exchange/v2`.
+
+Enter an HTTPS server URL (for example `https://swaps.example.com`) or its v2
+API base (`https://swaps.example.com/v2`). Reverse-proxy prefixes and explicit
+ports are supported, for example `https://swaps.example.com:8443/boltz/v2`.
+Select *Check and save*. The app checks both BTC/BTC swap-pair endpoints before
+saving; this checks basic API compatibility, not the operator's trustworthiness,
+liquidity, or full swap execution. Failures leave the saved setting unchanged.
+*Use Boltz default URL* fills the field; *Check and save* applies it.
+
+The endpoint must be a Boltz swap backend, not Bitcoin RPC, LND, or a Boltz client.
+This setting does not change the app's Bitcoin network or Electrum server.
+HTTP, embedded credentials, query parameters, fragments, and WebSocket URLs are
+rejected. HTTPS requires a certificate trusted by the phone; TLS verification is
+not disabled for private servers. There is no automatic fallback to another
+provider when the chosen backend is unavailable.
+
+== Private family server
+
+Connect each phone to your existing WireGuard VPN before checking or using a
+private backend. Its HTTPS hostname must resolve and be reachable through the
+VPN. Allow the swap API only on the VPN interface and keep node RPC, LND admin,
+and database ports private. No additional public API port is needed.
+
+This change does not deploy a backend, provision certificates, configure a VPN,
+or add server authentication headers. Per-user daily swap counts, total sats,
+and concurrency limits must be enforced by the backend/access layer with an
+identity per family member; app-only limits cannot protect the server.
+
+== Existing swaps and recovery
+
+Before a newly created swap can be returned to a caller for funding, the app
+persists its originating API URL in SecureStore under `boltz_backend_<swapId>`.
+WebSocket subscriptions, HTTP polling, transaction details, reverse recovery,
+and submarine refund lookups use that record rather than the current setting.
+The WebSocket address is derived from the same API base with `wss:` and `/ws`.
+
+The provider record is retained after completion for transaction history.
+Swaps created before this feature have no provider record and continue to use
+the original public Boltz endpoint, even after selecting a private server.
+Storage read errors fail the lookup rather than switching providers. Reused
+swap IDs with an existing provider or pending recovery record are rejected
+before callers can overwrite another swap's recovery secrets.
+
+Keep these provider records together with the existing swap recovery records;
+changing the setting cannot transfer an already-created swap to another server.
+
+== Manual verification
+
+. Open On-chain settings and confirm the default URL on a fresh install.
+. Enter an invalid URL, HTTP URL, or incompatible HTTPS endpoint: saving fails.
+. Connect WireGuard, enter a compatible private HTTPS endpoint, and save.
+. Restart the app and confirm the setting persists.
+. In a controlled test environment, create swaps in both directions and confirm
+  server logs show fee, creation, status, and refund lookups at that server.
+. With a pending swap, change the default server and restart. Recovery and
+  transaction details must continue querying the original provider.
+. Disconnect WireGuard: the private server becomes unreachable without any
+  fallback requests to the public provider.

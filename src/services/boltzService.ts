@@ -1,3 +1,4 @@
+import { parseBoltzPair } from './boltzPair';
 /**
  * Boltz Exchange reverse submarine swap service.
  *
@@ -23,9 +24,18 @@ import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
+import {
+  verifyReverseSwap,
+  verifyReverseLockup,
+  REVERSE_CLAIM_VBYTES,
+  REVERSE_CLAIM_MARGIN,
+} from '../utils/reverseSwapVerify';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
+import { amountSatsFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
-import { BOLTZ_API, fetchWithTimeout } from './boltzApi';
+import { fetchWithTimeout } from './boltzApi';
+import { getSwapBackend, getSwapBackendForId, pinSwapBackend } from './swapBackendService';
 import { waitForSwapStatus } from './boltzSwapStatus';
 
 // Re-exported for back-compat: the HTTP transport and the swap-status
@@ -48,6 +58,11 @@ export const BOLTZ_MAX_SATS = 25_000_000;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SwapFees {
+  pairHash?: string;
+  /** Server lockup fee, separate from our claim fee, for reverse swaps. */
+  lockupMinerFee?: number;
+  claimFeeRate?: number;
+  backend?: string;
   percentage: number;
   minerFee: number;
   minAmount: number;
@@ -55,6 +70,7 @@ export interface SwapFees {
 }
 
 export interface ReverseSwapResult {
+  claimFeeRate?: number;
   id: string;
   /** Lightning invoice the user must pay via NWC */
   invoice: string;
@@ -138,20 +154,16 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
 /**
  * Fetch current reverse swap fee schedule (BTC Lightning → BTC on-chain).
  */
-export async function getReverseSwapFees(): Promise<SwapFees> {
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`);
+export async function getReverseSwapFees(backend?: string): Promise<SwapFees> {
+  backend ??= await getSwapBackend();
+  const res = await fetchWithTimeout(`${backend}/swap/reverse`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
-  const pair = data?.BTC?.BTC;
-  if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
-
-  return {
-    percentage: pair.fees?.percentage ?? 0.5,
-    minerFee: pair.fees?.minerFees?.claim ?? pair.fees?.minerFees ?? 0,
-    minAmount: pair.limits?.minimal ?? 10000,
-    maxAmount: pair.limits?.maximal ?? 25000000,
-  };
+  const pair = parseBoltzPair(data?.BTC?.BTC, 'reverse');
+  const { getSwapClaimFeeRate } = require('./onchainService') as typeof import('./onchainService');
+  const claimFeeRate = await getSwapClaimFeeRate();
+  return { ...pair, minerFee: REVERSE_CLAIM_VBYTES * claimFeeRate, claimFeeRate, backend };
 }
 
 /** @deprecated Use getReverseSwapFees instead */
@@ -160,27 +172,40 @@ export const getSwapFees = getReverseSwapFees;
 /**
  * Fetch current submarine swap fee schedule (BTC on-chain → BTC Lightning).
  */
-export async function getSubmarineSwapFees(): Promise<SwapFees> {
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`);
+export async function getSubmarineSwapFees(backend?: string): Promise<SwapFees> {
+  backend ??= await getSwapBackend();
+  const res = await fetchWithTimeout(`${backend}/swap/submarine`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
-  const pair = data?.BTC?.BTC;
-  if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
-
-  return {
-    percentage: pair.fees?.percentage ?? 0.5,
-    minerFee: pair.fees?.minerFees ?? 0,
-    minAmount: pair.limits?.minimal ?? 10000,
-    maxAmount: pair.limits?.maximal ?? 25000000,
-  };
+  return parseBoltzPair(data?.BTC?.BTC, 'submarine');
 }
 
 /**
  * Calculate the total fee for a reverse swap of a given amount.
  */
 export function calculateSwapFee(amountSats: number, fees: SwapFees): number {
-  return Math.ceil(amountSats * (fees.percentage / 100)) + fees.minerFee;
+  return (
+    Math.ceil(amountSats * (fees.percentage / 100)) + fees.minerFee + (fees.lockupMinerFee ?? 0)
+  );
+}
+
+/**
+ * The approved reverse-swap quote no longer matches the server's. Thrown before
+ * any swap is created or paid; `quote` is the server's current quote for the
+ * caller to show — the user must review it and retry explicitly.
+ */
+export class QuoteChangedError extends Error {
+  readonly quote: SwapFees;
+  constructor(quote: SwapFees) {
+    super('Swap fees or server changed. Review the new quote before sending.');
+    this.name = 'QuoteChangedError';
+    this.quote = quote;
+  }
+}
+
+export function isQuoteChangedError(error: unknown): error is QuoteChangedError {
+  return (error as Error)?.name === 'QuoteChangedError' && !!(error as QuoteChangedError).quote;
 }
 
 /**
@@ -192,13 +217,36 @@ export function calculateSwapFee(amountSats: number, fees: SwapFees): number {
 export async function createReverseSwap(
   onchainAddress: string,
   amountSats: number,
+  approvedQuote?: SwapFees,
 ): Promise<ReverseSwapResult> {
+  const backend = await getSwapBackend();
   console.log(
     `[Boltz] Creating reverse swap (LN → on-chain) for ${amountSats} sats to ${onchainAddress}`,
   );
   if (!isBitcoinAddress(onchainAddress)) {
     throw new Error('Invalid destination Bitcoin address');
   }
+
+  if (!Number.isSafeInteger(amountSats) || amountSats <= 0)
+    throw new Error('Invalid reverse swap amount');
+  const { getBlockHeight } = require('./onchainService') as typeof import('./onchainService');
+  const [fees, currentBlockHeight] = await Promise.all([
+    getReverseSwapFees(backend),
+    getBlockHeight(),
+  ]);
+  if (
+    approvedQuote &&
+    (approvedQuote.backend !== backend ||
+      approvedQuote.pairHash !== fees.pairHash ||
+      approvedQuote.minerFee < fees.minerFee)
+  )
+    throw new QuoteChangedError(fees);
+  if (!fees.pairHash || fees.lockupMinerFee === undefined)
+    throw new Error('Incomplete reverse swap fee quote');
+  if (amountSats < fees.minAmount || amountSats > fees.maxAmount)
+    throw new Error('Reverse swap amount is outside the server limits');
+  const expectedAmount =
+    amountSats - Math.ceil(amountSats * (fees.percentage / 100)) - fees.lockupMinerFee;
 
   // Generate preimage and its SHA-256 hash
   const preimageBytes = new Uint8Array(32);
@@ -211,7 +259,7 @@ export async function createReverseSwap(
   const claimKeys = generateClaimKeyPair();
   const claimPublicKey = toHex(claimKeys.publicKey);
 
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`, {
+  const res = await fetchWithTimeout(`${backend}/swap/reverse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -221,7 +269,7 @@ export async function createReverseSwap(
       claimPublicKey,
       claimAddress: onchainAddress,
       invoiceAmount: amountSats,
-      referralId: 'lightning-piggy',
+      pairHash: fees.pairHash,
     }),
   });
 
@@ -230,7 +278,14 @@ export async function createReverseSwap(
     throw new Error(`Boltz swap creation failed: ${errBody}`);
   }
 
-  const data = await res.json();
+  const data: unknown = await res.json();
+  verifyReverseSwap(data, {
+    preimageHash: preimageHashBytes,
+    claimPublicKey: claimKeys.publicKey,
+    expectedAmount,
+    currentBlockHeight,
+    claimFeeSats: fees.minerFee,
+  });
   console.log(
     `[Boltz] Reverse swap created: id=${data.id} lockup=${data.lockupAddress} onchainAmount=${data.onchainAmount}`,
   );
@@ -242,13 +297,16 @@ export async function createReverseSwap(
     expectedPaymentHash: preimageHash,
     expectedAmountSats: amountSats,
   });
+  await pinSwapBackend(data.id, backend);
   return {
     id: data.id,
     invoice: data.invoice,
-    onchainAmount: data.onchainAmount ?? amountSats,
-    timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
-    lockupAddress: data.lockupAddress ?? '',
-    refundPublicKey: data.refundPublicKey ?? '',
+    onchainAmount: data.onchainAmount,
+    claimFeeRate: fees.claimFeeRate,
+    timeoutBlockHeight: data.timeoutBlockHeight,
+    lockupAddress: data.lockupAddress,
+    refundPublicKey:
+      data.refundPublicKey.length === 64 ? `02${data.refundPublicKey}` : data.refundPublicKey,
     swapTree: data.swapTree,
     preimage,
     claimPrivateKey: toHex(claimKeys.privateKey),
@@ -260,43 +318,31 @@ export async function createReverseSwap(
  * Uses WebSocket with polling fallback.
  */
 export async function waitForLockup(
-  swapId: string,
-  timeoutMs: number = 60000,
-): Promise<{ txId: string; vout: number; amount: number }> {
-  console.log(`[Boltz] Waiting for reverse swap lockup: ${swapId} (timeout ${timeoutMs / 1000}s)`);
-
-  const FAIL_STATUSES = [
-    'swap.expired',
-    'transaction.refunded',
-    'transaction.failed',
-    'invoice.expired',
-  ];
-
+  swap: ReverseSwapResult,
+  timeoutMs = 60000,
+  signal?: AbortSignal,
+) {
+  const failed = ['swap.expired', 'transaction.refunded', 'transaction.failed', 'invoice.expired'];
   const data = await waitForSwapStatus(
-    swapId,
+    swap.id,
     (status) => {
-      if (status === 'transaction.mempool' || status === 'transaction.confirmed') return true;
-      if (FAIL_STATUSES.includes(status)) throw new Error(`Swap failed with status: ${status}`);
-      return false;
+      if (failed.includes(status)) throw new Error(`Swap failed with status: ${status}`);
+      return status === 'transaction.mempool' || status === 'transaction.confirmed';
     },
     timeoutMs,
+    signal,
   );
-
-  const txId = data.transaction?.id;
-  const vout = data.transaction?.index;
-  const amount = data.onchainAmount;
-
-  if (typeof txId !== 'string' || txId.length === 0) {
-    throw new Error(`Boltz lockup missing valid transaction.id for swap ${swapId}`);
+  let txHex = data.transaction?.hex;
+  if (!txHex) {
+    const backend = await getSwapBackendForId(swap.id);
+    const res = await fetchWithTimeout(`${backend}/swap/reverse/${swap.id}/transaction`, {
+      signal,
+    });
+    if (!res.ok) throw new Error('Reverse lockup transaction unavailable');
+    txHex = (await res.json()).hex;
   }
-  if (!Number.isInteger(vout) || vout < 0) {
-    throw new Error(`Boltz lockup missing valid transaction.index for swap ${swapId}`);
-  }
-  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-    throw new Error(`Boltz lockup missing valid onchainAmount for swap ${swapId}`);
-  }
-
-  return { txId, vout, amount };
+  if (typeof txHex !== 'string') throw new Error('Reverse lockup missing transaction hex');
+  return verifyReverseLockup(txHex, swap);
 }
 
 /**
@@ -307,11 +353,32 @@ export async function waitForLockup(
  */
 export async function claimSwap(
   swap: ReverseSwapResult,
-  lockup: { txId: string; vout: number; amount: number },
+  lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
-  feeRate: number = 2,
+  feeRate: number = swap.claimFeeRate ?? 2,
 ): Promise<string> {
-  // Use ecc (already imported) for Schnorr signing
+  // Repeat structural/deadline checks immediately before disclosing our preimage.
+  const { getBlockHeight, getSwapClaimFeeRate } =
+    require('./onchainService') as typeof import('./onchainService');
+  // Use a current two-block estimate; this still cannot guarantee confirmation.
+  feeRate = Math.max(feeRate, await getSwapClaimFeeRate());
+  const claimKey = ecc.pointFromScalar(Buffer.from(swap.claimPrivateKey, 'hex'), true);
+  if (!claimKey) throw new Error('Invalid saved reverse claim key');
+  verifyReverseSwap(swap, {
+    preimageHash: sha256(Buffer.from(swap.preimage, 'hex')),
+    claimPublicKey: claimKey,
+    expectedAmount: swap.onchainAmount,
+    currentBlockHeight: await getBlockHeight(),
+    minClaimBlocks: REVERSE_CLAIM_MARGIN,
+    claimFeeSats: Math.ceil(REVERSE_CLAIM_VBYTES * feeRate),
+  });
+  const verifiedLockup = verifyReverseLockup(lockup.txHex, swap);
+  if (
+    verifiedLockup.txId !== lockup.txId ||
+    verifiedLockup.vout !== lockup.vout ||
+    verifiedLockup.amount !== lockup.amount
+  )
+    throw new Error('Reverse lockup metadata mismatch');
 
   const claimScript = Buffer.from(swap.swapTree.claimLeaf.output, 'hex');
   const refundScript = Buffer.from(swap.swapTree.refundLeaf.output, 'hex');
@@ -321,8 +388,8 @@ export async function claimSwap(
   const claimLeafVersion = swap.swapTree.claimLeaf.version ?? 0xc0;
   const refundLeafVersion = swap.swapTree.refundLeaf.version ?? 0xc0;
 
-  // Estimate fee (~150 vbytes for 1-in-1-out Taproot script-path)
-  const fee = Math.ceil(150 * feeRate);
+  // Conservative upper bound for a single-input script-path claim.
+  const fee = Math.ceil(REVERSE_CLAIM_VBYTES * feeRate);
   const outputAmount = lockup.amount - fee;
   if (outputAmount <= 546) {
     throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
@@ -354,11 +421,7 @@ export async function claimSwap(
   // See: https://docs.boltz.exchange and @scure/btc-signer musig2.
   const claimPubKeyCompressed = Buffer.from(ecc.pointFromScalar(claimPrivKey, true) as Uint8Array);
   const refundPubKeyCompressed =
-    refundPubKey.length === 33
-      ? refundPubKey
-      : Buffer.from(
-          ecc.xOnlyPointAddTweak(new Uint8Array(refundPubKey), new Uint8Array(32))!.xOnlyPubkey,
-        );
+    refundPubKey.length === 33 ? refundPubKey : Buffer.concat([Buffer.from([2]), refundPubKey]);
   // Boltz v2 MuSig2 key aggregation: "Boltz's public key always coming first".
   // For reverse swaps Boltz is the refunder, so refund key is passed first,
   // then claim key (the user's). Confirmed against chain via p2tr diagnostic.
@@ -421,7 +484,7 @@ export async function claimSwap(
   // turns out to be terminal. See issue #481.
   const txId = tx.getId();
   console.log(`[Boltz] Broadcasting claim tx: ${txId} (${tx.toHex().length / 2} bytes)`);
-  const onchainService = await import('./onchainService');
+  const onchainService = require('./onchainService') as typeof import('./onchainService');
   await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'claim', txId);
   console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
   return txId;
@@ -494,16 +557,20 @@ export async function getSubmarineSwapLockup(
   swapId: string,
   lockupAddress: string,
 ): Promise<{ txId: string; vout: number; amount: number } | null> {
+  const backend = await getSwapBackendForId(swapId);
   try {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}/transaction`);
+    const res = await fetchWithTimeout(`${backend}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();
-    const txId = data.transactionId ?? data.id;
     const txHex = data.hex;
-    if (!txId || typeof txHex !== 'string' || !txHex) return null;
+    if (typeof txHex !== 'string' || !txHex) return null;
     const lockup = extractLockupFromTxHex(txHex, lockupAddress);
     if (!lockup) return null;
-    return { txId, vout: lockup.vout, amount: lockup.amount };
+    // Refund the outpoint the raw tx actually creates; an advertised id that
+    // disagrees with the hex means the response can't be trusted at all.
+    const advertisedTxId = data.transactionId ?? data.id;
+    if (advertisedTxId && String(advertisedTxId).toLowerCase() !== lockup.txId) return null;
+    return { txId: lockup.txId, vout: lockup.vout, amount: lockup.amount };
   } catch {
     return null;
   }
@@ -568,11 +635,7 @@ export async function refundSwap(
     ecc.pointFromScalar(refundPrivKey, true) as Uint8Array,
   );
   const claimPubKeyCompressed =
-    claimPubKey.length === 33
-      ? claimPubKey
-      : Buffer.from(
-          ecc.xOnlyPointAddTweak(new Uint8Array(claimPubKey), new Uint8Array(32))!.xOnlyPubkey,
-        );
+    claimPubKey.length === 32 ? Buffer.concat([Buffer.from([2]), claimPubKey]) : claimPubKey;
   const aggCtx = keyAggregate([
     new Uint8Array(claimPubKeyCompressed),
     new Uint8Array(refundPubKeyCompressed),
@@ -648,19 +711,40 @@ export interface SubmarineSwapResult {
  *   4. Send BTC on-chain to that address from the hot wallet (caller does this)
  *   5. Boltz detects the on-chain payment and pays the LN invoice
  */
-export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
+export async function createSubmarineSwapForward(
+  invoice: string,
+  requestedAmountSats: number,
+): Promise<SubmarineSwapResult> {
+  const backend = await getSwapBackend();
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
+  const amount = amountSatsFromBolt11(invoice);
+  if (
+    !Number.isSafeInteger(requestedAmountSats) ||
+    requestedAmountSats <= 0 ||
+    amount !== requestedAmountSats
+  ) {
+    throw new Error('Submarine swap invoice amount does not match the requested payment');
+  }
+  // Quote independently of the creation response; fail closed if either the
+  // fee schedule or our configured Electrum server is unavailable.
+  const { getBlockHeight } = require('./onchainService') as typeof import('./onchainService');
+  const [fees, currentBlockHeight] = await Promise.all([
+    getSubmarineSwapFees(backend),
+    getBlockHeight(),
+  ]);
+  const expectedAmount = amount + calculateSwapFee(amount, fees);
   const refundKeys = generateClaimKeyPair();
 
-  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`, {
+  const res = await fetchWithTimeout(`${backend}/swap/submarine`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: 'BTC',
       to: 'BTC',
       invoice,
+      pairHash: fees.pairHash,
       refundPublicKey: toHex(refundKeys.publicKey),
-      referralId: 'lightning-piggy',
+      // Match the un-referred quote used for the pair hash and expected amount.
     }),
   });
 
@@ -669,17 +753,25 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     throw new Error(`Boltz submarine swap creation failed: ${errBody}`);
   }
 
-  const data = await res.json();
+  const data: unknown = await res.json();
+  verifySubmarineSwap(data, {
+    invoice,
+    refundPublicKey: refundKeys.publicKey,
+    expectedAmount,
+    currentBlockHeight,
+  });
   console.log(
     `[Boltz] Submarine swap created: id=${data.id} address=${data.address} amount=${data.expectedAmount}`,
   );
+  await pinSwapBackend(data.id, backend);
   return {
     id: data.id,
     address: data.address,
     expectedAmount: data.expectedAmount,
-    timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
+    timeoutBlockHeight: data.timeoutBlockHeight,
     refundPrivateKey: toHex(refundKeys.privateKey),
-    claimPublicKey: data.claimPublicKey ?? '',
+    claimPublicKey:
+      data.claimPublicKey.length === 64 ? `02${data.claimPublicKey}` : data.claimPublicKey,
     swapTree: data.swapTree,
   };
 }

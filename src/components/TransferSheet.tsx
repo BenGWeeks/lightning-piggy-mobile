@@ -1,3 +1,4 @@
+import { useTransferSwapFees } from '../utils/useTransferSwapFees';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -26,13 +27,27 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
-import { WalletMetadata, WalletState } from '../types/wallet';
+import { WalletMetadata, WalletState, WalletTransaction } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
 import * as boltzService from '../services/boltzService';
+import { createRecoverableSubmarineSwap } from '../services/createRecoverableSubmarineSwap';
+import {
+  payAndClaimReverseSwap,
+  persistReverseSwap,
+  type ReverseSwapStage,
+} from '../utils/reverseSwapPayClaim';
+import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
+import {
+  isReverseSwapNotPaid,
+  reverseSwapClaimingMessage,
+  reverseSwapCompleteMessage,
+  submarineSwapCompleteMessage,
+} from '../utils/swapHandoff';
 import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
 import * as nip19 from 'nostr-tools/nip19';
@@ -56,6 +71,7 @@ type Step = 'main' | 'amount';
 
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -222,36 +238,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     dest.walletType === 'nwc' &&
     !dest.lightningAddress;
 
-  // Cache Boltz fees — fetch once when transfer type changes, not per keystroke
-  const [cachedBoltzFees, setCachedBoltzFees] = useState<boltzService.SwapFees | null>(null);
-
-  useEffect(() => {
-    if (transferType === 'ln-to-onchain') {
-      let cancelled = false;
-      boltzService
-        .getReverseSwapFees()
-        .then((fees) => {
-          if (!cancelled) setCachedBoltzFees(fees);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
-    } else if (transferType === 'onchain-to-ln') {
-      let cancelled = false;
-      boltzService
-        .getSubmarineSwapFees()
-        .then((fees) => {
-          if (!cancelled) setCachedBoltzFees(fees);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
-    } else {
-      setCachedBoltzFees(null);
-    }
-  }, [transferType]);
+  const swapQuote = useTransferSwapFees(transferType, visible);
+  const cachedBoltzFees = swapQuote.fees;
 
   // Update fee estimate display based on cached fees + current amount
   useEffect(() => {
@@ -443,6 +431,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
     if (!transferType) return;
+    if ((transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && !cachedBoltzFees)
+      return;
 
     // A plain local (not React state) so the value is readable in the
     // `finally` block: on a Boltz hand-off we leave the "swap underway —
@@ -563,34 +553,41 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
 
-    // Add pending transactions to both wallets immediately
-    const now = Math.floor(Date.now() / 1000);
-    const swapLabel =
-      transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln'
-        ? 'Boltz swap in progress'
-        : 'Move in progress';
-    addPendingTransaction(sourceId, {
-      type: 'outgoing',
-      amount: currentSats,
-      description: swapLabel,
-      created_at: now,
-      settled_at: null,
-      // Flag so the tx-list merge keeps this row across a pull-to-refresh
-      // until the real swap leg settles (#896).
-      optimistic: true,
-    });
     // Skip pending-tx for cross-profile destinations — that wallet
     // belongs to a different profile and isn't in the active wallets
     // array, so the call would silently no-op anyway.
-    if (!isCrossProfile) {
-      addPendingTransaction(destId, {
-        type: 'incoming',
+    const addPendingPair = (outgoing: WalletTransaction, incoming: WalletTransaction) => {
+      addPendingTransaction(sourceId, outgoing);
+      if (!isCrossProfile) addPendingTransaction(destId, incoming);
+    };
+    // Boltz swaps add their "Boltz swap in progress" rows only once the swap
+    // exists (a stale quote can still reject creation, leaving a phantom row),
+    // tagged with the swapId so the settled legs replace exactly those rows.
+    const addSwapPlaceholders = (
+      swapId: string,
+      swapType: 'reverse' | 'submarine',
+      sentSats: number,
+      receivedSats: number,
+    ) => {
+      const { outgoing, incoming } = buildSwapPlaceholders({
+        swapId,
+        swapType,
+        sentSats,
+        receivedSats,
+        nowSeconds: Math.floor(Date.now() / 1000),
+      });
+      addPendingPair(outgoing, incoming);
+    };
+    if (transferType === 'ln-to-ln' || transferType === 'onchain-to-onchain') {
+      const now = Math.floor(Date.now() / 1000);
+      const moveRow = {
         amount: currentSats,
-        description: swapLabel,
+        description: 'Move in progress',
         created_at: now,
         settled_at: null,
         optimistic: true,
-      });
+      };
+      addPendingPair({ ...moveRow, type: 'outgoing' }, { ...moveRow, type: 'incoming' });
     }
 
     // Cross-profile invoice creation: we can't call
@@ -639,32 +636,24 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain.
         // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
-        // Background: wait for on-chain lockup, build & broadcast claim tx.
+        // Background: pay the hold invoice while watching for the lockup, and
+        // claim once it's verified — the invoice only settles after the claim.
         setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
-        const swap = await boltzService.createReverseSwap(address, currentSats);
+        const swap = await boltzService.createReverseSwap(address, currentSats, cachedBoltzFees!);
         setProgress((p) => advanceTransfer(p)); // swap → handoff
 
-        // Persist full swap state so the claim can be recovered if the
-        // app crashes, is force-stopped, or the background task dies.
-        await SecureStore.setItemAsync(
-          `boltz_swap_${swap.id}`,
-          JSON.stringify({
-            id: swap.id,
-            preimage: swap.preimage,
-            claimPrivateKey: swap.claimPrivateKey,
-            lockupAddress: swap.lockupAddress,
-            destinationAddress: address,
-            refundPublicKey: swap.refundPublicKey,
-            swapTree: swap.swapTree,
-          }),
-        );
-        await swapRecoveryService.registerPendingSwap(swap.id);
+        // Persist + index full swap state so the claim can be recovered if
+        // the app crashes, is force-stopped, or the background task dies.
+        const persisted = await persistReverseSwap(swap, address);
+        // Lightning leg is the invoice amount; the on-chain leg is at most what
+        // Boltz locks (the claim fee comes off at claim time).
+        addSwapPlaceholders(swap.id, 'reverse', currentSats, swap.onchainAmount);
 
         // Kick off the Lightning payment + claim in the background so the
         // user can dismiss the sheet immediately. The swap is persisted, so
         // swapRecoveryService is the safety net if this task dies.
-        const amount = currentSats;
+        const onchainAmount = swap.onchainAmount;
         const iifeSession = sessionRef.current;
         // Capture cross-profile flag into the IIFE closure — if the
         // user re-opens the sheet with a different profile selection
@@ -679,35 +668,43 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // diagnosing field reports like "swap failed with 'unknown
         // Error'" without having to read the user's screenshot for
         // which sheet stage they got stuck at.
-        let stage: 'payInvoice' | 'waitForLockup' | 'claimSwap' | 'cleanup' | 'refresh' =
-          'payInvoice';
+        let stage: ReverseSwapStage | 'refresh' = 'payAndLockup';
         (async () => {
           try {
-            await payInvoiceForWallet(sourceId, swap.invoice);
-            Toast.show({
-              type: 'info',
-              text1: 'Lightning payment sent',
-              text2: `Waiting for Boltz to lock ${amount.toLocaleString()} sats on-chain…`,
-              position: 'top',
-              visibilityTime: 5000,
+            const claimed = await payAndClaimReverseSwap({
+              persisted,
+              walletId: sourceId,
+              payInvoice: payInvoiceForWallet,
+              onStage: (next) => {
+                stage = next;
+                if (next !== 'claimSwap') return;
+                if (sessionRef.current === iifeSession) {
+                  setProgressMsg(reverseSwapClaimingMessage(onchainAmount));
+                }
+                Toast.show({
+                  type: 'info',
+                  text1: 'Boltz locked funds on-chain',
+                  text2: `Claiming ${onchainAmount.toLocaleString()} sats…`,
+                  position: 'top',
+                  visibilityTime: 5000,
+                });
+              },
             });
-            stage = 'waitForLockup';
-            const lockup = await boltzService.waitForLockup(swap.id, 900000);
-            stage = 'claimSwap';
-            const claimed = await boltzService.claimSwap(swap, lockup, address);
+            // Final status: replace the "underway" copy in THIS sheet session
+            // only — a reopened sheet belongs to a different transfer.
+            if (sessionRef.current === iifeSession) {
+              setProgressMsg(reverseSwapCompleteMessage(onchainAmount, claimed));
+            }
             Toast.show({
               type: 'success',
               text1: 'Swap complete',
-              text2: `${amount.toLocaleString()} sats sent on-chain. Claim tx ${claimed.slice(0, 10)}…`,
+              text2: `${onchainAmount.toLocaleString()} sats (less claim fee) claimed on-chain. Claim tx ${claimed.slice(0, 10)}…`,
               position: 'top',
               visibilityTime: 10000,
             });
-            stage = 'cleanup';
-            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-            await swapRecoveryService.unregisterPendingSwap(swap.id);
-            // Record the claim so TransactionList can badge the row 'done'
-            // and the detail sheet can surface the claim txid.
-            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimed);
+            // The refresh below then drops this swap's placeholders even if a
+            // real leg is not yet synced or tagged.
+            markSwapPlaceholdersResolved(swap.id);
             stage = 'refresh';
             try {
               const refreshTasks: Promise<unknown>[] = [
@@ -725,6 +722,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             console.warn(
               `[Transfer] reverse swap ${swap.id.slice(0, 8)} failed at stage="${stage}": ${msg || '(no message)'}`,
             );
+            // Payment definitely rejected → no sats left, so the "in progress"
+            // rows are phantoms. Ambiguous outcomes keep them (1h age-out).
+            if (isReverseSwapNotPaid(e)) {
+              markSwapPlaceholdersResolved(swap.id);
+              const refreshTasks = [fetchTransactionsForWallet(sourceId)];
+              if (!destIsCrossProfile) refreshTasks.push(fetchTransactionsForWallet(destId));
+              Promise.all(refreshTasks).catch(() => {});
+            }
             // Surface the error on the sheet itself — the previous version
             // only showed a toast and left the progress message stuck on
             // "Swap underway" forever. Users need an in-sheet signal so they
@@ -770,29 +775,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await fetchInvoiceForDest(dest);
-        const swap = await boltzService.createSubmarineSwapForward(invoice);
-
-        // Persist swap state for crash recovery + refund (includes all keys
-        // and scripts). `sourceWalletId` lets the recovery pass derive a
-        // refund address if the app is killed before the swap settles.
-        // Registered in the index too so recoverPendingSwaps actually finds
-        // it (previously this record was written but never read).
-        await SecureStore.setItemAsync(
-          `submarine_swap_${swap.id}`,
-          JSON.stringify({
-            id: swap.id,
-            address: swap.address,
-            expectedAmount: swap.expectedAmount,
-            refundPrivateKey: swap.refundPrivateKey,
-            claimPublicKey: swap.claimPublicKey,
-            timeoutBlockHeight: swap.timeoutBlockHeight,
-            swapTree: swap.swapTree,
-            sourceWalletId: sourceId,
-            createdAt: Date.now(),
-          }),
-          { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
-        );
-        await swapRecoveryService.registerPendingSubmarineSwap(swap.id);
+        const swap = await createRecoverableSubmarineSwap(invoice, currentSats, sourceId);
 
         setProgress((p) => advanceTransfer(p)); // swap → broadcast
         // Foreground: broadcast the on-chain tx (the user's action).
@@ -809,20 +792,29 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Tag both legs so the settled on-chain lockup + LN receive badge as a
         // Boltz swap rather than generic Sent/Received (#895).
         await swapRecoveryService.recordSubmarineSwapLegs(lockupTxId, invoice, swap.id);
+        // On-chain leg is what was broadcast; Lightning leg is the invoice.
+        addSwapPlaceholders(swap.id, 'submarine', swap.expectedAmount, currentSats);
         setProgress((p) => advanceTransfer(p)); // broadcast → handoff
-        const submarineAmount = swap.expectedAmount;
+        // Boltz pays our invoice, so the Lightning amount is the invoice
+        // amount — not `expectedAmount`, which includes Boltz's fees.
+        const invoiceSats = currentSats;
         // Same closure-capture pattern as the reverse-swap branch.
         const destIsCrossProfileSubmarine = isCrossProfile;
+        const submarineSession = sessionRef.current;
         (async () => {
           try {
             await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
+            if (sessionRef.current === submarineSession) {
+              setProgressMsg(submarineSwapCompleteMessage(invoiceSats));
+            }
             Toast.show({
               type: 'success',
               text1: 'Swap complete',
-              text2: `${submarineAmount.toLocaleString()} sats delivered via Lightning.`,
+              text2: `${invoiceSats.toLocaleString()} sats delivered via Lightning.`,
               position: 'top',
               visibilityTime: 10000,
             });
+            markSwapPlaceholdersResolved(swap.id);
             await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
             try {
               const refreshTasks: Promise<unknown>[] = [
@@ -843,6 +835,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // failed: 500", fetch failures) are ambiguous — the swap may still
             // settle — so show "still settling", never a false "Swap Failed".
             if (boltzService.isExplicitSwapFailure(swapError)) {
+              // Terminal: the Lightning leg will never arrive, so its
+              // placeholder goes on the next refresh (the lockup is a real leg).
+              markSwapPlaceholdersResolved(swap.id);
               await promptSubmarineRefund(swap, sourceId, msg);
             } else {
               Toast.show({
@@ -906,6 +901,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       Alert.alert('Move Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Move failed';
+      // Stale reverse-swap quote: nothing was created or paid. Back to the
+      // filled-in form (not the failed view, which has no Move button) with
+      // the server's refreshed fee; the user must review it and tap Move again.
+      if (boltzService.isQuoteChangedError(error)) {
+        setProgress(idleProgress());
+        swapQuote.adopt(error.quote);
+        const fee = boltzService.calculateSwapFee(currentSats, error.quote);
+        Alert.alert(
+          t('sendSheet.quoteChangedTitle'),
+          t('sendSheet.moveQuoteChanged', { fee: fee.toLocaleString() }),
+        );
+        return;
+      }
       setProgress((p) => failTransfer(p, message));
       // "Cannot read property 'reload' of undefined" comes from
       // react-native's HMRClient when Metro drops the dev-client
@@ -995,13 +1003,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   const isBoltzTransfer = transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln';
+  const boltzMin = cachedBoltzFees?.minAmount;
   const belowBoltzMin =
-    isBoltzTransfer && currentSats > 0 && currentSats < boltzService.BOLTZ_MIN_SATS;
+    isBoltzTransfer && currentSats > 0 && boltzMin !== undefined && currentSats < boltzMin;
   const canTransfer =
     sourceId &&
     destId &&
     currentSats > 0 &&
     transferType !== null &&
+    (!isBoltzTransfer || cachedBoltzFees !== null) &&
     !belowBoltzMin &&
     !crossProfileLnNoAddress;
 
@@ -1064,11 +1074,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           <AmountEntryScreen
             initialSats={currentSats}
             title="Move amount"
-            minSats={
-              isBoltzTransfer
-                ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
-                : undefined
-            }
+            minSats={isBoltzTransfer ? boltzMin : undefined}
             maxSats={isBoltzTransfer ? cachedBoltzFees?.maxAmount : undefined}
             confirmLabel="Done"
             onBack={() => setStep('main')}
@@ -1310,6 +1316,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   )}
                 </TouchableOpacity>
 
+                {swapQuote.failed && (
+                  <View testID="transfer-swap-quote-error">
+                    <Text style={styles.warningText}>{t('swapBackend.quoteFailed')}</Text>
+                    <TouchableOpacity onPress={swapQuote.retry} testID="transfer-swap-quote-retry">
+                      <Text style={styles.feeText}>{t('swapBackend.retryQuote')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {swapQuote.loading && (
+                  <Text style={styles.feeText}>{t('swapBackend.loadingQuote')}</Text>
+                )}
+
                 {/* Fee estimate */}
                 {feeEstimate && (
                   <View style={styles.feeRow}>
@@ -1341,8 +1359,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 {/* Boltz minimum amount warning */}
                 {belowBoltzMin && (
                   <Text style={styles.warningText}>
-                    Boltz swaps require a minimum of {boltzService.BOLTZ_MIN_SATS.toLocaleString()}{' '}
-                    sats.
+                    Boltz swaps require a minimum of {boltzMin?.toLocaleString()} sats.
                   </Text>
                 )}
 
