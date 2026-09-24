@@ -1,5 +1,5 @@
 import { haversineMetres } from './geohash';
-import type { BtcMapPlace } from '../services/btcMapService';
+import type { Bbox, BtcMapPlace } from '../services/btcMapService';
 
 /**
  * Upper bound on merchant pins rendered on a map at once (#1067).
@@ -44,6 +44,14 @@ export const bboxCentre = (b: {
   };
 };
 
+/** True when `pos` lies inside `b`, honouring an antimeridian-crossing bbox. */
+const inBbox = (b: Bbox, pos: { lat: number; lon: number }): boolean => {
+  if (pos.lat < b.minLat || pos.lat > b.maxLat) return false;
+  return b.minLon <= b.maxLon
+    ? pos.lon >= b.minLon && pos.lon <= b.maxLon
+    : pos.lon >= b.minLon || pos.lon <= b.maxLon;
+};
+
 /**
  * Cap a pin list to the `max` items nearest `centre` (the viewport
  * centre). Under the cap the list is returned as-is (no re-sort — the
@@ -51,12 +59,19 @@ export const bboxCentre = (b: {
  * Without a centre (no viewport settled yet) it truncates arbitrarily —
  * bounded is the requirement, nearest is the nicety. Items whose
  * position can't be resolved sort last (they're unplottable anyway).
+ *
+ * With a `bbox` (the visible viewport), on-screen items rank ahead of
+ * off-screen ones before distance: the BTC Map search circle reaches the
+ * viewport's corners so it overhangs each edge, and a pure nearest-centre
+ * cut would spend the budget on off-screen edge pins while dropping
+ * visible corner pins (#1068 review).
  */
 export function capPinsToNearest<T>(
   items: T[],
   centre: { lat: number; lon: number } | null,
   max: number,
   positionOf: (item: T) => { lat: number; lon: number } | null,
+  bbox: Bbox | null = null,
 ): T[] {
   if (items.length <= max) return items;
   if (!centre) return items.slice(0, max);
@@ -65,10 +80,11 @@ export function capPinsToNearest<T>(
       const pos = positionOf(item);
       return {
         item,
+        offscreen: pos && (!bbox || inBbox(bbox, pos)) ? 0 : 1,
         distance: pos ? haversineMetres(centre, pos) : Number.POSITIVE_INFINITY,
       };
     })
-    .sort((a, b) => a.distance - b.distance)
+    .sort((a, b) => a.offscreen - b.offscreen || a.distance - b.distance)
     .slice(0, max)
     .map((entry) => entry.item);
 }
@@ -78,9 +94,16 @@ export function capMerchantPinsToNearest(
   merchants: BtcMapPlace[],
   centre: { lat: number; lon: number } | null,
   max: number = MAX_MAP_MERCHANT_PINS,
+  bbox: Bbox | null = null,
 ): BtcMapPlace[] {
-  return capPinsToNearest(merchants, centre, max, (place) => ({
-    lat: place.lat,
-    lon: place.lon,
-  }));
+  return capPinsToNearest(
+    merchants,
+    centre,
+    max,
+    (place) => ({
+      lat: place.lat,
+      lon: place.lon,
+    }),
+    bbox,
+  );
 }

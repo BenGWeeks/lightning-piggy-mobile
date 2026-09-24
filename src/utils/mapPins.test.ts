@@ -25,6 +25,32 @@ describe('capMerchantPinsToNearest', () => {
     expect(result.map((p) => p.id)).toEqual([1, 2]);
   });
 
+  it('keeps a visible in-bbox corner pin over a closer off-screen pin', () => {
+    // Wide, short viewport: the fetch circle reaches the corners, so it
+    // overhangs the top/bottom edges well inside corner distance.
+    const bbox = { minLat: 51.9, maxLat: 52.1, minLon: -1, maxLon: 1 };
+    const centre = { lat: 52, lon: 0 };
+    const nearOnscreen = place(1, 52.01, 0.01);
+    const corner = place(2, 52.09, 0.95); // on-screen, ~65 km from centre
+    const offscreenEdge = place(3, 52.3, 0); // off-screen, ~33 km from centre
+    const result = capMerchantPinsToNearest([offscreenEdge, corner, nearOnscreen], centre, 2, bbox);
+    expect(result.map((p) => p.id)).toEqual([1, 2]);
+    // Without the bbox the old nearest-centre ranking would drop the corner.
+    expect(
+      capMerchantPinsToNearest([offscreenEdge, corner, nearOnscreen], centre, 2).map((p) => p.id),
+    ).toEqual([1, 3]);
+  });
+
+  it('treats an antimeridian-crossing bbox as containing both sides of ±180', () => {
+    const bbox = { minLat: -1, maxLat: 1, minLon: 170, maxLon: -170 };
+    const centre = { lat: 0, lon: 180 };
+    const east = place(1, 0, -171); // on-screen, past the dateline, ~1,000 km
+    const west = place(2, 0, 171); // on-screen, ~1,000 km
+    const outside = place(3, 2, 180); // off-screen (north of maxLat) but ~220 km
+    const result = capMerchantPinsToNearest([outside, east, west], centre, 2, bbox);
+    expect(result.map((p) => p.id).sort()).toEqual([1, 2]);
+  });
+
   it('truncates without a centre (no viewport settled yet)', () => {
     const list = [place(1, 50, 0), place(2, 51, 1), place(3, 52, 2)];
     const result = capMerchantPinsToNearest(list, null, 2);

@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { acceptsLightning, acceptsOnchain } from '../services/btcMapService';
-import type { BtcMapPlace } from '../services/btcMapService';
+import type { Bbox, BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { isHiddenInProd } from '../utils/exploreContentFilter';
 import { decodeGeohash } from '../utils/geohash';
-import { MAX_MAP_CACHE_PINS, capMerchantPinsToNearest, capPinsToNearest } from '../utils/mapPins';
+import {
+  MAX_MAP_CACHE_PINS,
+  MAX_MAP_MERCHANT_PINS,
+  capMerchantPinsToNearest,
+  capPinsToNearest,
+} from '../utils/mapPins';
 
 /**
  * Derives the pin arrays MapScreen feeds LibreMiniMap from the raw
@@ -12,8 +17,8 @@ import { MAX_MAP_CACHE_PINS, capMerchantPinsToNearest, capPinsToNearest } from '
  * MapScreen (#1067) so the screen stays composition and the derivation
  * is one nameable unit:
  *
- * - merchants: type + category filters, then capped to the pins nearest
- *   the viewport centre (`capMerchantPinsToNearest`) — an unbounded
+ * - merchants: type + category filters, then capped to the on-screen
+ *   pins nearest the viewport centre (`capMerchantPinsToNearest`) — an unbounded
  *   marker set is what wedged/crashed the app on zoom-out (#1067).
  * - caches: prod-hidden / pin-type / Web-of-Trust / NIP-40 expiry
  *   filters. Expiry is re-evaluated on a 60 s tick so a cache can lapse
@@ -39,12 +44,17 @@ export function useMapPins(args: {
    *  so the merchant cap recentres even when a pan's refetch fails and
    *  `places` keeps its identity (Copilot review on #1068). */
   viewportCentre: { lat: number; lon: number } | null;
+  /** Last settled viewport bbox — on-screen pins win the cap over
+   *  off-screen ones in the fetch circle's overhang. Null before the
+   *  first bounds event (cap falls back to pure nearest-centre). */
+  viewportBbox: Bbox | null;
 }): {
   visibleMerchants: BtcMapPlace[];
   visibleCaches: ParsedCache[];
   cacheCounts: { piglets: number; others: number };
 } {
-  const { places, cachesMap, filters, categoryFilter, isTrusted, viewportCentre } = args;
+  const { places, cachesMap, filters, categoryFilter, isTrusted, viewportCentre, viewportBbox } =
+    args;
 
   // Two memo stages so a viewport-centre change (every settled pan) only
   // re-runs the cheap cap, not the full filter pass over a potentially
@@ -63,8 +73,14 @@ export function useMapPins(args: {
     });
   }, [places, filters.lightning, filters.onchain, categoryFilter]);
   const visibleMerchants = useMemo(
-    () => capMerchantPinsToNearest(filteredMerchants, viewportCentre),
-    [filteredMerchants, viewportCentre],
+    () =>
+      capMerchantPinsToNearest(
+        filteredMerchants,
+        viewportCentre,
+        MAX_MAP_MERCHANT_PINS,
+        viewportBbox,
+      ),
+    [filteredMerchants, viewportCentre, viewportBbox],
   );
 
   // Re-evaluate the NIP-40 expiry filter as time advances even if nothing
@@ -95,12 +111,26 @@ export function useMapPins(args: {
     // accumulates caches across every visited viewport (by design — a
     // reset would purge the one-shot by-author Piglets), so bound the
     // RN-marker set to the nearest-N without dropping data.
-    return capPinsToNearest(filtered, viewportCentre, MAX_MAP_CACHE_PINS, (c) => {
-      if (!c.geohash) return null;
-      const { lat, lng } = decodeGeohash(c.geohash);
-      return { lat, lon: lng };
-    });
-  }, [cachesMap, filters.piglet, filters.nipgcCache, isTrusted, nowSec, viewportCentre]);
+    return capPinsToNearest(
+      filtered,
+      viewportCentre,
+      MAX_MAP_CACHE_PINS,
+      (c) => {
+        if (!c.geohash) return null;
+        const { lat, lng } = decodeGeohash(c.geohash);
+        return { lat, lon: lng };
+      },
+      viewportBbox,
+    );
+  }, [
+    cachesMap,
+    filters.piglet,
+    filters.nipgcCache,
+    isTrusted,
+    nowSec,
+    viewportCentre,
+    viewportBbox,
+  ]);
 
   // One pass instead of filtering the cache map twice per render
   // (Copilot review on #825).

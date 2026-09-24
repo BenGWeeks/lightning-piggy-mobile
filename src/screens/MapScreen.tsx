@@ -317,8 +317,15 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     return [...seen].sort();
   }, [places]);
 
-  // Cap centre as state, not a ref — see the viewportCentre note in useMapPins.
-  const [viewportCentre, setViewportCentre] = useState<{ lat: number; lon: number } | null>(null);
+  // Cap viewport as state, not a ref — see the viewportCentre note in
+  // useMapPins. Until the first bounds event the centre is seeded from the
+  // GPS fix so the cache-seeded `places` cap keeps the nearest, not an
+  // arbitrary slice (#1068 review).
+  const [viewportBbox, setViewportBbox] = useState<Bbox | null>(null);
+  const viewportCentre = useMemo(
+    () => (viewportBbox ? bboxCentre(viewportBbox) : pos ? { lat: pos.lat, lon: pos.lon } : null),
+    [viewportBbox, pos],
+  );
   const { visibleMerchants, visibleCaches, cacheCounts } = useMapPins({
     places,
     cachesMap: caches.map,
@@ -326,6 +333,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     categoryFilter,
     isTrusted,
     viewportCentre,
+    viewportBbox,
   });
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
@@ -339,7 +347,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
   }, []);
 
   const onLibreBounds = useDebouncedMapBounds((next) => {
-    setViewportCentre(bboxCentre(next));
+    setViewportBbox(next);
     void refreshPlaces(next);
     resubscribeForPrefixes(geohashPrefixesForBbox(next));
   });
