@@ -33,6 +33,7 @@ import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdSe
 import { WalletMetadata, WalletState } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
 import * as boltzService from '../services/boltzService';
+import { createRecoverableSubmarineSwap } from '../services/createRecoverableSubmarineSwap';
 import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
 import * as nip19 from 'nostr-tools/nip19';
@@ -770,29 +771,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await fetchInvoiceForDest(dest);
-        const swap = await boltzService.createSubmarineSwapForward(invoice);
-
-        // Persist swap state for crash recovery + refund (includes all keys
-        // and scripts). `sourceWalletId` lets the recovery pass derive a
-        // refund address if the app is killed before the swap settles.
-        // Registered in the index too so recoverPendingSwaps actually finds
-        // it (previously this record was written but never read).
-        await SecureStore.setItemAsync(
-          `submarine_swap_${swap.id}`,
-          JSON.stringify({
-            id: swap.id,
-            address: swap.address,
-            expectedAmount: swap.expectedAmount,
-            refundPrivateKey: swap.refundPrivateKey,
-            claimPublicKey: swap.claimPublicKey,
-            timeoutBlockHeight: swap.timeoutBlockHeight,
-            swapTree: swap.swapTree,
-            sourceWalletId: sourceId,
-            createdAt: Date.now(),
-          }),
-          { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
-        );
-        await swapRecoveryService.registerPendingSubmarineSwap(swap.id);
+        const swap = await createRecoverableSubmarineSwap(invoice, currentSats, sourceId);
 
         setProgress((p) => advanceTransfer(p)); // swap → broadcast
         // Foreground: broadcast the on-chain tx (the user's action).
