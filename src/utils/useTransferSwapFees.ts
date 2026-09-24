@@ -1,22 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getReverseSwapFees, getSubmarineSwapFees, type SwapFees } from '../services/boltzService';
 
-/** Ignore quotes from another direction, hidden sheet, or superseded request. */
-export function useTransferSwapFees(direction: string | null, visible: boolean): SwapFees | null {
-  const [quote, setQuote] = useState<{ direction: string; fees: SwapFees } | null>(null);
+/** Ignore quotes/errors from another direction, hidden sheet, or superseded request. */
+export function useTransferSwapFees(direction: string | null, visible: boolean) {
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{
+    direction: string;
+    attempt: number;
+    fees: SwapFees | null;
+    failed: boolean;
+  } | null>(null);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const needed = direction === 'ln-to-onchain' || direction === 'onchain-to-ln';
   useEffect(() => {
-    setQuote(null);
-    if (!visible || (direction !== 'ln-to-onchain' && direction !== 'onchain-to-ln')) return;
+    setResult(null);
+    if (!visible || !needed || !direction) return;
     let cancelled = false;
     const request = direction === 'ln-to-onchain' ? getReverseSwapFees : getSubmarineSwapFees;
     request()
       .then((fees) => {
-        if (!cancelled) setQuote({ direction, fees });
+        if (!cancelled) setResult({ direction, attempt, fees, failed: false });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setResult({ direction, attempt, fees: null, failed: true });
+      });
     return () => {
       cancelled = true;
     };
-  }, [direction, visible]);
-  return visible && quote?.direction === direction ? quote.fees : null;
+  }, [direction, visible, needed, attempt]);
+  const current =
+    visible && result?.direction === direction && result?.attempt === attempt ? result : null;
+  return {
+    fees: current?.fees ?? null,
+    failed: current?.failed ?? false,
+    loading: visible && needed && !current,
+    retry,
+  };
 }

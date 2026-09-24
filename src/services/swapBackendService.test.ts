@@ -33,7 +33,22 @@ beforeEach(async () => {
   jest.clearAllMocks();
   mockStore.clear();
   await AsyncStorage.clear();
-  mockFetch.mockReset().mockResolvedValue({ ok: true, json: async () => pair });
+  mockFetch
+    .mockReset()
+    .mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.endsWith('/reverse')
+          ? {
+              BTC: {
+                BTC: {
+                  ...pair.BTC.BTC,
+                  fees: { percentage: 0.5, minerFees: { claim: 2, lockup: 2 } },
+                },
+              },
+            }
+          : pair,
+    }));
   global.fetch = mockFetch;
 });
 afterAll(() => {

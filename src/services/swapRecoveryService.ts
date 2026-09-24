@@ -1,3 +1,4 @@
+import { reverseRefundHeight, verifyReverseLockup } from '../utils/reverseSwapVerify';
 /**
  * Swap recovery service.
  *
@@ -351,6 +352,9 @@ export async function recordSubmarineSwapLegs(
 // submarine refund lookup without an import cycle).
 
 interface PersistedReverseSwap {
+  onchainAmount?: number;
+  claimFeeRate?: number;
+  timeoutBlockHeight?: number;
   id: string;
   preimage: string;
   claimPrivateKey: string;
@@ -669,14 +673,15 @@ async function recoverSwap(swapId: string): Promise<void> {
       if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
-    const { vout, amount } = lockup;
+    const { amount } = lockup;
 
     console.log(`[SwapRecovery] Claiming swap ${swapId}...`);
     const reverseSwap: boltzService.ReverseSwapResult = {
       id: swap.id,
       invoice: '',
-      onchainAmount: amount,
-      timeoutBlockHeight: 0,
+      onchainAmount: swap.onchainAmount ?? amount,
+      timeoutBlockHeight: swap.timeoutBlockHeight ?? 0,
+      claimFeeRate: swap.claimFeeRate,
       lockupAddress: swap.lockupAddress,
       refundPublicKey: swap.refundPublicKey,
       swapTree: swap.swapTree,
@@ -693,9 +698,10 @@ async function recoverSwap(swapId: string): Promise<void> {
     });
     let claimTxId: string;
     try {
+      reverseSwap.timeoutBlockHeight ||= reverseRefundHeight(swap.swapTree);
       claimTxId = await boltzService.claimSwap(
         reverseSwap,
-        { txId, vout, amount },
+        verifyReverseLockup(txHex, reverseSwap),
         swap.destinationAddress,
       );
     } catch (e) {

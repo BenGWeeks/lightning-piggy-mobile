@@ -2045,6 +2045,9 @@
     "refundFailedTitle": "El reembolso falló"
   },
   "swapBackend": {
+    "quoteFailed": "No se pudieron cargar las comisiones. Comprueba tu conexión o VPN y vuelve a intentarlo.",
+    "retryQuote": "Reintentar comisiones",
+    "loadingQuote": "Cargando comisiones…",
     "title": "URL del servidor de swaps",
     "hint": "Usa un servidor compatible con Boltz para la red principal de Bitcoin mediante HTTPS. Conecta primero tu VPN si el servidor es privado. Los nuevos swaps de este dispositivo usarán el servidor guardado; los existentes conservarán su servidor original.",
     "save": "Comprobar y guardar",

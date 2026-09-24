@@ -399,11 +399,13 @@ const SendSheet: React.FC<Props> = ({
           // below maps SwapSettlingError / ReplyTimeoutError to the
           // swap-aware "Boltz swap in progress" overlay instead of "Payment
           // failed".
+          if (!boltzFees) throw new Error(t('sendSheet.feeUnavailable'));
           setInFlightIsSwap(true);
           await executeReverseSwap({
             walletId: walletId!,
             destinationAddress: invoiceData,
             amountSats: currentSats,
+            approvedQuote: boltzFees,
             signal,
             payInvoice: payInvoiceForWallet,
             onReplyTimeout: handleReplyTimeout,

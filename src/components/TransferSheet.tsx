@@ -27,6 +27,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
@@ -35,6 +36,11 @@ import { WalletMetadata, WalletState } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
 import * as boltzService from '../services/boltzService';
 import { createRecoverableSubmarineSwap } from '../services/createRecoverableSubmarineSwap';
+import {
+  payAndClaimReverseSwap,
+  persistReverseSwap,
+  type ReverseSwapStage,
+} from '../utils/reverseSwapPayClaim';
 import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
 import * as nip19 from 'nostr-tools/nip19';
@@ -58,6 +64,7 @@ type Step = 'main' | 'amount';
 
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
   const {
     wallets,
@@ -224,7 +231,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     dest.walletType === 'nwc' &&
     !dest.lightningAddress;
 
-  const cachedBoltzFees = useTransferSwapFees(transferType, visible);
+  const swapQuote = useTransferSwapFees(transferType, visible);
+  const cachedBoltzFees = swapQuote.fees;
 
   // Update fee estimate display based on cached fees + current amount
   useEffect(() => {
@@ -614,27 +622,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain.
         // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
-        // Background: wait for on-chain lockup, build & broadcast claim tx.
+        // Background: pay the hold invoice while watching for the lockup, and
+        // claim once it's verified — the invoice only settles after the claim.
         setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
-        const swap = await boltzService.createReverseSwap(address, currentSats);
+        const swap = await boltzService.createReverseSwap(address, currentSats, cachedBoltzFees!);
         setProgress((p) => advanceTransfer(p)); // swap → handoff
 
-        // Persist full swap state so the claim can be recovered if the
-        // app crashes, is force-stopped, or the background task dies.
-        await SecureStore.setItemAsync(
-          `boltz_swap_${swap.id}`,
-          JSON.stringify({
-            id: swap.id,
-            preimage: swap.preimage,
-            claimPrivateKey: swap.claimPrivateKey,
-            lockupAddress: swap.lockupAddress,
-            destinationAddress: address,
-            refundPublicKey: swap.refundPublicKey,
-            swapTree: swap.swapTree,
-          }),
-        );
-        await swapRecoveryService.registerPendingSwap(swap.id);
+        // Persist + index full swap state so the claim can be recovered if
+        // the app crashes, is force-stopped, or the background task dies.
+        const persisted = await persistReverseSwap(swap, address);
 
         // Kick off the Lightning payment + claim in the background so the
         // user can dismiss the sheet immediately. The swap is persisted, so
@@ -654,22 +651,25 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // diagnosing field reports like "swap failed with 'unknown
         // Error'" without having to read the user's screenshot for
         // which sheet stage they got stuck at.
-        let stage: 'payInvoice' | 'waitForLockup' | 'claimSwap' | 'cleanup' | 'refresh' =
-          'payInvoice';
+        let stage: ReverseSwapStage | 'refresh' = 'payAndLockup';
         (async () => {
           try {
-            await payInvoiceForWallet(sourceId, swap.invoice);
-            Toast.show({
-              type: 'info',
-              text1: 'Lightning payment sent',
-              text2: `Waiting for Boltz to lock ${amount.toLocaleString()} sats on-chain…`,
-              position: 'top',
-              visibilityTime: 5000,
+            const claimed = await payAndClaimReverseSwap({
+              persisted,
+              walletId: sourceId,
+              payInvoice: payInvoiceForWallet,
+              onStage: (next) => {
+                stage = next;
+                if (next !== 'claimSwap') return;
+                Toast.show({
+                  type: 'info',
+                  text1: 'Boltz locked funds on-chain',
+                  text2: `Claiming ${amount.toLocaleString()} sats…`,
+                  position: 'top',
+                  visibilityTime: 5000,
+                });
+              },
             });
-            stage = 'waitForLockup';
-            const lockup = await boltzService.waitForLockup(swap.id, 900000);
-            stage = 'claimSwap';
-            const claimed = await boltzService.claimSwap(swap, lockup, address);
             Toast.show({
               type: 'success',
               text1: 'Swap complete',
@@ -677,12 +677,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               position: 'top',
               visibilityTime: 10000,
             });
-            stage = 'cleanup';
-            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-            await swapRecoveryService.unregisterPendingSwap(swap.id);
-            // Record the claim so TransactionList can badge the row 'done'
-            // and the detail sheet can surface the claim txid.
-            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimed);
             stage = 'refresh';
             try {
               const refreshTasks: Promise<unknown>[] = [
@@ -1260,6 +1254,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                     <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
                   )}
                 </TouchableOpacity>
+
+                {swapQuote.failed && (
+                  <View testID="transfer-swap-quote-error">
+                    <Text style={styles.warningText}>{t('swapBackend.quoteFailed')}</Text>
+                    <TouchableOpacity onPress={swapQuote.retry} testID="transfer-swap-quote-retry">
+                      <Text style={styles.feeText}>{t('swapBackend.retryQuote')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {swapQuote.loading && (
+                  <Text style={styles.feeText}>{t('swapBackend.loadingQuote')}</Text>
+                )}
 
                 {/* Fee estimate */}
                 {feeEstimate && (

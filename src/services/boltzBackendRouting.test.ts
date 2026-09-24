@@ -32,8 +32,12 @@ jest.mock('bitcoinjs-lib', () => ({
   crypto: { sha256: () => new Uint8Array(32) },
 }));
 jest.mock('../utils/bolt11', () => ({ amountSatsFromBolt11: () => 50000 }));
+jest.mock('../utils/reverseSwapVerify', () => ({ verifyReverseSwap: jest.fn() }));
 jest.mock('../utils/submarineSwapVerify', () => ({ verifySubmarineSwap: jest.fn() }));
-jest.mock('./onchainService', () => ({ getBlockHeight: async () => 900000 }));
+jest.mock('./onchainService', () => ({
+  getBlockHeight: async () => 900000,
+  getSwapClaimFeeRate: async () => 2,
+}));
 jest.mock('../utils/boltzVerify', () => ({ verifyReverseSwapInvoice: jest.fn() }));
 jest.mock('../utils/lockupTx', () => ({
   extractLockupFromTxHex: () => ({ vout: 0, amount: 50000 }),
@@ -59,7 +63,7 @@ const quote = {
       BTC: {
         hash: 'quote',
         limits: { minimal: 1, maximal: 100000 },
-        fees: { percentage: 0.5, minerFees: 2 },
+        fees: { percentage: 0.5, minerFees: { claim: 2, lockup: 2 } },
       },
     },
   }),
@@ -70,6 +74,7 @@ const reply = (id: string) => ({
     id,
     invoice: 'invoice',
     expectedAmount: 50000,
+    refundPublicKey: '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
     claimPublicKey: '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
   }),
 });
@@ -81,7 +86,10 @@ it.each(['reverse', 'submarine'])('routes %s fees to the selected server', async
       BTC: {
         BTC: {
           hash: 'quote',
-          fees: { percentage: 0.5, minerFees: 2 },
+          fees: {
+            percentage: 0.5,
+            minerFees: direction === 'reverse' ? { claim: 2, lockup: 2 } : 2,
+          },
           limits: { minimal: 1, maximal: 100000 },
         },
       },
@@ -98,7 +106,20 @@ it.each(['reverse', 'submarine'])(
   async (direction) => {
     mockFetch.mockImplementationOnce(async () => {
       await AsyncStorage.setItem('swap_backend_url_v1', 'https://other.example/v2');
-      return direction === 'submarine' ? quote : reply('new-swap');
+      return direction === 'submarine'
+        ? {
+            ...quote,
+            json: async () => ({
+              BTC: {
+                BTC: {
+                  hash: 'quote',
+                  limits: { minimal: 1, maximal: 100000 },
+                  fees: { percentage: 0.5, minerFees: 2 },
+                },
+              },
+            }),
+          }
+        : quote;
     });
     mockFetch.mockResolvedValue(reply('new-swap'));
     const swap = await (direction === 'reverse'
@@ -116,7 +137,20 @@ it.each(['reverse', 'submarine'])(
   },
 );
 it('does not return a fundable swap when its server cannot be persisted', async () => {
-  mockFetch.mockResolvedValueOnce(quote).mockResolvedValue(reply('new-swap'));
+  mockFetch
+    .mockResolvedValueOnce({
+      ...quote,
+      json: async () => ({
+        BTC: {
+          BTC: {
+            hash: 'quote',
+            limits: { minimal: 1, maximal: 100000 },
+            fees: { percentage: 0.5, minerFees: 2 },
+          },
+        },
+      }),
+    })
+    .mockResolvedValue(reply('new-swap'));
   jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error('storage full'));
   await expect(createSubmarineSwapForward('invoice', 50000)).rejects.toThrow('storage full');
 });

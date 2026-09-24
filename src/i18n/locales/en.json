@@ -2045,6 +2045,9 @@
     "refundFailedTitle": "Refund failed"
   },
   "swapBackend": {
+    "quoteFailed": "Swap fees could not be loaded. Check your connection or VPN, then retry.",
+    "retryQuote": "Retry fees",
+    "loadingQuote": "Loading swap fees…",
     "title": "Swap server URL",
     "hint": "Use a Boltz-compatible Bitcoin mainnet server over HTTPS. Connect your VPN first for a private server. This device’s new swaps use the saved server; existing swaps keep their original server.",
     "save": "Check and save",

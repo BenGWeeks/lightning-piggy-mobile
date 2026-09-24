@@ -22,25 +22,30 @@ it('withholds old limits while the opposite direction loads and ignores supersed
         resolveSubmarine = resolve;
       }),
   );
-  const { result, rerender } = renderHook<SwapFees | null, { direction: string }>(
-    ({ direction }) => useTransferSwapFees(direction, true),
-    {
-      initialProps: { direction: 'ln-to-onchain' },
-    },
-  );
+  const { result, rerender } = renderHook<
+    ReturnType<typeof useTransferSwapFees>,
+    { direction: string }
+  >(({ direction }) => useTransferSwapFees(direction, true), {
+    initialProps: { direction: 'ln-to-onchain' },
+  });
   await act(async () => resolveReverse(reverse));
-  expect(result.current?.minAmount).toBe(25000);
+  expect(result.current.fees?.minAmount).toBe(25000);
   rerender({ direction: 'onchain-to-ln' });
-  expect(result.current).toBeNull();
+  expect(result.current.fees).toBeNull();
   rerender({ direction: 'ln-to-onchain' });
   await act(async () => resolveSubmarine(submarine));
-  expect(result.current).toBeNull();
+  expect(result.current.fees).toBeNull();
   await act(async () => resolveReverse(reverse));
-  expect(result.current).toEqual(reverse);
+  expect(result.current.fees).toEqual(reverse);
 });
 it('leaves fees unavailable when the backend fails', async () => {
   jest.mocked(getReverseSwapFees).mockRejectedValueOnce(new Error('offline'));
   const { result } = renderHook(() => useTransferSwapFees('ln-to-onchain', true));
   await act(async () => {});
-  expect(result.current).toBeNull();
+  expect(result.current.fees).toBeNull();
+  expect(result.current.failed).toBe(true);
+  jest.mocked(getReverseSwapFees).mockResolvedValueOnce(reverse);
+  await act(async () => result.current.retry());
+  expect(result.current.fees).toEqual(reverse);
+  expect(result.current.failed).toBe(false);
 });

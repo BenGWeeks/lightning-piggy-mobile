@@ -5,6 +5,8 @@
  * The four catch branches each map to a different caller UX, so a
  * regression here silently reintroduces the #891 false-failure. We mock
  * the swap dependencies and assert the thrown error type per branch.
+ * Pre-commit failures keep the lockup pending: Boltz only locks up once our
+ * HTLC reaches it, so a payment that never left can't race a lockup.
  */
 
 jest.mock('../services/boltzService', () => ({
@@ -17,21 +19,17 @@ jest.mock('../services/swapRecoveryService', () => ({
   unregisterPendingSwap: jest.fn(async () => undefined),
   recordClaimedFromPreimage: jest.fn(async () => undefined),
   recordReverseSwapLegs: jest.fn(async () => undefined),
+  recoverPendingSwaps: jest.fn(async () => undefined),
 }));
 jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(async () => undefined),
   deleteItemAsync: jest.fn(async () => undefined),
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
 }));
-// Match the real helper: it's a name check (see nwcErrors) — keep the test
-// independent of @getalby/sdk by stubbing just the predicate we use.
-jest.mock('../services/nwcService', () => ({
-  isReplyTimeoutError: (e: unknown) => (e as Error)?.name === 'ReplyTimeoutError',
-}));
-
 import { executeReverseSwap, isSwapSettlingError, SwapSettlingError } from './reverseSwapSend';
 import * as boltzService from '../services/boltzService';
 import * as SecureStore from 'expo-secure-store';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 
 const SWAP = {
   id: 'sw1',
@@ -42,6 +40,9 @@ const SWAP = {
   swapTree: { foo: 'bar' },
   invoice: 'lnbc30u1p...',
 };
+
+const neverLockup = () =>
+  (boltzService.waitForLockup as jest.Mock).mockReturnValue(new Promise(() => undefined));
 
 const named = (name: string, message = name) => {
   const e = new Error(message);
@@ -62,7 +63,12 @@ const params = (over: Partial<Parameters<typeof executeReverseSwap>[0]> = {}) =>
 beforeEach(() => {
   jest.clearAllMocks();
   (boltzService.createReverseSwap as jest.Mock).mockResolvedValue(SWAP);
-  (boltzService.waitForLockup as jest.Mock).mockResolvedValue({ lockupTxId: 'tx' });
+  (boltzService.waitForLockup as jest.Mock).mockResolvedValue({
+    txId: 'tx',
+    vout: 0,
+    amount: 9000,
+    txHex: 'fixture',
+  });
   (boltzService.claimSwap as jest.Mock).mockResolvedValue('claim-tx-id');
 });
 
@@ -78,6 +84,7 @@ describe('executeReverseSwap — #891 error contract', () => {
   });
 
   it('rethrows ReplyTimeoutError (ambiguous pay → status unknown) and KEEPS the record', async () => {
+    neverLockup();
     const payInvoice = jest.fn(async () => {
       throw named('ReplyTimeoutError', 'ambiguous');
     });
@@ -102,6 +109,7 @@ describe('executeReverseSwap — #891 error contract', () => {
   });
 
   it('rethrows AbortError on a PRE-commit user cancel', async () => {
+    neverLockup();
     const payInvoice = jest.fn(async () => {
       throw named('AbortError', 'cancelled');
     });
@@ -129,11 +137,39 @@ describe('executeReverseSwap — #891 error contract', () => {
   });
 
   it('throws "Boltz swap failed" on a genuine pre-commit failure', async () => {
+    neverLockup();
     const payInvoice = jest.fn(async () => {
       throw new Error('insufficient balance');
     });
     await expect(executeReverseSwap(params({ payInvoice }))).rejects.toThrow(
       /Boltz swap failed: insufficient balance/,
     );
+  });
+});
+
+describe('executeReverseSwap — hold invoice', () => {
+  it('binds the approved quote and persists + indexes before paying', async () => {
+    const quote = { pairHash: 'h', percentage: 0.5, minerFee: 1, minAmount: 1, maxAmount: 9 };
+    const payInvoice = jest.fn(async () => ({ preimage: 'preimage-hex' }));
+    await executeReverseSwap(params({ approvedQuote: quote, payInvoice }));
+    expect(boltzService.createReverseSwap).toHaveBeenCalledWith('bc1qdest', 30000, quote);
+    const persistAt = (SecureStore.setItemAsync as jest.Mock).mock.invocationCallOrder[0];
+    const indexAt = (swapRecoveryService.registerPendingSwap as jest.Mock).mock
+      .invocationCallOrder[0];
+    expect(persistAt).toBeLessThan(indexAt);
+    expect(indexAt).toBeLessThan(payInvoice.mock.invocationCallOrder[0]);
+  });
+
+  it('completes when the payment only settles after the claim reveals the preimage', async () => {
+    let settle!: (v: unknown) => void;
+    const payInvoice = jest.fn(() => new Promise((resolve) => (settle = resolve)));
+    (boltzService.claimSwap as jest.Mock).mockImplementation(async () => {
+      settle({ preimage: SWAP.preimage }); // Boltz settles the hold invoice
+      return 'claim-tx-id';
+    });
+    await expect(executeReverseSwap(params({ payInvoice }))).resolves.toBeUndefined();
+    expect(payInvoice).toHaveBeenCalledTimes(1);
+    expect(swapRecoveryService.recoverPendingSwaps).not.toHaveBeenCalled();
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('boltz_swap_sw1');
   });
 });

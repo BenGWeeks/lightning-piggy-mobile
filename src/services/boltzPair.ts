@@ -19,6 +19,10 @@ export function parseBoltzPair(input: unknown, direction: 'reverse' | 'submarine
     direction === 'reverse' && typeof rawMinerFee === 'object' && rawMinerFee
       ? (rawMinerFee as { claim?: unknown }).claim
       : rawMinerFee;
+  const lockupMinerFee =
+    typeof rawMinerFee === 'object' && rawMinerFee
+      ? (rawMinerFee as { lockup?: unknown }).lockup
+      : undefined;
   if (
     !pair ||
     !sats(minAmount) ||
@@ -28,15 +32,18 @@ export function parseBoltzPair(input: unknown, direction: 'reverse' | 'submarine
     !Number.isFinite(percentage) ||
     percentage < 0 ||
     !sats(minerFee) ||
-    (direction === 'submarine' && (typeof pair.hash !== 'string' || !pair.hash.trim()))
+    typeof pair.hash !== 'string' ||
+    !pair.hash.trim() ||
+    (direction === 'reverse' && !sats(lockupMinerFee))
   ) {
     throw new Error(`Invalid Boltz ${direction} fee quote`);
   }
   return {
+    ...(direction === 'reverse' && sats(lockupMinerFee) ? { lockupMinerFee } : {}),
     percentage,
     minerFee,
     minAmount,
     maxAmount,
-    ...(direction === 'submarine' ? { pairHash: pair.hash as string } : {}),
+    ...(typeof pair.hash === 'string' && pair.hash.trim() ? { pairHash: pair.hash } : {}),
   };
 }
