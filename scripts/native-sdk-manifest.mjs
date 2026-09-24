@@ -5,6 +5,9 @@ import { join } from 'node:path';
 // Paths, entry types and file hashes are pinned from the verified release ZIP.
 // Reject symlinks/special files rather than hashing data outside the SDK tree.
 export function frameworkContentHash(root) {
+  const rootStat = lstatSync(root);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory())
+    throw new Error('SDK root must be a real directory, not a symlink or file');
   const entries = [];
   function walk(relative) {
     for (const name of readdirSync(join(root, relative)).sort()) {

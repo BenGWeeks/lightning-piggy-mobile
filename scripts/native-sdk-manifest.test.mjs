@@ -28,3 +28,17 @@ test('content manifest detects modifications, omissions and added files', () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('rejects a symlink or regular file as the framework root', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'piggy-sdk-root-test-'));
+  try {
+    const target = join(dir, 'external');
+    mkdirSync(target);
+    writeFileSync(join(target, 'ffi'), 'contents');
+    symlinkSync(target, join(dir, 'framework'));
+    assert.throws(() => frameworkContentHash(join(dir, 'framework')), /real directory/);
+    assert.throws(() => frameworkContentHash(join(target, 'ffi')), /real directory/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
