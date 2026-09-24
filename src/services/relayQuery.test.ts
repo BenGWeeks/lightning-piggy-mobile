@@ -254,3 +254,35 @@ it('recognizes structured relay close reasons as total failure', async () => {
   params().onclose([{ url: 'wss://a', reason: 'connection failed' }] as never);
   await expect(promise).rejects.toThrow('All relays failed');
 });
+
+describe('strict shipping query completion', () => {
+  afterEach(() => jest.useRealTimers());
+  it('rejects a silent relay deadline instead of treating it as empty shipping', async () => {
+    jest.useFakeTimers();
+    const relay = fakePool();
+    const result = querySyncAbortable(
+      relay.pool,
+      ['wss://shipping'],
+      { kinds: [30406] },
+      { maxWait: 6000, rejectOnTimeout: true },
+    );
+    const assertion = expect(result).rejects.toThrow('before EOSE');
+    jest.advanceTimersByTime(6000);
+    await assertion;
+    expect(relay.close).toHaveBeenCalledTimes(1);
+  });
+  it('accepts completed empty EOSE without a later timeout error', async () => {
+    jest.useFakeTimers();
+    const relay = fakePool();
+    const result = querySyncAbortable(
+      relay.pool,
+      ['wss://shipping'],
+      { kinds: [30406] },
+      { maxWait: 6000, rejectOnTimeout: true },
+    );
+    relay.params().oneose();
+    await expect(result).resolves.toEqual([]);
+    jest.advanceTimersByTime(6000);
+    expect(relay.close).toHaveBeenCalledTimes(1);
+  });
+});

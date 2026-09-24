@@ -34,7 +34,7 @@ test('an all-relay connection failure is an error, never "no shipping needed"', 
     expect.anything(),
     expect.anything(),
     expect.anything(),
-    expect.objectContaining({ rejectOnAllRelaysFailure: true }),
+    expect.objectContaining({ rejectOnAllRelaysFailure: true, rejectOnTimeout: true }),
   );
 });
 test('ignores unrelated same-author events of another kind instead of failing checkout', async () => {

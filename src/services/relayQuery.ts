@@ -21,7 +21,12 @@ export function querySyncAbortable(
   pool: SimplePool,
   relays: string[],
   filter: Filter,
-  params: { maxWait?: number; signal?: AbortSignal; rejectOnAllRelaysFailure?: boolean },
+  params: {
+    maxWait?: number;
+    signal?: AbortSignal;
+    rejectOnAllRelaysFailure?: boolean;
+    rejectOnTimeout?: boolean;
+  },
 ): Promise<NostrEvent[]> {
   return new Promise((resolve, reject) => {
     const events: NostrEvent[] = [];
@@ -54,7 +59,14 @@ export function querySyncAbortable(
     // A quiet deadline is not proof that every relay failed: another relay
     // may have served a valid empty result while aggregate EOSE is still pending.
     // Explicit all-relay failures are rejected by onclose below.
-    if (params.maxWait !== undefined) deadline = setTimeout(() => finish(), params.maxWait);
+    if (params.maxWait !== undefined)
+      deadline = setTimeout(
+        () =>
+          finish(
+            params.rejectOnTimeout ? new Error('Relay query timed out before EOSE') : undefined,
+          ),
+        params.maxWait,
+      );
     closer = pool.subscribeMany(relays, filter, {
       // The pool's own timeout sits 1 s behind ours so our deadline always
       // settles first (it still bounds the pool's connection-timeout maths).

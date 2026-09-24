@@ -18,10 +18,9 @@ const FETCH_MAX_WAIT_MS = 6000;
  * Fetch the merchant's published shipping options. Queries the given read
  * relays unioned with the defaults (the merchant's options live wherever
  * they publish, which may not overlap the buyer's relay set), parses and
- * collapses to the newest revision per `d`. Returns `[]` when no options
- * arrived — which is indistinguishable from a quiet relay hitting the
- * `maxWait` deadline, so callers must NOT read `[]` as "no shipping needed"
- * (useShippingOptions treats it as an error for physical products).
+ * collapses to the newest revision per `d`. An unfinished relay query is an
+ * error, never an empty shipping list. A completed empty query returns `[]`;
+ * physical products still require an explicit shipping option in the hook.
  */
 export async function fetchShippingOptions(input: {
   merchantPubkey: string;
@@ -36,9 +35,13 @@ export async function fetchShippingOptions(input: {
     relays,
     { kinds: [SHIPPING_OPTION_KIND], authors: [merchantPubkey], limit: 100 },
     // An unreachable relay set must surface as an ERROR (retry row, submit
-    // blocked). A reachable-but-quiet set still resolves [] at the deadline;
-    // see the doc comment above for how callers handle that.
-    { maxWait: FETCH_MAX_WAIT_MS, signal: input.signal, rejectOnAllRelaysFailure: true },
+    // blocked), including a connected relay that never completes its response.
+    {
+      maxWait: FETCH_MAX_WAIT_MS,
+      signal: input.signal,
+      rejectOnAllRelaysFailure: true,
+      rejectOnTimeout: true,
+    },
   );
   // The `authors` filter is only a relay-side request; a misbehaving relay can
   // still hand back a valid-looking 30406 from another pubkey, whose price
