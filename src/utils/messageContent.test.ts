@@ -19,8 +19,19 @@ jest.mock('../services/boltzService', () => ({
   },
 }));
 
+// Control the bolt11 decoder so extractInvoice's DETECTION (the regex that
+// drives whether a DM renders an invoice card at all — the #948 "invoice
+// doesn't show" regression) is tested independently of the decoder's own
+// bech32 parsing. Default: yields no sections (amountless), so detection is
+// what's asserted; individual tests override for amount/description/expiry.
+const mockBolt11Decode = jest.fn((..._a: unknown[]) => ({
+  sections: [] as { name: string; value: unknown }[],
+}));
+jest.mock('light-bolt11-decoder', () => ({ decode: (...a: unknown[]) => mockBolt11Decode(...a) }));
+
 import {
   extractBitcoinUri,
+  extractInvoice,
   isSecretModeTrigger,
   extractAudioUrl,
   parseVoiceNote,
@@ -28,6 +39,12 @@ import {
   encodeEncryptedFileUrl,
   deriveGroupWireKind,
 } from './messageContent';
+
+// A syntactically-shaped bolt11 (the BOLT11 spec's 2500u example). Long enough
+// to satisfy the {50,} floor; its real bech32 validity is irrelevant here
+// because the decoder is mocked.
+const SAMPLE_BOLT11 =
+  'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
 
 describe('isSecretModeTrigger', () => {
   it('matches the exact trigger word', () => {
@@ -321,5 +338,75 @@ describe('deriveGroupWireKind (NIP-17 group kind 14 chat vs kind 15 file)', () =
   it('returns 14 for a malformed lpe fragment (falls back to chat)', () => {
     // Missing key/nonce → not a valid encrypted file → treated as kind-14.
     expect(deriveGroupWireKind('https://s/x.bin#lpe=1&m=audio%2Fmp4')).toBe(14);
+  });
+});
+
+describe('extractInvoice (bolt11 detection → in-chat invoice card, #948)', () => {
+  beforeEach(() => {
+    mockBolt11Decode.mockReset();
+    mockBolt11Decode.mockReturnValue({ sections: [] });
+  });
+
+  it('detects a standalone bolt11 and returns the bare invoice', () => {
+    const inv = extractInvoice(SAMPLE_BOLT11);
+    expect(inv).not.toBeNull();
+    expect(inv!.raw).toBe(SAMPLE_BOLT11);
+  });
+
+  it('detects a `lightning:`-prefixed invoice and strips the prefix', () => {
+    const inv = extractInvoice(`lightning:${SAMPLE_BOLT11}`);
+    expect(inv).not.toBeNull();
+    // `raw` is the bare bolt11 (the pay flow / QR encoder must not see the URI
+    // scheme), so a copied/QR'd value is a clean invoice.
+    expect(inv!.raw).toBe(SAMPLE_BOLT11);
+  });
+
+  it('detects an invoice embedded in a merchant / pasted message (the dan-dev case)', () => {
+    // A real merchant DM or a Primal user pasting an invoice wraps it in text —
+    // detection must still fire so the DM renders a payable card, not raw text.
+    expect(extractInvoice(`Please pay: ${SAMPLE_BOLT11} — thanks!`)?.raw).toBe(SAMPLE_BOLT11);
+    expect(extractInvoice(`Invoice:\n${SAMPLE_BOLT11}`)?.raw).toBe(SAMPLE_BOLT11);
+    expect(extractInvoice(`{"pr":"${SAMPLE_BOLT11}"}`)?.raw).toBe(SAMPLE_BOLT11);
+  });
+
+  it('detects an UPPERCASE invoice (QR-style payload)', () => {
+    const inv = extractInvoice(SAMPLE_BOLT11.toUpperCase());
+    expect(inv).not.toBeNull();
+    expect(inv!.raw).toBe(SAMPLE_BOLT11.toUpperCase());
+  });
+
+  it('returns null for plain text / too-short lnbc-shaped values', () => {
+    expect(extractInvoice('gm, how much for the widget?')).toBeNull();
+    expect(extractInvoice('')).toBeNull();
+    // Under the {50,} floor — not a real invoice.
+    expect(extractInvoice('lnbc100')).toBeNull();
+  });
+
+  it('parses amount / description / expiry off the decoded sections', () => {
+    const timestamp = 1_700_000_000;
+    mockBolt11Decode.mockReturnValue({
+      sections: [
+        { name: 'amount', value: '2500000' }, // msats → 2,500 sats
+        { name: 'description', value: 'Order #abc123' },
+        { name: 'timestamp', value: timestamp },
+        { name: 'expiry', value: 3600 },
+        { name: 'payment_hash', value: 'deadbeef' },
+      ],
+    });
+    const inv = extractInvoice(SAMPLE_BOLT11)!;
+    expect(inv.amountSats).toBe(2500);
+    expect(inv.description).toBe('Order #abc123');
+    expect(inv.expiresAt).toBe(timestamp + 3600);
+    expect(inv.paymentHash).toBe('deadbeef');
+  });
+
+  it('degrades to raw-only (still detected/payable) when the decoder throws', () => {
+    mockBolt11Decode.mockImplementation(() => {
+      throw new Error('bad checksum');
+    });
+    const inv = extractInvoice(SAMPLE_BOLT11);
+    expect(inv).not.toBeNull();
+    expect(inv!.raw).toBe(SAMPLE_BOLT11);
+    expect(inv!.amountSats).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ type SubParams = {
   abort?: AbortSignal;
   onevent: (e: NostrEvent) => void;
   oneose: () => void;
+  onclose: (reasons: string[]) => void;
 };
 
 const makeEvent = (id: string): NostrEvent =>
@@ -80,5 +81,208 @@ describe('querySyncAbortable', () => {
     params().oneose();
     await promise;
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('querySyncAbortable de-duplication', () => {
+  it('keeps one copy of an event id even if it arrives from several relays', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(pool, ['wss://a', 'wss://b'], { kinds: [1] }, {});
+    params().onevent(makeEvent('a'));
+    params().onevent(makeEvent('a'));
+    params().onevent(makeEvent('b'));
+    params().oneose();
+    expect((await promise).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('querySyncAbortable deadline', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('does not confuse an aggregate quiet deadline with proven all-relay failure', async () => {
+    jest.useFakeTimers();
+    const { pool, params, close } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      { kinds: [1] },
+      { maxWait: 1000, rejectOnAllRelaysFailure: true },
+    );
+    expect(params().maxWait).toBe(2000); // pool's own timeout trails ours
+    jest.advanceTimersByTime(1000);
+    await expect(promise).resolves.toEqual([]);
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('resolves partial results at the deadline, and [] without the flag', async () => {
+    jest.useFakeTimers();
+    const a = fakePool();
+    const withEvents = querySyncAbortable(a.pool, ['wss://a'], { kinds: [1] }, { maxWait: 1000, rejectOnAllRelaysFailure: true }); // prettier-ignore
+    a.params().onevent(makeEvent('x'));
+    const b = fakePool();
+    const noFlag = querySyncAbortable(b.pool, ['wss://a'], { kinds: [1] }, { maxWait: 1000 });
+    jest.advanceTimersByTime(1000);
+    expect((await withEvents).map((e) => e.id)).toEqual(['x']);
+    expect(await noFlag).toEqual([]);
+  });
+});
+
+describe('scoped aggregate connection failures', () => {
+  it('rejects when every relay dropped the socket after connecting ("relay connection closed")', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['relay connection closed', 'websocket closed']);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
+  it('treats relay refusals (NIP-42 auth failure, auth-required / restricted CLOSED) as failures', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b', 'wss://c'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose([
+      'auth was required and attempted, but failed with: bad sig',
+      'auth-required: we only serve subscriptions to registered users',
+      'restricted: not allowed',
+    ]);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
+  it('accepts every nostr-tools timeout reason, prefixed or not', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b', 'wss://c'],
+      { kinds: [1] },
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['connection timed out', 'relay connection timed out', 'auth timed out']);
+    await expect(promise).rejects.toThrow('All relays failed');
+  });
+
+  it('does not treat a deliberate close as a failure', async () => {
+    const { pool, params } = fakePool();
+    const promise = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      { kinds: [1] },
+      {
+        rejectOnAllRelaysFailure: true,
+      },
+    );
+    params().oneose();
+    params().onclose(['closed by caller']);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it('rejects all-relay connection failure even when EOSE fires first', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a', 'wss://b'],
+      {},
+      { rejectOnAllRelaysFailure: true },
+    );
+    params().oneose();
+    params().onclose(['connection failed', 'connection timed out']);
+    await expect(result).rejects.toThrow('All relays failed');
+  });
+  it('preserves default resolution on connection failure', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(pool, ['wss://a'], {}, {});
+    params().oneose();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toEqual([]);
+  });
+  it('preserves partial results despite a failure close', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(pool, ['wss://a'], {}, { rejectOnAllRelaysFailure: true });
+    params().onevent(makeEvent('a'));
+    params().oneose();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toHaveLength(1);
+  });
+  it('resolves on EOSE or subscription timeout without a connection failure', async () => {
+    const { pool, params } = fakePool();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      {},
+      { rejectOnAllRelaysFailure: true, maxWait: 1 },
+    );
+    params().oneose(); // The pool uses this callback for eoseTimeout too.
+    await expect(result).resolves.toEqual([]);
+  });
+  it('abort remains successful even if connection failures subsequently arrive', async () => {
+    const { pool, params } = fakePool();
+    const controller = new AbortController();
+    const result = querySyncAbortable(
+      pool,
+      ['wss://a'],
+      {},
+      { rejectOnAllRelaysFailure: true, signal: controller.signal },
+    );
+    controller.abort();
+    params().onclose(['connection failed']);
+    await expect(result).resolves.toEqual([]);
+  });
+});
+
+it('tolerates a synchronous EOSE without a subscription handle', async () => {
+  const pool = {
+    subscribeMany: (_r: unknown, _f: unknown, params: SubParams) => {
+      params.oneose();
+    },
+  } as unknown as SimplePool;
+  await expect(querySyncAbortable(pool, ['wss://a'], {}, {})).resolves.toEqual([]);
+});
+
+it('recognizes structured relay close reasons as total failure', async () => {
+  const { pool, params } = fakePool();
+  const promise = querySyncAbortable(pool, ['wss://a'], {}, { rejectOnAllRelaysFailure: true });
+  params().onclose([{ url: 'wss://a', reason: 'connection failed' }] as never);
+  await expect(promise).rejects.toThrow('All relays failed');
+});
+
+describe('strict shipping query completion', () => {
+  afterEach(() => jest.useRealTimers());
+  it('rejects a silent relay deadline instead of treating it as empty shipping', async () => {
+    jest.useFakeTimers();
+    const relay = fakePool();
+    const result = querySyncAbortable(
+      relay.pool,
+      ['wss://shipping'],
+      { kinds: [30406] },
+      { maxWait: 6000, rejectOnTimeout: true },
+    );
+    const assertion = expect(result).rejects.toThrow('before EOSE');
+    jest.advanceTimersByTime(6000);
+    await assertion;
+    expect(relay.close).toHaveBeenCalledTimes(1);
+  });
+  it('accepts completed empty EOSE without a later timeout error', async () => {
+    jest.useFakeTimers();
+    const relay = fakePool();
+    const result = querySyncAbortable(
+      relay.pool,
+      ['wss://shipping'],
+      { kinds: [30406] },
+      { maxWait: 6000, rejectOnTimeout: true },
+    );
+    relay.params().oneose();
+    await expect(result).resolves.toEqual([]);
+    jest.advanceTimersByTime(6000);
+    expect(relay.close).toHaveBeenCalledTimes(1);
   });
 });

@@ -74,6 +74,7 @@ export type Item =
       id: string;
       fromMe: boolean;
       order: ParsedOrderEvent;
+      expectedAmountSats?: number;
       createdAt: number;
     }
   | {
@@ -234,12 +235,69 @@ export function suppressDuplicateOrderInvoiceNotes(items: TimedItem[]): TimedIte
   });
 }
 
+/**
+ * Buyer-approved totals keyed by orderId — ONLY from the buyer's own outgoing
+ * kind-16 type-1 orders (a merchant can't author one of those into this
+ * thread; its `amount` tag on a payment request is never trusted). Two
+ * outgoing orders sharing an id with different totals fail closed
+ * (undefined). `olderOrders` seeds totals the screen resolved from the store
+ * for orders older than the loaded slice (see `orderIdsNeedingHistory`); an
+ * in-slice order that disagrees with a seeded total also fails closed.
+ */
+export function collectApprovedOrderAmounts(
+  messages: ConversationMessageInput[],
+  olderOrders?: ReadonlyMap<string, number | undefined>,
+): Map<string, number | undefined> {
+  const expectedAmounts = new Map<string, number | undefined>(olderOrders ?? []);
+  for (const message of messages) {
+    if (!message.fromMe || message.wireKind !== 16) continue;
+    const order = parseStoredOrder(message.text);
+    if (!order || order.type !== 'order') continue;
+    const amount = order.amountSats;
+    if (!Number.isSafeInteger(amount) || (amount ?? 0) <= 0) continue;
+    if (expectedAmounts.has(order.orderId) && expectedAmounts.get(order.orderId) !== amount) {
+      expectedAmounts.set(order.orderId, undefined);
+    } else if (!expectedAmounts.has(order.orderId)) {
+      expectedAmounts.set(order.orderId, amount);
+    }
+  }
+  return expectedAmounts;
+}
+
+/**
+ * Order ids of RECEIVED payment requests (kind-16 carrying a payable invoice)
+ * and receipts (kind-17) whose originating outgoing order isn't in `messages` — i.e. it's older than
+ * the loaded thread slice (DM_CONV_CAP). The screen resolves these from the
+ * store (`useOutgoingOrderHistory`) so an old order stays payable instead of
+ * sticking on "amount unverified". Sorted, so callers can key on the list.
+ */
+export function orderIdsNeedingHistory(messages: ConversationMessageInput[]): string[] {
+  const outgoing = new Set<string>();
+  const wanted = new Set<string>();
+  for (const message of messages) {
+    if (message.wireKind !== 16 && message.wireKind !== 17) continue;
+    const order = parseStoredOrder(message.text);
+    if (!order) continue;
+    if (message.fromMe) {
+      if (order.type === 'order') outgoing.add(order.orderId);
+    } else if (payableBolt11(order) || (order.kind === 17 && order.type === 'receipt')) {
+      // A payment request AND a receipt both bind to the buyer's own order.
+      wanted.add(order.orderId);
+    }
+  }
+  return [...wanted].filter((id) => !outgoing.has(id)).sort();
+}
+
 // Merge classified DM messages with wallet zap rows, sort newest-first, and
 // interleave "Today / Yesterday / <date>" dividers between day groups.
+// `olderOrderAmounts` — approved totals for orders outside the loaded slice
+// (see `collectApprovedOrderAmounts`).
 export function buildConversationItems(
   messages: ConversationMessageInput[],
   zapItems: TimedItem[],
+  olderOrderAmounts?: ReadonlyMap<string, number | undefined>,
 ): Item[] {
+  const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
     // render them as an order card rather than a chat bubble (#market).
@@ -252,6 +310,7 @@ export function buildConversationItems(
             id: `dm-${m.id}`,
             fromMe: m.fromMe,
             order,
+            expectedAmountSats: expectedAmounts.get(order.orderId),
             createdAt: m.createdAt,
           },
         ];

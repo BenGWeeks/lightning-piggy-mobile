@@ -293,6 +293,41 @@ export async function getConversationMessages(
   return (res.rows ?? []).map(toRow);
 }
 
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/**
+ * The owner's OWN kind-16 rows in one conversation whose stored order JSON
+ * carries one of `orderIds` — the targeted read that lets a merchant's payment
+ * request bind to an outgoing order OLDER than the loaded thread slice
+ * (DM_CONV_CAP), so an old order stays payable (#948). Content is the
+ * canonical `serializeOrder` JSON, so a substring match on the
+ * `"orderId":"…"` pair is a cheap pre-filter — callers still parse and compare
+ * the id exactly. Scoped by owner + conversation + from_me, so a merchant
+ * can't plant a row that satisfies it.
+ */
+export async function getOutgoingOrderRows(
+  owner: string,
+  conversation: string,
+  orderIds: readonly string[],
+): Promise<DmMessageRow[]> {
+  if (orderIds.length === 0) return [];
+  const db = await getLocalDb();
+  const out: DmMessageRow[] = [];
+  for (let i = 0; i < orderIds.length; i += VAR_CHUNK) {
+    const chunk = orderIds.slice(i, i + VAR_CHUNK);
+    const likes = chunk.map(() => `content LIKE ? ESCAPE '\\'`).join(' OR ');
+    const res = await db.execute(
+      `SELECT * FROM dm_messages
+        WHERE owner = ? AND conversation = ? AND from_me = 1 AND wire_kind = 16
+          AND (${likes})
+        ORDER BY created_at DESC;`,
+      [owner, conversation, ...chunk.map((id) => `%"orderId":"${escapeLike(id)}"%`)],
+    );
+    for (const r of res.rows ?? []) out.push(toRow(r));
+  }
+  return out;
+}
+
 /**
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:

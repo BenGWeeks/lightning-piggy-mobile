@@ -70,6 +70,7 @@ import {
 } from '../utils/conversationItems';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useConversationLoader } from '../hooks/useConversationLoader';
+import { useOutgoingOrderHistory } from '../hooks/useOutgoingOrderHistory';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -213,9 +214,12 @@ const ConversationScreen: React.FC = () => {
   // subscribes to the store, so `resolvedMessages` is a fresh array on every
   // settle — which is what flows the updated tick into `items` below.
   const resolvedMessages = useResolvedDmDeliveries(messages);
+  // Approved totals for payment requests whose outgoing order is older than
+  // the loaded slice — one targeted store read, so an old order stays payable.
+  const olderOrderAmounts = useOutgoingOrderHistory(myPubkey, pubkey, resolvedMessages);
   const items = useMemo<Item[]>(
-    () => buildConversationItems(resolvedMessages, zapItems),
-    [resolvedMessages, zapItems],
+    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts),
+    [resolvedMessages, zapItems, olderOrderAmounts],
   );
 
   // Poll aggregation + send/vote for this 1:1 thread (#203). Extracted to a

@@ -1459,7 +1459,9 @@
     "copyInvoiceA11y": "Копіювати інвойс",
     "copy": "Копіювати",
     "qrCodeA11y": "QR-код інвойсу Lightning",
-    "scanHint": "Відскануйте будь-яким гаманцем Lightning"
+    "scanHint": "Відскануйте будь-яким гаманцем Lightning",
+    "amountUnverified": "Не вдалося звірити цей рахунок із сумою початкового замовлення. Завантажте початкове замовлення перед оплатою; якщо суми різняться, попросіть продавця виправити рахунок.",
+    "receiptUnverified": "Не вдалося звірити цю квитанцію з вашим початковим замовленням. Завантажте початкове замовлення, щоб підтвердити оплату."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",
@@ -1745,6 +1747,14 @@
     "resetText": "Сканувати / вставити інший інвойс",
     "balance": "Баланс: {{balance}} sats ({{fiat}})"
   },
+  "starRating": {
+    "readOnly": "{{value}} з {{max}} зірок",
+    "input": "Оцінка",
+    "rate": {
+      "one": "Оцінити на {{count}} зірку",
+      "other": "Оцінити на {{count}} зірок"
+    }
+  },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: чайові за {{title}}",
     "shareMessage": "Інвойс Lightning на чайові {{amount}} sats ({{title}}):\n\n{{invoice}}",
@@ -2015,6 +2025,140 @@
     "refundBroadcastTitle": "Повернення транслювано",
     "refundBroadcastBody": "{{amount}} sats повернено ({{txid}}…)",
     "refundFailedTitle": "Не вдалося повернути"
+  },
+  "market": {
+    "sats": "{{amount}} sats",
+    "free": "Безкоштовно",
+    "fromSeller": "від {{seller}}",
+    "screen": {
+      "title": "Маркет",
+      "tagline": "Придбайте Lightning Piggy і Bitcoin-мерч",
+      "back": "Назад до Огляду",
+      "showing": "Показано: {{label}}",
+      "searchPlaceholder": "Пошук товарів або продавців",
+      "clearSearch": "Очистити пошук",
+      "filters": "Фільтри",
+      "filtersApplied": "Фільтри, застосовано {{count}}",
+      "emptyNoMatch": "Жоден товар не відповідає вашому пошуку чи фільтрам.",
+      "emptyNoFriends": "Ще ніхто з ваших друзів у Nostr не продає товари Lightning Piggy.",
+      "emptyNone": "Наразі немає доступних товарів."
+    },
+    "card": {
+      "featured": "Рекомендовано",
+      "accessibility": "{{title}} — {{amount}} sats від {{seller}}"
+    },
+    "detail": {
+      "back": "Назад до Маркету",
+      "unavailable": "Цей товар більше недоступний.",
+      "backToMarket": "Назад до Маркету",
+      "goBack": "Назад",
+      "buyFrom": "Купити у {{seller}}",
+      "buyAccessibility": "Купити {{title}} у {{seller}}",
+      "noFeedback": "Відгуки та коментарі поки недоступні для цього продавця — йому потрібна ідентичність Nostr, щоб прив’язати відгуки."
+    },
+    "modes": {
+      "soon": "Скоро",
+      "comingSoon": "{{label}} — скоро",
+      "selected": "{{label}}, вибрано",
+      "preferred": "Рекомендовані продавці Lightning Piggy",
+      "friends": "Мережа довіри: друзі",
+      "friendsOfFriends": "Мережа довіри: друзі друзів",
+      "all": "Мережа довіри: усі"
+    },
+    "filters": {
+      "title": "Фільтри",
+      "clear": "Очистити фільтри",
+      "clearAll": "Очистити всі фільтри",
+      "close": "Закрити фільтри",
+      "done": "Готово",
+      "all": "Усі",
+      "merchant": "Продавець",
+      "country": "Країна",
+      "currency": "Валюта",
+      "chipSelected": "{{label}}, вибрано"
+    },
+    "feedbackTabs": {
+      "reviews": "Відгуки",
+      "comments": "Коментарі",
+      "showMore": "Показати ще ({{count}} залишилось)",
+      "retry": "Повторити",
+      "publishFailed": "Не вдалося опублікувати. Спробуйте ще раз."
+    },
+    "reviews": {
+      "signIn": "Увійдіть, щоб написати відгук",
+      "write": "Написати відгук",
+      "updateLabel": "Оновити ваш відгук",
+      "placeholder": "Поділіться враженнями (необов’язково)",
+      "addRating": "Спершу поставте оцінку",
+      "submit": "Надіслати відгук",
+      "submitUpdate": "Оновити відгук",
+      "empty": "Ще немає відгуків. Будьте першим, хто залишить відгук про цей товар!",
+      "loadError": "Не вдалося завантажити відгуки",
+      "count": {
+        "one": "{{count}} відгук",
+        "other": "{{count}} відгуків"
+      }
+    },
+    "comments": {
+      "placeholder": "Додати коментар",
+      "post": "Опублікувати коментар",
+      "signIn": "Увійдіть, щоб коментувати",
+      "empty": "Ще немає коментарів. Будьте першим, хто розпочне обговорення!",
+      "loadError": "Не вдалося завантажити коментарі"
+    },
+    "checkout": {
+      "orderPlaced": "Замовлення оформлено",
+      "orderSentBody": "Ваше замовлення надіслано {{seller}}. Коли вони надішлють рахунок Lightning, він з’явиться як оплачуване замовлення у вашому чаті з ними.",
+      "openConversation": "Відкрити розмову з {{seller}}",
+      "goToChat": "Перейти в чат для оплати",
+      "unitPrice": "{{amount}} sats за шт. · {{fiat}}",
+      "quantity": "Кількість",
+      "decreaseQuantity": "Зменшити кількість",
+      "increaseQuantity": "Збільшити кількість",
+      "subtotal": "Проміжний підсумок",
+      "shipping": "Доставка",
+      "total": "Разом",
+      "placeOrder": "Оформити замовлення",
+      "placeOrderAccessibility": "Оформити замовлення у {{seller}}",
+      "signInToBuy": "Увійдіть, щоб купити",
+      "hint": "Ваше замовлення надсилається приватно (у подарунковій обгортці) продавцю, який відповідає рахунком Lightning, що ви оплачуєте в застосунку.",
+      "websiteFallback": "Бажаєте на сайт? Відкрити {{seller}}",
+      "openWebsiteAccessibility": "Відкрити сайт {{seller}}",
+      "toastPlaced": "Замовлення оформлено",
+      "toastPlacedBody": "Очікуємо, поки {{seller}} надішле рахунок…",
+      "errors": {
+        "notSignedIn": "Увійдіть, щоб оформити замовлення",
+        "noSellerIdentity": "Цей продавець не має ідентичності Nostr для оформлення замовлення",
+        "signingKeyMissing": "Не вдалося знайти ваш ключ підпису. Увійдіть знову.",
+        "unsupportedSigner": "Цей підписувач ще не може оформлювати замовлення.",
+        "relayUnreachable": "Не вдалося зʼєднатися з relay для оформлення замовлення. Спробуйте ще раз.",
+        "generic": "Щось пішло не так під час оформлення замовлення. Спробуйте ще раз."
+      },
+      "rateUpdated": "Вартість доставки оновлено. Перевірте нову суму й натисніть «Оформити замовлення» ще раз."
+    },
+    "shipping": {
+      "label": "Доставка",
+      "checking": "Перевіряємо, куди доставляє {{seller}}…",
+      "loadError": "Не вдалося завантажити варіанти доставки.",
+      "retry": "Повторити",
+      "retryAccessibility": "Повторити завантаження варіантів доставки",
+      "shipToTitle": "Доставити до",
+      "searchCountries": "Пошук країн",
+      "searchCountriesPlaceholder": "Пошук країн…",
+      "shipToCountry": "Доставити до {{country}}",
+      "noCountriesMatch": "Немає країн, що відповідають «{{query}}»",
+      "shipTo": "Доставка в {{country}} — змінити країну",
+      "chooseCountry": "Вибрати країну",
+      "chooseCountryPlaceholder": "Вибрати країну…",
+      "noShip": "Ми поки не доставляємо в {{country}} — напишіть у магазин і запитайте.",
+      "message": "Написати {{seller}}",
+      "worldwide": "Доставка по всьому світу",
+      "shipsTo": "Доставка в {{countries}}",
+      "shipsToMore": "Доставка в {{countries}} +{{count}}",
+      "optionAccessibility": "Варіант доставки {{title}}",
+      "priceFallback": "{{amount}} {{currency}}",
+      "addressInChat": "Адреса доставки не надсилається із замовленням — {{seller}} запитає її у вашому чаті."
+    }
   },
   "nwcShareSheet": {
     "title": "Поділитися гаманцем",

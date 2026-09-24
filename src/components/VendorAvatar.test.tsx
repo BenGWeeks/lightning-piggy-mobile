@@ -1,0 +1,24 @@
+import React from 'react';
+import { fireEvent, render } from '@testing-library/react-native';
+import VendorAvatar from './VendorAvatar';
+import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import type { MarketVendor } from '../data/marketVendors';
+jest.mock('../hooks/usePubkeyProfile', () => ({ usePubkeyProfile: jest.fn() }));
+jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
+jest.mock('../styles/VendorAvatar.styles', () => ({ createVendorAvatarStyles: () => ({}) }));
+jest.mock('../utils/marketVendors', () => ({ vendorNostrPubkey: () => null }));
+jest.mock('expo-image', () => ({ Image: require('react-native').Image }));
+const vendor = { name: 'Vendor', logo: 'https://example.com/logo.png' } as MarketVendor;
+test('failed profile and logo images fall back to the vendor initial', () => {
+  (usePubkeyProfile as jest.Mock).mockReturnValue({ picture: 'https://example.com/avatar.png' });
+  const ui = render(<VendorAvatar vendor={vendor} testID="vendor" />);
+  expect(ui.getByTestId('vendor-image').props.source.uri).toContain('avatar.png');
+  fireEvent(ui.getByTestId('vendor-image'), 'error');
+  expect(ui.getByTestId('vendor-image').props.source.uri).toContain('logo.png');
+  fireEvent(ui.getByTestId('vendor-image'), 'error');
+  expect(ui.queryByTestId('vendor-image')).toBeNull();
+  expect(ui.getByText('V')).toBeTruthy();
+  (usePubkeyProfile as jest.Mock).mockReturnValue({ picture: 'https://example.com/new.png' });
+  ui.rerender(<VendorAvatar vendor={vendor} testID="vendor" />);
+  expect(ui.getByTestId('vendor-image').props.source.uri).toContain('new.png');
+});
