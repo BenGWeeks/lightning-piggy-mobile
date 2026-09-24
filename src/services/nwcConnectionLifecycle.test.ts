@@ -1,10 +1,14 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
-import { connect, disconnect, getBalance } from './nwcService';
+import { connect, disconnect, getBalance, isConnectionInProgress, payInvoice } from './nwcService';
+import { isConnectionError } from './nwcErrors';
 
 jest.mock('@getalby/sdk', () => ({ NostrWebLNProvider: jest.fn() }));
 jest.mock('./nwcEncryption', () => ({
   pinNip04IfNoInfoEvent: jest.fn(async () => {}),
   clearEncryptionDecision: jest.fn(),
+}));
+jest.mock('light-bolt11-decoder', () => ({
+  decode: () => ({ sections: [{ name: 'payment_hash', value: 'c'.repeat(64) }] }),
 }));
 const URL =
   'nostr+walletconnect://' + 'a'.repeat(64) + '?relay=wss://example.com&secret=' + 'b'.repeat(64);
@@ -19,8 +23,13 @@ function provider(balance: number) {
   return {
     enable: jest.fn(async () => {}),
     getBalance: jest.fn(async () => ({ balance })),
+    lookupInvoice: jest.fn(async (): Promise<{ preimage?: string }> => ({})),
     close: jest.fn(),
-    client: { connected: true, pool: undefined },
+    client: {
+      connected: true,
+      pool: undefined,
+      executeNip47Request: jest.fn(async (): Promise<unknown> => ({ preimage: 'retried' })),
+    },
   };
 }
 const old = provider(111);
@@ -28,6 +37,8 @@ const fresh = provider(222);
 beforeEach(() => {
   disconnect('lifecycle');
   jest.clearAllMocks();
+  old.client.connected = true;
+  fresh.client.connected = true;
   old.enable.mockResolvedValue();
   old.getBalance.mockResolvedValue({ balance: 111 });
   jest
@@ -108,4 +119,83 @@ it('disconnect supersedes an in-flight reconnect without replacing the new provi
   expect(newest.close).not.toHaveBeenCalled();
   await expect(getBalance('lifecycle')).resolves.toBe(333);
   old.client.connected = true;
+});
+
+describe('payInvoice publish-failure reconnect races', () => {
+  const PREIMAGE = 'd'.repeat(64);
+  async function startAmbiguousPayment() {
+    await connect('lifecycle', URL);
+    old.client.executeNip47Request.mockRejectedValueOnce(new Error('failed to publish'));
+    const enabling = deferred<void>();
+    const started = deferred<void>();
+    fresh.enable.mockImplementationOnce(() => {
+      started.resolve();
+      return enabling.promise;
+    });
+    const paying = payInvoice('lifecycle', 'lnbc1fixture');
+    await started.promise;
+    return { paying, enabling };
+  }
+
+  it('adopts a connect() that supersedes its reconnect and still looks up before retrying', async () => {
+    const newest = provider(333);
+    newest.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE });
+    jest
+      .mocked(NostrWebLNProvider)
+      .mockImplementationOnce(() => newest as unknown as NostrWebLNProvider);
+    const { paying, enabling } = await startAmbiguousPayment();
+    expect(isConnectionInProgress('lifecycle')).toBe(true);
+    await expect(connect('lifecycle', URL)).resolves.toMatchObject({ success: true });
+    enabling.resolve();
+    await expect(paying).resolves.toEqual({ preimage: PREIMAGE });
+    expect(newest.lookupInvoice).toHaveBeenCalledWith({ paymentHash: 'c'.repeat(64) });
+    expect(newest.client.executeNip47Request).not.toHaveBeenCalled();
+    expect(fresh.close).toHaveBeenCalled();
+    expect(newest.close).not.toHaveBeenCalled();
+  });
+
+  it('shares its reconnect with a concurrent getBalance instead of being superseded', async () => {
+    fresh.lookupInvoice.mockResolvedValueOnce({ preimage: PREIMAGE });
+    const { paying, enabling } = await startAmbiguousPayment();
+    old.client.connected = false; // closed by the payment's reconnect
+    const balance = getBalance('lifecycle');
+    enabling.resolve();
+    await expect(paying).resolves.toEqual({ preimage: PREIMAGE });
+    await expect(balance).resolves.toBe(222);
+    expect(NostrWebLNProvider).toHaveBeenCalledTimes(2);
+    expect(fresh.close).not.toHaveBeenCalled();
+  });
+
+  it('reports a disconnect during the reconnect as a connection error, never a definite failure', async () => {
+    const { paying, enabling } = await startAmbiguousPayment();
+    disconnect('lifecycle');
+    enabling.resolve();
+    const error = await paying.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(isConnectionError(error)).toBe(true);
+    expect(old.client.executeNip47Request).toHaveBeenCalledTimes(1);
+    expect(fresh.client.executeNip47Request).not.toHaveBeenCalled();
+    expect(fresh.close).toHaveBeenCalled();
+  });
+});
+
+it('reconnect still succeeds when closing the dead provider throws', async () => {
+  await connect('lifecycle', URL);
+  old.client.connected = false;
+  old.close.mockImplementationOnce(() => {
+    throw new Error('already closed');
+  });
+  await expect(getBalance('lifecycle')).resolves.toBe(222);
+  await expect(getBalance('lifecycle')).resolves.toBe(222);
+  expect(NostrWebLNProvider).toHaveBeenCalledTimes(2);
+});
+
+it('reports a pending connect as in progress until its provider is installed', async () => {
+  const slow = deferred<void>();
+  old.enable.mockImplementationOnce(() => slow.promise);
+  const pending = connect('lifecycle', URL);
+  expect(isConnectionInProgress('lifecycle')).toBe(true);
+  slow.resolve();
+  await pending;
+  expect(isConnectionInProgress('lifecycle')).toBe(false);
 });

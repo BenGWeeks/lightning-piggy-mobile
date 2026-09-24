@@ -27,7 +27,12 @@ function metadata(id: string): WalletMetadata {
 }
 const readStorage = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
 const hydrateSeenReceipts = jest.fn(async () => {});
-function mount() {
+function mount(
+  loading: {
+    setIsLoading?: (value: boolean) => void;
+    setWalletsHydrated?: (value: boolean) => void;
+  } = {},
+) {
   return renderHook(() => {
     const [wallets, setWallets] = useState<WalletState[]>([]);
     const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
@@ -35,6 +40,7 @@ function mount() {
     walletsRef.current = wallets;
     const lastTxsJsonRef = useRef(new Map<string, string>());
     const captureIdentity = useWalletIdentityHydration({
+      ...loading,
       walletsRef,
       lastTxsJsonRef,
       hydrateSeenReceipts,
@@ -189,6 +195,36 @@ it('unsubscribes and drops pending reads on unmount', async () => {
   await switchTo('C');
   expect(read).toHaveBeenCalledTimes(1);
   expect(nwcService.connect).not.toHaveBeenCalled();
+});
+
+it('keeps the navigator loading gate down on a switch while hiding the old wallets', async () => {
+  const setIsLoading = jest.fn();
+  const setWalletsHydrated = jest.fn();
+  const { result } = mount({ setIsLoading, setWalletsHydrated });
+  await switchTo('B');
+  await waitFor(() => expect(result.current.activeWalletId).toBe('B-wallet'));
+  const slow = deferred<WalletMetadata[]>();
+  jest.spyOn(walletStorage, 'getWalletList').mockImplementationOnce(() => slow.promise);
+  setWalletsHydrated.mockClear();
+  await switchTo('C');
+  // Mid-switch: previous identity's wallets are gone, hydration is pending,
+  // but the app-wide loading gate (which unmounts AppNavigator) never rises.
+  expect(result.current.wallets).toEqual([]);
+  expect(result.current.activeWalletId).toBeNull();
+  expect(nwcService.disconnect).toHaveBeenCalledWith('B-wallet');
+  expect(setWalletsHydrated).toHaveBeenLastCalledWith(false);
+  await act(async () => slow.resolve([metadata('C-wallet')]));
+  await waitFor(() => expect(result.current.activeWalletId).toBe('C-wallet'));
+  expect(setWalletsHydrated).toHaveBeenLastCalledWith(true);
+  expect(setIsLoading).not.toHaveBeenCalledWith(true);
+});
+
+it('ends the boot spinner when an identity lands mid-startup', async () => {
+  const setIsLoading = jest.fn();
+  mount({ setIsLoading });
+  await switchTo('B');
+  await waitFor(() => expect(setIsLoading).toHaveBeenCalledWith(false));
+  expect(setIsLoading).not.toHaveBeenCalledWith(true);
 });
 
 it('invalidates the shared startup guard on switches, including returning to the same pubkey', async () => {

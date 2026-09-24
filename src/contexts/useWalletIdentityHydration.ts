@@ -61,8 +61,11 @@ export function useWalletIdentityHydration({
       for (const w of walletsRef.current) {
         if (w.walletType === 'nwc') nwcService.disconnect(w.id);
       }
-      // Clear in-memory wallet list and tx fingerprints so the UI reflects the switch.
-      setIsLoading?.(true);
+      // Clear in-memory wallet list and tx fingerprints so the UI reflects the
+      // switch and nothing can act on the previous identity's wallets. Leave
+      // `isLoading` alone: it gates the whole navigator (AppNavigator), so
+      // raising it here would tear down and remount navigation on every
+      // account switch / logout. `walletsHydrated=false` covers the reload.
       setWalletsHydrated?.(false);
       setWallets([]);
       setActiveWalletId(null);
@@ -116,6 +119,8 @@ export function useWalletIdentityHydration({
           if (!isCurrent()) return;
           setWallets(walletStates);
           setWalletsHydrated?.(true);
+          // Only matters on cold start: the startup hydration bails when an
+          // identity lands mid-boot, so this completion ends the boot spinner.
           setIsLoading?.(false);
           if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
           // Kick off NWC connects in parallel; same fire-and-forget

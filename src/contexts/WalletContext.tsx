@@ -428,13 +428,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Migrate legacy single-wallet data — now safely runs against
         // the correct per-account key.
         await walletStorage.migrateLegacy();
-        if (!isStartupCurrent()) return;
 
-        // Re-check onboarding after migration (migration sets it)
+        // Re-check onboarding after migration (migration sets it). The
+        // onboarding flag isn't per-account, so this runs even if the
+        // identity changed while migrating.
         if (!onboarded) {
           const onboardedAfterMigration = await walletStorage.isOnboarded();
           setIsOnboarded(onboardedAfterMigration);
         }
+        if (!isStartupCurrent()) return;
 
         // Distinguish new-install vs upgrade for the high-value-send
         // confirmation default — runs after migrateLegacy so the install-
@@ -592,19 +594,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
           }),
         );
-
-        // Attempt to recover any pending Boltz swaps (e.g. reverse swap
-        // claims that were interrupted by pay_invoice timeout or app crash).
-        // Runs in background so it doesn't block UI.
-        swapRecoveryService.recoverPendingSwaps().catch((e) => {
-          console.warn('[SwapRecovery] Background recovery failed:', e);
-        });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
         if (!isStartupCurrent()) return;
         // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
         setWalletsHydrated(true);
         setIsLoading(false);
+      } finally {
+        // Attempt to recover any pending Boltz swaps (e.g. reverse swap
+        // claims that were interrupted by pay_invoice timeout or app crash).
+        // Runs in background so it doesn't block UI. The swap index is global,
+        // not per identity, so this must run even when an identity switch
+        // (e.g. auto-login landing mid-startup) cut the hydration above short.
+        swapRecoveryService.recoverPendingSwaps().catch((e) => {
+          console.warn('[SwapRecovery] Background recovery failed:', e);
+        });
       }
     })();
     // Mount-once startup. `hydrateSeenReceipts` is a stable useCallback; adding

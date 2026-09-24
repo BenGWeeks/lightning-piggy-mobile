@@ -33,6 +33,9 @@ export function useNwcConnectionWatchdog(
       try {
         for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
           if (!isCurrent()) return;
+          // A handshake already in flight (startup connect, payInvoice's
+          // publish-failure reconnect) must not be superseded by the tick.
+          if (nwcService.isConnectionInProgress(w.id)) continue;
           if (!nwcService.isWalletConnected(w.id) && !nwcService.isRelayInCooldown(w.id)) {
             // Relay unresponsive (dead / hung) and not currently parked — try to
             // (re)connect, which re-probes via its initial getBalance. The
