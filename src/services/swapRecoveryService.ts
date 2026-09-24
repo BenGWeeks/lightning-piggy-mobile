@@ -579,9 +579,8 @@ async function recoverSwap(swapId: string): Promise<void> {
   // Query Boltz status. Timed fetch — the recovery pass is single-flight, so
   // a hung request here would block every future recovery trigger (startup,
   // pull-to-refresh, retry) for the whole session.
-  const res = await boltzService.fetchWithTimeout(
-    `${await getSwapBackendForId(swapId)}/swap/${swapId}`,
-  );
+  const backend = await getSwapBackendForId(swapId);
+  const res = await boltzService.fetchWithTimeout(`${backend}/swap/${swapId}`);
   if (!res.ok) {
     console.warn(`[SwapRecovery] Boltz returned ${res.status} for ${swapId}`);
     if (res.status === 404) {
@@ -656,10 +655,18 @@ async function recoverSwap(swapId: string): Promise<void> {
       return;
     }
 
-    const txId = data.transaction?.id;
-    const txHex = data.transaction?.hex;
-    if (!txId || !txHex) {
-      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup tx id/hex`);
+    let txHex = data.transaction?.hex;
+    // Status frames may omit hex; recover from the original provider's
+    // transaction endpoint, just as the live claim path does. No advertised
+    // transaction id is required: the outpoint is derived from the raw tx.
+    if (typeof txHex !== 'string' || !txHex) {
+      const transaction = await boltzService.fetchWithTimeout(
+        `${backend}/swap/reverse/${swapId}/transaction`,
+      );
+      txHex = transaction.ok ? (await transaction.json()).hex : undefined;
+    }
+    if (typeof txHex !== 'string' || !txHex) {
+      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup transaction hex`);
       if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }

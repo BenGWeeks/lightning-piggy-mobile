@@ -909,8 +909,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         swapQuote.adopt(error.quote);
         const fee = boltzService.calculateSwapFee(currentSats, error.quote);
         Alert.alert(
-          'Swap Fee Changed',
-          `Nothing was sent. The swap fee is now ~${fee.toLocaleString()} sats. Review it and tap Move to continue.`,
+          t('sendSheet.quoteChangedTitle'),
+          t('sendSheet.moveQuoteChanged', { fee: fee.toLocaleString() }),
         );
         return;
       }

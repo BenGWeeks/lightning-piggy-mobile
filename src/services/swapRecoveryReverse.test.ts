@@ -16,6 +16,9 @@ jest.mock('./boltzService', () => ({
 jest.mock('../components/BrandedToast', () => ({ __esModule: true, default: { show: jest.fn() } }));
 import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
+jest.mock('./swapBackendService', () => ({
+  getSwapBackendForId: jest.fn(async () => 'https://private.example/v2'),
+}));
 import { recoverPendingSwaps } from './swapRecoveryService';
 import { claimSwap } from './boltzService';
 bitcoin.initEccLib(ecc);
@@ -92,6 +95,45 @@ it('preserves malformed legacy records rather than deleting claim secrets', asyn
       swapTree: { ...base.swapTree, refundLeaf: { version: 0xc0, output: '51' } },
     }),
   );
+  await recoverPendingSwaps();
+  expect(claimSwap).not.toHaveBeenCalled();
+  expect(mockStore.has(`boltz_swap_${base.id}`)).toBe(true);
+});
+
+it('recovers hex-only status responses without an advertised transaction id', async () => {
+  mockStore.set(`boltz_swap_${base.id}`, JSON.stringify(base));
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ status: 'transaction.confirmed', transaction: { hex: tx.toHex() } }),
+  });
+  await recoverPendingSwaps();
+  expect(claimSwap).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ txId: tx.getId() }),
+    address,
+  );
+});
+it('fetches missing lockup hex from the pinned provider after restart', async () => {
+  mockStore.set(`boltz_swap_${base.id}`, JSON.stringify(base));
+  mockFetch
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'transaction.mempool' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ hex: tx.toHex() }) });
+  await recoverPendingSwaps();
+  expect(mockFetch).toHaveBeenNthCalledWith(
+    2,
+    `https://private.example/v2/swap/reverse/${base.id}/transaction`,
+  );
+  expect(claimSwap).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ txId: tx.getId(), txHex: tx.toHex() }),
+    address,
+  );
+});
+it('preserves secrets when the pinned transaction lookup is unavailable', async () => {
+  mockStore.set(`boltz_swap_${base.id}`, JSON.stringify(base));
+  mockFetch
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'transaction.mempool' }) })
+    .mockResolvedValueOnce({ ok: false });
   await recoverPendingSwaps();
   expect(claimSwap).not.toHaveBeenCalled();
   expect(mockStore.has(`boltz_swap_${base.id}`)).toBe(true);
