@@ -1703,9 +1703,9 @@
     "notificationContentHint": "Cuando está desactivado, las notificaciones te avisan de que llegó un mensaje o un pago pero nunca incluyen los detalles: verás \"Nuevo mensaje\" en lugar del texto y \"Pago recibido\" en lugar del importe, tanto en la pantalla de bloqueo como en el panel de notificaciones. Actívalo para incluir el contenido completo. Predeterminado: desactivado.",
     "showMessagePaymentDetails": "Mostrar detalles de mensajes y pagos",
     "showMessagePaymentDetailsA11y": "Mostrar detalles de mensajes y pagos en las notificaciones",
-    "backgroundNotifications": "Notificaciones de mensajes en segundo plano",
-    "backgroundNotificationsHint": "Cuando está activado, Lightning Piggy sigue vigilando los nuevos mensajes incluso con la app cerrada, así se te notifica en cuanto llega uno, sin usar servicios de Google ni servidores push. Esto muestra una notificación permanente de \"vigilando mensajes\" que no puedes deslizar para descartar y consume más batería porque mantiene una conexión activa con tus relays. Desactívalo para depender de comprobaciones periódicas. Predeterminado: desactivado.",
-    "watchForMessages": "Vigilar mensajes en segundo plano"
+    "backgroundNotifications": "Mensajes y pagos en segundo plano",
+    "backgroundNotificationsHint": "Busca mensajes y comprueba los pagos Lightning entrantes de carteras NWC aproximadamente cada minuto con la app cerrada. Sin servicios de Google ni servidor push. Muestra una notificación persistente y consume más batería. Para recibir avisos en reposo, permite el uso de batería sin restricciones en los ajustes de Android. Requiere acceso al historial de la cartera. No vigila pagos on-chain. Predeterminado: desactivado.",
+    "watchForMessages": "Vigilar mensajes y pagos en segundo plano"
   },
   "sendAmountSection": {
     "fixedAmount": "Cantidad fija",

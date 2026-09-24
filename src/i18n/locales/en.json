@@ -1703,9 +1703,9 @@
     "notificationContentHint": "When OFF, notifications tell you a message or payment arrived but never include the details — you'll see \"New message\" rather than the text, and \"Payment received\" rather than the amount, both on the lock screen and in the notification shade. Turn ON to include the full content. Default: OFF.",
     "showMessagePaymentDetails": "Show message & payment details",
     "showMessagePaymentDetailsA11y": "Show message and payment details in notifications",
-    "backgroundNotifications": "Background message notifications",
-    "backgroundNotificationsHint": "When ON, Lightning Piggy keeps watching for new messages even when the app is closed, so you're notified the moment one arrives — no Google services or push server involved. This shows a permanent \"watching for messages\" notification you can't swipe away, and uses extra battery because it holds a live connection to your relays. Turn OFF to rely on periodic checks instead. Default: OFF.",
-    "watchForMessages": "Watch for messages in the background"
+    "backgroundNotifications": "Background messages and payments",
+    "backgroundNotificationsHint": "Watch for messages and check incoming NWC Lightning payments about once a minute while the app is closed. No Google services or push server. Shows a persistent status notification and uses extra battery. For reliable delivery while idle, allow Unrestricted battery usage in Android app settings. Requires wallet transaction-history access. On-chain payments are not monitored. Default: OFF.",
+    "watchForMessages": "Watch for messages and payments in the background"
   },
   "sendAmountSection": {
     "fixedAmount": "Fixed amount",

@@ -1,0 +1,89 @@
+= Android background payment notifications
+
+Android's existing foreground message-watch service also hosts an incoming
+NWC Lightning payment monitor. It uses the wallet's configured Nostr relay,
+without FCM, Google Play services, a push server, or a new spending permission.
+
+== Enable
+
+In Account → Security, enable *Background messages and payments* and grant
+notification permission. The preference remains opt-in and defaults to off.
+An existing enabled background-message preference also enables payment checks
+after upgrading. The persistent status notification names both functions.
+
+For delivery while the phone is idle, allow Lightning Piggy unrestricted
+battery usage in Android app settings. Keep network access available; wallets
+using a private relay also require their VPN connection. Force-stop, a stopped
+Android user profile, network outages and OS power restrictions can prevent
+checks. This is periodic checking, not an instant push-delivery guarantee.
+
+== Scope and cadence
+
+* NWC Lightning wallets belonging to the active identity only. On-chain wallets
+  and iOS background payment delivery are not implemented by this change.
+* Each pass runs after the previous pass plus 60 seconds. Requests are sequential,
+  individually limited to 25 seconds, and use separate connections so the
+  foreground Send/Receive connection is untouched. Only `list_transactions`
+  is requested; its permission must be enabled in the wallet connection.
+* No wallet network requests while the UI is active. Background passes check
+  settled incoming transactions. The SDK's WebLN wrapper already converts
+  NIP-47 millisatoshis to whole satoshis, so the alert shows the same amount
+  as the app's own receive detector.
+* Each request inspects up to 100 incoming transactions. Newly enabled wallets
+  establish a start timestamp to suppress old-history floods. Later checks
+  catch up at most 24 hours. This bounded history is for personal wallets;
+  high-volume wallets and older transactions outside that window can be missed.
+* An invoice created earlier but settled recently qualifies if returned in the
+  bounded history. We do not filter requests by invoice creation timestamp.
+* Revoked history access or unreachable wallets are isolated; other wallets
+  continue and the next pass retries. SDK errors/credentials are not logged.
+
+== Handover, privacy and lifecycle
+
+The background monitor and `PaymentNotifier` share persisted notification
+claims scoped to identity, wallet and payment hash (up to 2,048 per wallet).
+Concurrent deliveries serialize. Reopening the app does not re-announce a
+claimed payment. When several payments land in one foreground refresh, the app
+announces only the newest and claims the rest as seen, so backgrounding the app
+does not raise late alerts for them. The notification privacy setting still
+hides amounts by default; background notifications do not include invoice
+descriptions.
+
+Claims are persisted before scheduling with the OS. A failed scheduling attempt
+releases the claim for retry; a process crash between claim persistence and
+scheduling can lose that alert. Exactly-once delivery across an OS crash is not
+promised. Wallet transaction history remains authoritative.
+
+Stopping the service aborts in-flight requests and timers. Results from a removed
+wallet, changed credential, disabled preference or switched identity are dropped,
+and that scope is re-checked per delivery, not just once per response.
+The worker reads explicitly scoped wallet lists without changing UI storage scope.
+
+Payment monitoring does not depend on the message subscription. An identity with
+NWC wallets but no message relays keeps the service alive for payment checks
+alone; an account switch re-evaluates both watchers; the service stops only when
+neither can run. While the service is up the payment check always runs, so an
+NWC wallet connected later is picked up on the next pass. A pass that finds no
+wallet never stops the service while a message watch is armed or re-arming; if
+no message watch is armed, it first tries to arm one. Turning the watch off
+or switching accounts cancels any arm or service decision still in progress
+for the previous session, so none of them can resubscribe, restart payment
+checks, or stop the newer session after the fact. A refused OS post
+releases the in-app dedupe so the next wallet refresh retries, while a payment
+already claimed by the service is not re-queried.
+
+== Device acceptance check (required before release)
+
+. Install a build containing this PR; enable the setting and unrestricted battery.
+. Background the app, lock the phone, and send a small payment from another wallet.
+. Confirm one OS payment notification without opening the app; verify its amount
+  with content enabled and generic wording with content disabled.
+. Reopen the app and confirm no duplicate alert. Repeat after swiping it away
+  from Recents and after a reboot followed by first unlock.
+. Repeat with the screen idle, Wi-Fi/mobile transition, VPN reconnect, an expired
+  NWC history permission, and an account switch while a request is pending.
+. Disable the setting and confirm the service stops. Confirm Send/Receive still
+  works while background monitoring is enabled.
+
+Unit tests simulate these lifecycle boundaries; they do not replace an actual
+GrapheneOS device run. No real payment is made by the automated tests.
