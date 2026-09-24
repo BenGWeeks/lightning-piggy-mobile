@@ -160,7 +160,14 @@ async function getBlockchain(): Promise<Blockchain> {
 /** Independent chain tip for validating swap refund deadlines; no wallet required. */
 export async function getBlockHeight(): Promise<number> {
   const chain = await getBlockchain();
-  return chain.getHeight();
+  try {
+    return await chain.getHeight();
+  } catch (error) {
+    // A suspended app or changed network can leave the cached socket dead.
+    // Do not discard a newer connection installed by a concurrent request.
+    if (blockchain === chain) blockchain = null;
+    throw error;
+  }
 }
 
 /**
