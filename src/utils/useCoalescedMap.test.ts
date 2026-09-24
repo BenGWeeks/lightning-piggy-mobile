@@ -87,6 +87,39 @@ describe('useCoalescedMap', () => {
     expect(result.current.map.get('x')).toEqual({ v: 2, ts: 200 });
   });
 
+  it('keeps the committed Map identity when a replayed batch is all rejected', () => {
+    const { result } = renderHook(() =>
+      useCoalescedMap<{ ts: number }>({
+        flushMs: 100,
+        flushThreshold: 2,
+        shouldReplace: (existing, incoming) => incoming.ts > existing.ts,
+      }),
+    );
+    act(() => {
+      result.current.enqueue('a', { ts: 1 });
+      result.current.enqueue('b', { ts: 1 });
+    });
+    const committed = result.current.map;
+    // A relay replaying the same events (e.g. MapScreen resubscribing on
+    // refocus) hits the threshold but must not commit an identical clone —
+    // returning `prev` lets React bail out and keeps consumers' memos
+    // (MapScreen's useMapPins) cached. Repeat to cover successive batches.
+    for (let i = 0; i < 3; i++) {
+      act(() => {
+        result.current.enqueue('a', { ts: 1 });
+        result.current.enqueue('b', { ts: 0 });
+      });
+      expect(result.current.map).toBe(committed);
+    }
+    // A genuinely newer event in a later batch still commits.
+    act(() => {
+      result.current.enqueue('a', { ts: 2 });
+      result.current.flush();
+    });
+    expect(result.current.map).not.toBe(committed);
+    expect(result.current.map.get('a')).toEqual({ ts: 2 });
+  });
+
   it('flush() drains the pending buffer immediately', () => {
     const { result } = renderHook(() => useCoalescedMap<number>({ flushMs: 5000 }));
     act(() => {

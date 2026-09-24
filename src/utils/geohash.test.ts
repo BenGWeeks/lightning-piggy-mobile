@@ -197,3 +197,105 @@ describe('geohashNeighbours', () => {
     expect(n).toContain('b');
   });
 });
+
+describe('geohashPrefixesForBbox', () => {
+  const { geohashPrefixesForBbox, encodeGeohash: enc } = jest.requireActual('./geohash');
+
+  it('covers a city-scale bbox at precision 5 within budget', () => {
+    // ~10 km around Longstanton, Cambridge.
+    const tiles = geohashPrefixesForBbox({
+      minLat: 52.26,
+      maxLat: 52.31,
+      minLon: 0.02,
+      maxLon: 0.07,
+    });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    expect(tiles.every((t: string) => t.length === 5)).toBe(true);
+    // The user's own tile must be in the covering set.
+    expect(tiles).toContain(enc(52.2836, 0.0439, 5));
+  });
+
+  // Every tile under a grid of sample points must be in the covering set.
+  const expectFullCoverage = (
+    tiles: string[],
+    b: { minLat: number; maxLat: number; minLon: number; maxLon: number },
+    precision: number,
+  ) => {
+    for (let i = 0; i <= 10; i += 1) {
+      for (let j = 0; j <= 10; j += 1) {
+        const lat = b.minLat + ((b.maxLat - b.minLat) * i) / 10;
+        const lon = b.minLon + ((b.maxLon - b.minLon) * j) / 10;
+        expect(tiles).toContain(enc(lat, lon, precision));
+      }
+    }
+  };
+
+  it('coarsens to precision 4 for a metro-scale bbox that overflows precision 5', () => {
+    // ~0.5° × 0.2° over central London: ~5 × 12 precision-5 cells (over
+    // budget) but a 2 × 2 block at precision 4 (0.3516° × 0.1758° cells).
+    const bbox = { minLat: 51.4, maxLat: 51.6, minLon: -0.3, maxLon: 0.2 };
+    const tiles = geohashPrefixesForBbox(bbox);
+    expect(tiles).toHaveLength(4);
+    expect(tiles.every((t: string) => t.length === 4)).toBe(true);
+    expectFullCoverage(tiles, bbox, 4);
+  });
+
+  it('coarsens to precision 3 for a region-scale bbox that overflows precision 4', () => {
+    // ~2.4° × 2.6° over the central Netherlands: ~14 precision-4 rows
+    // (over budget) but a 2 × 2 block at precision 3 (1.40625° cells).
+    const bbox = { minLat: 51.0, maxLat: 53.4, minLon: 4.3, maxLon: 6.9 };
+    const tiles = geohashPrefixesForBbox(bbox);
+    expect(tiles).toHaveLength(4);
+    expect(tiles.every((t: string) => t.length === 3)).toBe(true);
+    expectFullCoverage(tiles, bbox, 3);
+  });
+
+  it('falls back to centre + neighbours for a Denmark-sized bbox that overflows precision 3', () => {
+    // Roughly Denmark: 4 × 5 = 20 precision-3 cells, over the 9-tile
+    // budget, so this takes centreFallback rather than the coarsening loop.
+    const tiles = geohashPrefixesForBbox({ minLat: 54.5, maxLat: 57.8, minLon: 8, maxLon: 12.7 });
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    expect(tiles.every((t: string) => t.length === 3)).toBe(true);
+    expect(tiles[0]).toBe(enc((54.5 + 57.8) / 2, (8 + 12.7) / 2, 3));
+    // Johnnymoonshine's Livø Havn Piglet (56.887, 9.099) sits in the
+    // centre tile's neighbour ring.
+    expect(tiles).toContain(enc(56.887, 9.099, 3));
+  });
+
+  it('falls back to centre + neighbours at min precision for a world bbox', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: -60, maxLat: 75, minLon: -170, maxLon: 170 });
+    expect(tiles.length).toBeLessThanOrEqual(9);
+    expect(tiles.every((t: string) => t.length === 3)).toBe(true);
+  });
+
+  it('never returns tiles below precision 3 (publishers only tag 3..9)', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: 30, maxLat: 70, minLon: -20, maxLon: 40 });
+    expect(tiles.every((t: string) => t.length >= 3)).toBe(true);
+  });
+});
+
+describe('geohashPrefixesForBbox edge cases (Copilot review on #1069)', () => {
+  const { geohashPrefixesForBbox, encodeGeohash: enc } = jest.requireActual('./geohash');
+
+  it('returns the containing tile for a degenerate bbox exactly on a grid boundary', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: 0, maxLat: 0, minLon: 0, maxLon: 0 });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles).toContain(enc(0, 0, 5));
+  });
+
+  it('falls back around a wrapped mid-longitude for an antimeridian-crossing bbox', () => {
+    // minLon > maxLon: crosses the antimeridian. Naive averaging would
+    // centre on lon 0; the wrapped midpoint is ±180.
+    const tiles = geohashPrefixesForBbox({ minLat: -10, maxLat: 10, minLon: 170, maxLon: -170 });
+    expect(tiles.length).toBeGreaterThan(0);
+    expect(tiles[0]).toBe(enc(0, -180, 3));
+    expect(tiles).not.toContain(enc(0, 0, 3));
+  });
+
+  it('keeps the centre tile first in the fallback so a small maxTiles cannot drop it', () => {
+    const tiles = geohashPrefixesForBbox({ minLat: -60, maxLat: 75, minLon: -170, maxLon: 170 }, 1);
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toBe(enc(7.5, 0, 3));
+  });
+});
