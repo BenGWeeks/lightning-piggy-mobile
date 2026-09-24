@@ -134,5 +134,42 @@ describe('mapNwcTransactions', () => {
       expect(r.swapId).toBeUndefined();
       expect(r.description).toBe('Received');
     });
+
+    it('replaces a settled swap placeholder with its real leg, keeping unrelated pending rows', () => {
+      mockGetSwapMeta.mockImplementation((k: string) =>
+        k === H1 ? { swapId: 'rev1', swapType: 'reverse' } : undefined,
+      );
+      const now = Math.floor(Date.now() / 1000);
+      const placeholder = (swapId: string): WalletTransaction => ({
+        type: 'outgoing',
+        amount: 30000,
+        description: 'Boltz swap in progress',
+        created_at: now - 60,
+        settled_at: null,
+        swapId,
+        swapType: 'reverse',
+        optimistic: true,
+      });
+      const pendingZap: WalletTransaction = {
+        type: 'outgoing',
+        amount: 21,
+        paymentHash: H2,
+        created_at: now - 5,
+        optimistic: true,
+      };
+      const txs = mapNwcTransactions(
+        [raw({ type: 'outgoing', amount: 30000, payment_hash: H1, settled_at: now })],
+        [placeholder('rev1'), placeholder('rev2'), pendingZap],
+      );
+      expect(txs.filter((t) => t.swapId === 'rev1')).toEqual([
+        expect.objectContaining({
+          paymentHash: H1,
+          description: 'Boltz swap — sent via Lightning',
+        }),
+      ]);
+      expect(txs).toContainEqual(placeholder('rev2'));
+      expect(txs).toContainEqual(pendingZap);
+      expect(txs).toHaveLength(3);
+    });
   });
 });

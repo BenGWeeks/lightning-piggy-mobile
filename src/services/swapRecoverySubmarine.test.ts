@@ -89,7 +89,7 @@ beforeEach(async () => {
   setSubmarineRefundHandler(null);
   // Default: a lockup output is parseable ⇒ the probe reads "funded". Tests
   // exercising the unfunded/indeterminate paths override the probe response.
-  mockExtractLockup.mockReturnValue({ vout: 0, amount: 50_000 });
+  mockExtractLockup.mockReturnValue({ txId: 'lock-tx', vout: 0, amount: 50_000 });
   // Empty the reverse index so runRecoveryPass reaches the submarine branch.
   mockStore.set('boltz_swap_index', JSON.stringify([]));
   seed();
@@ -184,6 +184,47 @@ describe('submarine swap recovery', () => {
 
       expect(mockToastShow).not.toHaveBeenCalled();
       expect(mockStore.has(KEY)).toBe(true);
+    });
+
+    it('DEFERS when the advertised txid disagrees with the txid of the returned hex', async () => {
+      const handler = jest.fn();
+      setSubmarineRefundHandler(handler);
+      // The hex parses to `lock-tx` (mocked extractor), but the server claims
+      // a different transaction — never treat that response as funded.
+      route(
+        'invoice.failedToPay',
+        () =>
+          ({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ id: 'attacker-tx', hex: 'deadbeef' }),
+          }) as unknown as Response,
+      );
+
+      await recoverPendingSwaps();
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(mockToastShow).not.toHaveBeenCalled();
+      expect(mockStore.has(KEY)).toBe(true);
+      expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([SWAP_ID]);
+    });
+
+    it('treats a lockup without an advertised txid as funded via the hex-derived txid', async () => {
+      const handler = jest.fn().mockResolvedValue(undefined);
+      setSubmarineRefundHandler(handler);
+      route(
+        'invoice.failedToPay',
+        () =>
+          ({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ hex: 'deadbeef' }),
+          }) as unknown as Response,
+      );
+
+      await recoverPendingSwaps();
+
+      expect(handler).toHaveBeenCalledTimes(1);
     });
 
     it('retires a refunded swap silently (already resolved on-chain), without probing', async () => {

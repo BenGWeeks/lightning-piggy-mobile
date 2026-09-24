@@ -134,5 +134,5 @@ export function verifyReverseLockup(
   const output = extractLockupFromTxHex(txHex, swap.lockupAddress);
   if (!output || output.amount !== swap.onchainAmount)
     throw new Error('Reverse lockup does not pay the verified address and amount');
-  return { txId: tx.getId(), ...output, txHex };
+  return { ...output, txId: tx.getId(), txHex };
 }

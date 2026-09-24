@@ -49,3 +49,29 @@ it('leaves fees unavailable when the backend fails', async () => {
   expect(result.current.fees).toEqual(reverse);
   expect(result.current.failed).toBe(false);
 });
+it('adopts the refreshed quote from a stale-quote rejection without refetching', async () => {
+  jest.mocked(getReverseSwapFees).mockReset().mockResolvedValueOnce(reverse);
+  const { result } = renderHook(() => useTransferSwapFees('ln-to-onchain', true));
+  await act(async () => {});
+  const refreshed: SwapFees = { ...reverse, pairHash: 'requoted', percentage: 2 };
+  await act(async () => result.current.adopt(refreshed));
+  expect(result.current.fees).toEqual(refreshed);
+  expect(result.current.loading).toBe(false);
+  expect(getReverseSwapFees).toHaveBeenCalledTimes(1);
+});
+it('ignores an adopt captured before the direction changed', async () => {
+  jest.mocked(getReverseSwapFees).mockResolvedValue(reverse);
+  jest.mocked(getSubmarineSwapFees).mockResolvedValue(submarine);
+  const { result, rerender } = renderHook<
+    ReturnType<typeof useTransferSwapFees>,
+    { direction: string }
+  >(({ direction }) => useTransferSwapFees(direction, true), {
+    initialProps: { direction: 'ln-to-onchain' },
+  });
+  await act(async () => {});
+  const staleAdopt = result.current.adopt;
+  rerender({ direction: 'onchain-to-ln' });
+  await act(async () => {});
+  await act(async () => staleAdopt({ ...reverse, pairHash: 'late' }));
+  expect(result.current.fees).toEqual(submarine);
+});

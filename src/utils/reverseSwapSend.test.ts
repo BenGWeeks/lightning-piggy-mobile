@@ -108,13 +108,13 @@ describe('executeReverseSwap — #891 error contract', () => {
     expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
   });
 
-  it('rethrows AbortError on a PRE-commit user cancel', async () => {
+  it('keeps a dispatched payment in flight when cancelled before lockup', async () => {
     neverLockup();
     const payInvoice = jest.fn(async () => {
       throw named('AbortError', 'cancelled');
     });
     await expect(executeReverseSwap(params({ payInvoice }))).rejects.toMatchObject({
-      name: 'AbortError',
+      name: 'SwapSettlingError',
     });
   });
 
@@ -158,6 +158,21 @@ describe('executeReverseSwap — hold invoice', () => {
       .invocationCallOrder[0];
     expect(persistAt).toBeLessThan(indexAt);
     expect(indexAt).toBeLessThan(payInvoice.mock.invocationCallOrder[0]);
+  });
+
+  it('surfaces a stale-quote rejection with the refreshed quote and never pays', async () => {
+    const refreshed = { pairHash: 'h2', percentage: 1, minerFee: 2, minAmount: 1, maxAmount: 9 };
+    const rejection = Object.assign(new Error('Swap fees or server changed.'), {
+      name: 'QuoteChangedError',
+      quote: refreshed,
+    });
+    (boltzService.createReverseSwap as jest.Mock).mockRejectedValueOnce(rejection);
+    const payInvoice = jest.fn(async () => ({ preimage: 'preimage-hex' }));
+    await expect(executeReverseSwap(params({ payInvoice }))).rejects.toBe(rejection);
+    expect(payInvoice).not.toHaveBeenCalled();
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(swapRecoveryService.registerPendingSwap).not.toHaveBeenCalled();
+    expect(boltzService.createReverseSwap).toHaveBeenCalledTimes(1);
   });
 
   it('completes when the payment only settles after the claim reveals the preimage', async () => {

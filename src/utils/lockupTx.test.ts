@@ -22,10 +22,19 @@ function buildTxHex(): string {
 
 describe('extractLockupFromTxHex', () => {
   it('finds the vout + amount paying the lockup address (not output 0)', () => {
-    expect(extractLockupFromTxHex(buildTxHex(), LOCKUP_ADDR)).toEqual({
+    const hex = buildTxHex();
+    expect(extractLockupFromTxHex(hex, LOCKUP_ADDR)).toEqual({
+      txId: bitcoin.Transaction.fromHex(hex).getId(),
       vout: 1,
       amount: 82_405,
     });
+  });
+
+  it('derives the txid from the raw tx itself', () => {
+    const lockup = extractLockupFromTxHex(buildTxHex(), LOCKUP_ADDR)!;
+    // Display-order hex of the double-SHA256 of the serialized tx.
+    const hash = bitcoin.crypto.hash256(Buffer.from(buildTxHex(), 'hex'));
+    expect(lockup.txId).toBe(Buffer.from(hash).reverse().toString('hex'));
   });
 
   it('returns null when no output pays the address, or on garbage hex', () => {

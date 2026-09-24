@@ -191,6 +191,24 @@ export function calculateSwapFee(amountSats: number, fees: SwapFees): number {
 }
 
 /**
+ * The approved reverse-swap quote no longer matches the server's. Thrown before
+ * any swap is created or paid; `quote` is the server's current quote for the
+ * caller to show — the user must review it and retry explicitly.
+ */
+export class QuoteChangedError extends Error {
+  readonly quote: SwapFees;
+  constructor(quote: SwapFees) {
+    super('Swap fees or server changed. Review the new quote before sending.');
+    this.name = 'QuoteChangedError';
+    this.quote = quote;
+  }
+}
+
+export function isQuoteChangedError(error: unknown): error is QuoteChangedError {
+  return (error as Error)?.name === 'QuoteChangedError' && !!(error as QuoteChangedError).quote;
+}
+
+/**
  * Create a reverse submarine swap: Lightning → on-chain.
  *
  * Returns swap details including the Lightning invoice to pay and the
@@ -222,7 +240,7 @@ export async function createReverseSwap(
       approvedQuote.pairHash !== fees.pairHash ||
       approvedQuote.minerFee < fees.minerFee)
   )
-    throw new Error('Swap fees or server changed. Review the new quote before sending.');
+    throw new QuoteChangedError(fees);
   if (!fees.pairHash || fees.lockupMinerFee === undefined)
     throw new Error('Incomplete reverse swap fee quote');
   if (amountSats < fees.minAmount || amountSats > fees.maxAmount)
@@ -544,12 +562,15 @@ export async function getSubmarineSwapLockup(
     const res = await fetchWithTimeout(`${backend}/swap/submarine/${swapId}/transaction`);
     if (!res.ok) return null;
     const data = await res.json();
-    const txId = data.transactionId ?? data.id;
     const txHex = data.hex;
-    if (!txId || typeof txHex !== 'string' || !txHex) return null;
+    if (typeof txHex !== 'string' || !txHex) return null;
     const lockup = extractLockupFromTxHex(txHex, lockupAddress);
     if (!lockup) return null;
-    return { txId, vout: lockup.vout, amount: lockup.amount };
+    // Refund the outpoint the raw tx actually creates; an advertised id that
+    // disagrees with the hex means the response can't be trusted at all.
+    const advertisedTxId = data.transactionId ?? data.id;
+    if (advertisedTxId && String(advertisedTxId).toLowerCase() !== lockup.txId) return null;
+    return { txId: lockup.txId, vout: lockup.vout, amount: lockup.amount };
   } catch {
     return null;
   }

@@ -7,6 +7,8 @@ import {
   getReverseSwapFees,
   getSubmarineSwapFees,
   getSubmarineSwapLockup,
+  isQuoteChangedError,
+  QuoteChangedError,
 } from './boltzService';
 import { getSwapBackendForId } from './swapBackendService';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
@@ -40,7 +42,7 @@ jest.mock('./onchainService', () => ({
 }));
 jest.mock('../utils/boltzVerify', () => ({ verifyReverseSwapInvoice: jest.fn() }));
 jest.mock('../utils/lockupTx', () => ({
-  extractLockupFromTxHex: () => ({ vout: 0, amount: 50000 }),
+  extractLockupFromTxHex: () => ({ txId: 'tx', vout: 0, amount: 50000 }),
 }));
 
 const originalFetch = global.fetch;
@@ -136,6 +138,46 @@ it.each(['reverse', 'submarine'])(
     if (direction === 'reverse') expect(verifyReverseSwapInvoice).toHaveBeenCalled();
   },
 );
+it('rejects a stale approved reverse quote with the refreshed quote before creating a swap', async () => {
+  mockFetch.mockResolvedValueOnce(quote);
+  const approved = await getReverseSwapFees();
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      BTC: {
+        BTC: {
+          hash: 'requoted',
+          limits: { minimal: 1, maximal: 100000 },
+          fees: { percentage: 1, minerFees: { claim: 2, lockup: 5 } },
+        },
+      },
+    }),
+  });
+  const error = await createReverseSwap(
+    'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    50000,
+    approved,
+  ).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(QuoteChangedError);
+  expect(isQuoteChangedError(error)).toBe(true);
+  expect((error as QuoteChangedError).quote).toEqual(
+    expect.objectContaining({
+      pairHash: 'requoted',
+      percentage: 1,
+      lockupMinerFee: 5,
+      backend: 'https://family.example/v2',
+    }),
+  );
+  // Only the two quote GETs — the swap was never created.
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  expect(mockFetch).not.toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ method: 'POST' }),
+  );
+});
+it('does not classify other swap errors as a changed quote', () => {
+  expect(isQuoteChangedError(new Error('Swap fees or server changed.'))).toBe(false);
+});
 it('does not return a fundable swap when its server cannot be persisted', async () => {
   mockFetch
     .mockResolvedValueOnce({
@@ -169,6 +211,22 @@ it('gets refund lockups from the original provider after the setting changes', a
     'https://original.example/v2/swap/submarine/existing/transaction',
     expect.anything(),
   );
+});
+it('refuses a refund lockup whose advertised txid disagrees with the returned hex', async () => {
+  // The mocked hex parses to txid `tx`; the server advertises another one.
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ transactionId: 'attacker-tx', hex: 'abcd' }),
+  });
+  expect(await getSubmarineSwapLockup('existing', 'address')).toBeNull();
+});
+it('takes the refund lockup txid from the hex when none is advertised', async () => {
+  mockFetch.mockResolvedValue({ ok: true, json: async () => ({ hex: 'abcd' }) });
+  expect(await getSubmarineSwapLockup('existing', 'address')).toEqual({
+    txId: 'tx',
+    vout: 0,
+    amount: 50000,
+  });
 });
 
 it('surfaces pinned-provider storage errors instead of reporting an absent refund', async () => {

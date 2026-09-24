@@ -782,12 +782,19 @@ async function probeSubmarineFunding(swap: PersistedSubmarineSwap): Promise<Subm
   if (!res.ok) return { state: 'unknown' };
   try {
     const data = await res.json();
-    const txId = data.transactionId ?? data.id;
     const txHex = data.hex;
-    if (!txId || typeof txHex !== 'string' || !txHex) return { state: 'unknown' };
+    if (typeof txHex !== 'string' || !txHex) return { state: 'unknown' };
     const lockup = extractLockupFromTxHex(txHex, swap.address);
     if (!lockup) return { state: 'unknown' };
-    return { state: 'funded', lockup: { txId, vout: lockup.vout, amount: lockup.amount } };
+    // Use the txid derived from the hex; an advertised id that disagrees is an
+    // untrustworthy response, so defer rather than act on it.
+    const advertisedTxId = data.transactionId ?? data.id;
+    if (advertisedTxId && String(advertisedTxId).toLowerCase() !== lockup.txId)
+      return { state: 'unknown' };
+    return {
+      state: 'funded',
+      lockup: { txId: lockup.txId, vout: lockup.vout, amount: lockup.amount },
+    };
   } catch {
     return { state: 'unknown' };
   }

@@ -17,6 +17,7 @@ export interface ReverseSwapParams {
   /** Usually WalletContext's `payInvoiceForWallet`. */
   payInvoice: PayInvoiceFn;
   onReplyTimeout: () => void;
+  onPaymentDispatched?: () => void;
 }
 
 /**
@@ -35,5 +36,12 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
     params.approvedQuote,
   );
   const persisted = await persistReverseSwap(swap, destinationAddress);
-  await payAndClaimReverseSwap({ persisted, walletId, payInvoice, signal, onReplyTimeout });
+  await payAndClaimReverseSwap({
+    persisted,
+    walletId,
+    payInvoice,
+    signal,
+    onReplyTimeout,
+    onPaymentDispatched: params.onPaymentDispatched,
+  });
 }

@@ -1765,6 +1765,7 @@
     "loadingFees": "Cargando comisiones...",
     "swapFee": "Comisión del swap: ~{{fee}} sats · ~10-60 min",
     "feeUnavailable": "Estimación de comisión no disponible",
+    "quoteChanged": "No se envió nada. La comisión del swap ahora es de ~{{fee}} sats. Revísala y toca Enviar para continuar.",
     "zapMessagePlaceholder": "Mensaje del zap (opcional)",
     "commentPlaceholder": "Comentario (opcional)",
     "zapMessageLabel": "Mensaje del zap",

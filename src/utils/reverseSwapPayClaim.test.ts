@@ -321,7 +321,7 @@ describe('payAndClaimReverseSwap — cancellation', () => {
     expect(waitForLockup).not.toHaveBeenCalled();
   });
 
-  it('forwards a pre-lockup cancel to the payment and rethrows its AbortError', async () => {
+  it('keeps a dispatched hold invoice in flight on pre-lockup cancellation', async () => {
     const { state, payInvoice } = holdInvoiceSwap();
     const ctrl = new AbortController();
     const done = run({ payInvoice, signal: ctrl.signal });
@@ -329,8 +329,10 @@ describe('payAndClaimReverseSwap — cancellation', () => {
     ctrl.abort();
     expect(state.paySignal?.aborted).toBe(true);
     state.failPayment(named('AbortError', 'Payment cancelled'));
-    await expect(done).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(done).rejects.toMatchObject({ name: 'SwapSettlingError' });
     expect(claimSwap).not.toHaveBeenCalled();
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(payInvoice).toHaveBeenCalledTimes(1);
   });
 
   it('a cancel after the lockup is verified still claims (committed)', async () => {

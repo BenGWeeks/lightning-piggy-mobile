@@ -90,6 +90,7 @@ export interface PayAndClaimParams {
   payInvoice: PayInvoiceFn;
   signal?: AbortSignal;
   onReplyTimeout?: () => void;
+  onPaymentDispatched?: () => void;
   onStage?: (stage: ReverseSwapStage) => void;
   paymentSettleGraceMs?: number;
 }
@@ -123,7 +124,7 @@ const detailOf = (e: unknown) => (e instanceof Error ? e.message || e.toString()
  * outcome to the right overlay state instead of a blanket "Payment failed":
  *   - `ReplyTimeoutError` — rethrown as-is. The wallet's pay reply was
  *     ambiguous; the payment status is UNKNOWN and may have settled.
- *   - `AbortError` — rethrown as-is (user cancelled before commit).
+ *   - `AbortError` — only before payment dispatch; later cancellation is ambiguous.
  *   - `SwapSettlingError` — the LN side committed but the lockup/claim
  *     failed; recovery finishes it → "still settling".
  *   - `Error('Boltz swap failed: …')` — a genuine pre-commit failure
@@ -146,6 +147,7 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
   const lockupWait = settle(() =>
     boltzService.waitForLockup(swap, REVERSE_LOCKUP_TIMEOUT_MS, payCtrl.signal),
   );
+  params.onPaymentDispatched?.();
   const payment = settle(() =>
     params.payInvoice(params.walletId, swap.invoice, {
       signal: payCtrl.signal,
@@ -160,8 +162,10 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     // ReplyTimeoutError keeps its name so the caller routes it to the
     // "still in flight" overlay (ambiguous pay outcome, #891).
     if (isReplyTimeoutError(e)) return e;
-    // Pre-commit user cancel → caller's AbortError handler (silent close).
-    if ((e as Error)?.name === 'AbortError' || signal?.aborted) return e;
+    // Once dispatched, aborting the reply cannot recall a held HTLC. Keep
+    // recovery and show an in-flight outcome rather than inviting a retry.
+    if ((e as Error)?.name === 'AbortError' || signal?.aborted)
+      return new SwapSettlingError('Payment may still settle; the saved swap will be recovered.');
     return new Error(`Boltz swap failed: ${detailOf(e)}`);
   };
 

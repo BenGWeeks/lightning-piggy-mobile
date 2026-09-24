@@ -4,6 +4,51 @@ import type { WalletTransaction } from '../types/wallet';
 // let the optimistic placeholder linger forever — age it out after an hour.
 const SWAP_PENDING_MAX_AGE_S = 60 * 60;
 
+// Swaps whose final outcome is known (settled, or failed before any funds
+// left). Their swapId-tagged placeholders are dropped on the next refresh even
+// if the real leg hasn't synced or can't be tagged, so a finished swap never
+// keeps showing "in progress" beside its real row. In-memory and bounded: after
+// a relaunch the swapId match on the real leg (or the 1h age-out) takes over.
+const RESOLVED_SWAP_CAP = 200;
+const resolvedSwapIds = new Set<string>();
+
+/** Mark a swap's final status as known so its optimistic placeholders are
+ *  reconciled away on the next transaction-list refresh. Exact swapId only —
+ *  untagged or other swaps' placeholders are untouched. */
+export function markSwapPlaceholdersResolved(swapId: string): void {
+  resolvedSwapIds.delete(swapId);
+  resolvedSwapIds.add(swapId);
+  while (resolvedSwapIds.size > RESOLVED_SWAP_CAP) {
+    const oldest = resolvedSwapIds.values().next().value;
+    if (oldest === undefined) break;
+    resolvedSwapIds.delete(oldest);
+  }
+}
+
+/** Optimistic placeholders for a swap leg pair, tagged with the swap's stable
+ *  id so the merge supersedes exactly its own rows (#896). Only build these
+ *  once the swap exists — never before creation can still be rejected. */
+export function buildSwapPlaceholders(params: {
+  swapId: string;
+  swapType: NonNullable<WalletTransaction['swapType']>;
+  sentSats: number;
+  receivedSats: number;
+  nowSeconds: number;
+}): { outgoing: WalletTransaction; incoming: WalletTransaction } {
+  const base = {
+    description: 'Boltz swap in progress',
+    created_at: params.nowSeconds,
+    settled_at: null,
+    swapId: params.swapId,
+    swapType: params.swapType,
+    optimistic: true,
+  };
+  return {
+    outgoing: { ...base, type: 'outgoing', amount: params.sentSats },
+    incoming: { ...base, type: 'incoming', amount: params.receivedSats },
+  };
+}
+
 function isOptimisticSwapRow(t: WalletTransaction): boolean {
   return (
     t.optimistic === true &&
@@ -26,7 +71,9 @@ function isOptimisticSwapRow(t: WalletTransaction): boolean {
  * moment its own real leg appears, #895) and otherwise by `type` — but only
  * when there's a *single* optimistic row of that type, so concurrent
  * same-direction swaps aren't all dropped by the first settled leg (#896).
- * Never fuzzy amount/time matching.
+ * A swapId-tagged placeholder is also dropped once its swap is marked
+ * resolved (see `markSwapPlaceholdersResolved`). Never fuzzy amount/time
+ * matching.
  */
 export function preserveOptimisticSwapRows(
   fresh: readonly WalletTransaction[],
@@ -59,7 +106,7 @@ export function preserveOptimisticSwapRows(
   return optimistic.filter((t) => {
     // Prefer exact per-swap matching: drop the placeholder the moment its OWN
     // real leg appears, regardless of how many concurrent swaps are in flight.
-    if (t.swapId != null) return !freshSwapIds.has(t.swapId);
+    if (t.swapId != null) return !freshSwapIds.has(t.swapId) && !resolvedSwapIds.has(t.swapId);
     // Fall back to type matching only when this is the single optimistic row of
     // its type — with multiple concurrent same-direction swaps we can't tell
     // which the fresh leg belongs to, so keep them and let the 1h age-out clear

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getReverseSwapFees, getSubmarineSwapFees, type SwapFees } from '../services/boltzService';
 
 /** Ignore quotes/errors from another direction, hidden sheet, or superseded request. */
@@ -11,6 +11,18 @@ export function useTransferSwapFees(direction: string | null, visible: boolean) 
     failed: boolean;
   } | null>(null);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const latest = useRef({ direction, attempt });
+  latest.current = { direction, attempt };
+  /** Replace the shown quote with one the server just returned (e.g. a stale-quote
+   * rejection). A callback captured before the direction/attempt changed is ignored. */
+  const adopt = useCallback(
+    (fees: SwapFees) => {
+      if (!direction || latest.current.direction !== direction) return;
+      if (latest.current.attempt !== attempt) return;
+      setResult({ direction, attempt, fees, failed: false });
+    },
+    [direction, attempt],
+  );
   const needed = direction === 'ln-to-onchain' || direction === 'onchain-to-ln';
   useEffect(() => {
     setResult(null);
@@ -35,5 +47,6 @@ export function useTransferSwapFees(direction: string | null, visible: boolean) 
     failed: current?.failed ?? false,
     loading: visible && needed && !current,
     retry,
+    adopt,
   };
 }
