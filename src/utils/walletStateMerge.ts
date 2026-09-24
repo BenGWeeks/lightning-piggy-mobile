@@ -1,4 +1,4 @@
-import type { WalletState } from '../types/wallet';
+import type { WalletState, WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 
 /**
  * Apply a partial field update to one wallet in the `wallets` array, with a
@@ -28,4 +28,25 @@ export function mergeWalletUpdate(
     return prev;
   }
   return prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w));
+}
+
+/**
+ * Merge zap-resolver results (keyed by transaction index) into a transaction
+ * list. Returns `null` when no row's attribution actually changes (#1014): a
+ * forced pass returns null for every unattributed tx it re-checked, and
+ * rewriting those would rebuild the array and re-render every visible row.
+ */
+export function applyResolverResults(
+  transactions: readonly WalletTransaction[],
+  resultsByIdx: ReadonlyMap<number, ZapCounterpartyInfo | null>,
+): WalletTransaction[] | null {
+  let changed = false;
+  const updated = transactions.map((tx, i) => {
+    if (!resultsByIdx.has(i)) return tx;
+    const next = resultsByIdx.get(i) ?? null;
+    if (next === null && (tx.zapCounterparty ?? null) === null) return tx;
+    changed = true;
+    return { ...tx, zapCounterparty: next };
+  });
+  return changed ? updated : null;
 }

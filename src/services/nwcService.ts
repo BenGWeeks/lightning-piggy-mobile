@@ -20,6 +20,14 @@ import {
   recordRateLimited,
   recordRelayOutcome,
 } from './nwcRelayHealth';
+import {
+  beginConnectionAttempt,
+  clearConnectionAttempt,
+  CONNECTION_REPLACED_MESSAGE,
+  hasPendingConnectionAttempt,
+  isLatestConnectionAttempt,
+  waitForNewestConnectionAttempt,
+} from './nwcConnectionAttempts';
 
 // Preserve the prior public API — these were defined + exported here before
 // moving to ./nwcErrors; consumers (e.g. SendSheet) still import them from here.
@@ -92,6 +100,12 @@ async function withRetry<T>(
   throw new Error('unreachable');
 }
 
+function closeQuietly(provider: NostrWebLNProvider | undefined): void {
+  try {
+    provider?.close();
+  } catch {}
+}
+
 export function validateNwcUrl(url: string): { valid: boolean; error?: string } {
   url = url.trim();
   let parsed: URL;
@@ -119,34 +133,49 @@ export async function connect(
   walletId: string,
   nwcUrl: string,
   onEnabled?: () => void,
+  isActive: () => boolean = () => true,
 ): Promise<{ success: boolean; balance?: number; error?: string }> {
   const validation = validateNwcUrl(nwcUrl);
   if (!validation.valid) {
     return { success: false, error: validation.error };
   }
 
+  if (!isActive()) return { success: false, error: 'Connection superseded' };
+  const attempt = beginConnectionAttempt(walletId);
+  const isCurrent = () => isLatestConnectionAttempt(walletId, attempt) && isActive();
+  let provider: NostrWebLNProvider | undefined;
+  const discard = () => {
+    closeQuietly(provider);
+    if (provider && providers.get(walletId) === provider) providers.delete(walletId);
+    clearConnectionAttempt(walletId, attempt);
+    return { success: false, error: 'Connection superseded' };
+  };
   try {
     // Close existing provider for this wallet if any
     const existing = providers.get(walletId);
-    if (existing) {
-      try {
-        existing.close();
-      } catch {}
-    }
+    closeQuietly(existing);
 
-    const provider = new NostrWebLNProvider({
+    provider = new NostrWebLNProvider({
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
+    const currentProvider = provider;
     patchRelayPublish(provider, walletId);
 
-    await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
+    await withRetry(() => currentProvider.enable(), {
+      label: 'connect',
+      attempts: 3,
+      delayMs: 2000,
+    });
+    if (!isCurrent()) return discard();
     await pinNip04IfNoInfoEvent(provider, walletId);
+    if (!isCurrent()) return discard();
 
     // Store provider immediately after enable() — the relay connection is
     // established even if getBalance fails (e.g. slow relay response).
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
+    attempt.settle(); // wakes reconnect waiters; still in progress until the probe ends
     // Enable relay-pool keepalive pings so a dead link is noticed promptly
     // rather than lingering in TCP ESTABLISHED for ~2h (#654). Best-effort —
     // `client.pool` is an internal SDK shape and may be absent.
@@ -170,26 +199,30 @@ export async function connect(
       if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
     }
 
+    if (!isCurrent()) return discard();
     // Try to get initial balance, but don't fail the connection if it times
     // out. Doubles as the relay-responsiveness probe (#654): an answer resets
     // the failure counter (→ Connected); a timeout/connection error advances it
     // (so a dead relay stays Disconnected instead of flapping).
     let balance: number | undefined;
     try {
-      const b = await withRetry(() => provider.getBalance(), {
+      const b = await withRetry(() => currentProvider.getBalance(), {
         label: 'initial getBalance',
         attempts: 3,
         delayMs: 2000,
       });
       balance = b.balance;
-      recordRelayOutcome(walletId);
+      if (isCurrent()) recordRelayOutcome(walletId);
     } catch (e) {
-      recordRelayOutcome(walletId, e);
+      if (isCurrent()) recordRelayOutcome(walletId, e);
       if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
     }
 
+    if (!isCurrent()) return discard();
     return { success: true, balance };
   } catch (error) {
+    if (!isCurrent()) return discard();
+    discard();
     // enable() couldn't reach any relay (full outage). Count it so the cooldown
     // (#656) engages — otherwise the 30s connection-check retries forever.
     recordRelayOutcome(walletId, error);
@@ -197,15 +230,18 @@ export async function connect(
     nwcUrls.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
+  } finally {
+    attempt.finish();
   }
 }
 
 export function disconnect(walletId: string): void {
+  clearConnectionAttempt(walletId);
+  reconnectsInFlight.delete(walletId);
+  nwcUrls.delete(walletId);
   const provider = providers.get(walletId);
   if (provider) {
-    try {
-      provider.close();
-    } catch {}
+    closeQuietly(provider);
     providers.delete(walletId);
   }
   // Drop the failed-lookup LRU for this wallet so cache memory follows
@@ -407,25 +443,61 @@ function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void
 
 /**
  * Reconnect an NWC provider if the relay connection dropped.
- * Closes the old provider and creates a fresh one.
+ * Closes the old provider and creates a fresh one. If a newer connect() supersedes
+ * it, adopt that provider so payInvoice still runs its lookup-before-retry; if the
+ * wallet was disconnected / re-pointed instead, throw a connection error so the
+ * payment outcome stays "unknown" rather than "failed".
  */
 async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   const url = nwcUrls.get(walletId);
   if (!url) throw new Error('No NWC URL stored for reconnect');
 
-  const existing = providers.get(walletId);
-  if (existing) {
-    try {
-      existing.close();
-    } catch {}
-  }
-
+  const replaced = providers.get(walletId);
+  const attempt = beginConnectionAttempt(walletId);
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
-  patchRelayPublish(provider, walletId);
-  await provider.enable();
-  await pinNip04IfNoInfoEvent(provider, walletId);
-  providers.set(walletId, provider);
-  return provider;
+  const isCurrent = () =>
+    isLatestConnectionAttempt(walletId, attempt) && nwcUrls.get(walletId) === url;
+  try {
+    closeQuietly(replaced);
+    patchRelayPublish(provider, walletId);
+    await provider.enable();
+    if (isCurrent()) await pinNip04IfNoInfoEvent(provider, walletId);
+    if (isCurrent()) {
+      providers.set(walletId, provider);
+      return provider;
+    }
+  } catch (error) {
+    if (isCurrent()) {
+      closeQuietly(provider);
+      throw error;
+    }
+  } finally {
+    attempt.finish();
+  }
+  closeQuietly(provider);
+  await waitForNewestConnectionAttempt(walletId);
+  const newer = providers.get(walletId);
+  if (newer && newer !== replaced && nwcUrls.get(walletId) === url) return newer;
+  throw new Error(CONNECTION_REPLACED_MESSAGE);
+}
+
+// Shared by ensureConnected and payInvoice's publish-failure retry so neither can
+// supersede the other's handshake; cleared once settled so a later drop retries.
+function reconnectOnce(walletId: string): Promise<NostrWebLNProvider> {
+  let pending = reconnectsInFlight.get(walletId);
+  if (!pending) {
+    if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
+    pending = reconnect(walletId).finally(() => {
+      if (reconnectsInFlight.get(walletId) === pending) reconnectsInFlight.delete(walletId);
+    });
+    reconnectsInFlight.set(walletId, pending);
+  }
+  return pending;
+}
+
+/** True while a reconnect or a connect() (incl. its initial balance probe) is pending. */
+export function isConnectionInProgress(walletId: string): boolean {
+  return reconnectsInFlight.has(walletId) || hasPendingConnectionAttempt(walletId);
 }
 
 /**
@@ -438,18 +510,7 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
 
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
-    // Dedupe parallel reconnect attempts — every concurrent ensureConnected
-    // caller awaits the same promise. Promise is cleared once resolved or
-    // rejected so a *later* drop can trigger a fresh reconnect.
-    let pending = reconnectsInFlight.get(walletId);
-    if (!pending) {
-      if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
-      pending = reconnect(walletId).finally(() => {
-        reconnectsInFlight.delete(walletId);
-      });
-      reconnectsInFlight.set(walletId, pending);
-    }
-    provider = await pending;
+    provider = await reconnectOnce(walletId);
   }
   return provider;
 }
@@ -551,7 +612,7 @@ export async function payInvoice(
         console.log(
           '[NWC] Publish failed, checking invoice status before retry to avoid double-pay...',
         );
-      provider = await reconnect(walletId);
+      provider = await reconnectOnce(walletId);
       throwIfAborted(signal);
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {

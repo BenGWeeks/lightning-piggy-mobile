@@ -1,5 +1,5 @@
-import { mergeWalletUpdate } from './walletStateMerge';
-import type { WalletState } from '../types/wallet';
+import { applyResolverResults, mergeWalletUpdate } from './walletStateMerge';
+import type { WalletState, WalletTransaction } from '../types/wallet';
 
 const w = (over: Partial<WalletState> = {}): WalletState =>
   ({ id: 'a', balance: 100, ...over }) as WalletState;
@@ -37,5 +37,27 @@ describe('mergeWalletUpdate', () => {
       name: 'New',
     } as Partial<WalletState>);
     expect(next).not.toBe(prev);
+  });
+});
+
+describe('applyResolverResults', () => {
+  const tx = (over: Partial<WalletTransaction> = {}): WalletTransaction =>
+    ({ type: 'incoming', amount: 1, ...over }) as WalletTransaction;
+  const alice = { pubkey: 'alice', profile: null, comment: '', anonymous: false };
+
+  it('attributes rows by index and leaves the rest untouched', () => {
+    const prev = [tx({ paymentHash: 'a' }), tx({ paymentHash: 'b' })];
+    const next = applyResolverResults(prev, new Map([[1, alice]]));
+    expect(next?.[0]).toBe(prev[0]);
+    expect(next?.[1]).toEqual({ ...prev[1], zapCounterparty: alice });
+  });
+
+  it('returns null when a forced pass only re-confirms missing attributions', () => {
+    const prev = [tx(), tx({ zapCounterparty: null })];
+    const results = new Map([
+      [0, null],
+      [1, null],
+    ]);
+    expect(applyResolverResults(prev, results)).toBeNull();
   });
 });
