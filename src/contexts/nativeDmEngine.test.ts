@@ -69,6 +69,10 @@ const validEntry = {
   wrapCreatedAt: 1_729_999_000,
 };
 
+const flushMicrotasks = async (): Promise<void> => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+
 function startOpts(overrides: Partial<Parameters<typeof startNativeDmEngine>[0]> = {}) {
   return {
     relays: ['wss://relay.example'],
@@ -214,5 +218,161 @@ describe('stopNativeDmEngineGlobal', () => {
     mockGetNostrEngine.mockReturnValue(engine);
     await stopNativeDmEngineGlobal();
     expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('overlapping engine sessions', () => {
+  it('does not stop the new engine when an older start fails', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    let rejectOld!: (error: Error) => void;
+    engine.engineStart.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((_, reject) => {
+          rejectOld = reject;
+        }),
+    );
+    const oldStart = startNativeDmEngine(startOpts());
+    await flushMicrotasks(); // dispatched: now in flight natively
+    const currentStart = startNativeDmEngine(startOpts());
+    await flushMicrotasks();
+    // Serialized: the replacement start is not dispatched while the old one is in flight.
+    expect(engine.engineStart).toHaveBeenCalledTimes(1);
+    rejectOld(new Error('superseded'));
+    expect(await oldStart).toBeNull();
+    const current = await currentStart;
+    expect(current).not.toBeNull();
+    expect(engine.engineStart).toHaveBeenCalledTimes(2);
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not subscribe an older start that finishes after replacement', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    let resolveOld!: (value: boolean) => void;
+    engine.engineStart.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const oldStart = startNativeDmEngine(startOpts());
+    await flushMicrotasks();
+    const currentStart = startNativeDmEngine(startOpts());
+    resolveOld(true);
+    expect(await oldStart).toBeNull();
+    const current = await currentStart;
+    expect(engine.engineSubscribeWraps).toHaveBeenCalledTimes(1);
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+  });
+
+  it('an old handle cannot stop a replacement engine', async () => {
+    const engine = makeFakeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const old = await startNativeDmEngine(startOpts());
+    const current = await startNativeDmEngine(startOpts());
+    await old!.stop();
+    expect(engine.engineStop).not.toHaveBeenCalled();
+    await current!.stop();
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('logout during a delayed start', () => {
+  // Models the native side without its (absent) call ordering: engineStart
+  // only installs the pool + cached key when its promise settles, while
+  // engineStop tears down whatever is installed the moment it is dispatched.
+  function makeRacingNativeEngine() {
+    const engine = makeFakeEngine();
+    const native = { running: false, cachedKey: null as string | null };
+    const pendingStarts: (() => void)[] = [];
+    engine.engineStart.mockImplementation(
+      (_relays: string[], _viewer: string, secret: string) =>
+        new Promise<boolean>((resolve) => {
+          pendingStarts.push(() => {
+            native.running = true;
+            native.cachedKey = secret;
+            resolve(true);
+          });
+        }),
+    );
+    engine.engineStop.mockImplementation(async () => {
+      native.running = false;
+      native.cachedKey = null;
+    });
+    return { engine, native, pendingStarts };
+  }
+
+  it('leaves no pool or key running when logout lands while engineStart is in flight', async () => {
+    const { engine, native, pendingStarts } = makeRacingNativeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const start = startNativeDmEngine(startOpts());
+    await flushMicrotasks();
+    expect(pendingStarts).toHaveLength(1);
+
+    const logout = stopNativeDmEngineGlobal();
+    await flushMicrotasks();
+    // The stop must not overtake the in-flight start natively.
+    expect(engine.engineStop).not.toHaveBeenCalled();
+
+    pendingStarts[0]();
+    expect(await start).toBeNull();
+    await logout;
+
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+    expect(engine.engineStop.mock.invocationCallOrder[0]).toBeGreaterThan(
+      engine.engineStart.mock.invocationCallOrder[0],
+    );
+    expect(engine.engineSubscribeWraps).not.toHaveBeenCalled();
+    expect(native).toEqual({ running: false, cachedKey: null });
+    expect(engine.removed).toEqual(
+      expect.arrayContaining(['onEngineRumorBatch', 'onEngineReconnect']),
+    );
+  });
+
+  it('never dispatches a start that was superseded while still queued', async () => {
+    const { engine, native, pendingStarts } = makeRacingNativeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const first = startNativeDmEngine(startOpts());
+    await flushMicrotasks();
+    // Both issued while `first` is in flight: `second` sits in the queue.
+    const second = startNativeDmEngine(startOpts({ secretKeyHex: 'f'.repeat(64) }));
+    const logout = stopNativeDmEngineGlobal();
+    await flushMicrotasks();
+
+    pendingStarts[0]();
+    expect(await first).toBeNull();
+    expect(await second).toBeNull();
+    await logout;
+
+    expect(engine.engineStart).toHaveBeenCalledTimes(1);
+    expect(engine.engineStop).toHaveBeenCalledTimes(1);
+    expect(native).toEqual({ running: false, cachedKey: null });
+  });
+
+  it('a start after logout still runs, and the logout cannot stop it', async () => {
+    const { engine, native, pendingStarts } = makeRacingNativeEngine();
+    mockGetNostrEngine.mockReturnValue(engine);
+    const stale = startNativeDmEngine(startOpts());
+    await flushMicrotasks();
+    const logout = stopNativeDmEngineGlobal();
+    const next = startNativeDmEngine(startOpts({ secretKeyHex: 'f'.repeat(64) }));
+    await flushMicrotasks();
+
+    pendingStarts[0]();
+    expect(await stale).toBeNull();
+    await logout;
+    await flushMicrotasks();
+    expect(pendingStarts).toHaveLength(2);
+    pendingStarts[1]();
+    const handle = await next;
+
+    expect(handle).not.toBeNull();
+    expect(native).toEqual({ running: true, cachedKey: 'f'.repeat(64) });
+    await handle!.stop();
+    expect(native).toEqual({ running: false, cachedKey: null });
   });
 });

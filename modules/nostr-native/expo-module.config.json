@@ -1,5 +1,8 @@
 {
-  "platforms": ["android"],
+  "platforms": ["android", "apple"],
+  "apple": {
+    "modules": ["NostrNativeModule"]
+  },
   "android": {
     "modules": ["com.lightningpiggy.nostrnative.NostrNativeModule"]
   }

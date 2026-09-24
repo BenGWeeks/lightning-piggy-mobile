@@ -1,9 +1,10 @@
 /**
  * Platform-guard tests for the facade capability probe isNativeCryptoAvailable()
- * (#1057). It delegates to getNostrNative(), whose hard Platform.OS === 'android'
- * guard means the Settings toggle can only ever be enabled on Android with the
- * module linked — off-Android the row renders disabled ("Unavailable on this
- * device"). Mirrors nostrNativeModule.test.ts's mutable-Platform pattern.
+ * (#1057). It delegates to getNostrNative(), whose hard platform allowlist
+ * (Android + iOS since M3) means the Settings toggle can only ever be enabled
+ * on a native platform with the module linked — elsewhere the row renders
+ * disabled ("Unavailable on this device"). Mirrors nostrNativeModule.test.ts's
+ * mutable-Platform pattern.
  *
  * The native module is resolved to a non-null stub so the ONLY thing that can
  * make availability false here is the platform guard, not module absence
@@ -33,9 +34,9 @@ function setOS(os: string): void {
 }
 
 describe('isNativeCryptoAvailable platform guard', () => {
-  it('returns false on iOS even when the native module resolves', () => {
+  it('returns true on iOS when the module is linked (M3 bindings)', () => {
     setOS('ios');
-    expect(isNativeCryptoAvailable()).toBe(false);
+    expect(isNativeCryptoAvailable()).toBe(true);
   });
 
   it('returns false on web', () => {
