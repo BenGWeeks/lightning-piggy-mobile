@@ -62,6 +62,16 @@ it('cancels on stop and does not issue history requests after a late enable', as
   expect(mockClose.mock.calls.length).toBeGreaterThanOrEqual(2);
 });
 
+it('returns the WebLN rows unchanged, already in sats', async () => {
+  // NostrWebLNProvider.listTransactions has converted the NIP-47 msats
+  // (1_234_000) to 1234 sats; the transport must not scale them again.
+  const row = { type: 'incoming', state: 'settled', amount: 1234, fees_paid: 0 };
+  mockList.mockResolvedValue({ transactions: [row] });
+  await expect(
+    readBackgroundPayments('wallet', 'url', new AbortController().signal),
+  ).resolves.toEqual([row]);
+});
+
 it('normalizes a wallet response with no transaction array', async () => {
   mockList.mockResolvedValue({});
   await expect(

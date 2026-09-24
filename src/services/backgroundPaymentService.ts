@@ -106,7 +106,9 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
             firePaymentNotification({
               kind: 'payment',
               walletId: wallet.id,
-              amountSats: tx.amount / 1000,
+              // Already sats: the WebLN wrapper converts NIP-47 msats, exactly
+              // as the foreground receive announcer reads the same rows.
+              amountSats: tx.amount,
             }),
           async () =>
             !signal.aborted &&

@@ -26,7 +26,9 @@ checks. This is periodic checking, not an instant push-delivery guarantee.
   foreground Send/Receive connection is untouched. Only `list_transactions`
   is requested; its permission must be enabled in the wallet connection.
 * No wallet network requests while the UI is active. Background passes check
-  settled incoming transactions and convert millisatoshis to satoshis.
+  settled incoming transactions. The SDK's WebLN wrapper already converts
+  NIP-47 millisatoshis to whole satoshis, so the alert shows the same amount
+  as the app's own receive detector.
 * Each request inspects up to 100 incoming transactions. Newly enabled wallets
   establish a start timestamp to suppress old-history floods. Later checks
   catch up at most 24 hours. This bounded history is for personal wallets;
@@ -41,8 +43,11 @@ checks. This is periodic checking, not an instant push-delivery guarantee.
 The background monitor and `PaymentNotifier` share persisted notification
 claims scoped to identity, wallet and payment hash (up to 2,048 per wallet).
 Concurrent deliveries serialize. Reopening the app does not re-announce a
-claimed payment. The notification privacy setting still hides amounts by
-default; background notifications do not include invoice descriptions.
+claimed payment. When several payments land in one foreground refresh, the app
+announces only the newest and claims the rest as seen, so backgrounding the app
+does not raise late alerts for them. The notification privacy setting still
+hides amounts by default; background notifications do not include invoice
+descriptions.
 
 Claims are persisted before scheduling with the OS. A failed scheduling attempt
 releases the claim for retry; a process crash between claim persistence and
@@ -57,8 +62,15 @@ The worker reads explicitly scoped wallet lists without changing UI storage scop
 Payment monitoring does not depend on the message subscription. An identity with
 NWC wallets but no message relays keeps the service alive for payment checks
 alone; an account switch re-evaluates both watchers; the service stops only when
-neither can run. A refused OS post releases the in-app dedupe so the next wallet
-refresh retries, while a payment already claimed by the service is not re-queried.
+neither can run. While the service is up the payment check always runs, so an
+NWC wallet connected later is picked up on the next pass. A pass that finds no
+wallet never stops the service while a message watch is armed or re-arming; if
+no message watch is armed, it first tries to arm one. Turning the watch off
+or switching accounts cancels any arm or service decision still in progress
+for the previous session, so none of them can resubscribe, restart payment
+checks, or stop the newer session after the fact. A refused OS post
+releases the in-app dedupe so the next wallet refresh retries, while a payment
+already claimed by the service is not re-queried.
 
 == Device acceptance check (required before release)
 

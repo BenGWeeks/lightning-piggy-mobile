@@ -14,6 +14,8 @@ import {
   stopBackgroundPaymentWatch,
 } from './backgroundPaymentService';
 import { notifyPaymentOnce } from './paymentNotificationDedupe';
+import { mapNwcTransactions } from '../utils/nwcTransactions';
+import { pickNewReceipts } from '../utils/incomingReceipts';
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
   AppState: { currentState: 'background' },
@@ -26,11 +28,14 @@ jest.mock('./notificationService', () => ({
   hasNotificationPermission: jest.fn(),
 }));
 jest.mock('./backgroundPaymentTransport', () => ({ readBackgroundPayments: jest.fn() }));
+jest.mock('./swapRecoveryService', () => ({ getSwapMeta: () => undefined }));
 const owner = 'a'.repeat(64);
+// The WebLN wrapper's shape: `amount` is already whole sats (the SDK divides
+// the NIP-47 msats by 1000 before the transport sees the row).
 const tx = {
   type: 'incoming',
   state: 'settled',
-  amount: 1234000,
+  amount: 1234,
   settled_at: 1000,
   created_at: 1,
   payment_hash: 'b'.repeat(64),
@@ -63,6 +68,12 @@ it('posts settled payments in sats and deduplicates against foreground delivery 
   );
   expect(fire).toHaveBeenCalledTimes(1);
   expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+});
+it('announces the same sats amount the foreground receive path shows for the row', async () => {
+  await check();
+  const [foreground] = pickNewReceipts(mapNwcTransactions([tx as never], []), new Set());
+  expect(foreground.amountSats).toBe(1234);
+  expect(fire).toHaveBeenCalledWith(expect.objectContaining({ amountSats: foreground.amountSats }));
 });
 it('does not announce existing history, outgoing, unpaid, failed, or malformed transactions', async () => {
   read.mockResolvedValue([
@@ -175,6 +186,15 @@ it('tells the host when the scope disappears, but keeps polling while the host s
   jest.mocked(getWalletList).mockResolvedValue([{ id: 'w', walletType: 'nwc' }] as never);
   await jest.advanceTimersByTimeAsync(60_000);
   expect(read).toHaveBeenCalledTimes(2);
+});
+it('polls an NWC wallet connected after the loop started with none', async () => {
+  jest.mocked(getWalletList).mockResolvedValue([]);
+  startBackgroundPaymentWatch(jest.fn());
+  await jest.advanceTimersByTimeAsync(0);
+  expect(read).not.toHaveBeenCalled();
+  jest.mocked(getWalletList).mockResolvedValue([{ id: 'w', walletType: 'nwc' }] as never);
+  await jest.advanceTimersByTimeAsync(60_000);
+  expect(read).toHaveBeenCalledTimes(1);
 });
 it('does not stack polling loops and cancels in-flight work when stopped', async () => {
   let requestSignal: AbortSignal | undefined;

@@ -40,3 +40,34 @@ export function notifyPaymentOnce(
   queue = operation;
   return operation;
 }
+
+/**
+ * Claim payments the UI already showed without an OS notification — the
+ * receive announcer publishes only the newest of a burst, so the rest must be
+ * claimed here or the background poll would alert for them later (#1100
+ * review). Shares the queue so it cannot interleave with a delivery.
+ */
+export function markPaymentsSeen(
+  owner: string,
+  walletId: string,
+  paymentIds: readonly string[],
+  isCurrent: () => boolean | Promise<boolean> = () => true,
+): Promise<void> {
+  const operation = queue
+    .catch(() => {})
+    .then(async () => {
+      if (paymentIds.length === 0) return;
+      const key = `payment_notifications_v1:${owner}:${walletId}`;
+      const raw = await AsyncStorage.getItem(key);
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) throw new Error('Invalid payment notification history');
+      const seen = parsed.filter((id): id is string => typeof id === 'string');
+      const fresh = paymentIds.filter(
+        (id, i) => !seen.includes(id) && paymentIds.indexOf(id) === i,
+      );
+      if (fresh.length === 0 || !(await isCurrent())) return;
+      await AsyncStorage.setItem(key, JSON.stringify([...seen, ...fresh].slice(-2048)));
+    });
+  queue = operation;
+  return operation;
+}

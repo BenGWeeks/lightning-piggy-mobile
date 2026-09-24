@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { notifyPaymentOnce } from './paymentNotificationDedupe';
+import { markPaymentsSeen, notifyPaymentOnce } from './paymentNotificationDedupe';
 beforeEach(async () => {
   await AsyncStorage.clear();
 });
@@ -65,6 +65,27 @@ it('rolls back the persisted claim when post-claim scope validation throws', asy
     .mockRejectedValueOnce(new Error('keystore locked'));
   await expect(notifyPaymentOnce('a', 'w', 'h', send, scope)).rejects.toThrow('keystore locked');
   expect(send).not.toHaveBeenCalled();
+  await notifyPaymentOnce('a', 'w', 'h', send);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it('claims foreground-seen payments so a later delivery stays silent', async () => {
+  const send = jest.fn().mockResolvedValue('n');
+  await markPaymentsSeen('a', 'w', ['h1', 'h2', 'h1']);
+  await notifyPaymentOnce('a', 'w', 'h1', send);
+  await notifyPaymentOnce('a', 'w', 'h2', send);
+  await notifyPaymentOnce('a', 'w', 'h3', send);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(JSON.parse((await AsyncStorage.getItem('payment_notifications_v1:a:w'))!)).toEqual([
+    'h1',
+    'h2',
+    'h3',
+  ]);
+});
+
+it('does not claim seen payments for an identity that is no longer active', async () => {
+  const send = jest.fn().mockResolvedValue('n');
+  await markPaymentsSeen('a', 'w', ['h'], () => false);
   await notifyPaymentOnce('a', 'w', 'h', send);
   expect(send).toHaveBeenCalledTimes(1);
 });

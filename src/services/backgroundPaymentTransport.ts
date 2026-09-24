@@ -1,14 +1,22 @@
 import { AppState } from 'react-native';
-import type { Nip47Transaction } from '@getalby/sdk';
+import type { NostrWebLNProvider } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent } from './nwcEncryption';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
+
+/**
+ * A WebLN `listTransactions` row. NOT a raw NIP-47 row: the wrapper has
+ * already converted `amount` (and `fees_paid`) from msats to whole sats.
+ */
+export type BackgroundTransaction = Awaited<
+  ReturnType<NostrWebLNProvider['listTransactions']>
+>['transactions'][number];
 
 /** A read-only request on a private connection; never replace the UI's client. */
 export async function readBackgroundPayments(
   walletId: string,
   url: string,
   signal: AbortSignal,
-): Promise<Nip47Transaction[]> {
+): Promise<BackgroundTransaction[]> {
   if (AppState.currentState === 'active' || signal.aborted) return [];
   // Load the SDK only for an opted-in background request, not during headless task registration.
   // eslint-disable-next-line @typescript-eslint/no-require-imports

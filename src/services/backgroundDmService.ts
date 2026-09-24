@@ -204,6 +204,23 @@ let watchGeneration = 0;
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyRearmTimer: ReturnType<typeof setInterval> | null = null;
+// See runBackgroundDmWatch: arms run one at a time, and the count tells the
+// payment host-reconcile that a DM watch is being (re)built right now.
+let dmArmChain: Promise<unknown> = Promise.resolve();
+let dmArmsInFlight = 0;
+// Watch-session epoch, bumped synchronously by an intentional stop and by an
+// identity re-arm. Every queued arm and every host decision captures it up
+// front and re-checks it after each await, so work begun for a session that
+// has since been stopped or replaced can never subscribe, re-arm, or stop
+// anything on its behalf (#1100 review). NB distinct from watchGeneration,
+// which each arm bumps only once it actually subscribes.
+let watchEpoch = 0;
+
+/** Snapshot the current watch epoch; the returned check is false once superseded. */
+export function captureBackgroundDmWatchEpoch(): () => boolean {
+  const epoch = watchEpoch;
+  return () => epoch === watchEpoch;
+}
 
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
@@ -386,9 +403,33 @@ function buildDecryptor(
  * directly by `startBackgroundDmWatch` instead, so the experience still works
  * for as long as the foreground JS context is alive.
  */
-export async function runBackgroundDmWatch(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
+export function runBackgroundDmWatch(): Promise<boolean> {
+  return enqueueArm(captureBackgroundDmWatchEpoch());
+}
 
+/**
+ * Queue one arm for the session `isCurrent` was captured in. An arm whose
+ * session is stopped or replaced before it subscribes resolves false without
+ * touching anything — the newer owner decides.
+ */
+function enqueueArm(isCurrent: () => boolean): Promise<boolean> {
+  if (Platform.OS !== 'android') return Promise.resolve(false);
+  // Serialise arms (safety re-arm, reconnect, account switch, host
+  // reconcile) so two can't interleave and stack subscriptions, and count
+  // them: while one is in flight `activeWatch` is transiently null by design,
+  // and the payment poll must not read that as "no DM watch" (#1100 review).
+  dmArmsInFlight += 1;
+  const run = dmArmChain.catch(() => {}).then(() => armBackgroundDmWatchOnce(isCurrent));
+  dmArmChain = run;
+  return run.finally(() => {
+    dmArmsInFlight -= 1;
+  });
+}
+
+async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boolean> {
+  // Superseded while queued behind an earlier arm: bail before any teardown
+  // so a stale arm can never close the newer session's subscription.
+  if (!isCurrent()) return false;
   // Re-check notification permission on EVERY arm — including the safety
   // re-arm and relay-drop reconnect paths. If the user revoked
   // POST_NOTIFICATIONS after enabling the watch, keeping the subscription
@@ -396,6 +437,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   // an alert — hard-stop the whole watch instead, matching what
   // startBackgroundDmWatch and the headless task enforce on entry.
   const granted = await hasNotificationPermission().catch(() => false);
+  if (!isCurrent()) return false;
   if (!granted) {
     console.warn('[BgDmWatch] permission revoked — stopping the watch');
     void stopBackgroundDmWatch().catch(() => {});
@@ -406,6 +448,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   stopBackgroundDmWatchSubscription();
 
   const blob = await loadIdentities();
+  if (!isCurrent()) return false;
   // Normalise to lowercase before validating/subscribing — identities are
   // accepted case-insensitively upstream, but relay filters and the follow
   // gate compare lowercase hex; an uppercase-stored pubkey must not silently
@@ -422,6 +465,7 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   }
 
   const readRelays = await resolveReadRelays(activePubkey);
+  if (!isCurrent()) return false;
   if (readRelays.length === 0) {
     console.warn('[BgDmWatch] not armed: no read relays');
     return false;
@@ -432,6 +476,9 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
   // path can't know the sender, so it can't be gated). Loaded once per arm;
   // the 15-min safety re-arm refreshes it as follows change.
   const followedPubkeys = decryptWrap ? await loadFollowedPubkeys(activePubkey) : null;
+  // Last await before subscribing: from here to `activeWatch` is synchronous,
+  // so a stop / identity re-arm can't slip in between check and install.
+  if (!isCurrent()) return false;
   const subOpenedAtSec = Math.floor(Date.now() / 1000);
   console.warn(
     `[BgDmWatch] arming: viewer=${activePubkey.slice(0, 8)}… relays=${readRelays.length} decryptor=${decryptWrap ? 'nsec' : 'contentless'} follows=${followedPubkeys ? followedPubkeys.size : 'uncached'}`,
@@ -495,13 +542,32 @@ export async function runBackgroundDmWatch(): Promise<boolean> {
  * never-settling headless task pin them forever (Copilot review, #1100). A
  * live DM watch keeps the host up; the poll idles cheaply until a wallet
  * reappears or the 15-min safety re-arm re-evaluates.
+ *
+ * `activeWatch` alone is not proof that DMs are off: every safety re-arm and
+ * reconnect clears it while awaiting storage. So an in-flight arm defers the
+ * decision to the next pass, and with no DM watch at all the reconcile tries
+ * one arm itself (it also recovers a reconnect whose arm threw) before
+ * stopping anything (#1100 review). Every step is pinned to the epoch the
+ * reconcile started in, so a stop or identity re-arm during its awaits hands
+ * the decision to that newer session instead of being overridden by it.
  */
 export function armBackgroundPaymentWatch(): void {
   startBackgroundPaymentWatch(() => {
-    if (activeWatch) return;
-    console.warn('[BgDmWatch] payment scope gone and no DM watch — stopping the host');
-    void stopBackgroundDmWatch().catch(() => {});
+    void reconcilePaymentHost().catch(() => {});
   });
+}
+
+async function reconcilePaymentHost(): Promise<void> {
+  const isCurrent = captureBackgroundDmWatchEpoch();
+  if (activeWatch || dmArmsInFlight > 0) return;
+  const armed = await enqueueArm(isCurrent);
+  // A later arm (account switch, reconnect) or a stop owns the decision now.
+  if (!isCurrent() || armed || activeWatch || dmArmsInFlight > 0) return;
+  if (!isBackgroundPaymentWatchRunning()) return;
+  const payments = await canWatchBackgroundPayments();
+  if (!isCurrent() || payments || activeWatch || dmArmsInFlight > 0) return;
+  console.warn('[BgDmWatch] payment scope gone and no DM watch — stopping the host');
+  await stopBackgroundDmWatch();
 }
 
 /** Close the live subscription without touching the foreground chip. */
@@ -546,10 +612,14 @@ function stopBackgroundDmWatchSubscription(): void {
  */
 export async function startBackgroundDmWatch(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  // A stop / identity re-arm during this start's awaits supersedes it: it
+  // must neither arm after an explicit stop nor second-guess the newer owner.
+  let isCurrent = captureBackgroundDmWatchEpoch();
   // Without notification permission the watch is an invisible battery drain —
   // it can't post the status chip or any of the message alerts it exists to
   // deliver — so a missing/revoked permission is a hard stop, not a warning.
   const granted = await hasNotificationPermission().catch(() => false);
+  if (!isCurrent()) return;
   if (!granted) {
     console.warn('[BgDmWatch] not started: notification permission missing');
     return;
@@ -562,12 +632,17 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // its own startForeground() chip, so posting the Expo sticky chip as
       // well would stack two ongoing entries in the shade.
       await startForegroundService();
+      if (!isCurrent()) return;
       // If the service was ALREADY running, the start above is a no-op (the
       // service guards against stacking a second headless task) — but the
       // active identity may have changed since its watch armed (login adding
       // a new account). Swap the subscription in place; no-op after a fresh
       // start (the headless task hasn't armed anything in this context yet).
-      await rearmBackgroundDmWatchForActiveIdentity();
+      const rearm = rearmBackgroundDmWatchForActiveIdentity();
+      // The re-arm opens its epoch synchronously on call: adopt it, so a
+      // failure inside our own re-arm is still ours to clean up below.
+      isCurrent = captureBackgroundDmWatchEpoch();
+      await rearm;
     } else {
       // Fallback (native module absent — Expo Go / stale dev client): the
       // Expo sticky chip is the only status surface, and the subscription
@@ -576,25 +651,34 @@ export async function startBackgroundDmWatch(): Promise<void> {
         title: 'Lightning Piggy is watching for messages and payments',
         body: 'Tap to open. Watching messages and checking Lightning payments.',
       });
+      if (!isCurrent()) return;
       if (chipId === null) {
         console.warn('[BgDmWatch] not started: foreground chip could not be posted');
         return;
       }
-      const armed = await runBackgroundDmWatch();
+      const armed = await enqueueArm(isCurrent);
+      if (!isCurrent()) return;
       // Payments poll independently of the DM subscription: an identity with
       // NWC wallets but no DM relays still gets payment alerts (#1100 review).
       const payments = await canWatchBackgroundPayments();
-      if (payments) armBackgroundPaymentWatch();
+      if (!isCurrent()) return;
       if (!armed && !payments) {
         // Nothing to watch (no identity / no relays / no NWC wallets) — don't
         // leave a chip promising a watch that isn't running.
         await dismissForegroundServiceNotification();
+      } else {
+        // Armed even with no NWC wallet yet, like the headless task: each pass
+        // self-gates, so a wallet added later is polled without a re-arm.
+        armBackgroundPaymentWatch();
       }
     }
   } catch (e) {
     // Don't leave a stray chip (or half-armed subscription) behind when the
     // start failed — clean up and log; callers don't handle a rejection here.
     console.warn('[BgDmWatch] start failed — cleaning up:', e);
+    // Superseded meanwhile: the stop / re-arm that won owns the cleanup, and
+    // tearing down here could kill that newer session's watch.
+    if (!isCurrent()) return;
     stopBackgroundPaymentWatch();
     stopBackgroundDmWatchSubscription();
     await dismissForegroundServiceNotification();
@@ -608,18 +692,23 @@ export async function startBackgroundDmWatch(): Promise<void> {
 export async function stopBackgroundDmWatch(): Promise<void> {
   stopBackgroundPaymentWatch();
   if (Platform.OS !== 'android') return;
-  // Stop the native service first: this tears down the headless JS context
-  // (and the subscription running inside it). Best-effort — a transient
-  // bridge error must not skip the rest of the cleanup below, or the watch
-  // is left half-stopped with the chip still up.
+  // End the session synchronously, before any await: bumping the epoch
+  // cancels every queued or in-flight arm and host decision, and the teardown
+  // closes any inline subscription this context owns (the fallback path) and
+  // clears the reconnect / safety timers so none can enqueue a fresh arm.
+  // Nothing from the old session can arm after this point, so the awaits
+  // below never need to tear down again (which could only hit a newer start).
+  // An intentional stop also resets the reconnect backoff so the next enable
+  // starts fresh.
+  watchEpoch += 1;
+  reconnectAttempt = 0;
+  stopBackgroundDmWatchSubscription();
+  // Then stop the native service, which tears down the headless task.
+  // Best-effort — a transient bridge error must not skip the chip dismissal
+  // below, or the watch is left half-stopped with the chip still up.
   await stopForegroundService().catch((e) => {
     console.warn('[BgDmWatch] native stop failed (continuing cleanup):', e);
   });
-  // Then close any inline subscription this foreground context owns (the
-  // fallback path) and dismiss the chip. An intentional stop also resets the
-  // reconnect backoff so the next enable starts fresh.
-  reconnectAttempt = 0;
-  stopBackgroundDmWatchSubscription();
   await dismissForegroundServiceNotification();
 }
 
@@ -640,13 +729,23 @@ export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
   // not skip the payment re-arm (#1100 review). Once anything is live the
   // service is up, so re-evaluate BOTH watchers for the new identity — it may
   // have relays the previous one lacked, or vice versa.
-  if (!activeWatch && !isBackgroundPaymentWatchRunning()) return;
+  // An arm in flight counts too: it may have read the previous identity
+  // before the switch was persisted, and would otherwise win uncorrected.
+  if (!activeWatch && dmArmsInFlight === 0 && !isBackgroundPaymentWatchRunning()) return;
+  // Start a new epoch synchronously: queued arms and host decisions for the
+  // previous identity are cancelled, and a later stop / re-arm cancels ours.
+  watchEpoch += 1;
+  const isCurrent = captureBackgroundDmWatchEpoch();
   // Abort any in-flight poll for the previous identity; the fresh start
   // below ticks immediately for the new one.
   stopBackgroundPaymentWatch();
-  const armed = await runBackgroundDmWatch();
+  const armed = await enqueueArm(isCurrent);
+  if (!isCurrent()) return;
   const payments = await canWatchBackgroundPayments();
-  if (payments) armBackgroundPaymentWatch();
+  if (!isCurrent()) return;
+  // While the host stays up the poll always runs (it self-gates per pass), so
+  // an NWC wallet added after this re-arm is picked up without another one.
+  if (armed || payments) armBackgroundPaymentWatch();
   if (!armed && !payments) {
     // The new identity has neither DM relays nor NWC wallets: nothing is
     // watching, so the native service / chip must not stay up draining the
@@ -680,5 +779,8 @@ export function __isWatchActiveForTests(): boolean {
 /** Test hook: tear down state between tests. */
 export function __resetForTests(): void {
   reconnectAttempt = 0;
+  dmArmChain = Promise.resolve();
+  dmArmsInFlight = 0;
+  watchEpoch += 1;
   stopBackgroundDmWatchSubscription();
 }

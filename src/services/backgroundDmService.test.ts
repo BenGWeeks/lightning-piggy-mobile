@@ -532,13 +532,20 @@ describe('rearmBackgroundDmWatchForActiveIdentity (account switch, #288)', () =>
     expect(mockDismissForeground).not.toHaveBeenCalled();
   });
 
-  it('keeps payments off after a switch to an identity without NWC wallets', async () => {
+  it('keeps polling payments after a switch to an identity without NWC wallets yet', async () => {
+    // The poll self-gates per pass, so it must keep running while the host is
+    // up for DMs — otherwise a wallet connected after the switch is never
+    // polled until the next app launch (#1100 review).
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     await runBackgroundDmWatch();
     mockCanWatchPayments.mockResolvedValue(false);
     await rearmBackgroundDmWatchForActiveIdentity();
     expect(mockStopPayments).toHaveBeenCalledTimes(1);
-    expect(mockStartPayments).not.toHaveBeenCalled();
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+    expect(mockStopPayments.mock.invocationCallOrder[0]).toBeLessThan(
+      mockStartPayments.mock.invocationCallOrder[0],
+    );
+    expect(mockDismissForeground).not.toHaveBeenCalled();
   });
 
   it('swaps the running subscription to the new active identity', async () => {
@@ -569,13 +576,71 @@ describe('armBackgroundPaymentWatch host reconcile', () => {
     return mockStartPayments.mock.calls.at(-1)?.[0] as () => void;
   }
 
-  it('stops the host when the payment scope disappears and no DM watch is armed', async () => {
+  // Let the async reconcile (arm attempt + scope re-check + stop) settle.
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  }
+
+  it('stops the host when the payment scope disappears and no DM watch can arm', async () => {
+    mockLoadIdentities.mockResolvedValue({ identities: [], activePubkey: null });
+    mockPaymentsRunning.mockReturnValue(true);
     armBackgroundPaymentWatch();
     capturedOnUnwatchable()();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(mockStopPayments).toHaveBeenCalled();
     expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop the host while a DM safety re-arm is in flight', async () => {
+    // DM-only identity: every payment pass is unwatchable. The safety re-arm
+    // clears activeWatch and then awaits storage; a pass landing in that
+    // window must not read it as "no DM watch" and kill the host (#1100).
+    jest.useFakeTimers();
+    try {
+      mockPaymentsRunning.mockReturnValue(true);
+      mockLoadIdentities.mockResolvedValue(nsecIdentity());
+      await runBackgroundDmWatch();
+      armBackgroundPaymentWatch();
+      let release!: () => void;
+      mockLoadIdentities.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(nsecIdentity());
+          }),
+      );
+      await jest.advanceTimersByTimeAsync(15 * 60_000);
+      expect(__isWatchActiveForTests()).toBe(false);
+      capturedOnUnwatchable()();
+      await flush();
+      release();
+      await flush();
+      expect(mockDismissForeground).not.toHaveBeenCalled();
+      expect(mockStopPayments).not.toHaveBeenCalled();
+      expect(__isWatchActiveForTests()).toBe(true);
+      expect(mockSubscribe).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('re-arms a DM watch whose reconnect arm failed instead of stopping the host', async () => {
+    jest.useFakeTimers();
+    try {
+      mockPaymentsRunning.mockReturnValue(true);
+      mockLoadIdentities.mockResolvedValue(nsecIdentity());
+      await runBackgroundDmWatch();
+      armBackgroundPaymentWatch();
+      mockLoadIdentities.mockRejectedValueOnce(new Error('keystore busy'));
+      dropWrapsSub();
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(__isWatchActiveForTests()).toBe(false);
+      capturedOnUnwatchable()();
+      await flush();
+      expect(mockDismissForeground).not.toHaveBeenCalled();
+      expect(__isWatchActiveForTests()).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('keeps the host up for a live DM watch', async () => {
@@ -587,6 +652,164 @@ describe('armBackgroundPaymentWatch host reconcile', () => {
     await Promise.resolve();
     expect(mockDismissForeground).not.toHaveBeenCalled();
     expect(__isWatchActiveForTests()).toBe(true);
+  });
+});
+
+describe('arm cancellation epoch (#1100 review)', () => {
+  const OTHER = 'c'.repeat(64);
+  function otherIdentity() {
+    return {
+      identities: [{ pubkey: OTHER, signerType: 'nsec', nsec: 'nsec1yyy', lastUsedAt: 2 }],
+      activePubkey: OTHER,
+    };
+  }
+
+  // Hold the next call of `mock` pending until the returned release fires.
+  function holdNext<T>(mock: jest.Mock): (value: T) => void {
+    let release!: (value: T) => void;
+    mock.mockImplementationOnce(
+      () =>
+        new Promise<T>((resolve) => {
+          release = resolve;
+        }),
+    );
+    return (value) => release(value);
+  }
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  }
+
+  it('an arm awaiting loadIdentities installs nothing once stopped', async () => {
+    const release = holdNext(mockLoadIdentities);
+    const arm = runBackgroundDmWatch();
+    await flush();
+    expect(mockLoadIdentities).toHaveBeenCalledTimes(1);
+    await stopBackgroundDmWatch();
+    release(nsecIdentity());
+    expect(await arm).toBe(false);
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(__isWatchActiveForTests()).toBe(false);
+  });
+
+  it('arms queued before a stop never subscribe; arms after it do', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    const release = holdNext(mockLoadIdentities);
+    const arms = [runBackgroundDmWatch(), runBackgroundDmWatch(), runBackgroundDmWatch()];
+    await flush();
+    await stopBackgroundDmWatch();
+    release(nsecIdentity());
+    expect(await Promise.all(arms)).toEqual([false, false, false]);
+    // Only the head of the queue got as far as storage.
+    expect(mockLoadIdentities).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+
+    // A fresh session after the stop arms normally.
+    expect(await runBackgroundDmWatch()).toBe(true);
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stop clears the reconnect timer before its awaits', async () => {
+    jest.useFakeTimers();
+    try {
+      mockLoadIdentities.mockResolvedValue(nsecIdentity());
+      await runBackgroundDmWatch();
+      dropWrapsSub();
+      const stop = stopBackgroundDmWatch();
+      await jest.advanceTimersByTimeAsync(10 * 60_000);
+      await stop;
+      expect(mockSubscribe).toHaveBeenCalledTimes(1);
+      expect(__isWatchActiveForTests()).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('an account-switch re-arm supersedes an in-flight arm for the old identity', async () => {
+    const release = holdNext(mockLoadIdentities);
+    const staleArm = runBackgroundDmWatch();
+    await flush();
+    // Nothing is armed yet, but the in-flight arm counts as a running watch.
+    mockLoadIdentities.mockResolvedValue(otherIdentity());
+    mockDecodeNsec.mockReturnValue({ pubkey: OTHER, secretKey: SECRET });
+    const rearm = rearmBackgroundDmWatchForActiveIdentity();
+    release(nsecIdentity());
+    expect(await staleArm).toBe(false);
+    await rearm;
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ viewerPubkey: OTHER }),
+    );
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+  });
+
+  it('a re-arm superseded by a stop neither arms payments nor subscribes', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    await runBackgroundDmWatch();
+    const release = holdNext(mockLoadIdentities);
+    const rearm = rearmBackgroundDmWatchForActiveIdentity();
+    await flush();
+    await stopBackgroundDmWatch();
+    release(nsecIdentity());
+    await rearm;
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    expect(__isWatchActiveForTests()).toBe(false);
+    expect(mockStartPayments).not.toHaveBeenCalled();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+  });
+
+  it('a fallback start interrupted by a stop does not arm after it', async () => {
+    const release = holdNext(mockLoadIdentities);
+    mockCanWatchPayments.mockResolvedValue(true);
+    const start = startBackgroundDmWatch();
+    await flush();
+    await stopBackgroundDmWatch();
+    release(nsecIdentity());
+    await start;
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+  });
+
+  it('a host reconcile does not stop a newer session started during its awaits', async () => {
+    mockPaymentsRunning.mockReturnValue(true);
+    mockLoadIdentities.mockResolvedValue({ identities: [], activePubkey: null });
+    armBackgroundPaymentWatch();
+    const onUnwatchable = mockStartPayments.mock.calls.at(-1)?.[0] as () => void;
+    // The reconcile's arm finds nothing, then parks on the scope re-check.
+    const releaseScope = holdNext<boolean>(mockCanWatchPayments);
+    onUnwatchable();
+    await flush();
+    expect(mockCanWatchPayments).toHaveBeenCalledTimes(1);
+
+    // Meanwhile the user stops and re-enables: a payment-only session.
+    await stopBackgroundDmWatch();
+    mockCanWatchPayments.mockResolvedValue(true);
+    await startBackgroundDmWatch();
+    expect(mockStartPayments).toHaveBeenCalledTimes(2);
+    const dismissalsBefore = mockDismissForeground.mock.calls.length;
+    const stopsBefore = mockStopPayments.mock.calls.length;
+
+    // The stale "scope gone" verdict lands late and must be ignored.
+    releaseScope(false);
+    await flush();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(dismissalsBefore);
+    expect(mockStopPayments).toHaveBeenCalledTimes(stopsBefore);
+  });
+
+  it('a host reconcile arm cancelled by a stop installs nothing', async () => {
+    mockPaymentsRunning.mockReturnValue(true);
+    armBackgroundPaymentWatch();
+    const onUnwatchable = mockStartPayments.mock.calls.at(-1)?.[0] as () => void;
+    const release = holdNext(mockLoadIdentities);
+    onUnwatchable();
+    await flush();
+    await stopBackgroundDmWatch();
+    release(nsecIdentity());
+    await flush();
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -655,6 +878,15 @@ describe('start / stop lifecycle', () => {
     expect(mockShowForeground).toHaveBeenCalledTimes(1);
     expect(mockDismissForeground).not.toHaveBeenCalled();
     expect(mockStartPayments).toHaveBeenCalledTimes(1);
+  });
+
+  it('polls payments for a DM identity before it has any NWC wallet (fallback)', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockResolvedValue(false);
+    await startBackgroundDmWatch();
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+    expect(mockDismissForeground).not.toHaveBeenCalled();
   });
 
   it('starts payment polling alongside the DM watch (fallback)', async () => {
