@@ -8,6 +8,7 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { CacheMapMarker } from './CacheMapMarker';
+import { CacheClusterMarker } from './CacheClusterMarker';
 import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 /**
@@ -39,6 +40,10 @@ export interface MiniMapMarkersProps {
     payoutSats: number | null;
   }[];
   cacheByCoord: ReadonlyMap<string, ParsedCache>;
+  /** Grouped nearby caches (#1071) — one count chip per cluster. The
+   *  parent owns what a tap does (zoom in, or open the full map). */
+  cacheClusters?: { id: number; lat: number; lng: number; count: number; expansionZoom: number }[];
+  onPressCacheCluster?: (c: { lat: number; lng: number; expansionZoom: number }) => void;
   eventPoints: { lat: number; lng: number; id: string }[];
   eventByCoord: ReadonlyMap<string, ParsedEvent>;
   pinMarker?: { lat: number; lon: number; isLpPiggy?: boolean } | null;
@@ -58,6 +63,8 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
   merchants,
   cachePoints,
   cacheByCoord,
+  cacheClusters,
+  onPressCacheCluster,
   eventPoints,
   eventByCoord,
   pinMarker,
@@ -129,6 +136,27 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
           />
         );
       })}
+      {/* Cache clusters (#1071): count chips for groups of nearby caches.
+          Always rendered — the grouped caches are already excluded from
+          `cachePoints`, so skipping chips would drop them off the map.
+          Without a handler the chip is a non-button badge, so it never
+          presents as a control that does nothing. */}
+      {cacheClusters?.map((cl) => (
+        <CacheClusterMarker
+          key={`cluster-${cl.id}`}
+          id={cl.id}
+          lat={cl.lat}
+          lng={cl.lng}
+          count={cl.count}
+          markerDimStyle={markerDim}
+          onPress={
+            onPressCacheCluster
+              ? () =>
+                  onPressCacheCluster({ lat: cl.lat, lng: cl.lng, expansionZoom: cl.expansionZoom })
+              : undefined
+          }
+        />
+      ))}
       {/* Explicit pin marker (Hide/Edit-a-Piglet location step) — drawn
           at the hider's chosen coordinate so the centred map shows where
           the Piglet is, not just an empty map. */}

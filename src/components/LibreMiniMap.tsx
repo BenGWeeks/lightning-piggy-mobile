@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View, TouchableOpacity, Text } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { NavigationContext } from '@react-navigation/native';
@@ -18,6 +18,7 @@ import { Plus, Minus, Info, Maximize2, LocateFixed, Crosshair } from 'lucide-rea
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
+import { clusterCachePoints } from '../utils/cacheClusters';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -235,6 +236,15 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
+  // Reactive zoom for cache clustering (#1071). Unlike currentZoomRef
+  // (a plain ref feeding camera calls without re-rendering), cluster
+  // membership genuinely changes with zoom, so the clustering memo needs
+  // a state it can depend on. Updated by the zoom buttons, cluster-chip
+  // taps and on camera settle (pinch-zoom on the interactive full map).
+  // Always stored as a whole level — clusterCachePoints groups by integer
+  // zoom anyway, so a fractional write followed by the rounded settle
+  // value would re-render every marker for an identical grouping.
+  const [clusterZoom, setClusterZoom] = useState(Math.round(defaultZoom));
 
   // Pulse the accuracy halo so the user can pick out their own dot
   // against busy maps. 1.0 → 1.18 → 1.0 over 1.6 s, native-driven so the
@@ -380,8 +390,43 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const zoomBy = (delta: number) => () => {
     const next = Math.max(1, Math.min(20, currentZoomRef.current + delta));
     currentZoomRef.current = next;
+    setClusterZoom(Math.round(next));
     cameraRef.current?.zoomTo(next, { duration: 200 });
   };
+
+  // Cache pins, grouped: nearby caches collapse into a count chip until
+  // the zoom separates them (#1071). Leaves render through the existing
+  // CacheMapMarker path; clusters render as CacheClusterMarker chips.
+  const cacheClusterItems = useMemo(
+    () => clusterCachePoints(cachePoints, clusterZoom),
+    [cachePoints, clusterZoom],
+  );
+  const clusteredCachePoints = useMemo(
+    () => cacheClusterItems.flatMap((item) => (item.kind === 'point' ? [item.point] : [])),
+    [cacheClusterItems],
+  );
+  const cacheClusters = useMemo(
+    () => cacheClusterItems.flatMap((item) => (item.kind === 'cluster' ? [item] : [])),
+    [cacheClusterItems],
+  );
+  const flyToCacheCluster = useCallback(
+    (c: { lat: number; lng: number; expansionZoom: number }) => {
+      currentZoomRef.current = c.expansionZoom;
+      setClusterZoom(Math.round(c.expansionZoom));
+      cameraRef.current?.flyTo({ center: [c.lng, c.lat], zoom: c.expansionZoom, duration: 350 });
+    },
+    [],
+  );
+  // Only the interactive map zooms into a tapped chip. An inline map has
+  // no pan and no recenter button, and its GPS-follow only re-fires when
+  // the fix moves — so a fly-to would strand the camera on the group,
+  // possibly with the user's dot off-screen. There the chip opens the
+  // full map instead (same as the Open Map pill), or is a plain badge
+  // when the host wires no onTapMap.
+  const onPressCacheCluster = useMemo(
+    () => (interactive ? flyToCacheCluster : onTapMap ? () => onTapMap() : undefined),
+    [interactive, flyToCacheCluster, onTapMap],
+  );
 
   // Auto-follow GPS for inline mini-maps (non-interactive). When
   // interactive, leave the camera wherever the user panned it — the
@@ -444,33 +489,42 @@ const LibreMiniMapInner: React.FC<Props> = ({
         dragPan={interactive}
         touchRotate={interactive}
         touchPitch={interactive}
-        // Emit bbox on every camera-settle so host screens can filter
-        // their list to what's visible. Only wired when an onBoundsChange
-        // prop is provided — keeps the inline mini-map free of the
-        // event-marshalling cost.
-        onRegionDidChange={
-          onBoundsChange
-            ? async () => {
-                try {
-                  const bounds = await mapRef.current?.getBounds();
-                  if (!bounds) return;
-                  // MapLibre LngLatBounds shape: [west, south, east, north]
-                  // when accessed via the array indices. Convert to the
-                  // lat/lon bbox the host screens expect.
-                  const arr = bounds as unknown as [number, number, number, number];
-                  onBoundsChange({
-                    minLat: arr[1],
-                    maxLat: arr[3],
-                    minLon: arr[0],
-                    maxLon: arr[2],
-                  });
-                } catch {
-                  // Bounds query can race the camera tear-down on screen
-                  // unmount — swallow.
-                }
-              }
-            : undefined
-        }
+        // Fires on every camera-settle, on every map: refreshes the
+        // clustering zoom (one native getZoom() per settle), then — only
+        // when an onBoundsChange prop is provided — emits the bbox so
+        // host screens can filter their list to what's visible.
+        onRegionDidChange={async () => {
+          // Refresh the clustering zoom (#1071) — pinch-zoom on the
+          // interactive map only surfaces here. Rounded to integer
+          // levels so GPS-follow flyTo settles don't churn re-renders.
+          try {
+            const z = await mapRef.current?.getZoom();
+            if (typeof z === 'number') {
+              currentZoomRef.current = z;
+              setClusterZoom(Math.round(z));
+            }
+          } catch {
+            // Zoom query can race the camera tear-down on unmount — swallow.
+          }
+          if (!onBoundsChange) return;
+          try {
+            const bounds = await mapRef.current?.getBounds();
+            if (!bounds) return;
+            // MapLibre LngLatBounds shape: [west, south, east, north]
+            // when accessed via the array indices. Convert to the
+            // lat/lon bbox the host screens expect.
+            const arr = bounds as unknown as [number, number, number, number];
+            onBoundsChange({
+              minLat: arr[1],
+              maxLat: arr[3],
+              minLon: arr[0],
+              maxLon: arr[2],
+            });
+          } catch {
+            // Bounds query can race the camera tear-down on screen
+            // unmount — swallow.
+          }
+        }}
       >
         <Camera ref={cameraRef} initialViewState={{ center: [lon, lat], zoom: defaultZoom }} />
         {/* Accuracy halo — geographic polygon so the map's projection
@@ -487,7 +541,9 @@ const LibreMiniMapInner: React.FC<Props> = ({
             markers register via context. */}
         <MiniMapMarkers
           merchants={merchants}
-          cachePoints={cachePoints}
+          cachePoints={clusteredCachePoints}
+          cacheClusters={cacheClusters}
+          onPressCacheCluster={onPressCacheCluster}
           cacheByCoord={cacheByCoord}
           eventPoints={eventPoints}
           eventByCoord={eventByCoord}

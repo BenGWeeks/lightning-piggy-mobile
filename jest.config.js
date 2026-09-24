@@ -35,7 +35,7 @@ module.exports = {
   // first transitive crypto import. The base preset list is reproduced
   // verbatim so this doesn't silently drift if jest-expo updates.
   transformIgnorePatterns: [
-    '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure))',
+    '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure|supercluster|kdbush))',
     '/node_modules/react-native-reanimated/plugin/',
   ],
   // bitcoinjs-lib (and bip32) vendor `uint8array-tools`, which resolves to
