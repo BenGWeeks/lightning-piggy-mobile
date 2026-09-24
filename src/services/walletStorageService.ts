@@ -344,13 +344,26 @@ export function generateWalletId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+let _migrationQueue: Promise<void> = Promise.resolve();
 /**
  * Migrate legacy single-wallet storage to multi-wallet format.
  * Also backfills `walletType` for wallets created before on-chain support.
  * Idempotent — safe to call on every startup.
+ *
+ * Deferred while no identity is published: NostrContext publishes null at
+ * mount and the real pubkey later, so a null-owner run would write the wallet
+ * under the unsuffixed key (never read once the pubkey lands) and then delete
+ * the legacy credential. The legacy key stays put until WalletContext re-runs
+ * this for the eventual identity. Runs are serialised so two identities
+ * published back to back can't both claim the same legacy wallet.
  */
-export async function migrateLegacy(): Promise<void> {
-  const owner = _activePubkey;
+export function migrateLegacy(owner: string | null = _activePubkey): Promise<void> {
+  const run = _migrationQueue.then(() => (owner ? migrateLegacyFor(owner) : undefined));
+  _migrationQueue = run.catch(() => {});
+  return run;
+}
+
+async function migrateLegacyFor(owner: string): Promise<void> {
   // 1. Legacy single-wallet → multi-wallet migration.
   // Order: write the new wallet list + persist the NWC URL first, then delete
   // the legacy key. If a crash interrupts the migration, the legacy key is

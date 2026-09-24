@@ -40,7 +40,7 @@ import {
   ZapCounterpartyInfo,
 } from '../types/wallet';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
-import { mergeWalletUpdate } from '../utils/walletStateMerge';
+import { applyResolverResults, mergeWalletUpdate } from '../utils/walletStateMerge';
 import { parseNwcLud16 } from '../utils/nwcLud16';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 
@@ -334,7 +334,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
   // pulling the resolver's dependencies into its useCallback deps list.
   const resolveZapSendersRef = useRef<
-    ((walletId: string, opts?: { force?: boolean }) => Promise<void>) | null
+    | ((walletId: string, opts?: { force?: boolean; isCurrent?: () => boolean }) => Promise<void>)
+    | null
   >(null);
 
   // In-memory cache for `lightning_address -> LNURL server nostrPubkey`.
@@ -425,8 +426,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.awaitActivePubkeyHydrated();
         isStartupCurrent = captureWalletIdentity();
 
-        // Migrate legacy single-wallet data — now safely runs against
-        // the correct per-account key.
+        // Migrate legacy single-wallet data. A no-op while the identity is
+        // null; useWalletIdentityHydration retries once a pubkey lands.
         await walletStorage.migrateLegacy();
 
         // Re-check onboarding after migration (migration sets it). The
@@ -628,6 +629,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     lastTxsJsonRef,
     hydrateSeenReceipts,
     setIsLoading,
+    setIsOnboarded,
     setWalletsHydrated,
     setWallets,
     setActiveWalletId,
@@ -917,33 +919,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setActiveWalletId(walletId);
   }, []);
 
-  const refreshActiveBalance = useCallback(async () => {
-    if (!activeWalletId) return;
-    const wallet = wallets.find((w) => w.id === activeWalletId);
-
-    if (wallet?.walletType === 'onchain') {
-      const b = await onchainService.getBalance(activeWalletId);
-      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
-    } else {
-      const b = await nwcService.getBalance(activeWalletId);
-      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
-    }
-  }, [activeWalletId, wallets, updateWalletInState]);
-
   const refreshBalanceForWallet = useCallback(
     async (walletId: string) => {
+      // Pin the identity generation: after B → C → B the same wallet id is back
+      // in state, so only the generation stops a late read overwriting the
+      // re-hydrated balance (state and its `balance_` cache).
+      const isCurrent = captureWalletIdentity();
       const wallet = wallets.find((w) => w.id === walletId);
-
-      if (wallet?.walletType === 'onchain') {
-        const b = await onchainService.getBalance(walletId);
-        if (b !== null) updateWalletInState(walletId, { balance: b });
-      } else {
-        const b = await nwcService.getBalance(walletId);
-        if (b !== null) updateWalletInState(walletId, { balance: b });
-      }
+      const b =
+        wallet?.walletType === 'onchain'
+          ? await onchainService.getBalance(walletId)
+          : await nwcService.getBalance(walletId);
+      if (b !== null && isCurrent()) updateWalletInState(walletId, { balance: b });
     },
-    [wallets, updateWalletInState],
+    [wallets, updateWalletInState, captureWalletIdentity],
   );
+
+  const refreshActiveBalance = useCallback(async () => {
+    if (activeWalletId) await refreshBalanceForWallet(activeWalletId);
+  }, [activeWalletId, refreshBalanceForWallet]);
 
   const fetchTransactionsForWallet = useCallback(
     async (walletId: string, opts?: { force?: boolean }) => {
@@ -955,6 +949,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // See #123.
       const wallet = walletsRef.current.find((w) => w.id === walletId);
       if (!wallet) return;
+      const isCurrent = captureWalletIdentity(); // as in refreshBalanceForWallet
 
       try {
         // Load swap-meta before mapping so swap legs tag on the first fetch
@@ -964,6 +959,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (wallet.walletType === 'onchain') {
           // Single sync for both balance + transactions (avoids double Electrum sync)
           const result = await onchainService.syncAndRefresh(walletId);
+          if (!isCurrent()) return;
           if (result.balance !== null) {
             updateWalletInState(walletId, { balance: result.balance });
           }
@@ -974,6 +970,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           txs = mapOnchainTransactions(result.transactions, existingOnchain);
         } else {
           const raw = await nwcService.listTransactions(walletId);
+          if (!isCurrent()) return;
           // Carries forward resolved zap-counterparties + optimistic rows the
           // server doesn't round-trip (see mapNwcTransactions).
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
@@ -1000,6 +997,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // setItem lets the next poll retry rather than skip the persist.
         if (!txsUnchanged) {
           await AsyncStorage.setItem(`txs_${walletId}`, txsJson);
+          if (!isCurrent()) return;
           lastTxsJsonRef.current.set(walletId, txsJson);
         }
 
@@ -1011,9 +1009,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // re-render burst can't land in the same event-loop tick as the
         // `updateWalletInState` commit above — that tick is where the
         // incoming-payment overlay's dismiss tap was getting queued (#828).
+        // Pinned to this fetch's identity so a B → C → B hop cancels it.
         setTimeout(() => {
+          if (!isCurrent()) return;
           resolveZapSendersRef
-            .current?.(walletId, { force: opts?.force })
+            .current?.(walletId, { force: opts?.force, isCurrent })
             ?.catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
         }, 0);
       } catch (error) {
@@ -1023,7 +1023,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
     // the list short means callers that capture this function (e.g. SendSheet's
     // post-pay refresh IIFE) hold onto a stable reference across renders.
-    [updateWalletInState, seedSeenReceipts],
+    [updateWalletInState, seedSeenReceipts, captureWalletIdentity],
   );
 
   /**
@@ -1036,30 +1036,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
    * updates without refetching relays on every render.
    */
   const mergeResolverResults = useCallback(
-    (walletId: string, resultsByIdx: Map<number, ZapCounterpartyInfo | null>) => {
-      if (resultsByIdx.size === 0) return;
+    (
+      walletId: string,
+      resultsByIdx: Map<number, ZapCounterpartyInfo | null>,
+      isCurrent: () => boolean,
+    ) => {
+      // Indices refer to the resolving identity's list; after B → C → B the
+      // same wallet id holds a re-hydrated list they no longer line up with.
+      if (resultsByIdx.size === 0 || !isCurrent()) return;
       let nextTxs: WalletTransaction[] | null = null;
       setWallets((prev) =>
-        prev.map((w) => {
-          if (w.id !== walletId) return w;
-          // No-op guard (#1014): a forced resolver pass returns null for every
-          // unattributed tx it re-checked; writing `zapCounterparty: null` over
-          // rows that already had no attribution rebuilt the whole array (and
-          // re-rendered every visible row) while changing nothing. Only touch
-          // rows whose attribution actually changes; keep the old array
-          // identity when none do.
-          let changed = false;
-          const updated = w.transactions.map((tx, i) => {
-            if (!resultsByIdx.has(i)) return tx;
-            const next = resultsByIdx.get(i) ?? null;
-            if (next === null && (tx.zapCounterparty ?? null) === null) return tx;
-            changed = true;
-            return { ...tx, zapCounterparty: next };
-          });
-          if (!changed) return w;
-          nextTxs = updated;
-          return { ...w, transactions: updated };
-        }),
+        !isCurrent()
+          ? prev
+          : prev.map((w) => {
+              if (w.id !== walletId) return w;
+              const updated = applyResolverResults(w.transactions, resultsByIdx);
+              if (!updated) return w; // keep array identity on a no-op (#1014)
+              nextTxs = updated;
+              return { ...w, transactions: updated };
+            }),
       );
       if (nextTxs) {
         // Fingerprint updated in .then() so a failed write doesn't freeze
@@ -1067,7 +1062,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const json = JSON.stringify(nextTxs);
         AsyncStorage.setItem(`txs_${walletId}`, json)
           .then(() => {
-            lastTxsJsonRef.current.set(walletId, json);
+            if (isCurrent()) lastTxsJsonRef.current.set(walletId, json);
           })
           .catch(() => {});
       }
@@ -1076,8 +1071,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const resolveZapSendersForWallet = useCallback(
-    async (walletId: string, opts?: { force?: boolean }) => {
+    async (walletId: string, opts?: { force?: boolean; isCurrent?: () => boolean }) => {
       const force = opts?.force ?? false;
+      // A deferred pass inherits its triggering fetch's identity generation.
+      const isCurrent = opts?.isCurrent ?? captureWalletIdentity();
+      if (!isCurrent()) return;
       const __zapResolveStart = Date.now();
       perfLog(`resolveZapSenders[${walletId.slice(0, 8)}]: start`);
 
@@ -1088,6 +1086,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const abortController = new AbortController();
       zapResolverControllers.set(walletId, abortController);
       const { signal } = abortController;
+      const isStale = () => signal.aborted || !isCurrent();
       // Only clear the map slot if it still points at *our* controller —
       // a later run may have already replaced it.
       const releaseController = (): void => {
@@ -1096,32 +1095,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       };
 
-      // Snapshot the pending list via a setter so we always read the latest
-      // transactions without having to thread a ref through this callback.
-      // We deliberately don't require `bolt11` — cached transactions from
-      // before the bolt11-capture change still deserve attribution, and we
-      // fall back to (amount, time) matching when bolt11 is missing.
-      let pending: { tx: WalletTransaction; idx: number }[] = [];
-      let walletAlias = '';
-      setWallets((prev) => {
-        const current = prev.find((w) => w.id === walletId);
-        if (current) {
-          walletAlias = current.alias;
-          pending = current.transactions
-            .map((tx, idx) => ({ tx, idx }))
-            .filter(({ tx }) => {
-              if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
-              // Incoming null is a definitive relay-sweep miss — skip to
-              // avoid re-scanning hundreds of non-zap receipts each refresh.
-              // Outgoing null means only that an earlier run didn't find a
-              // local storage entry — retry, since the entry may have been
-              // written after that run (race) or on another device later.
-              if (tx.zapCounterparty === null && tx.bolt11 && tx.type === 'incoming') return false;
-              return true;
-            });
-        }
-        return prev;
-      });
+      // Read the latest committed wallet snapshot directly. A state updater
+      // is deferred by React and cannot be used as a synchronous getter.
+      const current = walletsRef.current.find((w) => w.id === walletId);
+      const walletAlias = current?.alias ?? '';
+      const pending = (current?.transactions ?? [])
+        .map((tx, idx) => ({ tx, idx }))
+        .filter(({ tx }) => {
+          if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
+          // Incoming null is a definitive receipt miss. Outgoing null can
+          // acquire an attribution later, so retain it for another pass.
+          return !(tx.zapCounterparty === null && tx.bolt11 && tx.type === 'incoming');
+        });
       if (pending.length === 0) {
         releaseController();
         return;
@@ -1152,7 +1137,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // or the next launch would wrongly skip it. Called at each
       // success-return path below.
       const commitFingerprint = (): void => {
-        void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
+        if (isCurrent()) void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
         releaseController();
       };
 
@@ -1165,7 +1150,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         walletsRef.current.find((w) => w.id === walletId)?.lightningAddress,
         resolveLud16ToNostrPubkey,
       );
-      if (recipients.length === 0 || signal.aborted) {
+      if (recipients.length === 0 || isStale()) {
         releaseController();
         return;
       }
@@ -1300,7 +1285,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // negative when we actually consulted relays — a no-bolt11 tx or a
           // rate-limit-skipped run is "didn't try" and must not poison cache.
           for (const { tx } of unmatched) {
-            if (!tx.paymentHash || !tx.bolt11) continue;
+            if (!tx.paymentHash || !tx.bolt11 || !isCurrent()) continue;
             if (byHash.has(tx.paymentHash)) continue;
             await zapCounterpartyStorage.recordOutgoingMiss(tx.paymentHash);
             // Mirror the freshly-persisted negative into the in-memory map so the resolver loop below treats this tx as resolved this pass instead of leaving it `undefined` until the next refresh — closes the "one extra attribution pass per miss" gap Copilot flagged.
@@ -1330,10 +1315,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      // A newer refresh superseded us during the outgoing relay/profile
-      // awaits — bail before the index-based merge + fingerprint commit
-      // below, exactly as the incoming path does after its fetch.
-      if (signal.aborted) {
+      // A newer refresh or identity change superseded us during the outgoing
+      // relay/profile awaits — bail before the index-based merge + fingerprint
+      // commit below, exactly as the incoming path does after its fetch.
+      if (isStale()) {
         releaseController();
         return;
       }
@@ -1346,7 +1331,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             `[Zap/${walletAlias}] outgoing-only: attributed ${attributed}/${outgoingPending.length}`,
           );
         }
-        mergeResolverResults(walletId, resultsByIdx);
+        mergeResolverResults(walletId, resultsByIdx, isCurrent);
         commitFingerprint();
         return;
       }
@@ -1359,10 +1344,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const receipts = await nostrService.fetchZapReceiptsForRecipient(recipients, queryRelays, {
         limit: 500,
       });
-      // A newer refresh superseded us mid-fetch — drop the (now stale)
-      // results instead of merging them + persisting a fingerprint the
-      // newer run is also about to write.
-      if (signal.aborted) {
+      // A newer refresh (or identity) superseded us mid-fetch — drop the stale
+      // results instead of merging them + persisting a fingerprint.
+      if (isStale()) {
         releaseController();
         return;
       }
@@ -1371,7 +1355,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           `[Zap/${walletAlias}] incoming=${incomingPending.length} outgoing=${outgoingPending.length} recipients=${recipients.length} receipts=${receipts.length}`,
         );
       if (receipts.length === 0) {
-        mergeResolverResults(walletId, resultsByIdx);
+        mergeResolverResults(walletId, resultsByIdx, isCurrent);
         commitFingerprint();
         return;
       }
@@ -1473,7 +1457,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           : undefined;
 
       // Superseded mid-fetch — bail before merging stale results.
-      if (signal.aborted) {
+      if (isStale()) {
         releaseController();
         return;
       }
@@ -1524,13 +1508,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           `[Zap/${walletAlias}] attributed ${attributed}/${pending.length} pending tx(s)`,
         );
       }
-      mergeResolverResults(walletId, resultsByIdx);
+      mergeResolverResults(walletId, resultsByIdx, isCurrent);
       commitFingerprint();
       perfLog(
         `resolveZapSenders[${walletId.slice(0, 8)}]: done ${Date.now() - __zapResolveStart}ms (merged ${resultsByIdx.size})`,
       );
     },
-    [resolveLud16ToNostrPubkey, mergeResolverResults],
+    [resolveLud16ToNostrPubkey, mergeResolverResults, captureWalletIdentity],
   );
 
   useEffect(() => {
@@ -1546,12 +1530,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const run = async () => {
       const pk = nostrService.getCurrentUserPubkey();
       if (!pk) return;
+      const isCurrent = captureWalletIdentity();
       // Serialize across wallets. Running concurrent querySync calls over
       // the same nostr-tools pool races on shared subscriptions — one
       // request often comes back empty — so resolve one wallet at a time.
       for (const w of walletsRef.current) {
+        if (!isCurrent()) return;
         try {
-          await resolveZapSendersRef.current?.(w.id);
+          await resolveZapSendersRef.current?.(w.id, { isCurrent });
         } catch (e) {
           console.warn(`resolveZapSenders (on-pubkey) failed for ${w.id}:`, e);
         }
@@ -1559,7 +1545,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     run();
     return nostrService.onCurrentUserPubkeyChange(run);
-  }, []);
+  }, [captureWalletIdentity]);
 
   const completeOnboarding = useCallback(async () => {
     await walletStorage.setOnboarded();

@@ -199,3 +199,16 @@ it('reports a pending connect as in progress until its provider is installed', a
   await pending;
   expect(isConnectionInProgress('lifecycle')).toBe(false);
 });
+it('keeps a connect in progress until its initial balance probe finishes', async () => {
+  const probe = deferred<{ balance: number }>();
+  const enabled = deferred<void>();
+  old.getBalance.mockImplementationOnce(() => probe.promise);
+  const pending = connect('lifecycle', URL, () => enabled.resolve());
+  await enabled.promise;
+  // Provider installed but the probe is still out: a watchdog tick seeing
+  // "not in progress" here would reconnect and discard this attempt's result.
+  expect(isConnectionInProgress('lifecycle')).toBe(true);
+  probe.resolve({ balance: 111 });
+  await expect(pending).resolves.toEqual({ success: true, balance: 111 });
+  expect(isConnectionInProgress('lifecycle')).toBe(false);
+});

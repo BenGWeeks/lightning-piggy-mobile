@@ -13,6 +13,7 @@ import type { WalletState, WalletTransaction } from '../types/wallet';
 
 interface WalletIdentityHydrationDeps {
   setIsLoading?: (value: boolean) => void;
+  setIsOnboarded?: (value: boolean) => void;
   setWalletsHydrated?: (value: boolean) => void;
   walletsRef: MutableRefObject<WalletState[]>;
   lastTxsJsonRef: MutableRefObject<Map<string, string>>;
@@ -31,6 +32,7 @@ interface WalletIdentityHydrationDeps {
  */
 export function useWalletIdentityHydration({
   setIsLoading,
+  setIsOnboarded,
   setWalletsHydrated,
   walletsRef,
   lastTxsJsonRef,
@@ -74,6 +76,16 @@ export function useWalletIdentityHydration({
       (async () => {
         if (!isCurrent()) return;
         try {
+          // A legacy single-wallet install's migration is deferred while no
+          // identity is published; run it for this one before reading its list.
+          if (nextPubkey) {
+            await walletStorage
+              .migrateLegacy(nextPubkey)
+              .catch((e) => console.warn('[Wallet] legacy migration failed:', e));
+            const onboarded = await walletStorage.isOnboarded();
+            if (!isCurrent()) return;
+            setIsOnboarded?.(onboarded);
+          }
           const walletList = await walletStorage.getWalletList();
           if (!isCurrent()) return;
           const walletStates: WalletState[] = await Promise.all(
@@ -187,6 +199,7 @@ export function useWalletIdentityHydration({
     };
   }, [
     setIsLoading,
+    setIsOnboarded,
     setWalletsHydrated,
     walletsRef,
     lastTxsJsonRef,

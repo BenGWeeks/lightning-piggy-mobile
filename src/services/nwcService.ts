@@ -175,7 +175,7 @@ export async function connect(
     // established even if getBalance fails (e.g. slow relay response).
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
-    attempt.settle();
+    attempt.settle(); // wakes reconnect waiters; still in progress until the probe ends
     // Enable relay-pool keepalive pings so a dead link is noticed promptly
     // rather than lingering in TCP ESTABLISHED for ~2h (#654). Best-effort —
     // `client.pool` is an internal SDK shape and may be absent.
@@ -231,7 +231,7 @@ export async function connect(
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
   } finally {
-    attempt.settle();
+    attempt.finish();
   }
 }
 
@@ -472,7 +472,7 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
       throw error;
     }
   } finally {
-    attempt.settle();
+    attempt.finish();
   }
   closeQuietly(provider);
   await waitForNewestConnectionAttempt(walletId);
@@ -495,7 +495,7 @@ function reconnectOnce(walletId: string): Promise<NostrWebLNProvider> {
   return pending;
 }
 
-/** True while a connect()/reconnect handshake for this wallet is still pending. */
+/** True while a reconnect or a connect() (incl. its initial balance probe) is pending. */
 export function isConnectionInProgress(walletId: string): boolean {
   return reconnectsInFlight.has(walletId) || hasPendingConnectionAttempt(walletId);
 }

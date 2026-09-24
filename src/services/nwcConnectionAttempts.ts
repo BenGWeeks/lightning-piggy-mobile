@@ -7,6 +7,9 @@ export interface ConnectionAttempt {
   /** Resolves once the attempt has installed its provider or given up. */
   readonly settled: Promise<void>;
   settle: () => void;
+  /** Ends the whole attempt. For connect() that is after its initial getBalance
+   *  probe, which runs after `settle()` has already released waiters. */
+  finish: () => void;
   done: boolean;
 }
 
@@ -21,7 +24,8 @@ export function beginConnectionAttempt(walletId: string): ConnectionAttempt {
   const attempt: ConnectionAttempt = {
     settled,
     done: false,
-    settle: () => {
+    settle: () => resolve(),
+    finish: () => {
       attempt.done = true;
       resolve();
     },
