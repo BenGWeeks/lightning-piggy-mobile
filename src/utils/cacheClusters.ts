@@ -6,10 +6,13 @@ import Supercluster from 'supercluster';
  *
  * Engine: supercluster (ISC, pure JS — the same hierarchical greedy
  * clustering every major map library uses internally). Cache pin counts
- * are small (bounded at 250 by the #1068 render cap), so we build the
- * index per call — O(n log n) over ≤250 points is microseconds — and
- * query the whole world at the given zoom rather than threading the
- * viewport through (off-screen markers are already bounded).
+ * are small — MapScreen caps them at 250 (#1068); the inline Explore /
+ * Geo-caches maps pass their nearby list uncapped, but that is a
+ * neighbourhood-scoped relay result of similar size — so we build the
+ * index per call (O(n log n), cheap at these sizes) and query
+ * the whole world at the given zoom rather than threading the viewport
+ * through. The query spans the full ±90° latitude range so no cache is
+ * dropped, even past the Web-Mercator cutoff (~±85.05°).
  *
  * The 48 px radius means two caches closer than ~a thumb-width at the
  * current zoom merge into one chip; `maxZoom: 16` guarantees everything
@@ -53,7 +56,7 @@ export function clusterCachePoints(points: CacheClusterPoint[], zoom: number): C
     })),
   );
   const clamped = Math.max(0, Math.min(CLUSTER_MAX_ZOOM + 1, Math.round(zoom)));
-  return index.getClusters([-180, -85, 180, 85], clamped).map((feature) => {
+  return index.getClusters([-180, -90, 180, 90], clamped).map((feature) => {
     const [lng, lat] = feature.geometry.coordinates;
     if ('cluster' in feature.properties && feature.properties.cluster) {
       const id = feature.id as number;

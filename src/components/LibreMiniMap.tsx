@@ -239,10 +239,12 @@ const LibreMiniMapInner: React.FC<Props> = ({
   // Reactive zoom for cache clustering (#1071). Unlike currentZoomRef
   // (a plain ref feeding camera calls without re-rendering), cluster
   // membership genuinely changes with zoom, so the clustering memo needs
-  // a state it can depend on. Updated by the zoom buttons and on camera
-  // settle (pinch-zoom on the interactive full map); half-level rounding
-  // keeps GPS-follow flyTo settles from churning re-renders.
-  const [clusterZoom, setClusterZoom] = useState(defaultZoom);
+  // a state it can depend on. Updated by the zoom buttons, cluster-chip
+  // taps and on camera settle (pinch-zoom on the interactive full map).
+  // Always stored as a whole level — clusterCachePoints groups by integer
+  // zoom anyway, so a fractional write followed by the rounded settle
+  // value would re-render every marker for an identical grouping.
+  const [clusterZoom, setClusterZoom] = useState(Math.round(defaultZoom));
 
   // Pulse the accuracy halo so the user can pick out their own dot
   // against busy maps. 1.0 → 1.18 → 1.0 over 1.6 s, native-driven so the
@@ -388,14 +390,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
   const zoomBy = (delta: number) => () => {
     const next = Math.max(1, Math.min(20, currentZoomRef.current + delta));
     currentZoomRef.current = next;
-    setClusterZoom(next);
+    setClusterZoom(Math.round(next));
     cameraRef.current?.zoomTo(next, { duration: 200 });
   };
 
   // Cache pins, grouped: nearby caches collapse into a count chip until
   // the zoom separates them (#1071). Leaves render through the existing
-  // CacheMapMarker path; clusters render as CacheClusterMarker chips
-  // whose tap flies the camera to the group's expansion zoom.
+  // CacheMapMarker path; clusters render as CacheClusterMarker chips.
   const cacheClusterItems = useMemo(
     () => clusterCachePoints(cachePoints, clusterZoom),
     [cachePoints, clusterZoom],
@@ -408,13 +409,23 @@ const LibreMiniMapInner: React.FC<Props> = ({
     () => cacheClusterItems.flatMap((item) => (item.kind === 'cluster' ? [item] : [])),
     [cacheClusterItems],
   );
-  const onPressCacheCluster = useCallback(
+  const flyToCacheCluster = useCallback(
     (c: { lat: number; lng: number; expansionZoom: number }) => {
       currentZoomRef.current = c.expansionZoom;
-      setClusterZoom(c.expansionZoom);
+      setClusterZoom(Math.round(c.expansionZoom));
       cameraRef.current?.flyTo({ center: [c.lng, c.lat], zoom: c.expansionZoom, duration: 350 });
     },
     [],
+  );
+  // Only the interactive map zooms into a tapped chip. An inline map has
+  // no pan and no recenter button, and its GPS-follow only re-fires when
+  // the fix moves — so a fly-to would strand the camera on the group,
+  // possibly with the user's dot off-screen. There the chip opens the
+  // full map instead (same as the Open Map pill), or is a plain badge
+  // when the host wires no onTapMap.
+  const onPressCacheCluster = useMemo(
+    () => (interactive ? flyToCacheCluster : onTapMap ? () => onTapMap() : undefined),
+    [interactive, flyToCacheCluster, onTapMap],
   );
 
   // Auto-follow GPS for inline mini-maps (non-interactive). When
@@ -478,13 +489,13 @@ const LibreMiniMapInner: React.FC<Props> = ({
         dragPan={interactive}
         touchRotate={interactive}
         touchPitch={interactive}
-        // Emit bbox on every camera-settle so host screens can filter
-        // their list to what's visible. Only wired when an onBoundsChange
-        // prop is provided — keeps the inline mini-map free of the
-        // event-marshalling cost.
+        // Fires on every camera-settle, on every map: refreshes the
+        // clustering zoom (one native getZoom() per settle), then — only
+        // when an onBoundsChange prop is provided — emits the bbox so
+        // host screens can filter their list to what's visible.
         onRegionDidChange={async () => {
-          // Always: refresh the clustering zoom (#1071) — pinch-zoom on
-          // the interactive map only surfaces here. Rounded to integer
+          // Refresh the clustering zoom (#1071) — pinch-zoom on the
+          // interactive map only surfaces here. Rounded to integer
           // levels so GPS-follow flyTo settles don't churn re-renders.
           try {
             const z = await mapRef.current?.getZoom();
