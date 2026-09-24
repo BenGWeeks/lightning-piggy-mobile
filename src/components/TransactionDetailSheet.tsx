@@ -22,6 +22,7 @@ import NostrLoginSheet from './NostrLoginSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
+import { isTransactionSettled } from '../utils/transactionSettlement';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
@@ -46,6 +47,7 @@ export interface TransactionDetailData {
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
+  settled?: boolean;
   blockHeight?: number | null;
   /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;
@@ -304,7 +306,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   const statusBadge = useMemo(() => {
     if (!tx) return null;
-    const pending = !tx.settled_at && !tx.blockHeight;
+    const pending = !isTransactionSettled(tx);
     if (swap?.terminalFailure)
       return {
         style: styles.badgeFailed,
@@ -330,7 +332,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
    *  taps in. */
   const boltzExplanation = useMemo(() => {
     if (!tx || !isBoltzSwap) return null;
-    const pending = !tx.settled_at && !tx.blockHeight;
+    const pending = !isTransactionSettled(tx);
     // Prefer live Boltz poll results (`swap.*`) over `iconState` whenever
     // they're available: `iconState` is snapshotted from the row tap and
     // can be stale, whereas the live poll is the latest server-side truth.

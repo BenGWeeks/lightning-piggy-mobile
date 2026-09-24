@@ -6,6 +6,7 @@ jest.mock('../services/swapRecoveryService', () => ({
 }));
 
 import { mapNwcTransactions, type NwcRawTransaction } from './nwcTransactions';
+import { isTransactionSettled } from './transactionSettlement';
 import type { WalletTransaction } from '../types/wallet';
 
 const H1 = 'a'.repeat(64);
@@ -49,9 +50,9 @@ describe('mapNwcTransactions', () => {
     });
   });
 
-  it('converts fees from msats to sats (rounded)', () => {
-    const [tx] = mapNwcTransactions([raw({ payment_hash: H1, fees_paid: 1500 })], []);
-    expect(tx.feesSats).toBe(2);
+  it('preserves fees already converted to sats by the WebLN SDK', () => {
+    const [tx] = mapNwcTransactions([raw({ payment_hash: H1, fees_paid: 55 })], []);
+    expect(tx.feesSats).toBe(55);
   });
 
   it('omits feesSats when fees_paid is absent', () => {
@@ -171,5 +172,49 @@ describe('mapNwcTransactions', () => {
       expect(txs).toContainEqual(pendingZap);
       expect(txs).toHaveLength(3);
     });
+  });
+});
+
+describe('Coinos settlement without settled_at', () => {
+  it('shows a settled outgoing response as confirmed without inventing a timestamp', () => {
+    const [tx] = mapNwcTransactions(
+      [
+        raw({
+          type: 'outgoing',
+          amount: 11000,
+          state: 'settled',
+          created_at: 1790262724,
+          fees_paid: 55,
+          payment_hash: H1,
+        }),
+      ],
+      [],
+    );
+    expect(isTransactionSettled(tx)).toBe(true);
+    expect(tx.settled_at).toBeUndefined();
+    expect(tx.created_at).toBe(1790262724);
+    expect(tx.feesSats).toBe(55);
+  });
+
+  it.each(['pending', 'failed', 'expired', 'unknown', undefined])(
+    'does not confirm a %s response merely because it has a preimage and creation time',
+    (state) => {
+      const [tx] = mapNwcTransactions(
+        [raw({ state, created_at: 123, preimage: 'a'.repeat(64), payment_hash: H1 })],
+        [],
+      );
+      expect(isTransactionSettled(tx)).toBe(false);
+    },
+  );
+
+  it('still confirms legacy providers that supply only settled_at', () => {
+    const [tx] = mapNwcTransactions([raw({ settled_at: 123 })], []);
+    expect(isTransactionSettled(tx)).toBe(true);
+  });
+
+  it('replaces pending state with settled state on the next wallet refresh', () => {
+    const pending = mapNwcTransactions([raw({ state: 'pending', payment_hash: H1 })], []);
+    const [settled] = mapNwcTransactions([raw({ state: 'settled', payment_hash: H1 })], pending);
+    expect(isTransactionSettled(settled)).toBe(true);
   });
 });

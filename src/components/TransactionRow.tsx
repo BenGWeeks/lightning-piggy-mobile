@@ -6,6 +6,7 @@ import { satsToFiatString } from '../services/fiatService';
 import TransactionTypeIcon, { type TransactionIconState } from './TransactionTypeIcon';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import { getTxCategory } from '../utils/txCategory';
+import { isTransactionSettled } from '../utils/transactionSettlement';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { AVATAR_SIZE, type TransactionListStyles } from '../styles/TransactionList.styles';
@@ -129,7 +130,7 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   // `??` (not `||`) so a `0` (epoch) timestamp counts as present; only
   // null/undefined means the tx has no settle/create time yet (pending).
   const ts = item.settled_at ?? item.created_at;
-  const isPending = ts == null && !item.blockHeight;
+  const isPending = !isTransactionSettled(item);
   const zapCpRaw = item.zapCounterparty ?? undefined;
   // Prefer the live profile from contacts (which refreshes when the
   // profile cache updates) over the snapshot embedded in the tx.
