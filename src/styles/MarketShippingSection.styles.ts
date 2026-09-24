@@ -115,6 +115,11 @@ export const createMarketShippingSectionStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.brandPink,
     },
+    addressNote: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
   });
 
 export type MarketShippingSectionStyles = ReturnType<typeof createMarketShippingSectionStyles>;

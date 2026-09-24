@@ -52,6 +52,29 @@ export interface MarketProduct {
   url: string;
   /** Featured products surface first in the rail/list. */
   featured: boolean;
+  /**
+   * Explicit opt-in to the in-app (NIP-17 gift-wrapped order) checkout.
+   * OMITTED means "Buy" opens the seller's website — the default for every
+   * real seller until they have confirmed they run an order service that
+   * accepts orders for the listing below. Never infer this from the seller
+   * merely having an npub.
+   */
+  checkout?: MarketProductCheckout;
+}
+
+/** Seller-confirmed facts the in-app checkout needs to address an order. */
+export interface MarketProductCheckout {
+  /** `d` tag of the seller's OWN published listing (kind 30402) that the
+   * order's `item` tag references. Must be the seller's real listing id —
+   * never an id the app made up for the catalogue. */
+  listingDTag: string;
+  /**
+   * `physical` — the seller's kind-30406 shipping options are required: an
+   * empty, invalid or timed-out fetch blocks the order (fail closed).
+   * `none` — the seller has confirmed nothing is shipped, so checkout skips
+   * the shipping step. Only set `none` on the seller's explicit say-so.
+   */
+  fulfilment: 'physical' | 'none';
 }
 
 /**
@@ -79,7 +102,8 @@ const gbpToSats = (gbp: number): number => Math.round(gbp * PRICE_SNAPSHOT_SATS_
 // shipped. Priced at 21 sats and sold by the Big/Little Piggy "(TEST)" sellers
 // (see PIG_TEST_VENDORS) so a pig-to-pig NIP-17 order can be exercised on a dev
 // build. Titles are clearly marked [TEST] so they can't be mistaken for real
-// listings.
+// listings. These are the ONLY entries opted in to in-app checkout; the real
+// sellers below keep the website link until they confirm order support.
 const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
   ? [
       {
@@ -93,6 +117,7 @@ const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
         sellerName: 'Big Piggy (TEST)',
         url: 'https://lightningpiggy.com',
         featured: false,
+        checkout: { listingDTag: 'test-big-piggy-21sat', fulfilment: 'physical' },
       },
       {
         id: 'test-little-piggy-21sat',
@@ -105,6 +130,7 @@ const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
         sellerName: 'Little Piggy (TEST)',
         url: 'https://lightningpiggy.com',
         featured: false,
+        checkout: { listingDTag: 'test-little-piggy-21sat', fulfilment: 'physical' },
       },
     ]
   : [];

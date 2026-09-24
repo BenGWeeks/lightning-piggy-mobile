@@ -9,6 +9,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketProductDetailStyles } from '../styles/MarketProductDetailScreen.styles';
 import { MARKET_PRODUCTS, sellerOf } from '../data/marketProducts';
 import { marketFeedbackContext } from '../utils/marketFeedback';
+import { marketCheckoutTarget } from '../utils/marketCheckout';
 import VendorAvatar from '../components/VendorAvatar';
 import ProductFeedbackTabs from '../components/ProductFeedbackTabs';
 import NostrLoginSheet from '../components/NostrLoginSheet';
@@ -35,8 +36,8 @@ interface Props {
 /**
  * Full Market PRODUCT page opened from a grid tile: product image, title,
  * price, seller (avatar + name), description and a buy affordance (the in-app
- * checkout sheet for sellers with a Nostr identity; the seller's shop URL as
- * the fallback otherwise), followed by Nostr Reviews (kind 31555) + Comments (kind
+ * checkout sheet for products explicitly opted in via `checkout`; the seller's
+ * shop URL otherwise), followed by Nostr Reviews (kind 31555) + Comments (kind
  * 1111) in an underlined tabbed section — mirroring the companion website's
  * product page. Reviews/comments are shown only when the seller has a Nostr
  * identity to root them on.
@@ -62,23 +63,25 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (product ? marketFeedbackContext(product, vendor) : null),
     [product, vendor],
   );
-  // In-app checkout is available exactly when the seller has a Nostr identity to
-  // address the order to (same gate as reviews/comments). The merchant pubkey is
-  // resolved once by `marketFeedbackContext`.
-  const vendorPubkey = feedback?.merchantPubkey ?? null;
+  // In-app checkout only for products explicitly opted in with the seller's
+  // real listing id — an npub alone doesn't prove the seller accepts orders.
+  const checkoutTarget = useMemo(
+    () => (product ? marketCheckoutTarget(product, vendor) : null),
+    [product, vendor],
+  );
 
   const onRequestSignIn = useCallback(() => setLoginVisible(true), []);
-  // In-app order for sellers with a Nostr identity; external website otherwise.
+  // In-app order for opted-in products; external website otherwise.
   const openShop = useCallback(() => {
     if (!product) return;
-    if (vendorPubkey) {
+    if (checkoutTarget) {
       setCheckoutVisible(true);
       return;
     }
     Linking.openURL(product.url).catch(() => {
       // Swallow — a malformed/unsupported URL shouldn't crash the screen.
     });
-  }, [product, vendorPubkey]);
+  }, [product, checkoutTarget]);
 
   const onOrderPlaced = useCallback(
     (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => {
@@ -193,9 +196,9 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
             <Text style={styles.buyText}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
-            {/* In-app checkout for Nostr sellers; the external-link glyph is only
-                shown when tapping Buy leaves the app for the seller's website. */}
-            {vendorPubkey ? null : (
+            {/* In-app checkout for opted-in products; the external-link glyph is
+                only shown when tapping Buy leaves the app for the seller's website. */}
+            {checkoutTarget ? null : (
               <ExternalLink size={16} color={colors.white} strokeWidth={2.5} />
             )}
           </TouchableOpacity>
@@ -218,13 +221,13 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </ScrollView>
 
-      {vendorPubkey ? (
+      {checkoutTarget ? (
         <MarketCheckoutSheet
           visible={checkoutVisible}
           onClose={() => setCheckoutVisible(false)}
           product={product}
+          checkout={checkoutTarget}
           sellerName={sellerName}
-          vendorPubkey={vendorPubkey}
           vendorLogo={vendor?.logo}
           onRequestSignIn={onRequestSignIn}
           onPlaced={onOrderPlaced}

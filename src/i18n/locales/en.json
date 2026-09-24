@@ -2184,7 +2184,8 @@
       "shipsTo": "Ships to {{countries}}",
       "shipsToMore": "Ships to {{countries}} +{{count}}",
       "optionAccessibility": "Shipping option {{title}}",
-      "priceFallback": "{{amount}} {{currency}}"
+      "priceFallback": "{{amount}} {{currency}}",
+      "addressInChat": "Your delivery address isn't sent with the order — {{seller}} will ask for it in your chat."
     }
   }
 }

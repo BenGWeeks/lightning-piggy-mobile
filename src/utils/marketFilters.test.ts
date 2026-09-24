@@ -71,6 +71,33 @@ describe('currencyOf', () => {
     expect(currencyOf(undefined)).toBeNull();
     expect(currencyOf(null)).toBeNull();
   });
+
+  it('uses the earliest symbol in the label, not the table order', () => {
+    expect(currencyOf('$25 (≈ €23)')).toBe('USD');
+    expect(currencyOf('€23 (≈ $25)')).toBe('EUR');
+    expect(currencyOf('$6 / £5')).toBe('USD');
+  });
+
+  it('prefers a leading ISO code over a symbol', () => {
+    expect(currencyOf('CAD $25')).toBe('CAD');
+    expect(currencyOf('CNY ¥50')).toBe('CNY');
+  });
+
+  it('reads prefixed dollars and refuses unknown prefixes', () => {
+    expect(currencyOf('A$30')).toBe('AUD');
+    expect(currencyOf('CA$25')).toBe('CAD');
+    expect(currencyOf('HK$100')).toBe('HKD');
+    expect(currencyOf('US$10')).toBe('USD');
+    expect(currencyOf('ZZ$10')).toBeNull();
+  });
+
+  it('only accepts known ISO codes in the bare-code form', () => {
+    expect(currencyOf('Ask')).toBeNull();
+    expect(currencyOf('TBC')).toBeNull();
+    expect(currencyOf('POA')).toBeNull();
+    expect(currencyOf('Sat 500')).toBeNull();
+    expect(currencyOf('21 sats')).toBeNull();
+  });
 });
 
 describe('productCountry', () => {
@@ -105,6 +132,12 @@ describe('productMatchesSearch', () => {
   it('matches everything for an empty / whitespace query', () => {
     expect(productMatchesSearch(p, resolve, '')).toBe(true);
     expect(productMatchesSearch(p, resolve, '   ')).toBe(true);
+  });
+
+  it('never matches a query spanning two fields', () => {
+    // title "…Badge" + description "Wear…" must not join into "badge wear".
+    expect(productMatchesSearch(p, resolve, 'badge wear')).toBe(false);
+    expect(productMatchesSearch(p, resolve, 'badgewear')).toBe(false);
   });
 
   it('matches on title, case-insensitively', () => {

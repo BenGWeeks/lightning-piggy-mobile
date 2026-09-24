@@ -182,6 +182,12 @@ const MarketShippingSection: React.FC<Props> = ({
           })
         )
       ) : null}
+
+      {/* The order carries only the chosen shipping option — there is no
+          address form, so say where the address actually gets collected. */}
+      <Text style={styles.addressNote} testID="market-shipping-address-note">
+        {t('market.shipping.addressInChat', { seller: sellerName })}
+      </Text>
     </View>
   );
 };

@@ -55,7 +55,7 @@ export type CheckoutStatus = 'idle' | 'placing' | 'sent' | 'error';
 export interface PlaceOrderInput {
   /** Merchant's Nostr pubkey (hex) — gift-wrap recipient + order `p` tag. */
   vendorPubkey: string;
-  /** Product `d` tag (the LP catalogue uses the product's stable id). */
+  /** `d` tag of the seller's own listing (the product's `checkout.listingDTag`). */
   dTag: string;
   /** Unit price in satoshis. */
   priceSats: number;

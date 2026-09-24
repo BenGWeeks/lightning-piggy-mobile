@@ -2184,7 +2184,8 @@
       "shipsTo": "Envía a {{countries}}",
       "shipsToMore": "Envía a {{countries}} +{{count}}",
       "optionAccessibility": "Opción de envío {{title}}",
-      "priceFallback": "{{amount}} {{currency}}"
+      "priceFallback": "{{amount}} {{currency}}",
+      "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
     }
   }
 }

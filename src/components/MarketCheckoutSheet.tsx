@@ -26,14 +26,16 @@ import MarketShippingSection from './MarketShippingSection';
 import CountryPickerSheet from './CountryPickerSheet';
 import Toast from './BrandedToast';
 import type { MarketProduct } from '../data/marketProducts';
+import type { MarketCheckoutTarget } from '../utils/marketCheckout';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   product: MarketProduct;
+  /** The product's explicit checkout opt-in, resolved by `marketCheckoutTarget`:
+   * order recipient, the seller's real listing `d` tag, and fulfilment. */
+  checkout: MarketCheckoutTarget;
   sellerName: string;
-  /** Merchant's Nostr pubkey (hex) — the order recipient. Required for in-app checkout. */
-  vendorPubkey: string;
   /** Seller logo, threaded into the conversation the buyer lands in. */
   vendorLogo?: string;
   /** Open the sign-in sheet (owned by the parent screen). */
@@ -63,12 +65,13 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   visible,
   onClose,
   product,
+  checkout,
   sellerName,
-  vendorPubkey,
   vendorLogo,
   onRequestSignIn,
   onPlaced,
 }) => {
+  const { vendorPubkey, listingDTag, fulfilment } = checkout;
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketCheckoutSheetStyles(colors), [colors]);
@@ -84,7 +87,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const [submitting, setSubmitting] = useState(false);
 
   // --- Country-first shipping (#948 Option A) ---
-  const shipping = useShippingOptions(visible ? vendorPubkey : null, visible);
+  const shipping = useShippingOptions(visible ? vendorPubkey : null, visible, fulfilment);
   const [countryCode, setCountryCode] = useState<string | null>(null);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
   const [selectedCoordinate, setSelectedCoordinate] = useState<string | null>(null);
@@ -119,10 +122,14 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     }
   }, [visible, reset]);
 
-  // The merchant publishes shipping options ⇔ the country-first flow is on.
-  // Zero published options (a digital-goods seller) skips the section — the
-  // pre-shipping checkout behaviour, unchanged.
+  // A `physical` product only reaches `ready` with ≥1 merchant option (an
+  // empty fetch is an error — see useShippingOptions), so this is the
+  // country-first flow. A seller-confirmed `none` product is `ready` with no
+  // options and skips the section.
   const hasShipping = shipping.status === 'ready' && shipping.options.length > 0;
+  // Belt and braces for the hook's contract: a physical order must never be
+  // signed without a shipping selection.
+  const shippingMissing = fulfilment === 'physical' && !hasShipping;
 
   // Fetch a BTC spot price once per distinct fiat currency the options use.
   // All fetches settle together and commit as ONE state write — no
@@ -222,13 +229,16 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   // no options (digital goods) or a priced selection. Until then it renders as
   // "—" rather than the bare subtotal masquerading as the order total.
   const shippingSettled =
-    shipping.status === 'ready' && (!hasShipping || selectedShippingSats !== null);
+    shipping.status === 'ready' &&
+    !shippingMissing &&
+    (!hasShipping || selectedShippingSats !== null);
   const totalSats = shippingSettled
     ? orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0)
     : null;
   const shippingBlocksSubmit =
     totalSats === null ||
     shipping.status !== 'ready' ||
+    shippingMissing ||
     (hasShipping && (!countryCode || !selectedOption || selectedShippingSats === null));
 
   // While an order is in flight the sheet must not be dismissable (pan or
@@ -305,7 +315,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
       }
       await placeOrder({
         vendorPubkey,
-        dTag: product.id,
+        dTag: listingDTag,
         priceSats: product.priceSats,
         quantity,
         shipping: shippingInput,
@@ -328,7 +338,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     onRequestSignIn,
     placeOrder,
     vendorPubkey,
-    product.id,
+    listingDTag,
     product.priceSats,
     quantity,
     sellerName,
