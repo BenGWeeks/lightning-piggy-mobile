@@ -127,10 +127,17 @@ const SendSheet: React.FC<Props> = ({
   // See pasteTextKey above — same uncontrolled-remount pattern; programmatic
   // sets go through applyMemo, onChangeText stays a bare setMemo.
   const [memoKey, setMemoKey] = useState(0);
+  // Freshest paste-field text: synced in render, and written synchronously by
+  // onChangeText / applyPasteText so it can run ahead of `pasteText` state
+  // (see the refs block below). Declared here so useSendInputMode can see
+  // native typing that hasn't committed yet.
+  const pasteTextRef = useRef(pasteText);
+  pasteTextRef.current = pasteText;
   const { inputMode, resetInputModeForOpen, selectInputMode } = useSendInputMode({
     visible,
     permission,
     hasInput: scanned || pasteText.length > 0,
+    liveInputRef: pasteTextRef,
   });
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
@@ -151,12 +158,15 @@ const SendSheet: React.FC<Props> = ({
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
   const dismissedInFlightRef = useRef(false);
+  // Bumped on every open and close; see the deferred initialAddress prefill.
+  const openSessionRef = useRef(0);
 
   // Programmatic value changes for the uncontrolled paste/memo fields go through
   // these helpers, which bump the remount key so the input picks up the new
   // `defaultValue`. onChangeText must NOT use them — it stays a bare setter (no
   // key bump) so native typing is never fed back through React (#873).
   const applyPasteText = useCallback((v: string) => {
+    pasteTextRef.current = v;
     setPasteText(v);
     setPasteTextKey((k) => k + 1);
   }, []);
@@ -199,6 +209,7 @@ const SendSheet: React.FC<Props> = ({
   const walletName = selectedWallet ? walletLabel(selectedWallet) : t('sendSheet.walletFallback');
 
   useEffect(() => {
+    openSessionRef.current += 1;
     if (visible) {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
@@ -224,8 +235,15 @@ const SendSheet: React.FC<Props> = ({
       setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
-        // Use setTimeout to process after state reset
-        setTimeout(() => processInput(initialAddress), 0);
+        // Use setTimeout to process after state reset. The sheet stays mounted
+        // across opens, so the cleanup cancels it on close/unmount and the
+        // session check drops it if it still fires after a reopen — a stale
+        // prefill must never overwrite the next open's target.
+        const session = openSessionRef.current;
+        const prefill = setTimeout(() => {
+          if (openSessionRef.current === session) processInput(initialAddress);
+        }, 0);
+        return () => clearTimeout(prefill);
       }
     } else {
       bottomSheetRef.current?.dismiss();
@@ -243,8 +261,7 @@ const SendSheet: React.FC<Props> = ({
   }, [visible, onClose]);
 
   // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
-  const pasteTextRef = useRef(pasteText);
-  pasteTextRef.current = pasteText;
+  // (pasteTextRef is declared above, before useSendInputMode.)
   const invoiceDataRef = useRef(invoiceData);
   invoiceDataRef.current = invoiceData;
   // Freshest-value refs for the two uncontrolled inputs. Because the fields are

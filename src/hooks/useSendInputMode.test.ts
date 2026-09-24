@@ -12,8 +12,10 @@ interface Props {
 
 // Mirrors SendSheet: the hook is called first, then the open effect keyed on
 // `visible` applies the open default (same effect ordering as the sheet).
+const liveInputRef = { current: '' };
+
 function useHarness({ visible, permission, hasInput = false, initialAddress }: Props) {
-  const mode = useSendInputMode({ visible, permission, hasInput });
+  const mode = useSendInputMode({ visible, permission, hasInput, liveInputRef });
   useEffect(() => {
     if (visible) mode.resetInputModeForOpen(initialAddress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -24,6 +26,10 @@ function useHarness({ visible, permission, hasInput = false, initialAddress }: P
 const granted = { granted: true };
 const denied = { granted: false };
 const setup = (initialProps: Props) => renderHook((p: Props) => useHarness(p), { initialProps });
+
+beforeEach(() => {
+  liveInputRef.current = '';
+});
 
 it('moves an untouched first open to Scan once permission resolves granted', () => {
   const { result, rerender } = setup({ visible: true, permission: null });
@@ -75,6 +81,15 @@ it('never yanks typed content: input latches Paste even if later cleared', () =>
 it('ignores input arriving in the same commit as the resolution', () => {
   const { result, rerender } = setup({ visible: true, permission: null });
   rerender({ visible: true, permission: granted, hasInput: true });
+  expect(result.current.inputMode).toBe('paste');
+});
+
+it('keeps Paste for native text in the live ref that has not reached state yet', () => {
+  const { result, rerender } = setup({ visible: true, permission: null });
+  // onChangeText wrote the ref synchronously; its setState hasn't committed,
+  // so the resolution render still reports hasInput=false.
+  liveInputRef.current = 'lnbc1';
+  rerender({ visible: true, permission: granted, hasInput: false });
   expect(result.current.inputMode).toBe('paste');
 });
 

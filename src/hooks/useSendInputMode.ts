@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { SendInputMode } from '../components/SendModeTabs';
 
 type CameraPermission = { granted: boolean } | null | undefined;
@@ -10,6 +10,10 @@ interface Options {
   // Anything the user has already entered/scanned in this open. Latches off the
   // late switch to Scan so an in-progress form is never yanked away.
   hasInput: boolean;
+  // Freshest paste-field text. The field is uncontrolled, so native typing
+  // writes this ref synchronously and can run ahead of the committed state
+  // behind `hasInput`; non-empty text here also blocks the late switch.
+  liveInputRef?: RefObject<string>;
 }
 
 // Send's Scan/Paste/NFC tab selection. The open default is Scan when the camera
@@ -20,7 +24,7 @@ interface Options {
 // resolution is granted, and the user hasn't picked a tab or entered anything,
 // move to Scan — only the tab, never a form reset. Denied/unavailable, an
 // initialAddress, or any user action ends the wait and keeps Paste.
-export function useSendInputMode({ visible, permission, hasInput }: Options) {
+export function useSendInputMode({ visible, permission, hasInput, liveInputRef }: Options) {
   const [inputMode, setInputMode] = useState<SendInputMode>('scan');
   const awaitingPermissionRef = useRef(false);
   const permissionRef = useRef(permission);
@@ -48,7 +52,10 @@ export function useSendInputMode({ visible, permission, hasInput }: Options) {
   useEffect(() => {
     if (!resolved || !awaitingPermissionRef.current) return;
     awaitingPermissionRef.current = false;
-    if (granted && visible && !hasInput) setInputMode('scan');
+    // Read the ref, not just `hasInput`: this effect can flush before a
+    // keystroke's setState commits (its closure still sees empty input).
+    const typing = !!liveInputRef?.current;
+    if (granted && visible && !hasInput && !typing) setInputMode('scan');
     // Only the first resolution after an unresolved open matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolved, granted]);

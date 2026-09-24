@@ -21,11 +21,25 @@ jest.mock('expo-camera', () => {
   };
 });
 
+// A native keystroke queued here is delivered from the paste field's layout
+// effect: after React commits the next render but BEFORE that commit's passive
+// effects flush — the window where the uncontrolled field's native text (and
+// pasteTextRef) is ahead of `pasteText` state.
+let mockNativeKeystroke: string | null = null;
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
   const RN = jest.requireActual('react-native');
   const Pass = ({ children }: { children?: React.ReactNode }) =>
     R.createElement(RN.View, null, children);
+  function TextInput(props: { testID?: string; onChangeText?: (v: string) => void }) {
+    R.useLayoutEffect(() => {
+      if (mockNativeKeystroke === null || props.testID !== 'send-paste-input') return;
+      const text = mockNativeKeystroke;
+      mockNativeKeystroke = null;
+      props.onChangeText?.(text);
+    });
+    return R.createElement(RN.TextInput, props);
+  }
   return {
     BottomSheetModal: R.forwardRef(function Modal(
       { children }: { children?: React.ReactNode },
@@ -35,7 +49,7 @@ jest.mock('@gorhom/bottom-sheet', () => {
       return R.createElement(RN.View, null, children);
     }),
     BottomSheetBackdrop: () => null,
-    BottomSheetTextInput: RN.TextInput,
+    BottomSheetTextInput: TextInput,
     BottomSheetScrollView: Pass,
     BottomSheetView: Pass,
   };
@@ -128,6 +142,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockPermission = null;
   mockSetPermission = null;
+  mockNativeKeystroke = null;
   mockProcessInput.mockClear();
 });
 afterEach(() => {
@@ -177,6 +192,43 @@ it('does not switch tab or reset typed text when permission resolves mid-entry',
   // Same native instance (no remount-key bump) and state still holds the text.
   expect(after).toBe(input);
   expect(screen.getByTestId('send-paste-go').props.accessibilityState?.disabled).toBe(false);
+});
+
+it('keeps Paste for a keystroke that lands before its state commits (ref ahead of state)', () => {
+  render(<SendSheet visible onClose={onClose} />);
+  const input = screen.getByTestId('send-paste-input');
+  // The resolution render commits with empty `pasteText`; the keystroke then
+  // arrives before the permission effect flushes, so only the ref has it.
+  mockNativeKeystroke = 'lnbc1partial';
+  resolvePermission({ granted: true });
+  expect(mockNativeKeystroke).toBeNull();
+  expect(screen.getByTestId('send-paste-input')).toBe(input);
+  expect(selectedTab('send-tab-input')).toBe(true);
+  expect(screen.getByTestId('send-paste-go').props.accessibilityState?.disabled).toBe(false);
+});
+
+it('cancels the deferred initialAddress prefill when the sheet closes first', () => {
+  const view = render(<SendSheet visible onClose={onClose} initialAddress="a@example.com" />);
+  view.rerender(<SendSheet visible={false} onClose={onClose} initialAddress="a@example.com" />);
+  act(() => jest.runOnlyPendingTimers());
+  expect(mockProcessInput).not.toHaveBeenCalled();
+});
+
+it('a previous open never prefills over a reopen with another address', () => {
+  const view = render(<SendSheet visible onClose={onClose} initialAddress="a@example.com" />);
+  view.rerender(<SendSheet visible={false} onClose={onClose} />);
+  view.rerender(<SendSheet visible onClose={onClose} initialAddress="b@example.com" />);
+  act(() => jest.runOnlyPendingTimers());
+  expect(mockProcessInput.mock.calls).toEqual([['b@example.com']]);
+});
+
+it('a previous prefill never processes into a plain reopen', () => {
+  const view = render(<SendSheet visible onClose={onClose} initialAddress="a@example.com" />);
+  view.rerender(<SendSheet visible={false} onClose={onClose} />);
+  view.rerender(<SendSheet visible onClose={onClose} />);
+  act(() => jest.runOnlyPendingTimers());
+  expect(mockProcessInput).not.toHaveBeenCalled();
+  expect(screen.getByTestId('send-paste-input').props.defaultValue).toBe('');
 });
 
 it('opens straight on Scan when permission was already granted at mount', () => {
