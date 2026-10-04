@@ -9,6 +9,9 @@ import ReceiveSheet from './ReceiveSheet';
 // slow address/invoice request from one open or wallet must never land on the
 // QR of a later one.
 
+// Runs once from the sheet's next commit (layout phase): lets a test settle a
+// request after React commits an update but before its passive effects flush.
+let mockDuringCommit: (() => void) | null = null;
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
   const RN = jest.requireActual('react-native');
@@ -20,15 +23,26 @@ jest.mock('@gorhom/bottom-sheet', () => {
       ref: React.Ref<unknown>,
     ) {
       R.useImperativeHandle(ref, () => ({ present: jest.fn(), dismiss: jest.fn() }));
+      R.useLayoutEffect(() => {
+        const run = mockDuringCommit;
+        mockDuringCommit = null;
+        run?.();
+      });
       return R.createElement(RN.View, null, children);
     }),
     BottomSheetBackdrop: () => null,
     BottomSheetView: Pass,
   };
 });
+// Every committed QR value, so a test can catch a stale frame that a later
+// effect overwrites.
+const mockQrRenders: string[] = [];
 jest.mock('react-native-qrcode-svg', () => {
   const { Text } = jest.requireActual('react-native');
-  return ({ value }: { value: string }) => <Text testID="receive-qr">{value}</Text>;
+  return ({ value }: { value: string }) => {
+    mockQrRenders.push(value);
+    return <Text testID="receive-qr">{value}</Text>;
+  };
 });
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
@@ -55,6 +69,12 @@ const resolveFor = async (id: string, value: string) => {
   expect(waiting.length).toBeGreaterThan(0);
   delete mockPending[id];
   await act(async () => waiting.forEach((resolve) => resolve(value)));
+};
+// Synchronous variant for use inside a commit (see mockDuringCommit).
+const resolveNow = (id: string, value: string) => {
+  const waiting = mockPending[id] ?? [];
+  delete mockPending[id];
+  waiting.forEach((resolve) => resolve(value));
 };
 
 const mockGetReceiveAddress = jest.fn((id: string) => deferFor(id));
@@ -98,8 +118,11 @@ const qrValue = () => screen.queryByTestId('receive-qr')?.props.children ?? null
 beforeEach(() => {
   mockActiveWalletId = 'A';
   mockConfirmAmount = null;
+  mockDuringCommit = null;
+  mockQrRenders.length = 0;
   for (const id of Object.keys(mockPending)) delete mockPending[id];
   jest.clearAllMocks();
+  mockGetReceiveAddress.mockImplementation((id: string) => deferFor(id));
 });
 
 // Open on wallet A, close, reopen on wallet B — with A's request still pending.
@@ -108,9 +131,112 @@ function openAThenReopenB() {
   view.rerender(<ReceiveSheet visible={false} onClose={onClose} />);
   mockActiveWalletId = 'B';
   view.rerender(<ReceiveSheet visible onClose={onClose} />);
-  expect(mockGetReceiveAddress).toHaveBeenCalledWith('A');
-  expect(mockGetReceiveAddress).toHaveBeenCalledWith('B');
+  // Exactly one request per open, for that open's wallet.
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A'], ['B']]);
 }
+
+// Owns `visible` so a test can flip it OUTSIDE act(), as a production state
+// update does. React then commits and flushes passive effects in separate
+// scheduler tasks, so a request settled during the commit (mockDuringCommit)
+// runs its continuation in between — exactly the window a token bumped from a
+// passive effect leaves open.
+let setHarnessVisible: (visible: boolean) => void = () => {};
+// A closed sheet renders nothing, so the harness commits its own probe too.
+function CommitProbe() {
+  React.useLayoutEffect(() => {
+    const run = mockDuringCommit;
+    mockDuringCommit = null;
+    run?.();
+  });
+  return null;
+}
+function Harness() {
+  const [visible, setVisible] = React.useState(true);
+  setHarnessVisible = setVisible;
+  return (
+    <>
+      <ReceiveSheet visible={visible} onClose={onClose} />
+      <CommitProbe />
+    </>
+  );
+}
+async function outsideAct(update: () => void) {
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = env.IS_REACT_ACT_ENVIRONMENT;
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    update();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
+// The composite's onPress, callable outside act() (fireEvent always wraps).
+function onPressOf(testID: string): () => void {
+  let node = screen.getByTestId(testID);
+  while (!node.props.onPress && node.parent) node = node.parent;
+  return node.props.onPress;
+}
+
+it('first open makes one address request and shows it even if a duplicate would fail', async () => {
+  mockGetReceiveAddress
+    .mockImplementationOnce(() => Promise.resolve('bc1qalpha000000'))
+    .mockImplementation(() => Promise.reject(new Error('rate limited')));
+  render(<ReceiveSheet visible onClose={onClose} />);
+  await act(async () => {});
+  expect(mockGetReceiveAddress).toHaveBeenCalledTimes(1);
+  expect(qrValue()).toBe('bitcoin:bc1qalpha000000');
+});
+
+it('reopening on the same wallet makes one fresh request', async () => {
+  const view = render(<ReceiveSheet visible onClose={onClose} />);
+  await resolveFor('A', 'bc1qalpha000000');
+  view.rerender(<ReceiveSheet visible={false} onClose={onClose} />);
+  view.rerender(<ReceiveSheet visible onClose={onClose} />);
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A'], ['A']]);
+  await resolveFor('A', 'bc1qalpha000001');
+  expect(qrValue()).toBe('bitcoin:bc1qalpha000001');
+});
+
+it("never commits the previous wallet's address under a dropdown switch", async () => {
+  render(<ReceiveSheet visible onClose={onClose} />);
+  await resolveFor('A', 'bc1qalpha000000');
+  fireEvent.press(screen.getByTestId('receive-wallet-dropdown-toggle'));
+  mockQrRenders.length = 0;
+  fireEvent.press(screen.getByTestId('receive-wallet-option-B'));
+  // Cleared in the switch's own commit, not one effect later.
+  expect(mockQrRenders).toEqual([]);
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A'], ['B']]);
+  await resolveFor('B', 'bc1qbravo000000');
+  expect(qrValue()).toBe('bitcoin:bc1qbravo000000');
+});
+
+it('drops an invoice that settles after the close commits but before its effects run', async () => {
+  mockActiveWalletId = 'LA';
+  render(<Harness />);
+  act(() => mockConfirmAmount?.(1000));
+  expect(mockMakeInvoice).toHaveBeenCalledWith('LA', 1000, expect.any(String));
+
+  mockDuringCommit = () => resolveNow('LA', 'lnbc-alpha');
+  await outsideAct(() => setHarnessVisible(false));
+  expect(mockDuringCommit).toBeNull();
+  // The closed session's invoice is never watched for payment.
+  expect(mockExpectPayment).not.toHaveBeenCalled();
+});
+
+it('drops an invoice that settles after a dropdown switch commits but before its effects run', async () => {
+  mockActiveWalletId = 'LA';
+  render(<Harness />);
+  act(() => mockConfirmAmount?.(1000));
+  fireEvent.press(screen.getByTestId('receive-wallet-dropdown-toggle'));
+  const selectLB = onPressOf('receive-wallet-option-LB');
+
+  mockDuringCommit = () => resolveNow('LA', 'lnbc-alpha');
+  await outsideAct(selectLB);
+  expect(mockDuringCommit).toBeNull();
+  expect(mockExpectPayment).not.toHaveBeenCalled();
+  expect(mockQrRenders).not.toContain('lnbc-alpha');
+});
 
 it('drops a delayed wallet-A address that resolves after reopening on wallet B', async () => {
   openAThenReopenB();

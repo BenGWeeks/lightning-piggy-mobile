@@ -127,12 +127,12 @@ const SendSheet: React.FC<Props> = ({
   // See pasteTextKey above — same uncontrolled-remount pattern; programmatic
   // sets go through applyMemo, onChangeText stays a bare setMemo.
   const [memoKey, setMemoKey] = useState(0);
-  // Freshest paste-field text: synced in render, and written synchronously by
-  // onChangeText / applyPasteText so it can run ahead of `pasteText` state
-  // (see the refs block below). Declared here so useSendInputMode can see
-  // native typing that hasn't committed yet.
+  // Freshest paste-field text, written synchronously by onChangeText and
+  // applyPasteText — the only two writers of `pasteText` — so it can run ahead
+  // of the state (see the refs block below). Deliberately NOT synced in render:
+  // a render whose `pasteText` still lags a keystroke would rewind it. Declared
+  // here so useSendInputMode can see native typing that hasn't committed yet.
   const pasteTextRef = useRef(pasteText);
-  pasteTextRef.current = pasteText;
   const { inputMode, resetInputModeForOpen, selectInputMode } = useSendInputMode({
     visible,
     permission,
@@ -158,7 +158,7 @@ const SendSheet: React.FC<Props> = ({
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
   const dismissedInFlightRef = useRef(false);
-  // Bumped on every open and close; see the deferred initialAddress prefill.
+  // Bumped on every open, close and new target; see the deferred initialAddress prefill.
   const openSessionRef = useRef(0);
 
   // Programmatic value changes for the uncontrolled paste/memo fields go through
@@ -248,8 +248,12 @@ const SendSheet: React.FC<Props> = ({
     } else {
       bottomSheetRef.current?.dismiss();
     }
+    // Also keyed on the target: the sheet stays mounted and visible, so a new
+    // navigateToSend (e.g. a deep link) only changes these props and must start
+    // a fresh send. Nothing else (onClose identity, balance ticks) re-runs it,
+    // so an unrelated render keeps the in-progress entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, initialAddress, initialPicture, recipientPubkey, recipientName, zapEventId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -260,8 +264,8 @@ const SendSheet: React.FC<Props> = ({
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
-  // (pasteTextRef is declared above, before useSendInputMode.)
+  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). invoiceDataRef is synced in render so it is current before any failure callback.
+  // (pasteTextRef is declared above, before useSendInputMode, and written only by its setters.)
   const invoiceDataRef = useRef(invoiceData);
   invoiceDataRef.current = invoiceData;
   // Freshest-value refs for the two uncontrolled inputs. Because the fields are
@@ -269,9 +273,9 @@ const SendSheet: React.FC<Props> = ({
   // React state under JS-thread load — the accepted tradeoff of the #873 fix. To
   // stop any *consumer* reading a stale value, onChangeText also writes the
   // native string into these refs synchronously (below), and the submit paths
-  // (`handlePasteSubmit`, `handleSend`) read the ref, not the state. The
-  // render-time assignments above/here keep the refs correct for *programmatic*
-  // sets (applyPasteText/applyMemo), which don't fire onChangeText. Reading the
+  // (`handlePasteSubmit`, `handleSend`) read the ref, not the state.
+  // *Programmatic* sets don't fire onChangeText: applyPasteText writes
+  // pasteTextRef itself, and the render-time assignment here covers applyMemo. Reading the
   // ref is therefore never staler than reading state — strictly a belt-and-
   // suspenders improvement that doesn't reintroduce the keystroke race.
   const memoRef = useRef(memo);
