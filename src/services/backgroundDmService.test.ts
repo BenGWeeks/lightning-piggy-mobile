@@ -74,9 +74,11 @@ import {
   startBackgroundDmWatch,
   stopBackgroundDmWatch,
   rearmBackgroundDmWatchForActiveIdentity,
+  rearmBackgroundWatchAfterNwcWalletAdded,
   __isWatchActiveForTests,
   __resetForTests,
 } from './backgroundDmService';
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import {
   claimWrapNotification,
   __resetForTests as __resetDedupeForTests,
@@ -568,6 +570,84 @@ describe('rearmBackgroundDmWatchForActiveIdentity (account switch, #288)', () =>
     expect(mockSubscribe.mock.calls.at(-1)?.[0]).toEqual(
       expect.objectContaining({ viewerPubkey: OTHER }),
     );
+  });
+});
+
+describe('rearmBackgroundWatchAfterNwcWalletAdded (first wallet, #1100 review)', () => {
+  it('restarts the stopped host when the first NWC wallet is added with the preference on', async () => {
+    // Preference already enabled, no DM relays and no NWC wallet yet: the
+    // start finds nothing to watch and tears the host down.
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockGetUserRelays.mockResolvedValue(WRITE_ONLY_RELAYS);
+    await startBackgroundDmWatch();
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).not.toHaveBeenCalled();
+
+    // The first NWC wallet is persisted for the active identity.
+    mockCanWatchPayments.mockResolvedValue(true);
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockShowForeground).toHaveBeenCalledTimes(2);
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+    expect(mockDismissForeground).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe).not.toHaveBeenCalled();
+  });
+
+  it('starts nothing when the payment scope is unwatchable (preference off / no permission)', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockResolvedValue(false);
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+    expect(mockSubscribe).not.toHaveBeenCalled();
+  });
+
+  it('ignores a wallet persisted for an identity that is no longer active', async () => {
+    mockLoadIdentities.mockResolvedValue({
+      identities: [{ pubkey: PARTNER, signerType: 'nsec', nsec: 'nsec1yyy', lastUsedAt: 2 }],
+      activePubkey: PARTNER,
+    });
+    mockCanWatchPayments.mockResolvedValue(true);
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockCanWatchPayments).not.toHaveBeenCalled();
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+  });
+
+  it('yields when the identity, preference or wallets change during the check', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockImplementation(async () => {
+      invalidateBackgroundPaymentScope();
+      return true;
+    });
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+  });
+
+  it('yields to a stop that lands during the check', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockImplementation(async () => {
+      await stopBackgroundDmWatch();
+      return true;
+    });
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+  });
+
+  it('leaves a running host alone: its self-gating poll picks the wallet up', async () => {
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockResolvedValue(true);
+    await runBackgroundDmWatch();
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockSubscribe).toHaveBeenCalledTimes(1);
+
+    __resetForTests();
+    mockPaymentsRunning.mockReturnValue(true);
+    await rearmBackgroundWatchAfterNwcWalletAdded(ME);
+    expect(mockShowForeground).not.toHaveBeenCalled();
+    expect(mockStartPayments).not.toHaveBeenCalled();
+    expect(mockCanWatchPayments).not.toHaveBeenCalled();
   });
 });
 

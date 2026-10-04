@@ -57,6 +57,7 @@ import {
   startBackgroundPaymentWatch,
   stopBackgroundPaymentWatch,
 } from './backgroundPaymentService';
+import { captureBackgroundPaymentScope } from './backgroundPaymentScope';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
@@ -754,6 +755,37 @@ export async function rearmBackgroundDmWatchForActiveIdentity(): Promise<void> {
     console.warn('[BgDmWatch] re-arm: nothing to watch for the new identity — stopping the host');
     await stopBackgroundDmWatch();
   }
+}
+
+/**
+ * Re-evaluate the host after an NWC wallet has been PERSISTED for
+ * `ownerPubkey`. With the preference already on but no DM relays and no NWC
+ * wallet, the host stopped itself (nothing to watch), so a first wallet added
+ * afterwards — or one re-added after the last was removed — would otherwise go
+ * unpolled until the next launch / login sync (Copilot review, #1100).
+ *
+ * Only (re)starts a host that is not running: a live DM watch or payment poll
+ * already self-gates per pass and picks the new wallet up. Starts nothing when
+ * the preference is off, notification permission is missing, or the wallet's
+ * identity is no longer active; any identity / preference / wallet write or
+ * watch stop / re-arm during the checks supersedes this call.
+ */
+export async function rearmBackgroundWatchAfterNwcWalletAdded(
+  ownerPubkey: string | null,
+): Promise<void> {
+  if (Platform.OS !== 'android' || !ownerPubkey) return;
+  const hostRunning = () =>
+    activeWatch !== null || dmArmsInFlight > 0 || isBackgroundPaymentWatchRunning();
+  if (hostRunning()) return;
+  const isCurrent = captureBackgroundDmWatchEpoch();
+  const scopeCurrent = captureBackgroundPaymentScope();
+  const { activePubkey } = await loadIdentities();
+  if (activePubkey !== ownerPubkey) return;
+  // Preference on, permission granted, and a usable NWC credential listed
+  // for the active identity.
+  const payments = await canWatchBackgroundPayments();
+  if (!payments || !isCurrent() || !scopeCurrent() || hostRunning()) return;
+  await startBackgroundDmWatch();
 }
 
 /**

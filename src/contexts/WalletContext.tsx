@@ -24,6 +24,7 @@ import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
+import { rearmBackgroundWatchAfterNwcWalletAdded } from '../services/backgroundDmService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
@@ -821,9 +822,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       // Persist
+      const owner = walletStorage.getActivePubkey();
       await walletStorage.saveNwcUrl(id, nwcUrl.trim());
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList([...currentList, metadata]);
+      // A background watch with nothing to watch stopped itself; the first
+      // NWC wallet must restart it for payment alerts (#1100 review).
+      void rearmBackgroundWatchAfterNwcWalletAdded(owner).catch((e) => {
+        console.warn('[WalletContext] background watch re-arm failed:', e);
+      });
 
       // Update state
       setWallets((prev) => [...prev, state]);
