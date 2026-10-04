@@ -1,5 +1,5 @@
 import { bech32 } from 'bech32';
-import { normalizeLnurlToUrl, resolveLnurlDirection } from './lnurlService';
+import { fetchInvoice, normalizeLnurlToUrl, resolveLnurlDirection } from './lnurlService';
 
 // Encode an https URL as a bech32 `lnurl1…` string, mirroring the helper
 // in lnurlWithdrawService.test.ts so both directions test the same form.
@@ -116,4 +116,78 @@ describe('resolveLnurlDirection', () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 502 });
     await expect(resolveLnurlDirection('lnurlp://example.com/x')).rejects.toThrow(/502/);
   });
+});
+
+// Real bech32 + BOLT11 decoding, with a dummy signature: this gate validates
+// amounts; signature verification remains the paying wallet's responsibility.
+function invoiceWithAmount(hrp: string): string {
+  const hashWords = bech32.toWords(Buffer.alloc(32, 1));
+  return bech32.encode(
+    hrp,
+    [
+      ...Array(7).fill(0), // timestamp
+      1,
+      1,
+      20,
+      ...hashWords, // payment_hash: 52 words
+      ...Array(104).fill(0), // signature
+    ],
+    2000,
+  );
+}
+
+describe('fetchInvoice amount authorization', () => {
+  const originalFetch = global.fetch;
+  let fetchMock: jest.Mock;
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    global.fetch = fetchMock;
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function returnInvoice(pr: unknown) {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ pr }) });
+  }
+
+  it('accepts the exact requested amount and preserves zap/comment parameters', async () => {
+    const invoice = invoiceWithAmount('lnbc1u'); // 100 sats
+    returnInvoice(invoice);
+    await expect(
+      fetchInvoice('https://example.com/cb?token=abc', 100, {
+        nostr: '{"kind":9734}',
+        comment: 'hello',
+      }),
+    ).resolves.toBe(invoice);
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.searchParams.get('amount')).toBe('100000');
+    expect(url.searchParams.get('token')).toBe('abc');
+    expect(url.searchParams.get('nostr')).toBe('{"kind":9734}');
+    expect(url.searchParams.get('comment')).toBe('hello');
+  });
+
+  it.each([
+    ['higher amount', 'lnbc2u'],
+    ['lower amount', 'lnbc500n'],
+    ['sub-satoshi overcharge', 'lnbc1000010p'],
+    ['amountless invoice', 'lnbc'],
+    ['zero amount', 'lnbc0n'],
+  ])('rejects a %s before handing the invoice to a caller', async (_, hrp) => {
+    returnInvoice(invoiceWithAmount(hrp));
+    await expect(fetchInvoice('https://example.com/cb', 100)).rejects.toThrow(/amount/);
+  });
+
+  it.each(['garbage', '', null, 123, {}])('rejects malformed invoice %p', async (pr) => {
+    returnInvoice(pr);
+    await expect(fetchInvoice('https://example.com/cb', 100)).rejects.toThrow();
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER])(
+    'rejects invalid requested amount %p without fetching',
+    async (amount) => {
+      await expect(fetchInvoice('https://example.com/cb', amount)).rejects.toThrow(/amount/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });
