@@ -103,6 +103,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install pinned Android alignment tools
         run: sdkmanager 'build-tools;35.0.0'
       - name: Install dependencies

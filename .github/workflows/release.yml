@@ -407,6 +407,8 @@ jobs:
 
       - name: Install Android alignment tools
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install pinned Android build tools
         run: sdkmanager 'build-tools;35.0.0'
