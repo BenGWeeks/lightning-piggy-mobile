@@ -12,6 +12,7 @@ import * as walletStorage from '../services/walletStorageService';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 
 interface WalletIdentityHydrationDeps {
+  setLastIncomingPayment?: (value: null) => void;
   setIsLoading?: (value: boolean) => void;
   setIsOnboarded?: (value: boolean) => void;
   setWalletsHydrated?: (value: boolean) => void;
@@ -31,6 +32,7 @@ interface WalletIdentityHydrationDeps {
  * The cold-start preferences/migration flow remains in WalletContext.
  */
 export function useWalletIdentityHydration({
+  setLastIncomingPayment,
   setIsLoading,
   setIsOnboarded,
   setWalletsHydrated,
@@ -71,6 +73,7 @@ export function useWalletIdentityHydration({
       setWalletsHydrated?.(false);
       setWallets([]);
       setActiveWalletId(null);
+      setLastIncomingPayment?.(null);
       lastTxsJsonRef.current.clear(); // drop stale fingerprints from the previous identity
       // Re-hydrate from per-account-keyed storage.
       (async () => {
@@ -198,6 +201,7 @@ export function useWalletIdentityHydration({
       unsubscribe();
     };
   }, [
+    setLastIncomingPayment,
     setIsLoading,
     setIsOnboarded,
     setWalletsHydrated,

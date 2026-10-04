@@ -25,13 +25,26 @@
  * service ever invokes it), but we guard anyway to keep the contract explicit.
  */
 import { AppRegistry, Platform } from 'react-native';
-import { runBackgroundDmWatch } from './backgroundDmService';
+import { canWatchBackgroundPayments } from './backgroundPaymentService';
+import {
+  armBackgroundPaymentWatch,
+  captureBackgroundDmWatchEpoch,
+  runBackgroundDmWatch,
+} from './backgroundDmService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { hasNotificationPermission } from './notificationService';
 import { stopForegroundService } from '../../modules/background-dm-service';
 
 /** Must match BackgroundDmService.HEADLESS_TASK_NAME (Kotlin). */
 export const BACKGROUND_DM_HEADLESS_TASK = 'BackgroundDmTask';
+
+// The native HeadlessJsTaskService keeps the JS context alive only while the
+// task Promise is pending, so the task returns one that never settles. The
+// service is torn down by stopService() (from stopBackgroundDmWatch), which
+// kills this headless context outright.
+function holdContext(): Promise<void> {
+  return new Promise<void>(() => {});
+}
 
 if (Platform.OS === 'android') {
   AppRegistry.registerHeadlessTask(BACKGROUND_DM_HEADLESS_TASK, () => async () => {
@@ -65,19 +78,32 @@ if (Platform.OS === 'android') {
     // the open: we return a Promise that never settles, anchoring the context
     // so the WebSocket stays alive until the service is stopped. The
     // subscription's own callbacks keep firing notifications in the meantime.
+    const isCurrent = captureBackgroundDmWatchEpoch();
     const armed = await runBackgroundDmWatch();
     console.warn(`[BgDmWatch] headless task: watch armed=${armed}`);
+    // A stop or account-switch re-arm landed meanwhile (our arm resolved false
+    // because it was cancelled): that newer owner decides the host's fate, so
+    // just hold the context — a stop kills the service regardless.
+    if (!isCurrent()) return holdContext();
     if (!armed) {
-      // Nothing to watch (no identity / no relays / not Android). Holding the
-      // never-settling promise here would pin the foreground service + wake
-      // lock while watching nothing — stop the service and finish instead.
-      await stopForegroundService().catch(() => {});
-      return;
+      // No DM subscription (no identity / no relays). The identity may still
+      // own NWC wallets worth polling — a payment-only user must not lose
+      // alerts for lack of DM relays (#1100 review). Only when NEITHER watcher
+      // can run do we stop: holding the never-settling promise would pin the
+      // foreground service + wake lock while watching nothing.
+      const payments = await canWatchBackgroundPayments().catch(() => false);
+      console.warn(`[BgDmWatch] headless task: payment-only=${payments}`);
+      if (!isCurrent()) return holdContext();
+      if (!payments) {
+        await stopForegroundService().catch(() => {});
+        return;
+      }
     }
-    return new Promise<void>(() => {
-      // Intentionally never resolves — see the comment above. The service is
-      // torn down by stopService() (from stopBackgroundDmWatch), which kills
-      // this headless context outright.
-    });
+    // Self-gates per pass (preference / permission / NWC wallets), so it is
+    // safe to run alongside a DM watch even before any NWC wallet exists;
+    // when the scope disappears and no DM watch is armed (or arming) it stops
+    // the host.
+    armBackgroundPaymentWatch();
+    return holdContext();
   });
 }

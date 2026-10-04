@@ -1,3 +1,4 @@
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import * as SecureStore from 'expo-secure-store';
 
 // Multi-account identity registry.
@@ -85,7 +86,12 @@ export async function loadIdentities(): Promise<IdentitiesBlob> {
 }
 
 async function saveIdentities(blob: IdentitiesBlob): Promise<void> {
-  await SecureStore.setItemAsync(IDENTITIES_KEY, JSON.stringify(blob), SECURE_OPTIONS);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.setItemAsync(IDENTITIES_KEY, JSON.stringify(blob), SECURE_OPTIONS);
+  } finally {
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 // Append `identity` to the registry (or update it in place if the
@@ -135,5 +141,10 @@ export async function setActiveIdentity(pubkey: string): Promise<IdentitiesBlob>
 // Wipe the registry entirely. Used on full sign-out from every
 // account.
 export async function clearIdentities(): Promise<void> {
-  await SecureStore.deleteItemAsync(IDENTITIES_KEY);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.deleteItemAsync(IDENTITIES_KEY);
+  } finally {
+    invalidateBackgroundPaymentScope();
+  }
 }

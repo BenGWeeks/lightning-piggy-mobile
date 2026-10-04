@@ -25,6 +25,7 @@ import { mapOnchainTransactions } from '../utils/onchainTransactions';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
+import { rearmBackgroundWatchAfterNwcWalletAdded } from '../services/backgroundDmService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
@@ -634,6 +635,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setWalletsHydrated,
     setWallets,
     setActiveWalletId,
+    setLastIncomingPayment,
   });
 
   // Refresh BTC price every 5 minutes
@@ -682,6 +684,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       if (!result.success || !result.state) return result;
       const state = result.state;
+      const owner = walletStorage.getActivePubkey();
+      void rearmBackgroundWatchAfterNwcWalletAdded(owner).catch((e) => {
+        console.warn('[WalletContext] background watch re-arm failed:', e);
+      });
       setWallets((prev) => (isCurrent() ? [...prev, state] : prev));
       setActiveWalletId((prev) => (isCurrent() ? (prev ?? state.id) : prev));
       return { success: true, walletId: state.id };

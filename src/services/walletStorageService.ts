@@ -1,3 +1,5 @@
+import { clearEncryptionDecision } from './nwcEncryption';
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
@@ -150,13 +152,25 @@ export async function saveWalletList(
   wallets: WalletMetadata[],
   owner: string | null = _activePubkey,
 ): Promise<void> {
-  await AsyncStorage.setItem(perAccountKey(WALLET_LIST_KEY_BASE, owner), JSON.stringify(wallets));
+  invalidateBackgroundPaymentScope();
+  try {
+    await AsyncStorage.setItem(perAccountKey(WALLET_LIST_KEY_BASE, owner), JSON.stringify(wallets));
+  } finally {
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 // --- NWC ---
 
 export async function saveNwcUrl(walletId: string, url: string): Promise<void> {
-  await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
+  clearEncryptionDecision(`background:${walletId}`);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
+  } finally {
+    clearEncryptionDecision(`background:${walletId}`);
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 export async function getNwcUrl(walletId: string): Promise<string | null> {
@@ -164,7 +178,14 @@ export async function getNwcUrl(walletId: string): Promise<string | null> {
 }
 
 export async function deleteNwcUrl(walletId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
+  clearEncryptionDecision(`background:${walletId}`);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
+  } finally {
+    clearEncryptionDecision(`background:${walletId}`);
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 // --- On-chain (xpub) ---
