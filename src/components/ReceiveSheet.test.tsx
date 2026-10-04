@@ -298,3 +298,12 @@ it('a stale invoice request does not hide the spinner of the current one', async
   await resolveFor('LB', 'lnbc-bravo');
   expect(qrValue()).toBe('lnbc-bravo');
 });
+
+it('selecting the displayed wallet preserves its in-flight address request', async () => {
+  render(<ReceiveSheet visible onClose={onClose} />);
+  fireEvent.press(screen.getByTestId('receive-wallet-dropdown-toggle'));
+  fireEvent.press(screen.getByTestId('receive-wallet-option-A'));
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A']]);
+  await resolveFor('A', 'bc1qalpha000000');
+  expect(qrValue()).toBe('bitcoin:bc1qalpha000000');
+});

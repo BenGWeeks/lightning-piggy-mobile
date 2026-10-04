@@ -662,7 +662,7 @@ const ReceiveSheet: React.FC<Props> = ({
                               selectedWalletId === w.id && styles.walletDropdownItemActive,
                             ]}
                             onPress={() => {
-                              if (w.id !== capturedWalletId) {
+                              if (w.id !== selectedWalletId) {
                                 // Invalidate the previous wallet's requests and
                                 // drop its QR in this commit, not an effect later.
                                 sessionTokenRef.current += 1;
