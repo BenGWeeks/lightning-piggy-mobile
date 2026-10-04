@@ -12,7 +12,8 @@
  *
  * Flow: resolve LUD-03 → fixed-amount (min === max) auto-claims; variable
  * (min < max) shows an amount picker (editable amount + bold slider, default
- * max, fiat hint) and a destination-wallet chooser → claim into the chosen
+ * max, fiat hint) and a destination-wallet chooser. Scanned vouchers always
+ * require Redeem, including fixed amounts. → claim into the chosen
  * Lightning wallet. On settle the app-root celebration fires and the sheet
  * auto-dismisses.
  */
@@ -47,12 +48,17 @@ import { useTranslation } from '../contexts/LocaleContext';
 
 // Imperative open — mirrors the BrandedAlert host pattern so the global
 // deep-link handler can pop the sheet without a screen in scope.
-let listener: ((lnurl: string) => void) | null = null;
+let listener: ((lnurl: string, walletId?: string, requireConfirmation?: boolean) => void) | null =
+  null;
 /** Open the global withdraw sheet for `lnurl`. Returns false if the host
  *  isn't mounted yet (cold launch race) so the caller can retry. */
-export function openLnurlWithdrawSheet(lnurl: string): boolean {
+export function openLnurlWithdrawSheet(
+  lnurl: string,
+  walletId?: string,
+  requireConfirmation = false,
+): boolean {
   if (listener) {
-    listener(lnurl);
+    listener(lnurl, walletId, requireConfirmation);
     return true;
   }
   return false;
@@ -72,7 +78,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, currency, expectPayment } = useWallet();
+  const { wallets, activeWalletId, makeInvoiceForWallet, currency, expectPayment } = useWallet();
   const { btcPrice, lastIncomingPayment } = useWalletLive();
 
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -88,6 +94,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     [],
   );
 
+  const requireConfirmationRef = useRef(false);
   const [lnurl, setLnurl] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [amountSats, setAmountSats] = useState<number>(0);
@@ -209,8 +216,13 @@ export function LnurlWithdrawHost(): React.ReactElement {
 
   // Open + resolve when a deep-link fires.
   useEffect(() => {
-    listener = (url: string) => {
+    listener = (url: string, walletId?: string, requireConfirmation = false) => {
       if (!mountedRef.current) return;
+      requireConfirmationRef.current = requireConfirmation;
+      const preferredId = walletId ?? activeWalletId;
+      setSelectedWalletId(
+        lightningWallets.find((w) => w.id === preferredId)?.id ?? lightningWallets[0]?.id ?? null,
+      );
       setLnurl(url);
       setStage({ kind: 'resolving' });
       sheetRef.current?.present();
@@ -218,7 +230,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
     return () => {
       listener = null;
     };
-  }, []);
+  }, [activeWalletId, lightningWallets]);
 
   // Resolve whenever a new lnurl is set. Fixed-amount → auto-claim; variable
   // → show the picker.
@@ -251,7 +263,7 @@ export function LnurlWithdrawHost(): React.ReactElement {
         // through to the ready state so the picker's Add-wallet path shows
         // instead of auto-claiming straight into a hard error (Copilot #341).
         // Either way the voucher value is visible before a wallet is required.
-        if (lo < hi || !selectedWalletId) {
+        if (lo < hi || !selectedWalletId || requireConfirmationRef.current) {
           setAmountSats(hi);
           setStage({ kind: 'ready', params });
           return;

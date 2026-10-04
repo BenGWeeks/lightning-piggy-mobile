@@ -7,14 +7,17 @@ import { createMapPinChassis } from './mapPinChassis';
 // in far enough to separate the group. Reuses the shared pin chassis so
 // the chip reads as kin to the individual cache pins, slightly enlarged
 // so the count stays legible over busy tiles.
-export const createCacheClusterMarkerStyles = (colors: Palette) =>
+export const createCacheClusterMarkerStyles = (
+  colors: Palette,
+  variant: 'cache' | 'merchant' = 'cache',
+) =>
   StyleSheet.create({
     chip: {
       ...createMapPinChassis(colors),
       width: 28,
       height: 28,
       borderRadius: 14,
-      backgroundColor: colors.brandPink,
+      backgroundColor: variant === 'merchant' ? '#F7931A' : colors.brandPink,
     },
     count: {
       color: colors.white,

@@ -44,6 +44,7 @@ jest.mock('@getalby/sdk', () => ({
 
 import {
   connect,
+  disconnect,
   getBalance,
   isConnectionError,
   isReplyTimeoutError,
@@ -59,17 +60,28 @@ const VALID_NWC_URL =
 const WALLET_ID = 'test-wallet-1';
 
 beforeEach(async () => {
-  jest.useRealTimers();
+  // Async timer advancement lets Promise continuations schedule retry timers
+  // before the fake clock advances; synchronous runAllTimers would miss them.
+  jest.useFakeTimers();
   // Cheap successful balance for the connect()'s initial getBalance.
   mockGetBalanceImpl = async () => ({ balance: 0 });
   mockSendPaymentImpl = async () => ({ preimage: 'p'.repeat(64) });
   mockLookupInvoiceImpl = async () => ({ paid: false });
-  const result = await connect(WALLET_ID, VALID_NWC_URL);
+  const connection = connect(WALLET_ID, VALID_NWC_URL);
+  await jest.runAllTimersAsync();
+  const result = await connection;
   expect(result.success).toBe(true);
 });
 
 afterEach(() => {
-  jest.useRealTimers();
+  disconnect(WALLET_ID);
+  try {
+    // Successful replies and fired timeouts must clean up their timers.
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  }
 });
 
 describe('nwcService.getBalance with replyTimeoutMs', () => {
@@ -83,14 +95,19 @@ describe('nwcService.getBalance with replyTimeoutMs', () => {
     // Pending forever — simulates a relay that never replies.
     mockGetBalanceImpl = () => new Promise(() => {});
 
-    // With replyTimeoutMs set, attempts is 1 (no retry) — the ceiling is the timeout itself, ~200 ms in this test. Kept generously slack here for CI scheduling.
-    const start = Date.now();
-    const result = await getBalance(WALLET_ID, { replyTimeoutMs: 200 });
-    const elapsed = Date.now() - start;
+    const pending = getBalance(WALLET_ID, { replyTimeoutMs: 200 });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
 
-    expect(result).toBeNull();
-    // 1 attempt × 200 ms timeout = ~200 ms. Allow generous slack for CI scheduling, but well under the SDK's 10 s default — that's the regression this guards against.
-    expect(elapsed).toBeLessThan(2000);
+    // Flush ensureConnected / Promise continuations before checking the exact
+    // deadline: one attempt, no retry, and no early timeout.
+    await jest.advanceTimersByTimeAsync(199);
+    expect(settled).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(await pending).toBeNull();
+    expect(settled).toBe(true);
   });
 
   it('does NOT retry on transient failure when replyTimeoutMs is set (true ceiling)', async () => {
@@ -122,9 +139,34 @@ describe('nwcService.getBalance with replyTimeoutMs', () => {
       return { balance: 999 };
     };
 
-    const balance = await getBalance(WALLET_ID);
-    expect(balance).toBe(999);
+    const pending = getBalance(WALLET_ID);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await jest.advanceTimersByTimeAsync(1499);
+    expect(calls).toBe(1);
+    expect(settled).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(await pending).toBe(999);
     expect(calls).toBe(2);
+  });
+
+  it('stops after two failed attempts on the default path', async () => {
+    const failedBalance = jest.fn(async () => {
+      throw new Error('reply timeout: event abc');
+    });
+    mockGetBalanceImpl = failedBalance;
+    const pending = getBalance(WALLET_ID);
+
+    await jest.advanceTimersByTimeAsync(1499);
+    expect(failedBalance).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(await pending).toBeNull();
+    expect(failedBalance).toHaveBeenCalledTimes(2);
+    // Advancing beyond a possible third backoff must not issue another call.
+    await jest.advanceTimersByTimeAsync(3000);
+    expect(failedBalance).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -193,10 +235,15 @@ describe('isWalletConnected (#654 — relay responsiveness, not just transport)'
     // ReplyTimeoutError. That must count toward relay-dead, not reset the
     // counter — a generic Error used to slip through both matchers (#654 review).
     mockGetBalanceImpl = () => new Promise(() => {});
-    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
-    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    const timeout = async () => {
+      const pending = getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+      await jest.advanceTimersByTimeAsync(150);
+      expect(await pending).toBeNull();
+    };
+    await timeout();
+    await timeout();
     expect(isWalletConnected(WALLET_ID)).toBe(true); // 2 failures < threshold (3)
-    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    await timeout();
     expect(isWalletConnected(WALLET_ID)).toBe(false); // 3rd timeout → dead
   });
 

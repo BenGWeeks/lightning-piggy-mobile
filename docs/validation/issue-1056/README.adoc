@@ -1,0 +1,52 @@
+= Secret mode Maestro flow validation
+
+== Scope
+
+Test-flow maintenance for issue #1056; no application logic changes.
+The flow requires an onboarded profile whose restored route is Home or an
+account screen. It cold-launches without clearing app data, leaves secret mode
+enabled on repeated runs, and returns to the tab navigator after inspecting the
+Add Wallet wizard. It does not import a recovery phrase or connect a wallet.
+
+== Environment
+
+2026-10-04, Warmachine Android API 34 emulator `lightningpiggy_api34`
+(`emulator-5554`), Lightning Piggy Preview `com.lightningpiggy.app.preview`,
+v1.3.17/build 70. Final Preview application is built from merged main `7fd55430`;
+this PR changes only YAML and documentation. Its profile contains only disconnected
+public UI fixture wallet metadata with no credentials or funds.
+No physical phone changes, live payments, or swaps.
+
+== Checks
+
+The exact updated YAML completed on merged main with secret mode already
+enabled, starting from Home. It left the enabled
+marker intact, reached the mnemonic option, dismissed the sheet and returned
+Home. `01-already-enabled-run.txt` contains the selected command/status trace.
+ADB screenshots show the import option and the returned Home screen.
+The optional absent account-back button is a Maestro warning on Home, not a
+failed step; the final check also verifies no sheet handle remains visible.
+
+A second exact-YAML run started with About restored and secret mode disabled.
+It enabled the mode through the rapid triple tap, verified the mnemonic option
+and returned Home with no sheet remaining. `02-enable-from-about-run.txt`
+contains this selected command/status trace. Both runs exited zero.
+
+
+Original main flow failed at the secret-mode celebration assertion: separate
+Maestro tap commands did not fit the release build's one-second triple-tap
+window. Rapid repeat taps reached the celebration and enabled marker. A
+launch-only fix still restored About (navigation persistence); hardware Back
+from this drawer route exited the application. The fixed flow instead uses the
+account screen's own back control before touching tab buttons.
+
+The original global carousel scroll also failed with an existing wallet: the
+screen-centre gesture selected Home's transaction list. The corrected flow
+anchors bounded left swipes to the existing wallet-card test ID. It dismisses
+the wizard by a downward swipe from its accessible handle rather than hardware
+Back, which leaves the portal sheet open while changing the account navigation underneath.
+
+TypeScript and Prettier checks pass; ESLint has zero errors and 254 existing
+warnings. The full curated `run-all.sh` is intentionally not run here: it imports
+real wallet credentials and includes Lightning payments and 26,000-sat swaps
+and on-chain transfers. This test-only change grants no financial authorisation.

@@ -127,7 +127,7 @@ describe('claimLnurlWithdraw', () => {
     delete (global as unknown as { fetch?: unknown }).fetch;
   });
 
-  it('happy path — POSTs k1+pr to callback, returns sats + bolt11', async () => {
+  it('happy path — sends k1+pr to callback, returns sats + bolt11', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'OK' }) });
     const getInvoice = jest.fn(async () => 'lnbcfakeinvoice');
@@ -178,5 +178,48 @@ describe('claimLnurlWithdraw', () => {
     });
     const getInvoice = jest.fn(async () => 'lnbcfake');
     await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(/did not return JSON/i);
+  });
+});
+
+describe('withdraw validation before invoice creation', () => {
+  const params = {
+    callback: 'https://example.com/cb?token=fixture',
+    k1: 'fixture',
+    defaultDescription: 'Voucher',
+    minWithdrawable: 21000,
+    maxWithdrawable: 21000,
+  };
+  it.each([
+    { callback: 'javascript:alert(1)' },
+    { callback: 'not-a-url' },
+    { minWithdrawable: -1 },
+    { maxWithdrawable: NaN },
+    { minWithdrawable: 22000 },
+    { minWithdrawable: 21500, maxWithdrawable: 21999 },
+  ])('rejects malformed or unrepresentable parameters: %j', async (override) => {
+    const invoice = jest.fn();
+    await expect(claimLnurlWithdraw({ ...params, ...override }, invoice)).rejects.toThrow();
+    expect(invoice).not.toHaveBeenCalled();
+  });
+  it('surfaces an expired voucher reason at resolution', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ERROR', reason: 'Voucher expired' }),
+    });
+    global.fetch = fetchMock;
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/voucher')).rejects.toThrow(
+      'Voucher expired',
+    );
+  });
+  it('preserves callback query parameters and URL-encodes the invoice', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ status: 'OK' }) });
+    global.fetch = fetchMock;
+    await claimLnurlWithdraw(params, async () => 'fixture+invoice');
+    const callback = new URL(fetchMock.mock.calls[0][0]);
+    expect(callback.searchParams.get('token')).toBe('fixture');
+    expect(callback.searchParams.get('k1')).toBe('fixture');
+    expect(callback.searchParams.get('pr')).toBe('fixture+invoice');
   });
 });

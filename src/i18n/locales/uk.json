@@ -199,6 +199,9 @@
     "nipGcCacheMarker": "Маркер схованки NIP-GC",
     "lightningPayoutAvailable": "Доступна виплата Lightning"
   },
+  "merchantClusterMarker": {
+    "label": "{{count}} місць поблизу"
+  },
   "cacheClusterMarker": {
     "label": "{{count}} геосхованок поруч — торкніться, щоб наблизити"
   },
@@ -1644,7 +1647,11 @@
     "friendPickerSubtitle": "Вони отримають зашифроване Nostr-повідомлення з кнопкою «Оплатити».",
     "receiveOnchainBoltz": "Отримати on-chain (через обмін Boltz) ₿",
     "receiveOnchainBoltzA11y": "Отримати on-chain через обмін Boltz",
-    "paymentQr": "QR-код для оплати"
+    "paymentQr": "QR-код для оплати",
+    "scanToClaim": "Сканувати для отримання",
+    "cancelScan": "Скасувати сканування",
+    "invalidClaimCode": "Скануйте код отримання LNURL-withdraw",
+    "claimUnavailable": "Отримання коштів недоступне. Спробуйте ще раз."
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Потрібна назва",

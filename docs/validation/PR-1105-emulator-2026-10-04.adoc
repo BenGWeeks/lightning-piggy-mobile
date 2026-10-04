@@ -1,0 +1,12 @@
+= PR #1105 emulator UI validation
+
+Captured on Warmachine's `lightningpiggy_api34` Android API 34 emulator (`emulator-5554`), 4 October 2026. The Satmo emulator and physical Pixel were not used.
+
+Source: PR head `56e451e3` plus the committed camera alignment adjustment. A local-only startup wrapper seeds public wallet metadata named `UI Fixture (no funds)` before mounting App. There is no NWC connection string, signing credential, real wallet or balance. The generated Android build enables debugging locally; neither harness change is committed.
+
+Maestro passed: launch Preview, open Receive, assert Scan to claim, open camera viewfinder, cancel scanning and assert camera gone. The emulator camera displays Android's synthetic scene. Screenshots are unchanged captures with no private content.
+
+* `01-receive-scan-entry.png`: Receive's new scan entry.
+* `02-withdraw-camera.png`: centred camera and Cancel scan action.
+
+These captures prove the entry/viewfinder/cancel UI works. They do not prove QR decoding, claim confirmation, callbacks or actual withdrawal settlement end to end. Those paths have mocked regression coverage; a real withdrawal remains untested.

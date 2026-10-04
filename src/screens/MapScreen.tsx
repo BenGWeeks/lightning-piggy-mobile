@@ -50,7 +50,7 @@ import {
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
+import { useMapAuthorCaches } from '../hooks/useMapAuthorCaches';
 import { useMapPins } from '../hooks/useMapPins';
 import { useDebouncedMapBounds } from '../hooks/useDebouncedMapBounds';
 import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription';
@@ -275,38 +275,14 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Surface the signed-in user's own published Piglets on the map even
-  // when no nearby-geohash subscription has echoed them back. The
-  // nearby sub filters by `#g` prefixes derived from the user's current
-  // GPS — so a Piglet hidden outside that neighbourhood (e.g. away
-  // from home, on holiday) wouldn't appear on the map without an
-  // author-side fetch. Mirrors ExploreHomeScreen's by-author merge.
-  // One-shot per pubkey via the ref so re-renders don't refire.
-  const byAuthorFetchedForRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!signedInPubkey) return;
-    if (byAuthorFetchedForRef.current === signedInPubkey) return;
-    byAuthorFetchedForRef.current = signedInPubkey;
-    let cancelled = false;
-    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
-    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
-      .then((mine) => {
-        if (cancelled || mine.length === 0) return;
-        for (const c of mine) caches.enqueue(c.coord, c);
-        // One-shot fetch — flush now so the author's own pins commit on this
-        // frame instead of waiting on the coalesce debounce (~100ms) when the
-        // batch is under the flush threshold (Copilot review on #825).
-        caches.flush();
-      })
-      .catch(() => {
-        // Best-effort — the nearby subscription will fill the gap if the
-        // user happens to be in the right neighbourhood.
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- caches.enqueue is stable; one-shot per (signedInPubkey, userRelays)
-  }, [signedInPubkey, userRelays]);
+  // Re-fetch our own listings on return from Edit, including Piglets moved
+  // outside the viewport's geohash subscription (#625).
+  useMapAuthorCaches({
+    pubkey: signedInPubkey,
+    relays: userRelays,
+    enqueue: caches.enqueue,
+    flush: caches.flush,
+  });
 
   // Distinct categories across the currently-loaded places — fed into
   // the FilterSheet so the available chips reflect what's actually on

@@ -31,6 +31,14 @@ import type { LibreMiniMapStyles } from '../styles/LibreMiniMap.styles';
 
 export interface MiniMapMarkersProps {
   merchants: BtcMapPlace[];
+  merchantClusters?: {
+    id: number;
+    lat: number;
+    lng: number;
+    count: number;
+    expansionZoom: number;
+  }[];
+  onPressMerchantCluster?: (c: { lat: number; lng: number; expansionZoom: number }) => void;
   cachePoints: {
     lat: number;
     lng: number;
@@ -61,6 +69,8 @@ export interface MiniMapMarkersProps {
 
 const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
   merchants,
+  merchantClusters,
+  onPressMerchantCluster,
   cachePoints,
   cacheByCoord,
   cacheClusters,
@@ -118,6 +128,18 @@ const MiniMapMarkers: React.FC<MiniMapMarkersProps> = ({
           </Marker>
         );
       })}
+      {merchantClusters?.map((cl) => (
+        <CacheClusterMarker
+          key={`merchant-cluster-${cl.id}`}
+          variant="merchant"
+          id={cl.id}
+          lat={cl.lat}
+          lng={cl.lng}
+          count={cl.count}
+          markerDimStyle={markerDim}
+          onPress={onPressMerchantCluster ? () => onPressMerchantCluster(cl) : undefined}
+        />
+      ))}
       {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
           NIP-GC → MapPin purple. */}
       {cachePoints.map((c) => {

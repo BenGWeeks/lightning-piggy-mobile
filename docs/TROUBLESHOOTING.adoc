@@ -598,12 +598,11 @@ adb -s <serial> logcat -d 2>/dev/null | grep -iE "AmberSigner|nostrsigner|sign_e
 The Intent fallback shows up as `ActivityTaskManager: START act=android.intent.action.VIEW dat=nostrsigner: ... cmp=...nostrsigner/.MainActivity (has extras)`. ContentResolver fast-path shows up as `Amber: Querying content://...SIGN_EVENT has context true`. If both lines appear and Amber still shows Applications instead of Sign, the URL-encoded payload is being silently dropped. +
 *Fix:* drop `Uri.encode()` from both Intent fallbacks in `modules/amber-signer/.../AmberSignerModule.kt` (`signEvent` + `handleCryptoOp`). Resolved in PR #407 (issue #406). After the fix lands, the *first* kind-13 send pops Amber's Sign sheet; once approved with Always, subsequent sends return silently via ContentResolver. A "Sign event with kind 13" row appears in Amber's per-app permissions list only after the first approval — its absence pre-fix is the smoking gun.
 
-| Android 16 KB page-size compatibility warning on Pixel 8 / Android 16
-| Local debug builds via `npm run android:dev` show an Android-system "this app isn't 16 KB-compatible" dialog before any LP UI renders. The dialog enumerates several `.so` files (libreactnative, libreanimated, libgesturehandler, libavif_android, libworklets, libnative-filters, libdispatch) but most of those are actually 16 KB-aligned in the APK — the dialog's list is misleading and includes libs from other installed packages, plus at least one (`libdispatch.so`) that isn't in our APK at all. +
-*Diagnose:* run `bash scripts/check-elf-alignment.sh android/app/build/outputs/apk/debug/app-debug.apk` — exits non-zero if any arm64-v8a `.so` has a PT_LOAD segment aligned below 16 KB (0x4000). +
-*Real culprit (as of issue #377):* `libbdkffi.so` from `bdk-rn`, the Bitcoin Dev Kit FFI lib. Prebuilt with an older Rust + NDK toolchain that emits 4 KB-aligned ELFs. Used only in `src/services/onchainService.ts` for on-chain wallet support. +
-*Fix paths (issue #377 has the full menu):* a) rebuild the prebuilt in the `bdk-rn` fork with NDK r27+ + `cargo-ndk` ≥0.17, b) replace `bdk-rn` with an actively-maintained alternative, c) post-install patch via `lld --max-page-size=16384` (brittle), d) defer until Google's Play Store enforcement deadline. +
-*Workaround in the meantime:* test on the Android 14 emulator (no enforcement); EAS production builds aren't blocked because the warning appears only on debuggable installs.
+| Android 16 KB page-size compatibility warning
+| `libbdkffi.so` in the upstream BDK Android 0.30.0 artifact uses 4 KB ELF load-segment alignment. This affects devices configured for 16 KB memory pages; an Android version number alone does not determine the page size. +
+*Diagnose:* run `bash scripts/check-elf-alignment.sh <apk>` to audit both arm64-v8a and x86_64 native libraries. Separately check APK packaging with `zipalign -c -P 16 4 <apk>`. A ZIP packaging pass does not fix an incompatible ELF binary. +
+*Fix:* the pinned `bdk-rn` dependency supplies BDK 0.30.0 native binaries rebuilt from the unchanged upstream source and Cargo.lock with NDK 27.1 and explicit 16 KB maximum/common page-size linker flags. Its Kotlin classes and wallet API remain unchanged; iOS continues to use the original Swift SDK. The fork includes the native rebuild script, licences and artifact checksum, explicitly links the NDK compiler runtime and rejects unresolved native symbols. JNA 5.17 supplies compatible dispatch binaries for both 64-bit ABIs. +
+*Verify:* check the final APK, then use a dedicated 16 KB Android emulator (`google_apis_ps16k`; confirm `adb shell getconf PAGE_SIZE` returns `16384`). Exercise native wallet creation and address derivation, not just app launch. The release workflow checks the downloaded APK's ELF alignment before attaching it to the GitHub Release.
 
 | Lightning payment shows "failed" in the UI but recipient says it was paid
 | Symptom: `pay_invoice` via NWC shows the "Sending payment" overlay, then flips
@@ -772,3 +771,22 @@ Keep `micro-packed` in the `transformIgnorePatterns` allow-list in
 A checkout whose `node_modules` symlinks to a sibling repository can produce Metro lazy-bundle URLs containing `/../<sibling>/node_modules/...`. Those requests may return 404 after URL normalization. In this case, importing an on-chain test wallet displayed `Failed to validate mnemonic` even though the recovery phrase was valid.
 
 Use a dependency directory local to the test checkout, restart Metro with `--clear`, and reload the development client. Check the failed lazy-bundle request before changing mnemonic validation or wallet credentials. Do not print recovery phrases while diagnosing the failure.
+
+=== Maestro secret-mode setup fails or disables an enabled mode
+
+`flow-072-secret-mode.yaml` must return from About using
+`account-back-button` before selecting `tab-home`: account drawer screens have
+no tab bar. Navigation is persisted across launches, so starting the app alone
+is not a Home-screen precondition. Triple taps should use Maestro's rapid
+`tapOn.repeat` to fit the release build's one-second gesture window, and the
+flow should first check the version's `secret` marker to avoid toggling it off.
+
+For Home's wallet carousel, anchor directional swipes to `wallet-card-.*`.
+A global scroll starts near the screen centre and can gesture on the transaction
+list instead of the carousel. Dismiss the Add Wallet sheet with an element-scoped
+downward swipe from
+`Bottom sheet handle`; Android Back can change the underlying navigation
+without dismissing this portal. Backdrop nodes cover the entire screen, so
+tapping their centre can hit a wallet option instead of the uncovered backdrop.
+Run the secret-mode flow alone for a
+nonfinancial check; the full curated runner imports wallets and moves funds.
