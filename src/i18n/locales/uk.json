@@ -1632,7 +1632,11 @@
     "sendInvoiceToFriend": "Надіслати інвойс другу",
     "friendPickerSubtitle": "Вони отримають зашифроване Nostr-повідомлення з кнопкою «Оплатити».",
     "receiveOnchainBoltz": "Отримати on-chain (через обмін Boltz) ₿",
-    "receiveOnchainBoltzA11y": "Отримати on-chain через обмін Boltz"
+    "receiveOnchainBoltzA11y": "Отримати on-chain через обмін Boltz",
+    "scanToClaim": "Сканувати для отримання",
+    "cancelScan": "Скасувати сканування",
+    "invalidClaimCode": "Скануйте код отримання LNURL-withdraw",
+    "claimUnavailable": "Отримання коштів недоступне. Спробуйте ще раз."
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Потрібна назва",

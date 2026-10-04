@@ -1,4 +1,5 @@
 import React from 'react';
+import { bech32 } from 'bech32';
 import { ActivityIndicator } from 'react-native';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import ReceiveSheet from './ReceiveSheet';
@@ -46,6 +47,22 @@ jest.mock('react-native-qrcode-svg', () => {
 });
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
+const mockOpenWithdraw = jest.fn((..._args: unknown[]) => true);
+jest.mock('./LnurlWithdrawSheet', () => ({
+  openLnurlWithdrawSheet: (...args: unknown[]) => mockOpenWithdraw(...args),
+}));
+jest.mock('expo-camera', () => ({
+  useCameraPermissions: () => [{ granted: true }, jest.fn()],
+}));
+let mockScan: ((event: { data: string }) => void) | null = null;
+jest.mock('./SendScanPane', () => ({
+  __esModule: true,
+  default: ({ onBarcodeScanned }: { onBarcodeScanned: typeof mockScan }) => {
+    mockScan = onBarcodeScanned;
+    return null;
+  },
+}));
+
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn() }) }));
 jest.mock('../styles/ReceiveSheet.styles', () => ({
   createReceiveSheetStyles: () => new Proxy({}, { get: () => ({}) }),
@@ -306,4 +323,61 @@ it('selecting the displayed wallet preserves its in-flight address request', asy
   expect(mockGetReceiveAddress.mock.calls).toEqual([['A']]);
   await resolveFor('A', 'bc1qalpha000000');
   expect(qrValue()).toBe('bitcoin:bc1qalpha000000');
+});
+
+describe('withdraw QR intake', () => {
+  beforeEach(() => {
+    mockActiveWalletId = 'LB';
+    mockOpenWithdraw.mockClear();
+    mockScan = null;
+  });
+
+  it.each([
+    bech32
+      .encode(
+        'lnurl',
+        bech32.toWords(Array.from(new TextEncoder().encode('https://example.com/voucher'))),
+        2000,
+      )
+      .toUpperCase(),
+    'lnurlw://example.com/voucher',
+    'lightning:lnurlw://example.com/voucher',
+    'https://example.com/voucher',
+  ])('opens a claim for the selected Receive wallet: %s', (data) => {
+    const onClose = jest.fn();
+    render(<ReceiveSheet visible onClose={onClose} />);
+    fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+    act(() => {
+      mockScan!({ data });
+      mockScan!({ data });
+    });
+    expect(mockOpenWithdraw).toHaveBeenCalledTimes(1);
+    expect(mockOpenWithdraw).toHaveBeenCalledWith(data, 'LB', true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockMakeInvoice).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payment invoice and keeps the scanner usable', () => {
+    render(<ReceiveSheet visible onClose={jest.fn()} />);
+    fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+    act(() => mockScan!({ data: 'lnbc123invalid' }));
+    expect(mockOpenWithdraw).not.toHaveBeenCalled();
+    act(() => mockScan!({ data: 'lnurlw://example.com/voucher' }));
+    expect(mockOpenWithdraw).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores camera callbacks after cancelling the scanner', () => {
+    render(<ReceiveSheet visible onClose={jest.fn()} />);
+    fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+    const lateCallback = mockScan!;
+    fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+    act(() => lateCallback({ data: 'lnurlw://example.com/voucher' }));
+    expect(mockOpenWithdraw).not.toHaveBeenCalled();
+  });
+
+  it('does not offer a Lightning voucher for an on-chain wallet', () => {
+    mockActiveWalletId = 'A';
+    render(<ReceiveSheet visible onClose={jest.fn()} />);
+    expect(screen.queryByTestId('receive-scan-to-claim')).toBeNull();
+  });
 });

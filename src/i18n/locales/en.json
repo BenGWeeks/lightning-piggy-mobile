@@ -1660,7 +1660,11 @@
     "sendInvoiceToFriend": "Send invoice to a friend",
     "friendPickerSubtitle": "They'll get an encrypted Nostr DM with a Pay button.",
     "receiveOnchainBoltz": "Receive on-chain (via Boltz swap) ₿",
-    "receiveOnchainBoltzA11y": "Receive on-chain via Boltz swap"
+    "receiveOnchainBoltzA11y": "Receive on-chain via Boltz swap",
+    "scanToClaim": "Scan to claim",
+    "cancelScan": "Cancel scan",
+    "invalidClaimCode": "Scan an LNURL-withdraw claim code",
+    "claimUnavailable": "Claim funds is unavailable. Try again."
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Name required",
