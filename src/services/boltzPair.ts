@@ -1,4 +1,5 @@
 import type { SwapFees } from './boltzService';
+import { MIN_SUBMARINE_LOCKUP_SATS } from '../utils/submarinePolicy';
 
 type Pair = {
   hash?: unknown;
@@ -38,11 +39,16 @@ export function parseBoltzPair(input: unknown, direction: 'reverse' | 'submarine
   ) {
     throw new Error(`Invalid Boltz ${direction} fee quote`);
   }
+  // Conservative invoice floor: even a zero-fee server must leave enough
+  // locked value for the app's default refund transaction.
+  const localMin =
+    direction === 'submarine' ? Math.max(minAmount, MIN_SUBMARINE_LOCKUP_SATS) : minAmount;
+  if (maxAmount < localMin) throw new Error('Swap limits leave no refundable submarine amount');
   return {
     ...(direction === 'reverse' && sats(lockupMinerFee) ? { lockupMinerFee } : {}),
     percentage,
     minerFee,
-    minAmount,
+    minAmount: localMin,
     maxAmount,
     ...(typeof pair.hash === 'string' && pair.hash.trim() ? { pairHash: pair.hash } : {}),
   };

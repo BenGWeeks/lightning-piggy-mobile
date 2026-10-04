@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { createSubmarineSwapForward } from './boltzService';
+import { createSubmarineSwapForward, type SwapFees } from './boltzService';
 import { registerPendingSubmarineSwap } from './swapRecoveryService';
 
 /** Prepare a transfer's swap and durably save refund material before funding. */
@@ -7,8 +7,10 @@ export async function createRecoverableSubmarineSwap(
   invoice: string,
   amountSats: number,
   sourceWalletId: string,
+  approvedQuote: SwapFees,
 ) {
-  const swap = await createSubmarineSwapForward(invoice, amountSats);
+  if (!approvedQuote) throw new Error('Wait for the swap fee quote before sending');
+  const swap = await createSubmarineSwapForward(invoice, amountSats, approvedQuote);
   await SecureStore.setItemAsync(
     `submarine_swap_${swap.id}`,
     JSON.stringify({ ...swap, sourceWalletId, createdAt: Date.now() }),

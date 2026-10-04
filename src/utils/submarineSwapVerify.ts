@@ -2,6 +2,7 @@ import * as ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import { paymentHashFromBolt11 } from './bolt11';
+import { MIN_SUBMARINE_LOCKUP_SATS } from './submarinePolicy';
 
 bitcoin.initEccLib(ecc);
 
@@ -43,7 +44,7 @@ export function verifySubmarineSwap(
   }
   if (
     !Number.isSafeInteger(input.expectedAmount) ||
-    input.expectedAmount <= 0 ||
+    input.expectedAmount < MIN_SUBMARINE_LOCKUP_SATS ||
     swap.expectedAmount !== input.expectedAmount
   ) {
     throw new Error('Boltz swap amount does not match the quoted amount');

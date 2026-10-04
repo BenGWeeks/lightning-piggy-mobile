@@ -31,6 +31,7 @@ import {
   REVERSE_CLAIM_MARGIN,
 } from '../utils/reverseSwapVerify';
 import { verifyReverseSwapInvoice } from '../utils/boltzVerify';
+import { singleFlightClaim } from '../utils/swapClaimSingleFlight';
 import { verifySubmarineSwap } from '../utils/submarineSwapVerify';
 import { amountSatsFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
@@ -178,7 +179,7 @@ export async function getSubmarineSwapFees(backend?: string): Promise<SwapFees> 
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
-  return parseBoltzPair(data?.BTC?.BTC, 'submarine');
+  return { ...parseBoltzPair(data?.BTC?.BTC, 'submarine'), backend };
 }
 
 /**
@@ -356,6 +357,17 @@ export async function claimSwap(
   lockup: { txId: string; vout: number; amount: number; txHex: string },
   destinationAddress: string,
   feeRate: number = swap.claimFeeRate ?? 2,
+): Promise<string> {
+  return singleFlightClaim(`${swap.id}:${lockup.txId}:${lockup.vout}`, () =>
+    broadcastClaim(swap, lockup, destinationAddress, feeRate),
+  );
+}
+
+async function broadcastClaim(
+  swap: ReverseSwapResult,
+  lockup: { txId: string; vout: number; amount: number; txHex: string },
+  destinationAddress: string,
+  feeRate: number,
 ): Promise<string> {
   // Repeat structural/deadline checks immediately before disclosing our preimage.
   const { getBlockHeight, getSwapClaimFeeRate } =
@@ -714,6 +726,7 @@ export interface SubmarineSwapResult {
 export async function createSubmarineSwapForward(
   invoice: string,
   requestedAmountSats: number,
+  approvedQuote?: SwapFees,
 ): Promise<SubmarineSwapResult> {
   const backend = await getSwapBackend();
   console.log('[Boltz] Creating submarine swap (on-chain → LN)');
@@ -732,6 +745,18 @@ export async function createSubmarineSwapForward(
     getSubmarineSwapFees(backend),
     getBlockHeight(),
   ]);
+  if (
+    approvedQuote &&
+    (approvedQuote.backend !== backend ||
+      approvedQuote.pairHash !== fees.pairHash ||
+      approvedQuote.percentage !== fees.percentage ||
+      approvedQuote.minerFee !== fees.minerFee ||
+      approvedQuote.minAmount !== fees.minAmount ||
+      approvedQuote.maxAmount !== fees.maxAmount)
+  )
+    throw new QuoteChangedError(fees);
+  if (amount < fees.minAmount || amount > fees.maxAmount)
+    throw new Error('Submarine swap amount is outside the server limits');
   const expectedAmount = amount + calculateSwapFee(amount, fees);
   const refundKeys = generateClaimKeyPair();
 

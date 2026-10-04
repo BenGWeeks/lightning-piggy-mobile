@@ -655,14 +655,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // swapRecoveryService is the safety net if this task dies.
         const onchainAmount = swap.onchainAmount;
         const iifeSession = sessionRef.current;
-        // Capture cross-profile flag into the IIFE closure — if the
-        // user re-opens the sheet with a different profile selection
-        // before the background task finishes, the dest is still the
-        // ORIGINAL transfer's destination, which may be in another
-        // profile's wallet list.
+        // Keep the original destination profile throughout this background swap.
         const destIsCrossProfile = isCrossProfile;
-        // Stage tracker so the catch handler can report WHICH step of
-        // the reverse-swap pipeline failed, not just the bare error
+        // Track the stage for actionable background error reporting.
         // message. Surfaces in `console.warn` so it survives the
         // production `transform-remove-console` strip — critical for
         // diagnosing field reports like "swap failed with 'unknown
@@ -775,7 +770,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await fetchInvoiceForDest(dest);
-        const swap = await createRecoverableSubmarineSwap(invoice, currentSats, sourceId);
+        const swap = await createRecoverableSubmarineSwap(
+          invoice,
+          currentSats,
+          sourceId,
+          cachedBoltzFees!,
+        );
 
         setProgress((p) => advanceTransfer(p)); // swap → broadcast
         // Foreground: broadcast the on-chain tx (the user's action).

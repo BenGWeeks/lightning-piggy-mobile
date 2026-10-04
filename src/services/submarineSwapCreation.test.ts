@@ -233,3 +233,9 @@ describe('createSubmarineSwapForward', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 });
+
+it('rejects a lockup that cannot leave a dust-safe refund', () => {
+  expect(() =>
+    verifySubmarineSwap({ ...fixture(), expectedAmount: 700 }, { ...input, expectedAmount: 700 }),
+  ).toThrow(/amount/);
+});

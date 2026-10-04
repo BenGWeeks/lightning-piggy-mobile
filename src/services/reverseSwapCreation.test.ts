@@ -221,6 +221,7 @@ describe('creation before funding', () => {
     const preimage = new Uint8Array(32).fill(5);
     const swap = {
       ...fixture(CLAIM, bitcoin.crypto.sha256(preimage)),
+      id: 'expired-unclaimed-swap',
       preimage: toHex(preimage),
       claimPrivateKey: toHex(PRIVATE),
     };

@@ -349,3 +349,48 @@ describe('payAndClaimReverseSwap — cancellation', () => {
     await expect(done).resolves.toBe('claim-tx');
   });
 });
+
+// A successful broadcast is final even if local bookkeeping fails.
+it.each(['recordClaimedFromPreimage', 'recordReverseSwapLegs', 'unregisterPendingSwap'] as const)(
+  'returns the claim when %s cleanup fails',
+  async (method) => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    jest
+      .mocked(
+        {
+          recordClaimedFromPreimage: swapRecoveryService.recordClaimedFromPreimage,
+          recordReverseSwapLegs: swapRecoveryService.recordReverseSwapLegs,
+          unregisterPendingSwap: swapRecoveryService.unregisterPendingSwap,
+        }[method],
+      )
+      .mockRejectedValueOnce(new Error('storage unavailable'));
+    const done = run({ payInvoice });
+    await flush();
+    state.releaseLockup();
+    await expect(done).resolves.toBe('claim-tx');
+    if (method !== 'unregisterPendingSwap')
+      expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+  },
+);
+it('keeps recovery indexed when secret deletion fails after claim', async () => {
+  const { state, payInvoice } = holdInvoiceSwap();
+  jest.mocked(SecureStore.deleteItemAsync).mockRejectedValueOnce(new Error('storage unavailable'));
+  const done = run({ payInvoice });
+  await flush();
+  state.releaseLockup();
+  await expect(done).resolves.toBe('claim-tx');
+  expect(swapRecoveryService.unregisterPendingSwap).not.toHaveBeenCalled();
+});
+it('does not announce dispatch if the wallet throws synchronously', async () => {
+  waitForLockup.mockReturnValue(new Promise(() => {}));
+  const onPaymentDispatched = jest.fn();
+  await expect(
+    run({
+      payInvoice: () => {
+        throw new Error('disconnected');
+      },
+      onPaymentDispatched,
+    }),
+  ).rejects.toThrow('disconnected');
+  expect(onPaymentDispatched).not.toHaveBeenCalled();
+});

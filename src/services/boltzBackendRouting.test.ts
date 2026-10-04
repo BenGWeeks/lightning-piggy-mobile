@@ -233,3 +233,44 @@ it('surfaces pinned-provider storage errors instead of reporting an absent refun
   jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(new Error('keystore locked'));
   await expect(getSubmarineSwapLockup('swap', 'address')).rejects.toThrow('keystore locked');
 });
+
+it.each(['backend', 'fees'])(
+  'rejects submarine approved quote changes (%s) before POST',
+  async (change) => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        BTC: {
+          BTC: {
+            hash: 'subquote',
+            limits: { minimal: 10000, maximal: 100000 },
+            fees: { percentage: 0.5, minerFees: 100 },
+          },
+        },
+      }),
+    });
+    const approved = await getSubmarineSwapFees();
+    if (change === 'backend')
+      await AsyncStorage.setItem('swap_backend_url_v1', 'https://other.example/v2');
+    else approved.minerFee -= 1;
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        BTC: {
+          BTC: {
+            hash: 'subquote',
+            limits: { minimal: 10000, maximal: 100000 },
+            fees: { percentage: 0.5, minerFees: 100 },
+          },
+        },
+      }),
+    });
+    await expect(createSubmarineSwapForward('invoice', 50000, approved)).rejects.toBeInstanceOf(
+      QuoteChangedError,
+    );
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  },
+);

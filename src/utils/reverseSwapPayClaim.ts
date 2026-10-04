@@ -147,16 +147,17 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
   const lockupWait = settle(() =>
     boltzService.waitForLockup(swap, REVERSE_LOCKUP_TIMEOUT_MS, payCtrl.signal),
   );
-  params.onPaymentDispatched?.();
-  const payment = settle(() =>
-    params.payInvoice(params.walletId, swap.invoice, {
+  const payment = settle(() => {
+    const pendingPayment = params.payInvoice(params.walletId, swap.invoice, {
       signal: payCtrl.signal,
       // A late reply timeout must not repaint a caller that has moved on.
       onReplyTimeout: () => {
         if (!finished) params.onReplyTimeout?.();
       },
-    }),
-  );
+    });
+    params.onPaymentDispatched?.();
+    return pendingPayment;
+  });
 
   const preCommitError = (e: unknown) => {
     // ReplyTimeoutError keeps its name so the caller routes it to the
@@ -210,11 +211,17 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     // TransactionList can badge the row 'done' and the detail sheet can
     // show the broadcast claim txid.
     params.onStage?.('cleanup');
-    await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-    await swapRecoveryService.unregisterPendingSwap(swap.id);
-    await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
-    // Tag both legs so the settled LN send + on-chain claim badge as a swap (#895).
-    await swapRecoveryService.recordReverseSwapLegs(swap.preimage, claimTxId, swap.id);
+    // Broadcast has succeeded. Storage/metadata cleanup must never turn that
+    // fact into an ambiguous payment outcome. Persist completion before deleting
+    // secrets; leave the indexed record available when an earlier write fails.
+    try {
+      await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
+      await swapRecoveryService.recordReverseSwapLegs(swap.preimage, claimTxId, swap.id);
+      await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+      await swapRecoveryService.unregisterPendingSwap(swap.id);
+    } catch (error) {
+      console.warn('[Boltz] Claim completed; local cleanup will need retry:', error);
+    }
 
     await awaitPaymentSettle(
       payment,
