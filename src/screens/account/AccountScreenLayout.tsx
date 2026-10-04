@@ -65,33 +65,44 @@ const AccountScreenLayout: React.FC<Props> = ({
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={styles.container}>
       <BrandGradientBackground />
-      <Image
-        source={require('../../../assets/images/nostrich.png')}
-        style={styles.bgImage}
-        resizeMode="contain"
-      />
-      {scrollable ? (
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
-          keyboardShouldPersistTaps="handled"
-          {...scrollViewProps}
-        >
-          {titleRow}
-          {children}
-        </ScrollView>
-      ) : (
-        <View style={[styles.content, styles.flex, { paddingTop: insets.top + 16 }]}>
-          {titleRow}
-          {children}
-        </View>
-      )}
-    </KeyboardAvoidingView>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Image
+          source={require('../../../assets/images/nostrich.png')}
+          style={styles.bgImage}
+          resizeMode="contain"
+        />
+        {scrollable ? (
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={[
+              styles.content,
+              { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            {...scrollViewProps}
+          >
+            {titleRow}
+            {children}
+          </ScrollView>
+        ) : (
+          <View
+            style={[
+              styles.content,
+              styles.flex,
+              { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+            ]}
+          >
+            {titleRow}
+            {children}
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 

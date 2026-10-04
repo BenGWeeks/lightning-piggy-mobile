@@ -1,4 +1,15 @@
 {
+  "serverConnection": {
+    "electrumLoadError": "No se pudieron cargar los ajustes Electrum. Introduce el servidor deseado antes de probar o guardar.",
+    "test": "Probar conexión",
+    "electrumTest": "Probar conexión Electrum",
+    "boltzTest": "Probar conexión Boltz",
+    "checking": "Comprobando conexión…",
+    "verified": "Conexión verificada",
+    "failed": "Error de conexión. Comprueba el servidor y la red; conecta la VPN para un servidor privado.",
+    "timeout": "La comprobación agotó el tiempo de espera. Inténtalo de nuevo.",
+    "electrumSaveError": "No se pudieron cargar o guardar los ajustes Electrum. Comprueba el servidor y el puerto e inténtalo de nuevo."
+  },
   "tabs": {
     "home": "Inicio",
     "messages": "Mensajes",
