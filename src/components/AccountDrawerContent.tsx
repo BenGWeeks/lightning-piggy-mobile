@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
@@ -32,6 +32,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { Palette } from '../styles/palettes';
+import { createAccountDrawerContentStyles } from '../styles/AccountDrawerContent.styles';
 import { appVersionLabel } from '../utils/appVersion';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { AccountDrawerParamList } from '../navigation/types';
@@ -114,7 +115,7 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
 const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAccountDrawerContentStyles(colors), [colors]);
   const sectionRows = useMemo(() => buildSectionRows(colors, t), [colors, t]);
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile, logout, identities, pubkey, switchIdentity, relays } = useNostr();
@@ -268,6 +269,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                   const idPrefix = id.pubkey.slice(0, 8);
                   return (
                     <TouchableOpacity
+                      accessibilityRole="button"
                       key={id.pubkey}
                       style={styles.avatarSmall}
                       onPress={() => handleSwitchTo(id.pubkey)}
@@ -300,6 +302,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
             )}
             {isLoggedIn && (
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.moreButton}
                 onPress={() => setSwitcherOpen(true)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -322,6 +325,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 </Text>
                 {profile?.npub && (
                   <TouchableOpacity
+                    accessibilityRole="button"
                     onPress={() => {
                       props.navigation.closeDrawer();
                       setQrSheetOpen(true);
@@ -342,6 +346,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
             </>
           ) : (
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.signInButton}
               onPress={() => {
                 props.navigation.closeDrawer();
@@ -360,6 +365,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         {/* Section rows */}
         {sectionRows.map((row) => (
           <TouchableOpacity
+            accessibilityRole="button"
             key={row.name}
             style={styles.row}
             onPress={() => {
@@ -378,6 +384,8 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
         {/* Sign Out — explicit row above the footer */}
         <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !isLoggedIn || signingOut }}
           style={[styles.row, (!isLoggedIn || signingOut) && styles.rowDisabled]}
           onPress={handleSignOut}
           disabled={!isLoggedIn || signingOut}
@@ -419,155 +427,5 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.surface,
-    },
-    scrollContent: {
-      paddingTop: 0,
-    },
-    header: {
-      paddingHorizontal: 20,
-      paddingTop: 16,
-      paddingBottom: 20,
-      alignItems: 'flex-start',
-    },
-    headerAvatarRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      alignSelf: 'stretch',
-      marginBottom: 12,
-    },
-    avatarLarge: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      overflow: 'hidden',
-      backgroundColor: 'rgba(0,0,0,0.05)',
-    },
-    avatarImage: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-    },
-    switcherAvatars: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      // Switcher avatars stack flush-right adjacent to the ⋯ button —
-      // active avatar stays on the left and gets visual breathing room.
-      // marginLeft: 'auto' pushes this group to fill the space between
-      // the large avatar and the menu trigger.
-      marginLeft: 'auto',
-      marginRight: 8,
-    },
-    avatarSmall: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      overflow: 'hidden',
-      backgroundColor: 'rgba(0,0,0,0.05)',
-    },
-    avatarSmallImage: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-    },
-    moreButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.divider,
-      alignItems: 'center',
-      justifyContent: 'center',
-      // marginLeft: 'auto' here is a single-identity safety net. When
-      // `switcherAvatars` renders, its own `marginLeft: 'auto'` fires
-      // FIRST (consumes the available row space) and this one is a
-      // no-op — both elements end up flush-right adjacent to each
-      // other, as the original design intended. When `switcherAvatars`
-      // does NOT render (no other identities signed in), this auto-
-      // margin keeps the ⋯ button right-aligned. Without it, the
-      // button collapsed left next to the avatar (#492).
-      marginLeft: 'auto',
-    },
-    avatarPlaceholder: {
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerName: {
-      color: colors.textHeader,
-      fontSize: 18,
-      fontWeight: '700',
-    },
-    nameRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      alignSelf: 'stretch',
-    },
-    flex1: {
-      flex: 1,
-    },
-    signInButton: {
-      alignSelf: 'stretch',
-      height: 44,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 4,
-    },
-    signInButtonText: {
-      color: colors.white,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    headerNpub: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.divider,
-      marginVertical: 8,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
-      paddingHorizontal: 20,
-      paddingVertical: 14,
-    },
-    rowDisabled: {
-      opacity: 0.4,
-    },
-    rowIcon: {
-      width: 24,
-      alignItems: 'center',
-    },
-    rowLabel: {
-      color: colors.textBody,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    footer: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-      paddingTop: 12,
-      paddingHorizontal: 20,
-      alignItems: 'center',
-    },
-    versionText: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-    },
-  });
 
 export default AccountDrawerContent;

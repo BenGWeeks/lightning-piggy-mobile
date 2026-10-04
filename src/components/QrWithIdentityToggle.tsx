@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
+import { View, Text, TouchableOpacity, Share } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { Copy, Share2, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createQrWithIdentityToggleStyles } from '../styles/QrWithIdentityToggle.styles';
 
 interface Props {
   npub: string;
@@ -29,7 +29,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createQrWithIdentityToggleStyles(colors), [colors]);
   // Clamp the initial mode to 'npub' when no lightning address exists —
   // otherwise a defaultMode='lightning' caller produces an empty
   // qrValue and a misleading "Lightning address copied" Toast.
@@ -74,8 +74,10 @@ const QrWithIdentityToggle: React.FC<Props> = ({
       {lightningAddress && (
         <View style={styles.toggleRow}>
           <TouchableOpacity
+            accessibilityRole="tab"
             style={[styles.toggleTab, mode === 'npub' && styles.toggleTabActive]}
             onPress={() => setMode('npub')}
+            accessibilityState={{ selected: mode === 'npub' }}
             accessibilityLabel={t('qrWithIdentityToggle.showNpubQr')}
             testID="profile-qr-toggle-npub"
           >
@@ -84,8 +86,10 @@ const QrWithIdentityToggle: React.FC<Props> = ({
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="tab"
             style={[styles.toggleTab, mode === 'lightning' && styles.toggleTabActive]}
             onPress={() => setMode('lightning')}
+            accessibilityState={{ selected: mode === 'lightning' }}
             accessibilityLabel={t('qrWithIdentityToggle.showLightningQr')}
             testID="profile-qr-toggle-lightning"
           >
@@ -121,6 +125,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
 
       <View style={styles.actionRow}>
         <TouchableOpacity
+          accessibilityRole="button"
           style={styles.iconButton}
           onPress={handleCopy}
           accessibilityLabel={t('qrWithIdentityToggle.copy', { label: valueLabel })}
@@ -131,6 +136,8 @@ const QrWithIdentityToggle: React.FC<Props> = ({
 
         {onNfcWrite && (
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !nfcSupported }}
             style={[styles.iconButton, !nfcSupported && styles.iconButtonDisabled]}
             onPress={nfcSupported ? onNfcWrite : undefined}
             disabled={!nfcSupported}
@@ -150,6 +157,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         )}
 
         <TouchableOpacity
+          accessibilityRole="button"
           style={styles.iconButton}
           onPress={handleShare}
           accessibilityLabel={t('qrWithIdentityToggle.share', { label: valueLabel })}
@@ -161,88 +169,5 @@ const QrWithIdentityToggle: React.FC<Props> = ({
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      alignItems: 'center',
-      marginHorizontal: 16,
-      marginTop: 18,
-      marginBottom: 12,
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingBottom: 16,
-      gap: 12,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    // Toggle styling matches the original bottom-sheet QrSheet for
-    // theme-consistent contrast: track uses `colors.background` (the
-    // page bg, darker than `colors.surface` which is what the box
-    // uses), active tab is white with brandPink text. Works in both
-    // light and dark themes — the page bg and surface bg are the two
-    // standard contrasting tones in the palette.
-    toggleRow: {
-      flexDirection: 'row',
-      backgroundColor: colors.background,
-      borderRadius: 10,
-      padding: 3,
-      marginTop: -46,
-    },
-    toggleTab: {
-      paddingHorizontal: 20,
-      paddingVertical: 8,
-      borderRadius: 8,
-    },
-    toggleTabActive: {
-      backgroundColor: colors.white,
-    },
-    toggleText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    toggleTextActive: {
-      color: colors.brandPink,
-    },
-    qrContainer: {
-      padding: 16,
-      backgroundColor: colors.white,
-      borderRadius: 16,
-    },
-    valueRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.background,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderRadius: 10,
-      maxWidth: '90%',
-    },
-    valueText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-      flex: 1,
-    },
-    actionRow: {
-      flexDirection: 'row',
-      gap: 16,
-      paddingTop: 4,
-    },
-    iconButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.background,
-    },
-    iconButtonDisabled: {
-      opacity: 0.4,
-    },
-  });
 
 export default QrWithIdentityToggle;

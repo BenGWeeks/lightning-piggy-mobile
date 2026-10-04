@@ -1,0 +1,32 @@
+appId: com.lightningpiggy.app.preview
+---
+- launchApp
+- assertVisible:
+    id: "fixture-switch"
+- tapOn:
+    id: "contact-row-message"
+    index: 0
+- assertVisible: "Message action"
+- tapOn:
+    id: "contact-row-zap"
+- assertVisible: "Zap action"
+- tapOn:
+    id: "fixture-contact-profile"
+- assertVisible: "Profile action"
+- tapOn:
+    id: "sendsheet-cancel"
+- assertVisible: "Cancel action"
+- tapOn:
+    id: "send-wallet-selector"
+- tapOn:
+    id: "send-wallet-selector"
+- takeScreenshot: /tmp/a11y1111-contact-controls
+- tapOn:
+    id: "fixture-switch"
+- assertVisible:
+    id: "profile-qr-image"
+- takeScreenshot: /tmp/a11y1111-qr-npub
+- tapOn:
+    id: "profile-qr-toggle-lightning"
+- assertVisible: "demo@example.com"
+- takeScreenshot: /tmp/a11y1111-qr-lightning

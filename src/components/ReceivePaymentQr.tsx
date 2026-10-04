@@ -1,0 +1,93 @@
+import React from 'react';
+import { View, Text, ActivityIndicator } from 'react-native';
+import { Check } from 'lucide-react-native';
+import QRCode from 'react-native-qrcode-svg';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LocaleContext';
+import type { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
+
+interface Props {
+  styles: Pick<
+    ReturnType<typeof createReceiveSheetStyles>,
+    'qrContainer' | 'checkmark' | 'checkmarkText' | 'noInvoice'
+  >;
+  isOnchainWallet: boolean;
+  onchainAddress: string | null;
+  onchainUri: string;
+  mode: 'address' | 'amount';
+  currentSats: number;
+  lightningAddress: string | null;
+  invoice: string;
+  paymentReceived: boolean;
+  loading: boolean;
+}
+
+export default function ReceivePaymentQr({
+  styles,
+  isOnchainWallet,
+  onchainAddress,
+  onchainUri,
+  mode,
+  currentSats,
+  lightningAddress,
+  invoice,
+  paymentReceived,
+  loading,
+}: Props) {
+  const colors = useThemeColors();
+  const t = useTranslation();
+  return (
+    <View
+      style={styles.qrContainer}
+      accessible={
+        isOnchainWallet
+          ? !!onchainAddress && (mode === 'address' || currentSats > 0)
+          : mode === 'address'
+            ? !!lightningAddress
+            : !!invoice
+      }
+      accessibilityRole="image"
+      accessibilityLabel={t('receiveSheet.paymentQr')}
+      testID="receive-payment-qr"
+    >
+      {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
+        <View>
+          <QRCode value={onchainUri} size={200} />
+          {paymentReceived && (
+            <View style={styles.checkmark}>
+              <Text style={styles.checkmarkText}>{'\u2713'}</Text>
+            </View>
+          )}
+        </View>
+      ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
+        <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
+      ) : mode === 'address' && lightningAddress ? (
+        <View>
+          <QRCode value={`lightning:${lightningAddress}`} size={200} />
+          {paymentReceived && (
+            <View style={styles.checkmark}>
+              <Check size={28} color={colors.white} />
+            </View>
+          )}
+        </View>
+      ) : mode === 'amount' && loading ? (
+        <ActivityIndicator size="large" color={colors.brandPink} />
+      ) : mode === 'amount' && invoice ? (
+        <View>
+          <QRCode value={invoice} size={200} />
+          {paymentReceived && (
+            <View style={styles.checkmark}>
+              <Check size={28} color={colors.white} />
+            </View>
+          )}
+        </View>
+      ) : (
+        <Text style={styles.noInvoice}>
+          {mode === 'address'
+            ? t('receiveSheet.noLightningAddress')
+            : t('receiveSheet.enterAmountForInvoice')}
+        </Text>
+      )}
+    </View>
+  );
+}

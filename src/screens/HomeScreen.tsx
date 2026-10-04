@@ -330,6 +330,8 @@ const HomeScreen: React.FC = () => {
         {/* Send/Receive/Transfer buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isReceiveDisabled }}
             style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
             onPress={() => {
               perfLog('btn-receive onPress');
@@ -345,6 +347,8 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>{t('homeScreen.receive')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isTransferDisabled }}
             style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
             onPress={() => sheetsRef.current?.openTransfer()}
             disabled={isTransferDisabled}
@@ -357,6 +361,8 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>{t('homeScreen.transfer')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isSendDisabled }}
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
             onPress={() => {
               perfLog('btn-send onPress');

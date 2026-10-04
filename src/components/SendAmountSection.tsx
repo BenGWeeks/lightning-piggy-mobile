@@ -68,6 +68,7 @@ const SendAmountSection: React.FC<Props> = ({
           <ActivityIndicator size="small" color={spinnerColor} />
         ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.amountPickerRow}
             onPress={onEnterAmount}
             testID="send-amount-picker"

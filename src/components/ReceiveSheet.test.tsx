@@ -397,3 +397,15 @@ it('ignores a late camera callback after Receive closes, and can rescan on reope
   act(() => mockScan!({ data: 'lnurlw://example.com/voucher' }));
   expect(mockOpenWithdraw).toHaveBeenCalledTimes(1);
 });
+
+it('exposes copy/share as disabled buttons until an address is ready', async () => {
+  render(<ReceiveSheet visible onClose={onClose} />);
+  for (const name of ['receiveSheet.copy', 'receiveSheet.share']) {
+    expect(screen.getByRole('button', { name, disabled: true })).toBeTruthy();
+  }
+  await resolveFor('A', 'bc1qalpha000000');
+  expect(screen.getByRole('image', { name: 'receiveSheet.paymentQr' })).toBeTruthy();
+  for (const name of ['receiveSheet.copy', 'receiveSheet.share']) {
+    expect(screen.getByRole('button', { name, disabled: false })).toBeTruthy();
+  }
+});

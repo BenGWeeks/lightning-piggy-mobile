@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   BackHandler,
   ActivityIndicator,
   Keyboard,
@@ -22,7 +21,7 @@ import * as Clipboard from 'expo-clipboard';
 import Svg, { Path } from 'react-native-svg';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createAddFriendSheetStyles } from '../styles/AddFriendSheet.styles';
 
 interface Props {
   visible: boolean;
@@ -33,7 +32,7 @@ interface Props {
 const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAddFriendSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
   const [inputValue, setInputValue] = useState('');
@@ -148,16 +147,24 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
         {/* Mode toggle */}
         <View style={styles.toggleRow}>
           <TouchableOpacity
+            accessibilityRole="tab"
             style={[styles.toggleTab, mode === 'paste' && styles.toggleTabActive]}
             onPress={() => setMode('paste')}
+            accessibilityLabel={t('addFriendSheet.pasteTab')}
+            accessibilityState={{ selected: mode === 'paste' }}
+            testID="add-friend-tab-paste"
           >
             <Text style={[styles.toggleText, mode === 'paste' && styles.toggleTextActive]}>
               {t('addFriendSheet.pasteTab')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="tab"
             style={[styles.toggleTab, mode === 'scan' && styles.toggleTabActive]}
             onPress={handleScanMode}
+            accessibilityLabel={t('addFriendSheet.scanTab')}
+            accessibilityState={{ selected: mode === 'scan' }}
+            testID="add-friend-tab-scan"
           >
             <Text style={[styles.toggleText, mode === 'scan' && styles.toggleTextActive]}>
               {t('addFriendSheet.scanTab')}
@@ -179,7 +186,13 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
                 accessibilityLabel={t('addFriendSheet.npubInputA11y')}
                 testID="npub-input"
               />
-              <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.pasteButton}
+                onPress={handlePaste}
+                accessibilityLabel={t('addFriendSheet.pasteTab')}
+                testID="add-friend-paste"
+              >
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                   <Path
                     d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"
@@ -196,6 +209,8 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
               </TouchableOpacity>
             </View>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !inputValue.trim() || loading, busy: loading }}
               style={[
                 styles.addButton,
                 (!inputValue.trim() || loading) && styles.addButtonDisabled,
@@ -223,7 +238,10 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
               <View style={styles.scanLoading}>
                 <Text style={styles.scanErrorText}>{scanError}</Text>
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.scanAgainButton}
+                  accessibilityLabel={t('addFriendSheet.scanAgain')}
+                  testID="add-friend-scan-again"
                   onPress={() => {
                     setScanned(false);
                     setScanError(null);
@@ -248,131 +266,5 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 40,
-    },
-    title: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
-    toggleRow: {
-      flexDirection: 'row',
-      backgroundColor: colors.background,
-      borderRadius: 10,
-      padding: 3,
-      marginBottom: 20,
-    },
-    toggleTab: {
-      paddingHorizontal: 20,
-      paddingVertical: 8,
-      borderRadius: 8,
-    },
-    toggleTabActive: {
-      backgroundColor: colors.white,
-    },
-    toggleText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    toggleTextActive: {
-      color: colors.brandPink,
-    },
-    pasteContent: {
-      width: '100%',
-      gap: 16,
-    },
-    inputRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.background,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      gap: 8,
-    },
-    input: {
-      flex: 1,
-      paddingVertical: 14,
-      fontSize: 15,
-      color: colors.textHeader,
-      fontWeight: '500',
-    },
-    pasteButton: {
-      padding: 8,
-    },
-    addButton: {
-      backgroundColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 10,
-      alignItems: 'center',
-    },
-    addButtonDisabled: {
-      opacity: 0.5,
-    },
-    addButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    scanContent: {
-      width: '100%',
-      alignItems: 'center',
-    },
-    cameraContainer: {
-      width: 250,
-      height: 250,
-      borderRadius: 16,
-      overflow: 'hidden',
-    },
-    camera: {
-      width: 250,
-      height: 250,
-    },
-    scanLoading: {
-      width: 250,
-      height: 250,
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 12,
-    },
-    scanLoadingText: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-    },
-    scanErrorText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    scanAgainButton: {
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 24,
-      paddingVertical: 12,
-      borderRadius: 10,
-    },
-    scanAgainText: {
-      color: colors.white,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-  });
 
 export default AddFriendSheet;

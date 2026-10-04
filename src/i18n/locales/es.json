@@ -1675,6 +1675,7 @@
     "friendPickerSubtitle": "Recibirán un mensaje privado cifrado de Nostr con un botón de Pagar.",
     "receiveOnchainBoltz": "Recibir on-chain (vía swap de Boltz) ₿",
     "receiveOnchainBoltzA11y": "Recibir on-chain vía swap de Boltz",
+    "paymentQr": "Código QR de pago",
     "scanToClaim": "Escanear para reclamar",
     "cancelScan": "Cancelar escaneo",
     "invalidClaimCode": "Escanea un código de retiro LNURL",
@@ -2224,6 +2225,20 @@
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
     }
+  },
+  "accountScreenLayout": {
+    "back": "Atrás"
+  },
+  "contactListItem": {
+    "message": "Enviar mensaje a {{name}}",
+    "messageWithReason": "Enviar mensaje a {{name}} ({{reason}})",
+    "zap": "Zap a {{name}}",
+    "zapWithReason": "Zap a {{name}} ({{reason}})"
+  },
+  "sendModeTabs": {
+    "scan": "Pestaña Escanear",
+    "paste": "Pestaña Introducir",
+    "nfc": "Pestaña NFC"
   },
   "liveMessages": {
     "newMessages": "Mensajes nuevos"

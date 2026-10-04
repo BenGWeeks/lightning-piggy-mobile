@@ -14,8 +14,8 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { ChevronUp, ChevronDown, Check, Copy, Share2, Send } from 'lucide-react-native';
-import QRCode from 'react-native-qrcode-svg';
+import { ChevronUp, ChevronDown, Copy, Share2, Send } from 'lucide-react-native';
+import ReceivePaymentQr from './ReceivePaymentQr';
 import * as Clipboard from 'expo-clipboard';
 import ReceiveClaimScanner from './ReceiveClaimScanner';
 import Toast from './BrandedToast';
@@ -641,6 +641,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     <View style={styles.walletDropdownWrapper}>
                       <TouchableOpacity
                         testID="receive-wallet-dropdown-toggle"
+                        accessibilityLabel={t('receiveSheet.toWallet', { wallet: walletName })}
                         accessibilityRole="button"
                         accessibilityState={{ expanded: dropdownOpen }}
                         style={styles.walletDropdown}
@@ -701,47 +702,18 @@ const ReceiveSheet: React.FC<Props> = ({
                   </Text>
                 )}
 
-                {/* QR Code */}
-                <View style={styles.qrContainer}>
-                  {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
-                    <View>
-                      <QRCode value={onchainUri} size={200} />
-                      {paymentReceived && (
-                        <View style={styles.checkmark}>
-                          <Text style={styles.checkmarkText}>{'\u2713'}</Text>
-                        </View>
-                      )}
-                    </View>
-                  ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
-                    <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
-                  ) : mode === 'address' && lightningAddress ? (
-                    <View>
-                      <QRCode value={`lightning:${lightningAddress}`} size={200} />
-                      {paymentReceived && (
-                        <View style={styles.checkmark}>
-                          <Check size={28} color={colors.white} />
-                        </View>
-                      )}
-                    </View>
-                  ) : mode === 'amount' && loading ? (
-                    <ActivityIndicator size="large" color={colors.brandPink} />
-                  ) : mode === 'amount' && invoice ? (
-                    <View>
-                      <QRCode value={invoice} size={200} />
-                      {paymentReceived && (
-                        <View style={styles.checkmark}>
-                          <Check size={28} color={colors.white} />
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    <Text style={styles.noInvoice}>
-                      {mode === 'address'
-                        ? t('receiveSheet.noLightningAddress')
-                        : t('receiveSheet.enterAmountForInvoice')}
-                    </Text>
-                  )}
-                </View>
+                <ReceivePaymentQr
+                  styles={styles}
+                  isOnchainWallet={isOnchainWallet}
+                  onchainAddress={onchainAddress}
+                  onchainUri={onchainUri}
+                  mode={mode}
+                  currentSats={currentSats}
+                  lightningAddress={lightningAddress}
+                  invoice={invoice}
+                  paymentReceived={paymentReceived}
+                  loading={loading}
+                />
 
                 <Text style={styles.qrLabel}>
                   {isOnchainWallet && onchainAddress && !(mode === 'amount' && currentSats > 0) ? (
@@ -781,6 +753,17 @@ const ReceiveSheet: React.FC<Props> = ({
                 {presetFriend || presetGroup ? (
                   <View style={styles.buttonRow}>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        disabled:
+                          !friendShareValue ||
+                          sendingToFriend ||
+                          // Programmer-error guard: if a caller passes
+                          // `presetGroup` without `onSendToGroup`, the press
+                          // would early-return with no feedback. Surface the
+                          // misconfiguration as a disabled button instead.
+                          (!!presetGroup && !onSendToGroup),
+                      }}
                       style={({ pressed }) => [
                         styles.actionButton,
                         styles.actionButtonPrimary,
@@ -819,22 +802,32 @@ const ReceiveSheet: React.FC<Props> = ({
                 ) : (
                   <View style={styles.buttonRow}>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !copyValue }}
                       style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                       onPress={handleCopy}
+                      accessibilityLabel={t('receiveSheet.copy')}
+                      testID="receive-copy"
                       disabled={!copyValue}
                     >
                       <Copy size={20} color={colors.brandPink} />
                       <Text style={styles.actionButtonText}>{t('receiveSheet.copy')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !copyValue }}
                       style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                       onPress={handleShare}
+                      accessibilityLabel={t('receiveSheet.share')}
+                      testID="receive-share"
                       disabled={!copyValue}
                     >
                       <Text style={styles.actionButtonText}>{t('receiveSheet.share')}</Text>
                       <Share2 size={20} color={colors.brandPink} />
                     </TouchableOpacity>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !friendShareValue }}
                       style={({ pressed }) => [
                         styles.actionButton,
                         !friendShareValue && styles.actionButtonDisabled,
@@ -870,6 +863,7 @@ const ReceiveSheet: React.FC<Props> = ({
                       </Text>
                     ) : null}
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={styles.changeAmountButton}
                       onPress={() => setStep('amount')}
                       testID="receive-change-amount"
@@ -879,6 +873,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     </TouchableOpacity>
                     {!isOnchainWallet && !presetGroup && lightningAddress ? (
                       <TouchableOpacity
+                        accessibilityRole="button"
                         style={styles.secondaryActionButton}
                         onPress={() => {
                           setInvoice('');
@@ -900,6 +895,7 @@ const ReceiveSheet: React.FC<Props> = ({
                   // their address as-is via "Send to <name>" or add an
                   // amount here to request a specific sum.
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.enterAmountButton}
                     onPress={() => {
                       setMode('amount');
@@ -924,6 +920,7 @@ const ReceiveSheet: React.FC<Props> = ({
                 !isOnchainWallet &&
                 selectedWallet?.isConnected ? (
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.secondaryActionButton}
                     onPress={() => setBoltzReceiveOpen(true)}
                     testID="receive-via-onchain-boltz"

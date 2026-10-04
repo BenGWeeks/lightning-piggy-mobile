@@ -1,0 +1,28 @@
+import React,{useState} from 'react';
+import {registerRootComponent} from 'expo';
+import {View,Text,SafeAreaView,TouchableOpacity} from 'react-native';
+import {ThemeProvider,useThemeColors} from './src/contexts/ThemeContext';
+import {LocaleProvider} from './src/contexts/LocaleContext';
+import ContactListItem from './src/components/ContactListItem';
+import QrWithIdentityToggle from './src/components/QrWithIdentityToggle';
+import SendActionButtons from './src/components/SendActionButtons';
+import SendWalletSelector from './src/components/SendWalletSelector';
+import {createSendSheetStyles} from './src/styles/SendSheet.styles';
+function Harness(){
+ const colors=useThemeColors(); const styles=createSendSheetStyles(colors);
+ const [page,setPage]=useState(false),[status,setStatus]=useState('Choose an independent contact action'),[open,setOpen]=useState(false),[wallet,setWallet]=useState('A');
+ return <SafeAreaView style={{flex:1,backgroundColor:colors.background}}><View style={{padding:20,gap:14}}>
+ <Text style={{fontSize:22,fontWeight:'700',color:colors.textHeader}}>Accessibility control fixture</Text>
+ <Text style={{color:colors.textBody}}>PR #1111 • Public dummy data • No payments</Text>
+ <TouchableOpacity accessibilityRole="button" accessibilityLabel="Switch fixture page" testID="fixture-switch" onPress={()=>setPage(!page)} style={{padding:12,backgroundColor:colors.surface}}><Text style={{color:colors.textBody}}>{page?'Contacts and wallet controls':'Identity QR controls'}</Text></TouchableOpacity>
+ {page?<QrWithIdentityToggle npub="npub1fixturepublicidentity000000000000000000000000000000000000" lightningAddress="demo@example.com" onNfcWrite={()=>{}}/>:<>
+ <ContactListItem name="Ada" canMessage canZap onPress={()=>setStatus('Profile action')} onMessage={()=>setStatus('Message action')} onZap={()=>setStatus('Zap action')} testID="fixture-contact-profile"/>
+ <ContactListItem name="Offline contact" showZap={false}/>
+ <Text testID="fixture-action-status" style={{color:colors.textBody}}>{status}</Text>
+ <SendWalletSelector wallets={[{id:'A',alias:'Savings',isConnected:true},{id:'B',alias:'Savings',isConnected:true}] as any} walletName="Savings" capturedWalletId={wallet} dropdownOpen={open} setDropdownOpen={setOpen} setCapturedWalletId={setWallet} styles={styles} colors={colors}/>
+ <Text style={{color:colors.textBody}}>Disabled Send; Cancel remains available</Text>
+ <SendActionButtons canSend={false} sending={false} handleSend={()=>setStatus('Unexpected send')} onCancel={()=>setStatus('Cancel action')} styles={styles} colors={colors}/>
+ </>}
+ </View></SafeAreaView>;
+}
+registerRootComponent(()=> <ThemeProvider><LocaleProvider><Harness/></LocaleProvider></ThemeProvider>);
