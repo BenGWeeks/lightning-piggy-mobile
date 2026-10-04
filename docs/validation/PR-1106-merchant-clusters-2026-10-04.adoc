@@ -1,0 +1,58 @@
+= Merchant count chips — PR #1106
+
+== Scope
+
+Issue #1073 groups the already bounded merchant input into orange React Native count chips.
+Cache chips remain pink and independently grouped. Leaf merchants pass their original objects
+through the existing category/payment-colour/detail-selection path.
+This is not #1070's native source/layer rendering or an uncapped world-density dataset.
+
+== Automated validation
+
+* Full Jest suite: 237 suites, 2,738 tests passed.
+* Focused clustering / viewport-subscription / camera debounce / map component: 28 tests passed.
+* TypeScript, changed-file ESLint, Prettier, file-size and performance anti-pattern gates passed.
+* #1065 is already implemented on main. Added a viewport-subscription regression proving a
+  changed prefix set replaces the previous bounded subscription, reordered tiles do not
+  reopen it, and the previous subscription cannot enqueue late events.
+
+== Marker budget
+
+A synthetic 250-merchant grid at zoom 6 reduces 250 individual React Native markers to one
+count chip. Tests verify the output count never exceeds the bounded input, and leaves plus
+cluster counts always account for all 250 merchants at every zoom from 0 through 20.
+
+A local Node/Jest measurement using `process.hrtime.bigint()` over 200 calls to the shared
+clustering utility recorded p50 0.534 ms / p95 0.851 ms for this grid. These are host utility
+measurements, not Android frame rates or a comparison of native render times.
+
+== Emulator evidence
+
+Warmachine Android emulator: `lightningpiggy_api34`, serial `emulator-5554`.
+The physical Pixel and Satmo emulator were not used.
+A temporary, uncommitted fixture entry mounts the actual branch's `LibreMiniMap` with four
+public dummy merchants and three dummy Piglets, under the real theme and locale providers.
+It bypasses authentication, live BTC Map fetching and relay ingestion. No credentials,
+private endpoints, real cache listings or financial operations are involved.
+
+ADB captures show:
+
+* Zoom 9: an orange four-place chip and a separate pink three-Piglet chip over loaded tiles.
+* Zoom 14: the same four merchant leaves, including category glyphs and distinct Lightning
+  (pink) / on-chain-only (orange) colours. Zooming used Maestro's production
+  `libre-minimap-zoom-in` / `libre-minimap-zoom-out` selectors.
+
+The fixture starts at zoom 9; eight zoom-in taps and three zoom-out taps reach zoom 14.
+Both selector-based zoom flows completed successfully. Native marker views do not appear
+in this emulator's Android accessibility tree, so the attempted label-based chip flow could
+not find the chip. No coordinate taps were used. Chip expansion and original-merchant
+selection are covered by the component tests with native MapLibre stand-ins; they are not
+claimed as emulator tap end-to-end proof. The real merchant detail sheet is not mounted by
+the fixture.
+
+Initial blank-map diagnostics found the emulator's global HTTP proxy still pointed at an
+unavailable local test listener. Clearing that emulator-only proxy allowed MapLibre's public
+style and tiles to load. No app network code or physical-phone settings changed.
+
+The fixture APK was replaced afterwards with the previous real-app Preview using
+`adb install -r`, preserving emulator app data.

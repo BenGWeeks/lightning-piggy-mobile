@@ -18,6 +18,7 @@ import { createCacheClusterMarkerStyles } from '../styles/CacheClusterMarker.sty
 export interface CacheClusterMarkerProps {
   /** Supercluster's cluster id — stable per grouping at a given zoom. */
   id: number;
+  variant?: 'cache' | 'merchant';
   lat: number;
   lng: number;
   count: number;
@@ -28,6 +29,7 @@ export interface CacheClusterMarkerProps {
 
 export const CacheClusterMarker: React.FC<CacheClusterMarkerProps> = ({
   id,
+  variant = 'cache',
   lat,
   lng,
   count,
@@ -36,17 +38,20 @@ export const CacheClusterMarker: React.FC<CacheClusterMarkerProps> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createCacheClusterMarkerStyles(colors), [colors]);
-  const label = t('cacheClusterMarker.label', { count });
+  const styles = useMemo(() => createCacheClusterMarkerStyles(colors, variant), [colors, variant]);
+  const label = t(
+    variant === 'merchant' ? 'merchantClusterMarker.label' : 'cacheClusterMarker.label',
+    { count },
+  );
 
   if (!onPress) {
     // Decorative badge: no button role, so screen readers don't announce
     // a control that does nothing.
     return (
-      <Marker id={`cache-cluster-${id}`} lngLat={[lng, lat]}>
+      <Marker id={`${variant}-cluster-${id}`} lngLat={[lng, lat]}>
         <View
           style={[styles.chip, markerDimStyle]}
-          testID={`cache-cluster-${id}`}
+          testID={`${variant}-cluster-${id}`}
           accessibilityLabel={label}
         >
           <Text style={styles.count} allowFontScaling={false}>
@@ -58,7 +63,7 @@ export const CacheClusterMarker: React.FC<CacheClusterMarkerProps> = ({
   }
 
   return (
-    <Marker id={`cache-cluster-${id}`} lngLat={[lng, lat]} onPress={onPress}>
+    <Marker id={`${variant}-cluster-${id}`} lngLat={[lng, lat]} onPress={onPress}>
       {/* Press handled on the chip's own Pressable, not just Marker.onPress:
           the native marker-press resolution picks between overlapping
           markers (a co-located merchant pin was winning taps aimed at the
@@ -68,7 +73,7 @@ export const CacheClusterMarker: React.FC<CacheClusterMarkerProps> = ({
       <Pressable
         style={[styles.chip, markerDimStyle]}
         onPress={onPress}
-        testID={`cache-cluster-${id}`}
+        testID={`${variant}-cluster-${id}`}
         accessibilityRole="button"
         accessibilityLabel={label}
       >

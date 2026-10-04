@@ -18,6 +18,7 @@ import { Plus, Minus, Info, Maximize2, LocateFixed, Crosshair } from 'lucide-rea
 import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
+import { clusterMapPoints } from '../utils/mapClusters';
 import { clusterCachePoints } from '../utils/cacheClusters';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -401,6 +402,25 @@ const LibreMiniMapInner: React.FC<Props> = ({
     () => clusterCachePoints(cachePoints, clusterZoom),
     [cachePoints, clusterZoom],
   );
+  // Cluster the already bounded merchant input independently from caches:
+  // counts stay orange, and leaves retain the original merchant for detail taps.
+  const merchantClusterItems = useMemo(
+    () =>
+      clusterMapPoints(
+        merchants.map((merchant) => ({ lat: merchant.lat, lng: merchant.lon, merchant })),
+        clusterZoom,
+      ),
+    [merchants, clusterZoom],
+  );
+  const clusteredMerchants = useMemo(
+    () =>
+      merchantClusterItems.flatMap((item) => (item.kind === 'point' ? [item.point.merchant] : [])),
+    [merchantClusterItems],
+  );
+  const merchantClusters = useMemo(
+    () => merchantClusterItems.flatMap((item) => (item.kind === 'cluster' ? [item] : [])),
+    [merchantClusterItems],
+  );
   const clusteredCachePoints = useMemo(
     () => cacheClusterItems.flatMap((item) => (item.kind === 'point' ? [item.point] : [])),
     [cacheClusterItems],
@@ -540,7 +560,9 @@ const LibreMiniMapInner: React.FC<Props> = ({
             (#1015). Rendering them from a child works because MapLibre
             markers register via context. */}
         <MiniMapMarkers
-          merchants={merchants}
+          merchants={clusteredMerchants}
+          merchantClusters={merchantClusters}
+          onPressMerchantCluster={onPressCacheCluster}
           cachePoints={clusteredCachePoints}
           cacheClusters={cacheClusters}
           onPressCacheCluster={onPressCacheCluster}
