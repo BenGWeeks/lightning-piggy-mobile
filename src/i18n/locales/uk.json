@@ -189,7 +189,7 @@
     "lightningPayoutAvailable": "Доступна виплата Lightning"
   },
   "merchantClusterMarker": {
-    "label": "{count} місць поблизу"
+    "label": "{{count}} місць поблизу"
   },
   "cacheClusterMarker": {
     "label": "{{count}} геосхованок поруч — торкніться, щоб наблизити"

@@ -1,5 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import type { BtcMapPlace } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { encodeGeohash } from '../utils/geohash';
 import { clusterCachePoints } from '../utils/cacheClusters';
@@ -18,7 +20,7 @@ let mockOnRegionDidChange: (() => Promise<void>) | undefined;
 
 jest.mock('@maplibre/maplibre-react-native', () => {
   const R = jest.requireActual<typeof import('react')>('react');
-  const { View } = jest.requireActual<typeof import('react-native')>('react-native');
+  const { View, Pressable } = jest.requireActual<typeof import('react-native')>('react-native');
   const Map = R.forwardRef(
     (
       props: { children?: React.ReactNode; onRegionDidChange?: () => Promise<void> },
@@ -33,8 +35,8 @@ jest.mock('@maplibre/maplibre-react-native', () => {
     R.useImperativeHandle(ref, () => mockCamera);
     return null;
   });
-  const Marker = ({ children }: { children?: React.ReactNode }) =>
-    R.createElement(View, null, children);
+  const Marker = ({ children, onPress }: { children?: React.ReactNode; onPress?: () => void }) =>
+    R.createElement(Pressable, { onPress }, children);
   return { Map, Camera, Marker, GeoJSONSource: () => null, Layer: () => null };
 });
 
@@ -177,5 +179,47 @@ describe('LibreMiniMap cache clustering (#1071)', () => {
     expect(mockCamera.zoomTo).toHaveBeenCalledWith(7.4, { duration: 200 });
     const lastZoom = clusterSpy.mock.calls[clusterSpy.mock.calls.length - 1][1];
     expect(lastZoom).toBe(7);
+  });
+});
+
+const merchantVillage: BtcMapPlace[] = village.map((c, index) => ({
+  id: index + 1,
+  lat: 52.283 + index * 0.0001,
+  lon: 0.044 + index * 0.0001,
+  icon: 'cafe',
+  tags: { name: c.name, 'payment:lightning': index === 0 ? 'yes' : 'no' },
+})) as BtcMapPlace[];
+
+describe('LibreMiniMap merchant clustering (#1073)', () => {
+  it('keeps merchant groups orange and cache groups pink, with separate ids and labels', () => {
+    renderMap({ merchants: merchantVillage });
+    const merchant = screen.getByTestId(/^merchant-cluster-/);
+    const cacheChip = chip();
+    expect(StyleSheet.flatten(merchant.props.style).backgroundColor).toBe('#F7931A');
+    expect(StyleSheet.flatten(cacheChip.props.style).backgroundColor).not.toBe('#F7931A');
+    expect(merchant.props.accessibilityLabel).toBe('merchantClusterMarker.label');
+    expect(screen.queryAllByTestId(/^minimap-merchant-/)).toHaveLength(0);
+  });
+
+  it('inline merchant chip opens the full map without moving the inline camera', () => {
+    const onTapMap = jest.fn();
+    renderMap({ merchants: merchantVillage, onTapMap });
+    mockCamera.flyTo.mockClear();
+    fireEvent.press(screen.getByTestId(/^merchant-cluster-/));
+    expect(onTapMap).toHaveBeenCalledWith();
+    expect(mockCamera.flyTo).not.toHaveBeenCalled();
+  });
+
+  it('interactive merchant chip expands, then leaf tap selects the original merchant', () => {
+    const onSelectMerchant = jest.fn();
+    renderMap({ merchants: merchantVillage, interactive: true, onSelectMerchant });
+    fireEvent.press(screen.getByTestId(/^merchant-cluster-/));
+    expect(mockCamera.flyTo).toHaveBeenCalledWith(
+      expect.objectContaining({ zoom: expect.any(Number) }),
+    );
+    expect(screen.queryAllByTestId(/^merchant-cluster-/)).toHaveLength(0);
+    expect(screen.getAllByTestId(/^minimap-merchant-/)).toHaveLength(4);
+    fireEvent.press(screen.getByTestId('minimap-merchant-1'));
+    expect(onSelectMerchant).toHaveBeenCalledWith(merchantVillage[0]);
   });
 });

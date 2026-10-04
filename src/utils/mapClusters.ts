@@ -5,7 +5,7 @@ import Supercluster from 'supercluster';
  * in far enough to separate them (#1071).
  *
  * Engine: supercluster (ISC, pure JS — the same hierarchical greedy
- * clustering every major map library uses internally). Cache pin counts
+ * clustering every major map library uses internally). Input pin counts
  * are small — MapScreen caps them at 250 (#1068); the inline Explore /
  * Geo-caches maps pass their nearby list uncapped, but that is a
  * neighbourhood-scoped relay result of similar size — so we build the
@@ -14,7 +14,7 @@ import Supercluster from 'supercluster';
  * through. The query spans the full ±90° latitude range so no point is
  * dropped, even past the Web-Mercator cutoff (~±85.05°).
  *
- * The 48 px radius means two caches closer than ~a thumb-width at the
+ * The 48 px radius means two pins closer than ~a thumb-width at the
  * current zoom merge into one chip; `maxZoom: 16` guarantees everything
  * separates by street level, whatever the data.
  */

@@ -189,7 +189,7 @@
     "lightningPayoutAvailable": "Lightning payout available"
   },
   "merchantClusterMarker": {
-    "label": "{count} nearby places"
+    "label": "{{count}} nearby places"
   },
   "cacheClusterMarker": {
     "label": "{{count}} geo-caches nearby — tap to zoom in"

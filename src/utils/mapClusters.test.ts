@@ -1,3 +1,4 @@
+import { createI18nInstance } from '../i18n';
 import { clusterMapPoints } from './mapClusters';
 
 const merchants = [
@@ -42,3 +43,12 @@ it('never increases the bounded merchant marker count or drops merchants at any 
     );
   }
 });
+
+it.each(['en', 'es', 'uk'] as const)(
+  'interpolates the merchant count for %s accessibility labels',
+  (locale) => {
+    const label = createI18nInstance(locale).t('merchantClusterMarker.label', { count: 4 });
+    expect(label).toContain('4');
+    expect(label).not.toContain('{');
+  },
+);
