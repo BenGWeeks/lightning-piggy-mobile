@@ -84,3 +84,8 @@ scripts/wait-compare.mjs
 # Maestro generated output (reorganised suite lives in .maestro/)
 .maestro/tmp/
 .maestro/**/results/
+
+# rust-nostr Swift bindings — fetched by scripts/fetch-nostr-sdk-swift.mjs
+# (postinstall), checksum-pinned; 39 MB of prebuilt binaries stays out of git
+modules/nostr-native/ios/nostr_sdkFFI.xcframework/
+modules/nostr-native/ios/Generated/

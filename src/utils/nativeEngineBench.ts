@@ -1,7 +1,8 @@
 // Dev-only benchmark for the #1049 native relay engine: the reconnect-
 // backlog drill. Drains the SAME synthetic 200-wrap kind-1059 backlog from a
-// local bench relay (scripts/bench-engine-relay.mjs, reachable from the
-// emulator at ws://10.0.2.2:4870) through BOTH paths:
+// local bench relay (scripts/bench-engine-relay.mjs — the Android emulator
+// reaches the host at ws://10.0.2.2:4870, the iOS Simulator at
+// ws://127.0.0.1:4870) through BOTH paths:
 //
 //   js     — SimplePool sub + per-wrap yieldToEventLoop + unwrapWrapNsec,
 //            the live sub's exact per-wrap pipeline shape;
@@ -14,6 +15,7 @@
 // only when EXPO_PUBLIC_NATIVE_ENGINE_BENCH=1 (inlined at bundle time —
 // dead code in every normal build), lazily imported, __DEV__-gated.
 
+import { Platform } from 'react-native';
 import { SimplePool } from 'nostr-tools/pool';
 import type { Filter } from 'nostr-tools/filter';
 import { hexToBytes } from '@noble/hashes/utils.js';
@@ -25,7 +27,9 @@ import { getNostrEngine } from '../../modules/nostr-native';
 
 // Shared with scripts/bench-engine-relay.mjs. Bench-only throwaway key.
 const BENCH_RECEIVER_SK_HEX = '11'.repeat(32);
-const BENCH_RELAY = process.env.EXPO_PUBLIC_NATIVE_ENGINE_BENCH_RELAY ?? 'ws://10.0.2.2:4870';
+const BENCH_RELAY =
+  process.env.EXPO_PUBLIC_NATIVE_ENGINE_BENCH_RELAY ??
+  Platform.select({ ios: 'ws://127.0.0.1:4870', default: 'ws://10.0.2.2:4870' });
 const TARGET_WRAPS = 200;
 const PHASE_TIMEOUT_MS = 180_000;
 const GAP_SAMPLE_MS = 50;

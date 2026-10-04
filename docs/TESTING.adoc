@@ -60,6 +60,15 @@ The first PR after this infrastructure merges may show a 0% main baseline if `co
 
 To tighten or loosen the gate, edit `NOISE_FLOOR` in the workflow file.
 
+==== iOS Native Build Gate (CI)
+
+`modules/nostr-native` has two macOS jobs in `.github/workflows/ci.yml`:
+
+* *iOS engine lifecycle* — compiles `NostrEngine.swift` against hand-written SDK doubles (`scripts/ios-tests/`) and runs the disposal/restart race test. Fast, but it proves nothing about the real rust-nostr bindings or ExpoModulesCore.
+* *iOS native pod build* — the real thing: `npm ci` with `FETCH_NOSTR_SDK_SWIFT_REQUIRED=1` (the postinstall must fetch and checksum-verify the pinned 0.44.2 `nostr_sdkFFI.xcframework` + `NostrSDK.swift`, never take the JS-only "continue without" path), `npx expo prebuild --platform ios` (which runs `pod install`), then a Debug `xcodebuild` of the whole app for an iOS Simulator, with Xcode pinned to the release `TROUBLESHOOTING.adoc` validates (`XCODE_VERSION` in the job). It fails if prebuild rewrote `package.json` / `package-lock.json`, if `Podfile.lock` lacks `NostrNative (0.44.2)`, or if no `uniffi_nostr_sdk_ffi_` symbols were linked into the app.
+
+The pod-build job runs on every PR with no path filter, so it can be a required check. Marking it required happens in GitHub settings, not in this repo: a maintainer adds `iOS native pod build` under branch protection for `main` → required status checks. When you bump the rust-nostr Swift SDK, update the version in `scripts/fetch-nostr-sdk-swift.mjs`, the podspec, and the two `0.44.2` checks in the job together.
+
 ==== Picking What to Cover Next
 
 Use `scripts/coverage-priorities.sh` to get a prioritized list of files most worth testing:
