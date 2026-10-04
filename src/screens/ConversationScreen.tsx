@@ -630,6 +630,8 @@ const ConversationScreen: React.FC = () => {
               renderItem={renderItem}
               contentContainerStyle={listContentStyle}
               inverted
+              // Keep the visible history row anchored when live messages prepend.
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               // Window the list so a thread with hundreds of messages
               // doesn't mount every row up front — first-frame work goes
               // from "render all N bubbles + avatars" to "render the
