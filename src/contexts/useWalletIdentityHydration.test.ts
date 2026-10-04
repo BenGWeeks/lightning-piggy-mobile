@@ -29,6 +29,7 @@ const readStorage = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
 const hydrateSeenReceipts = jest.fn(async () => {});
 function mount(
   loading: {
+    setLastIncomingPayment?: (value: null) => void;
     setIsLoading?: (value: boolean) => void;
     setWalletsHydrated?: (value: boolean) => void;
   } = {},
@@ -72,8 +73,10 @@ beforeEach(async () => {
 afterEach(() => jest.restoreAllMocks());
 
 it('hydrates the active identity, seeds receipts, and connects its wallets', async () => {
-  const { result } = mount();
+  const setLastIncomingPayment = jest.fn();
+  const { result } = mount({ setLastIncomingPayment });
   await switchTo('B');
+  expect(setLastIncomingPayment).toHaveBeenCalledWith(null);
   await waitFor(() => expect(result.current.wallets[0]?.isConnected).toBe(true));
   expect(result.current.activeWalletId).toBe('B-wallet');
   expect(result.current.wallets[0].balance).toBe(50);
