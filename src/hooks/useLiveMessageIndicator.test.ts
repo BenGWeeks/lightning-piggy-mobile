@@ -112,3 +112,37 @@ it('cancels deferred scrolling on unmount or if the user leaves the edge', () =>
   act(() => jest.advanceTimersByTime(50));
   expect(jump).not.toHaveBeenCalled();
 });
+
+it('preserves a pending live-edge scroll across delivery-status renders', () => {
+  const jump = jest.fn();
+  const { rerender } = renderHook(
+    ({ entries }: { entries: LiveMessageEntry[] }) =>
+      useLiveMessageIndicator({ scope: 'a', entries, scrollToLatest: jump }),
+    { initialProps: { entries: [entry('old', 1)] } },
+  );
+  rerender({ entries: [entry('new', 2), entry('old', 1)] });
+  act(() => jest.advanceTimersByTime(25));
+  rerender({ entries: [entry('new', 2), entry('old', 1)] });
+  act(() => jest.advanceTimersByTime(25));
+  expect(jump).toHaveBeenCalledTimes(1);
+  expect(jump).toHaveBeenCalledWith(true);
+});
+it('cancels a pending scroll when the conversation changes during loading', () => {
+  const jump = jest.fn();
+  const { rerender } = renderHook(
+    ({
+      scope,
+      entries,
+      loading,
+    }: {
+      scope: string;
+      entries: LiveMessageEntry[];
+      loading: boolean;
+    }) => useLiveMessageIndicator({ scope, entries, loading, scrollToLatest: jump }),
+    { initialProps: { scope: 'a', entries: [entry('old', 1)], loading: false } },
+  );
+  rerender({ scope: 'a', entries: [entry('new', 2)], loading: false });
+  rerender({ scope: 'b', entries: [], loading: true });
+  act(() => jest.advanceTimersByTime(50));
+  expect(jump).not.toHaveBeenCalled();
+});

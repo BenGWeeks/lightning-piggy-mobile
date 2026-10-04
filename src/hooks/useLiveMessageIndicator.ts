@@ -22,6 +22,7 @@ export function useLiveMessageIndicator({
 }) {
   const previous = useRef<{ scope: string; ids: Set<string>; newest: number } | null>(null);
   const activeScope = useRef(scope);
+  const pendingScroll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nearEdge = useRef(true);
   const scrollRef = useRef(scrollToLatest);
   scrollRef.current = scrollToLatest;
@@ -30,6 +31,10 @@ export function useLiveMessageIndicator({
 
   useEffect(() => {
     if (activeScope.current !== scope) {
+      if (pendingScroll.current !== null) {
+        clearTimeout(pendingScroll.current);
+        pendingScroll.current = null;
+      }
       activeScope.current = scope;
       previous.current = null;
       nearEdge.current = true;
@@ -59,11 +64,19 @@ export function useLiveMessageIndicator({
       setHasNewMessages(true);
       return;
     }
-    const timer = setTimeout(() => {
+    if (pendingScroll.current !== null) clearTimeout(pendingScroll.current);
+    pendingScroll.current = setTimeout(() => {
+      pendingScroll.current = null;
       if (nearEdge.current) scrollRef.current(true);
     }, 50);
-    return () => clearTimeout(timer);
   }, [scope, entries, loading]);
+
+  useEffect(
+    () => () => {
+      if (pendingScroll.current !== null) clearTimeout(pendingScroll.current);
+    },
+    [],
+  );
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
