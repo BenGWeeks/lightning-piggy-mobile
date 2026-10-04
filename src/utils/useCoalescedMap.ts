@@ -117,13 +117,19 @@ export function useCoalescedMap<V>(options?: {
     if (batch.size === 0) return;
     pendingRef.current = new Map();
     setMap((prev) => {
-      const next = new Map(prev);
+      // Clone lazily: when `shouldReplace` rejects the whole batch (e.g. a
+      // relay replaying events already committed, as on MapScreen's
+      // refocus resubscribe) return `prev` so React bails out of the
+      // re-render instead of committing an identical copy (#1068 review).
+      let next: Map<string, V> | null = null;
       const replace = shouldReplaceRef.current;
       for (const [key, value] of batch) {
-        const existing = next.get(key);
+        const existing = (next ?? prev).get(key);
         if (existing !== undefined && replace && !replace(existing, value)) continue;
+        if (next === null) next = new Map(prev);
         next.set(key, value);
       }
+      if (next === null) return prev;
       // Evict oldest-inserted entries once over the cap so a long-lived
       // subscription can't grow the committed Map unbounded.
       capOldest(next, maxSizeRef.current);

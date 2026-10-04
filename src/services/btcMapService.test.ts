@@ -338,3 +338,19 @@ describe('fetchPlacesInBbox (search endpoint)', () => {
     expect(peekCachedAnchorSync()).toEqual({ lat: 52.0, lon: 0.0 });
   });
 });
+
+it.each([
+  [{ minLon: -120, minLat: -40, maxLon: 100, maxLat: 70 }, 250, -10],
+  [{ minLon: 179, minLat: -1, maxLon: -179, maxLat: 1 }, 158, -180],
+])('bounds the request and wraps the centre for %j', async (bbox, maxRadius, longitude) => {
+  __resetCacheForTest();
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn();
+  global.fetch = fetchMock;
+  fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [] });
+  await fetchPlacesInBbox(bbox);
+  const url = new URL(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][0]);
+  expect(Number(url.searchParams.get('radius_km'))).toBeLessThanOrEqual(maxRadius);
+  expect(Number(url.searchParams.get('lon'))).toBe(longitude);
+  global.fetch = originalFetch;
+});
