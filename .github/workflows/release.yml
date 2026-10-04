@@ -405,6 +405,9 @@ jobs:
           }
           ls -la dist/
 
+      - name: Verify 16 KB native library alignment
+        run: bash scripts/check-elf-alignment.sh dist/*.apk
+
       - name: Upload APK to Release
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \

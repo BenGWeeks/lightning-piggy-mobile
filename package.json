@@ -46,7 +46,7 @@
     "@shopify/flash-list": "^2.3.1",
     "@shopify/react-native-skia": "2.4.18",
     "babel-preset-expo": "~55.0.23",
-    "bdk-rn": "github:BenGWeeks/bdk-rn#fix/rn083-gettype-compat",
+    "bdk-rn": "github:BenGWeeks/bdk-rn#d902a1b6559d33bb2bbe36fc07da7a522188e9fb",
     "bip32": "^5.0.1",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "^7.0.1",
