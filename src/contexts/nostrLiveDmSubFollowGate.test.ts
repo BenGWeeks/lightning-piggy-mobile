@@ -27,6 +27,7 @@ jest.mock('../services/dmLiveSubscription', () => ({
 
 jest.mock('../services/dmDb', () => ({
   selectDmWrapIds: jest.fn(async () => [] as string[]),
+  hasConversationWith: jest.fn(async () => true),
   upsertDmMessages: jest.fn(async () => {}),
 }));
 jest.mock('../services/groupMessagesStorageService', () => ({
@@ -92,6 +93,7 @@ jest.mock('./nostrDmCache', () => ({
 import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { createYieldScheduler } from './nostrDecryptPacing';
+import { upsertDmMessages } from '../services/dmDb';
 
 const VIEWER = 'f'.repeat(64);
 const ALICE = 'a'.repeat(64);
@@ -347,5 +349,81 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     await flush();
     expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
     expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(true);
+  });
+});
+
+describe('live plaintext marketplace order persistence', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
+  });
+
+  const orderEvent = () => ({
+    id: 'market-order',
+    kind: 16,
+    pubkey: ALICE,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['p', VIEWER],
+      ['type', '2'],
+      ['order', 'order-1'],
+      ['amount', '1000'],
+      ['payment', 'bolt11', 'lnbc10u1invoice'],
+    ],
+    content: '',
+  });
+
+  it('reloads the conversation only after the live order is stored', async () => {
+    let finish!: () => void;
+    jest.mocked(upsertDmMessages).mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          finish = r;
+        }),
+    );
+    const teardown = startLiveDmSubscription(makeParams());
+    await flush();
+    capturedOnEvent!(orderEvent());
+    await flush();
+    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+    expect(mockNotifyDm).not.toHaveBeenCalled();
+    expect(mockFireNotification).not.toHaveBeenCalled();
+    finish();
+    await flush();
+    expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
+    expect(mockNotifyDm).toHaveBeenCalledTimes(1);
+    teardown();
+  });
+
+  it('does not announce delivery when persistence fails', async () => {
+    jest.mocked(upsertDmMessages).mockRejectedValueOnce(new Error('disk unavailable'));
+    const teardown = startLiveDmSubscription(makeParams());
+    await flush();
+    capturedOnEvent!(orderEvent());
+    await flush();
+    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+    expect(mockNotifyDm).not.toHaveBeenCalled();
+    expect(mockFireNotification).not.toHaveBeenCalled();
+    teardown();
+  });
+
+  it('does not notify an old identity when persistence completes after teardown', async () => {
+    let finish!: () => void;
+    jest.mocked(upsertDmMessages).mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          finish = r;
+        }),
+    );
+    const teardown = startLiveDmSubscription(makeParams());
+    await flush();
+    capturedOnEvent!(orderEvent());
+    await flush();
+    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
+    teardown();
+    finish();
+    await flush();
+    expect(mockNotifyDm).not.toHaveBeenCalled();
+    expect(mockFireNotification).not.toHaveBeenCalled();
   });
 });
