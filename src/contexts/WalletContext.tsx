@@ -826,8 +826,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       await walletStorage.saveNwcUrl(id, nwcUrl.trim());
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList([...currentList, metadata]);
-      // A background watch with nothing to watch stopped itself; the first
-      // NWC wallet must restart it for payment alerts (#1100 review).
+      // Restart an opted-in host that stopped before its first wallet (#1100).
       void rearmBackgroundWatchAfterNwcWalletAdded(owner).catch((e) => {
         console.warn('[WalletContext] background watch re-arm failed:', e);
       });
@@ -838,16 +837,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveWalletId(id);
       }
 
-      // Return the new wallet's id so callers (e.g. CreateCoinosWalletSheet)
-      // can stash sidecar data — recovery info, NFC tag metadata — against
-      // the right id without racing the React state update. Without this
-      // the caller had to guess by scanning wallets[] which fails on a
-      // second create with the same alias / theme.
+      // Return the id so callers can save sidecar data before React commits.
       return { success: true, walletId: id };
     },
-    // Deliberately depend on wallets.length (not wallets) — the callback only
-    // cares about the count for duplicate checks. Adding wallets would bust
-    // the callback on every tx refresh.
+    // Keep the callback stable across transaction refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [wallets.length, activeWalletId],
   );
