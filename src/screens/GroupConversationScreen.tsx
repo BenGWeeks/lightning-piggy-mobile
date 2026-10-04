@@ -1,3 +1,5 @@
+import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
+import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -153,13 +155,12 @@ const GroupConversationScreen: React.FC = () => {
   useEffect(() => {
     if (!group) return;
     let cancelled = false;
+    setLoadingMessages(true);
     loadGroupMessages(group.id)
       .then((loaded) => {
         if (!cancelled) {
           setMessages(loaded);
           setLoadingMessages(false);
-          // Defer scroll to next tick so FlatList has laid out.
-          setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 0);
         }
       })
       .catch(() => {
@@ -177,15 +178,34 @@ const GroupConversationScreen: React.FC = () => {
   // smarter and merge in-memory, but file-of-truth simplicity wins.
   useEffect(() => {
     if (!group) return;
+    let cancelled = false;
     const unsubscribe = subscribeGroupMessages((groupId) => {
       if (groupId !== group.id) return;
-      loadGroupMessages(group.id).then((loaded) => {
-        setMessages(loaded);
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
-      });
+      loadGroupMessages(group.id)
+        .then((loaded) => {
+          if (!cancelled) setMessages(loaded);
+        })
+        .catch(() => {
+          /* Keep existing history if local storage cannot refresh. */
+        });
     });
-    return unsubscribe;
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [group]);
+
+  const liveEntries = useMemo(
+    () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
+    [messages],
+  );
+  const live = useLiveMessageIndicator({
+    scope: `${myPubkey}:${route.params.groupId}`,
+    entries: liveEntries,
+    loading: loadingMessages,
+    edge: 'end',
+    scrollToLatest: (animated) => listRef.current?.scrollToEnd({ animated }),
+  });
 
   // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
   // to drain any pending kind-14 group rumors before the live subscription
@@ -684,6 +704,9 @@ const GroupConversationScreen: React.FC = () => {
               renderItem={renderMessage}
               contentContainerStyle={styles.messagesList}
               testID="group-messages-list"
+              onScroll={live.onScroll}
+              scrollEventThrottle={100}
+              onContentSizeChange={live.onContentSizeChange}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Text style={styles.emptySubtitle}>
@@ -692,6 +715,9 @@ const GroupConversationScreen: React.FC = () => {
                 </View>
               }
             />
+          )}
+          {live.hasNewMessages && !loadingMessages && (
+            <NewMessagesPill onPress={live.jumpToLatest} testID="group-new-messages" />
           )}
         </Animated.View>
 

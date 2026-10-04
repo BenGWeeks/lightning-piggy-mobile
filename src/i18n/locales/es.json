@@ -2206,5 +2206,8 @@
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
     }
+  },
+  "liveMessages": {
+    "newMessages": "Mensajes nuevos"
   }
 }
