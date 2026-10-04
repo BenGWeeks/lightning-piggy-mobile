@@ -1,0 +1,13 @@
+= PR #1109 emulator validation
+
+Captured on Warmachine's lightningpiggy_api34 Android API34 emulator (emulator-5554), not Satmo or the Pixel.
+A local, uncommitted public fixture renders this branch's actual useLiveMessageIndicator hook and NewMessagesPill with native FlatList.
+Message arrivals are simulated; these captures do not establish delivery through Nostr, real conversations, or all three production screens.
+
+Maestro semantic selectors verified normal group history remains on public message 1 when a new message arrives, the New messages button appears, and tapping it shows the latest message and clears the button.
+The inverted DM fixture uses the same maintainVisibleContentPosition configuration as the conversation screen; the button appeared while reading older messages and jumped to the latest on tap.
+Screenshots contain only public dummy messages. No signing, private messages, payments, or wallet credentials were used.
+The exact main Preview APK (SHA256 9990e4ee86a844a7a60fee83361161b36e96ca514dc7d4fb8fc7db95305e4d99) was restored after the fixture run.
+
+Six focused hook tests pass. The full initial validation passed 237 suites / 2734 tests; TypeScript, lint, formatting, file-size and performance checks passed.
+Independent review identified stale scope state during hydration and inverted-list anchoring; both were addressed before this fixture run.

@@ -134,7 +134,7 @@ function computeRecentSenders(messages: { senderPubkey: string; createdAt: numbe
 
 function activityFromMessages(
   group: Group,
-  messages: { senderPubkey: string; text: string; createdAt: number }[],
+  messages: { id?: string; senderPubkey: string; text: string; createdAt: number }[],
 ): GroupActivity {
   const groupCreatedAtSec = Math.floor(group.createdAt / 1000);
   if (messages.length === 0) {
@@ -154,6 +154,7 @@ function activityFromMessages(
   return {
     lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
     lastText: last.text,
+    lastMessageId: last.id,
     lastSenderPubkey: last.senderPubkey.toLowerCase(),
     recentSenderPubkeys: computeRecentSenders(messages),
   };

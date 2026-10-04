@@ -1,3 +1,5 @@
+import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
+import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -149,17 +151,19 @@ const GroupConversationScreen: React.FC = () => {
 
   const group = getGroup(route.params.groupId);
 
-  // Load persisted local messages on mount / when navigating back.
+  const loadedGroupId = group?.id;
+
+  // Load persisted messages only when the thread or identity changes.
+  // Metadata edits must not unmount the list and discard its reading position.
   useEffect(() => {
-    if (!group) return;
+    if (!loadedGroupId) return;
     let cancelled = false;
-    loadGroupMessages(group.id)
+    setLoadingMessages(true);
+    loadGroupMessages(loadedGroupId)
       .then((loaded) => {
         if (!cancelled) {
           setMessages(loaded);
           setLoadingMessages(false);
-          // Defer scroll to next tick so FlatList has laid out.
-          setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 0);
         }
       })
       .catch(() => {
@@ -168,7 +172,7 @@ const GroupConversationScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [group]);
+  }, [loadedGroupId, myPubkey]);
 
   // Live updates: NostrContext fires `subscribeGroupMessages` when an
   // inbound NIP-17 wrap decrypts to a kind-14 rumor that matches this
@@ -176,16 +180,35 @@ const GroupConversationScreen: React.FC = () => {
   // entry (cheap — capped at 500 messages per group). We could be
   // smarter and merge in-memory, but file-of-truth simplicity wins.
   useEffect(() => {
-    if (!group) return;
+    if (!loadedGroupId) return;
+    let cancelled = false;
     const unsubscribe = subscribeGroupMessages((groupId) => {
-      if (groupId !== group.id) return;
-      loadGroupMessages(group.id).then((loaded) => {
-        setMessages(loaded);
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
-      });
+      if (groupId !== loadedGroupId) return;
+      loadGroupMessages(loadedGroupId)
+        .then((loaded) => {
+          if (!cancelled) setMessages(loaded);
+        })
+        .catch(() => {
+          /* Keep existing history if local storage cannot refresh. */
+        });
     });
-    return unsubscribe;
-  }, [group]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [loadedGroupId, myPubkey]);
+
+  const liveEntries = useMemo(
+    () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
+    [messages],
+  );
+  const live = useLiveMessageIndicator({
+    scope: `${myPubkey}:${route.params.groupId}`,
+    entries: liveEntries,
+    loading: loadingMessages,
+    edge: 'end',
+    scrollToLatest: (animated) => listRef.current?.scrollToEnd({ animated }),
+  });
 
   // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
   // to drain any pending kind-14 group rumors before the live subscription
@@ -684,6 +707,9 @@ const GroupConversationScreen: React.FC = () => {
               renderItem={renderMessage}
               contentContainerStyle={styles.messagesList}
               testID="group-messages-list"
+              onScroll={live.onScroll}
+              scrollEventThrottle={100}
+              onContentSizeChange={live.onContentSizeChange}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Text style={styles.emptySubtitle}>
@@ -692,6 +718,9 @@ const GroupConversationScreen: React.FC = () => {
                 </View>
               }
             />
+          )}
+          {live.hasNewMessages && !loadingMessages && (
+            <NewMessagesPill onPress={live.jumpToLatest} testID="group-new-messages" />
           )}
         </Animated.View>
 

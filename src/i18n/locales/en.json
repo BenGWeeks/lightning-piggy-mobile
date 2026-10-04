@@ -2239,5 +2239,8 @@
     "scan": "Scan tab",
     "paste": "Input tab",
     "nfc": "NFC tab"
+  },
+  "liveMessages": {
+    "newMessages": "New messages"
   }
 }

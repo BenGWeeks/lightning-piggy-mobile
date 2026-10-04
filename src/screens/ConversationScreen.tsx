@@ -1,3 +1,5 @@
+import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
+import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -234,39 +236,19 @@ const ConversationScreen: React.FC = () => {
     setMessages,
   });
 
-  // Jump to the newest message on first content load, and when the user is
-  // already near the bottom and a new message arrives. The list is
-  // `inverted`, so offset 0 is the visual bottom (data[0] = newest).
-  // We track whether the user is "near the bottom" in a ref updated by
-  // `onScroll` so a new message doesn't yank them back from an upward
-  // scroll they did deliberately.
-  const nearBottomRef = useRef(true);
-  // `atBottom` drives the floating scroll-to-bottom button's visibility.
-  // nearBottomRef alone is a ref so the FlatList onScroll handler can
-  // update it without re-rendering; the mirror state re-renders on
-  // actual transitions so the FAB fades in/out.
-  const [atBottom, setAtBottom] = useState(true);
-  const initialScrollDoneRef = useRef(false);
-  useEffect(() => {
-    if (items.length === 0) {
-      initialScrollDoneRef.current = false;
-      return;
-    }
-    // Always perform the first scroll after items load, regardless of
-    // current scroll position — this is the "open at newest" behaviour.
-    const shouldScroll = !initialScrollDoneRef.current || nearBottomRef.current;
-    if (!shouldScroll) return;
-    const t = setTimeout(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: initialScrollDoneRef.current });
-      initialScrollDoneRef.current = true;
-      // Programmatic scroll to the newest item — the FAB should match
-      // that reality regardless of whether onScroll fires a final
-      // event at offset 0 during the animation.
-      nearBottomRef.current = true;
-      setAtBottom(true);
-    }, 50);
-    return () => clearTimeout(t);
-  }, [items.length]);
+  const liveEntries = useMemo(
+    () =>
+      items.flatMap((item) =>
+        item.kind === 'dayHeader' ? [] : [{ id: item.id, createdAt: item.createdAt }],
+      ),
+    [items],
+  );
+  const live = useLiveMessageIndicator({
+    scope: `${myPubkey}:${route.params.pubkey}`,
+    entries: liveEntries,
+    loading,
+    scrollToLatest: (animated) => listRef.current?.scrollToOffset({ offset: 0, animated }),
+  });
 
   const { isInvoicePaid } = usePaidInvoiceTracker(messages);
 
@@ -648,6 +630,8 @@ const ConversationScreen: React.FC = () => {
               renderItem={renderItem}
               contentContainerStyle={listContentStyle}
               inverted
+              // Keep the visible history row anchored when live messages prepend.
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               // Window the list so a thread with hundreds of messages
               // doesn't mount every row up front — first-frame work goes
               // from "render all N bubbles + avatars" to "render the
@@ -675,20 +659,8 @@ const ConversationScreen: React.FC = () => {
                 </View>
               }
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-              onScroll={(e) => {
-                const y = e.nativeEvent.contentOffset.y;
-                // "Near bottom" in an inverted list = scroll offset ~0.
-                // 200 px of slack covers the contentContainer padding +
-                // one message bubble, so sitting at the newest message
-                // reliably registers as "at bottom" for both the
-                // auto-scroll-on-new-message behaviour and the FAB.
-                const isNear = y < 200;
-                nearBottomRef.current = isNear;
-                // Mirror to state only when the boolean actually flips —
-                // this keeps onScroll cheap while still triggering a
-                // re-render for the FAB's appearance.
-                setAtBottom((prev) => (prev !== isNear ? isNear : prev));
-              }}
+              onScroll={live.onScroll}
+              onContentSizeChange={live.onContentSizeChange}
               scrollEventThrottle={100}
             />
           )}
@@ -707,11 +679,13 @@ const ConversationScreen: React.FC = () => {
             />
           ) : null}
 
-          {!atBottom && !loading ? (
+          {live.hasNewMessages && !loading ? (
+            <NewMessagesPill onPress={live.jumpToLatest} testID="conversation-new-messages" />
+          ) : !live.atEdge && !loading ? (
             <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
               <TouchableOpacity
                 style={styles.scrollToBottomFab}
-                onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+                onPress={live.jumpToLatest}
                 accessibilityLabel={t('conversationScreen.scrollToRecent')}
                 testID="conversation-scroll-to-bottom"
               >

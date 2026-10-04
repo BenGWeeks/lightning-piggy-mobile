@@ -2239,5 +2239,8 @@
     "scan": "Pestaña Escanear",
     "paste": "Pestaña Introducir",
     "nfc": "Pestaña NFC"
+  },
+  "liveMessages": {
+    "newMessages": "Mensajes nuevos"
   }
 }

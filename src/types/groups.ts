@@ -20,6 +20,8 @@ export interface GroupActivity {
   lastActivityAt: number;
   /** Empty string if no messages yet. */
   lastText: string;
+  /** Event identity distinguishes repeated same-text messages in one second. */
+  lastMessageId?: string;
   /** Lowercased hex; null when no messages yet. */
   lastSenderPubkey: string | null;
   /**
