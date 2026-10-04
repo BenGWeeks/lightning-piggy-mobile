@@ -5,6 +5,7 @@ import {
   normalizeSwapBackend,
   getSwapBackend,
   checkAndSaveSwapBackend,
+  checkSwapBackend,
   pinSwapBackend,
   getSwapBackendForId,
   swapWebSocketUrl,
@@ -184,4 +185,37 @@ it('accepts reverse object miner fees and submarine integer miner fees', async (
   await expect(checkAndSaveSwapBackend('https://valid.example')).resolves.toBe(
     'https://valid.example/v2',
   );
+});
+
+it('checks a draft without selecting it as the provider', async () => {
+  await AsyncStorage.setItem('swap_backend_url_v1', 'https://saved.example/v2');
+  await expect(checkSwapBackend('https://draft.example')).resolves.toBe('https://draft.example/v2');
+  expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+    'https://draft.example/v2/swap/reverse',
+    'https://draft.example/v2/swap/submarine',
+  ]);
+  await expect(getSwapBackend()).resolves.toBe('https://saved.example/v2');
+});
+it('does not verify a draft whose request was cancelled while parsing its body', async () => {
+  const controller = new AbortController();
+  mockFetch.mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () => {
+      controller.abort();
+      return url.endsWith('/reverse')
+        ? {
+            BTC: {
+              BTC: {
+                ...pair.BTC.BTC,
+                fees: { percentage: 0.5, minerFees: { claim: 2, lockup: 2 } },
+              },
+            },
+          }
+        : pair;
+    },
+  }));
+  await expect(checkSwapBackend('https://draft.example', controller.signal)).rejects.toThrow(
+    'cancelled',
+  );
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });

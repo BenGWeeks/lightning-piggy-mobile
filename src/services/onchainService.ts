@@ -125,6 +125,7 @@ function mapAndSortTransactions(txList: any[]): OnchainTransaction[] {
 
 const bdkWallets = new Map<string, Wallet>();
 let blockchain: Blockchain | null = null;
+let blockchainGeneration = 0;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -139,10 +140,12 @@ function parseElectrumUrl(server: string): string {
 async function getBlockchain(): Promise<Blockchain> {
   if (blockchain) return blockchain;
 
+  const generation = blockchainGeneration;
   const serverStr = await getElectrumServer();
+  if (generation !== blockchainGeneration) throw new Error('Electrum settings changed');
   const url = parseElectrumUrl(serverStr);
 
-  blockchain = await new Blockchain().create({
+  const created = await new Blockchain().create({
     url,
     sock5: null,
     retry: 3,
@@ -154,7 +157,11 @@ async function getBlockchain(): Promise<Blockchain> {
     // hostname verification on all Electrum SSL connections.
     validateDomain: true,
   });
-  return blockchain;
+  // A native connection can finish after settings changed. Never publish that
+  // stale endpoint into the shared wallet client cache.
+  if (generation !== blockchainGeneration) throw new Error('Electrum settings changed');
+  blockchain = created;
+  return created;
 }
 
 /** Independent chain tip for validating swap refund deadlines; no wallet required. */
@@ -165,7 +172,7 @@ export async function getBlockHeight(): Promise<number> {
   } catch (error) {
     // A suspended app or changed network can leave the cached socket dead.
     // Do not discard a newer connection installed by a concurrent request.
-    if (blockchain === chain) blockchain = null;
+    if (blockchain === chain) disconnectElectrum();
     throw error;
   }
 }
@@ -179,7 +186,7 @@ export async function getSwapClaimFeeRate(): Promise<number> {
       throw new Error('Invalid Electrum claim fee estimate');
     return Math.max(2, Math.ceil(rate));
   } catch (error) {
-    if (blockchain === chain) blockchain = null;
+    if (blockchain === chain) disconnectElectrum();
     throw error;
   }
 }
@@ -465,7 +472,7 @@ export async function syncAndRefresh(walletId: string): Promise<{
     // rather than overwriting it with empty values on transient Electrum
     // failures (the UI would otherwise flash to "No transactions").
     console.warn('onchainService.syncAndRefresh failed:', e);
-    blockchain = null;
+    disconnectElectrum();
     return { balance: null, transactions: [], ok: false };
   }
 }
@@ -492,7 +499,7 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
     return mapAndSortTransactions(txList);
   } catch (e) {
     console.warn('onchainService.getTransactions failed:', e);
-    blockchain = null;
+    disconnectElectrum();
     return [];
   }
 }
@@ -535,7 +542,7 @@ export async function sendTransaction(
 
   // Always create a fresh Electrum connection for sends to avoid stale state
   console.log('[BDK] sendTransaction: creating fresh Electrum connection');
-  blockchain = null;
+  disconnectElectrum();
   const chain = await getBlockchain();
   console.log('[BDK] sendTransaction: syncing wallet');
   await wallet.sync(chain);
@@ -563,7 +570,7 @@ export async function sendTransaction(
     console.log('[BDK] sendTransaction: broadcast complete');
   } catch (e) {
     console.warn('sendTransaction: broadcast failed, reconnecting:', e);
-    blockchain = null;
+    disconnectElectrum();
     const freshChain = await getBlockchain();
     await freshChain.broadcast(tx);
   }
@@ -577,6 +584,7 @@ export async function removeWallet(walletId: string): Promise<void> {
 }
 
 export function disconnectElectrum(): void {
+  blockchainGeneration += 1;
   blockchain = null;
 }
 
@@ -602,7 +610,7 @@ export async function broadcastRawTx(txHex: string): Promise<void> {
   // broadcast() to fail in a way that masks the real error as a RN
   // DevSettings "Cannot read property 'reload' of undefined" crash. Matches
   // the pattern used in sendTransaction().
-  blockchain = null;
+  disconnectElectrum();
   const chain = await getBlockchain();
   const bytes: number[] = [];
   for (let i = 0; i < txHex.length; i += 2) {
