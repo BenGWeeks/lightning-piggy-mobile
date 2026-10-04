@@ -69,7 +69,18 @@ actor NostrEngine {
   }()
 
   private static func nowMs() -> UInt64 {
-    mach_continuous_time() * UInt64(timebase.numer) / UInt64(timebase.denom) / 1_000_000
+    milliseconds(ticks: mach_continuous_time(), numer: timebase.numer, denom: timebase.denom)
+  }
+
+  // Divide the full-width product so intermediate nanoseconds cannot overflow.
+  // Saturation is only relevant when even the final millisecond count exceeds
+  // UInt64; real Mach timebases are positive and cannot reach that in practice.
+  static func milliseconds(ticks: UInt64, numer: UInt32, denom: UInt32) -> UInt64 {
+    precondition(denom > 0)
+    let divisor = UInt64(denom) * 1_000_000
+    let product = ticks.multipliedFullWidth(by: UInt64(numer))
+    guard product.high < divisor else { return UInt64.max }
+    return divisor.dividingFullWidth(product).quotient
   }
 
   // Build the client, connect the relay pool, and start the notification +
