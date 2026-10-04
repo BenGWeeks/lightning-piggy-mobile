@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { useCameraPermissions } from 'expo-camera';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -71,11 +71,13 @@ export default function ReceiveClaimScanner({ enabled, walletId, onClaimOpen, ch
         </TouchableOpacity>
       )}
       {enabled && scanOpen ? (
-        <SendScanPane
-          permissionGranted={permission?.granted ?? false}
-          onRequestPermission={requestPermission}
-          onBarcodeScanned={scan}
-        />
+        <View style={styles.innerContent}>
+          <SendScanPane
+            permissionGranted={permission?.granted ?? false}
+            onRequestPermission={requestPermission}
+            onBarcodeScanned={scan}
+          />
+        </View>
       ) : (
         children
       )}
