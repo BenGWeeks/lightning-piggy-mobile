@@ -188,6 +188,9 @@
     "nipGcCacheMarker": "NIP-GC cache marker",
     "lightningPayoutAvailable": "Lightning payout available"
   },
+  "cacheClusterMarker": {
+    "label": "{{count}} geo-caches nearby — tap to zoom in"
+  },
   "coinosRecoverySheet": {
     "title": "Save your recovery info",
     "subtitle": "If you lose this device, sign in to {{host}} with this username and password to recover your funds. Lightning Piggy doesn't store these for you anywhere else.",
