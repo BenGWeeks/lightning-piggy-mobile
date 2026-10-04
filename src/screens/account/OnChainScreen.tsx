@@ -30,6 +30,7 @@ const OnChainScreen: React.FC = () => {
   const [electrumHostPort, setElectrumHostPort] = useState(DEFAULT_ELECTRUM);
   const [electrumSSL, setElectrumSSL] = useState(true);
   const [electrumLoading, setElectrumLoading] = useState(true);
+  const [electrumLoaded, setElectrumLoaded] = useState(false);
   const [electrumError, setElectrumError] = useState(false);
   const electrumWrite = useRef(0);
   const mounted = useRef(true);
@@ -51,6 +52,7 @@ const OnChainScreen: React.FC = () => {
         const protocol = parts.pop(); // 's' or 't'
         setElectrumHostPort(parts.join(':'));
         setElectrumSSL(protocol === 's');
+        setElectrumLoaded(true);
       })
       .catch(() => {
         if (mounted.current) setElectrumError(true);
@@ -97,7 +99,7 @@ const OnChainScreen: React.FC = () => {
     }
   };
   const handleElectrumSave = () => {
-    if (!electrumLoading) void saveElectrum(electrumHostPort, electrumSSL);
+    if (!electrumLoading && electrumLoaded) void saveElectrum(electrumHostPort, electrumSSL);
   };
   const testElectrum = useCallback(
     async (signal: AbortSignal) => {
@@ -116,6 +118,7 @@ const OnChainScreen: React.FC = () => {
         onChangeText={(value) => {
           ++electrumWrite.current;
           setElectrumHostPort(value);
+          setElectrumLoaded(true);
           setElectrumError(false);
         }}
         editable={!electrumLoading}
@@ -139,11 +142,14 @@ const OnChainScreen: React.FC = () => {
             setElectrumSSL(next);
             void saveElectrum(electrumHostPort, next);
           }}
-          disabled={electrumLoading}
+          disabled={electrumLoading || !electrumLoaded}
           testID="electrum-ssl-toggle"
           accessibilityLabel={t('onChainScreen.useSsl')}
           accessibilityRole="switch"
-          accessibilityState={{ checked: electrumSSL, disabled: electrumLoading }}
+          accessibilityState={{
+            checked: electrumSSL,
+            disabled: electrumLoading || !electrumLoaded,
+          }}
         >
           <View
             style={[
@@ -157,7 +163,7 @@ const OnChainScreen: React.FC = () => {
       <ServerConnectionTest
         inputKey={`${electrumHostPort}:${electrumSSL}`}
         probe={testElectrum}
-        disabled={electrumLoading}
+        disabled={electrumLoading || !electrumLoaded}
         label={t('serverConnection.electrumTest')}
         testID="electrum-connection"
       />
@@ -167,7 +173,11 @@ const OnChainScreen: React.FC = () => {
           testID="electrum-settings-error"
           accessibilityLiveRegion="polite"
         >
-          {t('serverConnection.electrumSaveError')}
+          {t(
+            electrumLoaded
+              ? 'serverConnection.electrumSaveError'
+              : 'serverConnection.electrumLoadError',
+          )}
         </Text>
       )}
 

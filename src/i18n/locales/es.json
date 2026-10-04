@@ -1,5 +1,6 @@
 {
   "serverConnection": {
+    "electrumLoadError": "No se pudieron cargar los ajustes Electrum. Introduce el servidor deseado antes de probar o guardar.",
     "test": "Probar conexión",
     "electrumTest": "Probar conexión Electrum",
     "boltzTest": "Probar conexión Boltz",

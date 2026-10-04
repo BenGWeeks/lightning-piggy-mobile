@@ -25,8 +25,9 @@ jest.mock('../services/onchainConnectionService', () => ({
   saveElectrumSetting: (...args: unknown[]) => mockSaveElectrum(...args),
   checkElectrumConnection: (...args: unknown[]) => mockCheckElectrum(...args),
 }));
+const mockGetElectrum = jest.fn(async () => 'electrum.example:50002:s');
 jest.mock('../services/walletStorageService', () => ({
-  getElectrumServer: async () => 'electrum.example:50002:s',
+  getElectrumServer: () => mockGetElectrum(),
   getDefaultOnchainWalletId: async () => null,
   setDefaultOnchainWalletId: jest.fn(),
 }));
@@ -82,4 +83,26 @@ test('Boltz Test checks the unsaved draft without choosing it as the backend', a
   expect(screen.queryByTestId('boltz-connection-success')).toBeNull();
   await act(async () => fireEvent.press(screen.getByTestId('swap-backend-save')));
   expect(mockSaveBoltz).toHaveBeenCalledWith('https://other.example/v2');
+});
+
+test('failed Electrum settings load cannot silently save or test the public default', async () => {
+  mockGetElectrum.mockRejectedValueOnce(new Error('storage unavailable'));
+  render(<OnChainScreen />);
+  await waitFor(() => expect(screen.getByTestId('electrum-settings-error')).toBeTruthy());
+  expect(screen.getByTestId('electrum-connection-test').props.accessibilityState.disabled).toBe(
+    true,
+  );
+  await act(async () => {
+    fireEvent(screen.getByTestId('electrum-server-input'), 'blur');
+    fireEvent.press(screen.getByTestId('electrum-connection-test'));
+  });
+  expect(mockSaveElectrum).not.toHaveBeenCalled();
+  expect(mockCheckElectrum).not.toHaveBeenCalled();
+  fireEvent.changeText(screen.getByTestId('electrum-server-input'), 'intended.example:50002');
+  await act(async () => fireEvent.press(screen.getByTestId('electrum-connection-test')));
+  expect(mockCheckElectrum).toHaveBeenCalledWith(
+    'intended.example:50002',
+    true,
+    expect.any(AbortSignal),
+  );
 });

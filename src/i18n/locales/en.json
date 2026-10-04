@@ -1,5 +1,6 @@
 {
   "serverConnection": {
+    "electrumLoadError": "Electrum settings could not be loaded. Enter your intended server address before testing or saving.",
     "test": "Test connection",
     "electrumTest": "Test Electrum connection",
     "boltzTest": "Test Boltz connection",
