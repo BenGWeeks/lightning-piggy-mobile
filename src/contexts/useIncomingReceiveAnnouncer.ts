@@ -9,6 +9,8 @@ import {
 } from '../utils/incomingReceipts';
 import { walletLabel, type WalletState } from '../types/wallet';
 import { incomingPaymentSourceFor } from './incomingPaymentSource';
+import { markPaymentsSeen } from '../services/paymentNotificationDedupe';
+import { getActivePubkey } from '../services/walletStorageService';
 import type { IncomingPayment } from './WalletContext';
 
 interface Params {
@@ -44,6 +46,7 @@ export function useIncomingReceiveAnnouncer({
     // batch and keep only the last, dropping the rest (#655 review). Pick the
     // newest by settled_at, deterministically, across all wallets.
     let newest: AnnouncedReceipt | null = null;
+    const marked: AnnouncedReceipt[] = [];
     for (const wallet of wallets) {
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
@@ -56,18 +59,38 @@ export function useIncomingReceiveAnnouncer({
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);
         changed = true;
-        newest = pickNewerReceipt(newest, {
+        const announced: AnnouncedReceipt = {
           ...receipt,
           walletId: wallet.id,
           walletLabel: walletLabel(wallet),
           // Which rail delivered this credit (#134) — on-chain receives carry
           // the mempool/confirmation hint; everything else is Lightning.
           source: incomingPaymentSourceFor(wallet.walletType),
-        });
+        };
+        marked.push(announced);
+        newest = pickNewerReceipt(newest, announced);
       }
       // Persist the moment a new receipt is seen so a reload before the next
       // write can't re-announce it.
       if (changed) persistSeenReceipts(wallet.id, seen);
+    }
+    // The receipts that lose the tie-break were shown in the app but never
+    // reach PaymentNotifier's claim: claim them here so the background poll
+    // does not alert for them once the app is backgrounded (#1100 review).
+    const owner = getActivePubkey();
+    if (owner) {
+      const byWallet = new Map<string, string[]>();
+      for (const receipt of marked) {
+        if (receipt === newest) continue;
+        const ids = byWallet.get(receipt.walletId) ?? [];
+        ids.push(receipt.paymentHash.toLowerCase());
+        byWallet.set(receipt.walletId, ids);
+      }
+      for (const [walletId, ids] of byWallet) {
+        void markPaymentsSeen(owner, walletId, ids, () => getActivePubkey() === owner).catch(
+          () => {},
+        );
+      }
     }
     if (newest) {
       if (__DEV__)

@@ -1,3 +1,4 @@
+import { reverseRefundHeight, verifyReverseLockup } from '../utils/reverseSwapVerify';
 /**
  * Swap recovery service.
  *
@@ -14,6 +15,7 @@ import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
+import { getSwapBackendForId } from './swapBackendService';
 
 /** Shape of the transaction-row data this module needs to classify a row as
  *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
@@ -349,9 +351,10 @@ export async function recordSubmarineSwapLegs(
 // Lockup-output parsing moved to utils/lockupTx (shared with boltzService's
 // submarine refund lookup without an import cycle).
 
-const BOLTZ_API = 'https://api.boltz.exchange/v2';
-
 interface PersistedReverseSwap {
+  onchainAmount?: number;
+  claimFeeRate?: number;
+  timeoutBlockHeight?: number;
   id: string;
   preimage: string;
   claimPrivateKey: string;
@@ -389,8 +392,8 @@ const SUBMARINE_INDEX_KEY = 'boltz_submarine_index';
 // (e.g. two swaps created back-to-back) cannot clobber each other's entries.
 // A dropped entry would leave a stranded swap that swapRecoveryService never
 // retries, so Boltz auto-refunds at timeout and the user loses the funds.
-// Each call chains onto `indexMutex`; failures are caught inside each op so
-// one bad write doesn't poison the chain for subsequent callers.
+// Each call chains onto `indexMutex`; failures reach the caller without
+// poisoning the chain for subsequent registrations.
 let indexMutex: Promise<void> = Promise.resolve();
 
 function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
@@ -402,19 +405,9 @@ function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** Registration must be durable before callers fund a swap. */
 export async function registerPendingSwap(swapId: string): Promise<void> {
-  return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      if (!ids.includes(swapId)) {
-        ids.push(swapId);
-        await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
-      }
-    } catch (e) {
-      console.warn('[SwapRecovery] Failed to register swap:', e);
-    }
-  });
+  return mutateIndex(SWAP_INDEX_KEY, (ids) => (ids.includes(swapId) ? ids : [...ids, swapId]));
 }
 
 export async function unregisterPendingSwap(swapId: string): Promise<void> {
@@ -432,13 +425,12 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
 
 async function mutateIndex(key: string, mutate: (ids: string[]) => string[]): Promise<void> {
   return withIndexLock(async () => {
-    try {
-      const existing = await SecureStore.getItemAsync(key);
-      const ids = existing ? (JSON.parse(existing) as string[]) : [];
-      await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
-    } catch (e) {
-      console.warn(`[SwapRecovery] Failed to mutate ${key}:`, e);
+    const existing = await SecureStore.getItemAsync(key);
+    const ids: unknown = existing ? JSON.parse(existing) : [];
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) {
+      throw new Error('Invalid pending swap index');
     }
+    await SecureStore.setItemAsync(key, JSON.stringify(mutate(ids)));
   });
 }
 
@@ -447,7 +439,9 @@ export async function registerPendingSubmarineSwap(swapId: string): Promise<void
 }
 
 export async function unregisterPendingSubmarineSwap(swapId: string): Promise<void> {
-  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId));
+  return mutateIndex(SUBMARINE_INDEX_KEY, (ids) => ids.filter((id) => id !== swapId)).catch(() => {
+    // A completed refund must not appear failed because best-effort index cleanup failed.
+  });
 }
 
 /**
@@ -585,7 +579,8 @@ async function recoverSwap(swapId: string): Promise<void> {
   // Query Boltz status. Timed fetch — the recovery pass is single-flight, so
   // a hung request here would block every future recovery trigger (startup,
   // pull-to-refresh, retry) for the whole session.
-  const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+  const backend = await getSwapBackendForId(swapId);
+  const res = await boltzService.fetchWithTimeout(`${backend}/swap/${swapId}`);
   if (!res.ok) {
     console.warn(`[SwapRecovery] Boltz returned ${res.status} for ${swapId}`);
     if (res.status === 404) {
@@ -660,10 +655,18 @@ async function recoverSwap(swapId: string): Promise<void> {
       return;
     }
 
-    const txId = data.transaction?.id;
-    const txHex = data.transaction?.hex;
-    if (!txId || !txHex) {
-      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup tx id/hex`);
+    let txHex = data.transaction?.hex;
+    // Status frames may omit hex; recover from the original provider's
+    // transaction endpoint, just as the live claim path does. No advertised
+    // transaction id is required: the outpoint is derived from the raw tx.
+    if (typeof txHex !== 'string' || !txHex) {
+      const transaction = await boltzService.fetchWithTimeout(
+        `${backend}/swap/reverse/${swapId}/transaction`,
+      );
+      txHex = transaction.ok ? (await transaction.json()).hex : undefined;
+    }
+    if (typeof txHex !== 'string' || !txHex) {
+      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup transaction hex`);
       if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
@@ -677,14 +680,15 @@ async function recoverSwap(swapId: string): Promise<void> {
       if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
-    const { vout, amount } = lockup;
+    const { amount } = lockup;
 
     console.log(`[SwapRecovery] Claiming swap ${swapId}...`);
     const reverseSwap: boltzService.ReverseSwapResult = {
       id: swap.id,
       invoice: '',
-      onchainAmount: amount,
-      timeoutBlockHeight: 0,
+      onchainAmount: swap.onchainAmount ?? amount,
+      timeoutBlockHeight: swap.timeoutBlockHeight ?? 0,
+      claimFeeRate: swap.claimFeeRate,
       lockupAddress: swap.lockupAddress,
       refundPublicKey: swap.refundPublicKey,
       swapTree: swap.swapTree,
@@ -701,9 +705,10 @@ async function recoverSwap(swapId: string): Promise<void> {
     });
     let claimTxId: string;
     try {
+      reverseSwap.timeoutBlockHeight ||= reverseRefundHeight(swap.swapTree);
       claimTxId = await boltzService.claimSwap(
         reverseSwap,
-        { txId, vout, amount },
+        verifyReverseLockup(txHex, reverseSwap),
         swap.destinationAddress,
       );
     } catch (e) {
@@ -771,7 +776,9 @@ type SubmarineFunding =
 async function probeSubmarineFunding(swap: PersistedSubmarineSwap): Promise<SubmarineFunding> {
   let res: Response;
   try {
-    res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swap.id}/transaction`);
+    res = await boltzService.fetchWithTimeout(
+      `${await getSwapBackendForId(swap.id)}/swap/submarine/${swap.id}/transaction`,
+    );
   } catch (e) {
     console.warn(`[SwapRecovery] Submarine lockup probe failed for ${swap.id}:`, e);
     return { state: 'unknown' };
@@ -782,12 +789,19 @@ async function probeSubmarineFunding(swap: PersistedSubmarineSwap): Promise<Subm
   if (!res.ok) return { state: 'unknown' };
   try {
     const data = await res.json();
-    const txId = data.transactionId ?? data.id;
     const txHex = data.hex;
-    if (!txId || typeof txHex !== 'string' || !txHex) return { state: 'unknown' };
+    if (typeof txHex !== 'string' || !txHex) return { state: 'unknown' };
     const lockup = extractLockupFromTxHex(txHex, swap.address);
     if (!lockup) return { state: 'unknown' };
-    return { state: 'funded', lockup: { txId, vout: lockup.vout, amount: lockup.amount } };
+    // Use the txid derived from the hex; an advertised id that disagrees is an
+    // untrustworthy response, so defer rather than act on it.
+    const advertisedTxId = data.transactionId ?? data.id;
+    if (advertisedTxId && String(advertisedTxId).toLowerCase() !== lockup.txId)
+      return { state: 'unknown' };
+    return {
+      state: 'funded',
+      lockup: { txId: lockup.txId, vout: lockup.vout, amount: lockup.amount },
+    };
   } catch {
     return { state: 'unknown' };
   }
@@ -813,7 +827,9 @@ async function recoverSubmarineSwaps(): Promise<void> {
         continue;
       }
       const swap = JSON.parse(raw) as PersistedSubmarineSwap;
-      const res = await boltzService.fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+      const res = await boltzService.fetchWithTimeout(
+        `${await getSwapBackendForId(swapId)}/swap/${swapId}`,
+      );
       if (!res.ok) {
         if (res.status === 404) {
           const misses = (swap.notFoundCount ?? 0) + 1;

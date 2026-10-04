@@ -188,6 +188,9 @@
     "nipGcCacheMarker": "Marcador de caché NIP-GC",
     "lightningPayoutAvailable": "Pago Lightning disponible"
   },
+  "cacheClusterMarker": {
+    "label": "{{count}} geocachés cerca — toca para acercar"
+  },
   "coinosRecoverySheet": {
     "title": "Guarda tu información de recuperación",
     "subtitle": "Si pierdes este dispositivo, inicia sesión en {{host}} con este usuario y contraseña para recuperar tus fondos. Lightning Piggy no los guarda en ningún otro sitio por ti.",
@@ -1487,7 +1490,9 @@
     "copyInvoiceA11y": "Copiar factura",
     "copy": "Copiar",
     "qrCodeA11y": "Código QR de la factura Lightning",
-    "scanHint": "Escanea con cualquier cartera Lightning"
+    "scanHint": "Escanea con cualquier cartera Lightning",
+    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
+    "receiptUnverified": "No se puede verificar este recibo con tu pedido original. Carga el pedido original para confirmar que se pagó."
   },
   "paymentProgressOverlay": {
     "amountSats": "{{amount}} sats",
@@ -1703,9 +1708,9 @@
     "notificationContentHint": "Cuando está desactivado, las notificaciones te avisan de que llegó un mensaje o un pago pero nunca incluyen los detalles: verás \"Nuevo mensaje\" en lugar del texto y \"Pago recibido\" en lugar del importe, tanto en la pantalla de bloqueo como en el panel de notificaciones. Actívalo para incluir el contenido completo. Predeterminado: desactivado.",
     "showMessagePaymentDetails": "Mostrar detalles de mensajes y pagos",
     "showMessagePaymentDetailsA11y": "Mostrar detalles de mensajes y pagos en las notificaciones",
-    "backgroundNotifications": "Notificaciones de mensajes en segundo plano",
-    "backgroundNotificationsHint": "Cuando está activado, Lightning Piggy sigue vigilando los nuevos mensajes incluso con la app cerrada, así se te notifica en cuanto llega uno, sin usar servicios de Google ni servidores push. Esto muestra una notificación permanente de \"vigilando mensajes\" que no puedes deslizar para descartar y consume más batería porque mantiene una conexión activa con tus relays. Desactívalo para depender de comprobaciones periódicas. Predeterminado: desactivado.",
-    "watchForMessages": "Vigilar mensajes en segundo plano"
+    "backgroundNotifications": "Mensajes y pagos en segundo plano",
+    "backgroundNotificationsHint": "Busca mensajes y comprueba los pagos Lightning entrantes de carteras NWC aproximadamente cada minuto con la app cerrada. Sin servicios de Google ni servidor push. Muestra una notificación persistente y consume más batería. Para recibir avisos en reposo, permite el uso de batería sin restricciones en los ajustes de Android. Requiere acceso al historial de la cartera. No vigila pagos on-chain. Predeterminado: desactivado.",
+    "watchForMessages": "Vigilar mensajes y pagos en segundo plano"
   },
   "sendAmountSection": {
     "fixedAmount": "Cantidad fija",
@@ -1765,6 +1770,9 @@
     "loadingFees": "Cargando comisiones...",
     "swapFee": "Comisión del swap: ~{{fee}} sats · ~10-60 min",
     "feeUnavailable": "Estimación de comisión no disponible",
+    "quoteChanged": "No se envió nada. La comisión del swap ahora es de ~{{fee}} sats. Revísala y toca Enviar para continuar.",
+    "quoteChangedTitle": "La comisión del swap ha cambiado",
+    "moveQuoteChanged": "No se ha enviado nada. La comisión del swap ahora es de ~{{fee}} sats. Revísala y pulsa Mover para continuar.",
     "zapMessagePlaceholder": "Mensaje del zap (opcional)",
     "commentPlaceholder": "Comentario (opcional)",
     "zapMessageLabel": "Mensaje del zap",
@@ -1772,6 +1780,14 @@
     "resetLabel": "Escanear o pegar otra factura",
     "resetText": "Escanear / pegar otra factura",
     "balance": "Saldo: {{balance}} sats ({{fiat}})"
+  },
+  "starRating": {
+    "readOnly": "{{value}} de {{max}} estrellas",
+    "input": "Valoración",
+    "rate": {
+      "one": "Valorar con {{count}} estrella",
+      "other": "Valorar con {{count}} estrellas"
+    }
   },
   "tipSheet": {
     "invoiceMemo": "Lightning Piggy: propina de {{title}}",
@@ -2043,5 +2059,152 @@
     "refundBroadcastTitle": "Reembolso difundido",
     "refundBroadcastBody": "{{amount}} sats reembolsados ({{txid}}…)",
     "refundFailedTitle": "El reembolso falló"
+  },
+  "swapBackend": {
+    "quoteFailed": "No se pudieron cargar las comisiones. Comprueba tu conexión o VPN y vuelve a intentarlo.",
+    "retryQuote": "Reintentar comisiones",
+    "loadingQuote": "Cargando comisiones…",
+    "title": "URL del servidor de swaps",
+    "hint": "Usa un servidor compatible con Boltz para la red principal de Bitcoin mediante HTTPS. Conecta primero tu VPN si el servidor es privado. Los nuevos swaps de este dispositivo usarán el servidor guardado; los existentes conservarán su servidor original.",
+    "save": "Comprobar y guardar",
+    "checking": "Comprobando…",
+    "default": "Usar la URL predeterminada de Boltz",
+    "saved": "Servidor guardado. Los nuevos swaps usarán este servidor.",
+    "saveError": "No se guardó el servidor. Comprueba la URL y la conexión.",
+    "loadError": "No se pudo cargar el servidor guardado. No se ha cambiado ningún servidor."
+  },
+  "market": {
+    "sats": "{{amount}} sats",
+    "free": "Gratis",
+    "fromSeller": "de {{seller}}",
+    "screen": {
+      "title": "Mercado",
+      "tagline": "Compra una Lightning Piggy y merch de Bitcoin",
+      "back": "Volver a Explorar",
+      "showing": "Mostrando: {{label}}",
+      "searchPlaceholder": "Buscar productos o vendedores",
+      "clearSearch": "Borrar búsqueda",
+      "filters": "Filtros",
+      "filtersApplied": "Filtros, {{count}} aplicados",
+      "emptyNoMatch": "Ningún producto coincide con tu búsqueda o filtros.",
+      "emptyNoFriends": "Ninguno de tus amigos de Nostr vende productos de Lightning Piggy todavía.",
+      "emptyNone": "No hay productos disponibles en este momento."
+    },
+    "card": {
+      "featured": "Destacado",
+      "accessibility": "{{title}} — {{amount}} sats de {{seller}}"
+    },
+    "detail": {
+      "back": "Volver al Mercado",
+      "unavailable": "Este producto ya no está disponible.",
+      "backToMarket": "Volver al Mercado",
+      "goBack": "Volver",
+      "buyFrom": "Comprar de {{seller}}",
+      "buyAccessibility": "Comprar {{title}} de {{seller}}",
+      "noFeedback": "Las reseñas y los comentarios aún no están disponibles para este vendedor: necesita una identidad de Nostr para anclar las opiniones."
+    },
+    "modes": {
+      "soon": "Pronto",
+      "comingSoon": "{{label}} — próximamente",
+      "selected": "{{label}}, seleccionado",
+      "preferred": "Vendedores preferidos de Lightning Piggy",
+      "friends": "Red de confianza: amigos",
+      "friendsOfFriends": "Red de confianza: amigos de amigos",
+      "all": "Red de confianza: todos"
+    },
+    "filters": {
+      "title": "Filtros",
+      "clear": "Borrar filtros",
+      "clearAll": "Borrar todos los filtros",
+      "close": "Cerrar filtros",
+      "done": "Listo",
+      "all": "Todos",
+      "merchant": "Comercio",
+      "country": "País",
+      "currency": "Moneda",
+      "chipSelected": "{{label}}, seleccionado"
+    },
+    "feedbackTabs": {
+      "reviews": "Reseñas",
+      "comments": "Comentarios",
+      "showMore": "Ver más ({{count}} restantes)",
+      "retry": "Reintentar",
+      "publishFailed": "No se pudo publicar. Inténtalo de nuevo."
+    },
+    "reviews": {
+      "signIn": "Inicia sesión para escribir una reseña",
+      "write": "Escribe una reseña",
+      "updateLabel": "Actualiza tu reseña",
+      "placeholder": "Comparte tu experiencia (opcional)",
+      "addRating": "Añade una valoración primero",
+      "submit": "Enviar reseña",
+      "submitUpdate": "Actualizar reseña",
+      "empty": "Aún no hay reseñas. ¡Sé el primero en reseñar este producto!",
+      "loadError": "No se pudieron cargar las reseñas",
+      "count": {
+        "one": "{{count}} reseña",
+        "other": "{{count}} reseñas"
+      }
+    },
+    "comments": {
+      "placeholder": "Añade un comentario",
+      "post": "Publicar comentario",
+      "signIn": "Inicia sesión para comentar",
+      "empty": "Aún no hay comentarios. ¡Sé el primero en iniciar la conversación!",
+      "loadError": "No se pudieron cargar los comentarios"
+    },
+    "checkout": {
+      "orderPlaced": "Pedido realizado",
+      "orderSentBody": "Tu pedido se envió a {{seller}}. Cuando envíen una factura Lightning, aparecerá como un pedido pagable en tu chat con ellos.",
+      "openConversation": "Abrir tu conversación con {{seller}}",
+      "goToChat": "Ir al chat para pagar",
+      "unitPrice": "{{amount}} sats cada uno · {{fiat}}",
+      "quantity": "Cantidad",
+      "decreaseQuantity": "Disminuir cantidad",
+      "increaseQuantity": "Aumentar cantidad",
+      "subtotal": "Subtotal",
+      "shipping": "Envío",
+      "total": "Total",
+      "placeOrder": "Realizar pedido",
+      "placeOrderAccessibility": "Realizar pedido con {{seller}}",
+      "signInToBuy": "Inicia sesión para comprar",
+      "hint": "Tu pedido se envía de forma privada (con envoltorio de regalo) al vendedor, que responde con una factura Lightning que pagas dentro de la app.",
+      "websiteFallback": "¿Prefieres la web? Abre {{seller}}",
+      "openWebsiteAccessibility": "Abrir la web de {{seller}}",
+      "toastPlaced": "Pedido realizado",
+      "toastPlacedBody": "Esperando a que {{seller}} envíe una factura…",
+      "errors": {
+        "notSignedIn": "Inicia sesión para realizar un pedido",
+        "noSellerIdentity": "Este vendedor no tiene identidad Nostr para hacerle un pedido",
+        "signingKeyMissing": "No se encontró tu clave de firma. Vuelve a iniciar sesión.",
+        "unsupportedSigner": "Este firmante aún no puede realizar pedidos.",
+        "relayUnreachable": "No se pudo contactar con un relay para realizar tu pedido. Inténtalo de nuevo.",
+        "generic": "Algo salió mal al realizar tu pedido. Inténtalo de nuevo."
+      },
+      "rateUpdated": "El coste de envío se ha actualizado. Revisa el nuevo total y vuelve a pulsar Realizar pedido."
+    },
+    "shipping": {
+      "label": "Envío",
+      "checking": "Comprobando a dónde envía {{seller}}…",
+      "loadError": "No se pudieron cargar las opciones de envío.",
+      "retry": "Reintentar",
+      "retryAccessibility": "Reintentar cargar las opciones de envío",
+      "shipToTitle": "Enviar a",
+      "searchCountries": "Buscar países",
+      "searchCountriesPlaceholder": "Buscar países…",
+      "shipToCountry": "Enviar a {{country}}",
+      "noCountriesMatch": "Ningún país coincide con «{{query}}»",
+      "shipTo": "Enviar a {{country}} — cambiar país",
+      "chooseCountry": "Elegir país",
+      "chooseCountryPlaceholder": "Elegir país…",
+      "noShip": "Todavía no enviamos a {{country}}: escribe a la tienda y pregunta.",
+      "message": "Enviar mensaje a {{seller}}",
+      "worldwide": "Envío a todo el mundo",
+      "shipsTo": "Envía a {{countries}}",
+      "shipsToMore": "Envía a {{countries}} +{{count}}",
+      "optionAccessibility": "Opción de envío {{title}}",
+      "priceFallback": "{{amount}} {{currency}}",
+      "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
+    }
   }
 }

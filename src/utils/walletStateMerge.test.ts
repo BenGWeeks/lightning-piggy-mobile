@@ -1,5 +1,5 @@
-import { mergeWalletUpdate } from './walletStateMerge';
-import type { WalletState } from '../types/wallet';
+import { applyResolverResults, mergeWalletUpdate } from './walletStateMerge';
+import type { WalletState, WalletTransaction } from '../types/wallet';
 
 const w = (over: Partial<WalletState> = {}): WalletState =>
   ({ id: 'a', balance: 100, ...over }) as WalletState;
@@ -38,4 +38,36 @@ describe('mergeWalletUpdate', () => {
     } as Partial<WalletState>);
     expect(next).not.toBe(prev);
   });
+});
+
+describe('applyResolverResults', () => {
+  const tx = (over: Partial<WalletTransaction> = {}): WalletTransaction =>
+    ({ type: 'incoming', amount: 1, ...over }) as WalletTransaction;
+  const alice = { pubkey: 'alice', profile: null, comment: '', anonymous: false };
+
+  it('attributes captured rows and leaves the rest untouched', () => {
+    const prev = [tx({ paymentHash: 'a' }), tx({ paymentHash: 'b' })];
+    const next = applyResolverResults(prev, new Map([[prev[1], alice]]));
+    expect(next?.[0]).toBe(prev[0]);
+    expect(next?.[1]).toEqual({ ...prev[1], zapCounterparty: alice });
+  });
+
+  it('returns null when a forced pass only re-confirms missing attributions', () => {
+    const prev = [tx(), tx({ zapCounterparty: null })];
+    const results = new Map([
+      [prev[0], null],
+      [prev[1], null],
+    ]);
+    expect(applyResolverResults(prev, results)).toBeNull();
+  });
+});
+
+it('keeps attribution attached to the original hash after a prepend and refresh', () => {
+  const original = { type: 'incoming', amount: 5, paymentHash: 'original' } as WalletTransaction;
+  const added = { type: 'incoming', amount: 7, paymentHash: 'new' } as WalletTransaction;
+  const alice = { pubkey: 'alice', profile: null, comment: '', anonymous: false };
+  const result = applyResolverResults([added, { ...original }], new Map([[original, alice]]));
+  expect(result?.[0]).toBe(added);
+  expect(result?.[1].zapCounterparty).toEqual(alice);
+  expect(applyResolverResults([added], new Map([[original, alice]]))).toBeNull();
 });

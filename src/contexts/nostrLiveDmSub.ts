@@ -499,6 +499,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // so the very first order from a stranger can't self-qualify.
       const partnerFollowed = followPubkeysRef.current.has(partnerPubkey);
       let partnerKnown = partnerFollowed;
+      let persisted = false;
       writeChain = writeChain
         .then(async () => {
           if (cancelled) return;
@@ -507,27 +508,21 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
               () => false,
             );
           }
-          await upsertDmMessages([orderRow]).catch((e) => {
-            if (__DEV__) console.warn('[DmStore] live order upsert failed:', e);
-          });
+          await upsertDmMessages([orderRow]);
+          persisted = true;
         })
         .catch((e) => {
           if (__DEV__) console.warn('[Nostr] live order persist failed:', e);
         });
-      // Surface to the UI without awaiting the persist chain (#934 item 2) —
-      // same reasoning as the kind-4 path above.
+      // Keep the inbox responsive, but the conversation reload reads SQLite:
+      // notify only after this order is durable, otherwise a fast reload can
+      // finish before the queued write and miss the invoice indefinitely.
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
-
       queueInboxEntry(orderInboxEntry);
-      notifyDmMessage(partnerPubkey);
-      // The OS-notification trust gate reads `partnerKnown`, which the
-      // persist closure above resolves from the pre-merge inbox cache — so
-      // the push (and only the push) still waits for the chain to settle.
-      // `writeChain` here is the captured promise INCLUDING this event's
-      // persist; later reassignments don't affect it, and its trailing
-      // .catch means this continuation always runs.
       void writeChain.then(() => {
-        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+        if (!persisted || cancelled || viewerPubkey !== pubkey || activeSigner !== signerType)
+          return;
+        notifyDmMessage(partnerPubkey);
         if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
           void fireMessageNotification({
             kind: 'dm',

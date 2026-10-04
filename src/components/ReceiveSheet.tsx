@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -78,7 +78,6 @@ const ReceiveSheet: React.FC<Props> = ({
     makeInvoiceForWallet,
     refreshBalanceForWallet,
     activeWalletId,
-    activeWallet,
     wallets,
     currency,
     getReceiveAddress,
@@ -106,6 +105,17 @@ const ReceiveSheet: React.FC<Props> = ({
   // checks at the render call site below.
   const [boltzReceiveOpen, setBoltzReceiveOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  // The sheet stays mounted across opens (HomeSheets retains it), so an async
+  // on-chain address / invoice can resolve after a close + reopen or a wallet
+  // switch. Open, close and wallet switch each bump this token; a result is
+  // applied only if the token it was requested under is still current, so a
+  // late wallet-A response can never overwrite wallet B's QR. The bumps land
+  // before any request callback can observe the transition: open/close in a
+  // layout effect (still inside the commit), a dropdown switch in its handler.
+  const sessionTokenRef = useRef(0);
+  // Session + wallet the current view was initialised for, so the open effect
+  // and the wallet effect it triggers issue ONE address request between them.
+  const initialisedViewRef = useRef<{ token: number; key: string } | null>(null);
   const { sendDirectMessage } = useNostr();
   const { contacts } = useNostrContacts();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -138,6 +148,7 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const generateInvoice = useCallback(
     async (sats: number, memo?: string) => {
+      const token = sessionTokenRef.current;
       setLoading(true);
       setPaymentReceived(false);
       try {
@@ -153,6 +164,8 @@ const ReceiveSheet: React.FC<Props> = ({
           sats,
           memo?.trim() || t('receiveSheet.defaultMemo'),
         );
+        // Closed/reopened or switched wallet meanwhile: never shown, never paid.
+        if (sessionTokenRef.current !== token) return;
         setInvoice(inv);
 
         // Hand the invoice off to WalletContext.expectPayment, which
@@ -186,6 +199,7 @@ const ReceiveSheet: React.FC<Props> = ({
         // or cancel out, instead of stranding them on an empty QR
         // panel with no error.
         if (__DEV__) console.warn('Failed to create invoice:', error);
+        if (sessionTokenRef.current !== token) return;
         const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
         Toast.show({
           type: 'error',
@@ -196,7 +210,9 @@ const ReceiveSheet: React.FC<Props> = ({
         });
         setStep('amount');
       } finally {
-        setLoading(false);
+        // A stale request must not clear a newer request's spinner; the
+        // open / wallet-switch resets already cleared its own.
+        if (sessionTokenRef.current === token) setLoading(false);
       }
     },
     [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
@@ -253,6 +269,43 @@ const ReceiveSheet: React.FC<Props> = ({
     [presetFriend, presetGroup, wallets],
   );
 
+  // Reset the per-wallet view and request the on-chain address. Shared by the
+  // open and wallet-switch effects, and runs once per session token + wallet:
+  // the open sets capturedWalletId, which re-fires the wallet effect for the
+  // same wallet — a second request (or reset) there would discard the first
+  // request's result and could itself fail.
+  const initWalletView = (walletId: string | null, wallet: typeof selectedWallet) => {
+    const token = sessionTokenRef.current;
+    const key = `${walletId}:${wallet?.walletType ?? ''}`;
+    const done = initialisedViewRef.current;
+    if (done?.token === token && done.key === key) return;
+    initialisedViewRef.current = { token, key };
+    setOnchainAddress(null);
+    setInvoice('');
+    setPaymentReceived(false);
+    setLoading(false);
+    setSatsValue('');
+    setMemoValue('');
+    const next = pickInitialView(wallet);
+    setStep(next.step);
+    setMode(next.mode);
+    if (wallet?.walletType === 'onchain' && walletId) {
+      getReceiveAddress(walletId)
+        .then((addr) => {
+          if (sessionTokenRef.current === token) setOnchainAddress(addr);
+        })
+        .catch(() => {
+          console.warn('Failed to fetch on-chain address');
+        });
+    }
+  };
+
+  // Invalidate the previous open's requests inside the open/close commit.
+  // Declared before the open effect; layout effects all run before it.
+  useLayoutEffect(() => {
+    sessionTokenRef.current += 1;
+  }, [visible]);
+
   // Open/close the sheet — intentionally depends only on `visible`.
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
@@ -263,24 +316,7 @@ const ReceiveSheet: React.FC<Props> = ({
       // below), not from the cached value here — the cache may be stale
       // if the app has been backgrounded and a previous invoice settled
       // while we weren't polling.
-      setOnchainAddress(null);
-      setSatsValue('');
-      setMemoValue('');
-      setInvoice('');
-      setPaymentReceived(false);
-
-      const initialWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
-      const initial = pickInitialView(initialWallet);
-      setStep(initial.step);
-      setMode(initial.mode);
-
-      if (activeWallet?.walletType === 'onchain' && activeWalletId) {
-        getReceiveAddress(activeWalletId)
-          .then((addr) => setOnchainAddress(addr))
-          .catch(() => {
-            console.warn('Failed to fetch on-chain address');
-          });
-      }
+      initWalletView(activeWalletId, wallets.find((w) => w.id === activeWalletId) ?? null);
 
       bottomSheetRef.current?.present();
     } else {
@@ -308,21 +344,10 @@ const ReceiveSheet: React.FC<Props> = ({
   // unexpectedly" bug (#450). Keyed on walletType (not just id) so
   // type-flips (lightning ↔ on-chain) always re-derive the default
   // step + mode rather than carrying state from the previous wallet.
+  // The dropdown handler has already bumped the session token.
   useEffect(() => {
     if (!visible || !capturedWalletId) return;
-    setOnchainAddress(null);
-    setInvoice('');
-    setPaymentReceived(false);
-    setSatsValue('');
-    setMemoValue('');
-    const next = pickInitialView(selectedWallet);
-    setStep(next.step);
-    setMode(next.mode);
-    if (selectedWallet?.walletType === 'onchain') {
-      getReceiveAddress(capturedWalletId)
-        .then((addr) => setOnchainAddress(addr))
-        .catch(() => {});
-    }
+    initWalletView(capturedWalletId, selectedWallet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId, selectedWallet?.walletType]);
 
@@ -637,6 +662,14 @@ const ReceiveSheet: React.FC<Props> = ({
                               selectedWalletId === w.id && styles.walletDropdownItemActive,
                             ]}
                             onPress={() => {
+                              if (w.id !== selectedWalletId) {
+                                // Invalidate the previous wallet's requests and
+                                // drop its QR in this commit, not an effect later.
+                                sessionTokenRef.current += 1;
+                                setOnchainAddress(null);
+                                setInvoice('');
+                                setLoading(false);
+                              }
                               setCapturedWalletId(w.id);
                               setDropdownOpen(false);
                             }}

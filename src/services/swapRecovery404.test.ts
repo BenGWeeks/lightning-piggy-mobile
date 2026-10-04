@@ -99,3 +99,10 @@ describe('recoverPendingSwaps 404 tolerance', () => {
     expect(mockStore.has(RECORD_KEY)).toBe(true);
   });
 });
+
+it('recovers a private swap through its pinned provider', async () => {
+  mockStore.set(`boltz_backend_${SWAP_ID}`, 'https://family.example/v2');
+  mockFetchWithTimeout.mockImplementation(pending);
+  await recoverPendingSwaps();
+  expect(mockFetchWithTimeout).toHaveBeenCalledWith(`https://family.example/v2/swap/${SWAP_ID}`);
+});

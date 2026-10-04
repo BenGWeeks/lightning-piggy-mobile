@@ -212,10 +212,10 @@ class BackgroundDmService : Service() {
     if (manager.getNotificationChannel(CHANNEL_ID) != null) return
     val channel = NotificationChannel(
       CHANNEL_ID,
-      "Background message watch",
+      "Background messages and payments",
       NotificationManager.IMPORTANCE_LOW,
     ).apply {
-      description = "The persistent status shown while Lightning Piggy watches for messages"
+      description = "The persistent status shown while Lightning Piggy watches messages and checks payments"
       setShowBadge(false)
       // Match the JS-side channel definition (notificationService.ts) exactly:
       // channel attributes are effectively immutable after first creation, so
@@ -235,8 +235,8 @@ class BackgroundDmService : Service() {
     }
 
     return builder
-      .setContentTitle("Lightning Piggy is watching for messages")
-      .setContentText("Tap to open. This keeps your messages arriving in the background.")
+      .setContentTitle("Lightning Piggy is watching for messages and payments")
+      .setContentText("Tap to open. Watching messages and checking Lightning payments.")
       // Monochrome pig-snout silhouette (this module's res/drawable) — a proper
       // status-bar small icon, unlike the launcher icon which renders as a
       // solid square/circle once Android masks it. Resolve by name so the

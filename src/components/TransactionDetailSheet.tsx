@@ -12,6 +12,8 @@ import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { DEFAULT_SWAP_BACKEND, getSwapBackendForId } from '../services/swapBackendService';
+import { fetchWithTimeout } from '../services/boltzApi';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
 import { createTransactionDetailSheetStyles } from '../styles/TransactionDetailSheet.styles';
@@ -20,6 +22,7 @@ import NostrLoginSheet from './NostrLoginSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
+import { isTransactionSettled } from '../utils/transactionSettlement';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
@@ -44,6 +47,7 @@ export interface TransactionDetailData {
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
+  settled?: boolean;
   blockHeight?: number | null;
   /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;
@@ -100,8 +104,6 @@ type BoltzSwapView = {
   terminalSuccess: boolean;
   terminalFailure: boolean;
 };
-
-const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
 const TransactionDetailSheet: React.FC<Props> = ({
   visible,
@@ -197,12 +199,21 @@ const TransactionDetailSheet: React.FC<Props> = ({
     };
   }, [visible, tx, activeWallet]);
 
+  const [supportBackend, setSupportBackend] = useState<{ id: string; backend: string } | null>(
+    null,
+  );
+  const canContactBoltz =
+    !!tx?.swapId &&
+    supportBackend?.id === tx.swapId &&
+    supportBackend.backend === DEFAULT_SWAP_BACKEND;
   const isBoltzSwap = useMemo(() => swapRecoveryService.isBoltzTransaction(tx), [tx]);
 
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
       setSwap(null);
+      setSupportBackend(null);
+      setSupportSheetOpen(false);
       setResolvedSwapId(null);
       if (!tx || !isBoltzSwap) return;
 
@@ -216,7 +227,10 @@ const TransactionDetailSheet: React.FC<Props> = ({
       setResolvedSwapId(swapId);
 
       try {
-        const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
+        const backend = await getSwapBackendForId(swapId);
+        if (cancelled) return;
+        setSupportBackend({ id: swapId, backend });
+        const res = await fetchWithTimeout(`${backend}/swap/${swapId}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const status: string = data.status ?? 'unknown';
@@ -292,7 +306,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   const statusBadge = useMemo(() => {
     if (!tx) return null;
-    const pending = !tx.settled_at && !tx.blockHeight;
+    const pending = !isTransactionSettled(tx);
     if (swap?.terminalFailure)
       return {
         style: styles.badgeFailed,
@@ -318,7 +332,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
    *  taps in. */
   const boltzExplanation = useMemo(() => {
     if (!tx || !isBoltzSwap) return null;
-    const pending = !tx.settled_at && !tx.blockHeight;
+    const pending = !isTransactionSettled(tx);
     // Prefer live Boltz poll results (`swap.*`) over `iconState` whenever
     // they're available: `iconState` is snapshotted from the row tap and
     // can be stale, whereas the live poll is the latest server-side truth.
@@ -788,7 +802,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {isBoltzSwap ? (
+            {canContactBoltz ? (
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={() => setSupportSheetOpen(true)}
@@ -807,7 +821,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         </BottomSheetView>
       </BottomSheetModal>
       <FeedbackSheet
-        visible={supportSheetOpen}
+        visible={supportSheetOpen && canContactBoltz}
         onClose={() => setSupportSheetOpen(false)}
         onSend={createDmSender(dmRecipient(BOLTZ_SUPPORT_NPUB), sendDirectMessage)}
         isLoggedIn={isLoggedIn}

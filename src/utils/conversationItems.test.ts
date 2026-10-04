@@ -14,6 +14,7 @@ import {
   buildConversationItems,
   buildZapItems,
   formatDayHeader,
+  orderIdsNeedingHistory,
   suppressDuplicateOrderInvoiceNotes,
   type ConversationMessageInput,
   type TimedItem,
@@ -469,5 +470,128 @@ describe('formatDayHeader', () => {
     expect(label).not.toBe('Today');
     expect(label).not.toBe('Yesterday');
     expect(label).toMatch(/\d/);
+  });
+});
+
+describe('buyer-approved order totals', () => {
+  const orderMessage = (id: string, fromMe: boolean, type: string, amountSats: number) => ({
+    id,
+    fromMe,
+    createdAt: DAY2,
+    wireKind: 16,
+    text: JSON.stringify({
+      kind: 16,
+      type,
+      amountSats,
+      orderId: 'same-order',
+      items: [],
+      message: '',
+    }),
+  });
+  it('binds the payment request to the outgoing order, ignoring the merchant amount', () => {
+    const items = buildConversationItems(
+      [
+        orderMessage('request', false, 'payment', 999),
+        orderMessage('approved', true, 'order', 100),
+      ],
+      [],
+    );
+    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
+      expectedAmountSats: 100,
+    });
+  });
+  it('cannot establish an approved amount from a merchant-authored order', () => {
+    const items = buildConversationItems(
+      [orderMessage('request', false, 'payment', 999), orderMessage('forged', false, 'order', 999)],
+      [],
+    );
+    expect(
+      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
+    ).toBeUndefined();
+  });
+  it('fails closed when outgoing orders with the same ID disagree', () => {
+    const items = buildConversationItems(
+      [
+        orderMessage('approved', true, 'order', 100),
+        orderMessage('conflicting', true, 'order', 200),
+        orderMessage('request', false, 'payment', 100),
+      ],
+      [],
+    );
+    expect(
+      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
+    ).toBeUndefined();
+  });
+
+  it('binds to a store-resolved total when the outgoing order is older than the loaded slice', () => {
+    const items = buildConversationItems(
+      [orderMessage('request', false, 'payment', 999)],
+      [],
+      new Map([['same-order', 100]]),
+    );
+    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
+      expectedAmountSats: 100,
+    });
+  });
+  it('fails closed when an in-slice outgoing order disagrees with the store-resolved total', () => {
+    const items = buildConversationItems(
+      [
+        orderMessage('request', false, 'payment', 100),
+        orderMessage('approved', true, 'order', 100),
+      ],
+      [],
+      new Map([['same-order', 200]]),
+    );
+    const request = items.find((item) => item.id === 'dm-request');
+    expect(request?.kind).toBe('order');
+    expect((request as { expectedAmountSats?: number }).expectedAmountSats).toBeUndefined();
+  });
+});
+
+describe('orderIdsNeedingHistory', () => {
+  const stored = (id: string, fromMe: boolean, type: string, orderId: string, payable = false) => ({
+    id,
+    fromMe,
+    createdAt: DAY2,
+    wireKind: 16,
+    text: JSON.stringify({
+      kind: 16,
+      type,
+      orderId,
+      items: [],
+      message: '',
+      ...(payable ? { payment: { method: 'lightning', value: `lnbc1${'a'.repeat(60)}` } } : {}),
+    }),
+  });
+  it('lists received payable requests whose outgoing order is not loaded, sorted + deduped', () => {
+    expect(
+      orderIdsNeedingHistory([
+        stored('r1', false, 'payment', 'old-b', true),
+        stored('r2', false, 'payment', 'old-a', true),
+        stored('r3', false, 'payment', 'old-a', true),
+        stored('r4', false, 'payment', 'loaded', true),
+        stored('o1', true, 'order', 'loaded'),
+      ]),
+    ).toEqual(['old-a', 'old-b']);
+  });
+  it('includes received kind-17 receipts whose order is not loaded', () => {
+    const receipt = {
+      id: 'rc1',
+      fromMe: false,
+      createdAt: DAY2,
+      wireKind: 17,
+      text: JSON.stringify({ kind: 17, type: 'receipt', orderId: 'old-receipt', items: [], message: '' }), // prettier-ignore
+    };
+    expect(orderIdsNeedingHistory([receipt])).toEqual(['old-receipt']);
+  });
+  it('ignores requests without a payable invoice and merchant-authored "orders"', () => {
+    expect(
+      orderIdsNeedingHistory([
+        stored('r1', false, 'payment', 'no-invoice'),
+        stored('r2', false, 'payment', 'forged', true),
+        stored('f1', false, 'order', 'forged'),
+        { id: 'chat', fromMe: false, createdAt: DAY2, wireKind: 14, text: 'hello' },
+      ]),
+    ).toEqual(['forged']);
   });
 });

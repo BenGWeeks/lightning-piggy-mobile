@@ -1,4 +1,5 @@
 import type { WalletTransaction } from '../types/wallet';
+import { isTransactionSettled } from './transactionSettlement';
 
 export interface NewReceipt {
   paymentHash: string;
@@ -34,10 +35,14 @@ export function pickNewReceipts(
   const fresh: NewReceipt[] = [];
   for (const tx of transactions) {
     if (tx.type !== 'incoming') continue;
-    if (typeof tx.settled_at !== 'number') continue;
+    if (!isTransactionSettled(tx)) continue;
     if (!isValidPaymentHash(tx.paymentHash)) continue;
     if (seenHashes.has(tx.paymentHash)) continue;
-    fresh.push({ paymentHash: tx.paymentHash, amountSats: tx.amount, settledAt: tx.settled_at });
+    fresh.push({
+      paymentHash: tx.paymentHash,
+      amountSats: tx.amount,
+      settledAt: tx.settled_at ?? tx.created_at ?? 0,
+    });
   }
   return fresh;
 }
@@ -88,11 +93,7 @@ export function pickNewerReceipt(
 export function settledIncomingHashes(transactions: readonly WalletTransaction[]): Set<string> {
   const hashes = new Set<string>();
   for (const tx of transactions) {
-    if (
-      tx.type === 'incoming' &&
-      typeof tx.settled_at === 'number' &&
-      isValidPaymentHash(tx.paymentHash)
-    ) {
+    if (tx.type === 'incoming' && isTransactionSettled(tx) && isValidPaymentHash(tx.paymentHash)) {
       hashes.add(tx.paymentHash);
     }
   }

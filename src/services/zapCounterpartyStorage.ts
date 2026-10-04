@@ -86,13 +86,22 @@ export async function recordOutgoing(
  * starts skip the expensive #P-tag relay query for txs where we already
  * know there's nothing to find (issue #127).
  */
-export async function recordOutgoingMiss(paymentHash: string): Promise<void> {
-  await record(paymentHash, null);
+export async function recordOutgoingMiss(
+  paymentHash: string,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
+  await record(paymentHash, null, isCurrent);
 }
 
-async function record(paymentHash: string, info: ZapCounterpartyInfo | null): Promise<void> {
+async function record(
+  paymentHash: string,
+  info: ZapCounterpartyInfo | null,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
   if (!paymentHash) return;
   const cache = await load();
+  // No await separates this guard, cache mutation and scheduling persistence.
+  if (!isCurrent()) return;
   // Prune stale negatives opportunistically — they're filtered out of every read path, so keeping them around just eats slots toward MAX_ENTRIES and risks evicting still-useful positive attributions when the cache fills.
   const now = Date.now();
   for (const k of Object.keys(cache)) {

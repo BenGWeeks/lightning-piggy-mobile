@@ -1,3 +1,5 @@
+import { clearEncryptionDecision } from './nwcEncryption';
+import { invalidateBackgroundPaymentScope } from './backgroundPaymentScope';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
@@ -95,14 +97,11 @@ export function getActivePubkey(): string | null {
   return _activePubkey;
 }
 const WALLET_LIST_KEY_BASE = 'wallet_list';
-function walletListKey(): string {
-  return perAccountKey(WALLET_LIST_KEY_BASE, _activePubkey);
-}
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
 // Per-account: this points at a wallet id from `wallet_list`, which is
-// itself namespaced per identity (see `walletListKey`). A global default
+// itself namespaced per identity (see `getWalletList`). A global default
 // would let one identity's choice clobber the other's, so mirror the
 // same `perAccountKey(...)` scheme. New key (no shipped global value to
 // migrate), so it's namespaced inline without a migration step.
@@ -137,8 +136,10 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
-export async function getWalletList(): Promise<WalletMetadata[]> {
-  const json = await AsyncStorage.getItem(walletListKey());
+export async function getWalletList(
+  owner: string | null = _activePubkey,
+): Promise<WalletMetadata[]> {
+  const json = await AsyncStorage.getItem(perAccountKey(WALLET_LIST_KEY_BASE, owner));
   if (!json) return [];
   try {
     return JSON.parse(json);
@@ -147,14 +148,29 @@ export async function getWalletList(): Promise<WalletMetadata[]> {
   }
 }
 
-export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
-  await AsyncStorage.setItem(walletListKey(), JSON.stringify(wallets));
+export async function saveWalletList(
+  wallets: WalletMetadata[],
+  owner: string | null = _activePubkey,
+): Promise<void> {
+  invalidateBackgroundPaymentScope();
+  try {
+    await AsyncStorage.setItem(perAccountKey(WALLET_LIST_KEY_BASE, owner), JSON.stringify(wallets));
+  } finally {
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 // --- NWC ---
 
 export async function saveNwcUrl(walletId: string, url: string): Promise<void> {
-  await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
+  clearEncryptionDecision(`background:${walletId}`);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
+  } finally {
+    clearEncryptionDecision(`background:${walletId}`);
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 export async function getNwcUrl(walletId: string): Promise<string | null> {
@@ -162,7 +178,14 @@ export async function getNwcUrl(walletId: string): Promise<string | null> {
 }
 
 export async function deleteNwcUrl(walletId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
+  clearEncryptionDecision(`background:${walletId}`);
+  invalidateBackgroundPaymentScope();
+  try {
+    await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
+  } finally {
+    clearEncryptionDecision(`background:${walletId}`);
+    invalidateBackgroundPaymentScope();
+  }
 }
 
 // --- On-chain (xpub) ---
@@ -342,12 +365,26 @@ export function generateWalletId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+let _migrationQueue: Promise<void> = Promise.resolve();
 /**
  * Migrate legacy single-wallet storage to multi-wallet format.
  * Also backfills `walletType` for wallets created before on-chain support.
  * Idempotent — safe to call on every startup.
+ *
+ * Deferred while no identity is published: NostrContext publishes null at
+ * mount and the real pubkey later, so a null-owner run would write the wallet
+ * under the unsuffixed key (never read once the pubkey lands) and then delete
+ * the legacy credential. The legacy key stays put until WalletContext re-runs
+ * this for the eventual identity. Runs are serialised so two identities
+ * published back to back can't both claim the same legacy wallet.
  */
-export async function migrateLegacy(): Promise<void> {
+export function migrateLegacy(owner: string | null = _activePubkey): Promise<void> {
+  const run = _migrationQueue.then(() => (owner ? migrateLegacyFor(owner) : undefined));
+  _migrationQueue = run.catch(() => {});
+  return run;
+}
+
+async function migrateLegacyFor(owner: string): Promise<void> {
   // 1. Legacy single-wallet → multi-wallet migration.
   // Order: write the new wallet list + persist the NWC URL first, then delete
   // the legacy key. If a crash interrupts the migration, the legacy key is
@@ -355,7 +392,7 @@ export async function migrateLegacy(): Promise<void> {
   // could permanently lose the user's NWC URL on a partial write.
   const legacyUrl = await SecureStore.getItemAsync(LEGACY_NWC_KEY);
   if (legacyUrl) {
-    const existingList = await getWalletList();
+    const existingList = await getWalletList(owner);
     if (existingList.length === 0) {
       const id = generateWalletId();
       const wallet: WalletMetadata = {
@@ -367,7 +404,7 @@ export async function migrateLegacy(): Promise<void> {
         lightningAddress: null,
       };
       await saveNwcUrl(id, legacyUrl);
-      await saveWalletList([wallet]);
+      await saveWalletList([wallet], owner);
       await setOnboarded();
       // Only after the new records are durably written do we drop the
       // legacy key. If this delete fails, next startup sees existingList
@@ -383,7 +420,7 @@ export async function migrateLegacy(): Promise<void> {
   }
 
   // 2. Backfill walletType for wallets that predate on-chain support
-  const wallets = await getWalletList();
+  const wallets = await getWalletList(owner);
   let needsSave = false;
   const updated = wallets.map((w) => {
     if (!w.walletType) {
@@ -393,7 +430,7 @@ export async function migrateLegacy(): Promise<void> {
     return w;
   });
   if (needsSave) {
-    await saveWalletList(updated);
+    await saveWalletList(updated, owner);
   }
 
   // 3. Versioned migrations. See #169 for the original driver.
@@ -413,7 +450,7 @@ export async function migrateLegacy(): Promise<void> {
     // remove the global storage key — nothing reads it anymore.
     const globalAddress = await AsyncStorage.getItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
     if (globalAddress) {
-      const list = await getWalletList();
+      const list = await getWalletList(owner);
       if (list.length === 0) {
         // Defer: older builds let users set a lightning address before
         // adding any wallet. Dropping the key now would throw that
@@ -429,7 +466,7 @@ export async function migrateLegacy(): Promise<void> {
         const anyChange = backfilled.some(
           (w, i) => w.lightningAddress !== list[i].lightningAddress,
         );
-        if (anyChange) await saveWalletList(backfilled);
+        if (anyChange) await saveWalletList(backfilled, owner);
         await AsyncStorage.removeItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
       }
     }

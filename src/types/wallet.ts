@@ -90,6 +90,8 @@ export interface WalletTransaction {
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
+  /** Explicit wallet settlement state; some providers omit settled_at. */
+  settled?: boolean;
   blockHeight?: number | null;
   /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;

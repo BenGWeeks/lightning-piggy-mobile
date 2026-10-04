@@ -53,9 +53,9 @@ const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 // Native routing (Stage 2 M1, #1046) — rust-nostr via modules/nostr-native.
 //
 // EXPO_PUBLIC_NATIVE_CRYPTO=1 routes the sk+pk-shaped operations below to
-// the native module when it is linked (Android dev/EAS builds); everything
-// else — and every platform where the module is absent — keeps the exact JS
-// path. EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK=1 additionally runs BOTH
+// the native module when it is linked (Android + iOS dev/EAS builds);
+// everything else — and every platform where the module is absent — keeps the
+// exact JS path. EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK=1 additionally runs BOTH
 // implementations per op in dev and logs any divergence loudly.
 //
 // Both env literals are inlined at bundle time, so a normal build (flags
@@ -132,7 +132,8 @@ export function __setNostrCryptoFlagsForTests(next: {
 
 // Routing gate: the native module is used ONLY when the build-time env flag is
 // set AND warm-up has succeeded (nativeReady). getNostrNative() adds the third
-// guard — it returns null off-Android and when the module isn't linked.
+// guard — it returns null on unsupported platforms and when the module isn't
+// linked.
 function nativeIfActive(): NostrNativeApi | null {
   if (!flags.native || !nativeReady) return null;
   return getNostrNative();
@@ -146,9 +147,9 @@ export function isNativeCryptoActive(): boolean {
 /**
  * Capability probe (#1057) — CAN this device ever run native crypto, ignoring
  * whether it's enabled or warmed up. getNostrNative() already returns null
- * off-Android and when the module isn't linked (iOS, Expo Go, stale dev
- * client), so this is the honest "is the native module present" signal used
- * to enable/disable the Settings toggle.
+ * on unsupported platforms and when the module isn't linked (Expo Go, web,
+ * stale dev client), so this is the honest "is the native module present"
+ * signal used to enable/disable the Settings toggle.
  *
  * Distinct from isNativeCryptoActive(): a tester can toggle native ON on a
  * capable device (available=true) yet still see active=false until they
@@ -163,7 +164,7 @@ export function isNativeCryptoAvailable(): boolean {
  * latches routing on: sets nativeReady=true ONLY when warm-up resolves true,
  * so every crypto op stays on the pure-JS path until the native module has
  * proven it can load. Resolves false (never rejects) — a linked-but-broken
- * module (dlopen/JNA failure), a disabled env flag, or a non-Android platform
+ * module (dlopen/JNA failure), a disabled env flag, or an unsupported platform
  * all leave nativeReady false and keep callers on JS for the session.
  *
  * Fire-and-forgotten at startup (index.ts) to warm native routing; it does

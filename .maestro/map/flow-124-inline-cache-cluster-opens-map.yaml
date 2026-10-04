@@ -1,0 +1,68 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Inline-map cache cluster chip opens the full Map
+---
+# Regression for the PR #1072 review (#1071 cache clustering): on the
+# NON-interactive inline mini-map (Geo-caches hub, defaultZoom 12 — the
+# surface most likely to group caches), tapping a count chip must open
+# the full Map screen rather than fly the inline camera onto the group.
+# The inline map has no pan and no recenter control, so a fly-to there
+# stranded the user's dot off-screen with no way back.
+#
+# Live relay data decides whether any caches sit close enough to group,
+# so the chip branch is conditional (same pattern as flow-036). When a
+# chip is present we assert it navigates to `map-screen`; when absent the
+# flow still verifies the inline map rendered.
+#
+# Run: maestro test .maestro/map/flow-124-inline-cache-cluster-opens-map.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'hunt-screen'
+# Inline chrome only: zoom buttons present, recenter absent (interactive-only).
+- assertVisible:
+    id: 'libre-minimap-zoom-in'
+- assertNotVisible:
+    id: 'libre-minimap-recenter'
+
+# Zoom out once so nearby caches are more likely to group into a chip.
+- tapOn:
+    id: 'libre-minimap-zoom-out'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- runFlow:
+    when:
+      visible:
+        id: 'cache-cluster-.*'
+    commands:
+      - tapOn:
+          id: 'cache-cluster-.*'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # Landed on the full, interactive map — not a re-centred inline map.
+      - assertVisible:
+          id: 'map-screen'
+      - assertVisible:
+          id: 'libre-minimap-recenter'
+      - tapOn:
+          id: 'map-back-button'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'hunt-screen'

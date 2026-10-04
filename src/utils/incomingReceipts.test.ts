@@ -135,3 +135,20 @@ describe('settledIncomingHashes (silent baseline seed)', () => {
     expect(settledIncomingHashes(txns)).toEqual(new Set([H1]));
   });
 });
+
+it('announces and baselines Coinos settled rows without settlement timestamps', () => {
+  const receipt = tx({
+    type: 'incoming',
+    amount: 100,
+    paymentHash: H1,
+    settled: true,
+    settled_at: undefined,
+    created_at: 123,
+  });
+  expect(pickNewReceipts([receipt], new Set())).toEqual([
+    { paymentHash: H1, amountSats: 100, settledAt: 123 },
+  ]);
+  expect(settledIncomingHashes([receipt])).toEqual(new Set([H1]));
+  expect(pickNewReceipts([receipt], settledIncomingHashes([receipt]))).toEqual([]);
+  expect(pickNewReceipts([{ ...receipt, settled: false }], new Set())).toEqual([]);
+});

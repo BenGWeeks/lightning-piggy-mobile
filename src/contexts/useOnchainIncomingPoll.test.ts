@@ -36,6 +36,7 @@ const mockedGetBalance = onchainService.getBalance as jest.MockedFunction<
 // AppState transitions without a real native event.
 let latestChangeHandler: ((next: string) => void) | null = null;
 const removeSub = jest.fn();
+const captureIdentity = () => () => true;
 
 function wallet(id: string, walletType: WalletState['walletType'], balance: number): WalletState {
   return { id, walletType, balance } as WalletState;
@@ -66,7 +67,12 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('oc', 'onchain', 100), wallet('ln', 'nwc', 0)];
 
     renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     await waitFor(() => expect(updateWalletInState).toHaveBeenCalledWith('oc', { balance: 500 }));
@@ -81,7 +87,12 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('oc', 'onchain', 100)];
 
     renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
@@ -93,7 +104,12 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('ln', 'nwc', 0)];
 
     renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     // Give any stray microtasks a chance to run.
@@ -110,7 +126,12 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('oc', 'onchain', 100)];
 
     renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
@@ -141,7 +162,12 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('oc', 'onchain', 100)];
 
     renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     // Mount sweep is now awaiting getBalance.
@@ -172,11 +198,45 @@ describe('useOnchainIncomingPoll', () => {
     const wallets = [wallet('oc', 'onchain', 100)];
 
     const { unmount } = renderHook(() =>
-      useOnchainIncomingPoll({ wallets, walletsRef: refOf(wallets), updateWalletInState }),
+      useOnchainIncomingPoll({
+        captureIdentity,
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState,
+      }),
     );
 
     await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
     unmount();
     expect(removeSub).toHaveBeenCalled();
   });
+});
+
+it('discards an on-chain balance finishing in a later identity generation', async () => {
+  let finish!: (n: number) => void;
+  mockedGetBalance.mockReturnValueOnce(
+    new Promise((r) => {
+      finish = r;
+    }),
+  );
+  let generation = 0;
+  const capture = () => {
+    const ticket = generation;
+    return () => ticket === generation;
+  };
+  const updateWalletInState = jest.fn();
+  const wallets = [wallet('oc', 'onchain', 100)];
+  const ref = refOf(wallets);
+  const view = renderHook(() =>
+    useOnchainIncomingPoll({
+      wallets,
+      walletsRef: ref,
+      updateWalletInState,
+      captureIdentity: capture,
+    }),
+  );
+  generation += 2; // B → C → B, wallet id reused
+  await act(async () => finish(999));
+  expect(updateWalletInState).not.toHaveBeenCalled();
+  view.unmount();
 });

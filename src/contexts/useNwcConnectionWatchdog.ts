@@ -17,17 +17,25 @@ import type { WalletState } from '../types/wallet';
 export function useNwcConnectionWatchdog(
   walletsRef: React.MutableRefObject<WalletState[]>,
   updateWalletInState: (walletId: string, updates: Partial<WalletState>) => void,
+  captureIdentity: () => () => boolean,
 ): void {
   const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     let checkInProgress = false;
+    let disposed = false;
     connectionCheckInterval.current = setInterval(async () => {
       // A reconnect on a dead relay can outlast the 30s tick; this guard stops
       // checks stacking across ticks (#654).
       if (checkInProgress) return;
       checkInProgress = true;
+      const currentIdentity = captureIdentity();
+      const isCurrent = () => !disposed && currentIdentity();
       try {
         for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+          if (!isCurrent()) return;
+          // A handshake already in flight (startup connect, payInvoice's
+          // publish-failure reconnect) must not be superseded by the tick.
+          if (nwcService.isConnectionInProgress(w.id)) continue;
           if (!nwcService.isWalletConnected(w.id) && !nwcService.isRelayInCooldown(w.id)) {
             // Relay unresponsive (dead / hung) and not currently parked — try to
             // (re)connect, which re-probes via its initial getBalance. The
@@ -36,7 +44,8 @@ export function useNwcConnectionWatchdog(
             // its cooldown lapses (no app-foreground reconnect-all to rely on).
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
-              if (nwcUrl) await nwcService.connect(w.id, nwcUrl);
+              if (nwcUrl && isCurrent())
+                await nwcService.connect(w.id, nwcUrl, undefined, isCurrent);
             } catch {
               // connect threw — the responsiveness read below reflects it
             }
@@ -47,6 +56,7 @@ export function useNwcConnectionWatchdog(
           // surface the tri-state health so the card can show amber "Not
           // responding" when the socket is up but the relay is parked /
           // rate-limited (#786). Write only on change to avoid re-renders.
+          if (!isCurrent()) return;
           const isConnected = nwcService.isWalletConnected(w.id);
           // getWalletHealth needs the SOCKET-only state to tell amber
           // "Not responding" (socket up, relay parked) from red "Disconnected"
@@ -62,7 +72,8 @@ export function useNwcConnectionWatchdog(
       }
     }, 30 * 1000);
     return () => {
+      disposed = true;
       if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
     };
-  }, [walletsRef, updateWalletInState]);
+  }, [walletsRef, updateWalletInState, captureIdentity]);
 }
