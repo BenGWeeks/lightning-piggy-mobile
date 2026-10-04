@@ -1,6 +1,7 @@
 import React from 'react';
-import { TouchableOpacity, StyleSheet, View } from 'react-native';
+import { TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
+import { profileIconStyles as styles } from '../styles/ProfileIcon.styles';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -17,6 +18,9 @@ const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
   const t = useTranslation();
   return (
     <TouchableOpacity
+      accessibilityRole={onPress ? 'button' : 'image'}
+      disabled={!onPress}
+      accessibilityState={{ disabled: !onPress }}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityLabel={t('profileIcon.profile')}
@@ -38,14 +42,5 @@ const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
     </TouchableOpacity>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-});
 
 export default ProfileIcon;

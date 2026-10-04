@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  BackHandler,
-  Linking,
-} from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -28,7 +21,9 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
-import { ChevronUp, ChevronDown } from 'lucide-react-native';
+import SendWalletSelector from './SendWalletSelector';
+import SendPastePane from './SendPastePane';
+import SendActionButtons from './SendActionButtons';
 import { fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import {
   type DecodedInvoice,
@@ -833,56 +828,16 @@ const SendSheet: React.FC<Props> = ({
               <Text style={styles.title}>{t('sendSheet.send')}</Text>
 
               {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected).length > 1 ? (
-                <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>{t('sendSheet.from')}</Text>
-                  <View style={styles.walletDropdownWrapper}>
-                    <TouchableOpacity
-                      style={styles.walletDropdown}
-                      onPress={() => setDropdownOpen(!dropdownOpen)}
-                    >
-                      <Text style={styles.walletDropdownText}>{walletName}</Text>
-                      {dropdownOpen ? (
-                        <ChevronUp size={16} color={colors.white} />
-                      ) : (
-                        <ChevronDown size={16} color={colors.white} />
-                      )}
-                    </TouchableOpacity>
-                    {dropdownOpen && (
-                      <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected)
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
-                              style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
-                              ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
-                                ]}
-                              >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ) : (
-                <Text style={styles.walletLabel}>
-                  {t('sendSheet.fromWallet', { wallet: walletName })}
-                </Text>
-              )}
+              <SendWalletSelector
+                wallets={wallets}
+                walletName={walletName}
+                capturedWalletId={capturedWalletId}
+                dropdownOpen={dropdownOpen}
+                setDropdownOpen={setDropdownOpen}
+                setCapturedWalletId={setCapturedWalletId}
+                styles={styles}
+                colors={colors}
+              />
 
               {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
               {!scanned && <SendModeTabs mode={inputMode} onChange={selectInputMode} />}
@@ -901,49 +856,18 @@ const SendSheet: React.FC<Props> = ({
                     onBarcodeScanned={handleBarCodeScanned}
                   />
                 ) : (
-                  <View style={styles.pasteSection}>
-                    <BottomSheetTextInput
-                      key={pasteTextKey}
-                      style={styles.pasteInput}
-                      placeholder={t('sendSheet.pastePlaceholder')}
-                      placeholderTextColor={colors.textSupplementary}
-                      defaultValue={pasteText}
-                      onChangeText={(v) => {
-                        // Keep the freshest native string in the ref synchronously
-                        // (submit reads the ref, not state) while leaving the state
-                        // setter a bare setPasteText with NO key bump — feeding
-                        // native typing back through a remount is the #873 race.
-                        pasteTextRef.current = v;
-                        setPasteText(v);
-                      }}
-                      multiline
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      accessibilityLabel={t('sendSheet.pasteInvoiceLabel')}
-                      testID="send-paste-input"
-                    />
-                    <View style={styles.pasteButtonRow}>
-                      <TouchableOpacity
-                        style={styles.pasteButton}
-                        onPress={handlePaste}
-                        accessibilityLabel={t('sendSheet.pasteFromClipboard')}
-                        testID="send-paste-clipboard"
-                      >
-                        <Text style={styles.pasteButtonText}>
-                          {t('sendSheet.pasteFromClipboard')}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
-                        onPress={handlePasteSubmit}
-                        disabled={!pasteText.trim()}
-                        accessibilityLabel={t('sendSheet.goLabel')}
-                        testID="send-paste-go"
-                      >
-                        <Text style={styles.goButtonText}>{t('sendSheet.go')}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <SendPastePane
+                    pasteText={pasteText}
+                    pasteTextKey={pasteTextKey}
+                    onChangeText={(v) => {
+                      pasteTextRef.current = v;
+                      setPasteText(v);
+                    }}
+                    handlePaste={handlePaste}
+                    handlePasteSubmit={handlePasteSubmit}
+                    styles={styles}
+                    colors={colors}
+                  />
                 )
               ) : (
                 /* Invoice/address detected - show details */
@@ -1008,6 +932,8 @@ const SendSheet: React.FC<Props> = ({
                         selectedWallet?.onchainImportMethod === 'mnemonic'
                       ) && (
                         <TouchableOpacity
+                          accessibilityRole="link"
+                          testID="send-boltz-info"
                           onPress={() => Linking.openURL('https://boltz.exchange')}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                           accessibilityLabel={t('sendSheet.poweredByBoltz')}
@@ -1067,6 +993,7 @@ const SendSheet: React.FC<Props> = ({
                       addresses / LNURL — a scanned bolt11 isn't hand-edited. */}
                   {(isLightningAddress(invoiceData || '') || isLnurl) && (
                     <TouchableOpacity
+                      accessibilityRole="button"
                       onPress={handleEditAddress}
                       accessibilityLabel={t('sendSheet.editAddress')}
                       testID="sendsheet-edit-address"
@@ -1076,6 +1003,7 @@ const SendSheet: React.FC<Props> = ({
                   )}
 
                   <TouchableOpacity
+                    accessibilityRole="button"
                     onPress={handleReset}
                     accessibilityLabel={t('sendSheet.resetLabel')}
                     testID="sendsheet-reset"
@@ -1096,30 +1024,17 @@ const SendSheet: React.FC<Props> = ({
               )}
 
               {/* Action buttons */}
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    handleReset();
-                    onClose();
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>{t('sendSheet.cancel')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
-                  onPress={handleSend}
-                  disabled={!canSend || sending}
-                  accessibilityLabel={t('sendSheet.send')}
-                  testID="sendsheet-send-button"
-                >
-                  {sending ? (
-                    <ActivityIndicator color={colors.brandPink} />
-                  ) : (
-                    <Text style={styles.sendButtonText}>{t('sendSheet.send')}</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+              <SendActionButtons
+                canSend={canSend}
+                sending={sending}
+                handleSend={handleSend}
+                onCancel={() => {
+                  handleReset();
+                  onClose();
+                }}
+                styles={styles}
+                colors={colors}
+              />
             </View>
           </BottomSheetScrollView>
         )}

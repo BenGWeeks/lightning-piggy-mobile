@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -14,8 +13,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import BrandGradientBackground from '../../components/BrandGradientBackground';
+import { useTranslation } from '../../contexts/LocaleContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
-import type { Palette } from '../../styles/palettes';
+import { createAccountScreenLayoutStyles } from '../../styles/AccountScreenLayout.styles';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 interface Props {
@@ -44,16 +44,18 @@ const AccountScreenLayout: React.FC<Props> = ({
   scrollable = true,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const t = useTranslation();
+  const styles = useMemo(() => createAccountScreenLayoutStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
   const insets = useSafeAreaInsets();
 
   const titleRow = (
     <View style={styles.titleRow}>
       <TouchableOpacity
+        accessibilityRole="button"
         style={styles.backButton}
         onPress={() => navigation.goBack()}
-        accessibilityLabel="Back"
+        accessibilityLabel={t('accountScreenLayout.back')}
         testID="account-back-button"
       >
         <ChevronLeft size={24} color={colors.brandPink} />
@@ -92,47 +94,5 @@ const AccountScreenLayout: React.FC<Props> = ({
     </KeyboardAvoidingView>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.brandPink,
-    },
-    flex: {
-      flex: 1,
-    },
-    bgImage: {
-      position: 'absolute',
-      width: 420,
-      height: 420,
-      right: -60,
-      top: -20,
-      opacity: 0.15,
-    },
-    content: {
-      paddingHorizontal: 20,
-      paddingBottom: 40,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      marginBottom: 24,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    title: {
-      color: colors.white,
-      fontSize: 28,
-      fontWeight: '700',
-    },
-  });
 
 export default AccountScreenLayout;

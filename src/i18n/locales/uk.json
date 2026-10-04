@@ -1632,7 +1632,8 @@
     "sendInvoiceToFriend": "Надіслати інвойс другу",
     "friendPickerSubtitle": "Вони отримають зашифроване Nostr-повідомлення з кнопкою «Оплатити».",
     "receiveOnchainBoltz": "Отримати on-chain (через обмін Boltz) ₿",
-    "receiveOnchainBoltzA11y": "Отримати on-chain через обмін Boltz"
+    "receiveOnchainBoltzA11y": "Отримати on-chain через обмін Boltz",
+    "paymentQr": "QR-код для оплати"
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Потрібна назва",
@@ -2206,5 +2207,19 @@
     "saved": "Сервер збережено. Нові обміни використовуватимуть цей сервер.",
     "saveError": "Сервер не збережено. Перевірте URL-адресу та з’єднання.",
     "loadError": "Не вдалося завантажити збережений сервер. Сервер не змінено."
+  },
+  "accountScreenLayout": {
+    "back": "Назад"
+  },
+  "contactListItem": {
+    "message": "Надіслати повідомлення {{name}}",
+    "messageWithReason": "Надіслати повідомлення {{name}} ({{reason}})",
+    "zap": "Зап для {{name}}",
+    "zapWithReason": "Зап для {{name}} ({{reason}})"
+  },
+  "sendModeTabs": {
+    "scan": "Вкладка сканування",
+    "paste": "Вкладка введення",
+    "nfc": "Вкладка NFC"
   }
 }

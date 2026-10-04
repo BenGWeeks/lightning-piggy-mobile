@@ -1,12 +1,12 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList } from 'react-native';
 import { Check, Search } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
-import type { Palette } from '../../styles/palettes';
+import { createDisplayScreenStyles } from '../../styles/DisplayScreen.styles';
 import { CURRENCY_LIST, type CurrencyInfo } from '../../services/fiatService';
 
 // Substring match against code OR name (case-insensitive). Mirrors the
@@ -24,7 +24,7 @@ const DisplayScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createDisplayScreenStyles(colors), [colors]);
   const { currency, setCurrency } = useWallet();
   const [search, setSearch] = useState('');
   // Defer the filter pass off the keystroke so the input stays responsive
@@ -36,6 +36,7 @@ const DisplayScreen: React.FC = () => {
     const active = item.code === currency;
     return (
       <TouchableOpacity
+        accessibilityRole="button"
         style={[styles.row, active && styles.rowActive]}
         onPress={() => setCurrency(item.code)}
         accessibilityLabel={t('displayScreen.currencyItem', { code: item.code, name: item.name })}
@@ -104,83 +105,5 @@ const DisplayScreen: React.FC = () => {
     </AccountScreenLayout>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: colors.surface,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      marginBottom: 12,
-    },
-    searchInput: {
-      flex: 1,
-      paddingVertical: 12,
-      fontSize: 15,
-      color: colors.textBody,
-      fontWeight: '500',
-    },
-    listCard: {
-      flex: 1,
-      backgroundColor: colors.surface,
-      borderRadius: 16,
-      overflow: 'hidden',
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-    },
-    rowActive: {
-      // Selected-row highlight — purple tint (matches the selected/active
-      // state convention used across Settings).
-      backgroundColor: colors.accentSecondaryLight,
-    },
-    symbolBadge: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    symbolText: {
-      color: colors.textBody,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    rowText: {
-      flex: 1,
-    },
-    rowCode: {
-      color: colors.textHeader,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-    rowName: {
-      color: colors.textSupplementary,
-      fontSize: 13,
-      marginTop: 2,
-    },
-    separator: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.divider,
-      marginLeft: 64,
-    },
-    empty: {
-      padding: 24,
-      alignItems: 'center',
-    },
-    emptyText: {
-      color: colors.textSupplementary,
-      fontSize: 14,
-      textAlign: 'center',
-    },
-  });
 
 export default DisplayScreen;

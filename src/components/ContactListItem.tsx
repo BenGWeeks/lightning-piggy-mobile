@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { MessageCircle, UserRound, Zap } from 'lucide-react-native';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createContactListItemStyles } from '../styles/ContactListItem.styles';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
@@ -50,7 +51,8 @@ const ContactListItem: React.FC<Props> = ({
   testID,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const t = useTranslation();
+  const styles = useMemo(() => createContactListItemStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
 
   // Reset error state when picture URL changes (rows are recycled by
@@ -67,39 +69,42 @@ const ContactListItem: React.FC<Props> = ({
   const showImage = !!picture && !avatarError && isSupportedImageUrl(picture);
 
   return (
-    <TouchableOpacity
-      style={styles.container}
-      onPress={onPress}
-      activeOpacity={onPress ? 0.6 : 1}
-      testID={testID}
-      accessibilityLabel={name}
-      accessible
-    >
-      <View style={styles.avatar}>
-        {showImage ? (
-          <Image
-            source={{ uri: picture }}
-            style={styles.avatarImage}
-            cachePolicy="memory-disk"
-            transition={200}
-            recyclingKey={picture || undefined}
-            autoplay={false}
-            onError={() => setAvatarError(true)}
-          />
-        ) : (
-          <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
-        )}
-      </View>
-      <View style={styles.info}>
-        <Text style={styles.name} numberOfLines={1}>
-          {name}
-        </Text>
-        {lightningAddress && (
-          <Text style={styles.address} numberOfLines={1}>
-            {lightningAddress}
+    <View style={styles.container}>
+      <TouchableOpacity
+        style={styles.profileTarget}
+        onPress={onPress}
+        disabled={!onPress}
+        activeOpacity={onPress ? 0.6 : 1}
+        testID={testID}
+        accessibilityRole={onPress ? 'button' : 'text'}
+        accessibilityLabel={name}
+      >
+        <View style={styles.avatar}>
+          {showImage ? (
+            <Image
+              source={{ uri: picture }}
+              style={styles.avatarImage}
+              cachePolicy="memory-disk"
+              transition={200}
+              recyclingKey={picture || undefined}
+              autoplay={false}
+              onError={() => setAvatarError(true)}
+            />
+          ) : (
+            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+          )}
+        </View>
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={1}>
+            {name}
           </Text>
-        )}
-      </View>
+          {lightningAddress && (
+            <Text style={styles.address} numberOfLines={1}>
+              {lightningAddress}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
       {/* Action buttons — always rendered so the row's right column has
           a stable width regardless of profile-load state. A single
           composite boolean drives `disabled`, the styling, AND the
@@ -120,8 +125,13 @@ const ContactListItem: React.FC<Props> = ({
               accessibilityState={{ disabled: messageDisabled }}
               accessibilityLabel={
                 messageDisabled
-                  ? `Message ${name} (${!canMessage ? 'no Nostr key' : 'unavailable'})`
-                  : `Message ${name}`
+                  ? t('contactListItem.messageWithReason', {
+                      name,
+                      reason: !canMessage
+                        ? t('contactProfileBody.noNostrKey')
+                        : t('contactProfileBody.unavailable'),
+                    })
+                  : t('contactListItem.message', { name })
               }
               testID="contact-row-message"
             >
@@ -147,8 +157,11 @@ const ContactListItem: React.FC<Props> = ({
                 accessibilityState={{ disabled: !onZap }}
                 accessibilityLabel={
                   zapDisabled
-                    ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})`
-                    : `Zap ${name}`
+                    ? t('contactListItem.zapWithReason', {
+                        name,
+                        reason: zapDisabledReason ?? t('contactProfileBody.unavailable'),
+                      })
+                    : t('contactListItem.zap', { name })
                 }
                 testID="contact-row-zap"
               >
@@ -164,7 +177,7 @@ const ContactListItem: React.FC<Props> = ({
           </View>
         );
       })()}
-    </TouchableOpacity>
+    </View>
   );
 };
 
@@ -174,59 +187,5 @@ const ContactListItem: React.FC<Props> = ({
 // paddingVertical, update this constant too (the FriendsScreen comment
 // references it).
 export const CONTACT_LIST_ITEM_HEIGHT = 72;
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingVertical: 14,
-      gap: 12,
-    },
-    avatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.background,
-      justifyContent: 'center',
-      alignItems: 'center',
-      overflow: 'hidden',
-    },
-    avatarImage: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-    },
-    info: {
-      flex: 1,
-    },
-    name: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    address: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    actions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    iconButton: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: colors.brandPinkLight,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    iconButtonDisabled: {
-      backgroundColor: colors.divider,
-    },
-  });
 
 export default React.memo(ContactListItem);

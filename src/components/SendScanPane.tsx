@@ -69,6 +69,7 @@ const SendScanPane: React.FC<Props> = ({
         <View style={styles.permissionContainer}>
           <Text style={styles.permissionText}>{t('sendScanPane.cameraAccessNeeded')}</Text>
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.permissionButton}
             onPress={onRequestPermission}
             accessibilityLabel={t('sendScanPane.grantCameraPermission')}

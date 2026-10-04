@@ -634,6 +634,7 @@ const ReceiveSheet: React.FC<Props> = ({
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
                       testID="receive-wallet-dropdown-toggle"
+                      accessibilityLabel={t('receiveSheet.toWallet', { wallet: walletName })}
                       accessibilityRole="button"
                       accessibilityState={{ expanded: dropdownOpen }}
                       style={styles.walletDropdown}
@@ -695,7 +696,19 @@ const ReceiveSheet: React.FC<Props> = ({
               )}
 
               {/* QR Code */}
-              <View style={styles.qrContainer}>
+              <View
+                style={styles.qrContainer}
+                accessible={
+                  isOnchainWallet
+                    ? !!onchainAddress && (mode === 'address' || currentSats > 0)
+                    : mode === 'address'
+                      ? !!lightningAddress
+                      : !!invoice
+                }
+                accessibilityRole="image"
+                accessibilityLabel={t('receiveSheet.paymentQr')}
+                testID="receive-payment-qr"
+              >
                 {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
                   <View>
                     <QRCode value={onchainUri} size={200} />
@@ -774,6 +787,17 @@ const ReceiveSheet: React.FC<Props> = ({
               {presetFriend || presetGroup ? (
                 <View style={styles.buttonRow}>
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled:
+                        !friendShareValue ||
+                        sendingToFriend ||
+                        // Programmer-error guard: if a caller passes
+                        // `presetGroup` without `onSendToGroup`, the press
+                        // would early-return with no feedback. Surface the
+                        // misconfiguration as a disabled button instead.
+                        (!!presetGroup && !onSendToGroup),
+                    }}
                     style={({ pressed }) => [
                       styles.actionButton,
                       styles.actionButtonPrimary,
@@ -812,22 +836,32 @@ const ReceiveSheet: React.FC<Props> = ({
               ) : (
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !copyValue }}
                     style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                     onPress={handleCopy}
+                    accessibilityLabel={t('receiveSheet.copy')}
+                    testID="receive-copy"
                     disabled={!copyValue}
                   >
                     <Copy size={20} color={colors.brandPink} />
                     <Text style={styles.actionButtonText}>{t('receiveSheet.copy')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !copyValue }}
                     style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
                     onPress={handleShare}
+                    accessibilityLabel={t('receiveSheet.share')}
+                    testID="receive-share"
                     disabled={!copyValue}
                   >
                     <Text style={styles.actionButtonText}>{t('receiveSheet.share')}</Text>
                     <Share2 size={20} color={colors.brandPink} />
                   </TouchableOpacity>
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !friendShareValue }}
                     style={({ pressed }) => [
                       styles.actionButton,
                       !friendShareValue && styles.actionButtonDisabled,
@@ -863,6 +897,7 @@ const ReceiveSheet: React.FC<Props> = ({
                     </Text>
                   ) : null}
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.changeAmountButton}
                     onPress={() => setStep('amount')}
                     testID="receive-change-amount"
@@ -872,6 +907,7 @@ const ReceiveSheet: React.FC<Props> = ({
                   </TouchableOpacity>
                   {!isOnchainWallet && !presetGroup && lightningAddress ? (
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={styles.secondaryActionButton}
                       onPress={() => {
                         setInvoice('');
@@ -893,6 +929,7 @@ const ReceiveSheet: React.FC<Props> = ({
                 // their address as-is via "Send to <name>" or add an
                 // amount here to request a specific sum.
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.enterAmountButton}
                   onPress={() => {
                     setMode('amount');
@@ -914,6 +951,7 @@ const ReceiveSheet: React.FC<Props> = ({
                *  Tapping opens BoltzReceiveSheet on top of this one. */}
               {!presetFriend && !presetGroup && !isOnchainWallet && selectedWallet?.isConnected ? (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.secondaryActionButton}
                   onPress={() => setBoltzReceiveOpen(true)}
                   testID="receive-via-onchain-boltz"

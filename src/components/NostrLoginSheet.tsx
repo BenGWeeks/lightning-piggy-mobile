@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Platform,
   BackHandler,
@@ -25,7 +24,7 @@ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createNostrLoginSheetStyles } from '../styles/NostrLoginSheet.styles';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
@@ -62,7 +61,7 @@ type Mode = 'login' | 'create' | 'backup' | 'nip46-pair';
 const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createNostrLoginSheetStyles(colors), [colors]);
   const { loginWithNsec, loginWithAmber, loginWithNip46, publishProfile, isLoggingIn } = useNostr();
   const [nsecInput, setNsecInput] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -389,6 +388,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 testID="nsec-input"
               />
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.pasteButton}
                 onPress={handlePaste}
                 accessibilityLabel={t('nostrLoginSheet.paste')}
@@ -413,6 +413,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             {error && <Text style={styles.error}>{error}</Text>}
 
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !nsecInput.trim() || isLoggingIn, busy: isLoggingIn }}
               style={[styles.loginButton, (!nsecInput.trim() || isLoggingIn) && styles.disabled]}
               onPress={handleLogin}
               disabled={!nsecInput.trim() || isLoggingIn}
@@ -428,6 +430,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             {Platform.OS === 'android' && (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ disabled: isLoggingIn }}
                 style={styles.amberButton}
                 onPress={handleAmber}
                 disabled={isLoggingIn}
@@ -445,6 +449,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 bunker isn't installed locally — useful for the
                 nsec.app web bunker etc). See issue #283. */}
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isLoggingIn }}
               style={styles.amberButton}
               onPress={handleNip46}
               disabled={isLoggingIn}
@@ -465,6 +471,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             </View>
 
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.createButton}
               onPress={handleCreate}
               accessibilityLabel={t('nostrLoginSheet.createAccount')}
@@ -500,6 +507,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             {error && <Text style={styles.error}>{error}</Text>}
 
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ disabled: creating, busy: creating }}
               style={[styles.loginButton, creating && styles.disabled]}
               onPress={handleFinishCreate}
               disabled={creating}
@@ -515,7 +524,13 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.backLink} onPress={() => setMode('login')}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={t('nostrLoginSheet.backToLogin')}
+              testID="nostr-back-to-login"
+              style={styles.backLink}
+              onPress={() => setMode('login')}
+            >
               <Text style={styles.backLinkText}>{t('nostrLoginSheet.backToLogin')}</Text>
             </TouchableOpacity>
           </>
@@ -560,6 +575,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                     installed bunker via its nostrconnect:// scheme. QR (cross-
                     device) + Copy (web bunkers like nsec.app) remain below. */}
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.loginButton}
                   onPress={handleOpenInBunker}
                   accessibilityLabel={t('nostrLoginSheet.nip46OpenBunker')}
@@ -569,6 +585,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.copyButton}
                   onPress={handleCopyNip46Uri}
                   accessibilityLabel={t('nostrLoginSheet.nip46CopyUri')}
@@ -578,6 +595,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.backLink}
                   onPress={handleCancelNip46}
                   accessibilityLabel={t('nostrLoginSheet.nip46CancelA11y')}
@@ -603,6 +621,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             </View>
 
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.copyButton}
               onPress={handleCopyNsec}
               accessibilityLabel={t('nostrLoginSheet.copyPrivateKey')}
@@ -612,6 +631,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             </TouchableOpacity>
 
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.loginButton}
               onPress={handleDone}
               accessibilityLabel={t('nostrLoginSheet.done')}
@@ -625,195 +645,5 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      flex: 1,
-      paddingHorizontal: 24,
-      paddingTop: 8,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 4,
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      marginBottom: 20,
-    },
-    inputRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-    },
-    input: {
-      flex: 1,
-      paddingVertical: 16,
-      fontSize: 16,
-      color: colors.textBody,
-      fontWeight: '500',
-    },
-    pasteButton: {
-      padding: 8,
-    },
-    error: {
-      color: colors.red,
-      fontSize: 13,
-      marginTop: 8,
-    },
-    loginButton: {
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 16,
-    },
-    loginButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    disabled: {
-      opacity: 0.5,
-    },
-    amberButton: {
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 12,
-      borderWidth: 2,
-      borderColor: colors.brandPink,
-    },
-    amberButtonText: {
-      color: colors.brandPink,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    dividerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginTop: 20,
-      marginBottom: 12,
-      gap: 12,
-    },
-    dividerLine: {
-      flex: 1,
-      height: 1,
-      backgroundColor: colors.divider,
-    },
-    dividerText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    createButton: {
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: colors.background,
-    },
-    createButtonText: {
-      color: colors.textHeader,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    safetyTip: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginBottom: 12,
-      fontStyle: 'italic',
-    },
-    fieldLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      marginBottom: 6,
-    },
-    createInput: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      fontSize: 16,
-      color: colors.textBody,
-      fontWeight: '500',
-    },
-    backLink: {
-      alignItems: 'center',
-      marginTop: 16,
-    },
-    backLinkText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    warningText: {
-      fontSize: 14,
-      color: colors.red,
-      marginBottom: 20,
-      lineHeight: 20,
-    },
-    nsecDisplay: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-    },
-    nsecText: {
-      fontSize: 13,
-      color: colors.textBody,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      lineHeight: 18,
-    },
-    copyButton: {
-      height: 44,
-      borderRadius: 10,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginTop: 12,
-      borderWidth: 2,
-      borderColor: colors.brandPink,
-    },
-    copyButtonText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    nip46QrContainer: {
-      padding: 16,
-      backgroundColor: '#FFFFFF',
-      borderRadius: 16,
-      alignSelf: 'center',
-      marginTop: 8,
-      marginBottom: 16,
-    },
-    nip46WaitingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 10,
-      marginBottom: 12,
-    },
-    nip46WaitingText: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-  });
 
 export default NostrLoginSheet;
