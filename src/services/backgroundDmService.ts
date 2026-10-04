@@ -644,6 +644,11 @@ export async function startBackgroundDmWatch(): Promise<void> {
       // failure inside our own re-arm is still ours to clean up below.
       isCurrent = captureBackgroundDmWatchEpoch();
       await rearm;
+      if (!isCurrent()) return;
+      // A running native service does not dispatch another headless task.
+      // Recover payment polling here if its earlier task failed or yielded
+      // before arming; starting the shared loop is idempotent.
+      armBackgroundPaymentWatch();
     } else {
       // Fallback (native module absent — Expo Go / stale dev client): the
       // Expo sticky chip is the only status surface, and the subscription

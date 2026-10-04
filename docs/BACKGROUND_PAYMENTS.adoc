@@ -74,6 +74,12 @@ already claimed by the service is not re-announced. Later `listTransactions`
 responses may still include that payment; `notifyPaymentOnce` suppresses the
 duplicate notification.
 
+A foreground launch also ensures the payment polling loop is running after
+starting the native host. Android may retain an existing service without
+dispatching another headless task, so this repairs an earlier arm that failed
+or yielded before starting payments. The shared loop start is idempotent;
+a stop or account switch that supersedes the launch still cancels its work.
+
 == Device acceptance check (required before release)
 
 . Install a build containing this PR; enable the setting and unrestricted battery.

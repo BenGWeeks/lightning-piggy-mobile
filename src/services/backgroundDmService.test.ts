@@ -23,6 +23,14 @@ const mockCanWatchPayments = jest.fn();
 const mockPaymentsRunning = jest.fn();
 const mockStartPayments = jest.fn();
 const mockStopPayments = jest.fn();
+const mockNativeAvailable = jest.fn();
+const mockStartNative = jest.fn();
+const mockStopNative = jest.fn();
+jest.mock('../../modules/background-dm-service', () => ({
+  isBackgroundDmServiceAvailable: () => mockNativeAvailable(),
+  startForegroundService: () => mockStartNative(),
+  stopForegroundService: () => mockStopNative(),
+}));
 
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('nostr-tools/nip44', () => ({}));
@@ -114,6 +122,9 @@ function nowSec(): number {
 }
 
 beforeEach(() => {
+  mockNativeAvailable.mockReturnValue(false);
+  mockStartNative.mockResolvedValue(undefined);
+  mockStopNative.mockResolvedValue(undefined);
   jest.clearAllMocks();
   __resetForTests();
   __resetDedupeForTests();
@@ -894,6 +905,37 @@ describe('arm cancellation epoch (#1100 review)', () => {
 });
 
 describe('start / stop lifecycle', () => {
+  it('repairs payment polling when a running native host does not dispatch a new headless task', async () => {
+    mockNativeAvailable.mockReturnValue(true);
+    mockLoadIdentities.mockResolvedValue(nsecIdentity());
+    mockCanWatchPayments.mockResolvedValue(true);
+    // No JS watch survived the earlier headless arm. Android's existing
+    // service makes startService a no-op; re-arm also has no JS watch to swap.
+    mockPaymentsRunning.mockReturnValue(false);
+    await startBackgroundDmWatch();
+    expect(mockStartNative).toHaveBeenCalledTimes(1);
+    expect(mockStartPayments).toHaveBeenCalledTimes(1);
+    expect(mockSubscribe).not.toHaveBeenCalled();
+    expect(mockShowForeground).not.toHaveBeenCalled();
+  });
+
+  it('does not resurrect payment polling when a native start is superseded by a stop', async () => {
+    mockNativeAvailable.mockReturnValue(true);
+    let release!: () => void;
+    mockStartNative.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const start = startBackgroundDmWatch();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    await stopBackgroundDmWatch();
+    release();
+    await start;
+    expect(mockStartPayments).not.toHaveBeenCalled();
+  });
+
   it('start posts the foreground chip and arms the watch', async () => {
     mockLoadIdentities.mockResolvedValue(nsecIdentity());
     await startBackgroundDmWatch();
