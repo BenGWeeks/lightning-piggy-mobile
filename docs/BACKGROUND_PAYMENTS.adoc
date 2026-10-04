@@ -70,7 +70,9 @@ or switching accounts cancels any arm or service decision still in progress
 for the previous session, so none of them can resubscribe, restart payment
 checks, or stop the newer session after the fact. A refused OS post
 releases the in-app dedupe so the next wallet refresh retries, while a payment
-already claimed by the service is not re-queried.
+already claimed by the service is not re-announced. Later `listTransactions`
+responses may still include that payment; `notifyPaymentOnce` suppresses the
+duplicate notification.
 
 == Device acceptance check (required before release)
 
