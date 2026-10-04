@@ -35,16 +35,29 @@ export async function getSwapBackend(): Promise<string> {
 }
 
 /** Check both supported BTC swap directions without creating a swap. */
-export async function checkAndSaveSwapBackend(input: string): Promise<string> {
+export async function checkSwapBackend(input: string, signal?: AbortSignal): Promise<string> {
   const backend = normalizeSwapBackend(input);
   await Promise.all(
     (['reverse', 'submarine'] as const).map(async (direction) => {
-      const response = await fetchWithTimeout(`${backend}/swap/${direction}`);
-      if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
-      const pairs = await response.json();
-      parseBoltzPair(pairs?.BTC?.BTC, direction);
+      await fetchWithTimeout(
+        `${backend}/swap/${direction}`,
+        signal ? { signal } : undefined,
+        10000,
+        async (response) => {
+          if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
+          const pairs = await response.json();
+          parseBoltzPair(pairs?.BTC?.BTC, direction);
+        },
+      );
     }),
   );
+  if (signal?.aborted) throw new Error('Connection check cancelled.');
+  return backend;
+}
+
+/** Checking a draft must not select it as the provider for new swaps. */
+export async function checkAndSaveSwapBackend(input: string): Promise<string> {
+  const backend = await checkSwapBackend(input);
   await AsyncStorage.setItem(SETTING_KEY, backend);
   return backend;
 }

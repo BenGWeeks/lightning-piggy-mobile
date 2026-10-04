@@ -1,13 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
+import ServerConnectionTest from './ServerConnectionTest';
 import { createSwapBackendSettingsStyles } from '../styles/SwapBackendSettings.styles';
 import {
   DEFAULT_SWAP_BACKEND,
   getSwapBackend,
   checkAndSaveSwapBackend,
+  checkSwapBackend,
 } from '../services/swapBackendService';
 
 export default function SwapBackendSettings() {
@@ -19,35 +21,44 @@ export default function SwapBackendSettings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const mounted = useRef(true);
+  const translation = useRef(t);
+  translation.current = t;
 
   useEffect(() => {
     let active = true;
+    mounted.current = true;
     getSwapBackend()
       .then((value) => {
         if (active) setUrl(value);
       })
       .catch(() => {
-        if (active) setMessage(t('swapBackend.loadError'));
+        if (active) setMessage(translation.current('swapBackend.loadError'));
       })
       .finally(() => {
         if (active) setLoading(false);
       });
     return () => {
       active = false;
+      mounted.current = false;
     };
-  }, [t]);
+  }, []);
+
+  const testBackend = useCallback((signal: AbortSignal) => checkSwapBackend(url, signal), [url]);
 
   const save = async () => {
     setBusy(true);
     setMessage('');
     try {
       const saved = await checkAndSaveSwapBackend(url);
+      if (!mounted.current) return;
       setUrl(saved);
       setMessage(t('swapBackend.saved'));
     } catch (error) {
+      if (!mounted.current) return;
       setMessage(`${t('swapBackend.saveError')} ${error instanceof Error ? error.message : ''}`);
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -71,6 +82,13 @@ export default function SwapBackendSettings() {
         accessibilityLabel={t('swapBackend.title')}
       />
       <Text style={shared.fieldHint}>{t('swapBackend.hint')}</Text>
+      <ServerConnectionTest
+        inputKey={url}
+        probe={testBackend}
+        disabled={loading || busy || !url.trim()}
+        label={t('serverConnection.boltzTest')}
+        testID="boltz-connection"
+      />
       <TouchableOpacity
         style={shared.saveButton}
         onPress={save}

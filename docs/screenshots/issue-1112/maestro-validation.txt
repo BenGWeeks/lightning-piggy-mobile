@@ -1,0 +1,22 @@
+Running on lightningpiggy_api34
+ > Flow piggy-1112-after
+Launch app "com.lightningpiggy.app.preview"... COMPLETED
+Tap on (Optional) id: account-back-button... COMPLETED
+Tap on id: profile-icon... COMPLETED
+Tap on id: drawer-row-onchain... COMPLETED
+Assert that id: electrum-connection-test is visible...Repeat 3 times...
+Repeat 3 times...
+  Tap on id: electrum-server-input... COMPLETED
+  Hide Keyboard... COMPLETED
+  Wait for animation to end...Repeat 3 times... RUNNING
+Repeat 3 times... RUNNING
+Take screenshot after-keyboard-cycles... COMPLETED
+Tap on id: electrum-connection-test... COMPLETED
+Take screenshot electrum-checking... COMPLETED
+Assert that id: electrum-connection-success is visible... COMPLETED
+Take screenshot electrum-verified... COMPLETED
+Scrolling DOWN until id: boltz-connection-test is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Tap on id: boltz-connection-test... COMPLETED
+Take screenshot boltz-checking... COMPLETED
+Assert that id: boltz-connection-checking is not visible... COMPLETED
+Take screenshot boltz-result... COMPLETED

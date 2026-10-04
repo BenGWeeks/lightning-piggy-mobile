@@ -1,4 +1,15 @@
 {
+  "serverConnection": {
+    "electrumLoadError": "Electrum settings could not be loaded. Enter your intended server address before testing or saving.",
+    "test": "Test connection",
+    "electrumTest": "Test Electrum connection",
+    "boltzTest": "Test Boltz connection",
+    "checking": "Checking connection…",
+    "verified": "Connection verified",
+    "failed": "Connection failed. Check the server and network; connect your VPN for a private server.",
+    "timeout": "Connection check timed out. Try again.",
+    "electrumSaveError": "Electrum settings could not be loaded or saved. Check the hostname and port, then try again."
+  },
   "tabs": {
     "home": "Home",
     "messages": "Messages",

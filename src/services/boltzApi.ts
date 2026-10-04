@@ -9,11 +9,23 @@ export const BOLTZ_API = 'https://api.boltz.exchange/v2';
  * Exported for swapRecoveryService — its recovery pass is single-flight, so
  * one bare `fetch` hanging there used to block every future recovery trigger
  * for the whole session (swap audit finding, 2026-07-02). */
-export async function fetchWithTimeout(
+export function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs?: number,
+): Promise<Response>;
+export function fetchWithTimeout<T>(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  consume: (response: Response) => Promise<T>,
+): Promise<T>;
+export async function fetchWithTimeout<T>(
   url: string,
   init?: RequestInit,
   timeoutMs = 10000,
-): Promise<Response> {
+  consume?: (response: Response) => Promise<T>,
+): Promise<Response | T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // Honour an external signal passed via `init.signal` — link it to the
@@ -27,7 +39,10 @@ export async function fetchWithTimeout(
     else external.addEventListener('abort', onExternalAbort, { once: true });
   }
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    // Keep the deadline and caller cancellation linked until the consumer has
+    // finished reading the body, not just until response headers arrive.
+    return consume ? await consume(response) : response;
   } finally {
     clearTimeout(timer);
     external?.removeEventListener('abort', onExternalAbort);

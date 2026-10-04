@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -15,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import BrandGradientBackground from '../../components/BrandGradientBackground';
 import { useThemeColors } from '../../contexts/ThemeContext';
-import type { Palette } from '../../styles/palettes';
+import { createAccountScreenLayoutStyles } from '../../styles/AccountScreenLayout.styles';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 interface Props {
@@ -44,7 +43,7 @@ const AccountScreenLayout: React.FC<Props> = ({
   scrollable = true,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAccountScreenLayoutStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
   const insets = useSafeAreaInsets();
 
@@ -63,76 +62,45 @@ const AccountScreenLayout: React.FC<Props> = ({
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={styles.container}>
       <BrandGradientBackground />
-      <Image
-        source={require('../../../assets/images/nostrich.png')}
-        style={styles.bgImage}
-        resizeMode="contain"
-      />
-      {scrollable ? (
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
-          keyboardShouldPersistTaps="handled"
-          {...scrollViewProps}
-        >
-          {titleRow}
-          {children}
-        </ScrollView>
-      ) : (
-        <View style={[styles.content, styles.flex, { paddingTop: insets.top + 16 }]}>
-          {titleRow}
-          {children}
-        </View>
-      )}
-    </KeyboardAvoidingView>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Image
+          source={require('../../../assets/images/nostrich.png')}
+          style={styles.bgImage}
+          resizeMode="contain"
+        />
+        {scrollable ? (
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={[
+              styles.content,
+              { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            {...scrollViewProps}
+          >
+            {titleRow}
+            {children}
+          </ScrollView>
+        ) : (
+          <View
+            style={[
+              styles.content,
+              styles.flex,
+              { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+            ]}
+          >
+            {titleRow}
+            {children}
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.brandPink,
-    },
-    flex: {
-      flex: 1,
-    },
-    bgImage: {
-      position: 'absolute',
-      width: 420,
-      height: 420,
-      right: -60,
-      top: -20,
-      opacity: 0.15,
-    },
-    content: {
-      paddingHorizontal: 20,
-      paddingBottom: 40,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      marginBottom: 24,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    title: {
-      color: colors.white,
-      fontSize: 28,
-      fontWeight: '700',
-    },
-  });
 
 export default AccountScreenLayout;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Check } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -9,11 +9,14 @@ import { createOnChainScreenStyles } from '../../styles/OnChainScreen.styles';
 import SwapBackendSettings from '../../components/SwapBackendSettings';
 import {
   getElectrumServer,
-  setElectrumServer,
   getDefaultOnchainWalletId,
   setDefaultOnchainWalletId,
 } from '../../services/walletStorageService';
-import { disconnectElectrum } from '../../services/onchainService';
+import ServerConnectionTest from '../../components/ServerConnectionTest';
+import {
+  checkElectrumConnection,
+  saveElectrumSetting,
+} from '../../services/onchainConnectionService';
 import { useWallet } from '../../contexts/WalletContext';
 
 const DEFAULT_ELECTRUM = 'electrum.blockstream.info:50002';
@@ -26,6 +29,11 @@ const OnChainScreen: React.FC = () => {
   const { wallets } = useWallet();
   const [electrumHostPort, setElectrumHostPort] = useState(DEFAULT_ELECTRUM);
   const [electrumSSL, setElectrumSSL] = useState(true);
+  const [electrumLoading, setElectrumLoading] = useState(true);
+  const [electrumLoaded, setElectrumLoaded] = useState(false);
+  const [electrumError, setElectrumError] = useState(false);
+  const electrumWrite = useRef(0);
+  const mounted = useRef(true);
   const [defaultOnchainId, setDefaultOnchainIdState] = useState<string | null>(null);
 
   // Onchain wallets the user could pick as default. Empty list = the section
@@ -36,12 +44,22 @@ const OnChainScreen: React.FC = () => {
   );
 
   useEffect(() => {
-    getElectrumServer().then((server) => {
-      const parts = server.split(':');
-      const protocol = parts.pop(); // 's' or 't'
-      setElectrumHostPort(parts.join(':'));
-      setElectrumSSL(protocol === 's');
-    });
+    mounted.current = true;
+    getElectrumServer()
+      .then((server) => {
+        if (!mounted.current) return;
+        const parts = server.split(':');
+        const protocol = parts.pop(); // 's' or 't'
+        setElectrumHostPort(parts.join(':'));
+        setElectrumSSL(protocol === 's');
+        setElectrumLoaded(true);
+      })
+      .catch(() => {
+        if (mounted.current) setElectrumError(true);
+      })
+      .finally(() => {
+        if (mounted.current) setElectrumLoading(false);
+      });
     getDefaultOnchainWalletId()
       .then(setDefaultOnchainIdState)
       .catch((err) => {
@@ -50,6 +68,9 @@ const OnChainScreen: React.FC = () => {
         console.warn('Failed to read default on-chain wallet id', err);
         setDefaultOnchainIdState(null);
       });
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   const handlePickDefault = async (walletId: string) => {
@@ -68,13 +89,25 @@ const OnChainScreen: React.FC = () => {
     }
   };
 
-  const handleElectrumSave = async () => {
-    const hostPort = electrumHostPort.trim() || DEFAULT_ELECTRUM;
-    setElectrumHostPort(hostPort);
-    const value = `${hostPort}:${electrumSSL ? 's' : 't'}`;
-    await setElectrumServer(value);
-    disconnectElectrum();
+  const saveElectrum = async (hostPort: string, ssl: boolean) => {
+    const request = ++electrumWrite.current;
+    try {
+      await saveElectrumSetting(hostPort, ssl);
+      if (mounted.current && request === electrumWrite.current) setElectrumError(false);
+    } catch {
+      if (mounted.current && request === electrumWrite.current) setElectrumError(true);
+    }
   };
+  const handleElectrumSave = () => {
+    if (!electrumLoading && electrumLoaded) void saveElectrum(electrumHostPort, electrumSSL);
+  };
+  const testElectrum = useCallback(
+    async (signal: AbortSignal) => {
+      if (mounted.current) setElectrumError(false);
+      return checkElectrumConnection(electrumHostPort, electrumSSL, signal);
+    },
+    [electrumHostPort, electrumSSL],
+  );
 
   return (
     <AccountScreenLayout title={t('onChainScreen.title')}>
@@ -82,7 +115,13 @@ const OnChainScreen: React.FC = () => {
       <TextInput
         style={sharedAccountStyles.textInput}
         value={electrumHostPort}
-        onChangeText={setElectrumHostPort}
+        onChangeText={(value) => {
+          ++electrumWrite.current;
+          setElectrumHostPort(value);
+          setElectrumLoaded(true);
+          setElectrumError(false);
+        }}
+        editable={!electrumLoading}
         placeholder={DEFAULT_ELECTRUM}
         placeholderTextColor="rgba(0,0,0,0.3)"
         autoCapitalize="none"
@@ -101,14 +140,16 @@ const OnChainScreen: React.FC = () => {
           onPress={() => {
             const next = !electrumSSL;
             setElectrumSSL(next);
-            const hostPort = electrumHostPort.trim() || DEFAULT_ELECTRUM;
-            setElectrumServer(`${hostPort}:${next ? 's' : 't'}`);
-            disconnectElectrum();
+            void saveElectrum(electrumHostPort, next);
           }}
+          disabled={electrumLoading || !electrumLoaded}
           testID="electrum-ssl-toggle"
           accessibilityLabel={t('onChainScreen.useSsl')}
           accessibilityRole="switch"
-          accessibilityState={{ checked: electrumSSL }}
+          accessibilityState={{
+            checked: electrumSSL,
+            disabled: electrumLoading || !electrumLoaded,
+          }}
         >
           <View
             style={[
@@ -119,6 +160,26 @@ const OnChainScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('onChainScreen.hint')}</Text>
+      <ServerConnectionTest
+        inputKey={`${electrumHostPort}:${electrumSSL}`}
+        probe={testElectrum}
+        disabled={electrumLoading || !electrumLoaded}
+        label={t('serverConnection.electrumTest')}
+        testID="electrum-connection"
+      />
+      {electrumError && (
+        <Text
+          style={sharedAccountStyles.fieldHint}
+          testID="electrum-settings-error"
+          accessibilityLiveRegion="polite"
+        >
+          {t(
+            electrumLoaded
+              ? 'serverConnection.electrumSaveError'
+              : 'serverConnection.electrumLoadError',
+          )}
+        </Text>
+      )}
 
       <Text style={[sharedAccountStyles.sectionLabel, styles.sectionGap]}>
         {t('onChainScreen.defaultWalletTitle')}

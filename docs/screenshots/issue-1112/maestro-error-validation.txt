@@ -1,0 +1,27 @@
+Running on lightningpiggy_api34
+ > Flow piggy-1112-error
+Launch app "com.lightningpiggy.app.preview"... COMPLETED
+Tap on (Optional) id: account-back-button... COMPLETED
+Tap on id: profile-icon... COMPLETED
+Tap on id: drawer-row-onchain... COMPLETED
+Tap on id: electrum-connection-test... COMPLETED
+Assert that id: electrum-connection-success is visible... COMPLETED
+Scrolling UP until id: electrum-server-input is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Tap on id: electrum-server-input... COMPLETED
+Input text !... COMPLETED
+Hide Keyboard... COMPLETED
+Assert that id: electrum-connection-success is not visible... COMPLETED
+Tap on id: electrum-connection-test... COMPLETED
+Assert that id: electrum-connection-error is visible... COMPLETED
+Take screenshot electrum-error... COMPLETED
+Scrolling DOWN until id: swap-backend-url is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Tap on id: swap-backend-url... COMPLETED
+Input text ?... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on id: boltz-connection-test... COMPLETED
+Assert that id: boltz-connection-error is visible... COMPLETED
+Take screenshot boltz-error... COMPLETED
+Scrolling DOWN until id: swap-backend-default is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Tap on id: swap-backend-default... COMPLETED
+Assert that id: boltz-connection-error is not visible... COMPLETED
+Launch app "com.lightningpiggy.app.preview"... COMPLETED
