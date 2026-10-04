@@ -16,7 +16,7 @@ import { bech32 } from 'bech32';
 const FETCH_TIMEOUT_MS = 20_000;
 
 export interface LnurlWithdrawParams {
-  /** Endpoint the finder POSTs the bolt11 invoice to. */
+  /** Endpoint receiving k1 + bolt11 as a LUD-03 GET callback. */
   callback: string;
   /** Random nonce the issuer expects echoed back at claim time. */
   k1: string;
@@ -126,6 +126,13 @@ export const resolveLnurlWithdraw = async (input: string): Promise<LnurlWithdraw
     throw new LnurlWithdrawError('LNURL endpoint did not return JSON');
   }
 
+  if (json && typeof json === 'object' && (json as { status?: string }).status === 'ERROR') {
+    const reason = (json as { reason?: unknown }).reason;
+    throw new LnurlWithdrawError(
+      typeof reason === 'string' ? reason : 'Issuer rejected the voucher',
+    );
+  }
+
   if (!isWithdrawRequest(json)) {
     throw new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)');
   }
@@ -156,8 +163,28 @@ const isWithdrawRequest = (v: unknown): v is WithdrawRequest => {
     typeof r.callback === 'string' &&
     typeof r.k1 === 'string' &&
     typeof r.minWithdrawable === 'number' &&
-    typeof r.maxWithdrawable === 'number'
+    typeof r.maxWithdrawable === 'number' &&
+    Number.isSafeInteger(r.minWithdrawable) &&
+    Number.isSafeInteger(r.maxWithdrawable) &&
+    r.minWithdrawable >= 0 &&
+    (r.maxWithdrawable === 0 || r.maxWithdrawable >= r.minWithdrawable) &&
+    (r.defaultDescription === undefined || typeof r.defaultDescription === 'string') &&
+    isCallbackUrl(r.callback)
   );
+};
+
+const isCallbackUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      !!url.hostname &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
 };
 
 /** Convenience for UI surfaces — turn millisats into a clean sats display. */
@@ -188,11 +215,17 @@ export const claimLnurlWithdraw = async (
   // this from the amount picker). With an un-clamped range this claims the max,
   // which is the right default for a single-amount voucher. The bolt11 we
   // generate has the exact amount baked in.
+  if (!isWithdrawRequest({ ...params, tag: 'withdrawRequest' })) {
+    throw new LnurlWithdrawError('Invalid withdrawal parameters');
+  }
   const sats = msatToSats(params.maxWithdrawable);
   if (sats <= 0) {
     throw new LnurlWithdrawError(
       'Issuer reports zero withdrawable — Piggy is sleeping (cooldown not yet expired, or budget exhausted).',
     );
+  }
+  if (sats * 1000 < params.minWithdrawable) {
+    throw new LnurlWithdrawError('Withdrawal range contains no whole-satoshi amount');
   }
   const bolt11 = await getInvoice(sats, params.defaultDescription || 'Hunt Piggy claim');
 

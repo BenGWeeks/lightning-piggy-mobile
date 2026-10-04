@@ -1671,7 +1671,11 @@
     "sendInvoiceToFriend": "Enviar factura a un amigo",
     "friendPickerSubtitle": "Recibirán un mensaje privado cifrado de Nostr con un botón de Pagar.",
     "receiveOnchainBoltz": "Recibir on-chain (vía swap de Boltz) ₿",
-    "receiveOnchainBoltzA11y": "Recibir on-chain vía swap de Boltz"
+    "receiveOnchainBoltzA11y": "Recibir on-chain vía swap de Boltz",
+    "scanToClaim": "Escanear para reclamar",
+    "cancelScan": "Cancelar escaneo",
+    "invalidClaimCode": "Escanea un código de retiro LNURL",
+    "claimUnavailable": "Reclamar fondos no está disponible. Inténtalo de nuevo."
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Nombre obligatorio",
