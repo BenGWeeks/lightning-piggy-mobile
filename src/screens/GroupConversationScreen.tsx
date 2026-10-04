@@ -151,12 +151,15 @@ const GroupConversationScreen: React.FC = () => {
 
   const group = getGroup(route.params.groupId);
 
-  // Load persisted local messages on mount / when navigating back.
+  const loadedGroupId = group?.id;
+
+  // Load persisted messages only when the thread or identity changes.
+  // Metadata edits must not unmount the list and discard its reading position.
   useEffect(() => {
-    if (!group) return;
+    if (!loadedGroupId) return;
     let cancelled = false;
     setLoadingMessages(true);
-    loadGroupMessages(group.id)
+    loadGroupMessages(loadedGroupId)
       .then((loaded) => {
         if (!cancelled) {
           setMessages(loaded);
@@ -169,7 +172,7 @@ const GroupConversationScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [group]);
+  }, [loadedGroupId, myPubkey]);
 
   // Live updates: NostrContext fires `subscribeGroupMessages` when an
   // inbound NIP-17 wrap decrypts to a kind-14 rumor that matches this
@@ -177,11 +180,11 @@ const GroupConversationScreen: React.FC = () => {
   // entry (cheap — capped at 500 messages per group). We could be
   // smarter and merge in-memory, but file-of-truth simplicity wins.
   useEffect(() => {
-    if (!group) return;
+    if (!loadedGroupId) return;
     let cancelled = false;
     const unsubscribe = subscribeGroupMessages((groupId) => {
-      if (groupId !== group.id) return;
-      loadGroupMessages(group.id)
+      if (groupId !== loadedGroupId) return;
+      loadGroupMessages(loadedGroupId)
         .then((loaded) => {
           if (!cancelled) setMessages(loaded);
         })
@@ -193,7 +196,7 @@ const GroupConversationScreen: React.FC = () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [group]);
+  }, [loadedGroupId, myPubkey]);
 
   const liveEntries = useMemo(
     () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
