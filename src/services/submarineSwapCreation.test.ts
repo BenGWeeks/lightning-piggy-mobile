@@ -168,6 +168,7 @@ describe('createSubmarineSwapForward', () => {
           BTC: {
             BTC: {
               hash: 'quote-hash',
+              limits: { minimal: 1, maximal: 25000000 },
               fees: { percentage: 0.5, minerFees: 100 },
             },
           },
@@ -231,4 +232,10 @@ describe('createSubmarineSwapForward', () => {
     await expect(createSubmarineSwapForward(INVOICE, 100000)).rejects.toThrow(/quote/);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
+});
+
+it('rejects a lockup that cannot leave a dust-safe refund', () => {
+  expect(() =>
+    verifySubmarineSwap({ ...fixture(), expectedAmount: 700 }, { ...input, expectedAmount: 700 }),
+  ).toThrow(/amount/);
 });

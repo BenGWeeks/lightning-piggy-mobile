@@ -760,3 +760,9 @@ Tests that exercise real `@scure/btc-signer` Taproot construction also load
 it fails at import time with `Cannot use import statement outside a module`.
 Keep `micro-packed` in the `transformIgnorePatterns` allow-list in
 `jest.config.js` alongside `@scure`, rather than mocking the cryptography.
+
+=== Dynamic imports fail in an emulator worktree with shared dependencies
+
+A checkout whose `node_modules` symlinks to a sibling repository can produce Metro lazy-bundle URLs containing `/../<sibling>/node_modules/...`. Those requests may return 404 after URL normalization. In this case, importing an on-chain test wallet displayed `Failed to validate mnemonic` even though the recovery phrase was valid.
+
+Use a dependency directory local to the test checkout, restart Metro with `--clear`, and reload the development client. Check the failed lazy-bundle request before changing mnemonic validation or wallet credentials. Do not print recovery phrases while diagnosing the failure.

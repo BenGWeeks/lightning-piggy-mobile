@@ -10,6 +10,14 @@ jest.mock('expo-secure-store', () => ({
 
 jest.mock('./boltzService', () => ({ createSubmarineSwapForward: jest.fn() }));
 jest.mock('./swapRecoveryService', () => ({ registerPendingSubmarineSwap: jest.fn() }));
+const quote = {
+  backend: 'https://example.com/v2',
+  pairHash: 'approved',
+  percentage: 0.5,
+  minerFee: 100,
+  minAmount: 10000,
+  maxAmount: 100000,
+};
 const swap = {
   id: 'fixture',
   address: 'address',
@@ -29,8 +37,8 @@ beforeEach(() => {
   jest.mocked(registerPendingSubmarineSwap).mockResolvedValue();
 });
 it('binds the requested amount and saves full recovery material before resolving', async () => {
-  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source')).resolves.toBe(swap);
-  expect(createSubmarineSwapForward).toHaveBeenCalledWith('invoice', 100);
+  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source', quote)).resolves.toBe(swap);
+  expect(createSubmarineSwapForward).toHaveBeenCalledWith('invoice', 100, quote);
   const [, raw, options] = jest.mocked(SecureStore.setItemAsync).mock.calls[0];
   expect(JSON.parse(raw)).toMatchObject({ ...swap, sourceWalletId: 'source' });
   expect(options).toEqual({ keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY });
@@ -38,7 +46,7 @@ it('binds the requested amount and saves full recovery material before resolving
 });
 it('never persists or registers an unverified swap', async () => {
   jest.mocked(createSubmarineSwapForward).mockRejectedValueOnce(new Error('Invalid swap'));
-  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source')).rejects.toThrow(
+  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source', quote)).rejects.toThrow(
     'Invalid swap',
   );
   expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
@@ -46,7 +54,7 @@ it('never persists or registers an unverified swap', async () => {
 });
 it('does not return funding instructions when persistence fails', async () => {
   jest.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error('Disk full'));
-  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source')).rejects.toThrow(
+  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source', quote)).rejects.toThrow(
     'Disk full',
   );
   expect(registerPendingSubmarineSwap).not.toHaveBeenCalled();
@@ -54,7 +62,7 @@ it('does not return funding instructions when persistence fails', async () => {
 
 it('does not return funding instructions when index registration fails', async () => {
   jest.mocked(registerPendingSubmarineSwap).mockRejectedValueOnce(new Error('Index full'));
-  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source')).rejects.toThrow(
+  await expect(createRecoverableSubmarineSwap('invoice', 100, 'source', quote)).rejects.toThrow(
     'Index full',
   );
 });

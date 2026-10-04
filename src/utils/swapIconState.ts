@@ -1,3 +1,4 @@
+import { isTransactionSettled } from './transactionSettlement';
 import type { WalletTransaction } from '../types/wallet';
 import type { TransactionIconState } from '../components/TransactionTypeIcon';
 
@@ -30,7 +31,7 @@ export function swapIconState(
   // Recorded claim ⇒ the swap terminally finished; trust it over a missing
   // local settled flag for outgoing (Send-to-BTC reverse) rows.
   if (tx.type === 'outgoing' && flags.claimed) return 'done';
-  const settled = Boolean(tx.settled_at || tx.blockHeight);
+  const settled = isTransactionSettled(tx);
   if (!settled) return 'pending';
   if (tx.type === 'incoming') return 'done';
   return undefined;

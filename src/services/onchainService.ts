@@ -170,6 +170,20 @@ export async function getBlockHeight(): Promise<number> {
   }
 }
 
+/** Fee estimate from the configured Electrum server, not the swap operator. */
+export async function getSwapClaimFeeRate(): Promise<number> {
+  const chain = await getBlockchain();
+  try {
+    const rate = (await chain.estimateFee(2)).asSatPerVb();
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 5000)
+      throw new Error('Invalid Electrum claim fee estimate');
+    return Math.max(2, Math.ceil(rate));
+  } catch (error) {
+    if (blockchain === chain) blockchain = null;
+    throw error;
+  }
+}
+
 /**
  * Heuristic check for a Bitcoin mainnet on-chain address (P2PKH, P2SH,
  * native SegWit v0, Taproot). Doesn't verify checksum — that's done by

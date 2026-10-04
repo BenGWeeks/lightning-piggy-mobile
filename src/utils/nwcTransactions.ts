@@ -2,13 +2,15 @@ import type { WalletTransaction } from '../types/wallet';
 import { getSwapMeta } from '../services/swapRecoveryService';
 import { preserveOptimisticSwapRows } from './swapPendingMerge';
 
-// The subset of an NWC `list_transactions` row we read. Backends vary, so most
+// The SDK WebLN listTransactions row (amount and fees already in sats).
+// Backends vary, so most
 // fields are optional / nullable and normalised to `undefined` on mapping.
 export interface NwcRawTransaction {
   type: 'incoming' | 'outgoing';
   amount: number;
   description?: string | null;
   settled_at?: number | null;
+  state?: string;
   created_at?: number | null;
   invoice?: string;
   payment_hash?: string;
@@ -56,13 +58,19 @@ export function mapNwcTransactions(
           : 'Boltz swap — received via Lightning'
         : (tx.description ?? undefined),
       settled_at: tx.settled_at ?? undefined,
+      settled:
+        tx.state === 'settled'
+          ? true
+          : tx.state === 'pending' || tx.state === 'failed' || tx.state === 'expired'
+            ? false
+            : undefined,
       created_at: tx.created_at ?? undefined,
       bolt11: tx.invoice,
       invoice: tx.invoice,
       paymentHash: tx.payment_hash,
       preimage: tx.preimage,
-      // NWC reports fees in msats; surface as sats for display.
-      feesSats: typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
+      // NostrWebLNProvider has already converted NIP-47 msats to sats.
+      feesSats: typeof tx.fees_paid === 'number' ? tx.fees_paid : undefined,
       zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
       swapId: meta?.swapId,
       swapType: meta?.swapType,
