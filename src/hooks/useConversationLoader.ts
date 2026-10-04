@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
-import { reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -124,7 +124,10 @@ export function useConversationLoader({
           // against messagesRef (not inside the setMessages updater) so the
           // AsyncStorage write is a plain side-effect — keeps the updater pure
           // and StrictMode-safe (Copilot #858).
-          const reconciled = reconcileDeliveryStatus(messagesRef.current, conv);
+          const reconciled = keepPendingLocalRows(
+            messagesRef.current,
+            reconcileDeliveryStatus(messagesRef.current, conv),
+          );
           // Durably write the reconciled ticks back to the conv cache, keyed by
           // the (now real-id) row id, so the tick survives a cold restart —
           // fetchConversation persisted the echo rows WITHOUT delivery when it

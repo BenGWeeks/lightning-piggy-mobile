@@ -2224,5 +2224,22 @@
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
     }
+  },
+  "dmProtocol": {
+    "label": "Protocolo: {{protocol}}",
+    "title": "Protocolo de mensajería",
+    "privateMessages": "Mensajes privados",
+    "nip17": {
+      "badge": "Recomendado",
+      "description": "Oculta a los relés con quién hablas; funciona con la mayoría de las aplicaciones modernas de Nostr."
+    },
+    "marmot": {
+      "badge": "Próximamente",
+      "description": "Cifrado de extremo a extremo con MLS, utilizado por White Noise."
+    },
+    "nip04": {
+      "badge": "Antiguo",
+      "description": "Formato antiguo; el contenido está cifrado, pero los relés pueden ver a quién envías mensajes. Para aplicaciones que aún no admiten NIP-17."
+    }
   }
 }

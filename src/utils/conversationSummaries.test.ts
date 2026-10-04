@@ -1,4 +1,4 @@
-import { buildDmSummaries, type DmInboxEntry } from './conversationSummaries';
+import { mergeSummaries, buildDmSummaries, type DmInboxEntry } from './conversationSummaries';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 
 const FOLLOWED = 'a'.repeat(64);
@@ -124,5 +124,25 @@ describe('buildDmSummaries non-followed profile resolution (#664)', () => {
       new Map([[FOLLOWED.toLowerCase(), evilProfile]]),
     );
     expect(result[0].name).toBe('Alice');
+  });
+});
+
+describe('conversation protocol metadata', () => {
+  it('takes the winning DM entry protocol, including the NIP-17 twin preference', () => {
+    expect(buildDmSummaries([entry(FOLLOWED, { wireKind: 4 })], [])[0].protocol).toBe('nip04');
+    const rows = buildDmSummaries(
+      [
+        entry(FOLLOWED, { wireKind: 14, createdAt: 100 }),
+        entry(FOLLOWED, { wireKind: 4, createdAt: 110 }),
+      ],
+      [],
+    );
+    expect(rows[0].protocol).toBe('nip17');
+  });
+  it.each([100, 1000])('preserves the DM protocol when a newer zap wins at %i', (createdAt) => {
+    const dm = buildDmSummaries([entry(FOLLOWED, { wireKind: 4, createdAt: 10 })], []);
+    const zap = { ...dm[0], protocol: undefined, lastActivityAt: createdAt };
+    expect(mergeSummaries([zap], dm)[0].protocol).toBe('nip04');
+    expect(mergeSummaries([zap], [])[0].protocol).toBeUndefined();
   });
 });

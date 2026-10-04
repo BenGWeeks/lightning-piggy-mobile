@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
+import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
 import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
@@ -26,6 +27,7 @@ const SEND_SETTLE_WATCHDOG_MS = 20_000;
  * The group sibling is `useGroupComposerActions`.
  */
 export function useConversationComposerActions(params: {
+  protocol?: DmProtocol;
   pubkey: string;
   name: string;
   draft: string;
@@ -38,6 +40,7 @@ export function useConversationComposerActions(params: {
 }) {
   const {
     pubkey,
+    protocol = DEFAULT_DM_PROTOCOL,
     name,
     draft,
     setDraft,
@@ -87,7 +90,7 @@ export function useConversationComposerActions(params: {
   // draft is cleared on send either way (Ben-confirmed standard-messaging
   // behaviour) — retry is via the bubble.
   const sendText = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, sendProtocol: DmProtocol = protocol): Promise<boolean> => {
       const createdAt = Math.floor(Date.now() / 1000);
       let eventId: string | null = null;
       // Target relays for THIS send, captured from onRumorReady. Carried onto the
@@ -110,6 +113,7 @@ export function useConversationComposerActions(params: {
       }, SEND_SETTLE_WATCHDOG_MS);
       try {
         const result = await sendDirectMessage(pubkey, text, {
+          protocol: sendProtocol,
           onRumorReady: ({ eventId: id, kind, relays }) => {
             eventId = id;
             targetRelays = relays;
@@ -155,7 +159,7 @@ export function useConversationComposerActions(params: {
         clearTimeout(watchdog);
       }
     },
-    [pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
+    [protocol, pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
   );
 
   const sendFile = useCallback(
@@ -257,9 +261,10 @@ export function useConversationComposerActions(params: {
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders. (1:1 needs no canSend preflight —
   // the peer pubkey is always present from the route params.)
+  const sendAttachmentText = useCallback((text: string) => sendText(text, 'nip17'), [sendText]);
   const strategy = useMemo(
-    () => ({ sendText, sendFile, confirmLocation }),
-    [sendText, sendFile, confirmLocation],
+    () => ({ sendText: sendAttachmentText, sendMessage: sendText, sendFile, confirmLocation }),
+    [sendAttachmentText, sendText, sendFile, confirmLocation],
   );
 
   const actions = useComposerActions({

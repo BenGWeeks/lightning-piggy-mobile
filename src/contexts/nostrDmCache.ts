@@ -322,6 +322,26 @@ export function mergeConversationMessages(
 }
 
 /**
+ * Carry still-pending optimistic local- rows from the in-memory thread onto a
+ * freshly fetched list. A thread fetch that read the store BEFORE the
+ * optimistic append committed would otherwise replace the list without the
+ * just-sent bubble. NIP-17 hides this race (the self-wrap echo triggers a
+ * reload) but a NIP-04 send has no self echo on the live sub, so the first
+ * message in a new conversation vanished until the thread was reopened.
+ * Rows whose echo IS in `fetched` collapse via `dedupeLocalEchoes`.
+ */
+export function keepPendingLocalRows(
+  current: ConversationMessage[],
+  fetched: ConversationMessage[],
+): ConversationMessage[] {
+  const fetchedIds = new Set(fetched.map((m) => m.id));
+  const pending = current.filter(
+    (m) => m.id.startsWith(LOCAL_DM_ID_PREFIX) && !fetchedIds.has(m.id),
+  );
+  return pending.length === 0 ? fetched : dedupeLocalEchoes([...fetched, ...pending]);
+}
+
+/**
  * Read-side echo dedup for a single store read (#850). `upsertDmMessages`
  * retires a matched local- row when its echo lands, but the two writes can
  * race (optimistic append vs live-sub echo), so a read may still see both

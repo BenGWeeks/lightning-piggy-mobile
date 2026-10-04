@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useConversationProtocol } from '../hooks/useConversationProtocol';
+import ConversationProtocolControl from '../components/ConversationProtocolControl';
 import {
   View,
   Text,
@@ -143,6 +145,11 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
+  const { protocol, setProtocol } = useConversationProtocol(
+    pubkey,
+    route.params.protocol,
+    messages,
+  );
   // Profiles resolved from `nostr:` contact references the other party has
   // shared in this conversation — see useSharedContactProfiles. Keyed by hex
   // pubkey; a `null` value means the kind-0 lookup ran and came back empty.
@@ -323,6 +330,7 @@ const ConversationScreen: React.FC = () => {
     handleSendVoiceNote,
     shareNwcWallet,
   } = useConversationComposerActions({
+    protocol,
     pubkey,
     name,
     draft,
@@ -615,6 +623,7 @@ const ConversationScreen: React.FC = () => {
             {name}
           </Text>
         </TouchableOpacity>
+        <ConversationProtocolControl protocol={protocol} onSelect={setProtocol} />
       </View>
 
       {/* KeyboardStickyView (below) floats the composer above the IME

@@ -2224,5 +2224,22 @@
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Your delivery address isn't sent with the order — {{seller}} will ask for it in your chat."
     }
+  },
+  "dmProtocol": {
+    "label": "Protocol: {{protocol}}",
+    "title": "Messaging protocol",
+    "privateMessages": "Private messages",
+    "nip17": {
+      "badge": "Recommended",
+      "description": "Hides who you’re talking to from relays; works with most modern Nostr apps."
+    },
+    "marmot": {
+      "badge": "Coming soon",
+      "description": "End-to-end encrypted with MLS, used by White Noise."
+    },
+    "nip04": {
+      "badge": "Legacy",
+      "description": "Older format; message content is encrypted but relays can see who you’re messaging. For apps that don’t support NIP-17 yet."
+    }
   }
 }

@@ -1,3 +1,5 @@
+import * as nip19 from 'nostr-tools/nip19';
+import { protocolForWireKind, type DmProtocol } from './dmProtocol';
 import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import { parsePoll, isPollVoteMessage } from './pollMessage';
@@ -29,6 +31,7 @@ export interface ConversationSummary {
   /** Zap comment on the last interaction, if any. */
   lastComment: string;
   anonymous: boolean;
+  protocol?: DmProtocol;
 }
 
 function displayNameFor(
@@ -180,8 +183,6 @@ export interface DmInboxEntry {
   rumorId?: string;
 }
 
-import * as nip19 from 'nostr-tools/nip19';
-
 /** Generates the display name shown when we have no kind-0 profile yet.
  * Prefers an npub prefix (what the rest of the app uses when copying a
  * pubkey for users) over raw hex. Returns the pubkey lowercased. */
@@ -310,6 +311,7 @@ export function buildDmSummaries(
       lastDirection: entry.fromMe ? 'outgoing' : 'incoming',
       lastComment: entry.text,
       anonymous: false,
+      protocol: protocolForWireKind(entry.wireKind) ?? undefined,
     });
   }
 
@@ -361,6 +363,7 @@ export function mergeSummaries(
       const preferDmPreview = diff <= DM_PREVIEW_PREFERENCE_WINDOW_SEC;
       merged.push({
         ...newest,
+        protocol: d.protocol,
         lastComment: preferDmPreview ? d.lastComment : newest.lastComment,
         lastAmountSats: preferDmPreview ? 0 : newest.lastAmountSats,
         lastDirection: newest.lastDirection,

@@ -31,6 +31,8 @@ export interface ComposerSendStrategy {
   /** Send a plaintext payload (message / GIF URL / geo / contact share). Owns
    *  the optimistic append. Returns true on success. */
   sendText: (text: string) => Promise<boolean>;
+  /** Optional typed-message strategy; attachments continue through sendText. */
+  sendMessage?: (text: string) => Promise<boolean>;
   /** Send an encrypted file (voice note or image, NIP-17 kind-15). Owns the
    *  optimistic append. Returns true on success. The `kind` lets the wrapper
    *  pick the right failure copy ("voice note" vs "image"). */
@@ -88,7 +90,7 @@ export function useComposerActions({
     if (!text || sending) return;
     setSending(true);
     try {
-      const ok = await strategy.sendText(text);
+      const ok = await (strategy.sendMessage ?? strategy.sendText)(text);
       if (ok) setDraft('');
     } finally {
       setSending(false);
