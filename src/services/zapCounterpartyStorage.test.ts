@@ -120,3 +120,22 @@ describe('zapCounterpartyStorage — write-version + persistence', () => {
     expect(map.get('hash-persist')).toBeNull();
   });
 });
+
+it('does not cache a miss when identity changes during the storage read', async () => {
+  let finish!: (value: string | null) => void;
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        finish = r;
+      }),
+  );
+  const writes = jest.mocked(AsyncStorage.setItem).mock.calls.length;
+  let current = true;
+  const recording = storage.recordOutgoingMiss('stale-miss', () => current);
+  current = false;
+  finish(null);
+  await recording;
+  expect(storage.getWriteVersion()).toBe(0);
+  expect((await storage.getMany(['stale-miss'])).has('stale-miss')).toBe(false);
+  expect(jest.mocked(AsyncStorage.setItem).mock.calls.length).toBe(writes);
+});

@@ -1,5 +1,12 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
-import { connect, disconnect, getBalance, isConnectionInProgress, payInvoice } from './nwcService';
+import {
+  connect,
+  disconnect,
+  getBalance,
+  isConnectionInProgress,
+  payInvoice,
+  listTransactions,
+} from './nwcService';
 import { isConnectionError } from './nwcErrors';
 
 jest.mock('@getalby/sdk', () => ({ NostrWebLNProvider: jest.fn() }));
@@ -23,6 +30,7 @@ function provider(balance: number) {
   return {
     enable: jest.fn(async () => {}),
     getBalance: jest.fn(async () => ({ balance })),
+    listTransactions: jest.fn(async () => ({ transactions: [] })),
     lookupInvoice: jest.fn(async (): Promise<{ preimage?: string }> => ({})),
     close: jest.fn(),
     client: {
@@ -211,4 +219,44 @@ it('keeps a connect in progress until its initial balance probe finishes', async
   probe.resolve({ balance: 111 });
   await expect(pending).resolves.toEqual({ success: true, balance: 111 });
   expect(isConnectionInProgress('lifecycle')).toBe(false);
+});
+
+it('does not reconnect a stale transaction request after identity changes', async () => {
+  await connect('lifecycle', URL);
+  const slow = deferred<{ transactions: never[] }>();
+  old.listTransactions.mockReturnValueOnce(slow.promise);
+  let current = true;
+  const pending = listTransactions('lifecycle', () => current).catch((e: Error) => e);
+  await Promise.resolve();
+  current = false;
+  disconnect('lifecycle');
+  await connect('lifecycle', URL);
+  // A late failure is as dangerous as a late success: neither may reconnect.
+  slow.resolve(Promise.reject(new Error('late relay failure')) as never);
+  expect(await pending).toBeInstanceOf(Error);
+  expect(NostrWebLNProvider).toHaveBeenCalledTimes(2);
+  expect(fresh.close).not.toHaveBeenCalled();
+});
+
+it('shares a retry reconnect across concurrent transaction requests', async () => {
+  jest.useFakeTimers();
+  try {
+    await connect('lifecycle', URL);
+    old.listTransactions
+      .mockRejectedValueOnce(new Error('relay failure'))
+      .mockRejectedValueOnce(new Error('relay failure'));
+    const enabling = deferred<void>();
+    fresh.enable.mockReturnValueOnce(enabling.promise);
+    const first = listTransactions('lifecycle');
+    const second = listTransactions('lifecycle');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(NostrWebLNProvider).toHaveBeenCalledTimes(2);
+    enabling.resolve();
+    await jest.advanceTimersByTimeAsync(1500);
+    await expect(first).resolves.toEqual([]);
+    await expect(second).resolves.toEqual([]);
+    expect(NostrWebLNProvider).toHaveBeenCalledTimes(2);
+  } finally {
+    jest.useRealTimers();
+  }
 });

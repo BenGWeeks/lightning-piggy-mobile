@@ -1,3 +1,4 @@
+import { listTransactionsWithRetry } from './nwcTransactionRetry';
 import { NostrWebLNProvider } from '@getalby/sdk';
 import type { Nip47GetInfoResponse } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
@@ -448,7 +449,11 @@ function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void
  * wallet was disconnected / re-pointed instead, throw a connection error so the
  * payment outcome stays "unknown" rather than "failed".
  */
-async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
+async function reconnect(
+  walletId: string,
+  isActive: () => boolean = () => true,
+): Promise<NostrWebLNProvider> {
+  if (!isActive()) throw new Error(CONNECTION_REPLACED_MESSAGE);
   const url = nwcUrls.get(walletId);
   if (!url) throw new Error('No NWC URL stored for reconnect');
 
@@ -456,7 +461,7 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   const attempt = beginConnectionAttempt(walletId);
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
   const isCurrent = () =>
-    isLatestConnectionAttempt(walletId, attempt) && nwcUrls.get(walletId) === url;
+    isLatestConnectionAttempt(walletId, attempt) && nwcUrls.get(walletId) === url && isActive();
   try {
     closeQuietly(replaced);
     patchRelayPublish(provider, walletId);
@@ -477,17 +482,21 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   closeQuietly(provider);
   await waitForNewestConnectionAttempt(walletId);
   const newer = providers.get(walletId);
-  if (newer && newer !== replaced && nwcUrls.get(walletId) === url) return newer;
+  if (isActive() && newer && newer !== replaced && nwcUrls.get(walletId) === url) return newer;
   throw new Error(CONNECTION_REPLACED_MESSAGE);
 }
 
 // Shared by ensureConnected and payInvoice's publish-failure retry so neither can
 // supersede the other's handshake; cleared once settled so a later drop retries.
-function reconnectOnce(walletId: string): Promise<NostrWebLNProvider> {
+function reconnectOnce(
+  walletId: string,
+  isActive: () => boolean = () => true,
+): Promise<NostrWebLNProvider> {
+  if (!isActive()) return Promise.reject(new Error(CONNECTION_REPLACED_MESSAGE));
   let pending = reconnectsInFlight.get(walletId);
   if (!pending) {
     if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
-    pending = reconnect(walletId).finally(() => {
+    pending = reconnect(walletId, isActive).finally(() => {
       if (reconnectsInFlight.get(walletId) === pending) reconnectsInFlight.delete(walletId);
     });
     reconnectsInFlight.set(walletId, pending);
@@ -504,15 +513,19 @@ export function isConnectionInProgress(walletId: string): boolean {
  * Ensure the NWC provider is connected. Reconnect if the WebSocket dropped.
  * Returns null if no provider exists for this wallet.
  */
-async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | null> {
+async function ensureConnected(
+  walletId: string,
+  isActive: () => boolean = () => true,
+): Promise<NostrWebLNProvider | null> {
+  if (!isActive()) return null;
   let provider = providers.get(walletId);
   if (!provider) return null;
 
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
-    provider = await reconnectOnce(walletId);
+    provider = await reconnectOnce(walletId, isActive);
   }
-  return provider;
+  return isActive() ? provider : null;
 }
 
 const PAY_INVOICE_REPLY_TIMEOUT_MS = 90_000;
@@ -784,8 +797,11 @@ function extractPaymentHash(bolt11: string): string | null {
   }
 }
 
-export async function getInfo(walletId: string): Promise<{ alias: string; lud16?: string } | null> {
-  const provider = await ensureConnected(walletId);
+export async function getInfo(
+  walletId: string,
+  isActive: () => boolean = () => true,
+): Promise<{ alias: string; lud16?: string } | null> {
+  const provider = await ensureConnected(walletId, isActive);
   if (!provider) return null;
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
@@ -799,38 +815,18 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   }
 }
 
-export async function listTransactions(walletId: string): Promise<any[]> {
-  let provider = await ensureConnected(walletId);
+export async function listTransactions(
+  walletId: string,
+  isActive: () => boolean = () => true,
+): Promise<any[]> {
+  const provider = await ensureConnected(walletId, isActive);
   if (!provider) throw new Error(`NWC wallet ${walletId} not connected — cannot list transactions`);
-  // Retry up to 3 times. The LNbits Nostrclient relay has a sporadic
-  // transport race where the first request after startup (or after a
-  // period of inactivity) is silently dropped — the server never logs
-  // it, the client hits the NWC SDK's ~60s reply timeout. Retrying with
-  // a relay reconnect between attempts usually clears it on attempt 2.
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      // LNbits's NWC provider defaults to `limit: 10` (see
-      // extensions/nwcprovider/tasks.py::_on_list_transactions), so an empty
-      // request only returns the 10 most recent payments. 50 is a balance
-      // between showing real history and keeping the fetch + follow-up zap
-      // resolver fast; bumping higher (100+) made first-load noticeably slow.
-      const result = await provider.listTransactions({ limit: 50 });
-      return result.transactions || [];
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`listTransactions attempt ${attempt}/${maxAttempts} for ${walletId}:`, msg);
-      if (attempt < maxAttempts) {
-        // Reconnect the relay before retrying — a stale subscription
-        // is the most common cause of the drop.
-        try {
-          provider = await reconnect(walletId);
-        } catch {}
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-    }
-  }
-  throw new Error(`listTransactions for ${walletId} failed after ${maxAttempts} attempts`);
+  return listTransactionsWithRetry(
+    walletId,
+    provider,
+    () => reconnectOnce(walletId, isActive),
+    isActive,
+  );
 }
 
 // A BOLT-11 payment hash is a SHA-256 digest — 64 hex chars.

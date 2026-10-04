@@ -7,7 +7,7 @@ import * as nostrService from '../services/nostrService';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import * as walletStorage from '../services/walletStorageService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import { WalletProvider, useWallet } from './WalletContext';
+import { WalletProvider, useWallet, useWalletLive } from './WalletContext';
 
 jest.mock('expo-secure-store', () => {
   const store = new Map<string, string>();
@@ -24,6 +24,7 @@ jest.mock('../services/nwcService', () => ({
   listTransactions: jest.fn(async () => []),
   disconnect: jest.fn(),
   getInfo: jest.fn(async () => null),
+  lookupInvoice: jest.fn(async () => null),
   isWalletConnected: jest.fn(() => true),
   isSocketConnected: jest.fn(() => true),
   isRelayInCooldown: jest.fn(() => false),
@@ -62,8 +63,10 @@ function deferred<T>() {
 }
 
 let latest: ReturnType<typeof useWallet> | undefined;
+let latestLive: ReturnType<typeof useWalletLive> | undefined;
 function Probe() {
   latest = useWallet();
+  latestLive = useWalletLive();
   return null;
 }
 
@@ -158,7 +161,9 @@ it('drops balance and transaction reads that finish after a B → C → B round 
   await flushStartup();
   await act(async () => walletStorage.setActivePubkeyForWalletStorage('B'));
   // W hydrates with no cached history, which kicks off its first tx fetch.
-  await waitFor(() => expect(nwcService.listTransactions).toHaveBeenCalledWith('W'));
+  await waitFor(() =>
+    expect(nwcService.listTransactions).toHaveBeenCalledWith('W', expect.any(Function)),
+  );
   const refreshing = latest!.refreshActiveBalance();
   expect(nwcService.getBalance).toHaveBeenCalledWith('W');
 
@@ -270,4 +275,48 @@ describe('deferred zap attribution after a transaction fetch', () => {
     expect(await zapResolverFingerprintStorage.get('W')).toBeNull();
     view.unmount();
   });
+});
+
+it('ignores a pending expected-payment result after B → C → B', async () => {
+  walletStorage.setActivePubkeyForWalletStorage(null);
+  await AsyncStorage.clear();
+  const metadata = {
+    id: 'W',
+    alias: 'W',
+    theme: 'lightning-piggy',
+    order: 0,
+    walletType: 'nwc',
+    lightningAddress: null,
+  };
+  await AsyncStorage.multiSet([
+    ['wallet_list_B', JSON.stringify([metadata])],
+    ['balance_W', '42'],
+  ]);
+  const view = renderProvider();
+  await flushStartup();
+  await act(async () => walletStorage.setActivePubkeyForWalletStorage('B'));
+  await waitFor(() => expect(latest?.wallets[0]?.id).toBe('W'));
+  const lookup = deferred<never>();
+  const balance = deferred<number | null>();
+  jest.mocked(nwcService.lookupInvoice).mockReturnValueOnce(lookup.promise);
+  jest.mocked(nwcService.getBalance).mockReturnValueOnce(balance.promise);
+  jest.useFakeTimers();
+  try {
+    act(() => latest!.expectPayment('W', 'hash', 50));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+    expect(nwcService.lookupInvoice).toHaveBeenCalled();
+    await act(async () => walletStorage.setActivePubkeyForWalletStorage('C'));
+    await act(async () => walletStorage.setActivePubkeyForWalletStorage('B'));
+    await act(async () => {
+      lookup.resolve({ paid: true } as never);
+      balance.resolve(999);
+    });
+    expect(latest?.wallets[0]?.balance).toBe(42);
+    expect(latestLive?.lastIncomingPayment).toBeNull();
+  } finally {
+    view.unmount();
+    jest.useRealTimers();
+  }
 });

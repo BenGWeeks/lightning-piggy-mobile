@@ -36,6 +36,7 @@ interface Params {
   // count (the effect's re-arm trigger). Live reads go through
   // `walletsRef` so additions/removals mid-poll are honoured.
   wallets: WalletState[];
+  captureIdentity: () => () => boolean;
   // Ref to the latest wallet list; read inside the poll tick so the
   // interval doesn't need to re-arm on every balance change.
   walletsRef: MutableRefObject<WalletState[]>;
@@ -44,7 +45,12 @@ interface Params {
   updateWalletInState: (walletId: string, updates: Partial<WalletState>) => void;
 }
 
-export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInState }: Params): void {
+export function useOnchainIncomingPoll({
+  wallets,
+  walletsRef,
+  updateWalletInState,
+  captureIdentity,
+}: Params): void {
   // Track count of on-chain wallets as the dep so this effect re-arms
   // when the user adds / removes an on-chain wallet, but doesn't tear
   // down on every balance tick (the full `wallets` array would).
@@ -59,9 +65,12 @@ export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInStat
     // same wallet. If a sweep is still in flight, later triggers are
     // dropped — the next tick catches up.
     let inFlight = false;
+    let disposed = false;
 
     const refreshAll = async () => {
-      if (inFlight) return;
+      if (inFlight || disposed) return;
+      const isIdentityCurrent = captureIdentity();
+      const isCurrent = () => !disposed && isIdentityCurrent();
       inFlight = true;
       try {
         // Re-read through walletsRef so additions/removals between the
@@ -75,12 +84,14 @@ export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInStat
         // resource usage (CPU/network/battery) smooth and avoids
         // shared-connection races.
         for (const w of onchain) {
+          if (!isCurrent()) return;
           try {
             const b = await onchainService.getBalance(w.id);
             // Only commit when the balance actually changed — an unchanged
             // write still costs an AsyncStorage round-trip (and needlessly
             // re-runs the receive detector).
-            if (b !== null && b !== w.balance) updateWalletInState(w.id, { balance: b });
+            if (isCurrent() && b !== null && b !== w.balance)
+              updateWalletInState(w.id, { balance: b });
           } catch {
             // Transient Electrum / Esplora failures are routine; the next
             // tick will retry. Log only in dev so we don't spam production
@@ -118,8 +129,9 @@ export function useOnchainIncomingPoll({ wallets, walletsRef, updateWalletInStat
       }
     });
     return () => {
+      disposed = true;
       stopPoll();
       sub.remove();
     };
-  }, [onchainWalletCount, walletsRef, updateWalletInState]);
+  }, [onchainWalletCount, walletsRef, updateWalletInState, captureIdentity]);
 }
