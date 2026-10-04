@@ -89,6 +89,8 @@ it('resets the indicator and baseline on account/thread/filter changes and ignor
   rerender({ scope: 'a', entries: [entry('new', 2)], loading: false });
   expect(result.current.hasNewMessages).toBe(true);
   rerender({ scope: 'b', entries: [entry('history', 50)], loading: true });
+  expect(result.current.hasNewMessages).toBe(false);
+  expect(result.current.atEdge).toBe(true);
   rerender({ scope: 'b', entries: [entry('history', 50)], loading: false });
   expect(result.current.hasNewMessages).toBe(false);
   expect(result.current.atEdge).toBe(true);

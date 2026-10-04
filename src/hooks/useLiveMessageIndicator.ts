@@ -21,6 +21,7 @@ export function useLiveMessageIndicator({
   scrollToLatest: (animated: boolean) => void;
 }) {
   const previous = useRef<{ scope: string; ids: Set<string>; newest: number } | null>(null);
+  const activeScope = useRef(scope);
   const nearEdge = useRef(true);
   const scrollRef = useRef(scrollToLatest);
   scrollRef.current = scrollToLatest;
@@ -28,6 +29,13 @@ export function useLiveMessageIndicator({
   const [hasNewMessages, setHasNewMessages] = useState(false);
 
   useEffect(() => {
+    if (activeScope.current !== scope) {
+      activeScope.current = scope;
+      previous.current = null;
+      nearEdge.current = true;
+      setAtEdge(true);
+      setHasNewMessages(false);
+    }
     if (loading) return;
     const old = previous.current;
     const newest = entries.reduce((max, entry) => Math.max(max, entry.createdAt), -Infinity);
