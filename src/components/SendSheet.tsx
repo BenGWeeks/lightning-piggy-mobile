@@ -38,6 +38,7 @@ import {
 import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useSendSheetInput } from '../hooks/useSendSheetInput';
+import { useSendInputMode } from '../hooks/useSendInputMode';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSend';
@@ -49,7 +50,7 @@ import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressO
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
-import SendModeTabs, { type SendInputMode } from './SendModeTabs';
+import SendModeTabs from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
 import { perfLog } from '../utils/perfLog';
@@ -69,7 +70,6 @@ interface Props {
   zapEventId?: string;
 }
 
-type InputMode = SendInputMode;
 type Step = 'main' | 'amount';
 
 let __sendSheetFirstVisibleLogged = false;
@@ -108,7 +108,6 @@ const SendSheet: React.FC<Props> = ({
   const [decoded, setDecoded] = useState<DecodedInvoice | null>(null);
   const [sending, setSending] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const [inputMode, setInputMode] = useState<InputMode>('scan');
   const [pasteText, setPasteText] = useState('');
   // Remount key for the paste BottomSheetTextInput. The field is intentionally
   // uncontrolled during typing (`defaultValue`, no `value` prop) so a slow
@@ -128,6 +127,18 @@ const SendSheet: React.FC<Props> = ({
   // See pasteTextKey above — same uncontrolled-remount pattern; programmatic
   // sets go through applyMemo, onChangeText stays a bare setMemo.
   const [memoKey, setMemoKey] = useState(0);
+  // Freshest paste-field text, written synchronously by onChangeText and
+  // applyPasteText — the only two writers of `pasteText` — so it can run ahead
+  // of the state (see the refs block below). Deliberately NOT synced in render:
+  // a render whose `pasteText` still lags a keystroke would rewind it. Declared
+  // here so useSendInputMode can see native typing that hasn't committed yet.
+  const pasteTextRef = useRef(pasteText);
+  const { inputMode, resetInputModeForOpen, selectInputMode } = useSendInputMode({
+    visible,
+    permission,
+    hasInput: scanned || pasteText.length > 0,
+    liveInputRef: pasteTextRef,
+  });
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
@@ -147,12 +158,15 @@ const SendSheet: React.FC<Props> = ({
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
   const dismissedInFlightRef = useRef(false);
+  // Bumped on every open, close and new target; see the deferred initialAddress prefill.
+  const openSessionRef = useRef(0);
 
   // Programmatic value changes for the uncontrolled paste/memo fields go through
   // these helpers, which bump the remount key so the input picks up the new
   // `defaultValue`. onChangeText must NOT use them — it stays a bare setter (no
   // key bump) so native typing is never fed back through React (#873).
   const applyPasteText = useCallback((v: string) => {
+    pasteTextRef.current = v;
     setPasteText(v);
     setPasteTextKey((k) => k + 1);
   }, []);
@@ -195,6 +209,7 @@ const SendSheet: React.FC<Props> = ({
   const walletName = selectedWallet ? walletLabel(selectedWallet) : t('sendSheet.walletFallback');
 
   useEffect(() => {
+    openSessionRef.current += 1;
     if (visible) {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
@@ -203,9 +218,10 @@ const SendSheet: React.FC<Props> = ({
       setScanned(false);
       setSending(false);
       // Default to the paste tab unless the camera is actually usable — opening
-      // on a scanner that can't start (permission unresolved/denied) is a
-      // dead-end; the user can still switch to Scan, which prompts for access.
-      setInputMode(initialAddress || !permission?.granted ? 'paste' : 'scan');
+      // on a scanner that can't start (permission denied) is a dead-end; the
+      // user can still switch to Scan, which prompts for access. A first open
+      // before permission resolves may still move to Scan (useSendInputMode).
+      resetInputModeForOpen(initialAddress);
       applyPasteText(initialAddress || '');
       setSatsValue('');
       setStep('main');
@@ -219,14 +235,25 @@ const SendSheet: React.FC<Props> = ({
       setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
-        // Use setTimeout to process after state reset
-        setTimeout(() => processInput(initialAddress), 0);
+        // Use setTimeout to process after state reset. The sheet stays mounted
+        // across opens, so the cleanup cancels it on close/unmount and the
+        // session check drops it if it still fires after a reopen — a stale
+        // prefill must never overwrite the next open's target.
+        const session = openSessionRef.current;
+        const prefill = setTimeout(() => {
+          if (openSessionRef.current === session) processInput(initialAddress);
+        }, 0);
+        return () => clearTimeout(prefill);
       }
     } else {
       bottomSheetRef.current?.dismiss();
     }
+    // Also keyed on the target: the sheet stays mounted and visible, so a new
+    // navigateToSend (e.g. a deep link) only changes these props and must start
+    // a fresh send. Nothing else (onClose identity, balance ticks) re-runs it,
+    // so an unrelated render keeps the in-progress entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, initialAddress, initialPicture, recipientPubkey, recipientName, zapEventId]);
 
   useEffect(() => {
     if (!visible) return;
@@ -237,9 +264,8 @@ const SendSheet: React.FC<Props> = ({
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). Synced in render so refs are current before any failure callback.
-  const pasteTextRef = useRef(pasteText);
-  pasteTextRef.current = pasteText;
+  // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). invoiceDataRef is synced in render so it is current before any failure callback.
+  // (pasteTextRef is declared above, before useSendInputMode, and written only by its setters.)
   const invoiceDataRef = useRef(invoiceData);
   invoiceDataRef.current = invoiceData;
   // Freshest-value refs for the two uncontrolled inputs. Because the fields are
@@ -247,9 +273,9 @@ const SendSheet: React.FC<Props> = ({
   // React state under JS-thread load — the accepted tradeoff of the #873 fix. To
   // stop any *consumer* reading a stale value, onChangeText also writes the
   // native string into these refs synchronously (below), and the submit paths
-  // (`handlePasteSubmit`, `handleSend`) read the ref, not the state. The
-  // render-time assignments above/here keep the refs correct for *programmatic*
-  // sets (applyPasteText/applyMemo), which don't fire onChangeText. Reading the
+  // (`handlePasteSubmit`, `handleSend`) read the ref, not the state.
+  // *Programmatic* sets don't fire onChangeText: applyPasteText writes
+  // pasteTextRef itself, and the render-time assignment here covers applyMemo. Reading the
   // ref is therefore never staler than reading state — strictly a belt-and-
   // suspenders improvement that doesn't reintroduce the keystroke race.
   const memoRef = useRef(memo);
@@ -271,9 +297,9 @@ const SendSheet: React.FC<Props> = ({
     setIsLnurl(false);
     setIsOnchainAddress(false);
     setStep('main');
-    setInputMode('paste');
+    selectInputMode('paste');
     applyPasteText(prefill);
-  }, [applyPasteText]);
+  }, [applyPasteText, selectInputMode]);
 
   // Resolution failed (typo / unreachable): toast the friendly error, then
   // hand the user straight back to the editable address (#871).
@@ -843,7 +869,7 @@ const SendSheet: React.FC<Props> = ({
               )}
 
               {/* Mode tabs (icon toggles: QR scan / paste / NFC) */}
-              {!scanned && <SendModeTabs mode={inputMode} onChange={setInputMode} />}
+              {!scanned && <SendModeTabs mode={inputMode} onChange={selectInputMode} />}
 
               {/* Scanner, paste input, or NFC reader */}
               {!scanned ? (
