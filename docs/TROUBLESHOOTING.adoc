@@ -772,3 +772,22 @@ Keep `micro-packed` in the `transformIgnorePatterns` allow-list in
 A checkout whose `node_modules` symlinks to a sibling repository can produce Metro lazy-bundle URLs containing `/../<sibling>/node_modules/...`. Those requests may return 404 after URL normalization. In this case, importing an on-chain test wallet displayed `Failed to validate mnemonic` even though the recovery phrase was valid.
 
 Use a dependency directory local to the test checkout, restart Metro with `--clear`, and reload the development client. Check the failed lazy-bundle request before changing mnemonic validation or wallet credentials. Do not print recovery phrases while diagnosing the failure.
+
+=== Maestro secret-mode setup fails or disables an enabled mode
+
+`flow-072-secret-mode.yaml` must return from About using
+`account-back-button` before selecting `tab-home`: account drawer screens have
+no tab bar. Navigation is persisted across launches, so starting the app alone
+is not a Home-screen precondition. Triple taps should use Maestro's rapid
+`tapOn.repeat` to fit the release build's one-second gesture window, and the
+flow should first check the version's `secret` marker to avoid toggling it off.
+
+For Home's wallet carousel, anchor directional swipes to `wallet-card-.*`.
+A global scroll starts near the screen centre and can gesture on the transaction
+list instead of the carousel. Dismiss the Add Wallet sheet with an element-scoped
+downward swipe from
+`Bottom sheet handle`; Android Back can change the underlying navigation
+without dismissing this portal. Backdrop nodes cover the entire screen, so
+tapping their centre can hit a wallet option instead of the uncovered backdrop.
+Run the secret-mode flow alone for a
+nonfinancial check; the full curated runner imports wallets and moves funds.

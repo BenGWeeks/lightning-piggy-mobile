@@ -1,0 +1,29 @@
+COMPLETED  launchAppCommand 
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'tab-home|account-back-button', 'optional': False}}
+COMPLETED  waitForAnimationToEndCommand 
+SKIPPED    runFlowCommand 
+COMPLETED  tapOnElement {'idRegex': 'account-back-button', 'optional': True}
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'tab-home', 'optional': False}}
+COMPLETED  tapOnElement {'idRegex': 'tab-home', 'optional': False}
+COMPLETED  tapOnElement {'idRegex': 'profile-icon', 'optional': False}
+COMPLETED  tapOnElement {'idRegex': 'drawer-row-about', 'optional': False}
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'version-text', 'optional': False}}
+COMPLETED  runFlowCommand 
+COMPLETED  tapOnElement {'idRegex': 'version-text', 'optional': False}
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'secret-mode-celebration-ok', 'optional': False}}
+COMPLETED  tapOnElement {'idRegex': 'secret-mode-celebration-ok', 'optional': False}
+COMPLETED  assertConditionCommand {'visible': {'textRegex': 'v.*secret.*', 'optional': False}}
+COMPLETED  takeScreenshotCommand secret-mode-enabled
+COMPLETED  tapOnElement {'idRegex': 'account-back-button', 'optional': False}
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'tab-home', 'optional': False}}
+COMPLETED  tapOnElement {'idRegex': 'tab-home', 'optional': False}
+COMPLETED  repeatCommand 
+SKIPPED    runFlowCommand 
+COMPLETED  tapOnElement {'idRegex': 'add-wallet-card', 'optional': False}
+COMPLETED  scrollUntilVisible 
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'wallet-type-mnemonic', 'optional': False}}
+COMPLETED  takeScreenshotCommand secret-mode-import-option
+COMPLETED  swipeCommand {'direction': 'DOWN', 'elementSelector': {'textRegex': 'Bottom sheet handle', 'optional': False}, 'duration': 300, 'optional': False}
+COMPLETED  waitForAnimationToEndCommand 
+COMPLETED  assertConditionCommand {'visible': {'idRegex': 'tab-home', 'optional': False}}
+COMPLETED  assertConditionCommand {'notVisible': {'textRegex': 'Bottom sheet handle', 'optional': False}}
