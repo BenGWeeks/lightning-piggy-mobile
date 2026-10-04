@@ -405,8 +405,16 @@ jobs:
           }
           ls -la dist/
 
+      - name: Install Android alignment tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android build tools
+        run: sdkmanager 'build-tools;35.0.0'
+
       - name: Verify 16 KB native library alignment
-        run: bash scripts/check-elf-alignment.sh dist/*.apk
+        run: |
+          bash scripts/check-elf-alignment.sh dist/*.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/*.apk
 
       - name: Upload APK to Release
         run: |
