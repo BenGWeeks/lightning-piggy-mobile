@@ -1,0 +1,9 @@
+= PR #1104 emulator navigation check
+
+Warmachine `lightningpiggy_api34`, Android API 34, `emulator-5554`, 4 October 2026. Source `12e6ff8e`; generated Android debugging enabled locally. The Satmo emulator and Pixel were not used.
+
+Maestro passed: launch Preview, Explore, Open map, assert MapScreen, screenshot, Back. Initial attempt tapped the mini-map container instead of the explicit Open map action and did not navigate; the corrected flow passed.
+
+The screenshot is unchanged and contains no private data. The Preview profile contains only public fixture wallet metadata without an NWC connection string. No signed-in author, real Piglets, edits, publications or financial operations were involved.
+
+IMPORTANT: the map canvas remained blank and showed zero merchants in this run. This screenshot proves navigation and screen controls only, not successful basemap/dataset loading or edited-pin refresh. The owned-pin fix is verified by the 14 hook/coalescing regression tests, including a regression that fails against the original one-shot fetch guard. End-to-end edited-pin and basemap validation remain pending.
