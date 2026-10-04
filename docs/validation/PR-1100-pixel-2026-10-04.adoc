@@ -28,6 +28,19 @@ intercepted the notification and suppressed visual effects; this test proves
 notification posting, not an audible alert or an unrestricted heads-up alert.
 The phone's Do Not Disturb preference was not changed for this check.
 
+== Physical lock-screen screenshot
+
+image::../screenshots/PR-1100/02-pixel-locked-notification.png[Lightning Piggy Preview notification in the locked Pixel notification shade, width=320]
+
+Captured at 17:32 after the earlier payment-delivery test, without reopening
+Preview. Android's keyguard still reported `showing=true` and
+`inputRestricted=true`. GrapheneOS hides the notification text while locked;
+expanding this notification requested authentication. The visible app label
+is therefore lock-screen presence evidence, not a screenshot of the payment
+title. The title and body above were independently read from Android's
+notification record. Unrelated notifications were blurred using ImageMagick;
+the Lightning Piggy notification pixels were retained unchanged.
+
 == Automated validation
 
 The full suite passed: 185 suites and 2,123 tests. Focused watcher tests
