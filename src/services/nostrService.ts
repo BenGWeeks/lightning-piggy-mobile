@@ -1439,8 +1439,8 @@ export function subscribeAuthorNotes(input: {
         });
       },
       oneose: () => {
-        // pool.subscribeMany fires oneose per relay; collapse to one
-        // callback so consumers don't need their own dedupe.
+        // pool.subscribeMany aggregates EOSE (fires once after EVERY relay
+        // has EOSE'd); keep this guard so a re-armed sub can't double-fire.
         if (eoseFired) return;
         eoseFired = true;
         input.onEose?.();

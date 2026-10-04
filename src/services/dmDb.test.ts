@@ -20,6 +20,7 @@ import {
   importDmMessages,
   updateDmDeliveryStatuses,
   getConversationMessages,
+  getOutgoingOrderRows,
   getInboxLatest,
   selectDmWrapIds,
   hasStoredWraps,
@@ -272,6 +273,27 @@ describe('dmDb', () => {
       expect(out[0].rumorId).toBe('rumX');
       expect(out[1].deliveryStatus).toBeUndefined();
       expect(out[1].rumorId).toBeUndefined();
+    });
+  });
+
+  describe('getOutgoingOrderRows', () => {
+    it('returns nothing (no query) for an empty id list', async () => {
+      expect(await getOutgoingOrderRows(OWNER, 'convA', [])).toEqual([]);
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('reads only our own kind-16 rows in the conversation, one escaped LIKE per id', async () => {
+      mockExecute.mockResolvedValueOnce(
+        rowsResult([
+          { owner: OWNER, event_id: 'o1', conversation: 'convA', created_at: 5, sender: OWNER, content: '{"orderId":"abc"}', from_me: 1, wire_kind: 16 }, // prettier-ignore
+        ]),
+      );
+      const rows = await getOutgoingOrderRows(OWNER, 'convA', ['abc', 'x_y%']);
+      expect(rows.map((r) => r.eventId)).toEqual(['o1']);
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toContain('owner = ? AND conversation = ? AND from_me = 1 AND wire_kind = 16');
+      expect(sql).toContain("content LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'");
+      expect(params).toEqual([OWNER, 'convA', '%"orderId":"abc"%', '%"orderId":"x\\_y\\%"%']);
     });
   });
 

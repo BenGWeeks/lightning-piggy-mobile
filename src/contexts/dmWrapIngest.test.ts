@@ -48,6 +48,7 @@ jest.mock('../utils/nip17Unwrap', () => ({
 }));
 
 import { ingestInboxWraps } from './dmWrapIngest';
+import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import type { DmMessageRow } from '../services/dmDb';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 
@@ -99,6 +100,8 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     expect(res.entries).toEqual([
       { id: 'w1', partnerPubkey: ALICE, fromMe: false, createdAt: 100, text: `msg-from-${ALICE.slice(0, 4)}`, wireKind: 14 }, // prettier-ignore
     ]);
+    // A plain DM's preview IS its render text — no duplicate string stored.
+    expect(res.entries[0]).not.toHaveProperty('renderText');
     expect(res.stored).toBe(1);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0]).toEqual({
@@ -135,9 +138,44 @@ describe('dmWrapIngest.ingestInboxWraps', () => {
     });
     expect(res.entries[0].text).toBe('🛒 Order Placed · 21 sats');
     expect(res.entries[0].text).not.toContain('{');
+    // renderText carries the raw order JSON so the conversation thread renders
+    // the order card on the FIRST open (the inbox `text` preview can't be parsed
+    // back into a card). #market
+    expect(res.entries[0].renderText).toBe(orderJson);
     const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
     expect(rows[0].content).toBe(orderJson); // raw order JSON persisted
     expect(rows[0].wireKind).toBe(16);
+  });
+
+  it('does not carry raw content for a kind-16 that is not a parseable order', async () => {
+    // textForRumor falls back to rumor.content for a non-order kind-16 (e.g. a
+    // repost or malformed payload); that raw text must not become renderText.
+    const raw = 'nostr+walletconnect://relay?secret=cafebabe';
+    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: 16, content: raw }));
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('m1')],
+      unwrap,
+      passesFollowGate: () => true,
+    });
+    expect(res.entries[0]).not.toHaveProperty('renderText');
+    expect(res.entries[0].text).not.toContain('cafebabe');
+  });
+
+  it('never carries an NWC wallet-share secret into the inbox entry as renderText', async () => {
+    const secret = 'nostr+walletconnect://relay?secret=deadbeef';
+    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: NWC_SHARE_KIND, content: secret }));
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('n1')],
+      unwrap,
+      passesFollowGate: () => true,
+    });
+    expect(res.entries[0]).not.toHaveProperty('renderText');
+    expect(res.entries[0].text).not.toContain('deadbeef');
+    // The raw content still reaches the encrypted store for the thread view.
+    const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
+    expect(rows[0].content).toBe(secret);
   });
 
   it('skips decrypt for DB-known wraps (decrypt-once) and reports them', async () => {

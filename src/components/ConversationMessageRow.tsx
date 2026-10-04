@@ -192,6 +192,7 @@ function ConversationMessageRow({
               follow-up). Renders nothing for other order types. */}
           <OrderPaymentActions
             order={item.order}
+            expectedAmountSats={item.expectedAmountSats}
             fromMe={item.fromMe}
             isInvoicePaid={isInvoicePaid}
             onPayInvoice={onPayInvoice}
