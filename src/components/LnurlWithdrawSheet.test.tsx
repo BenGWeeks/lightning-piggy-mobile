@@ -2,14 +2,16 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { LnurlWithdrawHost, openLnurlWithdrawSheet } from './LnurlWithdrawSheet';
 
+let mockDismiss: (() => void) | null = null;
 jest.mock('@gorhom/bottom-sheet', () => {
   const R = jest.requireActual('react');
   const RN = jest.requireActual('react-native');
   return {
     BottomSheetModal: R.forwardRef(function Modal(
-      { children }: { children: React.ReactNode },
+      { children, onDismiss }: { children: React.ReactNode; onDismiss: () => void },
       ref: React.Ref<unknown>,
     ) {
+      mockDismiss = onDismiss;
       R.useImperativeHandle(ref, () => ({ present: jest.fn(), dismiss: jest.fn() }));
       return R.createElement(RN.View, null, children);
     }),
@@ -97,4 +99,22 @@ it('does not mint an invoice when a scanned voucher cannot resolve', async () =>
   expect(mockMakeInvoice).not.toHaveBeenCalled();
   expect(mockClaim).not.toHaveBeenCalled();
   expect(screen.queryByTestId('lnurl-withdraw-claim-button')).toBeNull();
+});
+
+it('resolves the same voucher again after dismissing and reopening, with confirmation reset', async () => {
+  render(<LnurlWithdrawHost />);
+  const voucher = 'lnurlw://example.com/voucher';
+  await act(async () => {
+    openLnurlWithdrawSheet(voucher, 'first', true);
+  });
+  expect(screen.getByTestId('lnurl-withdraw-claim-button')).toBeTruthy();
+  act(() => mockDismiss!());
+  expect(screen.queryByTestId('lnurl-withdraw-claim-button')).toBeNull();
+  await act(async () => {
+    openLnurlWithdrawSheet(voucher, 'active', true);
+  });
+  expect(mockResolve).toHaveBeenCalledTimes(2);
+  expect(mockClaim).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
+  expect(mockMakeInvoice).toHaveBeenCalledWith('active', 21, 'Voucher');
 });

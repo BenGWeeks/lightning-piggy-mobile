@@ -381,3 +381,19 @@ describe('withdraw QR intake', () => {
     expect(screen.queryByTestId('receive-scan-to-claim')).toBeNull();
   });
 });
+
+it('ignores a late camera callback after Receive closes, and can rescan on reopen', () => {
+  mockActiveWalletId = 'LB';
+  mockOpenWithdraw.mockClear();
+  const onClose = jest.fn();
+  const { rerender } = render(<ReceiveSheet visible onClose={onClose} />);
+  fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+  const lateCallback = mockScan!;
+  rerender(<ReceiveSheet visible={false} onClose={onClose} />);
+  act(() => lateCallback({ data: 'lnurlw://example.com/voucher' }));
+  expect(mockOpenWithdraw).not.toHaveBeenCalled();
+  rerender(<ReceiveSheet visible onClose={onClose} />);
+  fireEvent.press(screen.getByTestId('receive-scan-to-claim'));
+  act(() => mockScan!({ data: 'lnurlw://example.com/voucher' }));
+  expect(mockOpenWithdraw).toHaveBeenCalledTimes(1);
+});
