@@ -202,12 +202,10 @@ describe('withdraw validation before invoice creation', () => {
     expect(invoice).not.toHaveBeenCalled();
   });
   it('surfaces an expired voucher reason at resolution', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ status: 'ERROR', reason: 'Voucher expired' }),
-      });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ERROR', reason: 'Voucher expired' }),
+    });
     global.fetch = fetchMock;
     await expect(resolveLnurlWithdraw('lnurlw://example.com/voucher')).rejects.toThrow(
       'Voucher expired',
