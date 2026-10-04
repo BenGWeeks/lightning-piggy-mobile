@@ -39,13 +39,16 @@ export async function checkSwapBackend(input: string, signal?: AbortSignal): Pro
   const backend = normalizeSwapBackend(input);
   await Promise.all(
     (['reverse', 'submarine'] as const).map(async (direction) => {
-      const response = await fetchWithTimeout(
+      await fetchWithTimeout(
         `${backend}/swap/${direction}`,
         signal ? { signal } : undefined,
+        10000,
+        async (response) => {
+          if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
+          const pairs = await response.json();
+          parseBoltzPair(pairs?.BTC?.BTC, direction);
+        },
       );
-      if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
-      const pairs = await response.json();
-      parseBoltzPair(pairs?.BTC?.BTC, direction);
     }),
   );
   if (signal?.aborted) throw new Error('Connection check cancelled.');
