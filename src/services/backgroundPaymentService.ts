@@ -82,13 +82,19 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
       for (const tx of transactions) {
+        // Some providers report explicit settlement without settled_at. State
+        // establishes payment, while creation time only bounds recency: accept
+        // these receipts only if the invoice itself was created during this
+        // watch window. Never use creation time alone as settlement evidence or
+        // announce old timestamp-less history on first background polling.
+        const receiptTime = tx?.settled_at ?? (tx?.state === 'settled' ? tx.created_at : undefined);
         if (
           !tx ||
           tx.type !== 'incoming' ||
           (tx.state && tx.state !== 'settled') ||
-          !Number.isSafeInteger(tx.settled_at) ||
-          tx.settled_at < Math.max(start, now - CATCHUP_SECONDS) ||
-          tx.settled_at > now + 120 ||
+          !Number.isSafeInteger(receiptTime) ||
+          receiptTime! < Math.max(start, now - CATCHUP_SECONDS) ||
+          receiptTime! > now + 120 ||
           !/^[0-9a-f]{64}$/i.test(tx.payment_hash ?? '') ||
           !Number.isSafeInteger(tx.amount) ||
           tx.amount <= 0

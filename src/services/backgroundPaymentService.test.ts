@@ -263,3 +263,42 @@ it('stops notifications from the same batch when the app resumes after a deliver
   await check();
   expect(fire).toHaveBeenCalledTimes(1);
 });
+
+it('notifies a recent explicitly settled receipt without a settlement timestamp exactly once', async () => {
+  read.mockResolvedValue([{ ...tx, settled_at: undefined, created_at: 1000 }] as never);
+  await check();
+  await check();
+  await notifyPaymentOnce(owner, 'w', tx.payment_hash, () =>
+    fire({ kind: 'payment', amountSats: 1234 }),
+  );
+  expect(fire).toHaveBeenCalledTimes(1);
+  expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+});
+
+it.each([undefined, '', 'pending', 'failed', 'expired', 'unknown'])(
+  'does not use creation time to imply settlement for state %s',
+  async (state) => {
+    read.mockResolvedValue([{ ...tx, state, settled_at: undefined, created_at: 1000 }] as never);
+    await check();
+    expect(fire).not.toHaveBeenCalled();
+  },
+);
+
+it.each([undefined, null, 0, 999, 1121, NaN, 1000.5])(
+  'does not notify timestamp-less history with missing, old, invalid or future creation time %s',
+  async (created_at) => {
+    read.mockResolvedValue([{ ...tx, settled_at: undefined, created_at }] as never);
+    await check();
+    expect(fire).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps the persisted watch start and catches a newly created state-only receipt after foreground priming', async () => {
+  AppState.currentState = 'active';
+  await check();
+  jest.setSystemTime(1_060_000);
+  AppState.currentState = 'background';
+  read.mockResolvedValue([{ ...tx, settled_at: null, created_at: 1030 }] as never);
+  await check();
+  expect(fire).toHaveBeenCalledTimes(1);
+});

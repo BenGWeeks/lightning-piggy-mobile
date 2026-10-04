@@ -87,3 +87,10 @@ already claimed by the service is not re-queried.
 
 Unit tests simulate these lifecycle boundaries; they do not replace an actual
 GrapheneOS device run. No real payment is made by the automated tests.
+
+
+For providers that return `state: settled` without `settled_at`, background
+alerts use `created_at` only to check that the invoice was created within the
+active watch window. Creation time alone never establishes payment. An older
+invoice that settles without a settlement timestamp cannot safely be
+classified as a new background receipt, so it is not announced by this fallback.
