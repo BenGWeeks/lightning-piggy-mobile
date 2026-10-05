@@ -28,6 +28,13 @@ export function parseMarketListing(event: Event, now = Date.now() / 1000): Marke
   // NIP-19 TLV lengths are one byte, so naddr can't encode an identifier over
   // 255 UTF-8 bytes — reject it rather than build a broken "Open listing" link.
   if (!d || new TextEncoder().encode(d).length > 255 || event.tags.length > 256) return null;
+  // A lone surrogate makes encodeURIComponent (used for the product id) throw,
+  // which would abort the whole snapshot — drop just this listing.
+  try {
+    encodeURIComponent(d);
+  } catch {
+    return null;
+  }
   const expiry = tag(event, 'expiration');
   if (expiry && (!Number.isFinite(Number(expiry)) || Number(expiry) <= now)) return null;
   let title: unknown;

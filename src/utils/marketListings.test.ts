@@ -40,6 +40,18 @@ describe('market relay listings', () => {
     // 100 × "€" is only 100 characters but 300 UTF-8 bytes.
     expect(parseMarketListing(withD('€'.repeat(100)))).toBeNull();
   });
+
+  it('drops a listing whose identifier has a lone surrogate instead of throwing', () => {
+    const lone = event({
+      tags: [
+        ['d', 'bad\ud800id'],
+        ['title', 'Test listing'],
+        ['price', '50', 'USD'],
+      ],
+    });
+    expect(() => parseMarketListing(lone)).not.toThrow();
+    expect(parseMarketListing(lone)).toBeNull();
+  });
   it('retains fiat prices without inventing a sats quote and uses the signed seller identity', () => {
     const e = event();
     const p = parseMarketListing(e)!;

@@ -139,3 +139,22 @@ it("keeps the relay's own EOSE timeout past the deadline so it can't fake a load
   callbacks.oneose();
   expect(await pending).toMatchObject({ incomplete: false });
 });
+it('flags a relay that hit its 100-result limit even when some results were duplicates', async () => {
+  const subs: (typeof callbacks)[] = [];
+  subscribe.mockImplementation((_filters, c) => {
+    subs.push(c);
+    return { close };
+  });
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://a.example', 'wss://b.example'],
+    new AbortController().signal,
+  );
+  await opened();
+  const same = Array.from({ length: 60 }, () => event);
+  same.forEach((e) => subs[0].onevent(e)); // relay A: 60 (all the same listing)
+  subs[0].oneose();
+  Array.from({ length: 100 }, () => event).forEach((e) => subs[1].onevent(e)); // relay B: 100
+  subs[1].oneose();
+  expect(await pending).toMatchObject({ incomplete: true });
+});

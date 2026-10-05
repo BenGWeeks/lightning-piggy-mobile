@@ -79,8 +79,11 @@ export function fetchMarketListings(
             const sub = relay.subscribe([filter], {
               eoseTimeout: TIMEOUT_MS * 2,
               onevent(event) {
+                if (finished) return;
+                // The relay's `limit` counts everything it sends, so count
+                // before filtering/dedup or a truncated reply looks complete.
+                if (++batchCount >= 100) limited = true;
                 if (
-                  finished ||
                   !scope.has(event.pubkey) ||
                   event.content.length > 32768 ||
                   event.tags.length > 256 ||
@@ -95,7 +98,6 @@ export function fetchMarketListings(
                 try {
                   if (verifyEvent(event)) {
                     events.set(event.id, event);
-                    if (++batchCount >= 100) limited = true;
                   }
                 } catch {
                   /* Ignore malformed relay data. */
