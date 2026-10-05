@@ -31,8 +31,11 @@ export function useNip65Relays() {
   // Bumped by resetRelayLists (logout / identity switch): a background load
   // started for the previous identity must not restore its relays afterwards.
   const generationRef = useRef(0);
+  // Same guard for NIP-65 loads: bumped on reset AND when a just-published
+  // list is adopted, so a slower, older load can't overwrite it.
+  const nip65GenerationRef = useRef(0);
 
-  const loadDmInboxRelays = useCallback(async (pk: string) => {
+  const loadDmInboxRelays = useCallback(async (pk: string, nip65WriteRelays: string[] = []) => {
     const generation = generationRef.current;
     const current = () => generation === generationRef.current;
     try {
@@ -44,8 +47,9 @@ export function useNip65Relays() {
       /* corrupt cache — the network read below replaces it */
     }
     // The NEWEST published list across relays, not the first reply.
+    // Other clients publish it to the user's NIP-65 write relays — look there too.
     const event = await fetchLatestReplaceable(pk, 10050, [
-      ...new Set([...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
+      ...new Set([...nip65WriteRelays, ...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
     ]);
     if (!event || !current()) return;
     const fresh = dmInboxRelaysFromTags(event.tags);
@@ -71,6 +75,7 @@ export function useNip65Relays() {
   /** Forget both lists (logout / identity switch). */
   const resetRelayLists = useCallback(() => {
     generationRef.current += 1;
+    nip65GenerationRef.current += 1;
     setNip65Relays([]);
     setDmInboxRelays([]);
   }, []);
@@ -99,8 +104,9 @@ export function useNip65Relays() {
   const loadRelays = useCallback(
     async (pk: string): Promise<string[]> => {
       const t0 = Date.now();
-      // Background: own DM inbox relays (cache first, then network).
-      void loadDmInboxRelays(pk);
+      const generation = nip65GenerationRef.current;
+      const current = () => generation === nip65GenerationRef.current;
+      const writeRelaysOf = (list: RelayConfig[]) => list.filter((r) => r.write).map((r) => r.url);
       // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
       // from cache when under the TTL and skip the ~3s relay round trip.
       const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
@@ -108,7 +114,9 @@ export function useNip65Relays() {
         perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
       );
       if (cached && ageMs < CACHE_MAX_AGE_MS) {
-        setNip65Relays(cached);
+        if (current()) setNip65Relays(cached);
+        // Background: own DM inbox relays (cache first, then network).
+        void loadDmInboxRelays(pk, writeRelaysOf(cached));
         if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
         const readRelays = cached.filter((r) => r.read).map((r) => r.url);
         return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -118,12 +126,20 @@ export function useNip65Relays() {
         // Network couldn't produce a kind-10002 — fall back to defaults
         // and DON'T persist (so we don't poison the cache with a blip).
         if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
+        void loadDmInboxRelays(pk, writeRelaysOf(cached ?? []));
         return nostrService.DEFAULT_RELAYS;
       }
       if (__DEV__)
         console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
+      void loadDmInboxRelays(pk, writeRelaysOf(relayList));
+      // A list published in-app while this load was in flight wins.
+      if (!current()) {
+        const read = relayList.filter((r) => r.read).map((r) => r.url);
+        return read.length > 0 ? read : nostrService.DEFAULT_RELAYS;
+      }
       setNip65Relays(relayList);
       InteractionManager.runAfterInteractions(() => {
+        if (!current()) return;
         AsyncStorage.setItem(
           perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
           JSON.stringify(relayList),
@@ -142,6 +158,7 @@ export function useNip65Relays() {
   /** Adopt a relay list the user just published (and cache it), so the app
    * uses it straight away instead of waiting for the cache TTL. */
   const applyPublishedRelayList = useCallback(async (pk: string, list: RelayConfig[]) => {
+    nip65GenerationRef.current += 1;
     setNip65Relays(list);
     await AsyncStorage.setItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk), JSON.stringify(list));
     await AsyncStorage.setItem(

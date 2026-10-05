@@ -1,5 +1,6 @@
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
+import { isConnectionFailure } from './nostrDmPublish';
 
 export interface RelayPublishResult {
   url: string;
@@ -61,7 +62,10 @@ export async function publishToRelays(
         timer = setTimeout(() => resolve({ url, ok: false, message: 'timed out' }), timeoutMs);
       });
       const attempt = Promise.resolve(attempts[i]).then(
-        (): RelayPublishResult => ({ url, ok: true }),
+        // nostr-tools RESOLVES (not rejects) with "connection failure: …" when
+        // it can't reach the relay — that's a failure, never an accept.
+        (value: unknown): RelayPublishResult =>
+          isConnectionFailure(value) ? { url, ok: false, message: value } : { url, ok: true },
         (e: unknown): RelayPublishResult => ({
           url,
           ok: false,

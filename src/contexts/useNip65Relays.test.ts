@@ -76,3 +76,39 @@ it('a just-published inbox list is not overwritten by an older in-flight load', 
   });
   expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
 });
+
+it("looks up the DM inbox list on the user's NIP-65 write relays too", async () => {
+  fetchList.mockResolvedValue([
+    { url: 'wss://my-write.example', read: false, write: true },
+    { url: 'wss://my-read.example', read: true, write: false },
+  ]);
+  fetchLatest.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await waitFor(() => expect(fetchLatest).toHaveBeenCalled());
+  const relays = fetchLatest.mock.calls[0][2] as string[];
+  expect(relays).toContain('wss://my-write.example');
+  expect(relays).not.toContain('wss://my-read.example');
+});
+
+it('a NIP-65 load finishing after an in-app publish does not overwrite it', async () => {
+  let finish!: (v: unknown) => void;
+  fetchList.mockReturnValue(new Promise((r) => (finish = r)));
+  fetchLatest.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  let loading!: Promise<unknown>;
+  act(() => {
+    loading = result.current.loadRelays(PK);
+  });
+  const published = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, published);
+  });
+  await act(async () => {
+    finish([{ url: 'wss://stale.example', read: true, write: true }]);
+    await loading;
+  });
+  expect(result.current.nip65Relays).toEqual(published);
+});

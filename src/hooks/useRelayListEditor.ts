@@ -91,6 +91,8 @@ export function useRelayListEditor() {
       // A failed lookup isn't "no inbox list": fall back to the known one so
       // publishing extends it rather than silently replacing it.
       const list = event ? dmInboxRelaysFromTags(event.tags) : dmInboxRelays;
+      // A list found here (wider lookup / newer copy) must also be READ app-wide.
+      if (event) void applyPublishedDmInbox(pubkey, list);
       setInboxBaseline(list);
       setInboxDraft(list);
       setInboxLoading(false);

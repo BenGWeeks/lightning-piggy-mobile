@@ -31,6 +31,16 @@ describe('publishToRelays', () => {
       { url: 'wss://c', ok: false, message: 'timed out' },
     ]);
   });
+  it("counts nostr-tools' resolved 'connection failure' as a failure, not an accept", async () => {
+    publish.mockReturnValue([Promise.resolve('connection failure: Error: getaddrinfo ENOTFOUND')]);
+    expect(await publishToRelays(event, ['wss://down.example'])).toEqual([
+      {
+        url: 'wss://down.example',
+        ok: false,
+        message: 'connection failure: Error: getaddrinfo ENOTFOUND',
+      },
+    ]);
+  });
 });
 
 describe('fetchLatestReplaceable', () => {

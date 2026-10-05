@@ -329,3 +329,12 @@ it('does not adopt a publish that completes after the user switched accounts', a
     ),
   ).toBe(false);
 });
+
+it('adopts an inbox list it discovers app-wide, so the app listens there', async () => {
+  net10050 = ['wss://relay.primal.net', 'wss://nostr.mom'];
+  await setup();
+  expect(mockApplyInbox).toHaveBeenCalledWith('a'.repeat(64), [
+    'wss://relay.primal.net',
+    'wss://nostr.mom',
+  ]);
+});
