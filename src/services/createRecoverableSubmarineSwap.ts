@@ -11,6 +11,9 @@ export async function createRecoverableSubmarineSwap(
   approvedQuote: SwapFees,
 ) {
   if (!approvedQuote) throw new Error('Wait for the swap fee quote before sending');
+  // Capture the initiating identity BEFORE any async work: an identity switch
+  // while the swap is being created must not re-attribute it (#1124).
+  const ownerPubkey = getActivePubkey() ?? undefined;
   const swap = await createSubmarineSwapForward(invoice, amountSats, approvedQuote);
   await SecureStore.setItemAsync(
     `submarine_swap_${swap.id}`,
@@ -19,7 +22,7 @@ export async function createRecoverableSubmarineSwap(
     JSON.stringify({
       ...swap,
       sourceWalletId,
-      ownerPubkey: getActivePubkey() ?? undefined,
+      ownerPubkey,
       createdAt: Date.now(),
     }),
     { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },

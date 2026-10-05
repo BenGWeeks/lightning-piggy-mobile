@@ -374,6 +374,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const handleConfirmAmount = useCallback(
     async (sats: number) => {
       if (!walletId || !wallet) return;
+      // Capture the initiating identity before any async work, so an identity
+      // switch mid-create can't re-attribute this swap's refund (#1124).
+      const ownerPubkey = getActivePubkey() ?? undefined;
       // Mark the flow in-flight *synchronously*, before the state updates below
       // schedule a re-render. `swapInFlightRef` is otherwise refreshed only
       // during render, so without this there's a brief window where a stray
@@ -430,7 +433,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             refundDestinationAddress: refundDestination?.address,
             sourceWalletId: refundDestination?.walletId,
             // Refunds only ever land in the creating identity's wallets (#1124).
-            ownerPubkey: getActivePubkey() ?? undefined,
+            ownerPubkey,
             createdAt: Date.now(),
           }),
           // Device-only accessibility so the refundPrivateKey in this record
