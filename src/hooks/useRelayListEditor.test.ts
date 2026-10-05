@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useRelayListEditor } from './useRelayListEditor';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
+import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 
 const mockSign = jest.fn();
 const mockApply = jest.fn().mockResolvedValue(undefined);
@@ -22,6 +23,9 @@ jest.mock('../contexts/NostrContext', () => ({
     applyPublishedRelayList: mockApply,
     applyPublishedDmInbox: mockApplyInbox,
   }),
+}));
+jest.mock('../services/backgroundDmService', () => ({
+  rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../services/nostrRelayLists', () => ({
   fetchLatestReplaceable: jest.fn(),
@@ -337,4 +341,28 @@ it('adopts an inbox list it discovers app-wide, so the app listens there', async
     'wss://relay.primal.net',
     'wss://nostr.mom',
   ]);
+});
+
+it('uses the inbox list the app learns about after the screen opened', async () => {
+  net10050 = null; // lookup fails
+  mockInbox = [];
+  const h = await setup();
+  expect(h.result.current.inboxDraft).toEqual([]);
+  mockInbox = ['wss://relay.primal.net', 'wss://nostr.mom']; // provider finishes loading later
+  h.rerender({});
+  await waitFor(() =>
+    expect(h.result.current.inboxDraft).toEqual(['wss://relay.primal.net', 'wss://nostr.mom']),
+  );
+});
+
+it('re-arms the background DM watch after publishing an inbox list', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const { result } = await setup();
+  act(() => {
+    result.current.addInbox('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishInbox();
+  });
+  expect(rearmBackgroundDmWatchForActiveIdentity).toHaveBeenCalled();
 });

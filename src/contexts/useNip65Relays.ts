@@ -5,17 +5,16 @@ import * as nostrService from '../services/nostrService';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { RelayConfig } from '../types/nostr';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
+import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 import { dmInboxRelaysFromTags, RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 
 import {
   RELAY_LIST_CACHE_KEY_BASE,
   RELAY_LIST_TIMESTAMP_KEY_BASE,
+  DM_INBOX_RELAYS_CACHE_KEY_BASE,
   CACHE_MAX_AGE_MS,
   readCachedWithTtl,
 } from './nostrCacheKeys';
-
-/** Per-account cache of the user's own NIP-17 DM inbox relays (kind 10050). */
-const DM_INBOX_RELAYS_CACHE_KEY_BASE = 'nostr_dm_inbox_relays_v1';
 
 /**
  * The user's published NIP-65 (kind-10002) relay list: hydrate from the
@@ -35,30 +34,34 @@ export function useNip65Relays() {
   // list is adopted, so a slower, older load can't overwrite it.
   const nip65GenerationRef = useRef(0);
 
-  const loadDmInboxRelays = useCallback(async (pk: string, nip65WriteRelays: string[] = []) => {
-    const generation = generationRef.current;
-    const current = () => generation === generationRef.current;
-    try {
-      const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
-      const cached = raw ? (JSON.parse(raw) as unknown) : null;
-      if (current() && Array.isArray(cached))
-        setDmInboxRelays(cached.filter((u): u is string => typeof u === 'string'));
-    } catch {
-      /* corrupt cache — the network read below replaces it */
-    }
-    // The NEWEST published list across relays, not the first reply.
-    // Other clients publish it to the user's NIP-65 write relays — look there too.
-    const event = await fetchLatestReplaceable(pk, 10050, [
-      ...new Set([...nip65WriteRelays, ...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
-    ]);
-    if (!event || !current()) return;
-    const fresh = dmInboxRelaysFromTags(event.tags);
-    setDmInboxRelays(fresh);
-    await AsyncStorage.setItem(
-      perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
-      JSON.stringify(fresh),
-    ).catch(() => {});
-  }, []);
+  const loadDmInboxRelays = useCallback(
+    async (pk: string, nip65WriteRelays: string[] = [], generation = generationRef.current) => {
+      const current = () => generation === generationRef.current;
+      try {
+        const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
+        const cached = raw ? (JSON.parse(raw) as unknown) : null;
+        if (current() && Array.isArray(cached))
+          setDmInboxRelays(cached.filter((u): u is string => typeof u === 'string'));
+      } catch {
+        /* corrupt cache — the network read below replaces it */
+      }
+      // The NEWEST published list across relays, not the first reply.
+      // Other clients publish it to the user's NIP-65 write relays — look there too.
+      const event = await fetchLatestReplaceable(pk, 10050, [
+        ...new Set([...nip65WriteRelays, ...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
+      ]);
+      if (!event || !current()) return;
+      const fresh = dmInboxRelaysFromTags(event.tags);
+      const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
+      const before = await AsyncStorage.getItem(key).catch(() => null);
+      if (!current()) return;
+      setDmInboxRelays(fresh);
+      await AsyncStorage.setItem(key, JSON.stringify(fresh)).catch(() => {});
+      // The background DM watch reads this cache; re-arm it if the list changed.
+      if (before !== JSON.stringify(fresh)) void rearmBackgroundDmWatchForActiveIdentity();
+    },
+    [],
+  );
 
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
   const applyPublishedDmInbox = useCallback(async (pk: string, list: string[]) => {
@@ -106,6 +109,12 @@ export function useNip65Relays() {
       const t0 = Date.now();
       const generation = nip65GenerationRef.current;
       const current = () => generation === nip65GenerationRef.current;
+      // Inbox hydration below belongs to THIS load: capture its generation now,
+      // and only start it while this load is still current.
+      const inboxGeneration = generationRef.current;
+      const hydrateInbox = (list: RelayConfig[]) => {
+        if (current()) void loadDmInboxRelays(pk, writeRelaysOf(list), inboxGeneration);
+      };
       const writeRelaysOf = (list: RelayConfig[]) => list.filter((r) => r.write).map((r) => r.url);
       // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
       // from cache when under the TTL and skip the ~3s relay round trip.
@@ -116,7 +125,7 @@ export function useNip65Relays() {
       if (cached && ageMs < CACHE_MAX_AGE_MS) {
         if (current()) setNip65Relays(cached);
         // Background: own DM inbox relays (cache first, then network).
-        void loadDmInboxRelays(pk, writeRelaysOf(cached));
+        hydrateInbox(cached);
         if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
         const readRelays = cached.filter((r) => r.read).map((r) => r.url);
         return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -126,12 +135,12 @@ export function useNip65Relays() {
         // Network couldn't produce a kind-10002 — fall back to defaults
         // and DON'T persist (so we don't poison the cache with a blip).
         if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
-        void loadDmInboxRelays(pk, writeRelaysOf(cached ?? []));
+        hydrateInbox(cached ?? []);
         return nostrService.DEFAULT_RELAYS;
       }
       if (__DEV__)
         console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
-      void loadDmInboxRelays(pk, writeRelaysOf(relayList));
+      hydrateInbox(relayList);
       // A list published in-app while this load was in flight wins.
       if (!current()) {
         const read = relayList.filter((r) => r.read).map((r) => r.url);

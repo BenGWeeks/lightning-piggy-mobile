@@ -62,11 +62,10 @@ import { captureBackgroundPaymentScope } from './backgroundPaymentScope';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadIdentities, type StoredIdentity } from './identitiesStore';
-import { getUserRelays, mergeRelays } from './nostrRelayStorage';
 import { perAccountKey } from './perAccountStorage';
-import { RELAY_LIST_CACHE_KEY_BASE, CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { resolveReadRelays } from './backgroundDmReadRelays';
 import { claimWrapNotification } from './dmWrapNotificationDedupe';
-import type { RelayConfig } from '../types/nostr';
 import * as nostrService from './nostrService';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
@@ -112,39 +111,6 @@ const BACKLOG_WRAPS_LIMIT = 50;
 const CONTENTLESS_BACKLOG_WRAPS_LIMIT = 10;
 
 const HEX64 = /^[0-9a-f]{64}$/;
-
-/**
- * Resolve the viewer's read relays the same way the app's foreground context
- * does: defaults + cached NIP-65 list + user overrides, merged with the same
- * precedence (`mergeRelays`). `getUserRelays()` alone is ONLY the user's
- * explicit in-app overrides — `[]` for anyone who never customised relays —
- * which is why the watch must never use it bare: it silently armed nothing
- * for default-relay users (the original #279 swipe-away bug). `mergeRelays`
- * always folds in DEFAULT_RELAYS, so this can't return an empty read set.
- */
-async function resolveReadRelays(pubkey: string): Promise<string[]> {
-  let nip65: RelayConfig[] = [];
-  try {
-    const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pubkey));
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      nip65 = parsed.filter(
-        (r): r is RelayConfig =>
-          r &&
-          typeof r === 'object' &&
-          typeof r.url === 'string' &&
-          typeof r.read === 'boolean' &&
-          typeof r.write === 'boolean',
-      );
-    }
-  } catch {
-    // Unreadable cache just means defaults + user overrides.
-  }
-  const user = await getUserRelays().catch(() => []);
-  return mergeRelays({ nip65, user })
-    .filter((r) => r.read)
-    .map((r) => r.url);
-}
 
 /**
  * The viewer's followed pubkeys from the per-account contacts cache, for the

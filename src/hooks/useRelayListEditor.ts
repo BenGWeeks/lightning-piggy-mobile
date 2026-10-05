@@ -12,6 +12,7 @@ import {
   relayListPublishTargets,
   type UnsignedEvent,
 } from '../utils/relayListEvents';
+import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 import {
   fetchLatestReplaceable,
   publishToRelays,
@@ -52,6 +53,9 @@ export function useRelayListEditor() {
   // not be adopted (or signed) after the user switches accounts.
   const activePubkeyRef = useRef(pubkey);
   activePubkeyRef.current = pubkey;
+  // Latest known inbox list (the provider may finish loading after mount).
+  const knownInboxRef = useRef(dmInboxRelays);
+  knownInboxRef.current = dmInboxRelays;
 
   const [nip65Draft, setNip65Draft] = useState<RelayConfig[]>(nip65Relays);
   const [nip65Dirty, setNip65Dirty] = useState(false);
@@ -90,7 +94,7 @@ export function useRelayListEditor() {
       if (cancelled) return;
       // A failed lookup isn't "no inbox list": fall back to the known one so
       // publishing extends it rather than silently replacing it.
-      const list = event ? dmInboxRelaysFromTags(event.tags) : dmInboxRelays;
+      const list = event ? dmInboxRelaysFromTags(event.tags) : knownInboxRef.current;
       // A list found here (wider lookup / newer copy) must also be READ app-wide.
       if (event) void applyPublishedDmInbox(pubkey, list);
       setInboxBaseline(list);
@@ -103,6 +107,19 @@ export function useRelayListEditor() {
     // Load once per identity; relay-set churn shouldn't reload mid-edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
+
+  // Keep an untouched inbox draft in step with the provider's known list —
+  // only when that list CHANGES (not when loading finishes, which would
+  // overwrite a just-fetched list with an older provider value).
+  const inboxDirtyRef = useRef(inboxDirty);
+  inboxDirtyRef.current = inboxDirty;
+  const inboxLoadingRef = useRef(inboxLoading);
+  inboxLoadingRef.current = inboxLoading;
+  useEffect(() => {
+    if (inboxDirtyRef.current || inboxLoadingRef.current) return;
+    setInboxDraft(dmInboxRelays);
+    setInboxBaseline(dmInboxRelays);
+  }, [dmInboxRelays]);
 
   const nip65Editable = !nip65Loading && publishing === null;
   const inboxEditable = !inboxLoading && publishing === null;
@@ -233,6 +250,8 @@ export function useRelayListEditor() {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
         await applyPublishedDmInbox(pubkey, published);
+        // The Android background DM watch reads the cached inbox; re-arm it.
+        void rearmBackgroundDmWatchForActiveIdentity();
         setInboxBaseline(published);
         setInboxDraft(published);
         setInboxDirty(false);

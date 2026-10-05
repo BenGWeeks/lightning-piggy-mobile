@@ -5,6 +5,9 @@ import { fetchLatestReplaceable } from '../services/nostrRelayLists';
 import * as nostrService from '../services/nostrService';
 
 jest.mock('../services/nostrRelayLists', () => ({ fetchLatestReplaceable: jest.fn() }));
+jest.mock('../services/backgroundDmService', () => ({
+  rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../services/nostrService', () => ({
   DEFAULT_RELAYS: ['wss://relay.damus.io'],
   fetchRelayList: jest.fn(),
@@ -111,4 +114,22 @@ it('a NIP-65 load finishing after an in-app publish does not overwrite it', asyn
     await loading;
   });
   expect(result.current.nip65Relays).toEqual(published);
+});
+
+it('a NIP-65 load finishing after an identity reset does not start an inbox load', async () => {
+  let finish!: (v: unknown) => void;
+  fetchList.mockReturnValue(new Promise((r) => (finish = r)));
+  fetchLatest.mockResolvedValue(inboxEvent(['wss://old-account.example']));
+  const { result } = renderHook(() => useNip65Relays());
+  let loading!: Promise<unknown>;
+  act(() => {
+    loading = result.current.loadRelays(PK);
+  });
+  act(() => result.current.resetRelayLists());
+  await act(async () => {
+    finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+    await loading;
+  });
+  expect(fetchLatest).not.toHaveBeenCalled();
+  expect(result.current.dmInboxRelays).toEqual([]);
 });
