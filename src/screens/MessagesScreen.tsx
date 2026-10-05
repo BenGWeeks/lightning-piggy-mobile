@@ -2,7 +2,7 @@ import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
 import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
-import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
+import { DEFAULT_DM_PROTOCOL, dmMessageThreadId, type DmProtocol } from '../utils/dmProtocol';
 import {
   View,
   Text,
@@ -704,11 +704,13 @@ const MessagesScreen: React.FC = () => {
   // Follow live arrivals near the top; otherwise offer a jump without moving history.
   const listRef = useRef<FlashListRef<InboxRow>>(null);
   const liveEntries = useMemo(() => {
-    const visiblePartners = new Set(
+    // DM rows are one thread per person per protocol (`pubkey:protocol`), so
+    // match each message by its thread, not its bare partner pubkey.
+    const visibleThreads = new Set(
       filteredRows.flatMap((row) => (row.kind === 'dm' ? [row.summary.id.toLowerCase()] : [])),
     );
     const dmEntries = deferredDmInbox
-      .filter((message) => visiblePartners.has(message.partnerPubkey.toLowerCase()))
+      .filter((message) => visibleThreads.has(dmMessageThreadId(message)))
       .map((message) => ({ id: `dm:${message.id}`, createdAt: message.createdAt }));
     const rowEntries = filteredRows.map((row) => ({
       id:

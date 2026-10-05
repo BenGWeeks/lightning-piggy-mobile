@@ -1,4 +1,5 @@
 import {
+  dmMessageThreadId,
   DEFAULT_DM_PROTOCOL,
   DM_PROTOCOL_LABEL,
   protocolForWireKind,
@@ -34,6 +35,13 @@ describe('DM protocols', () => {
     expect(filterMessagesByProtocol(messages, 'marmot')).toEqual([]);
     expect(filterMessagesByProtocol([], 'nip17')).toEqual([]);
   });
+  it('gives a stored message the same thread id as its inbox summary row', () => {
+    const pk = 'A'.repeat(64);
+    expect(dmMessageThreadId({ partnerPubkey: pk, wireKind: 4 })).toBe(`${'a'.repeat(64)}:nip04`);
+    expect(dmMessageThreadId({ partnerPubkey: pk, wireKind: 14 })).toBe(`${'a'.repeat(64)}:nip17`);
+    expect(dmMessageThreadId({ partnerPubkey: pk, wireKind: 15 })).toBe(`${'a'.repeat(64)}:nip17`);
+  });
+
   it('reserves Marmot without enabling it', () => {
     expect(isDmProtocolAvailable('nip04')).toBe(true);
     expect(isDmProtocolAvailable('nip17')).toBe(true);

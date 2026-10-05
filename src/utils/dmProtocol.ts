@@ -25,6 +25,11 @@ export function dmThreadId(pubkey: string, protocol: DmProtocol): string {
   return `${pubkey.toLowerCase()}:${protocol}`;
 }
 
+/** Thread identity of a stored DM — matches the inbox summary row id. */
+export function dmMessageThreadId(message: { partnerPubkey: string; wireKind?: number }): string {
+  return dmThreadId(message.partnerPubkey, protocolForWireKind(message.wireKind));
+}
+
 export function isDmProtocolAvailable(protocol: DmProtocol): boolean {
   return protocol !== 'marmot';
 }
