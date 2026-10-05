@@ -276,3 +276,33 @@ it('keeps a newer cached NIP-65 list when a relay serves an older copy after the
   expect(result.current.nip65Relays).toEqual(newer);
   expect(read).toEqual(['wss://nostr.mom']);
 });
+
+it('keeps a newly adopted list even when saving its timestamp fails (storage full)', async () => {
+  const realSet = AsyncStorage.setItem;
+  AsyncStorage.setItem = jest.fn().mockRejectedValue(new Error('disk full'));
+  try {
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 500);
+      await result.current.applyPublishedRelayList(
+        PK,
+        [{ url: 'wss://nostr.mom', read: true, write: true }],
+        500,
+      );
+    });
+    let inbox, nip65;
+    await act(async () => {
+      inbox = await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 100);
+      nip65 = await result.current.applyPublishedRelayList(
+        PK,
+        [{ url: 'wss://old.example', read: true, write: true }],
+        100,
+      );
+    });
+    expect(inbox).toEqual({ adopted: false, baseline: 500 });
+    expect(nip65).toEqual({ adopted: false, baseline: 500 });
+    expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+  } finally {
+    AsyncStorage.setItem = realSet;
+  }
+});
