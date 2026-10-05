@@ -12,7 +12,7 @@ const PUBKEY_HEX64 = /^[0-9a-f]{64}$/;
 
 export interface ConversationSummary {
   /**
-   * Stable id — `pubkey` (hex) for identified counterparties; otherwise
+   * Stable id — `pubkey:protocol` for DMs, `pubkey` for standalone zaps; otherwise
    * `anon:<walletId>:<paymentHash|txid|bolt11>` so the id doesn't shift
    * when new zaps are prepended to the transaction list (keeps FlashList
    * row identity stable across renders).
@@ -194,23 +194,15 @@ function fallbackName(partnerPubkey: string): string {
   }
 }
 
-/** Dual-publish window — if the same partner sends a NIP-04 and a NIP-17
- * copy of the same message within this many seconds, treat them as one
- * and prefer the NIP-17 row. 5 minutes is generous enough to absorb relay
- * propagation jitter (NIP-17 wraps use a randomised created_at up to 2
- * days in the past, but we deduplicate on rumor.created_at which is the
- * real send time, so 5 min of headroom is sufficient). */
-const DUAL_PUBLISH_WINDOW_SEC = 5 * 60;
-
-/** Similarly, when merging a zap row and a DM row for the same partner,
+/** When merging a zap row and a NIP-17 DM row for the same partner,
  * if the two events are within this window pick the DM's preview text.
  * Sorting timestamp still uses whichever is newer so the inbox order is
  * correct — we only override the preview.  */
 const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
 
 /**
- * Bucket DM entries by partner pubkey and reduce to one ConversationSummary
- * per partner. `trustedPubkeys` (formerly `followPubkeys`, kept on the
+ * Bucket DM entries by partner pubkey + protocol, newest entry per thread.
+ * `trustedPubkeys` (formerly `followPubkeys`, kept on the
  * parameter name for diff churn but the semantics have widened) is the
  * lowercase-hex trust set the caller wants to enforce here as a render-
  * time safety net: even though `refreshDmInbox` already filters at the
@@ -223,13 +215,6 @@ const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
  * themself depending on the current `wotTier`. The contract is the
  * same — pubkeys present in the set pass the filter — but don't
  * assume the contents are limited to direct follows.
- *
- * When a partner has both a NIP-04 and a NIP-17 message within
- * DUAL_PUBLISH_WINDOW_SEC we always pick the NIP-17 copy regardless of
- * which one has the newer timestamp. Clients in the wild deliver the
- * two copies in either order, and wraps are the preferred metadata-
- * minimising form — we never want a laggy kind-4 to displace its NIP-17
- * twin and "unhide" the sender identity in the preview.
  */
 export function buildDmSummaries(
   entries: DmInboxEntry[],
@@ -252,38 +237,10 @@ export function buildDmSummaries(
     // any already in the store without a risky DB migration.
     if (!PUBKEY_HEX64.test(key)) continue;
     if (followPubkeys && !followPubkeys.has(key)) continue;
-    const existing = winner.get(key);
-    if (!existing) {
-      winner.set(key, entry);
-      continue;
-    }
-
-    const newIsNip17 = entry.wireKind !== 4;
-    const existingIsNip17 = existing.wireKind !== 4;
-    const diff = Math.abs(entry.createdAt - existing.createdAt);
-
-    // Rule 1: NIP-17 always beats a NIP-04 twin inside the dual-publish
-    // window, regardless of which arrived first. (The old `diff > 60`
-    // path let a laggy kind-4 61 s newer than its wrap win the slot —
-    // that was the bug called out in review.)
-    if (diff <= DUAL_PUBLISH_WINDOW_SEC) {
-      if (newIsNip17 && !existingIsNip17) {
-        winner.set(key, entry);
-        continue;
-      }
-      if (!newIsNip17 && existingIsNip17) {
-        continue;
-      }
-      // Same wire kind within the window → newer wins.
-      if (entry.createdAt > existing.createdAt) {
-        winner.set(key, entry);
-      }
-      continue;
-    }
-
-    // Rule 2: outside the window, newer wins.
-    if (entry.createdAt > existing.createdAt) {
-      winner.set(key, entry);
+    const threadKey = `${key}:${protocolForWireKind(entry.wireKind)}`;
+    const existing = winner.get(threadKey);
+    if (!existing || entry.createdAt > existing.createdAt) {
+      winner.set(threadKey, entry);
     }
   }
 
@@ -300,8 +257,8 @@ export function buildDmSummaries(
       contact?.petname?.trim() ||
       fallbackName(entry.partnerPubkey);
     summaries.push({
-      id: entry.partnerPubkey,
-      pubkey: entry.partnerPubkey,
+      id: `${key}:${protocolForWireKind(entry.wireKind)}`,
+      pubkey: key,
       name,
       picture: prof?.picture ?? null,
       nip05: prof?.nip05 ?? null,
@@ -311,7 +268,7 @@ export function buildDmSummaries(
       lastDirection: entry.fromMe ? 'outgoing' : 'incoming',
       lastComment: entry.text,
       anonymous: false,
-      protocol: protocolForWireKind(entry.wireKind) ?? undefined,
+      protocol: protocolForWireKind(entry.wireKind),
     });
   }
 
@@ -320,7 +277,7 @@ export function buildDmSummaries(
 
 /**
  * Merge zap-derived and DM-derived summaries into a single inbox list:
- * one row per identified partner, anonymous zap rows passed through
+ * zaps merge only into NIP-17 threads; anonymous zap rows passed through
  * untouched (no pubkey → nothing to merge against).
  *
  * When a partner has both a zap row and a DM row, we use the newest
@@ -348,10 +305,10 @@ export function mergeSummaries(
   }
   for (const s of dm) {
     if (!s.pubkey) continue;
-    dmByPubkey.set(s.pubkey.toLowerCase(), s);
+    if (s.protocol === 'nip17') dmByPubkey.set(s.pubkey.toLowerCase(), s);
   }
 
-  const merged: ConversationSummary[] = [];
+  const merged: ConversationSummary[] = dm.filter((s) => s.protocol !== 'nip17');
   const allKeys = new Set<string>([...zapByPubkey.keys(), ...dmByPubkey.keys()]);
   for (const key of allKeys) {
     const z = zapByPubkey.get(key);
@@ -363,6 +320,8 @@ export function mergeSummaries(
       const preferDmPreview = diff <= DM_PREVIEW_PREFERENCE_WINDOW_SEC;
       merged.push({
         ...newest,
+        id: d.id,
+        pubkey: d.pubkey,
         protocol: d.protocol,
         lastComment: preferDmPreview ? d.lastComment : newest.lastComment,
         lastAmountSats: preferDmPreview ? 0 : newest.lastAmountSats,

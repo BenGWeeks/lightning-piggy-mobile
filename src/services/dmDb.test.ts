@@ -315,7 +315,8 @@ describe('dmDb', () => {
       expect(out[0].conversation).toBe('convB');
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('MAX(created_at)');
-      expect(sql).toContain('GROUP BY conversation');
+      // One latest row per (partner, protocol): NIP-04 and NIP-17 are separate threads.
+      expect(sql).toContain('GROUP BY conversation, (wire_kind = 4)');
       expect(sql).toContain('WHERE m.owner = ?');
       expect(params).toEqual([OWNER, OWNER]);
     });

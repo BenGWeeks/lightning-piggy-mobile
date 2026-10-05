@@ -223,7 +223,7 @@ describe('nsec path: content notifications', () => {
         threadId: PARTNER,
         title: 'Alice',
         body: 'hello there',
-        data: { conversationPubkey: PARTNER },
+        data: { conversationPubkey: PARTNER, conversationProtocol: 'nip17' },
       }),
     );
   });

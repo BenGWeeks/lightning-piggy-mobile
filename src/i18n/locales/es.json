@@ -285,6 +285,7 @@
     "seeAll": "Ver todo"
   },
   "conversationComposer": {
+    "attachmentsNip17Only": "Los archivos adjuntos y las notas de voz están disponibles en el chat NIP-17. Cambia el protocolo desde el encabezado.",
     "messagePlaceholder": "Mensaje",
     "attach": "Adjuntar",
     "messageInput": "Campo de mensaje",

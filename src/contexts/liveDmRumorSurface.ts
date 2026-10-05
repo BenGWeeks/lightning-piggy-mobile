@@ -1,3 +1,4 @@
+import { protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -185,7 +186,10 @@ export function createLiveRumorSurfacer(
         // structured rumor (order JSON, or an NWC wallet-share bearer
         // connection string) must never surface its payload in a push body.
         body: inboxEntry.text,
-        data: { conversationPubkey: partnership.partnerPubkey },
+        data: {
+          conversationPubkey: partnership.partnerPubkey,
+          conversationProtocol: protocolForWireKind(rumor.kind),
+        },
       });
     }
     if (__DEV__)

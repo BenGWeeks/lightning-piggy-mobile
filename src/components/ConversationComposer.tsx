@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, TextInput, TouchableOpacity } from 'react-native';
 import { Plus, Send, Mic } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
@@ -10,7 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createConversationComposerStyles } from '../styles/ConversationComposer.styles';
 
 /**
  * Shared composer for 1:1 (ConversationScreen) and group
@@ -56,6 +56,8 @@ export interface ConversationComposerProps {
   attachOpen: boolean;
   /** Disables the Attach button (e.g. while a location share or image upload is mid-flight). */
   attachDisabled?: boolean;
+  /** NIP-04 threads only support text; disables attachments and hides voice. */
+  attachmentsEnabled?: boolean;
   /** Called when the input gains focus — typical use is to close the attach panel. */
   onInputFocus?: () => void;
   /** Renders a spinner on the Attach button instead of the Plus icon. */
@@ -102,6 +104,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   onAttachToggle,
   attachOpen,
   attachDisabled = false,
+  attachmentsEnabled = true,
   onInputFocus,
   attachLoading = false,
   attachPanel,
@@ -118,7 +121,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   const insets = useSafeAreaInsets();
   const styles = useMemo(
     () =>
-      createStyles(colors, {
+      createConversationComposerStyles(colors, {
         paddingHorizontal: composerPaddingHorizontal,
         attachButtonHasBackground,
       }),
@@ -139,16 +142,23 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   const inputDisabled = disabled || sending;
   // WhatsApp/Signal pattern (#235): show the mic while the input is empty (and
   // voice is supported here), swap to Send the moment the user types.
-  const showMic = !!onStartVoiceNote && !value.trim() && !sending && !disabled;
+  const showMic =
+    attachmentsEnabled && !!onStartVoiceNote && !value.trim() && !sending && !disabled;
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-      {attachOpen ? attachPanel : null}
+      {attachmentsEnabled && attachOpen ? attachPanel : null}
       <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
         <TouchableOpacity
-          style={styles.attachButton}
+          style={[styles.attachButton, !attachmentsEnabled && styles.sendButtonDisabled]}
           onPress={onAttachToggle}
-          disabled={disabled || sending || attachDisabled}
+          disabled={!attachmentsEnabled || disabled || sending || attachDisabled}
+          accessibilityState={{
+            disabled: !attachmentsEnabled || disabled || sending || attachDisabled,
+          }}
+          accessibilityHint={
+            attachmentsEnabled ? undefined : t('conversationComposer.attachmentsNip17Only')
+          }
           accessibilityLabel={accessibilityLabels?.attach ?? t('conversationComposer.attach')}
           testID={testIDs?.attach}
         >
@@ -222,61 +232,5 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
     </KeyboardStickyView>
   );
 };
-
-const createStyles = (
-  colors: Palette,
-  opts: { paddingHorizontal: number; attachButtonHasBackground: boolean },
-) =>
-  StyleSheet.create({
-    composer: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      paddingHorizontal: opts.paddingHorizontal,
-      paddingTop: 8,
-      gap: 8,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    input: {
-      flex: 1,
-      minHeight: 40,
-      maxHeight: 120,
-      backgroundColor: colors.background,
-      borderRadius: 20,
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 10,
-      fontSize: 15,
-      color: colors.textBody,
-    },
-    attachButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: opts.attachButtonHasBackground ? colors.background : 'transparent',
-    },
-    sendButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sendButtonLarge: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sendButtonDisabled: {
-      opacity: 0.4,
-    },
-  });
 
 export default ConversationComposer;

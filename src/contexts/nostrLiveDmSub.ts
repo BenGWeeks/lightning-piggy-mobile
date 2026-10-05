@@ -1,3 +1,4 @@
+import { protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
@@ -200,7 +201,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         threadId: item.partnerPubkey,
         title: item.notify.title,
         body: item.notify.body,
-        data: { conversationPubkey: item.partnerPubkey },
+        data: {
+          conversationPubkey: item.partnerPubkey,
+          conversationProtocol: protocolForWireKind(item.entry.wireKind),
+        },
       });
     }
   };
@@ -435,7 +439,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           threadId: partnerPubkey,
           title: 'New message',
           body: plaintext,
-          data: { conversationPubkey: partnerPubkey },
+          data: {
+            conversationPubkey: partnerPubkey,
+            conversationProtocol: protocolForWireKind(ev.kind),
+          },
         });
       }
       if (__DEV__)
@@ -529,7 +536,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             threadId: partnerPubkey,
             title: 'Marketplace update',
             body: preview,
-            data: { conversationPubkey: partnerPubkey },
+            data: {
+              conversationPubkey: partnerPubkey,
+              conversationProtocol: protocolForWireKind(ev.kind),
+            },
           });
         }
       });

@@ -7,20 +7,16 @@ export const DM_PROTOCOL_LABEL: Record<DmProtocol, string> = {
   marmot: 'Marmot',
 };
 
-export function protocolForWireKind(wireKind: number | undefined): DmProtocol | null {
-  return wireKind === undefined ? null : wireKind === 4 ? 'nip04' : 'nip17';
+export function protocolForWireKind(wireKind: number | undefined): 'nip04' | 'nip17' {
+  return wireKind === 4 ? 'nip04' : 'nip17';
 }
 
-export function latestThreadProtocol(
-  messages: readonly { createdAt: number; wireKind?: number }[],
-): DmProtocol | null {
-  let newest: (typeof messages)[number] | undefined;
-  for (const message of messages) {
-    if (message.wireKind !== undefined && (!newest || message.createdAt > newest.createdAt)) {
-      newest = message;
-    }
-  }
-  return protocolForWireKind(newest?.wireKind);
+/** Read-side thread partition; preserves message order and object identity. */
+export function filterMessagesByProtocol<T extends { wireKind?: number }>(
+  messages: readonly T[],
+  protocol: DmProtocol,
+): T[] {
+  return messages.filter((message) => protocolForWireKind(message.wireKind) === protocol);
 }
 
 export function isDmProtocolAvailable(protocol: DmProtocol): boolean {

@@ -285,6 +285,7 @@
     "seeAll": "Переглянути все"
   },
   "conversationComposer": {
+    "attachmentsNip17Only": "Вкладення та голосові повідомлення доступні в чаті NIP-17. Змініть протокол у заголовку.",
     "messagePlaceholder": "Повідомлення",
     "attach": "Прикріпити",
     "messageInput": "Поле повідомлення",

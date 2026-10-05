@@ -332,16 +332,19 @@ export async function getOutgoingOrderRows(
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:
  * the DB does the per-conversation MAX in one indexed query instead of JS
- * walking everything.
+ * walking everything. A conversation is (partner, protocol): NIP-04 rows
+ * (wire_kind 4) and NIP-17 rows each get their own latest row, so a partner
+ * with both shows two inbox threads (see `protocolForWireKind`).
  */
 export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
   const res = await db.execute(
     `SELECT m.* FROM dm_messages m
        JOIN (
-         SELECT conversation, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? GROUP BY conversation
-       ) g ON m.conversation = g.conversation AND m.created_at = g.mx
+         SELECT conversation, (wire_kind = 4) AS is_nip04, MAX(created_at) AS mx
+         FROM dm_messages WHERE owner = ? GROUP BY conversation, (wire_kind = 4)
+       ) g ON m.conversation = g.conversation AND (m.wire_kind = 4) = g.is_nip04
+          AND m.created_at = g.mx
      WHERE m.owner = ?
      ORDER BY m.created_at DESC;`,
     [owner, owner],

@@ -5,7 +5,8 @@ name: New conversation protocol picker → NIP-04 send to Little Piggy
 # see .maestro/README.adoc), assert the protocol picker offers NIP-17 /
 # Marmot (disabled, "Coming soon") / NIP-04, pick NIP-04, and send one
 # legacy kind-4 DM. Asserts the conversation header tag reads NIP-04 and the
-# message lands in the thread.
+# message lands only in its own thread. Requires existing NIP-17 history
+# with Little Piggy so both inbox rows can be asserted.
 #
 # Expects the signed-in user to be Big Piggy (or any account that follows
 # Little Piggy). Only ever messages a Piggy — never a real contact.
@@ -52,4 +53,22 @@ name: New conversation protocol picker → NIP-04 send to Little Piggy
 - extendedWaitUntil:
     visible:
       text: 'NIP-04 protocol test'
+    timeout: 15000
+- tapOn:
+    id: 'conversation-protocol-tag'
+- tapOn:
+    id: 'dm-protocol-option-nip17'
+- extendedWaitUntil:
+    visible:
+      text: 'NIP-17'
+    timeout: 10000
+- assertNotVisible:
+    text: 'NIP-04 protocol test'
+- tapOn:
+    id: 'conversation-back'
+- assertVisible:
+    id: 'conversation-row-d9b33280.*:nip04'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-d9b33280.*:nip17'
     timeout: 15000

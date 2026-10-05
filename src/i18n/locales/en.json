@@ -285,6 +285,7 @@
     "seeAll": "See all"
   },
   "conversationComposer": {
+    "attachmentsNip17Only": "Attachments and voice notes are available in the NIP-17 thread. Switch protocol using the header.",
     "messagePlaceholder": "Message",
     "attach": "Attach",
     "messageInput": "Message input",

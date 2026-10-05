@@ -193,6 +193,7 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
 export const navigateFromNotification = (data: {
   kind?: string;
   conversationPubkey?: string;
+  conversationProtocol?: 'nip04' | 'nip17';
   groupId?: string;
   walletId?: string;
   cacheCoord?: string;
@@ -201,7 +202,11 @@ export const navigateFromNotification = (data: {
   if (data.conversationPubkey) {
     // `name` is required by the route type but the screen fills the real
     // header from its own profile fetch, so seed it empty.
-    navigationRef.navigate('Conversation', { pubkey: data.conversationPubkey, name: '' });
+    navigationRef.navigate('Conversation', {
+      pubkey: data.conversationPubkey,
+      name: '',
+      protocol: data.conversationProtocol ?? 'nip17',
+    });
     return true;
   }
   if (data.groupId) {

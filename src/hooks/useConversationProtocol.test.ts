@@ -1,38 +1,17 @@
-import { act, renderHook } from '@testing-library/react-native';
+import { renderHook } from '@testing-library/react-native';
 import { useConversationProtocol } from './useConversationProtocol';
 import type { DmProtocol } from '../utils/dmProtocol';
 
-it('applies session choice, route, thread and default precedence', () => {
+it('uses only the route protocol, defaulting unqualified entry points to NIP-17', () => {
   const { result, rerender } = renderHook(
-    ({
-      route,
-      messages,
-    }: {
-      route?: DmProtocol;
-      messages: { createdAt: number; wireKind?: number }[];
-    }) => useConversationProtocol('alice', route, messages),
-    {
-      initialProps: { route: undefined, messages: [] },
-    },
+    ({ protocol }: { protocol?: DmProtocol }) => useConversationProtocol(protocol),
+    { initialProps: { protocol: undefined } },
   );
-  expect(result.current.protocol).toBe('nip17');
-  rerender({ messages: [{ createdAt: 1, wireKind: 4 }] });
-  expect(result.current.protocol).toBe('nip04');
-  rerender({ route: 'nip17', messages: [{ createdAt: 1, wireKind: 4 }] });
-  expect(result.current.protocol).toBe('nip17');
-  act(() => result.current.setProtocol('nip04'));
-  rerender({ route: 'nip17', messages: [{ createdAt: 2, wireKind: 14 }] });
-  expect(result.current.protocol).toBe('nip04');
-});
-
-it('does not carry a session choice into a different conversation', () => {
-  const { result, rerender } = renderHook(
-    ({ peer }: { peer: string }) => useConversationProtocol(peer, undefined, []),
-    {
-      initialProps: { peer: 'alice' },
-    },
-  );
-  act(() => result.current.setProtocol('nip04'));
-  rerender({ peer: 'bob' });
-  expect(result.current.protocol).toBe('nip17');
+  expect(result.current).toBe('nip17');
+  rerender({ protocol: 'nip04' });
+  expect(result.current).toBe('nip04');
+  rerender({ protocol: 'nip17' });
+  expect(result.current).toBe('nip17');
+  rerender({ protocol: undefined });
+  expect(result.current).toBe('nip17');
 });
