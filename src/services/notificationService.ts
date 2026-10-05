@@ -74,7 +74,7 @@ const PERMISSION_REQUESTED_KEY = 'notif_pref_permission_asked_v1';
  * Add a new kind here BEFORE adding a new caller — keeps the routing
  * logic exhaustive.
  */
-export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache';
+export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 'swap';
 
 /** Tap-routing data shipped with every notification. The deep-link
  * router (TODO — follow-up) reads these on tap to navigate to the
@@ -275,6 +275,7 @@ function channelForKind(kind: NotificationKind): string {
       return CHANNEL_MESSAGES;
     case 'payment':
     case 'zap':
+    case 'swap':
       return CHANNEL_PAYMENTS;
   }
 }
@@ -295,6 +296,9 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
       return { title: 'Zap received', body: 'Open Lightning Piggy for details' };
     case 'cache':
       return { title: 'New find on your cache', body: 'Open Lightning Piggy to view' };
+    // A swap needing action must not be redacted into "Payment received".
+    case 'swap':
+      return { title: 'Action needed', body: 'Open Lightning Piggy for details' };
   }
 }
 

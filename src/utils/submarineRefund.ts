@@ -5,6 +5,22 @@ import * as onchainService from '../services/onchainService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { PersistedSubmarineSwap } from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
+import { fireNotification } from '../services/notificationService';
+import { resolveRefundDestination } from './refundDestination';
+import { swapSupportHint } from './swapSupportText';
+import { blockEtaText } from './blockEta';
+
+// Once-per-session guards: recovery runs on every app start/resume, and these
+// informational prompts shouldn't repeat each time (the actionable Refund
+// prompt still does, until the user acts).
+const shownWaiting = new Set<string>();
+const shownNoWallet = new Set<string>();
+
+/** Toast + OS notification, so a swap needing action isn't missed. */
+function notifySwapAttention(title: string, body: string): void {
+  Toast.show({ type: 'error', text1: title, text2: body, position: 'top', visibilityTime: 12000 });
+  void fireNotification({ kind: 'swap', title, body });
+}
 
 /**
  * Handle a submarine swap (on-chain → Lightning) that hit a terminal Boltz
@@ -19,6 +35,8 @@ export async function promptSubmarineRefund(
   swap: boltzService.SubmarineSwapResult,
   sourceWalletId: string,
   reason: string,
+  /** Shown in the prompt so the user can see — and decline — where it goes. */
+  destinationLabel?: string,
 ): Promise<void> {
   // Look up the on-chain lockup + a refund destination. Guarded because this
   // runs inside TransferSheet's detached background task — an unhandled reject
@@ -31,6 +49,23 @@ export async function promptSubmarineRefund(
     if (lockup) destAddr = await onchainService.getNextReceiveAddress(sourceWalletId);
   } catch (e) {
     console.warn('[Transfer] submarine refund lookup failed:', e);
+  }
+  // Before the swap's timeout block the refund can't be broadcast yet — say
+  // when it unlocks instead of offering a button that would be rejected.
+  if (lockup && destAddr) {
+    const height = await onchainService.getBlockHeight().catch(() => null);
+    if (height !== null && height < swap.timeoutBlockHeight) {
+      if (!shownWaiting.has(swap.id)) {
+        shownWaiting.add(swap.id);
+        const blocks = swap.timeoutBlockHeight - height;
+        Alert.alert(
+          'Refund not available yet',
+          `Your ${swap.expectedAmount.toLocaleString()} sats are safe. The refund unlocks at block ${swap.timeoutBlockHeight} (${blockEtaText(blocks)} from now), and Lightning Piggy will offer it then. Keep the app installed until it's done.`,
+          [{ text: 'OK' }],
+        );
+      }
+      return;
+    }
   }
   if (!lockup || !destAddr) {
     // Nothing recoverable (already refunded on-chain) or the lookup failed —
@@ -46,7 +81,7 @@ export async function promptSubmarineRefund(
   }
   Alert.alert(
     'Swap Failed — Refund Available',
-    `The swap failed (${reason}). Your on-chain funds become refundable at block ${swap.timeoutBlockHeight}. Tap Refund to broadcast the refund now — if that block hasn't been reached yet it will be rejected, so try again once it has.`,
+    `The swap failed (${reason}). Tap Refund to send your on-chain funds back${destinationLabel ? ` to "${destinationLabel}"` : ''}.`,
     [
       {
         text: 'Refund',
@@ -85,16 +120,27 @@ export async function promptSubmarineRefund(
  * persisted record and delegates. Registered once at app start.
  */
 export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Promise<void> {
-  if (!swap.sourceWalletId || !swap.swapTree) {
-    // Older records (pre-recovery) lack the refund destination / script tree —
-    // nothing we can reconstruct. Surface it so the user can contact support.
-    Toast.show({
-      type: 'error',
-      text1: 'Swap needs attention',
-      text2: `A pending swap (${swap.id.slice(0, 8)}…) failed and can't be auto-refunded. Contact Boltz support with this ID.`,
-      position: 'top',
-      visibilityTime: 12000,
-    });
+  if (!swap.swapTree) {
+    // Older records (pre-recovery) lack the script tree — nothing we can
+    // reconstruct, so point the user at whoever runs the swap server.
+    notifySwapAttention(
+      'Swap needs attention',
+      `A pending swap (${swap.id.slice(0, 8)}…) failed and can't be auto-refunded. ${await swapSupportHint(swap.id)}`,
+    );
+    return;
+  }
+  // The destination is chosen now, not at swap creation (#1124), and never in
+  // another identity's wallets (see resolveRefundDestination).
+  const destination = await resolveRefundDestination(swap);
+  if (destination.kind === 'other-identity') return;
+  if (destination.kind === 'no-wallet') {
+    if (!shownNoWallet.has(swap.id)) {
+      shownNoWallet.add(swap.id);
+      notifySwapAttention(
+        'Add an on-chain wallet for your refund',
+        `A failed swap's ${swap.expectedAmount.toLocaleString()} sats can be refunded, but you have no on-chain wallet to receive them. Add one in Lightning Piggy and the refund will be offered.`,
+      );
+    }
     return;
   }
   await promptSubmarineRefund(
@@ -107,7 +153,8 @@ export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Prom
       claimPublicKey: swap.claimPublicKey,
       swapTree: swap.swapTree as boltzService.SubmarineSwapResult['swapTree'],
     },
-    swap.sourceWalletId,
+    destination.walletId,
     'recovered after app restart',
+    destination.alias,
   );
 }

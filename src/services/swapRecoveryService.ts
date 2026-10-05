@@ -17,6 +17,9 @@ import { markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 import { getSwapBackendForId } from './swapBackendService';
+import { getActivePubkey } from './walletStorageService';
+import { fireNotification } from './notificationService';
+import { swapSupportHint } from '../utils/swapSupportText';
 
 /** Shape of the transaction-row data this module needs to classify a row as
  *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
@@ -472,6 +475,9 @@ export interface PersistedSubmarineSwap {
   timeoutBlockHeight: number;
   swapTree?: unknown;
   sourceWalletId?: string;
+  /** Identity that created the swap; refunds never cross identities (#1124).
+   *  Absent on records created before this field existed. */
+  ownerPubkey?: string;
   createdAt?: number;
   notFoundCount?: number;
   /** Set once we've surfaced the funded-but-unrecoverable "needs attention"
@@ -904,7 +910,14 @@ async function recoverSubmarineSwaps(): Promise<void> {
         console.warn(
           `[SwapRecovery] Submarine swap ${swapId} failed (${status}) with on-chain lockup — refund path`,
         );
-        const refundable = !!(swap.swapTree && swap.sourceWalletId);
+        // Another identity's swap: no refund prompt or alert here — its ID and
+        // state aren't this identity's to see; it surfaces when its owner is
+        // active (#1124).
+        if (swap.ownerPubkey && swap.ownerPubkey !== getActivePubkey()) continue;
+        // Refundable whenever we hold the refund script; the handler picks the
+        // destination wallet at refund time (#1124), so a swap created before
+        // the user had an on-chain wallet isn't stranded.
+        const refundable = !!swap.swapTree;
         if (refundable && submarineRefundHandler) {
           // Funded + refundable: the handler surfaces the interactive refund
           // prompt; it owns record deletion once the refund is broadcast.
@@ -919,13 +932,15 @@ async function recoverSubmarineSwaps(): Promise<void> {
           // refund material, or no handler registered). This genuinely needs
           // manual action — but alert ONCE, not on every pass. Persist the
           // acknowledged flag so a stuck swap surfaces a single time.
+          const body = `A pending swap (${swapId.slice(0, 8)}…) with on-chain funds couldn't be auto-refunded. ${await swapSupportHint(swapId)}`;
           Toast.show({
             type: 'error',
             text1: 'Swap needs attention',
-            text2: `A pending swap (${swapId.slice(0, 8)}…) with on-chain funds couldn't be auto-refunded. Contact Boltz support with this ID.`,
+            text2: body,
             position: 'top',
             visibilityTime: 12000,
           });
+          void fireNotification({ kind: 'swap', title: 'Swap needs attention', body });
           await SecureStore.setItemAsync(
             `submarine_swap_${swapId}`,
             JSON.stringify({ ...swap, notFoundCount: undefined, notifiedUnrecoverable: true }),

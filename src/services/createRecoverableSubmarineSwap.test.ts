@@ -10,6 +10,8 @@ jest.mock('expo-secure-store', () => ({
 
 jest.mock('./boltzService', () => ({ createSubmarineSwapForward: jest.fn() }));
 jest.mock('./swapRecoveryService', () => ({ registerPendingSubmarineSwap: jest.fn() }));
+let mockActivePubkey: string | null = 'a'.repeat(64);
+jest.mock('./walletStorageService', () => ({ getActivePubkey: () => mockActivePubkey }));
 const quote = {
   backend: 'https://example.com/v2',
   pairHash: 'approved',
@@ -65,4 +67,15 @@ it('does not return funding instructions when index registration fails', async (
   await expect(createRecoverableSubmarineSwap('invoice', 100, 'source', quote)).rejects.toThrow(
     'Index full',
   );
+});
+it('records the identity that started the swap, even if it switches mid-create (#1124)', async () => {
+  const initiator = 'a'.repeat(64);
+  mockActivePubkey = initiator;
+  jest.mocked(createSubmarineSwapForward).mockImplementationOnce(async () => {
+    mockActivePubkey = 'c'.repeat(64); // user switches identity while this is in flight
+    return swap;
+  });
+  await createRecoverableSubmarineSwap('invoice', 100, 'source', quote);
+  const [, raw] = jest.mocked(SecureStore.setItemAsync).mock.calls[0];
+  expect(JSON.parse(raw).ownerPubkey).toBe(initiator);
 });

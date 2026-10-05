@@ -67,8 +67,9 @@ import AmountEntryScreen from './AmountEntryScreen';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
-import { getDefaultOnchainWalletId } from '../services/walletStorageService';
+import { getActivePubkey, getDefaultOnchainWalletId } from '../services/walletStorageService';
 import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
+import { blockEta } from '../utils/blockEta';
 
 interface Props {
   visible: boolean;
@@ -102,6 +103,31 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
   // Swap state — populated after createSubmarineSwapForward returns.
   const [swap, setSwap] = useState<boltzService.SubmarineSwapResult | null>(null);
+  // Current block height, for a real "expires in about …" estimate — the
+  // timeout depends on the swap server (Boltz ~24h, custom backends ~1 week).
+  const [tipHeight, setTipHeight] = useState<number | null>(null);
+  useEffect(() => {
+    if (!swap) return;
+    let cancelled = false;
+    onchainService
+      .getBlockHeight()
+      .then((h) => {
+        if (!cancelled) setTipHeight(h);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [swap]);
+  const etaLabel = useCallback(
+    (blocks: number) => {
+      const { unit, count } = blockEta(blocks);
+      if (unit === 'hours')
+        return count === 1 ? t('boltzReceive.etaHour') : t('boltzReceive.etaHours', { count });
+      return count === 1 ? t('boltzReceive.etaDay') : t('boltzReceive.etaDays', { count });
+    },
+    [t],
+  );
   const [phase, setPhase] = useState<boltzService.SubmarineSwapPhase>('awaiting-payment');
   const [refunding, setRefunding] = useState(false);
   const [refundedTxId, setRefundedTxId] = useState<string | null>(null);
@@ -348,6 +374,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const handleConfirmAmount = useCallback(
     async (sats: number) => {
       if (!walletId || !wallet) return;
+      // Capture the initiating identity before any async work, so an identity
+      // switch mid-create can't re-attribute this swap's refund (#1124).
+      const ownerPubkey = getActivePubkey() ?? undefined;
       // Mark the flow in-flight *synchronously*, before the state updates below
       // schedule a re-render. `swapInFlightRef` is otherwise refreshed only
       // during render, so without this there's a brief window where a stray
@@ -403,6 +432,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             swapTree: created.swapTree,
             refundDestinationAddress: refundDestination?.address,
             sourceWalletId: refundDestination?.walletId,
+            // Refunds only ever land in the creating identity's wallets (#1124).
+            ownerPubkey,
             createdAt: Date.now(),
           }),
           // Device-only accessibility so the refundPrivateKey in this record
@@ -700,7 +731,12 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
 
                 {swap.timeoutBlockHeight > 0 ? (
                   <Text style={styles.timeoutNote}>
-                    {t('boltzReceive.timeoutNote', { height: swap.timeoutBlockHeight })}
+                    {tipHeight !== null && tipHeight < swap.timeoutBlockHeight
+                      ? t('boltzReceive.timeoutNote', {
+                          height: swap.timeoutBlockHeight,
+                          eta: etaLabel(swap.timeoutBlockHeight - tipHeight),
+                        })
+                      : t('boltzReceive.timeoutNoteNoEta', { height: swap.timeoutBlockHeight })}
                   </Text>
                 ) : null}
 
