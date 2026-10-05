@@ -247,3 +247,50 @@ it('honours a bulk deletion with more tags than the per-event limit', async () =
   callbacks.oneose();
   expect(await pending).toMatchObject({ products: [], incomplete: true });
 });
+it('hides an older listing behind a verified revision larger than 256 KB', async () => {
+  const older = finalizeEvent(
+    { kind: 30402, created_at: 100, content: 'Book', tags: event.tags },
+    key,
+  );
+  const huge = finalizeEvent(
+    { kind: 30402, created_at: 200, content: 'x'.repeat(300000), tags: event.tags },
+    key,
+  );
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onevent(older);
+  callbacks.onevent(huge);
+  callbacks.oneose();
+  expect(await pending).toEqual({ products: [], incomplete: true });
+});
+it('keeps revision tie-breaking: a renderable revision with the lower id still wins', async () => {
+  // Same address + timestamp; the reducer keeps the lowest id on a tie.
+  let small = event;
+  let big = event;
+  for (let i = 0; ; i++) {
+    small = finalizeEvent(
+      { kind: 30402, created_at: 500, content: `Book ${i}`, tags: event.tags },
+      key,
+    );
+    big = finalizeEvent(
+      { kind: 30402, created_at: 500, content: 'x'.repeat(40000 + i), tags: event.tags },
+      key,
+    );
+    if (small.id < big.id) break;
+  }
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onevent(big);
+  callbacks.onevent(small);
+  callbacks.oneose();
+  const result = await pending;
+  expect(result.products.map((p) => p.listing?.event.id)).toEqual([small.id]);
+});

@@ -31,12 +31,22 @@ export function fetchMarketListings(
     let finished = false;
     let limited = keys.length > MAX_AUTHORS || uniqueRelays.length > urls.length;
     const events = new Map<string, Event>();
-    // A verified-but-oversized revision is never rendered, yet it is still the
-    // newest revision of its listing: record it as a deletion marker so the
-    // reducer's newest-revision rule keeps older revisions hidden.
+    // Verified-but-oversized events are never rendered, yet still take part in
+    // revision ordering and deletion. Keep small, non-renderable stand-ins
+    // (sharing the event budget) instead of the payloads.
     const suppressions = new Map<string, Event>();
+    // Signature checks hash the whole payload; beyond this we can't afford to
+    // verify, so the snapshot is only flagged incomplete.
+    const MAX_VERIFY_CHARS = 1048576;
+    const verified = (event: Event) => {
+      try {
+        return verifyEvent(event);
+      } catch {
+        return false;
+      }
+    };
     // A bulk deletion over the tag limit still withdraws listings: keep a
-    // trimmed copy with only the e / own-listing a tags, inside the budget.
+    // trimmed copy with only the e / own-listing a tags.
     const suppressOversizedDeletion = (event: Event) => {
       if (suppressions.has(event.id) || events.size + suppressions.size >= MAX_EVENTS) return;
       const tags = event.tags
@@ -49,17 +59,12 @@ export function fetchMarketListings(
         )
         .slice(0, MAX_EVENTS)
         .map((t) => [t[0], t[1]]);
-      if (tags.length === 0) return;
-      try {
-        if (!verifyEvent(event)) return;
-      } catch {
-        return;
-      }
+      if (tags.length === 0 || !verified(event)) return;
       suppressions.set(event.id, { ...event, content: '', tags });
     };
     const suppressOversized = (event: Event) => {
       limited = true;
-      if (event.content.length > 262144) return;
+      if (event.content.length > MAX_VERIFY_CHARS) return;
       if (event.kind === 5) {
         suppressOversizedDeletion(event);
         return;
@@ -69,22 +74,26 @@ export function fetchMarketListings(
       // Over-long ids are rejected as listings anyway, so there's nothing to hide.
       if (!d || new TextEncoder().encode(d).length > 255) return;
       const address = `${event.kind}:${event.pubkey}:${d}`;
-      // Only the newest marker per listing matters; markers share the event
-      // budget so a noisy relay can't grow this without bound.
+      // Keep only the revision that would win this address (newest, then
+      // lowest id — the reducer's own order), so a noisy relay can't grow this.
       const existing = suppressions.get(address);
-      if (existing && existing.created_at >= event.created_at) return;
-      if (!existing && events.size + suppressions.size >= MAX_EVENTS) return;
-      try {
-        if (!verifyEvent(event)) return;
-      } catch {
+      if (
+        existing &&
+        (existing.created_at > event.created_at ||
+          (existing.created_at === event.created_at && existing.id <= event.id))
+      )
         return;
-      }
+      if (!existing && events.size + suppressions.size >= MAX_EVENTS) return;
+      if (!verified(event)) return;
+      // Same id/kind/created_at as the real revision so it competes normally;
+      // empty content + a non-active status make it non-renderable.
       suppressions.set(address, {
         ...event,
-        id: `oversized-${event.id}`,
-        kind: 5,
         content: '',
-        tags: [['a', address]],
+        tags: [
+          ['d', d],
+          ['status', 'oversized'],
+        ],
       });
     };
     const subscriptions: { close: () => void }[] = [];
