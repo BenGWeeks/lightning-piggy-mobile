@@ -178,3 +178,55 @@ it('lets an oversized newer revision hide the older one instead of resurrecting 
   callbacks.oneose();
   expect(await pending).toEqual({ products: [], incomplete: true });
 });
+it('bounds oversized-revision markers by the shared event budget', async () => {
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  // Repeated oversized revisions of ONE listing keep a single marker.
+  for (let i = 0; i < 5; i++) {
+    callbacks.onevent(
+      finalizeEvent(
+        { kind: 30402, created_at: 200 + i, content: 'x'.repeat(33000), tags: event.tags },
+        key,
+      ),
+    );
+  }
+  // Oversized revisions of many DISTINCT listings stop at the shared budget
+  // (MAX_EVENTS = 1200), so a noisy relay can't grow memory without bound.
+  for (let i = 0; i < 1300; i++) {
+    callbacks.onevent(
+      finalizeEvent(
+        {
+          kind: 30402,
+          created_at: 200,
+          content: 'x'.repeat(33000),
+          tags: [
+            ['d', `big-${i}`],
+            ['title', 'Big'],
+          ],
+        },
+        key,
+      ),
+    );
+  }
+  // With the budget spent, a normal listing is dropped and the result is partial.
+  const other = finalizeEvent(
+    {
+      kind: 30402,
+      created_at: 100,
+      content: 'Pen',
+      tags: [
+        ['d', 'pen'],
+        ['title', 'Pen'],
+        ['price', '5', 'SAT'],
+      ],
+    },
+    key,
+  );
+  callbacks.onevent(other);
+  callbacks.oneose();
+  expect(await pending).toEqual({ products: [], incomplete: true });
+}, 60000);

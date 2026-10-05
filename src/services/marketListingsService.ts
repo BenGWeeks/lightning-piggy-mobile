@@ -39,18 +39,25 @@ export function fetchMarketListings(
       limited = true;
       if (![30018, 30402].includes(event.kind) || event.content.length > 262144) return;
       const d = event.tags.find((t) => t[0] === 'd')?.[1];
-      if (!d) return;
+      // Over-long ids are rejected as listings anyway, so there's nothing to hide.
+      if (!d || new TextEncoder().encode(d).length > 255) return;
+      const address = `${event.kind}:${event.pubkey}:${d}`;
+      // Only the newest marker per listing matters; markers share the event
+      // budget so a noisy relay can't grow this without bound.
+      const existing = suppressions.get(address);
+      if (existing && existing.created_at >= event.created_at) return;
+      if (!existing && events.size + suppressions.size >= MAX_EVENTS) return;
       try {
         if (!verifyEvent(event)) return;
       } catch {
         return;
       }
-      suppressions.set(event.id, {
+      suppressions.set(address, {
         ...event,
         id: `oversized-${event.id}`,
         kind: 5,
         content: '',
-        tags: [['a', `${event.kind}:${event.pubkey}:${d}`]],
+        tags: [['a', address]],
       });
     };
     const subscriptions: { close: () => void }[] = [];
@@ -113,7 +120,7 @@ export function fetchMarketListings(
                   return;
                 }
                 if (events.has(event.id)) return;
-                if (events.size >= MAX_EVENTS) {
+                if (events.size + suppressions.size >= MAX_EVENTS) {
                   limited = true;
                   return;
                 }
