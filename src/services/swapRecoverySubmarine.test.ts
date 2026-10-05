@@ -118,6 +118,20 @@ describe('submarine swap recovery', () => {
     expect(mockStore.has(KEY)).toBe(true);
   });
 
+  it('routes a funded failure with no recorded wallet to the refund handler (#1124)', async () => {
+    // The real case: created before the user had an on-chain wallet, and
+    // already flagged by the old one-time "needs attention" toast.
+    seed({ sourceWalletId: undefined, notifiedUnrecoverable: true });
+    const handler = jest.fn().mockResolvedValue(undefined);
+    setSubmarineRefundHandler(handler);
+    route('invoice.failedToPay');
+
+    await recoverPendingSwaps();
+
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: SWAP_ID }));
+    expect(attentionToasts()).toHaveLength(0);
+  });
+
   it('re-surfaces the interactive refund prompt on every pass (not once-only)', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     setSubmarineRefundHandler(handler);
