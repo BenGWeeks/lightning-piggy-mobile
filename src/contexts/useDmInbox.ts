@@ -6,6 +6,7 @@ import { nip46DecryptNip04 } from './nip46DmDecrypt';
 import { ingestInboxNip17ForSigner } from './inboxNip17Ingest';
 import type { SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { localSendInboxEntry } from '../utils/localSendInboxEntry';
 import {
   selectKnownEventIds,
   upsertDmMessages,
@@ -220,6 +221,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       if (!pubkey) return;
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      // Outgoing NIP-04 sends have no self-echo to surface them in the list.
+      const entry = localSendInboxEntry(normalized, msg);
+      if (entry) setDmInbox((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
       try {
         await upsertDmMessages([
           {
@@ -242,7 +246,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         if (__DEV__) console.warn('[DmStore] optimistic append failed:', e);
       }
     },
-    [pubkey],
+    [pubkey, setDmInbox],
   );
 
   // Durably attach delivery status (#856) to stored rows, keyed by row id —
