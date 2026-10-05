@@ -54,8 +54,11 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [checkoutVisible, setCheckoutVisible] = useState(false);
 
   const product = useMemo(
-    () => MARKET_PRODUCTS.find((p) => p.id === route.params.productId),
-    [route.params.productId],
+    () =>
+      route.params.product?.id === route.params.productId
+        ? route.params.product
+        : MARKET_PRODUCTS.find((p) => p.id === route.params.productId),
+    [route.params.productId, route.params.product],
   );
   const vendor = useMemo(() => (product ? sellerOf(product) : undefined), [product]);
   // Memoised so the comment-thread root identity stays stable across renders.
@@ -172,9 +175,12 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.priceRow}>
             <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
             <Text style={styles.priceSats} testID="market-product-detail-price">
-              {t('market.sats', { amount: product.priceSats.toLocaleString() })}
+              {product.listing?.priceLabel ??
+                t('market.sats', { amount: product.priceSats.toLocaleString() })}
             </Text>
-            <Text style={styles.priceFiat}>· {product.priceFiatLabel}</Text>
+            {!product.listing ? (
+              <Text style={styles.priceFiat}>· {product.priceFiatLabel}</Text>
+            ) : null}
           </View>
 
           <View style={styles.vendorRow}>
@@ -183,6 +189,22 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           <Text style={styles.description}>{product.description}</Text>
+          {product.listing ? (
+            <TouchableOpacity
+              style={styles.buyButton}
+              testID="market-contact-seller"
+              accessibilityLabel={t('market.live.contactSeller')}
+              onPress={() =>
+                navigation.navigate('Conversation', {
+                  pubkey: product.listing!.event.pubkey,
+                  name: sellerName,
+                  picture: null,
+                })
+              }
+            >
+              <Text style={styles.buyText}>{t('market.live.contactSeller')}</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <TouchableOpacity
             style={styles.buyButton}
@@ -195,7 +217,11 @@ const MarketProductDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             })}
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} fill={colors.white} />
-            <Text style={styles.buyText}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
+            <Text style={styles.buyText}>
+              {product.listing
+                ? t('market.live.openListing')
+                : t('market.detail.buyFrom', { seller: sellerName })}
+            </Text>
             {/* In-app checkout for opted-in products; the external-link glyph is
                 only shown when tapping Buy leaves the app for the seller's website. */}
             {checkoutTarget ? null : (

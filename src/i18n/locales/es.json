@@ -2224,6 +2224,14 @@
       "optionAccessibility": "Opción de envío {{title}}",
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
+    },
+    "live": {
+      "loading": "Cargando anuncios de tus amigos…",
+      "incomplete": "No se pudieron cargar todos los anuncios. Intenta actualizar.",
+      "loaded": "Anuncios en directo de tus amigos",
+      "refresh": "Actualizar",
+      "openListing": "Abrir anuncio",
+      "contactSeller": "Enviar mensaje al vendedor"
     }
   },
   "accountScreenLayout": {

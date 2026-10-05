@@ -25,10 +25,13 @@
 // the relay fetch is deliberately left unimplemented for now.
 
 import { MARKET_VENDORS, type MarketVendor } from './marketVendors';
+import type { MarketListing } from '../utils/marketListings';
 
 /** A single product offered by a Market seller. Field layout mirrors the
  * website's product cards (image, title, price, seller). */
 export interface MarketProduct {
+  /** Signed relay listing; never implies merchant checkout support. */
+  listing?: MarketListing;
   /** Stable id — used as the React key and to build testIDs. */
   id: string;
   /** Product title, e.g. "Lightning Piggy". */
@@ -218,5 +221,5 @@ export const MARKET_PRODUCTS: MarketProduct[] = [
  * forbids, so this is total in practice).
  */
 export function sellerOf(product: MarketProduct): MarketVendor | undefined {
-  return MARKET_VENDORS.find((v) => v.name === product.sellerName);
+  return product.listing?.vendor ?? MARKET_VENDORS.find((v) => v.name === product.sellerName);
 }

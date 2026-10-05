@@ -22,6 +22,7 @@ export function marketCheckoutTarget(
   product: MarketProduct,
   vendor: MarketVendor | undefined,
 ): MarketCheckoutTarget | null {
+  if (product.listing) return null;
   const checkout = product.checkout;
   if (!checkout || !vendor) return null;
   const listingDTag = checkout.listingDTag.trim();

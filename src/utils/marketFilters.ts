@@ -241,7 +241,7 @@ export function distinctMerchants(
 export function distinctCurrencies(products: readonly MarketProduct[]): string[] {
   const set = new Set<string>();
   for (const p of products) {
-    const cur = currencyOf(p.priceFiatLabel);
+    const cur = p.listing?.currency ?? currencyOf(p.priceFiatLabel);
     if (cur) set.add(cur);
   }
   return [...set].sort((a, b) => a.localeCompare(b));
@@ -266,7 +266,10 @@ export function filterMarketProducts(
     if (filter.country !== null && productCountry(p, resolveVendor) !== filter.country) {
       return false;
     }
-    if (filter.currency !== null && currencyOf(p.priceFiatLabel) !== filter.currency) {
+    if (
+      filter.currency !== null &&
+      (p.listing?.currency ?? currencyOf(p.priceFiatLabel)) !== filter.currency
+    ) {
       return false;
     }
     return true;

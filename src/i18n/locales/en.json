@@ -2224,6 +2224,14 @@
       "optionAccessibility": "Shipping option {{title}}",
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Your delivery address isn't sent with the order — {{seller}} will ask for it in your chat."
+    },
+    "live": {
+      "loading": "Loading listings from your friends…",
+      "incomplete": "Some listings could not be loaded. Try refreshing.",
+      "loaded": "Live listings from your friends",
+      "refresh": "Refresh",
+      "openListing": "Open listing",
+      "contactSeller": "Message seller"
     }
   },
   "accountScreenLayout": {
