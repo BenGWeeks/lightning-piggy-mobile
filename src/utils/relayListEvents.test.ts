@@ -130,3 +130,22 @@ it('reads a list with separate read and write tags for one relay as ONE row', ()
   ]);
   expect(mergeRelayRows([])).toEqual([]);
 });
+
+describe('parsing lists published by other clients', () => {
+  it('drops malformed relay URLs so one bad tag cannot break every subscription', () => {
+    expect(
+      dmInboxRelaysFromTags([
+        ['relay', 'wss://'],
+        ['relay', 'not a url'],
+        ['relay', 'https://relay.example.com'],
+        ['relay', 'wss://nostr.mom'],
+      ]),
+    ).toEqual(['wss://nostr.mom']);
+    expect(
+      relayListFromTags([
+        ['r', 'wss://'],
+        ['r', 'wss://relay.primal.net', 'read'],
+      ]).map((r) => r.url),
+    ).toEqual(['wss://relay.primal.net']);
+  });
+});

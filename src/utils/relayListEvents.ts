@@ -75,7 +75,7 @@ export function mergeRelayRows(rows: RelayConfig[]): RelayConfig[] {
 export function relayListFromTags(tags: string[][]): RelayConfig[] {
   return mergeRelayRows(
     tags
-      .filter((t) => t[0] === 'r' && t[1])
+      .filter((t) => t[0] === 'r' && t[1] && isRelayUrl(t[1]))
       .map((t) => ({
         url: t[1],
         read: !t[2] || t[2] === 'read',
@@ -111,9 +111,24 @@ export function buildDmInboxEvent(urls: string[], now = Date.now()): UnsignedEve
   return { kind: 10050, created_at: Math.floor(now / 1000), tags, content: '' };
 }
 
+/** A well-formed ws(s) relay URL. Lists published by other clients may carry
+ * junk (e.g. `wss://`), and one bad URL makes nostr-tools throw for the whole
+ * subscription — so parsed lists keep only these. */
+export function isRelayUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'wss:' || u.protocol === 'ws:') && u.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Relay URLs from a kind-10050 event's `relay` tags. */
 export function dmInboxRelaysFromTags(tags: string[][]): string[] {
-  return tags.filter((t) => t[0] === 'relay' && t[1]).map((t) => norm(t[1]));
+  return tags
+    .filter((t) => t[0] === 'relay' && t[1])
+    .map((t) => norm(t[1]))
+    .filter(isRelayUrl);
 }
 
 /**
