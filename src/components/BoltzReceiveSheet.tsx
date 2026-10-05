@@ -250,6 +250,11 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
         if (result.phase === 'complete' || result.phase === 'failed') {
           markSwapPlaceholdersResolved(swap.id);
         }
+        // A failed swap's Lightning leg never arrives, so nothing else would
+        // trigger that refresh — request it here (complete refreshes below).
+        if (result.phase === 'failed' && walletId) {
+          fetchTransactionsForWallet(walletId).catch(() => {});
+        }
         if (result.phase === 'complete') {
           // Refresh the wallet balance + list so the user sees the credit
           // (and the settled row replaces the placeholder) immediately.
