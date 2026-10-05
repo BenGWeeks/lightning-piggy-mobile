@@ -215,6 +215,7 @@ const ConversationScreen: React.FC = () => {
     myPubkey,
     pubkey,
     sendDirectMessage,
+    protocol,
     sendDirectRumor,
     appendLocalDmMessage,
     setMessages,

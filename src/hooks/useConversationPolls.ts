@@ -19,6 +19,7 @@ import {
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { SendResult, SendHooks } from '../contexts/useMessageSend';
+import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 
 interface UseConversationPollsParams {
   /** The 1:1 thread's messages (polls + votes ride here as normal DMs). */
@@ -28,7 +29,14 @@ interface UseConversationPollsParams {
   /** The peer's hex pubkey — the send target for polls + votes. */
   pubkey: string;
   /** Legacy text send (back-compat voting on a text-encoded poll). */
-  sendDirectMessage: (recipientPubkey: string, plaintext: string) => Promise<SendResult>;
+  sendDirectMessage: (
+    recipientPubkey: string,
+    plaintext: string,
+    hooks?: SendHooks,
+  ) => Promise<SendResult>;
+  /** This thread's protocol — a legacy text vote must stay in it, not fall
+   *  back to NIP-17 and land in the other thread. */
+  protocol?: DmProtocol;
   /** Structured send: gift-wrap a pre-built kind-1068/1018 rumor. */
   sendDirectRumor: (
     recipientPubkeys: string[],
@@ -65,6 +73,7 @@ export function useConversationPolls({
   myPubkey,
   pubkey,
   sendDirectMessage,
+  protocol = DEFAULT_DM_PROTOCOL,
   sendDirectRumor,
   appendLocalDmMessage,
   setMessages,
@@ -181,7 +190,7 @@ export function useConversationPolls({
       if (!structuredPollIds.has(pollId)) {
         const optNum = Number(optionId);
         const payload = buildVoteMessage(pollId, Number.isFinite(optNum) ? optNum : 0);
-        const result = await sendDirectMessage(pubkey, payload);
+        const result = await sendDirectMessage(pubkey, payload, { protocol });
         if (!result.success) {
           Alert.alert('Vote failed', result.error ?? 'Could not record your vote.');
           return;
@@ -193,6 +202,7 @@ export function useConversationPolls({
             fromMe: true,
             text: payload,
             createdAt: Math.floor(Date.now() / 1000),
+            wireKind: protocol === 'nip04' ? 4 : 14,
           },
         ]);
         return;
@@ -239,6 +249,7 @@ export function useConversationPolls({
       messages,
       pollAggregates,
       sendDirectMessage,
+      protocol,
       sendDirectRumor,
       appendOptimistic,
       setMessages,
