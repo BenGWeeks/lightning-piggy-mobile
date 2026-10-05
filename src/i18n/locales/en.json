@@ -1517,6 +1517,7 @@
     "receivedTitle": "Payment received!",
     "sentTitle": "Payment sent!",
     "onchainHint": "On-chain · 1 confirmation pending",
+    "onchainSendHint": "On-chain · usually confirms in 10–60 min",
     "amountFromRecipient": "{{amount}} from {{name}}",
     "amountToRecipient": "{{amount}} to {{name}}",
     "connectionLostTitle": "Connection lost",

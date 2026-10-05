@@ -37,6 +37,7 @@ import {
   setSubmarineRefundHandler,
   type PersistedSubmarineSwap,
 } from './swapRecoveryService';
+import { buildSwapPlaceholders, preserveOptimisticSwapRows } from '../utils/swapPendingMerge';
 
 const mockToastShow = Toast.show as jest.Mock;
 const mockExtractLockup = extractLockupFromTxHex as jest.Mock;
@@ -133,6 +134,33 @@ describe('submarine swap recovery', () => {
     await recoverPendingSwaps();
     expect(mockStore.has(KEY)).toBe(false);
     expect(JSON.parse(mockStore.get('boltz_submarine_index')!)).toEqual([]);
+  });
+
+  it('resolves the pending Home row once recovery sees a terminal status (#1119)', async () => {
+    // Own id: resolved ids are module state shared across this file's tests.
+    const id = 's-swap-placeholder';
+    mockStore.set(
+      `submarine_swap_${id}`,
+      JSON.stringify({ ...JSON.parse(mockStore.get(KEY)!), id }),
+    );
+    await registerPendingSubmarineSwap(id);
+    const now = Math.floor(Date.now() / 1000);
+    const { incoming } = buildSwapPlaceholders({
+      swapId: id,
+      swapType: 'submarine',
+      sentSats: 50_000,
+      receivedSats: 49_000,
+      nowSeconds: now,
+    });
+
+    route('transaction.mempool');
+    await recoverPendingSwaps();
+    expect(preserveOptimisticSwapRows([], [incoming], now)).toEqual([incoming]);
+
+    setSubmarineRefundHandler(jest.fn().mockResolvedValue(undefined));
+    route('invoice.failedToPay');
+    await recoverPendingSwaps();
+    expect(preserveOptimisticSwapRows([], [incoming], now)).toEqual([]);
   });
 
   it('leaves a still-pending swap untouched', async () => {

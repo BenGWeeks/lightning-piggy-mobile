@@ -67,7 +67,8 @@ interface Props {
   /** When the in-flight payment is a Boltz swap (e.g. Lightning → on-chain
    * via a reverse swap), the `in-flight-extended` state names it as a swap
    * and explains swaps take longer — instead of the generic copy used for a
-   * plain Lightning send that's slow to confirm. */
+   * plain Lightning send that's slow to confirm. On a successful swap send,
+   * a hint notes the on-chain leg still has to confirm. */
   inFlightIsSwap?: boolean;
 }
 
@@ -475,11 +476,16 @@ export default function PaymentProgressOverlay({
   // On-chain incoming payments are detected at the mempool stage
   // (see WalletContext on-chain poll, #134). Surface a small hint so
   // users understand the credit is unconfirmed — the celebration is
-  // informational, not a balance commitment.
+  // informational, not a balance commitment. A swap send (Lightning →
+  // on-chain) likewise lands unconfirmed at the recipient's address.
   const onchainHint =
-    isReceive && state === 'success' && receiveSource === 'onchain'
-      ? t('paymentProgressOverlay.onchainHint')
-      : undefined;
+    state !== 'success'
+      ? undefined
+      : isReceive && receiveSource === 'onchain'
+        ? t('paymentProgressOverlay.onchainHint')
+        : !isReceive && inFlightIsSwap
+          ? t('paymentProgressOverlay.onchainSendHint')
+          : undefined;
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
   // — passing `undefined` intermittently can warn and makes the button
