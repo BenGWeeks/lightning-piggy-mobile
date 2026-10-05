@@ -2279,7 +2279,7 @@
     "title": "Published relay lists",
     "intro": "These lists are public. Other Nostr apps use them to find your posts and to send you DMs. Publishing signs the list with your key and replaces your previous one.",
     "nip65Title": "Your relays (NIP-65)",
-    "nip65Hint": "Read = where others find your posts. Write = where your posts are published.",
+    "nip65Hint": "Write = where your posts are published, and where others look for them. Read = where others send posts that mention you.",
     "nip65Empty": "No published relay list yet.",
     "inboxTitle": "DM inbox relays",
     "inboxHint": "Other apps send your private messages here. Two or three reliable relays are enough.",

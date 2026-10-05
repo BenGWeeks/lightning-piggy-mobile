@@ -66,6 +66,14 @@ export function useRelayListEditor() {
   const [inboxDirty, setInboxDirty] = useState(false);
   const [inboxLoading, setInboxLoading] = useState(true);
   const [publishing, setPublishing] = useState<'nip65' | 'inbox' | null>(null);
+  // Newest created_at seen per list kind (fetched or published). Each publish
+  // must be strictly newer or relays keep the previous event (NIP-01: newest
+  // wins, ties by lowest id) — e.g. after another client's clock skew.
+  const latestCreatedAtRef = useRef<Record<number, number>>({});
+  const nextCreatedAt = (unsigned: UnsignedEvent): UnsignedEvent => ({
+    ...unsigned,
+    created_at: Math.max(unsigned.created_at, (latestCreatedAtRef.current[unsigned.kind] ?? 0) + 1),
+  });
 
   // Follow the published list until the user starts editing.
   useEffect(() => {
@@ -89,6 +97,7 @@ export function useRelayListEditor() {
     void (async () => {
       const nip65Event = await fetchLatestReplaceable(pubkey, 10002, sources);
       if (cancelled) return;
+      if (nip65Event) latestCreatedAtRef.current[10002] = nip65Event.created_at;
       const nip65List = nip65Event ? relayListFromTags(nip65Event.tags) : null;
       if (nip65List) await applyPublishedRelayList(pubkey, nip65List);
       if (cancelled) return;
@@ -100,6 +109,7 @@ export function useRelayListEditor() {
         ...new Set([...sources, ...writeRelays]),
       ]);
       if (cancelled) return;
+      if (inboxEvent) latestCreatedAtRef.current[10050] = inboxEvent.created_at;
       // A failed lookup isn't "no inbox list": fall back to the known one so
       // publishing extends it rather than silently replacing it.
       const list = inboxEvent ? dmInboxRelaysFromTags(inboxEvent.tags) : knownInboxRef.current;
@@ -189,11 +199,15 @@ export function useRelayListEditor() {
   /** Sign, publish, and return the event as signed (so callers adopt exactly that). */
   const signAndPublish = useCallback(
     async (unsigned: UnsignedEvent, targets: string[], pk: string) => {
-      const signed = await signEvent(unsigned);
+      const signed = await signEvent(nextCreatedAt(unsigned));
       // Must be signed by the identity that started this publish, which must
       // still be the active one (no cross-account publish after a switch).
       if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
         return { outcome: { ok: false as const, error: 'not-signed' as const } };
+      latestCreatedAtRef.current[signed.kind] = Math.max(
+        latestCreatedAtRef.current[signed.kind] ?? 0,
+        signed.created_at,
+      );
       const results = await publishToRelays(signed as unknown as Event, targets);
       const outcome: RelayListPublishOutcome = results.some((r) => r.ok)
         ? { ok: true, results }

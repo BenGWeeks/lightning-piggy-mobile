@@ -17,6 +17,21 @@ const norm = (url: string) => url.trim().replace(/\/+$/, '');
  * real host. (A `ws://localhost` entry is how a test account once ended up
  * advertising an unreachable relay to the whole network.)
  */
+const PRIVATE_IPV4 =
+  /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
+
+/** IPv4 dotted form embedded in an IPv4-mapped IPv6 literal (::ffff:…), else null. */
+function mappedIPv4(v6: string): string | null {
+  const m = /^::ffff:(.+)$/i.exec(v6);
+  if (!m) return null;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(m[1])) return m[1];
+  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(m[1]); // URL normalises to hex
+  if (!hex) return null;
+  const hi = parseInt(hex[1], 16);
+  const lo = parseInt(hex[2], 16);
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+}
+
 export function isPublishableRelayUrl(url: string): boolean {
   try {
     const u = new URL(norm(url));
@@ -24,16 +39,16 @@ export function isPublishableRelayUrl(url: string): boolean {
     if (u.protocol !== 'wss:' || !host) return false;
     if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
       return false;
-    // IPv6 literal: reject loopback, unspecified, unique-local (fc00::/7) and
-    // link-local (fe80::/10) — none are reachable by other users.
+    // IPv6 literal: reject loopback, unspecified, unique-local (fc00::/7),
+    // link-local (fe80::/10), and IPv4-mapped private addresses.
     if (host.startsWith('[')) {
       const v6 = host.slice(1, -1);
+      const v4 = mappedIPv4(v6);
+      if (v4) return !PRIVATE_IPV4.test(v4);
       return !(v6 === '::1' || v6 === '::' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6));
     }
     // IPv4 private, loopback, link-local, CGNAT and unspecified ranges.
-    return !/^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(
-      host,
-    );
+    return !PRIVATE_IPV4.test(host);
   } catch {
     return false;
   }

@@ -45,6 +45,9 @@ describe('relay list events', () => {
       'wss://169.254.1.1',
       'wss://100.64.0.1',
       'wss://0.0.0.0',
+      'wss://[::ffff:127.0.0.1]',
+      'wss://[::ffff:192.168.1.1]',
+      'wss://[::ffff:c0a8:101]',
       'https://relay.example',
       'nonsense',
     ])
@@ -52,6 +55,7 @@ describe('relay list events', () => {
     expect(isPublishableRelayUrl('wss://relay.snort.social')).toBe(true);
     expect(isPublishableRelayUrl('wss://[2001:db8::1]')).toBe(true);
     expect(isPublishableRelayUrl('wss://100.128.0.1')).toBe(true);
+    expect(isPublishableRelayUrl('wss://[::ffff:8.8.8.8]')).toBe(true);
     expect(
       buildRelayListEvent([{ url: 'ws://localhost:10547', read: true, write: true }]).tags,
     ).toEqual([]);

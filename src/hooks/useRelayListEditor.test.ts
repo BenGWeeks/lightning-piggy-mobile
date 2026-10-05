@@ -35,7 +35,12 @@ const fetchLatest = fetchLatestReplaceable as jest.Mock;
 /** Network state per kind: 10002 → relay rows (as r tags), 10050 → inbox URLs. */
 let net10002: { url: string; read: boolean; write: boolean }[] | null = null;
 let net10050: string[] | null = ['wss://relay.damus.io'];
-const asEvent = (kind: number, tags: string[][]) => ({ kind, tags, created_at: 1 });
+let net10002CreatedAt = 1;
+const asEvent = (kind: number, tags: string[][]) => ({
+  kind,
+  tags,
+  created_at: kind === 10002 ? net10002CreatedAt : 1,
+});
 function mockNetwork() {
   fetchLatest.mockImplementation(async (_pk: string, kind: number) => {
     if (kind === 10002)
@@ -64,6 +69,7 @@ beforeEach(() => {
   mockInbox = [];
   net10002 = null; // network unchanged / unreachable → keep the cached list
   net10050 = ['wss://relay.damus.io'];
+  net10002CreatedAt = 1;
   mockNetwork();
   mockSign.mockImplementation(async (e: object) => ({
     ...e,
@@ -385,4 +391,27 @@ it('also publishes to the discovery/default relays so no stale copy survives the
     await result.current.publishNip65();
   });
   expect(publish.mock.calls[0][1]).toEqual(expect.arrayContaining(['wss://default.example']));
+});
+
+it('signs each update strictly newer than the existing list, even with clock skew', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const future = Math.floor(Date.now() / 1000) + 3600; // another client's clock is an hour ahead
+  net10002CreatedAt = future;
+  net10002 = [{ url: 'wss://relay.primal.net', read: true, write: true }];
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  const first = mockSign.mock.calls[0][0].created_at;
+  expect(first).toBeGreaterThan(future);
+  act(() => {
+    result.current.addNip65('wss://relay.snort.social');
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  expect(mockSign.mock.calls[1][0].created_at).toBeGreaterThan(first);
 });
