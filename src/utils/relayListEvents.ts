@@ -39,15 +39,33 @@ export function isPublishableRelayUrl(url: string): boolean {
   }
 }
 
-/** NIP-65 relay rows from a kind-10002 event's `r` tags (as signed). */
+/** One row per relay: merge duplicate URLs (e.g. separate read and write
+ * tags) by unioning their permissions, keeping first-seen order. */
+export function mergeRelayRows(rows: RelayConfig[]): RelayConfig[] {
+  const merged = new Map<string, RelayConfig>();
+  for (const r of rows) {
+    const url = norm(r.url);
+    const prev = merged.get(url);
+    merged.set(url, {
+      url,
+      read: (prev?.read ?? false) || r.read,
+      write: (prev?.write ?? false) || r.write,
+    });
+  }
+  return [...merged.values()];
+}
+
+/** NIP-65 relay rows from a kind-10002 event's `r` tags, one row per relay. */
 export function relayListFromTags(tags: string[][]): RelayConfig[] {
-  return tags
-    .filter((t) => t[0] === 'r' && t[1])
-    .map((t) => ({
-      url: norm(t[1]),
-      read: !t[2] || t[2] === 'read',
-      write: !t[2] || t[2] === 'write',
-    }));
+  return mergeRelayRows(
+    tags
+      .filter((t) => t[0] === 'r' && t[1])
+      .map((t) => ({
+        url: t[1],
+        read: !t[2] || t[2] === 'read',
+        write: !t[2] || t[2] === 'write',
+      })),
+  );
 }
 
 /** NIP-65 kind 10002: `["r", url]` (read+write) / `["r", url, "read"|"write"]`. */

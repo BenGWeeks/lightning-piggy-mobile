@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNip65Relays } from './useNip65Relays';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
 import * as nostrService from '../services/nostrService';
+import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 
 jest.mock('../services/nostrRelayLists', () => ({ fetchLatestReplaceable: jest.fn() }));
 jest.mock('../services/backgroundDmService', () => ({
@@ -132,4 +133,18 @@ it('a NIP-65 load finishing after an identity reset does not start an inbox load
   });
   expect(fetchLatest).not.toHaveBeenCalled();
   expect(result.current.dmInboxRelays).toEqual([]);
+});
+
+it('re-arms the background DM watch when the inbox list changes, not when it is the same', async () => {
+  fetchLatest.mockResolvedValue(null);
+  const rearm = rearmBackgroundDmWatchForActiveIdentity as jest.Mock;
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
 });

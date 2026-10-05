@@ -1,7 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useRelayListEditor } from './useRelayListEditor';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
-import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 
 const mockSign = jest.fn();
 const mockApply = jest.fn().mockResolvedValue(undefined);
@@ -355,14 +354,22 @@ it('uses the inbox list the app learns about after the screen opened', async () 
   );
 });
 
-it('re-arms the background DM watch after publishing an inbox list', async () => {
-  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+it('looks up the inbox list on just-discovered NIP-65 write relays too', async () => {
+  net10002 = [{ url: 'wss://new-write.example', read: false, write: true }];
+  await setup();
+  const inboxCall = fetchLatest.mock.calls.find((c) => c[1] === 10050);
+  expect(inboxCall?.[2]).toContain('wss://new-write.example');
+});
+
+it('shows one row per relay and lets each permission be toggled independently', async () => {
+  mockNip65 = [
+    { url: 'wss://nos.lol', read: true, write: false },
+    { url: 'wss://nos.lol', read: false, write: true },
+  ];
   const { result } = await setup();
+  expect(result.current.nip65Draft).toEqual([{ url: 'wss://nos.lol', read: true, write: true }]);
   act(() => {
-    result.current.addInbox('wss://nostr.mom');
+    result.current.toggleNip65('wss://nos.lol', 'write');
   });
-  await act(async () => {
-    await result.current.publishInbox();
-  });
-  expect(rearmBackgroundDmWatchForActiveIdentity).toHaveBeenCalled();
+  expect(result.current.nip65Draft).toEqual([{ url: 'wss://nos.lol', read: true, write: false }]);
 });

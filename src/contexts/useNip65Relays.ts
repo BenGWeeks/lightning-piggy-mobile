@@ -65,14 +65,15 @@ export function useNip65Relays() {
 
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
   const applyPublishedDmInbox = useCallback(async (pk: string, list: string[]) => {
-    // A just-published list is the newest; invalidate any in-flight load that
-    // could still land an older copy on top of it.
+    // A just-published (or freshly discovered) list is the newest; invalidate
+    // any in-flight load that could still land an older copy on top of it.
     generationRef.current += 1;
     setDmInboxRelays(list);
-    await AsyncStorage.setItem(
-      perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
-      JSON.stringify(list),
-    );
+    const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
+    const before = await AsyncStorage.getItem(key).catch(() => null);
+    await AsyncStorage.setItem(key, JSON.stringify(list));
+    // The background DM watch reads this cache; re-arm it when it changed.
+    if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
   }, []);
 
   /** Forget both lists (logout / identity switch). */

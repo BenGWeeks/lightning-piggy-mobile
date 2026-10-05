@@ -6,13 +6,13 @@ import {
   buildDmInboxEvent,
   buildRelayListEvent,
   dmInboxRelaysFromTags,
+  mergeRelayRows,
   isPublishableRelayUrl,
   RELAY_LIST_INDEXERS,
   relayListFromTags,
   relayListPublishTargets,
   type UnsignedEvent,
 } from '../utils/relayListEvents';
-import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 import {
   fetchLatestReplaceable,
   publishToRelays,
@@ -57,7 +57,7 @@ export function useRelayListEditor() {
   const knownInboxRef = useRef(dmInboxRelays);
   knownInboxRef.current = dmInboxRelays;
 
-  const [nip65Draft, setNip65Draft] = useState<RelayConfig[]>(nip65Relays);
+  const [nip65Draft, setNip65Draft] = useState<RelayConfig[]>(() => mergeRelayRows(nip65Relays));
   const [nip65Dirty, setNip65Dirty] = useState(false);
   const [nip65Loading, setNip65Loading] = useState(true);
   const [inboxBaseline, setInboxBaseline] = useState<string[]>([]);
@@ -68,7 +68,7 @@ export function useRelayListEditor() {
 
   // Follow the published list until the user starts editing.
   useEffect(() => {
-    if (!nip65Dirty) setNip65Draft(nip65Relays);
+    if (!nip65Dirty) setNip65Draft(mergeRelayRows(nip65Relays));
   }, [nip65Relays, nip65Dirty]);
 
   const relayUrls = useMemo(() => relays.map((r) => r.url), [relays]);
@@ -76,7 +76,7 @@ export function useRelayListEditor() {
     // Per identity: drop any draft from the previous account, so one
     // account's edits can never be signed and published by another.
     setNip65Dirty(false);
-    setNip65Draft(nip65Relays);
+    setNip65Draft(mergeRelayRows(nip65Relays));
     setInboxDirty(false);
     setInboxDraft([]);
     setInboxBaseline([]);
@@ -85,22 +85,30 @@ export function useRelayListEditor() {
     const sources = [...new Set([...relayUrls, ...RELAY_LIST_INDEXERS])];
     setNip65Loading(true);
     setInboxLoading(true);
-    void fetchLatestReplaceable(pubkey, 10002, sources).then(async (event) => {
+    void (async () => {
+      const nip65Event = await fetchLatestReplaceable(pubkey, 10002, sources);
       if (cancelled) return;
-      if (event) await applyPublishedRelayList(pubkey, relayListFromTags(event.tags));
-      if (!cancelled) setNip65Loading(false);
-    });
-    void fetchLatestReplaceable(pubkey, 10050, sources).then((event) => {
+      const nip65List = nip65Event ? relayListFromTags(nip65Event.tags) : null;
+      if (nip65List) await applyPublishedRelayList(pubkey, nip65List);
+      if (cancelled) return;
+      setNip65Loading(false);
+      // Then the inbox list — also on the (possibly just-discovered) NIP-65
+      // write relays, where other clients publish it.
+      const writeRelays = (nip65List ?? []).filter((r) => r.write).map((r) => r.url);
+      const inboxEvent = await fetchLatestReplaceable(pubkey, 10050, [
+        ...new Set([...sources, ...writeRelays]),
+      ]);
       if (cancelled) return;
       // A failed lookup isn't "no inbox list": fall back to the known one so
       // publishing extends it rather than silently replacing it.
-      const list = event ? dmInboxRelaysFromTags(event.tags) : knownInboxRef.current;
+      const list = inboxEvent ? dmInboxRelaysFromTags(inboxEvent.tags) : knownInboxRef.current;
       // A list found here (wider lookup / newer copy) must also be READ app-wide.
-      if (event) void applyPublishedDmInbox(pubkey, list);
+      if (inboxEvent) await applyPublishedDmInbox(pubkey, list);
+      if (cancelled) return;
       setInboxBaseline(list);
       setInboxDraft(list);
       setInboxLoading(false);
-    });
+    })();
     return () => {
       cancelled = true;
     };
@@ -250,8 +258,6 @@ export function useRelayListEditor() {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
         await applyPublishedDmInbox(pubkey, published);
-        // The Android background DM watch reads the cached inbox; re-arm it.
-        void rearmBackgroundDmWatchForActiveIdentity();
         setInboxBaseline(published);
         setInboxDraft(published);
         setInboxDirty(false);

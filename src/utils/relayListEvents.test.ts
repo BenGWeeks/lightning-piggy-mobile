@@ -3,6 +3,7 @@ import {
   buildRelayListEvent,
   dmInboxRelaysFromTags,
   relayListFromTags,
+  mergeRelayRows,
   isPublishableRelayUrl,
   relayListPublishTargets,
 } from './relayListEvents';
@@ -108,4 +109,18 @@ it('merges separate read and write rows for one relay instead of dropping one', 
     ['r', 'wss://nos.lol'],
     ['r', 'wss://relay.primal.net', 'read'],
   ]);
+});
+
+it('reads a list with separate read and write tags for one relay as ONE row', () => {
+  expect(
+    relayListFromTags([
+      ['r', 'wss://nos.lol', 'read'],
+      ['r', 'wss://nos.lol/', 'write'],
+      ['r', 'wss://relay.primal.net'],
+    ]),
+  ).toEqual([
+    { url: 'wss://nos.lol', read: true, write: true },
+    { url: 'wss://relay.primal.net', read: true, write: true },
+  ]);
+  expect(mergeRelayRows([])).toEqual([]);
 });
