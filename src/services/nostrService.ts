@@ -382,7 +382,7 @@ function tagsToRelayList(tags: string[][]): RelayConfig[] {
 export async function fetchSingleLatest<T>(
   filter: Filter,
   relays: string[],
-  parse: (tags: string[][]) => T,
+  parse: (tags: string[][], createdAt: number) => T,
   opts: {
     softTimeoutMs?: number;
     keepOpenMs?: number;
@@ -405,7 +405,7 @@ export async function fetchSingleLatest<T>(
           if (!firstResolved) {
             firstResolved = true;
             firstResolvedCreatedAt = event.created_at;
-            resolve(parse(event.tags));
+            resolve(parse(event.tags, event.created_at));
           }
           // Newer events keep updating bestEvent for the keepOpenMs
           // window, but onLatest fires only once at sub close so it
@@ -437,7 +437,7 @@ export async function fetchSingleLatest<T>(
           firstResolvedCreatedAt === null || bestEvent.created_at > firstResolvedCreatedAt;
         if (isNewer) {
           try {
-            opts.onLatest(parse(bestEvent.tags));
+            opts.onLatest(parse(bestEvent.tags, bestEvent.created_at));
           } catch {
             // best-effort — onLatest failures must not crash the sub
           }
@@ -481,6 +481,24 @@ export async function fetchRelayList(
       relays,
       tagsToRelayList,
       { onLatest: opts?.onLatest },
+    );
+  } catch (error) {
+    console.warn('Failed to fetch NIP-65 relay list:', error);
+    return null;
+  }
+}
+
+/** Like fetchRelayList, but also returns the event's created_at so callers
+ * can refuse a copy older than the list they already hold. */
+export async function fetchRelayListEvent(
+  pubkey: string,
+  relays: string[],
+): Promise<{ list: RelayConfig[]; createdAt: number } | null> {
+  try {
+    return await fetchSingleLatest(
+      { kinds: [10002], authors: [pubkey] } as Filter,
+      relays,
+      (tags, createdAt) => ({ list: tagsToRelayList(tags), createdAt }),
     );
   } catch (error) {
     console.warn('Failed to fetch NIP-65 relay list:', error);

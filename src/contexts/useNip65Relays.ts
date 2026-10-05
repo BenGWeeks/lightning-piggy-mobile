@@ -33,6 +33,16 @@ export interface AdoptResult {
 const readCreatedAt = async (key: string): Promise<number> =>
   Number((await AsyncStorage.getItem(key).catch(() => null)) ?? 0) || 0;
 
+/** created_at of the list (kind 10002 or 10050) the app last adopted for `pk`;
+ * 0 when none. Sign the next update strictly after it. */
+export const readAdoptedCreatedAt = (pk: string, kind: 10002 | 10050): Promise<number> =>
+  readCreatedAt(
+    perAccountKey(
+      kind === 10002 ? RELAY_LIST_CREATED_AT_KEY_BASE : DM_INBOX_CREATED_AT_KEY_BASE,
+      pk,
+    ),
+  );
+
 export function useNip65Relays() {
   const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
   // The user's own DM inbox relays: others deliver NIP-17 DMs there, so the
@@ -172,14 +182,24 @@ export function useNip65Relays() {
         const readRelays = cached.filter((r) => r.read).map((r) => r.url);
         return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
       }
-      const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
-      if (relayList === null) {
+      const fetched = await nostrService.fetchRelayListEvent(pk, nostrService.DEFAULT_RELAYS);
+      if (fetched === null) {
         // Network couldn't produce a kind-10002 — fall back to defaults
         // and DON'T persist (so we don't poison the cache with a blip).
         if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
         hydrateInbox(cached ?? []);
         return nostrService.DEFAULT_RELAYS;
       }
+      const createdAtKey = perAccountKey(RELAY_LIST_CREATED_AT_KEY_BASE, pk);
+      // A relay that missed the user's last in-app publish can still serve an
+      // older copy: keep the newer cached list rather than restore it.
+      if (cached && fetched.createdAt < (await readCreatedAt(createdAtKey))) {
+        if (current()) setNip65Relays(cached);
+        hydrateInbox(cached);
+        const read = cached.filter((r) => r.read).map((r) => r.url);
+        return read.length > 0 ? read : nostrService.DEFAULT_RELAYS;
+      }
+      const relayList = fetched.list;
       if (__DEV__)
         console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
       hydrateInbox(relayList);
@@ -199,6 +219,7 @@ export function useNip65Relays() {
           perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
           Date.now().toString(),
         ).catch(() => {});
+        AsyncStorage.setItem(createdAtKey, String(fetched.createdAt)).catch(() => {});
       });
       const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
       return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;

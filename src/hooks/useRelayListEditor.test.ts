@@ -25,6 +25,11 @@ jest.mock('../contexts/NostrContext', () => ({
   }),
 }));
 jest.mock('../services/nostrService', () => ({ DEFAULT_RELAYS: ['wss://default.example'] }));
+// created_at of the list the app last adopted, per kind.
+const mockStored: Record<number, number> = {};
+jest.mock('../contexts/useNip65Relays', () => ({
+  readAdoptedCreatedAt: jest.fn(async (_pk: string, kind: number) => mockStored[kind] ?? 0),
+}));
 jest.mock('../services/backgroundDmService', () => ({
   rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
 }));
@@ -73,6 +78,8 @@ beforeEach(() => {
   net10002 = null; // network unchanged / unreachable → keep the cached list
   net10050 = ['wss://relay.damus.io'];
   net10002CreatedAt = 1;
+  delete mockStored[10002];
+  delete mockStored[10050];
   mockNetwork();
   mockSign.mockImplementation(async (e: object) => ({
     ...e,
@@ -495,4 +502,51 @@ it("signs after the app's baseline even when the discovered copy was older", asy
     await result.current.publishInbox();
   });
   expect(mockSign.mock.calls.at(-1)?.[0].created_at).toBeGreaterThan(future);
+});
+
+it("signs after the app's stored baseline even when the lookup finds no list", async () => {
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  mockStored[10002] = future;
+  mockStored[10050] = future;
+  net10002 = null;
+  net10050 = null;
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+    result.current.addInbox('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  await act(async () => {
+    await result.current.publishInbox();
+  });
+  expect(mockSign.mock.calls[0][0].created_at).toBeGreaterThan(future);
+  expect(mockSign.mock.calls[1][0].created_at).toBeGreaterThan(future);
+});
+
+it("doesn't restore the previous account's draft when the switch lands during adoption", async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  let finishAdopt!: (v: unknown) => void;
+  const h = await setup();
+  mockApply.mockReturnValueOnce(new Promise((r) => (finishAdopt = r)));
+  act(() => {
+    h.result.current.addNip65('wss://nostr.mom');
+  });
+  let pending!: Promise<unknown>;
+  act(() => {
+    pending = h.result.current.publishNip65();
+  });
+  await waitFor(() =>
+    expect(mockApply).toHaveBeenCalledWith('a'.repeat(64), expect.anything(), expect.any(Number)),
+  );
+  mockPubkey = 'c'.repeat(64); // switch identity while adoption awaits storage
+  h.rerender({});
+  await act(async () => {
+    finishAdopt(ADOPTED);
+    await pending;
+  });
+  await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
+  expect(h.result.current.nip65Draft.some((r) => r.url === 'wss://nostr.mom')).toBe(false);
 });

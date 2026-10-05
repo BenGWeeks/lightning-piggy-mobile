@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
+import { readAdoptedCreatedAt } from '../contexts/useNip65Relays';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import type { RelayConfig } from '../types/nostr';
 import {
@@ -107,9 +108,14 @@ export function useRelayListEditor() {
             ? await applyPublishedRelayList(pubkey, nip65List, nip65Event.created_at)
             : null;
         if (cancelled) return;
+        // Also the stored baseline: with no event found, a newer list adopted
+        // earlier must still be superseded by the next publish.
+        const nip65Stored = await readAdoptedCreatedAt(pubkey, 10002);
+        if (cancelled) return;
         latestCreatedAtRef.current[10002] = Math.max(
           nip65Event?.created_at ?? 0,
           nip65Adopt?.baseline ?? 0,
+          nip65Stored,
         );
         setNip65Loading(false);
         // Then the inbox list — also on the (possibly just-discovered) NIP-65
@@ -129,9 +135,12 @@ export function useRelayListEditor() {
             ? await applyPublishedDmInbox(pubkey, found, inboxEvent.created_at)
             : null;
         if (cancelled) return;
+        const inboxStored = await readAdoptedCreatedAt(pubkey, 10050);
+        if (cancelled) return;
         latestCreatedAtRef.current[10050] = Math.max(
           inboxEvent?.created_at ?? 0,
           inboxAdopt?.baseline ?? 0,
+          inboxStored,
         );
         const list = inboxAdopt?.adopted && found ? found : knownInboxRef.current;
         setInboxBaseline(list);
@@ -277,6 +286,8 @@ export function useRelayListEditor() {
         // Refused (a newer list exists, or the identity changed): keep the
         // draft dirty and don't claim success.
         if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
+        // The account switched while adopting: leave the successor's editor alone.
+        if (activePubkeyRef.current !== pubkey) return outcome;
         setNip65Draft(published);
         setNip65Dirty(false);
       }
@@ -321,6 +332,7 @@ export function useRelayListEditor() {
         // The app must now READ these relays, or DMs sent there are missed.
         const result = await applyPublishedDmInbox(pubkey, published, signedAt);
         if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
+        if (activePubkeyRef.current !== pubkey) return outcome;
         setInboxBaseline(published);
         setInboxDraft(published);
         setInboxDirty(false);

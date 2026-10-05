@@ -1,17 +1,24 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNip65Relays } from './useNip65Relays';
+import { RELAY_LIST_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
+import { perAccountKey } from '../services/perAccountStorage';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
-import * as nostrService from '../services/nostrService';
 import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 
 jest.mock('../services/nostrRelayLists', () => ({ fetchLatestReplaceable: jest.fn() }));
 jest.mock('../services/backgroundDmService', () => ({
   rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
 }));
+const mockFetchList = jest.fn();
+let mockListCreatedAt = 100;
 jest.mock('../services/nostrService', () => ({
   DEFAULT_RELAYS: ['wss://relay.damus.io'],
-  fetchRelayList: jest.fn(),
+  // The list mock below, wrapped as {list, createdAt}.
+  fetchRelayListEvent: jest.fn(async (...args: unknown[]) => {
+    const list = await mockFetchList(...args);
+    return list ? { list, createdAt: mockListCreatedAt } : null;
+  }),
 }));
 const fetchLatest = fetchLatestReplaceable as jest.Mock;
 const inboxEvent = (urls: string[], created_at = 100) => ({
@@ -19,12 +26,13 @@ const inboxEvent = (urls: string[], created_at = 100) => ({
   created_at,
   tags: urls.map((u) => ['relay', u]),
 });
-const fetchList = nostrService.fetchRelayList as jest.Mock;
+const fetchList = mockFetchList;
 const PK = 'a'.repeat(64);
 
 beforeEach(async () => {
   jest.clearAllMocks();
   await AsyncStorage.clear();
+  mockListCreatedAt = 100;
   fetchList.mockResolvedValue([{ url: 'wss://relay.primal.net', read: true, write: true }]);
 });
 
@@ -249,4 +257,22 @@ it('does not adopt an inbox list if the identity is reset mid-call', async () =>
     expect(await r).toMatchObject({ adopted: false });
   });
   expect(result.current.dmInboxRelays).toEqual([]);
+});
+
+it('keeps a newer cached NIP-65 list when a relay serves an older copy after the TTL', async () => {
+  const newer = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, newer, 500);
+  });
+  // Expire the cache TTL so loadRelays goes to the network.
+  await AsyncStorage.setItem(perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK), '0');
+  mockListCreatedAt = 100; // the relay copy predates the publish
+  let read: string[] = [];
+  await act(async () => {
+    read = await result.current.loadRelays(PK);
+  });
+  expect(mockFetchList).toHaveBeenCalled();
+  expect(result.current.nip65Relays).toEqual(newer);
+  expect(read).toEqual(['wss://nostr.mom']);
 });
