@@ -14,17 +14,12 @@ import MarketModeSelector from '../components/MarketModeSelector';
 import MarketFilterBar from '../components/MarketFilterBar';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { useTrustGraph } from '../contexts/TrustGraphContext';
+import { useMarketListings } from '../hooks/useMarketListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
-import { featuredFirst, vendorNostrPubkey } from '../utils/marketVendors';
-import {
-  DEFAULT_MARKET_MODE,
-  marketModeOption,
-  productsForMode,
-  type MarketMode,
-} from '../utils/marketMode';
+import { featuredFirst } from '../utils/marketVendors';
+import { DEFAULT_MARKET_MODE, marketModeOption, type MarketMode } from '../utils/marketMode';
 import {
   countActiveMarketFilters,
   distinctCountries,
@@ -41,39 +36,11 @@ interface Props {
   navigation: ExploreNavigation;
 }
 
-// Resolve a product's seller Nostr pubkey (hex) from the vendor directory,
-// used to filter by the user's web-of-trust follow set. Null when the seller
-// has no Nostr identity (so it can never match a WoT mode).
-const sellerPubkeyOf = (product: MarketProduct): string | null => {
-  const vendor = sellerOf(product);
-  return vendor ? vendorNostrPubkey(vendor) : null;
-};
-
-/**
- * Full "Market" screen — the "See all →" destination from the Explore hub's
- * Market rail. Lists individual PRODUCTS (image, title, price in sats, the
- * seller they come from), mirroring lightningpiggy.com/market/.
- *
- * A marketplace-mode selector at the top chooses which sellers products are
- * sourced from: Lightning Piggy preferred sellers (default), or the user's
- * Nostr web-of-trust friends. Friends-of-friends / all tiers are present but
- * disabled (coming soon). Tapping a tile opens the `MarketProductDetail`
- * route (reviews / comments, and in-app checkout for sellers with a Nostr
- * identity — the seller's shop URL is the fallback for those without).
- *
- * Data is the hardcoded {@link MARKET_PRODUCTS} catalogue, ported from the
- * website. A future live Nostr feed (NIP-15 products kind 30018 + NIP-99
- * classifieds kind 30402 — see the seam in `data/marketProducts.ts`) could
- * supplement or replace it without touching this screen.
- */
+/** Preferred catalogue or foreground relay listings from the viewer's direct follows. */
 const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createMarketScreenStyles(colors), [colors]);
-  // The explicit "WoT: Friends" mode must filter on the FRIENDS tier, not the
-  // user's persisted WoT tier (`trustSet` widens to FoF / all when that
-  // setting is wider, which would show sellers they don't follow).
-  const { trustSetForTier } = useTrustGraph();
 
   // Derive the square tile width from the live window so rotation / tablet
   // widths stay a clean 2-up grid; a fixed width (not flex) also keeps a lone
@@ -82,6 +49,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const [mode, setMode] = useState<MarketMode>(DEFAULT_MARKET_MODE);
+  const live = useMarketListings(mode === 'wotFriends');
 
   // The category filters (merchant / country / currency) live in a right-anchored
   // slide-in panel to keep the main view compact; the search box stays inline.
@@ -99,10 +67,8 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
   // Mode-scoped catalogue (preferred sellers / WoT friends), featured-first.
   // This is the set the filter options and the filtered list both derive from.
   const baseProducts = useMemo(() => {
-    const friends = trustSetForTier('friends');
-    const scoped = productsForMode(mode, MARKET_PRODUCTS, friends, sellerPubkeyOf);
-    return featuredFirst(scoped);
-  }, [mode, trustSetForTier]);
+    return featuredFirst(mode === 'wotFriends' ? live.products : MARKET_PRODUCTS);
+  }, [mode, live.products]);
 
   // Filter option lists sourced from the data actually loaded (not hardcoded).
   const merchants = useMemo(() => distinctMerchants(baseProducts, sellerOf), [baseProducts]);
@@ -156,7 +122,7 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
 
   const openProduct = useCallback(
     (product: MarketProduct) => {
-      navigation.navigate('MarketProductDetail', { productId: product.id });
+      navigation.navigate('MarketProductDetail', { productId: product.id, product });
     },
     [navigation],
   );
@@ -185,11 +151,14 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
     [tileWidth, openProduct],
   );
 
-  const emptyCopy = filterActive
-    ? t('market.screen.emptyNoMatch')
-    : mode === 'wotFriends'
-      ? t('market.screen.emptyNoFriends')
-      : t('market.screen.emptyNone');
+  const emptyCopy =
+    mode === 'wotFriends' && (live.loading || live.incomplete)
+      ? t(live.loading ? 'market.live.loading' : 'market.live.incomplete')
+      : filterActive
+        ? t('market.screen.emptyNoMatch')
+        : mode === 'wotFriends'
+          ? t('market.screen.emptyNoFriends')
+          : t('market.screen.emptyNone');
 
   return (
     <View style={styles.container} testID="market-screen">
@@ -226,6 +195,28 @@ const MarketScreen: React.FC<Props> = ({ navigation }) => {
       {/* Inline search + a compact filter icon that opens the slide-in panel.
           Keeping only this single row (instead of three chip rows) reclaims the
           vertical space so the product grid starts higher. */}
+      {mode === 'wotFriends' ? (
+        <View style={styles.liveStatus}>
+          <Text style={styles.liveStatusText} testID="market-live-status">
+            {t(
+              live.loading
+                ? 'market.live.loading'
+                : live.incomplete
+                  ? 'market.live.incomplete'
+                  : 'market.live.loaded',
+            )}
+          </Text>
+          <TouchableOpacity
+            onPress={live.refresh}
+            disabled={live.loading}
+            accessibilityState={{ disabled: live.loading }}
+            accessibilityLabel={t('market.live.refresh')}
+            testID="market-live-refresh"
+          >
+            <Text style={styles.liveStatusText}>{t('market.live.refresh')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={styles.searchBar}>
         <View style={styles.searchRow}>
           <Search size={16} color={colors.textSupplementary} strokeWidth={2.25} />

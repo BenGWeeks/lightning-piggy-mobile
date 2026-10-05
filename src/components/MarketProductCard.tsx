@@ -90,11 +90,15 @@ const MarketProductCard: React.FC<Props> = ({
       style={cardStyle}
       onPress={() => onPress(product)}
       accessibilityRole="button"
-      accessibilityLabel={t('market.card.accessibility', {
-        title: product.title,
-        amount: product.priceSats.toLocaleString(),
-        seller: sellerName,
-      })}
+      accessibilityLabel={
+        product.listing
+          ? `${product.title}, ${product.listing.priceLabel}, ${sellerName}`
+          : t('market.card.accessibility', {
+              title: product.title,
+              amount: product.priceSats.toLocaleString(),
+              seller: sellerName,
+            })
+      }
       testID={testID}
       activeOpacity={0.8}
     >
@@ -106,7 +110,8 @@ const MarketProductCard: React.FC<Props> = ({
         <View style={styles.priceRow}>
           <Zap size={12} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
           <Text style={styles.price} testID={testID ? `${testID}-price` : undefined}>
-            {t('market.sats', { amount: product.priceSats.toLocaleString() })}
+            {product.listing?.priceLabel ??
+              t('market.sats', { amount: product.priceSats.toLocaleString() })}
           </Text>
         </View>
         <View style={styles.sellerRow}>

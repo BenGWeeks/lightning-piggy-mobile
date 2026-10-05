@@ -141,6 +141,14 @@ export const createMarketScreenStyles = (colors: Palette) =>
       justifyContent: 'space-between',
       marginBottom: 12,
     },
+    liveStatus: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      gap: 12,
+    },
+    liveStatusText: { fontSize: 12, color: colors.textSupplementary, flexShrink: 1 },
     emptyWrap: {
       paddingVertical: 48,
       paddingHorizontal: 24,

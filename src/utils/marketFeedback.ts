@@ -49,11 +49,11 @@ export function marketFeedbackContext(
   product: MarketProduct,
   vendor: MarketVendor | undefined,
 ): MarketFeedbackContext | null {
-  if (!vendor) return null;
+  if (!vendor || (product.listing && product.listing.event.kind !== PRODUCT_KIND)) return null;
   const merchantPubkey = vendorNostrPubkey(vendor);
   if (!merchantPubkey) return null;
 
-  const productDTag = product.id;
+  const productDTag = product.listing?.event.tags.find((tag) => tag[0] === 'd')?.[1] ?? product.id;
   const commentRoot = {
     id: '',
     pubkey: merchantPubkey,
@@ -68,6 +68,6 @@ export function marketFeedbackContext(
     merchantPubkey,
     productDTag,
     reviewCoord: productReviewCoord(merchantPubkey, productDTag),
-    commentRoot,
+    commentRoot: product.listing?.event ?? commentRoot,
   };
 }

@@ -4,6 +4,7 @@ import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
+import type { MarketProduct } from '../data/marketProducts';
 import type { LeaderboardEntry } from '../utils/huntLeaderboard';
 
 // Main tab param list
@@ -119,7 +120,7 @@ export type ExploreStackParamList = {
   // Full product page opened from a Market grid tile — product info plus
   // Nostr reviews (kind 31555) + comments (kind 1111). `productId` keys into
   // MARKET_PRODUCTS (see src/data/marketProducts.ts).
-  MarketProductDetail: { productId: string };
+  MarketProductDetail: { productId: string; product?: MarketProduct };
   Hunt: undefined;
   // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
   // reuses the same screen, pre-fills every field, and on save replaces
