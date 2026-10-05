@@ -25,7 +25,9 @@ export function safeMarketUrl(value: unknown): string | null {
 export function parseMarketListing(event: Event, now = Date.now() / 1000): MarketProduct | null {
   if (![30018, 30402].includes(event.kind) || event.content.length > 32768) return null;
   const d = tag(event, 'd');
-  if (!d || d.length > 256 || event.tags.length > 256) return null;
+  // NIP-19 TLV lengths are one byte, so naddr can't encode an identifier over
+  // 255 UTF-8 bytes — reject it rather than build a broken "Open listing" link.
+  if (!d || new TextEncoder().encode(d).length > 255 || event.tags.length > 256) return null;
   const expiry = tag(event, 'expiration');
   if (expiry && (!Number.isFinite(Number(expiry)) || Number(expiry) <= now)) return null;
   let title: unknown;

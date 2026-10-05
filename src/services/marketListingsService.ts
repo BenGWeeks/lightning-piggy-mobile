@@ -1,4 +1,4 @@
-import { verifyEvent, type Event } from 'nostr-tools';
+import { verifyEvent, type Event, type Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
 import { reduceMarketListings } from '../utils/marketListings';
 import type { MarketProduct } from '../data/marketProducts';
@@ -29,7 +29,6 @@ export function fetchMarketListings(
   trackRelays(urls);
   return new Promise((resolve) => {
     let finished = false;
-    let pending = Math.ceil(scope.size / 64);
     let limited = keys.length > MAX_AUTHORS || uniqueRelays.length > urls.length;
     const events = new Map<string, Event>();
     const subscriptions: { close: () => void }[] = [];
@@ -49,47 +48,68 @@ export function fetchMarketListings(
     const timer = setTimeout(() => complete(true), TIMEOUT_MS);
     signal.addEventListener('abort', abort, { once: true });
     const all = [...scope];
-    for (let i = 0; i < all.length && !finished; i += 64) {
-      let batchCount = 0;
-      try {
-        const sub = pool.subscribeMany(
-          urls,
-          { kinds: [30018, 30402, 5], authors: all.slice(i, i + 64), limit: 100 },
-          {
-            onevent(event) {
-              if (
-                finished ||
-                !scope.has(event.pubkey) ||
-                event.content.length > 32768 ||
-                event.tags.length > 256 ||
-                event.created_at > Date.now() / 1000 + 300
-              )
-                return;
-              if (events.has(event.id)) return;
-              if (events.size >= MAX_EVENTS) {
-                limited = true;
-                return;
-              }
-              try {
-                if (verifyEvent(event)) {
-                  events.set(event.id, event);
-                  if (++batchCount >= 100) limited = true;
+    const filters: Filter[] = [];
+    for (let i = 0; i < all.length; i += 64) {
+      filters.push({ kinds: [30018, 30402, 5], authors: all.slice(i, i + 64), limit: 100 });
+    }
+    // One subscription per relay × author batch. Only a real EOSE counts as a
+    // loaded snapshot: a failed connection or an early CLOSED marks the result
+    // incomplete, and the relay's own EOSE timeout is pushed past our deadline
+    // so it can't masquerade as EOSE (the pool's aggregated `oneose` counts
+    // closures and timeouts as EOSE).
+    let pending = urls.length * filters.length;
+    let failed = false;
+    const settle = (ok: boolean) => {
+      if (!ok) failed = true;
+      if (!finished && --pending === 0) complete(failed);
+    };
+    for (const url of urls) {
+      pool
+        .ensureRelay(url, { connectionTimeout: TIMEOUT_MS })
+        .then((relay) => {
+          for (const filter of filters) {
+            if (finished) return;
+            let batchCount = 0;
+            let done = false;
+            const once = (ok: boolean) => {
+              if (done) return;
+              done = true;
+              settle(ok);
+            };
+            const sub = relay.subscribe([filter], {
+              eoseTimeout: TIMEOUT_MS * 2,
+              onevent(event) {
+                if (
+                  finished ||
+                  !scope.has(event.pubkey) ||
+                  event.content.length > 32768 ||
+                  event.tags.length > 256 ||
+                  event.created_at > Date.now() / 1000 + 300
+                )
+                  return;
+                if (events.has(event.id)) return;
+                if (events.size >= MAX_EVENTS) {
+                  limited = true;
+                  return;
                 }
-              } catch {
-                /* Ignore malformed relay data. */
-              }
-            },
-            oneose() {
-              if (!finished && --pending === 0) complete(false);
-            },
-          },
-        );
-        if (finished) sub.close();
-        else subscriptions.push(sub);
-      } catch {
-        limited = true;
-        if (--pending === 0) complete(true);
-      }
+                try {
+                  if (verifyEvent(event)) {
+                    events.set(event.id, event);
+                    if (++batchCount >= 100) limited = true;
+                  }
+                } catch {
+                  /* Ignore malformed relay data. */
+                }
+              },
+              oneose: () => once(true),
+              onclose: () => once(false),
+            });
+            subscriptions.push(sub);
+          }
+        })
+        .catch(() => {
+          for (let i = 0; i < filters.length; i++) settle(false);
+        });
     }
   });
 }

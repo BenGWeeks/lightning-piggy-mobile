@@ -1,7 +1,7 @@
 import { finalizeEvent, getPublicKey } from 'nostr-tools';
 import { fetchMarketListings } from './marketListingsService';
 import { pool } from './nostrPool';
-jest.mock('./nostrPool', () => ({ pool: { subscribeMany: jest.fn() }, trackRelays: jest.fn() }));
+jest.mock('./nostrPool', () => ({ pool: { ensureRelay: jest.fn() }, trackRelays: jest.fn() }));
 const key = new Uint8Array(32).fill(7);
 const author = getPublicKey(key);
 const event = finalizeEvent(
@@ -17,14 +17,27 @@ const event = finalizeEvent(
   },
   key,
 );
-const subscribe = pool.subscribeMany as jest.Mock;
-let callbacks: { onevent: (e: typeof event) => void; oneose: () => void };
+const ensureRelay = pool.ensureRelay as jest.Mock;
+const subscribe = jest.fn();
+let callbacks: {
+  onevent: (e: typeof event) => void;
+  oneose: () => void;
+  onclose: (reason: string) => void;
+  eoseTimeout: number;
+};
 let close: jest.Mock;
+/** Let the mocked relay connection resolve and its subscriptions open. */
+const opened = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
 beforeEach(() => {
   jest.useFakeTimers();
   subscribe.mockReset();
+  ensureRelay.mockReset();
+  ensureRelay.mockResolvedValue({ subscribe });
   close = jest.fn();
-  subscribe.mockImplementation((_urls, _filter, c) => {
+  subscribe.mockImplementation((_filters, c) => {
     callbacks = c;
     return { close };
   });
@@ -36,7 +49,11 @@ it('author scopes relay queries and rejects forged signatures and unsolicited au
     ['wss://example.com'],
     new AbortController().signal,
   );
-  expect(subscribe.mock.calls[0][1]).toMatchObject({ authors: [author], kinds: [30018, 30402, 5] });
+  await opened();
+  expect(subscribe.mock.calls[0][0][0]).toMatchObject({
+    authors: [author],
+    kinds: [30018, 30402, 5],
+  });
   callbacks.onevent(
     JSON.parse(JSON.stringify({ ...event, id: '0'.repeat(64), sig: '0'.repeat(128) })),
   );
@@ -54,6 +71,7 @@ it('author scopes relay queries and rejects forged signatures and unsolicited au
 it('closes subscriptions on abort and ignores late relay events', async () => {
   const controller = new AbortController();
   const pending = fetchMarketListings([author], ['wss://example.com'], controller.signal);
+  await opened();
   controller.abort();
   callbacks.onevent(event);
   callbacks.oneose();
@@ -67,6 +85,7 @@ it('returns explicit partial status on deadline and when no usable relay exists'
     ['wss://example.com'],
     new AbortController().signal,
   );
+  await opened();
   callbacks.onevent(event);
   jest.advanceTimersByTime(12000);
   expect(await pending).toMatchObject({ incomplete: true, products: [expect.anything()] });
@@ -81,4 +100,42 @@ it('does not issue unscoped queries for an empty follow list', async () => {
     await fetchMarketListings([], ['wss://example.com'], new AbortController().signal),
   ).toEqual({ products: [], incomplete: false });
   expect(subscribe).not.toHaveBeenCalled();
+});
+it('reports a relay that fails to connect as incomplete, not loaded', async () => {
+  ensureRelay.mockReset();
+  ensureRelay.mockImplementation((url: string) =>
+    url === 'wss://down.example'
+      ? Promise.reject(new Error('offline'))
+      : Promise.resolve({ subscribe }),
+  );
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com', 'wss://down.example'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onevent(event);
+  callbacks.oneose();
+  expect(await pending).toMatchObject({ incomplete: true, products: [expect.anything()] });
+});
+it('reports a relay that closes before EOSE as incomplete', async () => {
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onclose('rate-limited');
+  expect(await pending).toMatchObject({ incomplete: true });
+});
+it("keeps the relay's own EOSE timeout past the deadline so it can't fake a load", async () => {
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  expect(callbacks.eoseTimeout).toBeGreaterThan(12000);
+  callbacks.oneose();
+  expect(await pending).toMatchObject({ incomplete: false });
 });

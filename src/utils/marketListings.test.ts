@@ -26,6 +26,20 @@ const event = (fields: Partial<Event> = {}, secret = key) =>
   );
 
 describe('market relay listings', () => {
+  it('rejects identifiers too long for a NIP-19 naddr (255 UTF-8 bytes)', () => {
+    const withD = (d: string) =>
+      event({
+        tags: [
+          ['d', d],
+          ['title', 'Test listing'],
+          ['price', '50', 'USD'],
+        ],
+      });
+    expect(parseMarketListing(withD('a'.repeat(255)))).not.toBeNull();
+    expect(parseMarketListing(withD('a'.repeat(256)))).toBeNull();
+    // 100 × "€" is only 100 characters but 300 UTF-8 bytes.
+    expect(parseMarketListing(withD('€'.repeat(100)))).toBeNull();
+  });
   it('retains fiat prices without inventing a sats quote and uses the signed seller identity', () => {
     const e = event();
     const p = parseMarketListing(e)!;
