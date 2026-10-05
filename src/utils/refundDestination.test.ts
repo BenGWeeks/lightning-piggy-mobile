@@ -71,4 +71,12 @@ describe('resolveRefundDestination', () => {
       await resolveRefundDestination({ sourceWalletId: 'gone', ownerPubkey: ME }),
     ).toMatchObject({ kind: 'wallet', walletId: 'chain-a' });
   });
+
+  it('still falls back to an on-chain wallet when reading the default fails', async () => {
+    preferred.mockRejectedValue(new Error('storage unavailable'));
+    expect(await resolveRefundDestination({})).toMatchObject({
+      kind: 'wallet',
+      walletId: 'chain-a',
+    });
+  });
 });

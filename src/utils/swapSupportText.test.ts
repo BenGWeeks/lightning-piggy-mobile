@@ -17,4 +17,9 @@ describe('swapSupportHint', () => {
     backendFor.mockResolvedValue('https://swaps.example.com/v2');
     expect(await swapSupportHint('abc')).toMatch(/swap server's operator/);
   });
+
+  it('stays backend-neutral when the lookup fails (no evidence it is Boltz)', async () => {
+    backendFor.mockRejectedValue(new Error('storage unavailable'));
+    expect(await swapSupportHint('abc')).toBe('Contact your swap provider with this ID.');
+  });
 });

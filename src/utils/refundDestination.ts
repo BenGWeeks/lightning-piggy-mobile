@@ -38,7 +38,9 @@ export async function resolveRefundDestination(swap: {
   // unless the swap is known to belong to the active identity.
   if (swap.sourceWalletId && !swap.ownerPubkey) return { kind: 'other-identity' };
 
-  const fallback = find(await getDefaultOnchainWalletId()) ?? onchain[0];
+  // A failed preference read is just "no preference" — still fall back.
+  const preferred = await getDefaultOnchainWalletId().catch(() => null);
+  const fallback = find(preferred) ?? onchain[0];
   if (!fallback) return { kind: 'no-wallet' };
   return { kind: 'wallet', walletId: fallback.id, alias: fallback.alias };
 }

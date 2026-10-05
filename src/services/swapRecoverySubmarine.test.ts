@@ -132,6 +132,17 @@ describe('submarine swap recovery', () => {
     expect(attentionToasts()).toHaveLength(0);
   });
 
+  it("shows nothing for another identity's unrecoverable swap (#1124)", async () => {
+    // No active identity in tests, so any recorded owner is "another identity".
+    seed({ swapTree: undefined, ownerPubkey: 'c'.repeat(64) });
+    setSubmarineRefundHandler(jest.fn());
+    route('invoice.failedToPay');
+
+    await recoverPendingSwaps();
+
+    expect(attentionToasts()).toHaveLength(0);
+  });
+
   it('re-surfaces the interactive refund prompt on every pass (not once-only)', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     setSubmarineRefundHandler(handler);

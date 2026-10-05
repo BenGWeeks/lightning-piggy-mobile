@@ -17,6 +17,7 @@ import { markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 import { getSwapBackendForId } from './swapBackendService';
+import { getActivePubkey } from './walletStorageService';
 import { fireNotification } from './notificationService';
 import { swapSupportHint } from '../utils/swapSupportText';
 
@@ -909,6 +910,10 @@ async function recoverSubmarineSwaps(): Promise<void> {
         console.warn(
           `[SwapRecovery] Submarine swap ${swapId} failed (${status}) with on-chain lockup — refund path`,
         );
+        // Another identity's swap: no refund prompt or alert here — its ID and
+        // state aren't this identity's to see; it surfaces when its owner is
+        // active (#1124).
+        if (swap.ownerPubkey && swap.ownerPubkey !== getActivePubkey()) continue;
         // Refundable whenever we hold the refund script; the handler picks the
         // destination wallet at refund time (#1124), so a swap created before
         // the user had an on-chain wallet isn't stranded.
