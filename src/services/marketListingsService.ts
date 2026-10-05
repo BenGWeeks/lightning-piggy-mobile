@@ -31,6 +31,28 @@ export function fetchMarketListings(
     let finished = false;
     let limited = keys.length > MAX_AUTHORS || uniqueRelays.length > urls.length;
     const events = new Map<string, Event>();
+    // A verified-but-oversized revision is never rendered, yet it is still the
+    // newest revision of its listing: record it as a deletion marker so the
+    // reducer's newest-revision rule keeps older revisions hidden.
+    const suppressions = new Map<string, Event>();
+    const suppressOversized = (event: Event) => {
+      limited = true;
+      if (![30018, 30402].includes(event.kind) || event.content.length > 262144) return;
+      const d = event.tags.find((t) => t[0] === 'd')?.[1];
+      if (!d) return;
+      try {
+        if (!verifyEvent(event)) return;
+      } catch {
+        return;
+      }
+      suppressions.set(event.id, {
+        ...event,
+        id: `oversized-${event.id}`,
+        kind: 5,
+        content: '',
+        tags: [['a', `${event.kind}:${event.pubkey}:${d}`]],
+      });
+    };
     const subscriptions: { close: () => void }[] = [];
     const complete = (incomplete: boolean) => {
       if (finished) return;
@@ -38,7 +60,9 @@ export function fetchMarketListings(
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
       subscriptions.forEach((s) => s.close());
-      const products = signal.aborted ? [] : reduceMarketListings([...events.values()], scope);
+      const products = signal.aborted
+        ? []
+        : reduceMarketListings([...events.values(), ...suppressions.values()], scope);
       resolve({
         products: products.slice(0, MAX_PRODUCTS),
         incomplete: incomplete || limited || products.length > MAX_PRODUCTS,
@@ -83,13 +107,11 @@ export function fetchMarketListings(
                 // The relay's `limit` counts everything it sends, so count
                 // before filtering/dedup or a truncated reply looks complete.
                 if (++batchCount >= 100) limited = true;
-                if (
-                  !scope.has(event.pubkey) ||
-                  event.content.length > 32768 ||
-                  event.tags.length > 256 ||
-                  event.created_at > Date.now() / 1000 + 300
-                )
+                if (!scope.has(event.pubkey) || event.created_at > Date.now() / 1000 + 300) return;
+                if (event.content.length > 32768 || event.tags.length > 256) {
+                  suppressOversized(event);
                   return;
+                }
                 if (events.has(event.id)) return;
                 if (events.size >= MAX_EVENTS) {
                   limited = true;

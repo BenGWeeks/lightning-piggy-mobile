@@ -32,7 +32,13 @@ export function useMarketListings(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !focused || !pubkey) return;
     const controller = new AbortController();
-    setState({ key, products: [], incomplete: false, loading: true });
+    // Refreshing the same account/follow scope keeps the current snapshot on
+    // screen (and so the user's filters); only a new scope starts empty.
+    setState((prev) =>
+      prev.key === key
+        ? { ...prev, loading: true }
+        : { key, products: [], incomplete: false, loading: true },
+    );
     void fetchMarketListings(authorsKey.split(','), relaysKey.split(','), controller.signal).then(
       (result) => {
         if (!controller.signal.aborted) setState({ ...result, key, loading: false });

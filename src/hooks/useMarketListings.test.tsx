@@ -57,3 +57,16 @@ it('cleans up on unmount', () => {
   h.unmount();
   expect(signal.aborted).toBe(true);
 });
+it('keeps the current listings on screen while refreshing the same scope', async () => {
+  const product = {
+    id: 'p1',
+    sellerName: 'Seller',
+  } as unknown as MarketListingsResult['products'][number];
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () => finish({ products: [product], incomplete: false }));
+  expect(h.result.current.products).toHaveLength(1);
+  act(() => h.result.current.refresh());
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(h.result.current.loading).toBe(true);
+  expect(h.result.current.products).toHaveLength(1);
+});

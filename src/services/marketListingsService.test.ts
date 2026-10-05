@@ -158,3 +158,23 @@ it('flags a relay that hit its 100-result limit even when some results were dupl
   subs[1].oneose();
   expect(await pending).toMatchObject({ incomplete: true });
 });
+it('lets an oversized newer revision hide the older one instead of resurrecting it', async () => {
+  const older = finalizeEvent(
+    { kind: 30402, created_at: 100, content: 'Book', tags: event.tags },
+    key,
+  );
+  const newer = finalizeEvent(
+    { kind: 30402, created_at: 200, content: 'x'.repeat(40000), tags: event.tags },
+    key,
+  );
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onevent(older);
+  callbacks.onevent(newer);
+  callbacks.oneose();
+  expect(await pending).toEqual({ products: [], incomplete: true });
+});
