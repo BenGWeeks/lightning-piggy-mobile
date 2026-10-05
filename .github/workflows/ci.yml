@@ -115,7 +115,11 @@ jobs:
         run: git diff --exit-code -- package.json package-lock.json
       - name: Build Preview APK with both 64-bit architectures
         working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
+        # The generated default heap (2 GiB) intermittently OOMs in
+        # :app:packageRelease now the APK is ~300 MB (#1130); runners have 16 GB.
+        run: >-
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
+          -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g"
       - name: Verify APK ELF and ZIP alignment
         run: |
           apk=android/app/build/outputs/apk/release/app-release.apk
