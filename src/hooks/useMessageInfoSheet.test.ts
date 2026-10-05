@@ -61,6 +61,21 @@ describe('useMessageInfoSheet', () => {
     expect(result.current.canResend).toBe(false);
   });
 
+  it('enables Re-publish for a sent NIP-04 (kind 4) text message', () => {
+    const resend = jest.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useMessageInfoSheet(resend));
+    act(() => {
+      result.current.showInfo({
+        fromMe: true,
+        eventId: 'abc',
+        wireKind: 4,
+        deliveryStatus: delivery,
+        resendText: 'hello',
+      });
+    });
+    expect(result.current.canResend).toBe(true);
+  });
+
   it('disables Re-publish for a sent kind-15 file message', () => {
     const resend = jest.fn().mockResolvedValue(true);
     const { result } = renderHook(() => useMessageInfoSheet(resend));
