@@ -48,7 +48,7 @@ const TIMED_OUT = Symbol('timed-out');
 // verified on 2.23.3). Without this check a fully-unreachable relay counted
 // as an ACCEPT — `wrapsPublished` went up and the bubble painted a green tick
 // for a message that never left the device.
-const isConnectionFailure = (value: unknown): value is string =>
+export const isConnectionFailure = (value: unknown): value is string =>
   typeof value === 'string' && value.startsWith('connection failure:');
 
 // Transport-shaped failures — the socket was dead/unreachable, as opposed to a

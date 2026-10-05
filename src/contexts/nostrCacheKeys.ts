@@ -19,6 +19,12 @@ export const CONTACTS_TIMESTAMP_KEY_BASE = 'nostr_contacts_timestamp';
 export const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
 export const OWN_PROFILE_TIMESTAMP_KEY_BASE = 'nostr_own_profile_timestamp';
 export const RELAY_LIST_CACHE_KEY_BASE = 'nostr_relay_list_cache';
+/** The user's own NIP-17 DM inbox relays (kind 10050) — read for DMs, incl. in the background watch. */
+export const DM_INBOX_RELAYS_CACHE_KEY_BASE = 'nostr_dm_inbox_relays_v1';
+/** created_at of the cached DM inbox list, so an older relay copy never replaces it. */
+export const DM_INBOX_CREATED_AT_KEY_BASE = 'nostr_dm_inbox_created_at_v1';
+/** created_at of the adopted NIP-65 list, so an older relay copy never replaces it. */
+export const RELAY_LIST_CREATED_AT_KEY_BASE = 'nostr_relay_list_created_at_v1';
 export const RELAY_LIST_TIMESTAMP_KEY_BASE = 'nostr_relay_list_timestamp';
 export const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — for all-cached fast path
 // A contact whose kind-0 we couldn't resolve on the previous attempt is

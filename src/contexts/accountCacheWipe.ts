@@ -42,6 +42,9 @@ import {
   OWN_PROFILE_TIMESTAMP_KEY_BASE,
   RELAY_LIST_CACHE_KEY_BASE,
   RELAY_LIST_TIMESTAMP_KEY_BASE,
+  RELAY_LIST_CREATED_AT_KEY_BASE,
+  DM_INBOX_RELAYS_CACHE_KEY_BASE,
+  DM_INBOX_CREATED_AT_KEY_BASE,
 } from './nostrCacheKeys';
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
@@ -82,6 +85,9 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
     perAccountKey(RELAY_LIST_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+    perAccountKey(RELAY_LIST_CREATED_AT_KEY_BASE, loggedOutPubkey),
+    perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, loggedOutPubkey),
+    perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, loggedOutPubkey),
     perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
     // DM-store migration flags (#848 wrap cache, #850 blobs) — a future

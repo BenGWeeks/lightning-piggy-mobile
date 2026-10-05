@@ -2274,5 +2274,39 @@
   },
   "liveMessages": {
     "newMessages": "Mensajes nuevos"
+  },
+  "publishedRelays": {
+    "title": "Listas de relays publicadas",
+    "intro": "Estas listas son públicas. Otras apps de Nostr las usan para encontrar tus publicaciones y enviarte mensajes directos. Al publicar, la lista se firma con tu clave y sustituye a la anterior.",
+    "nip65Title": "Tus relays (NIP-65)",
+    "nip65Hint": "Escritura = donde se publican tus publicaciones y donde otros las buscan. Lectura = donde otros envían publicaciones que te mencionan.",
+    "nip65Empty": "Aún no hay una lista de relays publicada.",
+    "inboxTitle": "Relays de bandeja de mensajes",
+    "inboxHint": "Otras apps envían aquí tus mensajes privados. Con dos o tres relays fiables es suficiente.",
+    "inboxEmpty": "Aún no hay relays de mensajes publicados.",
+    "read": "Lectura",
+    "write": "Escritura",
+    "add": "Añadir",
+    "addLabel": "Añadir relay",
+    "addUrlLabel": "URL del relay",
+    "removeLabel": "Quitar {{url}}",
+    "invalidUrl": "Usa una dirección de relay pública que empiece por wss://.",
+    "publish": "Publicar",
+    "cancel": "Cancelar",
+    "confirmNip65Title": "¿Publicar tu lista de relays?",
+    "confirmInboxTitle": "¿Publicar tus relays de mensajes?",
+    "confirmBody": "Esto sustituye tu lista pública en Nostr y otras apps empezarán a usarla. Puede que tu firmante te pida aprobarlo.",
+    "publishedTitle": "Lista de relays publicada",
+    "notPublishedTitle": "No publicada",
+    "acceptedCount": "Aceptada por {{accepted}} de {{total}} relays.",
+    "error": {
+      "empty": "Añade al menos un relay primero.",
+      "no-write": "Deja al menos un relay con Escritura activada.",
+      "not-signed": "La lista no se firmó. Revisa tu firmante e inténtalo de nuevo.",
+      "none-accepted": "Ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo.",
+      "busy": "Todavía hay otra publicación en curso.",
+      "superseded": "Se encontró una lista más reciente. Vuelve a abrir esta pantalla para verla e inténtalo de nuevo."
+    },
+    "notPublishable": "No es un relay público: se quitará al publicar"
   }
 }

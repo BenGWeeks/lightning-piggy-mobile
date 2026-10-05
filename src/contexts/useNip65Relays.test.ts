@@ -1,0 +1,308 @@
+import { act, renderHook, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNip65Relays } from './useNip65Relays';
+import { RELAY_LIST_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
+import { perAccountKey } from '../services/perAccountStorage';
+import { fetchLatestReplaceable } from '../services/nostrRelayLists';
+import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
+
+jest.mock('../services/nostrRelayLists', () => ({ fetchLatestReplaceable: jest.fn() }));
+jest.mock('../services/backgroundDmService', () => ({
+  rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
+}));
+const mockFetchList = jest.fn();
+let mockListCreatedAt = 100;
+jest.mock('../services/nostrService', () => ({
+  DEFAULT_RELAYS: ['wss://relay.damus.io'],
+  // The list mock below, wrapped as {list, createdAt}.
+  fetchRelayListEvent: jest.fn(async (...args: unknown[]) => {
+    const list = await mockFetchList(...args);
+    return list ? { list, createdAt: mockListCreatedAt } : null;
+  }),
+}));
+const fetchLatest = fetchLatestReplaceable as jest.Mock;
+const inboxEvent = (urls: string[], created_at = 100) => ({
+  kind: 10050,
+  created_at,
+  tags: urls.map((u) => ['relay', u]),
+});
+const fetchList = mockFetchList;
+const PK = 'a'.repeat(64);
+
+beforeEach(async () => {
+  jest.clearAllMocks();
+  await AsyncStorage.clear();
+  mockListCreatedAt = 100;
+  fetchList.mockResolvedValue([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+});
+
+it("loads the user's own DM inbox relays alongside NIP-65, so the app reads them", async () => {
+  fetchLatest.mockResolvedValue(inboxEvent(['wss://nostr.mom', 'wss://relay.snort.social']));
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await waitFor(() =>
+    expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom', 'wss://relay.snort.social']),
+  );
+});
+
+it('adopts published DM inbox relays immediately and clears both lists on reset', async () => {
+  fetchLatest.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+    await result.current.applyPublishedRelayList(PK, [
+      { url: 'wss://nostr.mom', read: true, write: true },
+    ]);
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+  expect(result.current.nip65Relays).toHaveLength(1);
+  act(() => result.current.resetRelayLists());
+  expect(result.current.dmInboxRelays).toEqual([]);
+  expect(result.current.nip65Relays).toEqual([]);
+});
+
+it('ignores a slow inbox load that finishes after an identity reset', async () => {
+  let finish!: (v: unknown) => void;
+  fetchLatest.mockReturnValue(new Promise((r) => (finish = r)));
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  act(() => result.current.resetRelayLists()); // logout / switch while still loading
+  await act(async () => {
+    finish(inboxEvent(['wss://old-account.example']));
+  });
+  expect(result.current.dmInboxRelays).toEqual([]);
+});
+
+it('a just-published inbox list is not overwritten by an older in-flight load', async () => {
+  let finish!: (v: unknown) => void;
+  fetchLatest.mockReturnValue(new Promise((r) => (finish = r)));
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  await act(async () => {
+    finish(inboxEvent(['wss://old-inbox.example'])); // older copy lands after the publish
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+});
+
+it("looks up the DM inbox list on the user's NIP-65 write relays too", async () => {
+  fetchList.mockResolvedValue([
+    { url: 'wss://my-write.example', read: false, write: true },
+    { url: 'wss://my-read.example', read: true, write: false },
+  ]);
+  fetchLatest.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await waitFor(() => expect(fetchLatest).toHaveBeenCalled());
+  const relays = fetchLatest.mock.calls[0][2] as string[];
+  expect(relays).toContain('wss://my-write.example');
+  expect(relays).not.toContain('wss://my-read.example');
+});
+
+it('a NIP-65 load finishing after an in-app publish does not overwrite it', async () => {
+  let finish!: (v: unknown) => void;
+  fetchList.mockReturnValue(new Promise((r) => (finish = r)));
+  fetchLatest.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  let loading!: Promise<unknown>;
+  act(() => {
+    loading = result.current.loadRelays(PK);
+  });
+  const published = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, published);
+  });
+  await act(async () => {
+    finish([{ url: 'wss://stale.example', read: true, write: true }]);
+    await loading;
+  });
+  expect(result.current.nip65Relays).toEqual(published);
+});
+
+it('a NIP-65 load finishing after an identity reset does not start an inbox load', async () => {
+  let finish!: (v: unknown) => void;
+  fetchList.mockReturnValue(new Promise((r) => (finish = r)));
+  fetchLatest.mockResolvedValue(inboxEvent(['wss://old-account.example']));
+  const { result } = renderHook(() => useNip65Relays());
+  let loading!: Promise<unknown>;
+  act(() => {
+    loading = result.current.loadRelays(PK);
+  });
+  act(() => result.current.resetRelayLists());
+  await act(async () => {
+    finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+    await loading;
+  });
+  expect(fetchLatest).not.toHaveBeenCalled();
+  expect(result.current.dmInboxRelays).toEqual([]);
+});
+
+it('re-arms the background DM watch when the inbox list changes, not when it is the same', async () => {
+  fetchLatest.mockResolvedValue(null);
+  const rearm = rearmBackgroundDmWatchForActiveIdentity as jest.Mock;
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+});
+
+it('re-arms the background DM watch when the NIP-65 list changes, not when it is the same', async () => {
+  const rearm = rearmBackgroundDmWatchForActiveIdentity as jest.Mock;
+  rearm.mockClear();
+  const { result } = renderHook(() => useNip65Relays());
+  const list = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, list);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, list);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+});
+
+it('never replaces a newer cached inbox list with an older relay copy', async () => {
+  fetchList.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://new-inbox.example'], 500);
+  });
+  fetchLatest.mockResolvedValue(inboxEvent(['wss://old-inbox.example'], 400)); // older copy
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await waitFor(() => expect(fetchLatest).toHaveBeenCalled());
+  expect(result.current.dmInboxRelays).toEqual(['wss://new-inbox.example']);
+  // ...and the lookup searched the known inbox relays themselves.
+  expect(fetchLatest.mock.calls.at(-1)?.[2]).toContain('wss://new-inbox.example');
+});
+
+it('adopts lists in memory even when the cache write fails', async () => {
+  const original = AsyncStorage.setItem;
+  (AsyncStorage as { setItem: unknown }).setItem = jest
+    .fn()
+    .mockRejectedValue(new Error('disk full'));
+  try {
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 1);
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://nostr.mom', read: true, write: true },
+      ]);
+    });
+    expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+    expect(result.current.nip65Relays).toHaveLength(1);
+  } finally {
+    (AsyncStorage as { setItem: unknown }).setItem = original;
+  }
+});
+
+it('refuses to adopt an inbox list older than the one already adopted', async () => {
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://new.example'], 500)).toEqual({
+      adopted: true,
+      baseline: 500,
+    });
+  });
+  await act(async () => {
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 400)).toEqual({
+      adopted: false,
+      baseline: 500,
+    });
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://new.example']);
+});
+
+it('refuses to adopt a NIP-65 list older than the one already adopted', async () => {
+  const { result } = renderHook(() => useNip65Relays());
+  const newer = [{ url: 'wss://new.example', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, newer, 500);
+  });
+  await act(async () => {
+    const r = await result.current.applyPublishedRelayList(
+      PK,
+      [{ url: 'wss://old.example', read: true, write: true }],
+      400,
+    );
+    expect(r).toEqual({ adopted: false, baseline: 500 });
+  });
+  expect(result.current.nip65Relays).toEqual(newer);
+});
+
+it('does not adopt an inbox list if the identity is reset mid-call', async () => {
+  const { result } = renderHook(() => useNip65Relays());
+  let r!: Promise<unknown>;
+  act(() => {
+    r = result.current.applyPublishedDmInbox(PK, ['wss://old-account.example'], 1);
+    result.current.resetRelayLists(); // switch/logout while it awaits storage
+  });
+  await act(async () => {
+    expect(await r).toMatchObject({ adopted: false });
+  });
+  expect(result.current.dmInboxRelays).toEqual([]);
+});
+
+it('keeps a newer cached NIP-65 list when a relay serves an older copy after the TTL', async () => {
+  const newer = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, newer, 500);
+  });
+  // Expire the cache TTL so loadRelays goes to the network.
+  await AsyncStorage.setItem(perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK), '0');
+  mockListCreatedAt = 100; // the relay copy predates the publish
+  let read: string[] = [];
+  await act(async () => {
+    read = await result.current.loadRelays(PK);
+  });
+  expect(mockFetchList).toHaveBeenCalled();
+  expect(result.current.nip65Relays).toEqual(newer);
+  expect(read).toEqual(['wss://nostr.mom']);
+});
+
+it('keeps a newly adopted list even when saving its timestamp fails (storage full)', async () => {
+  const realSet = AsyncStorage.setItem;
+  AsyncStorage.setItem = jest.fn().mockRejectedValue(new Error('disk full'));
+  try {
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 500);
+      await result.current.applyPublishedRelayList(
+        PK,
+        [{ url: 'wss://nostr.mom', read: true, write: true }],
+        500,
+      );
+    });
+    let inbox, nip65;
+    await act(async () => {
+      inbox = await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 100);
+      nip65 = await result.current.applyPublishedRelayList(
+        PK,
+        [{ url: 'wss://old.example', read: true, write: true }],
+        100,
+      );
+    });
+    expect(inbox).toEqual({ adopted: false, baseline: 500 });
+    expect(nip65).toEqual({ adopted: false, baseline: 500 });
+    expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+  } finally {
+    AsyncStorage.setItem = realSet;
+  }
+});

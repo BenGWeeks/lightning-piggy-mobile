@@ -4,6 +4,7 @@ import { Alert } from '../../components/BrandedAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import { X as XIcon } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
+import PublishedRelayListsSection from '../../components/PublishedRelayListsSection';
 import { createSharedAccountStyles } from './sharedStyles';
 import {
   getBlossomServer,
@@ -273,6 +274,8 @@ const NostrScreen: React.FC = () => {
         </Text>
       )}
       <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.relaysHint')}</Text>
+
+      <PublishedRelayListsSection />
 
       <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
         {t('nostrScreen.geoCacheRelays')}
