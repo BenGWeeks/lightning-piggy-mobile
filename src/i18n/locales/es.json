@@ -2304,7 +2304,8 @@
       "no-write": "Deja al menos un relay con Escritura activada.",
       "not-signed": "La lista no se firmó. Revisa tu firmante e inténtalo de nuevo.",
       "none-accepted": "Ningún relay la aceptó. Revisa tu conexión e inténtalo de nuevo.",
-      "busy": "Todavía hay otra publicación en curso."
+      "busy": "Todavía hay otra publicación en curso.",
+      "superseded": "Se encontró una lista más reciente. Vuelve a abrir esta pantalla para verla e inténtalo de nuevo."
     },
     "notPublishable": "No es un relay público: se quitará al publicar"
   }

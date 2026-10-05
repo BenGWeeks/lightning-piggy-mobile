@@ -131,7 +131,7 @@ export default function PublishedRelayListsSection() {
 
   const report = useCallback(
     (outcome: RelayListPublishOutcome) => {
-      if (!outcome.ok && !outcome.results) {
+      if (!outcome.ok && (!outcome.results || outcome.error === 'superseded')) {
         Alert.alert(
           t('publishedRelays.notPublishedTitle'),
           t(`publishedRelays.error.${outcome.error}`),

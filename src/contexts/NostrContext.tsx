@@ -53,7 +53,7 @@ import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging, type GroupSendHooks } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
-import { useNip65Relays } from './useNip65Relays';
+import { useNip65Relays, type AdoptResult } from './useNip65Relays';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
@@ -100,11 +100,15 @@ interface NostrContextType extends UseReactionActionsResult {
   /** The user's published NIP-65 (kind-10002) list, as last fetched/published. */
   nip65Relays: RelayConfig[];
   /** Adopt (and cache) a relay list the user just published in-app. */
-  applyPublishedRelayList: (pk: string, list: RelayConfig[]) => Promise<void>;
+  applyPublishedRelayList: (
+    pk: string,
+    list: RelayConfig[],
+    createdAt?: number,
+  ) => Promise<AdoptResult>;
   /** The user's own NIP-17 DM inbox relays (kind 10050); read for DMs. */
   dmInboxRelays: string[];
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
-  applyPublishedDmInbox: (pk: string, list: string[], createdAt?: number) => Promise<boolean>;
+  applyPublishedDmInbox: (pk: string, list: string[], createdAt?: number) => Promise<AdoptResult>;
   /**
    * Add or update a user-managed relay. Replaces any existing entry
    * with the same URL (so toggling read/write on an existing user

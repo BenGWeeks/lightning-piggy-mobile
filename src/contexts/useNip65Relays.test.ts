@@ -207,10 +207,46 @@ it('adopts lists in memory even when the cache write fails', async () => {
 it('refuses to adopt an inbox list older than the one already adopted', async () => {
   const { result } = renderHook(() => useNip65Relays());
   await act(async () => {
-    expect(await result.current.applyPublishedDmInbox(PK, ['wss://new.example'], 500)).toBe(true);
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://new.example'], 500)).toEqual({
+      adopted: true,
+      baseline: 500,
+    });
   });
   await act(async () => {
-    expect(await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 400)).toBe(false);
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 400)).toEqual({
+      adopted: false,
+      baseline: 500,
+    });
   });
   expect(result.current.dmInboxRelays).toEqual(['wss://new.example']);
+});
+
+it('refuses to adopt a NIP-65 list older than the one already adopted', async () => {
+  const { result } = renderHook(() => useNip65Relays());
+  const newer = [{ url: 'wss://new.example', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, newer, 500);
+  });
+  await act(async () => {
+    const r = await result.current.applyPublishedRelayList(
+      PK,
+      [{ url: 'wss://old.example', read: true, write: true }],
+      400,
+    );
+    expect(r).toEqual({ adopted: false, baseline: 500 });
+  });
+  expect(result.current.nip65Relays).toEqual(newer);
+});
+
+it('does not adopt an inbox list if the identity is reset mid-call', async () => {
+  const { result } = renderHook(() => useNip65Relays());
+  let r!: Promise<unknown>;
+  act(() => {
+    r = result.current.applyPublishedDmInbox(PK, ['wss://old-account.example'], 1);
+    result.current.resetRelayLists(); // switch/logout while it awaits storage
+  });
+  await act(async () => {
+    expect(await r).toMatchObject({ adopted: false });
+  });
+  expect(result.current.dmInboxRelays).toEqual([]);
 });

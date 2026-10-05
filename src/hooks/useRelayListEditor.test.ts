@@ -3,8 +3,9 @@ import { useRelayListEditor } from './useRelayListEditor';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
 
 const mockSign = jest.fn();
-const mockApply = jest.fn().mockResolvedValue(undefined);
-const mockApplyInbox = jest.fn().mockResolvedValue(true);
+const ADOPTED = { adopted: true, baseline: 0 };
+const mockApply = jest.fn().mockResolvedValue(ADOPTED);
+const mockApplyInbox = jest.fn().mockResolvedValue(ADOPTED);
 const PUBLISHED = [
   { url: 'wss://relay.primal.net', read: true, write: true },
   { url: 'wss://nostr.land', read: true, write: true },
@@ -64,7 +65,8 @@ const publish = publishToRelays as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockApplyInbox.mockResolvedValue(true);
+  mockApplyInbox.mockResolvedValue(ADOPTED);
+  mockApply.mockResolvedValue(ADOPTED);
   mockNip65 = PUBLISHED;
   mockPubkey = 'a'.repeat(64);
   mockInbox = [];
@@ -109,10 +111,14 @@ it('removes a published relay, adds one, and publishes a kind 10002 to old + new
   expect(publish.mock.calls[0][1]).toEqual(
     expect.arrayContaining(['wss://nostr.land', 'wss://nostr.mom', 'wss://purplepag.es']),
   );
-  expect(mockApply).toHaveBeenCalledWith('a'.repeat(64), [
-    { url: 'wss://relay.primal.net', read: true, write: true },
-    { url: 'wss://nostr.mom', read: true, write: true },
-  ]);
+  expect(mockApply).toHaveBeenCalledWith(
+    'a'.repeat(64),
+    [
+      { url: 'wss://relay.primal.net', read: true, write: true },
+      { url: 'wss://nostr.mom', read: true, write: true },
+    ],
+    expect.any(Number),
+  );
 });
 
 it('refuses to publish an empty list or one with no write relay', async () => {
@@ -200,7 +206,7 @@ it('loads the CURRENT published list before editing, so a stale cache is never p
     expect(await h.result.current.publishNip65()).toEqual({ ok: false, error: 'not-signed' });
   });
   await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
-  expect(mockApply).toHaveBeenCalledWith('a'.repeat(64), fresh);
+  expect(mockApply).toHaveBeenCalledWith('a'.repeat(64), fresh, expect.any(Number));
   expect(mockSign).not.toHaveBeenCalled();
 });
 
@@ -455,10 +461,38 @@ it("does not carry one account's list timestamp into another's publish", async (
 it('keeps the known inbox list when the discovered copy is older (never restores stale relays)', async () => {
   mockInbox = ['wss://new-inbox.example'];
   net10050 = ['wss://old-inbox.example'];
-  mockApplyInbox.mockResolvedValue(false); // the app refuses the older copy
+  mockApplyInbox.mockResolvedValue({ adopted: false, baseline: 999 }); // the app refuses the older copy
   const { result } = await setup();
   expect(result.current.inboxDraft).toEqual(['wss://new-inbox.example']);
   // ...and the lookup searched the known inbox relays themselves.
   const inboxCall = fetchLatest.mock.calls.find((c) => c[1] === 10050);
   expect(inboxCall?.[2]).toContain('wss://new-inbox.example');
+});
+
+it("keeps edits and doesn't claim success when the app refuses the published list", async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  mockApply.mockResolvedValue({ adopted: false, baseline: 10 });
+  await act(async () => {
+    expect(await result.current.publishNip65()).toMatchObject({ ok: false, error: 'superseded' });
+  });
+  expect(result.current.nip65Dirty).toBe(true);
+});
+
+it("signs after the app's baseline even when the discovered copy was older", async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  net10050 = ['wss://old.example']; // discovered copy (created_at 1)...
+  mockApplyInbox.mockResolvedValueOnce({ adopted: false, baseline: future }); // ...refused: app holds a newer one
+  const { result } = await setup();
+  act(() => {
+    result.current.addInbox('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishInbox();
+  });
+  expect(mockSign.mock.calls.at(-1)?.[0].created_at).toBeGreaterThan(future);
 });

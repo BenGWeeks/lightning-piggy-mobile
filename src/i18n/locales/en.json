@@ -2304,7 +2304,8 @@
       "no-write": "Keep at least one relay with Write turned on.",
       "not-signed": "The list wasn't signed. Check your signer and try again.",
       "none-accepted": "No relay accepted it. Check your connection and try again.",
-      "busy": "Another publish is still in progress."
+      "busy": "Another publish is still in progress.",
+      "superseded": "A newer list was found. Reopen this screen to see it, then try again."
     },
     "notPublishable": "Not a public relay: dropped when you publish"
   }

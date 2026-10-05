@@ -26,7 +26,7 @@ export type RelayListPublishOutcome =
   | { ok: true; results: RelayPublishResult[] }
   | {
       ok: false;
-      error: 'empty' | 'no-write' | 'not-signed' | 'none-accepted' | 'busy';
+      error: 'empty' | 'no-write' | 'not-signed' | 'none-accepted' | 'busy' | 'superseded';
       results?: RelayPublishResult[];
     };
 
@@ -99,10 +99,18 @@ export function useRelayListEditor() {
       try {
         const nip65Event = await fetchLatestReplaceable(pubkey, 10002, sources);
         if (cancelled) return;
-        if (nip65Event) latestCreatedAtRef.current[10002] = nip65Event.created_at;
         const nip65List = nip65Event ? relayListFromTags(nip65Event.tags) : null;
-        if (nip65List) await applyPublishedRelayList(pubkey, nip65List);
+        // Adoption refuses a copy older than the one the app holds; either way
+        // the next publish must be newer than the app's baseline.
+        const nip65Adopt =
+          nip65List && nip65Event
+            ? await applyPublishedRelayList(pubkey, nip65List, nip65Event.created_at)
+            : null;
         if (cancelled) return;
+        latestCreatedAtRef.current[10002] = Math.max(
+          nip65Event?.created_at ?? 0,
+          nip65Adopt?.baseline ?? 0,
+        );
         setNip65Loading(false);
         // Then the inbox list — also on the (possibly just-discovered) NIP-65
         // write relays, where other clients publish it.
@@ -111,18 +119,21 @@ export function useRelayListEditor() {
           ...new Set([...sources, ...writeRelays, ...knownInboxRef.current]),
         ]);
         if (cancelled) return;
-        if (inboxEvent) latestCreatedAtRef.current[10050] = inboxEvent.created_at;
         // A list found here (wider lookup / newer copy) must also be READ
         // app-wide — unless it's older than what the app already has, in which
         // case the known list stays (adoption refuses stale copies). A failed
         // lookup likewise falls back to the known list, never an empty one.
         const found = inboxEvent ? dmInboxRelaysFromTags(inboxEvent.tags) : null;
-        const adopted =
+        const inboxAdopt =
           found !== null && inboxEvent
             ? await applyPublishedDmInbox(pubkey, found, inboxEvent.created_at)
-            : false;
+            : null;
         if (cancelled) return;
-        const list = adopted && found ? found : knownInboxRef.current;
+        latestCreatedAtRef.current[10050] = Math.max(
+          inboxEvent?.created_at ?? 0,
+          inboxAdopt?.baseline ?? 0,
+        );
+        const list = inboxAdopt?.adopted && found ? found : knownInboxRef.current;
         setInboxBaseline(list);
         setInboxDraft(list);
         setInboxLoading(false);
@@ -245,7 +256,11 @@ export function useRelayListEditor() {
       return { ok: false, error: 'no-write' };
     setPublishing('nip65');
     try {
-      const { outcome, tags } = await signAndPublish(
+      const {
+        outcome,
+        tags,
+        createdAt: signedAt,
+      } = await signAndPublish(
         unsigned,
         // Also the relays the app (and other clients) discover lists on, so
         // any old copy there is replaced rather than later restored.
@@ -258,7 +273,10 @@ export function useRelayListEditor() {
       if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
         // Adopt exactly what was signed (non-public rows were dropped).
         const published = relayListFromTags(tags);
-        await applyPublishedRelayList(pubkey, published);
+        const result = await applyPublishedRelayList(pubkey, published, signedAt);
+        // Refused (a newer list exists, or the identity changed): keep the
+        // draft dirty and don't claim success.
+        if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
         setNip65Draft(published);
         setNip65Dirty(false);
       }
@@ -301,7 +319,8 @@ export function useRelayListEditor() {
       if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
-        await applyPublishedDmInbox(pubkey, published, signedAt);
+        const result = await applyPublishedDmInbox(pubkey, published, signedAt);
+        if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
         setInboxBaseline(published);
         setInboxDraft(published);
         setInboxDirty(false);
