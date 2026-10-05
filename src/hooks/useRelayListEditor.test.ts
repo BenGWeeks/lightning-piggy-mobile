@@ -559,3 +559,20 @@ it('starts the inbox draft from the known list when loading fails (never publish
   await waitFor(() => expect(h.result.current.inboxLoading).toBe(false));
   expect(h.result.current.inboxDraft).toEqual(['wss://relay.primal.net', 'wss://nostr.mom']);
 });
+
+it('signs a retry after the newer list that superseded the previous publish', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const newer = Math.floor(Date.now() / 1000) + 3600;
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  mockApply.mockResolvedValueOnce({ adopted: false, baseline: newer });
+  await act(async () => {
+    expect(await result.current.publishNip65()).toMatchObject({ error: 'superseded' });
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  expect(mockSign.mock.calls[1][0].created_at).toBeGreaterThan(newer);
+});

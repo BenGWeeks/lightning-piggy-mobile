@@ -76,6 +76,10 @@ export function useRelayListEditor() {
     created_at: Math.max(unsigned.created_at, (latestCreatedAtRef.current[unsigned.kind] ?? 0) + 1),
   });
 
+  const raiseBaseline = (kind: number, createdAt: number) => {
+    latestCreatedAtRef.current[kind] = Math.max(latestCreatedAtRef.current[kind] ?? 0, createdAt);
+  };
+
   // Follow the published list until the user starts editing.
   useEffect(() => {
     if (!nip65Dirty) setNip65Draft(mergeRelayRows(nip65Relays));
@@ -299,7 +303,11 @@ export function useRelayListEditor() {
         const result = await applyPublishedRelayList(pubkey, published, signedAt);
         // Refused (a newer list exists, or the identity changed): keep the
         // draft dirty and don't claim success.
-        if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
+        if (!result.adopted) {
+          // A retry must be signed after the newer list the app holds.
+          raiseBaseline(10002, result.baseline);
+          return { ok: false, error: 'superseded', results: outcome.results };
+        }
         // The account switched while adopting: leave the successor's editor alone.
         if (activePubkeyRef.current !== pubkey) return outcome;
         setNip65Draft(published);
@@ -345,7 +353,10 @@ export function useRelayListEditor() {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
         const result = await applyPublishedDmInbox(pubkey, published, signedAt);
-        if (!result.adopted) return { ok: false, error: 'superseded', results: outcome.results };
+        if (!result.adopted) {
+          raiseBaseline(10050, result.baseline);
+          return { ok: false, error: 'superseded', results: outcome.results };
+        }
         if (activePubkeyRef.current !== pubkey) return outcome;
         setInboxBaseline(published);
         setInboxDraft(published);
