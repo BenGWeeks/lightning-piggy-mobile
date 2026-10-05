@@ -366,6 +366,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               t={t}
               selectedTheme={selectedTheme}
               onSelectTheme={setSelectedTheme}
+              onSave={handleSave}
             />
           )}
 
