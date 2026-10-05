@@ -2274,5 +2274,37 @@
   },
   "liveMessages": {
     "newMessages": "New messages"
+  },
+  "publishedRelays": {
+    "title": "Published relay lists",
+    "intro": "These lists are public. Other Nostr apps use them to find your posts and to send you DMs. Publishing signs the list with your key and replaces your previous one.",
+    "nip65Title": "Your relays (NIP-65)",
+    "nip65Hint": "Read = where others find your posts. Write = where your posts are published.",
+    "nip65Empty": "No published relay list yet.",
+    "inboxTitle": "DM inbox relays",
+    "inboxHint": "Other apps send your private messages here. Two or three reliable relays are enough.",
+    "inboxEmpty": "No DM inbox relays published yet.",
+    "read": "Read",
+    "write": "Write",
+    "add": "Add",
+    "addLabel": "Add relay",
+    "addUrlLabel": "Relay URL",
+    "removeLabel": "Remove {{url}}",
+    "invalidUrl": "Use a public relay address starting with wss://.",
+    "publish": "Publish",
+    "cancel": "Cancel",
+    "confirmNip65Title": "Publish your relay list?",
+    "confirmInboxTitle": "Publish your DM inbox relays?",
+    "confirmBody": "This replaces your public list on Nostr, and other apps will start using it. Your signer may ask you to approve.",
+    "publishedTitle": "Relay list published",
+    "notPublishedTitle": "Not published",
+    "acceptedCount": "Accepted by {{accepted}} of {{total}} relays.",
+    "error": {
+      "empty": "Add at least one relay first.",
+      "no-write": "Keep at least one relay with Write turned on.",
+      "not-signed": "The list wasn't signed. Check your signer and try again.",
+      "none-accepted": "No relay accepted it. Check your connection and try again."
+    },
+    "notPublishable": "Not a public relay: dropped when you publish"
   }
 }

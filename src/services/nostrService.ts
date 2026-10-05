@@ -379,7 +379,7 @@ function tagsToRelayList(tags: string[][]): RelayConfig[] {
 //     Firing once at the end avoids the race where an inline `onLatest`
 //     callback could overwrite cache that a still-pending `await` is
 //     about to write with the older first result.
-async function fetchSingleLatest<T>(
+export async function fetchSingleLatest<T>(
   filter: Filter,
   relays: string[],
   parse: (tags: string[][]) => T,

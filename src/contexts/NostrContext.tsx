@@ -53,6 +53,7 @@ import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging, type GroupSendHooks } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
+import { useNip65Relays } from './useNip65Relays';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
@@ -96,6 +97,10 @@ interface NostrContextType extends UseReactionActionsResult {
    * another Nostr client for now).
    */
   userRelays: RelayConfig[];
+  /** The user's published NIP-65 (kind-10002) list, as last fetched/published. */
+  nip65Relays: RelayConfig[];
+  /** Adopt (and cache) a relay list the user just published in-app. */
+  applyPublishedRelayList: (pk: string, list: RelayConfig[]) => Promise<void>;
   /**
    * Add or update a user-managed relay. Replaces any existing entry
    * with the same URL (so toggling read/write on an existing user
@@ -321,7 +326,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // (#202). The exposed `relays` memo is the merge — defaults +
   // NIP-65 + user overrides — so every existing read/write filter
   // call site picks up user-added relays without further plumbing.
-  const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
+  const { nip65Relays, setNip65Relays, loadRelaysFromCache, loadRelays, applyPublishedRelayList } =
+    useNip65Relays();
   const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
   const relays = useMemo(
     () => mergeRelays({ nip65: nip65Relays, user: userRelays }),
@@ -515,27 +521,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     } catch (error) {
       console.warn('Failed to load profile cache:', error);
-      return false;
-    }
-  }, []);
-
-  /** Eagerly hydrate `relays` state from the per-account cache so
-   * relay-dependent fan-out (kind-0 publish, NIP-17 send) uses the
-   * user's actual relays from the very first action instead of
-   * defaulting to `DEFAULT_RELAYS`. Same pattern as
-   * `loadProfileFromCache`. */
-  const loadRelaysFromCache = useCallback(async (pk: string) => {
-    try {
-      const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk));
-      if (!raw) return false;
-      const cached = JSON.parse(raw) as RelayConfig[];
-      if (!Array.isArray(cached)) return false;
-      // Cached relay-list is the NIP-65 slice; the user overrides are
-      // hydrated separately by the `getUserRelays()` effect.
-      setNip65Relays(cached);
-      return true;
-    } catch (error) {
-      console.warn('Failed to load relays cache:', error);
       return false;
     }
   }, []);
@@ -811,44 +796,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [],
   );
-
-  const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
-    const t0 = Date.now();
-    // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
-    // from cache when under the TTL and skip the ~3s relay round trip.
-    const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
-      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
-      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
-    );
-    if (cached && ageMs < CACHE_MAX_AGE_MS) {
-      setNip65Relays(cached);
-      if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
-      const readRelays = cached.filter((r) => r.read).map((r) => r.url);
-      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-    }
-    const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
-    if (relayList === null) {
-      // Network couldn't produce a kind-10002 — fall back to defaults
-      // and DON'T persist (so we don't poison the cache with a blip).
-      if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
-      return nostrService.DEFAULT_RELAYS;
-    }
-    if (__DEV__)
-      console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
-    setNip65Relays(relayList);
-    InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(
-        perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
-        JSON.stringify(relayList),
-      ).catch(() => {});
-      AsyncStorage.setItem(
-        perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
-        Date.now().toString(),
-      ).catch(() => {});
-    });
-    const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
-    return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-  }, []);
 
   // Single-fire perf log when isLoggedIn becomes true — the
   // "login restored from cache" moment. Anchor for the boot path.
@@ -1297,6 +1244,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     nostrService.cleanup();
   }, [
+    setNip65Relays,
     pubkey,
     loadContactsFromCache,
     loadProfileFromCache,
@@ -1386,6 +1334,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [
       pubkey,
+      setNip65Relays,
       loadContactsFromCache,
       hydrateDmInboxFromCache,
       loadRelays,
@@ -1662,6 +1611,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       relays,
       userRelays,
+      nip65Relays,
+      applyPublishedRelayList,
       addUserRelay,
       removeUserRelay,
       signerType,
@@ -1699,6 +1650,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       relays,
       userRelays,
+      nip65Relays,
+      applyPublishedRelayList,
       addUserRelay,
       removeUserRelay,
       signerType,
