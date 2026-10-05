@@ -191,3 +191,12 @@ describe('keepPendingLocalRows', () => {
     expect(keepPendingLocalRows([{ ...fetched[0] }], fetched)).toBe(fetched);
   });
 });
+
+describe('cross-protocol echo isolation', () => {
+  it('does not let a NIP-17 echo retire a NIP-04 optimistic row with the same text', () => {
+    const nip04Local = { id: 'local-a', fromMe: true, text: 'hello', createdAt: 100, wireKind: 4 };
+    const nip17Echo = { id: 'wrap-b', fromMe: true, text: 'hello', createdAt: 101, wireKind: 14 };
+    const ids = mergeConversationMessages([nip04Local], [nip17Echo], DM_CONV_CAP).map((m) => m.id);
+    expect(ids).toEqual(['local-a', 'wrap-b']);
+  });
+});

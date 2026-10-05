@@ -4,6 +4,7 @@ import {
   protocolForWireKind,
   filterMessagesByProtocol,
   isDmProtocolAvailable,
+  dmThreadId,
 } from './dmProtocol';
 
 describe('DM protocols', () => {
@@ -37,5 +38,12 @@ describe('DM protocols', () => {
     expect(isDmProtocolAvailable('nip04')).toBe(true);
     expect(isDmProtocolAvailable('nip17')).toBe(true);
     expect(isDmProtocolAvailable('marmot')).toBe(false);
+  });
+});
+
+describe('dmThreadId', () => {
+  it('keys a thread by lowercase pubkey and protocol', () => {
+    expect(dmThreadId('ABC', 'nip04')).toBe('abc:nip04');
+    expect(dmThreadId('abc', 'nip17')).not.toBe(dmThreadId('abc', 'nip04'));
   });
 });

@@ -1,4 +1,4 @@
-import { protocolForWireKind } from '../utils/dmProtocol';
+import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
@@ -198,7 +198,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (item.notify && claimWrapNotification(item.entry.id)) {
       void fireMessageNotification({
         kind: 'dm',
-        threadId: item.partnerPubkey,
+        threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
         title: item.notify.title,
         body: item.notify.body,
         data: {
@@ -436,7 +436,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (!fromMe && isFreshArrival(ev.created_at)) {
         void fireMessageNotification({
           kind: 'dm',
-          threadId: partnerPubkey,
+          threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
           title: 'New message',
           body: plaintext,
           data: {
@@ -533,7 +533,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
           void fireMessageNotification({
             kind: 'dm',
-            threadId: partnerPubkey,
+            threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
             title: 'Marketplace update',
             body: preview,
             data: {

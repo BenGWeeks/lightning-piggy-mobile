@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { DEFAULT_DM_PROTOCOL, dmThreadId, type DmProtocol } from '../utils/dmProtocol';
 import { Linking, StyleSheet, ActivityIndicator, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -248,7 +249,10 @@ export const navigateFromNotification = (data: {
 function syncActiveThreadFromNav(): void {
   const route = navigationRef.getCurrentRoute();
   if (route?.name === 'Conversation') {
-    setActiveThread((route.params as { pubkey?: string } | undefined)?.pubkey ?? null);
+    const params = route.params as { pubkey?: string; protocol?: DmProtocol } | undefined;
+    setActiveThread(
+      params?.pubkey ? dmThreadId(params.pubkey, params.protocol ?? DEFAULT_DM_PROTOCOL) : null,
+    );
   } else if (route?.name === 'GroupConversation') {
     setActiveThread((route.params as { groupId?: string } | undefined)?.groupId ?? null);
   } else {
@@ -562,7 +566,15 @@ export default function AppNavigator() {
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainDrawer} />
-        <Stack.Screen name="Conversation" component={ConversationScreen} />
+        <Stack.Screen
+          name="Conversation"
+          component={ConversationScreen}
+          // One screen instance per (partner, protocol) thread: navigating to a
+          // different thread (e.g. from a notification) pushes a fresh screen
+          // instead of re-using this one, so optimistic rows and in-flight send
+          // callbacks can never land in another person's thread.
+          getId={({ params }) => dmThreadId(params.pubkey, params.protocol ?? DEFAULT_DM_PROTOCOL)}
+        />
         <Stack.Screen name="Groups" component={GroupsScreen} />
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
         <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />

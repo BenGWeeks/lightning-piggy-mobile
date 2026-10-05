@@ -129,7 +129,9 @@ describe('dmDb', () => {
       expect(selectSql).toContain('from_me = 1');
       // Sargable window (Copilot #990): BETWEEN, not ABS(created_at - ?).
       expect(selectSql).toContain('created_at BETWEEN ? - 30 AND ? + 30');
-      expect(selectParams).toEqual([OWNER, 'convA', 'hi', 100, 100]);
+      // Same-protocol only: a NIP-17 echo never retires a NIP-04 local- row.
+      expect(selectSql).toContain('(wire_kind = 4) = (? = 4)');
+      expect(selectParams).toEqual([OWNER, 'convA', 'hi', 14, 100, 100]);
       const [deleteSql, deleteParams] = mockExecute.mock.calls[1];
       expect(deleteSql).toContain('DELETE FROM dm_messages');
       expect(deleteParams).toEqual([OWNER, 'local-42']);

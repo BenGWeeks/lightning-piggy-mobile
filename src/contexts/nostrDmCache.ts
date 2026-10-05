@@ -4,6 +4,7 @@ import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { LOCAL_DM_ID_PREFIX, LOCAL_DM_ECHO_WINDOW_SECS } from '../services/dmDb';
 import type { ConversationMessage } from './nostrContextTypes';
+import { protocolForWireKind } from '../utils/dmProtocol';
 
 // Re-export the echo-window constant from its single source of truth (dmDb —
 // the store-level echo retire and this in-memory merge must agree, #850).
@@ -274,6 +275,9 @@ export function mergeConversationMessages(
         if (!k.startsWith('local-')) continue;
         if (prev.fromMe !== m.fromMe) continue;
         if (prev.text !== m.text) continue;
+        // Threads are split per protocol: a NIP-17 echo must never retire a
+        // NIP-04 optimistic row with the same text (or vice versa).
+        if (protocolForWireKind(prev.wireKind) !== protocolForWireKind(m.wireKind)) continue;
         const delta = Math.abs(prev.createdAt - m.createdAt);
         if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
         if (delta < bestDelta) {

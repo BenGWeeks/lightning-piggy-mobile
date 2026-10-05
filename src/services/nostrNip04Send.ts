@@ -1,4 +1,4 @@
-import { finalizeEvent, getEventHash, type VerifiedEvent } from 'nostr-tools/pure';
+import { finalizeEvent, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
 import * as amberService from './amberService';
 import * as nostrConnectService from './nostrConnectService';
@@ -40,16 +40,27 @@ export async function sendNip04Message(input: {
       tags: [['p', recipientPubkey]],
       content: await signer.requestNip04Encrypt(plaintext, recipientPubkey, senderPubkey),
     };
-    const eventId = getEventHash(unsigned);
     const { event } = await signer.requestEventSignature(
       JSON.stringify(unsigned),
       '',
       senderPubkey,
     );
     if (!event) throw new Error('Signer returned empty signed event');
-    signed = JSON.parse(event) as VerifiedEvent;
-    // Prefer the signed identity if the signer changed the event template.
-    signed.id = signed.id || eventId;
+    const parsed = JSON.parse(event) as VerifiedEvent;
+    // Never publish what an external signer hands back unchecked: it must be a
+    // validly signed kind-4 from us, to the same recipient, with the same
+    // ciphertext. `created_at` (and so the id) may legitimately differ, so the
+    // optimistic row is keyed off the signed id below, not a pre-computed one.
+    if (
+      !verifyEvent(parsed) ||
+      parsed.kind !== 4 ||
+      parsed.pubkey !== senderPubkey ||
+      parsed.content !== unsigned.content ||
+      JSON.stringify(parsed.tags) !== JSON.stringify(unsigned.tags)
+    ) {
+      throw new Error('Signer returned an invalid or modified event');
+    }
+    signed = parsed;
   } else {
     throw new Error('Unsupported signer type');
   }

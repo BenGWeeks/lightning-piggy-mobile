@@ -19,6 +19,12 @@ export function filterMessagesByProtocol<T extends { wireKind?: number }>(
   return messages.filter((message) => protocolForWireKind(message.wireKind) === protocol);
 }
 
+/** Notification / active-thread identity for a 1:1 conversation. Threads are
+ * split per protocol, so viewing one protocol must not silence the other. */
+export function dmThreadId(pubkey: string, protocol: DmProtocol): string {
+  return `${pubkey.toLowerCase()}:${protocol}`;
+}
+
 export function isDmProtocolAvailable(protocol: DmProtocol): boolean {
   return protocol !== 'marmot';
 }

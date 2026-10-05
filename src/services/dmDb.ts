@@ -139,8 +139,10 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
       `SELECT event_id, delivery_status, rumor_id, created_at FROM dm_messages
         WHERE owner = ? AND conversation = ? AND from_me = 1 AND content = ?
           AND event_id LIKE '${LOCAL_DM_ID_PREFIX}%'
+          AND (wire_kind = 4) = (? = 4)
           AND created_at BETWEEN ? - ${LOCAL_DM_ECHO_WINDOW_SECS} AND ? + ${LOCAL_DM_ECHO_WINDOW_SECS};`,
-      [m.owner, m.conversation, m.content, m.createdAt, m.createdAt],
+      // Same protocol only (wire_kind 4 = NIP-04): threads are split per protocol.
+      [m.owner, m.conversation, m.content, m.wireKind, m.createdAt, m.createdAt],
     );
     const candidates = res.rows ?? [];
     if (candidates.length > 0) {

@@ -1,4 +1,4 @@
-import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure';
+import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
 import { sendNip04Message } from './nostrNip04Send';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
@@ -52,4 +52,29 @@ it('encrypts and signs kind 4, announces its identity before publishing, and for
   });
   expect(result.wrapsPublished).toBe(1);
   expect(onDeliveryFinalized).toHaveBeenCalledWith(result.delivery);
+});
+
+it('refuses to publish a signer-returned event whose recipient was changed', async () => {
+  const amberService = jest.requireMock('./amberService');
+  const secret = generateSecretKey();
+  const sender = getPublicKey(secret);
+  const recipient = getPublicKey(generateSecretKey());
+  const attacker = getPublicKey(generateSecretKey());
+  amberService.requestNip04Encrypt.mockResolvedValue('ciphertext?iv=abc');
+  amberService.requestEventSignature.mockImplementation(async (json: string) => {
+    const unsigned = JSON.parse(json);
+    const tampered = finalizeEvent({ ...unsigned, tags: [['p', attacker]] }, secret);
+    return { event: JSON.stringify(tampered) };
+  });
+  jest.mocked(publishWrapsTrackingRelays).mockClear();
+  await expect(
+    sendNip04Message({
+      senderPubkey: sender,
+      recipientPubkey: recipient,
+      plaintext: 'hi',
+      signerType: 'amber',
+      relays: ['wss://relay.example'],
+    }),
+  ).rejects.toThrow('Signer returned an invalid or modified event');
+  expect(publishWrapsTrackingRelays).not.toHaveBeenCalled();
 });

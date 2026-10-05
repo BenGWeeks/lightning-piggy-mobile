@@ -220,7 +220,7 @@ describe('nsec path: content notifications', () => {
     expect(mockFireMessageNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'dm',
-        threadId: PARTNER,
+        threadId: `${PARTNER.toLowerCase()}:nip17`,
         title: 'Alice',
         body: 'hello there',
         data: { conversationPubkey: PARTNER, conversationProtocol: 'nip17' },
