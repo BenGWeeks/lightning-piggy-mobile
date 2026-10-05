@@ -1,3 +1,4 @@
+import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -179,13 +180,16 @@ export function createLiveRumorSurfacer(
     if (!partnership.fromMe && isFreshArrival(rumor.created_at) && claimWrapNotification(wrapId)) {
       void fireMessageNotification({
         kind: 'dm',
-        threadId: partnership.partnerPubkey,
+        threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
         title: 'New message',
         // Use the already-redacted preview, not raw `rumor.content`: a
         // structured rumor (order JSON, or an NWC wallet-share bearer
         // connection string) must never surface its payload in a push body.
         body: inboxEntry.text,
-        data: { conversationPubkey: partnership.partnerPubkey },
+        data: {
+          conversationPubkey: partnership.partnerPubkey,
+          conversationProtocol: protocolForWireKind(rumor.kind),
+        },
       });
     }
     if (__DEV__)

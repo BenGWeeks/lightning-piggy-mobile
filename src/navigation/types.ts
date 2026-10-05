@@ -1,3 +1,4 @@
+import type { DmProtocol } from '../utils/dmProtocol';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
@@ -40,6 +41,7 @@ export type AccountDrawerParamList = {
 export type RootStackParamList = {
   Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
+    protocol?: DmProtocol;
     pubkey: string;
     name: string;
     picture?: string | null;

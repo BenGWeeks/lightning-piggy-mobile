@@ -1,6 +1,8 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
+import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
+import { DEFAULT_DM_PROTOCOL, dmMessageThreadId, type DmProtocol } from '../utils/dmProtocol';
 import {
   View,
   Text,
@@ -16,7 +18,6 @@ import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Clock, Search, X, Zap } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -70,9 +71,8 @@ const MessagesScreen: React.FC = () => {
     console.log(`[Perf] MessagesScreen first render`);
   }, []);
   const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const { isLoggedIn, profile, refreshProfile, fetchProfilesForPubkeys, pubkey } = useNostr();
+  const { isLoggedIn, refreshProfile, fetchProfilesForPubkeys, pubkey } = useNostr();
   const { dmInbox, refreshDmInbox, armLiveDmSub } = useNostrDmInbox();
   const { contacts, refreshContacts } = useNostrContacts();
   const { wallets } = useWallet();
@@ -113,6 +113,7 @@ const MessagesScreen: React.FC = () => {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [pickedFriend, setPickedFriend] = useState<PickedFriend | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
   const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
@@ -611,6 +612,7 @@ const MessagesScreen: React.FC = () => {
       const lightningAddress = summary.lightningAddress ?? info?.lightningAddress ?? null;
       if (summary.pubkey) {
         navigation.navigate('Conversation', {
+          protocol: summary.protocol,
           pubkey: summary.pubkey,
           name: summary.name,
           picture,
@@ -657,17 +659,18 @@ const MessagesScreen: React.FC = () => {
     });
   }, [navigation, pubkey]);
 
-  const handlePickerSelect = useCallback(
-    (friend: PickedFriend) => {
-      setPickerVisible(false);
-      navigation.navigate('Conversation', {
-        pubkey: friend.pubkey,
-        name: friend.name,
-        picture: friend.picture,
-        lightningAddress: friend.lightningAddress,
-      });
+  const handlePickerSelect = useCallback((friend: PickedFriend) => {
+    setPickerVisible(false);
+    setPickedFriend(friend);
+  }, []);
+  const closeProtocolPicker = useCallback(() => setPickedFriend(null), []);
+  const selectProtocol = useCallback(
+    (protocol: DmProtocol) => {
+      if (!pickedFriend) return;
+      navigation.navigate('Conversation', { ...pickedFriend, protocol });
+      setPickedFriend(null);
     },
-    [navigation],
+    [navigation, pickedFriend],
   );
 
   const handleGroupPress = useCallback(
@@ -701,11 +704,13 @@ const MessagesScreen: React.FC = () => {
   // Follow live arrivals near the top; otherwise offer a jump without moving history.
   const listRef = useRef<FlashListRef<InboxRow>>(null);
   const liveEntries = useMemo(() => {
-    const visiblePartners = new Set(
+    // DM rows are one thread per person per protocol (`pubkey:protocol`), so
+    // match each message by its thread, not its bare partner pubkey.
+    const visibleThreads = new Set(
       filteredRows.flatMap((row) => (row.kind === 'dm' ? [row.summary.id.toLowerCase()] : [])),
     );
     const dmEntries = deferredDmInbox
-      .filter((message) => visiblePartners.has(message.partnerPubkey.toLowerCase()))
+      .filter((message) => visibleThreads.has(dmMessageThreadId(message)))
       .map((message) => ({ id: `dm:${message.id}`, createdAt: message.createdAt }));
     const rowEntries = filteredRows.map((row) => ({
       id:
@@ -896,6 +901,12 @@ const MessagesScreen: React.FC = () => {
         )}
       </View>
 
+      <DmProtocolPickerSheet
+        visible={pickedFriend !== null}
+        selected={DEFAULT_DM_PROTOCOL}
+        onSelect={selectProtocol}
+        onClose={closeProtocolPicker}
+      />
       <FriendPickerSheet
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}

@@ -17,6 +17,20 @@ import { useNostr } from '../contexts/NostrContext';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
 import { subscribeTyping, publishTypingIndicator } from '../services/nostrTyping';
 
+// Run the focus effect like an effect, and keep the latest callback so a test
+// can simulate blur (run its cleanup) and refocus (run it again).
+let mockFocusCleanup: (() => void) | void;
+let mockFocusCallback: (() => void | (() => void)) | undefined;
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    const React = jest.requireActual('react');
+    mockFocusCallback = callback;
+    React.useEffect(() => {
+      mockFocusCleanup = callback();
+      return () => mockFocusCleanup?.();
+    }, [callback]);
+  },
+}));
 jest.mock('../contexts/NostrContext', () => ({ useNostr: jest.fn() }));
 jest.mock('../contexts/nostrSecretKeyCache', () => ({ getMemoisedSecretKey: jest.fn() }));
 jest.mock('../services/nostrTyping', () => ({
@@ -95,6 +109,22 @@ describe('useTypingIndicator — receive', () => {
     expect(mockedSubscribe).toHaveBeenCalledTimes(1);
     unmount();
     expect(unsub).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the subscription on blur and re-arms it on refocus', () => {
+    setNostr();
+    const unsub = jest.fn();
+    mockedSubscribe.mockReturnValue(unsub);
+    renderHook(() => useTypingIndicator(PEER_PK));
+    expect(mockedSubscribe).toHaveBeenCalledTimes(1);
+
+    act(() => mockFocusCleanup?.()); // screen blurred (another thread pushed on top)
+    expect(unsub).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      mockFocusCleanup = mockFocusCallback?.(); // screen focused again
+    });
+    expect(mockedSubscribe).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   dedupeLocalEchoes,
   DM_CONV_CAP,
 } from './nostrDmCache';
+import { keepPendingLocalRows } from './nostrDmCache';
 import type { ConversationMessage } from './nostrContextTypes';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
@@ -169,5 +170,33 @@ describe('rumorId carry-over — the delivery-store key (#857)', () => {
     const out = reconcileDeliveryStatus(prev, next);
     expect(out[0].id).toBe('real-1001');
     expect(out[0].rumorId).toBe('rumor-1000');
+  });
+});
+
+describe('keepPendingLocalRows', () => {
+  const local = { id: 'local-abc', fromMe: true, text: 'hi', createdAt: 100, wireKind: 4 };
+
+  it('keeps an optimistic row a stale fetch does not contain', () => {
+    const fetched = [{ id: 'e1', fromMe: false, text: 'older', createdAt: 50 }];
+    expect(keepPendingLocalRows([local], fetched).map((m) => m.id)).toEqual(['e1', 'local-abc']);
+  });
+
+  it('collapses the optimistic row into its fetched echo', () => {
+    const echo = { id: 'e2', fromMe: true, text: 'hi', createdAt: 101, wireKind: 4 };
+    expect(keepPendingLocalRows([local], [echo]).map((m) => m.id)).toEqual(['e2']);
+  });
+
+  it('returns the fetched list untouched when nothing is pending', () => {
+    const fetched = [{ id: 'e1', fromMe: false, text: 'x', createdAt: 1 }];
+    expect(keepPendingLocalRows([{ ...fetched[0] }], fetched)).toBe(fetched);
+  });
+});
+
+describe('cross-protocol echo isolation', () => {
+  it('does not let a NIP-17 echo retire a NIP-04 optimistic row with the same text', () => {
+    const nip04Local = { id: 'local-a', fromMe: true, text: 'hello', createdAt: 100, wireKind: 4 };
+    const nip17Echo = { id: 'wrap-b', fromMe: true, text: 'hello', createdAt: 101, wireKind: 14 };
+    const ids = mergeConversationMessages([nip04Local], [nip17Echo], DM_CONV_CAP).map((m) => m.id);
+    expect(ids).toEqual(['local-a', 'wrap-b']);
   });
 });

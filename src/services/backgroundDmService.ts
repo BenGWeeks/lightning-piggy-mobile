@@ -1,3 +1,4 @@
+import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 /**
  * backgroundDmService — Amethyst-style realtime background DM notifications
  * for Android (#279 realtime upgrade).
@@ -360,10 +361,13 @@ async function handleWrap(input: {
   const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
   const notifId = await fireMessageNotification({
     kind: 'dm',
-    threadId: partnership.partnerPubkey,
+    threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
     title: senderName,
     body: preview,
-    data: { conversationPubkey: partnership.partnerPubkey },
+    data: {
+      conversationPubkey: partnership.partnerPubkey,
+      conversationProtocol: protocolForWireKind(rumor.kind),
+    },
   });
   console.warn(`[BgDmWatch] notification result: ${notifId ?? 'suppressed/failed'}`);
 }

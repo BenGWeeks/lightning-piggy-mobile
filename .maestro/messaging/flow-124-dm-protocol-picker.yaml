@@ -1,0 +1,74 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: New conversation protocol picker → NIP-04 send to Little Piggy
+---
+# Start a new conversation with Little Piggy (`d9b33280…`, a Piggy fixture —
+# see .maestro/README.adoc), assert the protocol picker offers NIP-17 /
+# Marmot (disabled, "Coming soon") / NIP-04, pick NIP-04, and send one
+# legacy kind-4 DM. Asserts the conversation header tag reads NIP-04 and the
+# message lands only in its own thread. Requires existing NIP-17 history
+# with Little Piggy so both inbox rows can be asserted.
+#
+# Expects the signed-in user to be Big Piggy (or any account that follows
+# Little Piggy). Only ever messages a Piggy — never a real contact.
+#
+# Run: maestro --device emulator-5554 test .maestro/messaging/flow-124-dm-protocol-picker.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-search'
+- inputText: 'Little Piggy'
+- extendedWaitUntil:
+    visible:
+      id: 'friend-picker-d9b33280'
+    timeout: 10000
+- tapOn:
+    id: 'friend-picker-d9b33280'
+- assertVisible:
+    id: 'dm-protocol-picker-sheet'
+- assertVisible:
+    id: 'dm-protocol-option-nip17'
+- assertVisible:
+    id: 'dm-protocol-option-marmot'
+    enabled: false
+- assertVisible:
+    id: 'dm-protocol-option-nip04'
+- tapOn:
+    id: 'dm-protocol-option-nip04'
+- assertVisible:
+    id: 'conversation-protocol-tag'
+- assertVisible:
+    text: 'NIP-04'
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'NIP-04 protocol test'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: 'NIP-04 protocol test'
+    timeout: 15000
+- tapOn:
+    id: 'conversation-protocol-tag'
+- tapOn:
+    id: 'dm-protocol-option-nip17'
+- extendedWaitUntil:
+    visible:
+      text: 'NIP-17'
+    timeout: 10000
+- assertNotVisible:
+    text: 'NIP-04 protocol test'
+- tapOn:
+    id: 'conversation-back'
+- assertVisible:
+    id: 'conversation-row-d9b33280.*:nip04'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-d9b33280.*:nip17'
+    timeout: 15000

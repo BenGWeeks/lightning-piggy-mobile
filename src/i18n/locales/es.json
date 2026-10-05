@@ -285,6 +285,7 @@
     "seeAll": "Ver todo"
   },
   "conversationComposer": {
+    "attachmentsNip17Only": "Los archivos adjuntos y las notas de voz están disponibles en el chat NIP-17. Cambia el protocolo desde el encabezado.",
     "messagePlaceholder": "Mensaje",
     "attach": "Adjuntar",
     "messageInput": "Campo de mensaje",
@@ -1676,11 +1677,11 @@
     "friendPickerSubtitle": "Recibirán un mensaje privado cifrado de Nostr con un botón de Pagar.",
     "receiveOnchainBoltz": "Recibir on-chain (vía swap de Boltz) ₿",
     "receiveOnchainBoltzA11y": "Recibir on-chain vía swap de Boltz",
-    "paymentQr": "Código QR de pago",
     "scanToClaim": "Escanear para reclamar",
     "cancelScan": "Cancelar escaneo",
     "invalidClaimCode": "Escanea un código de retiro LNURL",
-    "claimUnavailable": "Reclamar fondos no está disponible. Inténtalo de nuevo."
+    "claimUnavailable": "Reclamar fondos no está disponible. Inténtalo de nuevo.",
+    "paymentQr": "Código QR de pago"
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Nombre obligatorio",
@@ -2225,6 +2226,23 @@
       "optionAccessibility": "Opción de envío {{title}}",
       "priceFallback": "{{amount}} {{currency}}",
       "addressInChat": "Tu dirección de entrega no se envía con el pedido: {{seller}} te la pedirá en el chat."
+    }
+  },
+  "dmProtocol": {
+    "label": "Protocolo: {{protocol}}",
+    "title": "Protocolo de mensajería",
+    "privateMessages": "Mensajes privados",
+    "nip17": {
+      "badge": "Recomendado",
+      "description": "Oculta a los relés con quién hablas; funciona con la mayoría de las aplicaciones modernas de Nostr."
+    },
+    "marmot": {
+      "badge": "Próximamente",
+      "description": "Cifrado de extremo a extremo con MLS, utilizado por White Noise."
+    },
+    "nip04": {
+      "badge": "Antiguo",
+      "description": "Formato antiguo; el contenido está cifrado, pero los relés pueden ver a quién envías mensajes. Para aplicaciones que aún no admiten NIP-17."
     }
   },
   "accountScreenLayout": {

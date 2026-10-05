@@ -1,4 +1,6 @@
 import { useCallback } from 'react';
+import { sendNip04Message } from '../services/nostrNip04Send';
+import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
@@ -26,7 +28,9 @@ export interface SendResult {
   delivery?: DeliveryStatus;
 }
 
-// Early/late hooks for the optimistic-send flow (#857). `onRumorReady` fires
+// Per-send options. `protocol` picks the wire format for a text send (defaults
+// to NIP-17; NIP-04 is legacy; Marmot is rejected until it ships). The hooks
+// drive the optimistic-send flow (#857): `onRumorReady` fires
 // synchronously once the stable rumor eventId is known (before publishing), so
 // the caller can paint the pending bubble keyed by it. It also carries the
 // `relays` the send is going out to, so the pending/failed status can seed its
@@ -34,6 +38,7 @@ export interface SendResult {
 // pending or hung send still lists its relays). `onDeliveryFinalized` fires
 // later with the COMPLETE per-relay breakdown after all relays settle.
 export interface SendHooks {
+  protocol?: DmProtocol;
   onRumorReady?: (meta: { eventId: string; kind: number; relays: string[] }) => void;
   onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
 }
@@ -79,6 +84,10 @@ function toTextSendResult(result: DmSendResult): SendResult {
 export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMessageSendParams) {
   const sendDirectMessage = useCallback(
     async (recipientPubkey: string, plaintext: string, hooks?: SendHooks): Promise<SendResult> => {
+      const protocol = hooks?.protocol ?? DEFAULT_DM_PROTOCOL;
+      if (protocol === 'marmot') {
+        return { success: false, error: 'Marmot messaging is not available yet' };
+      }
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -93,6 +102,18 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
+        if (protocol === 'nip04') {
+          return toTextSendResult(
+            await sendNip04Message({
+              senderPubkey: pubkey,
+              recipientPubkey: normalizedRecipientPubkey,
+              plaintext,
+              signerType,
+              relays: targetRelays,
+              hooks,
+            }),
+          );
+        }
         const rumor = nostrService.createDirectMessageRumor({
           senderPubkey: pubkey,
           recipientPubkey: normalizedRecipientPubkey,

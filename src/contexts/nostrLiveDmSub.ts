@@ -1,3 +1,4 @@
+import { dmThreadId, protocolForWireKind } from '../utils/dmProtocol';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
@@ -197,10 +198,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (item.notify && claimWrapNotification(item.entry.id)) {
       void fireMessageNotification({
         kind: 'dm',
-        threadId: item.partnerPubkey,
+        threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
         title: item.notify.title,
         body: item.notify.body,
-        data: { conversationPubkey: item.partnerPubkey },
+        data: {
+          conversationPubkey: item.partnerPubkey,
+          conversationProtocol: protocolForWireKind(item.entry.wireKind),
+        },
       });
     }
   };
@@ -432,10 +436,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (!fromMe && isFreshArrival(ev.created_at)) {
         void fireMessageNotification({
           kind: 'dm',
-          threadId: partnerPubkey,
+          threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
           title: 'New message',
           body: plaintext,
-          data: { conversationPubkey: partnerPubkey },
+          data: {
+            conversationPubkey: partnerPubkey,
+            conversationProtocol: protocolForWireKind(ev.kind),
+          },
         });
       }
       if (__DEV__)
@@ -526,10 +533,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
           void fireMessageNotification({
             kind: 'dm',
-            threadId: partnerPubkey,
+            threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
             title: 'Marketplace update',
             body: preview,
-            data: { conversationPubkey: partnerPubkey },
+            data: {
+              conversationPubkey: partnerPubkey,
+              conversationProtocol: protocolForWireKind(ev.kind),
+            },
           });
         }
       });

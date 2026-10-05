@@ -1,3 +1,4 @@
+import type { DmProtocol } from '../utils/dmProtocol';
 import { renderHook, act } from '@testing-library/react-native';
 import { useConversationComposerActions } from './useConversationComposerActions';
 import { getDmDeliveryStatus, __resetDmDeliveryStore } from '../utils/dmDeliveryStore';
@@ -33,11 +34,12 @@ const PUBKEY = 'a'.repeat(64);
 // pending/failed status can seed its relay breakdown for the info sheet.
 const RELAYS = ['wss://a', 'wss://b'];
 
-function setup() {
+function setup(protocol?: DmProtocol) {
   const setMessages = jest.fn();
   const setDraft = jest.fn();
   const { result } = renderHook(() =>
     useConversationComposerActions({
+      protocol,
       pubkey: PUBKEY,
       name: 'Big Piggy',
       draft: 'hi',
@@ -58,6 +60,50 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     mockSendDirectMessage.mockReset();
     mockAppendLocalDmMessage.mockClear();
     mockAlert.mockReset();
+  });
+
+  it('uses NIP-04 for typed messages and NIP-17 for GIF attachments', async () => {
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, _text: string, hooks?: SendHooks) => {
+        hooks?.onRumorReady?.({
+          eventId: EVENT_ID,
+          kind: hooks.protocol === 'nip04' ? 4 : 14,
+          relays: RELAYS,
+        });
+        return { success: true };
+      },
+    );
+    const { result } = setup('nip04');
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(mockSendDirectMessage).toHaveBeenLastCalledWith(
+      PUBKEY,
+      'hi',
+      expect.objectContaining({ protocol: 'nip04' }),
+    );
+    expect(mockAppendLocalDmMessage).toHaveBeenLastCalledWith(
+      PUBKEY,
+      expect.objectContaining({ wireKind: 4 }),
+    );
+    await act(async () => {
+      await result.current.handleSendGif({
+        id: 'gif',
+        url: 'https://example.com/a.gif',
+        previewUrl: '',
+        previewStillUrl: '',
+        title: '',
+      });
+    });
+    expect(mockSendDirectMessage).toHaveBeenLastCalledWith(
+      PUBKEY,
+      expect.any(String),
+      expect.objectContaining({ protocol: 'nip17' }),
+    );
+    expect(mockAppendLocalDmMessage).toHaveBeenLastCalledWith(
+      PUBKEY,
+      expect.objectContaining({ wireKind: 14 }),
+    );
   });
 
   it('paints a pending bubble immediately, then settles it to delivered', async () => {

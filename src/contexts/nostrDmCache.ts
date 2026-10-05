@@ -4,6 +4,7 @@ import { utf8ByteSize } from '../utils/byteSize';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { LOCAL_DM_ID_PREFIX, LOCAL_DM_ECHO_WINDOW_SECS } from '../services/dmDb';
 import type { ConversationMessage } from './nostrContextTypes';
+import { protocolForWireKind } from '../utils/dmProtocol';
 
 // Re-export the echo-window constant from its single source of truth (dmDb —
 // the store-level echo retire and this in-memory merge must agree, #850).
@@ -274,6 +275,9 @@ export function mergeConversationMessages(
         if (!k.startsWith('local-')) continue;
         if (prev.fromMe !== m.fromMe) continue;
         if (prev.text !== m.text) continue;
+        // Threads are split per protocol: a NIP-17 echo must never retire a
+        // NIP-04 optimistic row with the same text (or vice versa).
+        if (protocolForWireKind(prev.wireKind) !== protocolForWireKind(m.wireKind)) continue;
         const delta = Math.abs(prev.createdAt - m.createdAt);
         if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
         if (delta < bestDelta) {
@@ -319,6 +323,26 @@ export function mergeConversationMessages(
     result = result.slice(drop);
   }
   return result;
+}
+
+/**
+ * Carry still-pending optimistic local- rows from the in-memory thread onto a
+ * freshly fetched list. A thread fetch that read the store BEFORE the
+ * optimistic append committed would otherwise replace the list without the
+ * just-sent bubble. NIP-17 hides this race (the self-wrap echo triggers a
+ * reload) but a NIP-04 send has no self echo on the live sub, so the first
+ * message in a new conversation vanished until the thread was reopened.
+ * Rows whose echo IS in `fetched` collapse via `dedupeLocalEchoes`.
+ */
+export function keepPendingLocalRows(
+  current: ConversationMessage[],
+  fetched: ConversationMessage[],
+): ConversationMessage[] {
+  const fetchedIds = new Set(fetched.map((m) => m.id));
+  const pending = current.filter(
+    (m) => m.id.startsWith(LOCAL_DM_ID_PREFIX) && !fetchedIds.has(m.id),
+  );
+  return pending.length === 0 ? fetched : dedupeLocalEchoes([...fetched, ...pending]);
 }
 
 /**

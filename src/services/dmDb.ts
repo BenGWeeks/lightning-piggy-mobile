@@ -139,8 +139,10 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
       `SELECT event_id, delivery_status, rumor_id, created_at FROM dm_messages
         WHERE owner = ? AND conversation = ? AND from_me = 1 AND content = ?
           AND event_id LIKE '${LOCAL_DM_ID_PREFIX}%'
+          AND (wire_kind = 4) = (? = 4)
           AND created_at BETWEEN ? - ${LOCAL_DM_ECHO_WINDOW_SECS} AND ? + ${LOCAL_DM_ECHO_WINDOW_SECS};`,
-      [m.owner, m.conversation, m.content, m.createdAt, m.createdAt],
+      // Same protocol only (wire_kind 4 = NIP-04): threads are split per protocol.
+      [m.owner, m.conversation, m.content, m.wireKind, m.createdAt, m.createdAt],
     );
     const candidates = res.rows ?? [];
     if (candidates.length > 0) {
@@ -277,12 +279,16 @@ export async function updateDmDeliveryStatuses(
 export async function getConversationMessages(
   owner: string,
   conversation: string,
-  opts: { limit?: number; beforeCreatedAt?: number } = {},
+  opts: { limit?: number; beforeCreatedAt?: number; protocol?: 'nip04' | 'nip17' } = {},
 ): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
   const limit = opts.limit ?? 50;
   const params: (string | number)[] = [owner, conversation];
   let sql = `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ?`;
+  // Per-protocol thread (#1118): filter BEFORE the LIMIT so one protocol's
+  // newer history can't use up the other thread's whole slice.
+  if (opts.protocol === 'nip04') sql += ` AND wire_kind = 4`;
+  else if (opts.protocol === 'nip17') sql += ` AND wire_kind <> 4`;
   if (opts.beforeCreatedAt != null) {
     sql += ` AND created_at < ?`;
     params.push(opts.beforeCreatedAt);
@@ -332,16 +338,19 @@ export async function getOutgoingOrderRows(
  * The latest message in each of this owner's conversations, newest-first —
  * the inbox list. This is the read that replaces the whole-inbox blob parse:
  * the DB does the per-conversation MAX in one indexed query instead of JS
- * walking everything.
+ * walking everything. A conversation is (partner, protocol): NIP-04 rows
+ * (wire_kind 4) and NIP-17 rows each get their own latest row, so a partner
+ * with both shows two inbox threads (see `protocolForWireKind`).
  */
 export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
   const res = await db.execute(
     `SELECT m.* FROM dm_messages m
        JOIN (
-         SELECT conversation, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? GROUP BY conversation
-       ) g ON m.conversation = g.conversation AND m.created_at = g.mx
+         SELECT conversation, (wire_kind = 4) AS is_nip04, MAX(created_at) AS mx
+         FROM dm_messages WHERE owner = ? GROUP BY conversation, (wire_kind = 4)
+       ) g ON m.conversation = g.conversation AND (m.wire_kind = 4) = g.is_nip04
+          AND m.created_at = g.mx
      WHERE m.owner = ?
      ORDER BY m.created_at DESC;`,
     [owner, owner],

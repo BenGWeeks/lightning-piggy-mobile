@@ -129,7 +129,9 @@ describe('dmDb', () => {
       expect(selectSql).toContain('from_me = 1');
       // Sargable window (Copilot #990): BETWEEN, not ABS(created_at - ?).
       expect(selectSql).toContain('created_at BETWEEN ? - 30 AND ? + 30');
-      expect(selectParams).toEqual([OWNER, 'convA', 'hi', 100, 100]);
+      // Same-protocol only: a NIP-17 echo never retires a NIP-04 local- row.
+      expect(selectSql).toContain('(wire_kind = 4) = (? = 4)');
+      expect(selectParams).toEqual([OWNER, 'convA', 'hi', 14, 100, 100]);
       const [deleteSql, deleteParams] = mockExecute.mock.calls[1];
       expect(deleteSql).toContain('DELETE FROM dm_messages');
       expect(deleteParams).toEqual([OWNER, 'local-42']);
@@ -231,6 +233,16 @@ describe('dmDb', () => {
       expect(params).toEqual([OWNER, 'convA', 50]);
     });
 
+    it('filters by protocol before the LIMIT so threads get separate windows (#1118)', async () => {
+      await getConversationMessages(OWNER, 'convA', { limit: 500, protocol: 'nip04' });
+      let [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toMatch(/AND wire_kind = 4 ORDER BY created_at DESC LIMIT \?/);
+      expect(params).toEqual([OWNER, 'convA', 500]);
+      await getConversationMessages(OWNER, 'convA', { limit: 500, protocol: 'nip17' });
+      [sql] = mockExecute.mock.calls[1];
+      expect(sql).toMatch(/AND wire_kind <> 4 ORDER BY created_at DESC LIMIT \?/);
+    });
+
     it('pages backwards with beforeCreatedAt', async () => {
       await getConversationMessages(OWNER, 'convA', { limit: 20, beforeCreatedAt: 150 });
       const [sql, params] = mockExecute.mock.calls[0];
@@ -315,7 +327,8 @@ describe('dmDb', () => {
       expect(out[0].conversation).toBe('convB');
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('MAX(created_at)');
-      expect(sql).toContain('GROUP BY conversation');
+      // One latest row per (partner, protocol): NIP-04 and NIP-17 are separate threads.
+      expect(sql).toContain('GROUP BY conversation, (wire_kind = 4)');
       expect(sql).toContain('WHERE m.owner = ?');
       expect(params).toEqual([OWNER, OWNER]);
     });

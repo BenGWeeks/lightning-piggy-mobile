@@ -717,6 +717,9 @@ Client-side group chat layered on top of the existing NIP-17 DM pipeline. No rel
 
 NIP-29 (relay-enforced groups) and NIP-104 (MLS) were both considered. NIP-29 was rejected because it requires opt-in relay support for every member's read relay; NIP-104/MLS deferred until a maintained RN-friendly MLS library lands.
 
+1:1 conversations are split by partner pubkey + protocol, with separate inbox rows and timelines. Zaps live in the NIP-17 thread. Dual-published NIP-04/NIP-17 copies appear in both threads. Marmot will have a separate thread per MLS group. The header protocol picker navigates to the selected thread: NIP-17 is the default, NIP-04 is the legacy option, and Marmot is reserved and disabled until `marmot-ts` 1.0.0 implementing the adopted spec is published (https://github.com/marmot-protocol/marmot-ts/issues/79[marmot-protocol/marmot-ts#79]). The NIP methods are expected to be retired once Marmot ships.
+
+
 === Send path
 
 `sendGroupMessage()` in `NostrContext`:

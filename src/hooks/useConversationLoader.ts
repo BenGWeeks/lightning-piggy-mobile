@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
-import { reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -16,12 +18,16 @@ import { createAbortReplacer } from '../utils/abortReplace';
 
 export interface UseConversationLoaderParams {
   pubkey: string;
+  protocol: DmProtocol;
   isLoggedIn: boolean;
   fetchConversation: (
     otherPubkey: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; protocol?: 'nip04' | 'nip17' },
   ) => Promise<ConversationMessage[]>;
-  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  loadInitialConversation: (
+    otherPubkey: string,
+    protocol?: 'nip04' | 'nip17',
+  ) => Promise<ConversationMessage[]>;
   persistDeliveryStatuses: (
     otherPubkey: string,
     statusById: Record<string, DeliveryStatus>,
@@ -38,6 +44,7 @@ export interface UseConversationLoaderResult {
 
 export function useConversationLoader({
   pubkey,
+  protocol,
   isLoggedIn,
   fetchConversation,
   loadInitialConversation,
@@ -99,16 +106,27 @@ export function useConversationLoader({
       // the preview. The relay fetch below is a background top-up, not a
       // precondition for showing anything. Only show the spinner if BOTH are
       // empty (a true cold open with nothing ingested yet).
-      const initial = await loadInitialConversation(pubkey);
+      // Per-protocol window (#1118): the store + fetch read only this thread,
+      // so another protocol's newer history can't use up its slice.
+      const storeProtocol = protocol === 'marmot' ? undefined : protocol;
+      const initial = filterMessagesByProtocol(
+        await loadInitialConversation(pubkey, storeProtocol),
+        protocol,
+      );
       if (signal.aborted || !isMountedRef.current) return;
       if (initial.length > 0) {
-        setMessages(initial);
+        setMessages((prev) =>
+          keepPendingLocalRows(filterMessagesByProtocol(prev, protocol), initial),
+        );
         setLoading(false);
       } else if (showSpinner) {
         setLoading(true);
       }
       try {
-        const conv = await fetchConversation(pubkey, { signal });
+        const conv = filterMessagesByProtocol(
+          await fetchConversation(pubkey, { signal, protocol: storeProtocol }),
+          protocol,
+        );
         // A superseding load (or unmount) aborted this fetch — drop the result
         // so we don't setState on a cancelled / stale pass.
         if (signal.aborted) return;
@@ -124,7 +142,11 @@ export function useConversationLoader({
           // against messagesRef (not inside the setMessages updater) so the
           // AsyncStorage write is a plain side-effect — keeps the updater pure
           // and StrictMode-safe (Copilot #858).
-          const reconciled = reconcileDeliveryStatus(messagesRef.current, conv);
+          const previous = filterMessagesByProtocol(messagesRef.current, protocol);
+          const reconciled = keepPendingLocalRows(
+            previous,
+            reconcileDeliveryStatus(previous, conv),
+          );
           // Durably write the reconciled ticks back to the conv cache, keyed by
           // the (now real-id) row id, so the tick survives a cold restart —
           // fetchConversation persisted the echo rows WITHOUT delivery when it
@@ -146,27 +168,46 @@ export function useConversationLoader({
         }
       }
     },
-    [isLoggedIn, fetchConversation, loadInitialConversation, persistDeliveryStatuses, pubkey],
+    [
+      isLoggedIn,
+      fetchConversation,
+      loadInitialConversation,
+      persistDeliveryStatuses,
+      pubkey,
+      protocol,
+    ],
   );
-
-  useEffect(() => {
-    load(true);
-  }, [load]);
 
   // Live updates: NostrContext fires `subscribeDmMessages` after a kind-1059
   // wrap arrives via the long-lived relay sub and decrypts to a 1:1 rumor for
   // this thread's peer (#349). Re-fetching the conversation is cheap because the
   // new wrap is now in the persistent NIP-17 cache, so fetchConversation
   // short-circuits the relay round-trip and the thread re-renders within a tick.
-  useEffect(() => {
-    if (!pubkey) return;
-    const target = pubkey.toLowerCase();
-    const unsubscribe = subscribeDmMessages((partnerPubkey) => {
-      if (partnerPubkey !== target) return;
-      load(false);
-    });
-    return unsubscribe;
-  }, [pubkey, load]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!pubkey) return;
+      // Catch up with messages received while this screen was blurred.
+      void load(true);
+      const target = pubkey.toLowerCase();
+      let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+      const unsubscribe = subscribeDmMessages((partnerPubkey) => {
+        if (partnerPubkey !== target) return;
+        // Coalesce relay bursts into one read instead of one load per event.
+        if (refreshTimer) return;
+        refreshTimer = setTimeout(() => {
+          refreshTimer = undefined;
+          void load(false);
+        }, 150);
+      });
+      return () => {
+        clearTimeout(refreshTimer);
+        unsubscribe();
+        // A blurred thread (e.g. kept underneath another protocol's thread)
+        // must not keep decrypting or prompting a signer; refocus reloads.
+        fetchAbortRef.current?.abort();
+      };
+    }, [pubkey, load]),
+  );
 
   // Generation guard so overlapping pull-to-refreshes don't drop the spinner
   // early (Copilot #869): `load` is single-flight and aborts the previous
@@ -185,5 +226,10 @@ export function useConversationLoader({
     }
   }, [load]);
 
-  return { messages, setMessages, loading, refreshing, handleRefresh };
+  // Route changes can reuse a mounted screen: never paint the old protocol while loading.
+  const threadMessages = useMemo(
+    () => filterMessagesByProtocol(messages, protocol),
+    [messages, protocol],
+  );
+  return { messages: threadMessages, setMessages, loading, refreshing, handleRefresh };
 }

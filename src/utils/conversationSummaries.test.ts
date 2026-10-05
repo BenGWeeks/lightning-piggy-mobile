@@ -1,4 +1,4 @@
-import { buildDmSummaries, type DmInboxEntry } from './conversationSummaries';
+import { mergeSummaries, buildDmSummaries, type DmInboxEntry } from './conversationSummaries';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 
 const FOLLOWED = 'a'.repeat(64);
@@ -124,5 +124,83 @@ describe('buildDmSummaries non-followed profile resolution (#664)', () => {
       new Map([[FOLLOWED.toLowerCase(), evilProfile]]),
     );
     expect(result[0].name).toBe('Alice');
+  });
+});
+
+describe('conversation protocol metadata', () => {
+  it.each([false, true])(
+    'keeps dual-published copies in separate rows (reversed=%s)',
+    (reverse) => {
+      const entries = [
+        entry(FOLLOWED, { wireKind: 14, createdAt: 100 }),
+        entry(FOLLOWED, { wireKind: 4, createdAt: 110 }),
+        entry(FOLLOWED, { wireKind: 15, createdAt: 105, text: 'file' }),
+        entry(FOLLOWED, { wireKind: 4, createdAt: 90 }),
+      ];
+      const rows = buildDmSummaries(reverse ? entries.reverse() : entries, []);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        id: `${FOLLOWED}:nip04`,
+        pubkey: FOLLOWED,
+        protocol: 'nip04',
+        lastActivityAt: 110,
+      });
+      expect(rows[1]).toMatchObject({
+        id: `${FOLLOWED}:nip17`,
+        pubkey: FOLLOWED,
+        protocol: 'nip17',
+        lastActivityAt: 105,
+        lastComment: 'file',
+      });
+    },
+  );
+  it('treats historical inbox entries without a wire kind as NIP-17', () => {
+    expect(buildDmSummaries([entry(FOLLOWED, { wireKind: undefined })], [])[0]).toMatchObject({
+      id: `${FOLLOWED}:nip17`,
+      protocol: 'nip17',
+    });
+  });
+  it.each([5, 100, 1000])(
+    'merges zaps only into NIP-17 with existing preview rules at %i',
+    (createdAt) => {
+      const dm = buildDmSummaries(
+        [
+          entry(FOLLOWED, { wireKind: 4, createdAt: 20 }),
+          entry(FOLLOWED, { wireKind: 14, createdAt: 10 }),
+        ],
+        [],
+      );
+      const zap = {
+        ...dm[0],
+        id: FOLLOWED,
+        protocol: undefined,
+        lastActivityAt: createdAt,
+        lastComment: 'zap',
+        lastAmountSats: 21,
+      };
+      const rows = mergeSummaries([zap], dm);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.protocol === 'nip04')).toBe(dm[0]);
+      expect(rows.find((r) => r.protocol === 'nip17')).toMatchObject({
+        id: `${FOLLOWED}:nip17`,
+        pubkey: FOLLOWED,
+        lastActivityAt: Math.max(createdAt, 10),
+        lastComment: createdAt <= 310 ? 'hi' : 'zap',
+        lastAmountSats: createdAt <= 310 ? 0 : 21,
+      });
+      expect(mergeSummaries([zap], [])).toEqual([zap]);
+    },
+  );
+  it('keeps a zap standalone alongside only NIP-04 and preserves anonymous rows', () => {
+    const dm = buildDmSummaries([entry(FOLLOWED, { wireKind: 4, createdAt: 10 })], []);
+    const zap = { ...dm[0], id: FOLLOWED, protocol: undefined, lastActivityAt: 100 };
+    const anonymous = {
+      ...zap,
+      id: 'anon:wallet:hash',
+      pubkey: null,
+      anonymous: true,
+      lastActivityAt: 200,
+    };
+    expect(mergeSummaries([zap, anonymous], dm)).toEqual([anonymous, zap, dm[0]]);
   });
 });

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
 import { publishTypingIndicator, subscribeTyping } from '../services/nostrTyping';
@@ -28,28 +29,32 @@ export function useTypingIndicator(peerPubkey: string | null): {
   const lastSentRef = useRef(0);
   const peerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Receive: subscribe to the peer's typing pings to me.
-  useEffect(() => {
-    if (!pubkey || !peerPubkey) return;
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    if (readRelays.length === 0) return;
-    const unsub = subscribeTyping({
-      myPubkey: pubkey,
-      peerPubkey,
-      relays: readRelays,
-      onTyping: () => {
-        setIsPeerTyping(true);
+  // Receive: subscribe to the peer's typing pings to me. Focus-scoped so a
+  // conversation screen kept underneath another (one screen per protocol
+  // thread) doesn't hold a duplicate relay subscription while hidden.
+  useFocusEffect(
+    useCallback(() => {
+      if (!pubkey || !peerPubkey) return;
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      if (readRelays.length === 0) return;
+      const unsub = subscribeTyping({
+        myPubkey: pubkey,
+        peerPubkey,
+        relays: readRelays,
+        onTyping: () => {
+          setIsPeerTyping(true);
+          if (peerTimerRef.current) clearTimeout(peerTimerRef.current);
+          peerTimerRef.current = setTimeout(() => setIsPeerTyping(false), PEER_TYPING_TIMEOUT_MS);
+        },
+      });
+      return () => {
+        unsub();
         if (peerTimerRef.current) clearTimeout(peerTimerRef.current);
-        peerTimerRef.current = setTimeout(() => setIsPeerTyping(false), PEER_TYPING_TIMEOUT_MS);
-      },
-    });
-    return () => {
-      unsub();
-      if (peerTimerRef.current) clearTimeout(peerTimerRef.current);
-      setIsPeerTyping(false);
-    };
-    // `relays` identity changes when the user edits their relay list; re-arm then.
-  }, [pubkey, peerPubkey, relays]);
+        setIsPeerTyping(false);
+      };
+      // `relays` identity changes when the user edits their relay list; re-arm then.
+    }, [pubkey, peerPubkey, relays]),
+  );
 
   const notifyTyping = useCallback(() => {
     if (signerType !== 'nsec' || !pubkey || !peerPubkey) return;

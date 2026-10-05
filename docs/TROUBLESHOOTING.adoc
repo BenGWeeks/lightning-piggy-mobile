@@ -790,3 +790,20 @@ without dismissing this portal. Backdrop nodes cover the entire screen, so
 tapping their centre can hit a wallet option instead of the uncovered backdrop.
 Run the secret-mode flow alone for a
 nonfinancial check; the full curated runner imports wallets and moves funds.
+
+=== Maestro: Big Piggy shows no friends or conversations after a fresh sign-in
+
+As of 2026-10-05 the Piggy fixtures' kind-0 / kind-3 / kind-10002 events
+survive only on `wss://purplepag.es`; the app's `DEFAULT_RELAYS` no longer hold
+them, and Big Piggy's published relay list points at `ws://localhost:10547`. On
+a freshly signed-in emulator `fetchRelayList` times out, contacts load empty,
+and any flow that picks Little Piggy from the friend picker fails with
+"You don't follow anyone on Nostr yet".
+
+Workaround used for the DM-protocol PR: run a throwaway in-memory relay on port
+10547 seeded with the Piggies' events copied from `purplepag.es`, forward it
+with `adb -s emulator-5554 reverse tcp:10547 tcp:10547`, and temporarily put
+`ws://localhost:10547` first in `DEFAULT_RELAYS` (never commit that line). The
+lasting fix is re-broadcasting the Piggies' signed fixture events to the
+default relays and republishing Big Piggy's relay list without the localhost
+entry.

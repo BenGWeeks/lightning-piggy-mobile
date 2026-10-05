@@ -23,6 +23,7 @@ import {
 } from './nostrDmCache';
 import { mapStoredRowsToMessages } from './conversationReadThrough';
 import { ingestInboxWraps } from './dmWrapIngest';
+import { filterMessagesByProtocol } from '../utils/dmProtocol';
 import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 import type { ConversationMessage } from './nostrContextTypes';
 
@@ -49,6 +50,10 @@ export interface FetchConversationParams {
   // a back-press mid-fetch stops chewing the JS thread, and re-entering can
   // abort-and-replace an in-flight fetch instead of stacking a second loop.
   signal?: AbortSignal;
+  /** Read and return only this protocol's thread (#1118), so the
+   * DM_CONV_CAP window applies per thread rather than per peer. Decryption,
+   * storage and the since-cursor are unaffected. Omit for all protocols. */
+  protocol?: 'nip04' | 'nip17';
 }
 
 export async function fetchConversationFor(
@@ -62,6 +67,7 @@ export async function fetchConversationFor(
     decryptNip04ViaSigner,
     otherPubkey,
     signal,
+    protocol,
   } = params;
   if (!pubkey || !isLoggedIn) return [];
   if (signal?.aborted) return [];
@@ -96,7 +102,10 @@ export async function fetchConversationFor(
   let storedMessages: ConversationMessage[] = [];
   let storeHasWraps = false;
   try {
-    const threadRows = await getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
+    const threadRows = await getConversationMessages(pubkey, normalized, {
+      limit: DM_CONV_CAP,
+      protocol,
+    });
     for (const r of threadRows) {
       if (r.wireKind === 4) nip04StoreHits++;
       else nip17StoreHits++;
@@ -323,7 +332,11 @@ export async function fetchConversationFor(
   // via `mergeConversationMessages` Map semantics (and retires any optimistic
   // local- row its relay echo just replaced — the store-side upsert did the
   // same for the persisted rows).
-  const merged = mergeConversationMessages(storedMessages, decrypted, DM_CONV_CAP);
+  const merged = mergeConversationMessages(
+    storedMessages,
+    protocol ? filterMessagesByProtocol(decrypted, protocol) : decrypted,
+    DM_CONV_CAP,
+  );
 
   // Aborted mid-fetch (Copilot #869): the kind-4 decrypt loop bails between
   // batches, so `decrypted` may omit events the abort skipped — but

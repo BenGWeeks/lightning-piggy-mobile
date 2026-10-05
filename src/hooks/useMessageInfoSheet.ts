@@ -53,14 +53,15 @@ export function useMessageInfoSheet(resendText: (text: string) => Promise<boolea
     if (text) void resendText(text);
   }, [messageInfo, resendText]);
 
-  // Re-publish only for a SENT text message (kind 14) with a resendable
-  // payload. Received messages never get it; non-text bubbles pass an empty
-  // string; kind-15 file messages would be re-sent as plain kind-14 text and
-  // drop the file tags, so hide it there too (Copilot #858). #857 covers k15.
+  // Re-publish only for a SENT text message (kind 14 NIP-17, or kind 4 NIP-04 —
+  // each thread resends over its own protocol) with a resendable payload.
+  // Received messages never get it; non-text bubbles pass an empty string;
+  // kind-15 file messages would be re-sent as plain kind-14 text and drop the
+  // file tags, so hide it there too (Copilot #858). #857 covers k15.
   const canResend =
     messageInfo?.info.direction === 'sent' &&
     !!messageInfo.resendText &&
-    messageInfo.info.wireKind === 14;
+    (messageInfo.info.wireKind === 14 || messageInfo.info.wireKind === 4);
 
   return {
     info: messageInfo?.info ?? null,

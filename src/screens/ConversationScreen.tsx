@@ -1,6 +1,8 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useConversationProtocol } from '../hooks/useConversationProtocol';
+import ConversationProtocolControl from '../components/ConversationProtocolControl';
 import {
   View,
   Text,
@@ -62,17 +64,11 @@ import { isSupportedImageUrl } from '../utils/imageUrl';
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import { useConversationComposerActions } from '../hooks/useConversationComposerActions';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
-import { useResolvedDmDeliveries } from '../hooks/useDmDeliveryStatuses';
+import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
-import {
-  type Item,
-  type TimedItem,
-  buildZapItems,
-  buildConversationItems,
-} from '../utils/conversationItems';
+import type { Item } from '../utils/conversationItems';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useConversationLoader } from '../hooks/useConversationLoader';
-import { useOutgoingOrderHistory } from '../hooks/useOutgoingOrderHistory';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -103,6 +99,7 @@ const ConversationScreen: React.FC = () => {
     marginBottom: -keyboard.height.value,
   }));
   const { pubkey, name, picture, lightningAddress } = route.params;
+  const protocol = useConversationProtocol(route.params.protocol);
 
   const {
     isLoggedIn,
@@ -134,6 +131,7 @@ const ConversationScreen: React.FC = () => {
   // Thread data lifecycle — read-through paint, background relay top-up,
   // abort-on-unmount, single-flight refresh (#868) — lives in this hook.
   const { messages, setMessages, loading, refreshing, handleRefresh } = useConversationLoader({
+    protocol,
     pubkey,
     isLoggedIn,
     fetchConversation,
@@ -208,21 +206,7 @@ const ConversationScreen: React.FC = () => {
   const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
   const listRef = useRef<FlatList<Item>>(null);
 
-  const zapItems = useMemo<TimedItem[]>(() => buildZapItems(wallets, pubkey), [wallets, pubkey]);
-
-  // Resolve each sent bubble's delivery tick from the eventId-keyed store (#857)
-  // and re-render as statuses settle. Keyed by the stable rumor eventId, so the
-  // local- → echo swap + the 10s re-fetch can't strip the tick. The hook
-  // subscribes to the store, so `resolvedMessages` is a fresh array on every
-  // settle — which is what flows the updated tick into `items` below.
-  const resolvedMessages = useResolvedDmDeliveries(messages);
-  // Approved totals for payment requests whose outgoing order is older than
-  // the loaded slice — one targeted store read, so an old order stays payable.
-  const olderOrderAmounts = useOutgoingOrderHistory(myPubkey, pubkey, resolvedMessages);
-  const items = useMemo<Item[]>(
-    () => buildConversationItems(resolvedMessages, zapItems, olderOrderAmounts),
-    [resolvedMessages, zapItems, olderOrderAmounts],
-  );
+  const items = useConversationTimeline(messages, wallets, myPubkey, pubkey, protocol);
 
   // Poll aggregation + send/vote for this 1:1 thread (#203). Extracted to a
   // hook so the screen stays under the #703 size cap — see useConversationPolls.
@@ -231,6 +215,7 @@ const ConversationScreen: React.FC = () => {
     myPubkey,
     pubkey,
     sendDirectMessage,
+    protocol,
     sendDirectRumor,
     appendLocalDmMessage,
     setMessages,
@@ -305,6 +290,7 @@ const ConversationScreen: React.FC = () => {
     handleSendVoiceNote,
     shareNwcWallet,
   } = useConversationComposerActions({
+    protocol,
     pubkey,
     name,
     draft,
@@ -597,6 +583,7 @@ const ConversationScreen: React.FC = () => {
             {name}
           </Text>
         </TouchableOpacity>
+        <ConversationProtocolControl protocol={protocol} />
       </View>
 
       {/* KeyboardStickyView (below) floats the composer above the IME
@@ -711,6 +698,7 @@ const ConversationScreen: React.FC = () => {
           </Text>
         )}
         <ConversationComposer
+          attachmentsEnabled={protocol === 'nip17'}
           value={draft}
           onChangeText={(text) => {
             setDraft(text);

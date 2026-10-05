@@ -88,6 +88,7 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache';
  */
 export interface NotificationData {
   conversationPubkey?: string;
+  conversationProtocol?: 'nip04' | 'nip17';
   groupId?: string;
   walletId?: string;
   /** `<kind>:<pubkey>:<d>` coordinate of the geo-cache the find-log
