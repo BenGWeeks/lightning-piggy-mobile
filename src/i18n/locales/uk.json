@@ -1651,7 +1651,8 @@
     "scanToClaim": "Сканувати для отримання",
     "cancelScan": "Скасувати сканування",
     "invalidClaimCode": "Скануйте код отримання LNURL-withdraw",
-    "claimUnavailable": "Отримання коштів недоступне. Спробуйте ще раз."
+    "claimUnavailable": "Отримання коштів недоступне. Спробуйте ще раз.",
+    "paymentQr": "QR-код для оплати"
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Потрібна назва",
@@ -2242,5 +2243,22 @@
       "badge": "Застарілий",
       "description": "Старіший формат; вміст повідомлень зашифровано, але реле бачать, кому ви пишете. Для застосунків, які ще не підтримують NIP-17."
     }
+  },
+  "accountScreenLayout": {
+    "back": "Назад"
+  },
+  "contactListItem": {
+    "message": "Надіслати повідомлення {{name}}",
+    "messageWithReason": "Надіслати повідомлення {{name}} ({{reason}})",
+    "zap": "Зап для {{name}}",
+    "zapWithReason": "Зап для {{name}} ({{reason}})"
+  },
+  "sendModeTabs": {
+    "scan": "Вкладка сканування",
+    "paste": "Вкладка введення",
+    "nfc": "Вкладка NFC"
+  },
+  "liveMessages": {
+    "newMessages": "Нові повідомлення"
   }
 }

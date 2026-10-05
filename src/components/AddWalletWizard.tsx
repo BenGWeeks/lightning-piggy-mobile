@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Keyboard,
   Platform,
@@ -22,7 +21,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createAddWalletWizardStyles } from '../styles/AddWalletWizard.styles';
 import type { CardTheme, WalletType } from '../types/wallet';
 import { defaultCardThemeFor } from '../themes/cardThemes';
 import WalletCardPicker from './WalletCardPicker';
@@ -42,7 +41,7 @@ type Step = 'type' | 'url' | 'xpub' | 'mnemonic' | 'alias' | 'theme';
 const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAddWalletWizardStyles(colors), [colors]);
   const { addNwcWallet, addOnchainWallet, addHotWallet } = useWallet();
   const [step, setStep] = useState<Step>('type');
   const [walletType, setWalletType] = useState<WalletType>('nwc');
@@ -310,6 +309,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 disclosure lives in the create flow itself, not here, so
                 this tile stays visually consistent with the rest. */}
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.typeCard}
                 onPress={() => {
                   // Close THIS sheet so the create-CoinOS sheet can take
@@ -335,6 +335,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.typeCard}
                 onPress={() => handleTypeSelect('nwc')}
                 testID="wallet-type-nwc"
@@ -353,6 +354,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.typeCard}
                 onPress={() => handleTypeSelect('onchain')}
                 testID="wallet-type-onchain"
@@ -368,6 +370,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               </TouchableOpacity>
               {secretMode && (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.typeCard}
                   onPress={handleMnemonicSelect}
                   testID="wallet-type-mnemonic"
@@ -397,6 +400,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                     onBarcodeScanned={handleBarCodeScanned}
                   />
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={t('addWalletWizard.cancel')}
+                    testID="wizard-nwc-cancel-scan"
                     style={styles.secondaryButton}
                     onPress={() => setScanning(false)}
                   >
@@ -423,6 +429,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   />
                   <View style={styles.secondaryButtonRow}>
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={[styles.secondaryButton, styles.secondaryButtonHalf]}
                       onPress={handleScan}
                       accessibilityLabel={t('addWalletWizard.a11yScanQrCode')}
@@ -432,6 +439,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                       <Text style={styles.secondaryButtonText}>{t('addWalletWizard.scanQr')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={[styles.secondaryButton, styles.secondaryButtonHalf]}
                       onPress={async () => {
                         const text = await Clipboard.getStringAsync();
@@ -450,6 +458,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   {error && <Text style={styles.errorText}>{error}</Text>}
                   <View style={styles.buttonRow}>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('addWalletWizard.back')}
+                      testID="wizard-nwc-back"
                       style={styles.backButton}
                       onPress={() => {
                         setError(null);
@@ -459,6 +470,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                       <Text style={styles.backButtonText}>{t('addWalletWizard.back')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={[styles.primaryButton, { flex: 1 }]}
                       onPress={handleUrlNext}
                       accessibilityLabel={t('addWalletWizard.a11yNextValidateNwc')}
@@ -484,6 +496,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                     onBarcodeScanned={handleBarCodeScanned}
                   />
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={t('addWalletWizard.cancel')}
+                    testID="wizard-xpub-cancel-scan"
                     style={styles.secondaryButton}
                     onPress={() => setScanning(false)}
                   >
@@ -508,7 +523,13 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                     testID="xpub-input"
                     accessibilityLabel={t('addWalletWizard.a11yXpubInput')}
                   />
-                  <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={t('addWalletWizard.scanQrCode')}
+                    testID="wizard-xpub-scan"
+                    style={styles.secondaryButton}
+                    onPress={handleScan}
+                  >
                     <Text style={styles.secondaryButtonText}>
                       {t('addWalletWizard.scanQrCode')}
                     </Text>
@@ -516,6 +537,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   {error && <Text style={styles.errorText}>{error}</Text>}
                   <View style={styles.buttonRow}>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('addWalletWizard.back')}
+                      testID="wizard-xpub-back"
                       style={styles.backButton}
                       onPress={() => {
                         setError(null);
@@ -525,6 +549,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                       <Text style={styles.backButtonText}>{t('addWalletWizard.back')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={t('addWalletWizard.next')}
+                      testID="wizard-xpub-next"
                       style={[styles.primaryButton, { flex: 1 }]}
                       onPress={handleXpubNext}
                     >
@@ -558,6 +585,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               {error && <Text style={styles.errorText}>{error}</Text>}
               <View style={styles.buttonRow}>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addWalletWizard.back')}
+                  testID="wizard-mnemonic-back"
                   style={styles.backButton}
                   onPress={() => {
                     setError(null);
@@ -567,6 +597,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   <Text style={styles.backButtonText}>{t('addWalletWizard.back')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addWalletWizard.next')}
+                  testID="wizard-mnemonic-next"
                   style={[styles.primaryButton, { flex: 1 }]}
                   onPress={handleMnemonicNext}
                 >
@@ -596,6 +629,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               {error && <Text style={styles.errorText}>{error}</Text>}
               <View style={styles.buttonRow}>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addWalletWizard.back')}
+                  testID="wizard-alias-back"
                   style={styles.backButton}
                   onPress={() => {
                     setError(null);
@@ -605,6 +641,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   <Text style={styles.backButtonText}>{t('addWalletWizard.back')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addWalletWizard.next')}
+                  testID="wizard-alias-next"
                   style={[styles.primaryButton, { flex: 1 }]}
                   onPress={handleAliasNext}
                 >
@@ -621,6 +660,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               {error && <Text style={styles.errorText}>{error}</Text>}
               <View style={styles.buttonRow}>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t('addWalletWizard.back')}
+                  testID="wizard-theme-back"
                   style={styles.backButton}
                   onPress={() => {
                     setError(null);
@@ -630,6 +672,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   <Text style={styles.backButtonText}>{t('addWalletWizard.back')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: connecting, busy: connecting }}
                   style={[styles.primaryButton, { flex: 1 }, connecting && { opacity: 0.7 }]}
                   onPress={handleConnect}
                   disabled={connecting}
@@ -673,155 +717,5 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handle: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      flex: 1,
-      padding: 24,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
-    stepContent: {
-      gap: 16,
-    },
-    description: {
-      fontSize: 14,
-      color: colors.textBody,
-      lineHeight: 20,
-    },
-    // --- Wallet type selection ---
-    typeCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.background,
-      borderRadius: 16,
-      padding: 20,
-      gap: 16,
-    },
-    typeCardIconWrapper: {
-      width: 40,
-      height: 40,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    // CoinOS logo mark (rings + half-fill) on transparent background.
-    // `tintColor` recolours every non-transparent pixel so the rings
-    // pick up brand pink, matching the other tile icons.
-    coinosLogo: {
-      width: 32,
-      height: 32,
-      tintColor: colors.brandPink,
-    },
-    typeCardText: {
-      flex: 1,
-      gap: 4,
-    },
-    typeCardTitle: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    typeCardDesc: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      lineHeight: 18,
-    },
-    // --- Inputs ---
-    nwcInput: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
-      fontSize: 14,
-      color: colors.textBody,
-      minHeight: 80,
-      textAlignVertical: 'top',
-    },
-    aliasInput: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
-      fontSize: 16,
-      color: colors.textBody,
-    },
-    scannerContainer: {
-      alignItems: 'center',
-      gap: 12,
-    },
-    scanner: {
-      width: 260,
-      height: 260,
-      borderRadius: 16,
-      overflow: 'hidden',
-    },
-    secondaryButton: {
-      backgroundColor: colors.background,
-      height: 48,
-      borderRadius: 12,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 8,
-    },
-    secondaryButtonRow: {
-      flexDirection: 'row',
-      gap: 8,
-    },
-    secondaryButtonHalf: {
-      flex: 1,
-    },
-    secondaryButtonText: {
-      color: colors.textBody,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    primaryButton: {
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    primaryButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-    buttonRow: {
-      flexDirection: 'row',
-      gap: 12,
-    },
-    backButton: {
-      height: 52,
-      paddingHorizontal: 20,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: colors.background,
-    },
-    backButtonText: {
-      color: colors.textBody,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    errorText: {
-      color: colors.red,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-  });
 
 export default AddWalletWizard;

@@ -652,6 +652,7 @@ const FriendsScreen: React.FC = () => {
                 testID="search-input"
               />
               <TouchableOpacity
+                accessibilityRole="button"
                 onPress={() => {
                   setSearch('');
                   setSearchExpanded(false);
@@ -684,17 +685,19 @@ const FriendsScreen: React.FC = () => {
               <View testID={`friends-filter-active-${filter}`} accessibilityElementsHidden />
 
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.searchToggle}
                 onPress={() => {
                   setSearchExpanded(true);
                   setTimeout(() => searchInputRef.current?.focus(), 100);
                 }}
-                accessibilityLabel="Search friends"
+                accessibilityLabel={t('friendsScreen.searchFriends')}
                 testID="search-toggle"
               >
                 <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
               </TouchableOpacity>
               <TouchableOpacity
+                accessibilityRole="button"
                 style={styles.addButton}
                 onPress={() => navigation.navigate('Groups')}
                 accessibilityLabel={t('friendsScreen.groups')}
@@ -718,6 +721,7 @@ const FriendsScreen: React.FC = () => {
               </TouchableOpacity>
               {isLoggedIn && (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={styles.addButton}
                   onPress={() => setAddFriendVisible(true)}
                   accessibilityLabel={t('friendsScreen.addFriend')}
@@ -751,7 +755,10 @@ const FriendsScreen: React.FC = () => {
             <Text style={styles.emptyTitle}>{t('friendsScreen.connectNostr')}</Text>
             <Text style={styles.emptySubtitle}>{t('friendsScreen.connectNostrSubtitle')}</Text>
             <TouchableOpacity
+              accessibilityRole="button"
               style={styles.connectButton}
+              accessibilityLabel={t('friendsScreen.goToAccount')}
+              testID="friends-go-to-account"
               onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
               <Text style={styles.connectButtonText}>{t('friendsScreen.goToAccount')}</Text>

@@ -1679,7 +1679,8 @@
     "scanToClaim": "Escanear para reclamar",
     "cancelScan": "Cancelar escaneo",
     "invalidClaimCode": "Escanea un código de retiro LNURL",
-    "claimUnavailable": "Reclamar fondos no está disponible. Inténtalo de nuevo."
+    "claimUnavailable": "Reclamar fondos no está disponible. Inténtalo de nuevo.",
+    "paymentQr": "Código QR de pago"
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Nombre obligatorio",
@@ -2242,5 +2243,22 @@
       "badge": "Antiguo",
       "description": "Formato antiguo; el contenido está cifrado, pero los relés pueden ver a quién envías mensajes. Para aplicaciones que aún no admiten NIP-17."
     }
+  },
+  "accountScreenLayout": {
+    "back": "Atrás"
+  },
+  "contactListItem": {
+    "message": "Enviar mensaje a {{name}}",
+    "messageWithReason": "Enviar mensaje a {{name}} ({{reason}})",
+    "zap": "Zap a {{name}}",
+    "zapWithReason": "Zap a {{name}} ({{reason}})"
+  },
+  "sendModeTabs": {
+    "scan": "Pestaña Escanear",
+    "paste": "Pestaña Introducir",
+    "nfc": "Pestaña NFC"
+  },
+  "liveMessages": {
+    "newMessages": "Mensajes nuevos"
   }
 }

@@ -1,3 +1,5 @@
+import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
+import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
 import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
 import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
@@ -9,8 +11,6 @@ import {
   RefreshControl,
   InteractionManager,
   AppState,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import BrandPatternBackground from '../components/BrandPatternBackground';
@@ -701,32 +701,29 @@ const MessagesScreen: React.FC = () => {
     [handleConversationPress, handleGroupPress, contactInfoMap],
   );
 
-  // Auto-scroll to top when a new top row arrives via the live DM sub, but only if the user is already near the top so anyone scrolled down reading older threads isn't interrupted.
+  // Follow live arrivals near the top; otherwise offer a jump without moving history.
   const listRef = useRef<FlashListRef<InboxRow>>(null);
-  const scrollOffsetRef = useRef(0);
-  const prevTopIdRef = useRef<string | null>(null);
-  const NEAR_TOP_PX = 200;
-  const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-  }, []);
-  useEffect(() => {
-    const top = filteredRows[0];
-    const topId = top
-      ? top.kind === 'dm'
-        ? `dm:${top.summary.id}`
-        : `group:${top.summary.group.id}`
-      : null;
-    // Skip the initial mount — only scroll on a *change* of top row, not the first paint.
-    if (
-      topId &&
-      prevTopIdRef.current !== null &&
-      topId !== prevTopIdRef.current &&
-      scrollOffsetRef.current < NEAR_TOP_PX
-    ) {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    }
-    prevTopIdRef.current = topId;
-  }, [filteredRows]);
+  const liveEntries = useMemo(() => {
+    const visiblePartners = new Set(
+      filteredRows.flatMap((row) => (row.kind === 'dm' ? [row.summary.id.toLowerCase()] : [])),
+    );
+    const dmEntries = deferredDmInbox
+      .filter((message) => visiblePartners.has(message.partnerPubkey.toLowerCase()))
+      .map((message) => ({ id: `dm:${message.id}`, createdAt: message.createdAt }));
+    const rowEntries = filteredRows.map((row) => ({
+      id:
+        row.kind === 'dm'
+          ? `activity:${row.summary.id}:${row.sortKey}:${row.summary.lastComment}`
+          : `group:${row.summary.group.id}:${row.summary.activity.lastMessageId ?? `${row.sortKey}:${row.summary.activity.lastText}`}`,
+      createdAt: row.sortKey,
+    }));
+    return [...dmEntries, ...rowEntries];
+  }, [filteredRows, deferredDmInbox]);
+  const live = useLiveMessageIndicator({
+    scope: `${pubkey}:${search}:${windowDays}:${effectiveWotTier}:${showZapCounterparties}`,
+    entries: liveEntries,
+    scrollToLatest: (animated) => listRef.current?.scrollToOffset({ offset: 0, animated }),
+  });
 
   return (
     <View style={styles.container}>
@@ -865,7 +862,7 @@ const MessagesScreen: React.FC = () => {
               item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
             }
             renderItem={renderItem}
-            onScroll={handleListScroll}
+            onScroll={live.onScroll}
             scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListEmptyComponent={
@@ -884,6 +881,9 @@ const MessagesScreen: React.FC = () => {
           />
         )}
 
+        {live.hasNewMessages && (
+          <NewMessagesPill onPress={live.jumpToLatest} testID="messages-new-messages" />
+        )}
         {isLoggedIn && (
           <TouchableOpacity
             style={styles.fab}

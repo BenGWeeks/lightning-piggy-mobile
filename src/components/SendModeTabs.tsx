@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { QrCode, ClipboardPaste, Nfc } from 'lucide-react-native';
+import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendModeTabsStyles } from '../styles/SendModeTabs.styles';
 
@@ -16,13 +17,14 @@ interface Props {
 // screen readers and Maestro flows (`send-tab-scan` / `send-tab-input`)
 // are unaffected.
 const TABS: { mode: SendInputMode; Icon: typeof QrCode; label: string; testID: string }[] = [
-  { mode: 'scan', Icon: QrCode, label: 'Scan tab', testID: 'send-tab-scan' },
-  { mode: 'paste', Icon: ClipboardPaste, label: 'Input tab', testID: 'send-tab-input' },
-  { mode: 'nfc', Icon: Nfc, label: 'NFC tab', testID: 'send-tab-nfc' },
+  { mode: 'scan', Icon: QrCode, label: 'sendModeTabs.scan', testID: 'send-tab-scan' },
+  { mode: 'paste', Icon: ClipboardPaste, label: 'sendModeTabs.paste', testID: 'send-tab-input' },
+  { mode: 'nfc', Icon: Nfc, label: 'sendModeTabs.nfc', testID: 'send-tab-nfc' },
 ];
 
 const SendModeTabs: React.FC<Props> = ({ mode, onChange }) => {
   const colors = useThemeColors();
+  const t = useTranslation();
   const styles = useMemo(() => createSendModeTabsStyles(colors), [colors]);
   return (
     <View style={styles.tabRow}>
@@ -31,8 +33,8 @@ const SendModeTabs: React.FC<Props> = ({ mode, onChange }) => {
           key={m}
           style={[styles.tab, mode === m && styles.tabActive]}
           onPress={() => onChange(m)}
-          accessibilityLabel={label}
-          accessibilityRole="button"
+          accessibilityLabel={t(label)}
+          accessibilityRole="tab"
           accessibilityState={{ selected: mode === m }}
           testID={testID}
         >

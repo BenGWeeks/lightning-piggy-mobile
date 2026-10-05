@@ -268,6 +268,7 @@ const AmountEntryScreen: React.FC<Props> = ({
       <View style={styles.headerRow}>
         {onBack ? (
           <TouchableOpacity
+            accessibilityRole="button"
             onPress={onBack}
             style={styles.backButton}
             testID="amount-entry-back"
@@ -379,6 +380,8 @@ const AmountEntryScreen: React.FC<Props> = ({
       </View>
 
       <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canConfirm }}
         style={[styles.confirmButton, !canConfirm && styles.confirmButtonDisabled]}
         onPress={() =>
           canConfirm && onConfirm(currentSats, enableMemo ? memo.trim() || undefined : undefined)
@@ -400,6 +403,7 @@ const AmountEntryScreen: React.FC<Props> = ({
               if (k.kind === 'backspace') {
                 return (
                   <TouchableOpacity
+                    accessibilityRole="button"
                     key={`cell-${rIdx}-${cIdx}`}
                     style={styles.key}
                     onPress={pressBackspace}
@@ -413,6 +417,7 @@ const AmountEntryScreen: React.FC<Props> = ({
               if (k.kind === 'decimal') {
                 return (
                   <TouchableOpacity
+                    accessibilityRole="button"
                     key={`cell-${rIdx}-${cIdx}`}
                     style={[styles.key, styles.keyFilled]}
                     onPress={pressDecimal}
@@ -425,6 +430,7 @@ const AmountEntryScreen: React.FC<Props> = ({
               }
               return (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   key={`cell-${rIdx}-${cIdx}`}
                   style={[styles.key, styles.keyFilled]}
                   onPress={() => pressDigit(k.value)}

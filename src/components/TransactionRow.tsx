@@ -179,6 +179,8 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
 
   return (
     <TouchableOpacity
+      accessibilityRole="button"
+      testID={`transaction-row-${row.key}`}
       style={[styles.item, isPending && styles.itemPending]}
       onPress={() => onPressTx(item as TransactionDetailData, iconState)}
       accessibilityLabel={t('transactionList.openDetailsFor', { name: primary })}

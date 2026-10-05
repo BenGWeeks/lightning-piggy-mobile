@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Image, TouchableOpacity, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState, WalletConnectionHealth } from '../types/wallet';
@@ -11,11 +11,9 @@ import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 
+import { CARD_WIDTH, CARD_HEIGHT, walletCardStyles as styles } from '../styles/WalletCard.styles';
+export { CARD_MARGIN, CARD_WIDTH, CARD_HEIGHT, CARD_ASPECT } from '../styles/WalletCard.styles';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-export const CARD_MARGIN = 16;
-export const CARD_WIDTH = SCREEN_WIDTH - CARD_MARGIN * 2;
-export const CARD_HEIGHT = 200;
-export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT;
 
 // Mini preview is the full card scaled down. The default 2-up grid width;
 // the cover-flow picker passes a larger value. Height + scale are derived
@@ -157,6 +155,7 @@ const CardContent: React.FC<{
               )}
               {onSettingsPress && (
                 <TouchableOpacity
+                  accessibilityRole="button"
                   onPress={onSettingsPress}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   testID="wallet-settings"
@@ -222,9 +221,11 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({
   const height = CARD_HEIGHT * scale;
   return (
     <TouchableOpacity
+      accessibilityRole="button"
       style={[styles.miniCardContainer, { width, height }, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityState={{ selected: !!selected }}
       accessibilityLabel={t('walletCard.cardDesign', { name: theme.name })}
       testID={`theme-${theme.id}`}
     >
@@ -259,6 +260,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   return (
     <View
       style={styles.cardContainer}
+      accessible={false}
       testID={`wallet-card-${wallet.walletType}`}
       accessibilityLabel={t('walletCard.walletAccessibility', {
         alias: wallet.alias,
@@ -284,95 +286,5 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  cardContainer: {
-    width: CARD_WIDTH,
-    marginHorizontal: CARD_MARGIN,
-  },
-  card: {
-    height: CARD_HEIGHT,
-    borderRadius: 16,
-    padding: 20,
-    overflow: 'hidden',
-    justifyContent: 'space-between',
-  },
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '500',
-    opacity: 0.8,
-  },
-  topRightIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  walletTypeIcon: {
-    width: 22,
-    height: 22,
-    opacity: 0.9,
-  },
-  aliasBalanceGroup: {
-    gap: 2,
-  },
-  alias: {
-    fontSize: 16,
-    fontWeight: '600',
-    opacity: 0.85,
-  },
-  balance: {
-    fontSize: 32,
-    fontWeight: '700',
-  },
-  fiatBalance: {
-    fontSize: 14,
-    fontWeight: '400',
-    opacity: 0.8,
-  },
-  providerAlias: {
-    fontSize: 11,
-    fontWeight: '400',
-    opacity: 0.6,
-  },
-  previewLabel: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  previewName: {
-    fontSize: 36,
-    fontWeight: '700',
-  },
-  // width/height are supplied per-instance at render time (defaulting to the
-  // 2-up grid size, or a larger value from the cover-flow picker), so they're
-  // intentionally omitted here to avoid a dead/contradictory hard-coded size.
-  miniCardContainer: {
-    borderRadius: 16,
-    borderWidth: 3,
-    borderColor: 'transparent',
-    overflow: 'hidden',
-  },
-  miniCardSelected: {
-    borderColor: '#EC008C',
-  },
-  miniScaleWrapper: {
-    overflow: 'hidden',
-  },
-});
 
 export default WalletCard;

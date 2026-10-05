@@ -118,6 +118,7 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
         <>
           <Text style={styles.description}>{errorMessage}</Text>
           <TouchableOpacity
+            accessibilityRole="button"
             style={styles.retryButton}
             onPress={() => void arm()}
             accessibilityLabel={t('sendNfcPane.tryNfcAgain')}

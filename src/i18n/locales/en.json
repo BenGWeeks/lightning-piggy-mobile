@@ -1679,7 +1679,8 @@
     "scanToClaim": "Scan to claim",
     "cancelScan": "Cancel scan",
     "invalidClaimCode": "Scan an LNURL-withdraw claim code",
-    "claimUnavailable": "Claim funds is unavailable. Try again."
+    "claimUnavailable": "Claim funds is unavailable. Try again.",
+    "paymentQr": "Payment QR code"
   },
   "renameGroupSheet": {
     "nameRequiredTitle": "Name required",
@@ -2242,5 +2243,22 @@
       "badge": "Legacy",
       "description": "Older format; message content is encrypted but relays can see who you’re messaging. For apps that don’t support NIP-17 yet."
     }
+  },
+  "accountScreenLayout": {
+    "back": "Back"
+  },
+  "contactListItem": {
+    "message": "Message {{name}}",
+    "messageWithReason": "Message {{name}} ({{reason}})",
+    "zap": "Zap {{name}}",
+    "zapWithReason": "Zap {{name}} ({{reason}})"
+  },
+  "sendModeTabs": {
+    "scan": "Scan tab",
+    "paste": "Input tab",
+    "nfc": "NFC tab"
+  },
+  "liveMessages": {
+    "newMessages": "New messages"
   }
 }
