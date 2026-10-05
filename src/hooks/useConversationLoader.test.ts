@@ -4,10 +4,16 @@ import { notifyDmMessage } from '../contexts/nostrEventBus';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { DmProtocol } from '../utils/dmProtocol';
 
+// Run the focus effect like an effect, keeping its cleanup so a test can
+// simulate blur separately from unmount.
+let mockFocusCleanup: (() => void) | void;
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) => {
     const React = jest.requireActual('react');
-    React.useEffect(callback, [callback]);
+    React.useEffect(() => {
+      mockFocusCleanup = callback();
+      return () => mockFocusCleanup?.();
+    }, [callback]);
   },
 }));
 
@@ -79,6 +85,16 @@ it('filters live refreshes and defaults missing kinds to NIP-17', async () => {
   });
   await waitFor(() => expect(result.current.messages).toEqual([modern, unknown, later]));
   expect(fetchConversation).toHaveBeenCalledTimes(2);
+});
+
+it('aborts the in-flight conversation fetch when the screen blurs', async () => {
+  const fetchConversation = jest.fn(() => new Promise<never>(() => {}));
+  const { fetchConversation: fetchMock } = setup('nip17', fetchConversation);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const { signal } = fetchMock.mock.calls[0][1] as { signal: AbortSignal };
+  expect(signal.aborted).toBe(false);
+  act(() => mockFocusCleanup?.()); // blur — another thread pushed on top
+  expect(signal.aborted).toBe(true);
 });
 
 it("reads only this thread's protocol from the store and fetch (#1118)", async () => {

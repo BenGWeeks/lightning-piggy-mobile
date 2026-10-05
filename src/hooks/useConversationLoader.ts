@@ -202,6 +202,9 @@ export function useConversationLoader({
       return () => {
         clearTimeout(refreshTimer);
         unsubscribe();
+        // A blurred thread (e.g. kept underneath another protocol's thread)
+        // must not keep decrypting or prompting a signer; refocus reloads.
+        fetchAbortRef.current?.abort();
       };
     }, [pubkey, load]),
   );
