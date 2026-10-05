@@ -23,6 +23,7 @@ jest.mock('../contexts/NostrContext', () => ({
     applyPublishedDmInbox: mockApplyInbox,
   }),
 }));
+jest.mock('../services/nostrService', () => ({ DEFAULT_RELAYS: ['wss://default.example'] }));
 jest.mock('../services/backgroundDmService', () => ({
   rearmBackgroundDmWatchForActiveIdentity: jest.fn().mockResolvedValue(undefined),
 }));
@@ -372,4 +373,16 @@ it('shows one row per relay and lets each permission be toggled independently', 
     result.current.toggleNip65('wss://nos.lol', 'write');
   });
   expect(result.current.nip65Draft).toEqual([{ url: 'wss://nos.lol', read: true, write: false }]);
+});
+
+it('also publishes to the discovery/default relays so no stale copy survives there', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  expect(publish.mock.calls[0][1]).toEqual(expect.arrayContaining(['wss://default.example']));
 });

@@ -170,11 +170,16 @@ export function useNip65Relays() {
   const applyPublishedRelayList = useCallback(async (pk: string, list: RelayConfig[]) => {
     nip65GenerationRef.current += 1;
     setNip65Relays(list);
-    await AsyncStorage.setItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk), JSON.stringify(list));
+    const key = perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk);
+    const before = await AsyncStorage.getItem(key).catch(() => null);
+    await AsyncStorage.setItem(key, JSON.stringify(list));
     await AsyncStorage.setItem(
       perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
       Date.now().toString(),
     );
+    // The background DM watch subscribes to the NIP-65 read relays; re-arm it
+    // when the list changed.
+    if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
   }, []);
 
   return {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
+import { DEFAULT_RELAYS } from '../services/nostrService';
 import type { RelayConfig } from '../types/nostr';
 import {
   buildDmInboxEvent,
@@ -213,8 +214,10 @@ export function useRelayListEditor() {
     try {
       const { outcome, tags } = await signAndPublish(
         unsigned,
+        // Also the relays the app (and other clients) discover lists on, so
+        // any old copy there is replaced rather than later restored.
         relayListPublishTargets(
-          nip65Relays.map((r) => r.url),
+          [...nip65Relays.map((r) => r.url), ...relayUrls, ...DEFAULT_RELAYS],
           nip65Draft.map((r) => r.url),
         ),
         pubkey,
@@ -234,6 +237,7 @@ export function useRelayListEditor() {
     pubkey,
     nip65Loading,
     publishing,
+    relayUrls,
     nip65Draft,
     nip65Relays,
     signAndPublish,
@@ -251,7 +255,10 @@ export function useRelayListEditor() {
       const writeRelays = nip65Relays.filter((r) => r.write).map((r) => r.url);
       const { outcome, tags } = await signAndPublish(
         unsigned,
-        relayListPublishTargets([...inboxBaseline, ...writeRelays], inboxDraft),
+        relayListPublishTargets(
+          [...inboxBaseline, ...writeRelays, ...relayUrls, ...DEFAULT_RELAYS],
+          inboxDraft,
+        ),
         pubkey,
       );
       if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
@@ -270,6 +277,7 @@ export function useRelayListEditor() {
     pubkey,
     inboxLoading,
     publishing,
+    relayUrls,
     inboxDraft,
     inboxBaseline,
     nip65Relays,

@@ -1205,6 +1205,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Promote the successor (clear stale identity → set successor →
         // hydrate caches → deferred relay refresh). The teardown-before-set
         // ordering is what fixes the #851 F4 stale-drawer bug; see the helper.
+        // Drop the signed-out account's relay lists (and in-flight loads) first.
+        resetRelayLists();
         await promoteSuccessorIdentity(successor, {
           setProfile,
           setContacts,

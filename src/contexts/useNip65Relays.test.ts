@@ -148,3 +148,18 @@ it('re-arms the background DM watch when the inbox list changes, not when it is 
   });
   expect(rearm).toHaveBeenCalledTimes(1);
 });
+
+it('re-arms the background DM watch when the NIP-65 list changes, not when it is the same', async () => {
+  const rearm = rearmBackgroundDmWatchForActiveIdentity as jest.Mock;
+  rearm.mockClear();
+  const { result } = renderHook(() => useNip65Relays());
+  const list = [{ url: 'wss://nostr.mom', read: true, write: true }];
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, list);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await result.current.applyPublishedRelayList(PK, list);
+  });
+  expect(rearm).toHaveBeenCalledTimes(1);
+});
