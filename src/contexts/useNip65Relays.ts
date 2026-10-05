@@ -12,6 +12,7 @@ import {
   RELAY_LIST_CACHE_KEY_BASE,
   RELAY_LIST_TIMESTAMP_KEY_BASE,
   DM_INBOX_RELAYS_CACHE_KEY_BASE,
+  DM_INBOX_CREATED_AT_KEY_BASE,
   CACHE_MAX_AGE_MS,
   readCachedWithTtl,
 } from './nostrCacheKeys';
@@ -34,47 +35,68 @@ export function useNip65Relays() {
   // list is adopted, so a slower, older load can't overwrite it.
   const nip65GenerationRef = useRef(0);
 
-  const loadDmInboxRelays = useCallback(
-    async (pk: string, nip65WriteRelays: string[] = [], generation = generationRef.current) => {
-      const current = () => generation === generationRef.current;
-      try {
-        const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
-        const cached = raw ? (JSON.parse(raw) as unknown) : null;
-        if (current() && Array.isArray(cached))
-          setDmInboxRelays(cached.filter((u): u is string => typeof u === 'string'));
-      } catch {
-        /* corrupt cache — the network read below replaces it */
-      }
-      // The NEWEST published list across relays, not the first reply.
-      // Other clients publish it to the user's NIP-65 write relays — look there too.
-      const event = await fetchLatestReplaceable(pk, 10050, [
-        ...new Set([...nip65WriteRelays, ...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
-      ]);
-      if (!event || !current()) return;
-      const fresh = dmInboxRelaysFromTags(event.tags);
-      const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
-      const before = await AsyncStorage.getItem(key).catch(() => null);
-      if (!current()) return;
-      setDmInboxRelays(fresh);
-      await AsyncStorage.setItem(key, JSON.stringify(fresh)).catch(() => {});
-      // The background DM watch reads this cache; re-arm it if the list changed.
-      if (before !== JSON.stringify(fresh)) void rearmBackgroundDmWatchForActiveIdentity();
-    },
-    [],
-  );
-
-  /** Adopt (and cache) DM inbox relays the user just published in-app. */
-  const applyPublishedDmInbox = useCallback(async (pk: string, list: string[]) => {
-    // A just-published (or freshly discovered) list is the newest; invalidate
-    // any in-flight load that could still land an older copy on top of it.
-    generationRef.current += 1;
+  /** Adopt a DM inbox list (in memory first; caching is best-effort so a
+   * full device can't break the caller) and re-arm the background watch. */
+  const adoptDmInbox = useCallback(async (pk: string, list: string[], createdAt?: number) => {
     setDmInboxRelays(list);
     const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
     const before = await AsyncStorage.getItem(key).catch(() => null);
-    await AsyncStorage.setItem(key, JSON.stringify(list));
+    await AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
+    if (createdAt)
+      await AsyncStorage.setItem(
+        perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk),
+        String(createdAt),
+      ).catch(() => {});
     // The background DM watch reads this cache; re-arm it when it changed.
     if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
   }, []);
+
+  const loadDmInboxRelays = useCallback(
+    async (pk: string, nip65WriteRelays: string[] = [], generation = generationRef.current) => {
+      const current = () => generation === generationRef.current;
+      let cached: string[] = [];
+      try {
+        const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
+        const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+        if (Array.isArray(parsed))
+          cached = parsed.filter((u): u is string => typeof u === 'string');
+        if (current() && cached.length > 0) setDmInboxRelays(cached);
+      } catch {
+        /* corrupt cache — the network read below replaces it */
+      }
+      const cachedAt = Number(
+        (await AsyncStorage.getItem(perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk)).catch(
+          () => null,
+        )) ?? 0,
+      );
+      // The NEWEST published list across relays, not the first reply — also on
+      // the user's NIP-65 write relays and the inbox relays themselves, where
+      // other clients (or our own last publish) put it.
+      const event = await fetchLatestReplaceable(pk, 10050, [
+        ...new Set([
+          ...nip65WriteRelays,
+          ...cached,
+          ...nostrService.DEFAULT_RELAYS,
+          ...RELAY_LIST_INDEXERS,
+        ]),
+      ]);
+      // Never let an older relay copy replace a newer cached list.
+      if (!event || !current() || event.created_at < cachedAt) return;
+      await adoptDmInbox(pk, dmInboxRelaysFromTags(event.tags), event.created_at);
+    },
+    [adoptDmInbox],
+  );
+
+  /** Adopt DM inbox relays the user just published (or the editor found). */
+  const applyPublishedDmInbox = useCallback(
+    async (pk: string, list: string[], createdAt?: number) => {
+      // The newest list; invalidate any in-flight load that could still land
+      // an older copy on top of it.
+      generationRef.current += 1;
+      await adoptDmInbox(pk, list, createdAt);
+    },
+    [adoptDmInbox],
+  );
 
   /** Forget both lists (logout / identity switch). */
   const resetRelayLists = useCallback(() => {
@@ -172,11 +194,12 @@ export function useNip65Relays() {
     setNip65Relays(list);
     const key = perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk);
     const before = await AsyncStorage.getItem(key).catch(() => null);
-    await AsyncStorage.setItem(key, JSON.stringify(list));
+    // Best-effort: the list is already adopted in memory.
+    await AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
     await AsyncStorage.setItem(
       perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
       Date.now().toString(),
-    );
+    ).catch(() => {});
     // The background DM watch subscribes to the NIP-65 read relays; re-arm it
     // when the list changed.
     if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();

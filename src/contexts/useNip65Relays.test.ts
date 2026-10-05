@@ -14,7 +14,11 @@ jest.mock('../services/nostrService', () => ({
   fetchRelayList: jest.fn(),
 }));
 const fetchLatest = fetchLatestReplaceable as jest.Mock;
-const inboxEvent = (urls: string[]) => ({ kind: 10050, tags: urls.map((u) => ['relay', u]) });
+const inboxEvent = (urls: string[], created_at = 100) => ({
+  kind: 10050,
+  created_at,
+  tags: urls.map((u) => ['relay', u]),
+});
 const fetchList = nostrService.fetchRelayList as jest.Mock;
 const PK = 'a'.repeat(64);
 
@@ -162,4 +166,34 @@ it('re-arms the background DM watch when the NIP-65 list changes, not when it is
     await result.current.applyPublishedRelayList(PK, list);
   });
   expect(rearm).toHaveBeenCalledTimes(1);
+});
+
+it('never replaces a newer cached inbox list with an older relay copy', async () => {
+  fetchList.mockResolvedValue(null);
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://new-inbox.example'], 500);
+  });
+  fetchLatest.mockResolvedValue(inboxEvent(['wss://old-inbox.example'], 400)); // older copy
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await waitFor(() => expect(fetchLatest).toHaveBeenCalled());
+  expect(result.current.dmInboxRelays).toEqual(['wss://new-inbox.example']);
+  // ...and the lookup searched the known inbox relays themselves.
+  expect(fetchLatest.mock.calls.at(-1)?.[2]).toContain('wss://new-inbox.example');
+});
+
+it('adopts lists in memory even when the cache write fails', async () => {
+  const spy = jest.spyOn(AsyncStorage, 'setItem').mockRejectedValue(new Error('disk full'));
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 1);
+    await result.current.applyPublishedRelayList(PK, [
+      { url: 'wss://nostr.mom', read: true, write: true },
+    ]);
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+  expect(result.current.nip65Relays).toHaveLength(1);
+  spy.mockRestore();
 });

@@ -248,10 +248,11 @@ it('starts READING newly published DM inbox relays (so DMs sent there arrive)', 
   await act(async () => {
     await result.current.publishInbox();
   });
-  expect(mockApplyInbox).toHaveBeenCalledWith('a'.repeat(64), [
-    'wss://relay.damus.io',
-    'wss://nostr.mom',
-  ]);
+  expect(mockApplyInbox).toHaveBeenCalledWith(
+    'a'.repeat(64),
+    ['wss://relay.damus.io', 'wss://nostr.mom'],
+    expect.any(Number),
+  );
 });
 
 it('freezes editing while a publish is in flight, so no edit is lost', async () => {
@@ -343,10 +344,11 @@ it('does not adopt a publish that completes after the user switched accounts', a
 it('adopts an inbox list it discovers app-wide, so the app listens there', async () => {
   net10050 = ['wss://relay.primal.net', 'wss://nostr.mom'];
   await setup();
-  expect(mockApplyInbox).toHaveBeenCalledWith('a'.repeat(64), [
-    'wss://relay.primal.net',
-    'wss://nostr.mom',
-  ]);
+  expect(mockApplyInbox).toHaveBeenCalledWith(
+    'a'.repeat(64),
+    ['wss://relay.primal.net', 'wss://nostr.mom'],
+    expect.any(Number),
+  );
 });
 
 it('uses the inbox list the app learns about after the screen opened', async () => {
@@ -414,4 +416,37 @@ it('signs each update strictly newer than the existing list, even with clock ske
     await result.current.publishNip65();
   });
   expect(mockSign.mock.calls[1][0].created_at).toBeGreaterThan(first);
+});
+
+it('finishes loading even if adopting the list fails (e.g. storage full)', async () => {
+  mockApply.mockRejectedValueOnce(new Error('disk full'));
+  net10002 = [{ url: 'wss://relay.primal.net', read: true, write: true }];
+  const h = renderHook(() => useRelayListEditor());
+  await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
+  await waitFor(() => expect(h.result.current.inboxLoading).toBe(false));
+});
+
+it("does not carry one account's list timestamp into another's publish", async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  net10002CreatedAt = Math.floor(Date.now() / 1000) + 3600; // account A: future-dated list
+  net10002 = [{ url: 'wss://relay.primal.net', read: true, write: true }];
+  const h = await setup();
+  net10002 = null; // account B has no published list
+  mockPubkey = 'c'.repeat(64);
+  mockSign.mockImplementation(async (e: object) => ({
+    ...e,
+    id: 'id',
+    sig: 'sig',
+    pubkey: 'c'.repeat(64),
+  }));
+  h.rerender({});
+  await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
+  act(() => {
+    h.result.current.addNip65('wss://nostr.mom');
+  });
+  await act(async () => {
+    await h.result.current.publishNip65();
+  });
+  const signedAt = mockSign.mock.calls.at(-1)?.[0].created_at;
+  expect(signedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 5);
 });

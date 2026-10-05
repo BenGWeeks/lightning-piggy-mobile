@@ -89,36 +89,50 @@ export function useRelayListEditor() {
     setInboxDirty(false);
     setInboxDraft([]);
     setInboxBaseline([]);
+    latestCreatedAtRef.current = {};
     if (!pubkey) return;
     let cancelled = false;
     const sources = [...new Set([...relayUrls, ...RELAY_LIST_INDEXERS])];
     setNip65Loading(true);
     setInboxLoading(true);
     void (async () => {
-      const nip65Event = await fetchLatestReplaceable(pubkey, 10002, sources);
-      if (cancelled) return;
-      if (nip65Event) latestCreatedAtRef.current[10002] = nip65Event.created_at;
-      const nip65List = nip65Event ? relayListFromTags(nip65Event.tags) : null;
-      if (nip65List) await applyPublishedRelayList(pubkey, nip65List);
-      if (cancelled) return;
-      setNip65Loading(false);
-      // Then the inbox list — also on the (possibly just-discovered) NIP-65
-      // write relays, where other clients publish it.
-      const writeRelays = (nip65List ?? []).filter((r) => r.write).map((r) => r.url);
-      const inboxEvent = await fetchLatestReplaceable(pubkey, 10050, [
-        ...new Set([...sources, ...writeRelays]),
-      ]);
-      if (cancelled) return;
-      if (inboxEvent) latestCreatedAtRef.current[10050] = inboxEvent.created_at;
-      // A failed lookup isn't "no inbox list": fall back to the known one so
-      // publishing extends it rather than silently replacing it.
-      const list = inboxEvent ? dmInboxRelaysFromTags(inboxEvent.tags) : knownInboxRef.current;
-      // A list found here (wider lookup / newer copy) must also be READ app-wide.
-      if (inboxEvent) await applyPublishedDmInbox(pubkey, list);
-      if (cancelled) return;
-      setInboxBaseline(list);
-      setInboxDraft(list);
-      setInboxLoading(false);
+      try {
+        const nip65Event = await fetchLatestReplaceable(pubkey, 10002, sources);
+        if (cancelled) return;
+        if (nip65Event) latestCreatedAtRef.current[10002] = nip65Event.created_at;
+        const nip65List = nip65Event ? relayListFromTags(nip65Event.tags) : null;
+        if (nip65List) await applyPublishedRelayList(pubkey, nip65List);
+        if (cancelled) return;
+        setNip65Loading(false);
+        // Then the inbox list — also on the (possibly just-discovered) NIP-65
+        // write relays, where other clients publish it.
+        const writeRelays = (nip65List ?? []).filter((r) => r.write).map((r) => r.url);
+        const inboxEvent = await fetchLatestReplaceable(pubkey, 10050, [
+          ...new Set([...sources, ...writeRelays]),
+        ]);
+        if (cancelled) return;
+        if (inboxEvent) latestCreatedAtRef.current[10050] = inboxEvent.created_at;
+        // A failed lookup isn't "no inbox list": fall back to the known one so
+        // publishing extends it rather than silently replacing it.
+        const list = inboxEvent ? dmInboxRelaysFromTags(inboxEvent.tags) : knownInboxRef.current;
+        // A list found here (wider lookup / newer copy) must also be READ app-wide.
+        if (inboxEvent) await applyPublishedDmInbox(pubkey, list, inboxEvent.created_at);
+        if (cancelled) return;
+        setInboxBaseline(list);
+        setInboxDraft(list);
+        setInboxLoading(false);
+      } catch (e) {
+        // A lookup or local adoption failed; editing still proceeds from the
+        // known lists rather than leaving the screen stuck.
+        console.warn('[RelayListEditor] loading current lists failed:', e);
+      } finally {
+        // Always finish loading (even if a cache write or lookup threw), so
+        // the editor never stays stuck.
+        if (!cancelled) {
+          setNip65Loading(false);
+          setInboxLoading(false);
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -212,7 +226,7 @@ export function useRelayListEditor() {
       const outcome: RelayListPublishOutcome = results.some((r) => r.ok)
         ? { ok: true, results }
         : { ok: false, error: 'none-accepted', results };
-      return { outcome, tags: signed.tags };
+      return { outcome, tags: signed.tags, createdAt: signed.created_at };
     },
     [signEvent],
   );
@@ -267,7 +281,11 @@ export function useRelayListEditor() {
     try {
       // Senders look up the inbox list on the user's NIP-65 write relays.
       const writeRelays = nip65Relays.filter((r) => r.write).map((r) => r.url);
-      const { outcome, tags } = await signAndPublish(
+      const {
+        outcome,
+        tags,
+        createdAt: signedAt,
+      } = await signAndPublish(
         unsigned,
         relayListPublishTargets(
           [...inboxBaseline, ...writeRelays, ...relayUrls, ...DEFAULT_RELAYS],
@@ -278,7 +296,7 @@ export function useRelayListEditor() {
       if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
-        await applyPublishedDmInbox(pubkey, published);
+        await applyPublishedDmInbox(pubkey, published, signedAt);
         setInboxBaseline(published);
         setInboxDraft(published);
         setInboxDirty(false);
