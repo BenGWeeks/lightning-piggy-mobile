@@ -4,12 +4,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { RelayConfig } from '../types/nostr';
+import { fetchDmInboxRelays } from '../services/nostrRelayLists';
+
 import {
   RELAY_LIST_CACHE_KEY_BASE,
   RELAY_LIST_TIMESTAMP_KEY_BASE,
   CACHE_MAX_AGE_MS,
   readCachedWithTtl,
 } from './nostrCacheKeys';
+
+/** Per-account cache of the user's own NIP-17 DM inbox relays (kind 10050). */
+const DM_INBOX_RELAYS_CACHE_KEY_BASE = 'nostr_dm_inbox_relays_v1';
 
 /**
  * The user's published NIP-65 (kind-10002) relay list: hydrate from the
@@ -18,6 +23,42 @@ import {
  */
 export function useNip65Relays() {
   const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
+  // The user's own DM inbox relays: others deliver NIP-17 DMs there, so the
+  // app must READ them too (merged into getReadRelays by NostrContext).
+  const [dmInboxRelays, setDmInboxRelays] = useState<string[]>([]);
+
+  const loadDmInboxRelays = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
+      const cached = raw ? (JSON.parse(raw) as unknown) : null;
+      if (Array.isArray(cached)) setDmInboxRelays(cached.filter((u) => typeof u === 'string'));
+    } catch {
+      /* corrupt cache — the network read below replaces it */
+    }
+    const fresh = await fetchDmInboxRelays(pk, nostrService.DEFAULT_RELAYS);
+    if (fresh) {
+      setDmInboxRelays(fresh);
+      await AsyncStorage.setItem(
+        perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
+        JSON.stringify(fresh),
+      ).catch(() => {});
+    }
+  }, []);
+
+  /** Adopt (and cache) DM inbox relays the user just published in-app. */
+  const applyPublishedDmInbox = useCallback(async (pk: string, list: string[]) => {
+    setDmInboxRelays(list);
+    await AsyncStorage.setItem(
+      perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
+      JSON.stringify(list),
+    );
+  }, []);
+
+  /** Forget both lists (logout / identity switch). */
+  const resetRelayLists = useCallback(() => {
+    setNip65Relays([]);
+    setDmInboxRelays([]);
+  }, []);
 
   /** Eagerly hydrate `relays` state from the per-account cache so
    * relay-dependent fan-out (kind-0 publish, NIP-17 send) uses the
@@ -40,43 +81,48 @@ export function useNip65Relays() {
     }
   }, []);
 
-  const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
-    const t0 = Date.now();
-    // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
-    // from cache when under the TTL and skip the ~3s relay round trip.
-    const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
-      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
-      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
-    );
-    if (cached && ageMs < CACHE_MAX_AGE_MS) {
-      setNip65Relays(cached);
-      if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
-      const readRelays = cached.filter((r) => r.read).map((r) => r.url);
-      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-    }
-    const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
-    if (relayList === null) {
-      // Network couldn't produce a kind-10002 — fall back to defaults
-      // and DON'T persist (so we don't poison the cache with a blip).
-      if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
-      return nostrService.DEFAULT_RELAYS;
-    }
-    if (__DEV__)
-      console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
-    setNip65Relays(relayList);
-    InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(
+  const loadRelays = useCallback(
+    async (pk: string): Promise<string[]> => {
+      const t0 = Date.now();
+      // Background: own DM inbox relays (cache first, then network).
+      void loadDmInboxRelays(pk);
+      // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
+      // from cache when under the TTL and skip the ~3s relay round trip.
+      const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
         perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
-        JSON.stringify(relayList),
-      ).catch(() => {});
-      AsyncStorage.setItem(
         perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
-        Date.now().toString(),
-      ).catch(() => {});
-    });
-    const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
-    return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-  }, []);
+      );
+      if (cached && ageMs < CACHE_MAX_AGE_MS) {
+        setNip65Relays(cached);
+        if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
+        const readRelays = cached.filter((r) => r.read).map((r) => r.url);
+        return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+      }
+      const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
+      if (relayList === null) {
+        // Network couldn't produce a kind-10002 — fall back to defaults
+        // and DON'T persist (so we don't poison the cache with a blip).
+        if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
+        return nostrService.DEFAULT_RELAYS;
+      }
+      if (__DEV__)
+        console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
+      setNip65Relays(relayList);
+      InteractionManager.runAfterInteractions(() => {
+        AsyncStorage.setItem(
+          perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
+          JSON.stringify(relayList),
+        ).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
+          Date.now().toString(),
+        ).catch(() => {});
+      });
+      const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
+      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+    },
+    [loadDmInboxRelays],
+  );
 
   /** Adopt a relay list the user just published (and cache it), so the app
    * uses it straight away instead of waiting for the cache TTL. */
@@ -91,7 +137,9 @@ export function useNip65Relays() {
 
   return {
     nip65Relays,
-    setNip65Relays,
+    dmInboxRelays,
+    resetRelayLists,
+    applyPublishedDmInbox,
     loadRelaysFromCache,
     loadRelays,
     applyPublishedRelayList,

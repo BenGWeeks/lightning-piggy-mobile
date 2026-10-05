@@ -20,17 +20,34 @@ const norm = (url: string) => url.trim().replace(/\/+$/, '');
 export function isPublishableRelayUrl(url: string): boolean {
   try {
     const u = new URL(norm(url));
-    const host = u.hostname;
-    return (
-      u.protocol === 'wss:' &&
-      !!host &&
-      host !== 'localhost' &&
-      !host.endsWith('.local') &&
-      !/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)
+    const host = u.hostname.toLowerCase();
+    if (u.protocol !== 'wss:' || !host) return false;
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
+      return false;
+    // IPv6 literal: reject loopback, unspecified, unique-local (fc00::/7) and
+    // link-local (fe80::/10) — none are reachable by other users.
+    if (host.startsWith('[')) {
+      const v6 = host.slice(1, -1);
+      return !(v6 === '::1' || v6 === '::' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6));
+    }
+    // IPv4 private, loopback, link-local, CGNAT and unspecified ranges.
+    return !/^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(
+      host,
     );
   } catch {
     return false;
   }
+}
+
+/** NIP-65 relay rows from a kind-10002 event's `r` tags (as signed). */
+export function relayListFromTags(tags: string[][]): RelayConfig[] {
+  return tags
+    .filter((t) => t[0] === 'r' && t[1])
+    .map((t) => ({
+      url: norm(t[1]),
+      read: !t[2] || t[2] === 'read',
+      write: !t[2] || t[2] === 'write',
+    }));
 }
 
 /** NIP-65 kind 10002: `["r", url]` (read+write) / `["r", url, "read"|"write"]`. */

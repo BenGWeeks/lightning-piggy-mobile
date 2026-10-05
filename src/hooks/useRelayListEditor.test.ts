@@ -5,23 +5,28 @@ import { fetchRelayList } from '../services/nostrService';
 
 const mockSign = jest.fn();
 const mockApply = jest.fn().mockResolvedValue(undefined);
+const mockApplyInbox = jest.fn().mockResolvedValue(undefined);
 const PUBLISHED = [
   { url: 'wss://relay.primal.net', read: true, write: true },
   { url: 'wss://nostr.land', read: true, write: true },
 ];
+let mockNip65: typeof PUBLISHED = PUBLISHED;
 jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({
     pubkey: 'a'.repeat(64),
     relays: PUBLISHED,
-    nip65Relays: PUBLISHED,
+    nip65Relays: mockNip65,
     signEvent: mockSign,
     applyPublishedRelayList: mockApply,
+    applyPublishedDmInbox: mockApplyInbox,
   }),
 }));
 jest.mock('../services/nostrService', () => ({ fetchRelayList: jest.fn() }));
 jest.mock('../services/nostrRelayLists', () => ({
   fetchDmInboxRelays: jest.fn(),
   publishToRelays: jest.fn(),
+  // Production waits out the relay keep-open window; tests take the result directly.
+  fetchNewest: (start: (onLatest: () => void) => Promise<unknown>) => start(() => {}),
 }));
 const fetchInbox = fetchDmInboxRelays as jest.Mock;
 const fetchFresh = fetchRelayList as jest.Mock;
@@ -29,6 +34,7 @@ const publish = publishToRelays as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNip65 = PUBLISHED;
   fetchInbox.mockResolvedValue(['wss://relay.damus.io']);
   fetchFresh.mockResolvedValue(null); // network unchanged / unreachable → keep the cached list
   mockSign.mockImplementation(async (e: object) => ({
@@ -161,4 +167,77 @@ it('loads the CURRENT published list before editing, so a stale cache is never p
   await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
   expect(mockApply).toHaveBeenCalledWith('a'.repeat(64), fresh);
   expect(mockSign).not.toHaveBeenCalled();
+});
+
+it('blocks edits while the current lists are still loading', async () => {
+  let release!: (v: null) => void;
+  fetchFresh.mockReturnValue(new Promise((r) => (release = r)));
+  const h = renderHook(() => useRelayListEditor());
+  expect(h.result.current.nip65Editable).toBe(false);
+  act(() => {
+    expect(h.result.current.addNip65('wss://nostr.mom')).toBe(false);
+  });
+  expect(h.result.current.nip65Dirty).toBe(false);
+  await act(async () => release(null));
+  await waitFor(() => expect(h.result.current.nip65Editable).toBe(true));
+});
+
+it('adopts exactly the signed list (non-public rows dropped), not the raw draft', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  // The current list still holds a local relay; it's shown but never published.
+  mockNip65 = [
+    { url: 'wss://relay.primal.net', read: true, write: true },
+    { url: 'ws://localhost:10547', read: true, write: true },
+  ];
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishNip65();
+  });
+  const adopted = mockApply.mock.calls.at(-1)?.[1];
+  expect(adopted).toEqual([
+    { url: 'wss://relay.primal.net', read: true, write: true },
+    { url: 'wss://nostr.mom', read: true, write: true },
+  ]);
+});
+
+it('starts READING newly published DM inbox relays (so DMs sent there arrive)', async () => {
+  publish.mockResolvedValue([{ url: 'wss://relay.primal.net', ok: true }]);
+  const { result } = await setup();
+  act(() => {
+    result.current.addInbox('wss://nostr.mom');
+  });
+  await act(async () => {
+    await result.current.publishInbox();
+  });
+  expect(mockApplyInbox).toHaveBeenCalledWith('a'.repeat(64), [
+    'wss://relay.damus.io',
+    'wss://nostr.mom',
+  ]);
+});
+
+it('freezes editing while a publish is in flight, so no edit is lost', async () => {
+  let finish!: (v: unknown) => void;
+  publish.mockReturnValue(new Promise((r) => (finish = r)));
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  let pending!: Promise<unknown>;
+  act(() => {
+    pending = result.current.publishNip65();
+  });
+  await waitFor(() => expect(result.current.publishing).toBe('nip65'));
+  act(() => {
+    expect(result.current.addNip65('wss://relay.snort.social')).toBe(false);
+  });
+  await act(async () => {
+    expect(await result.current.publishInbox()).toEqual({ ok: false, error: 'busy' });
+  });
+  await act(async () => {
+    finish([{ url: 'wss://relay.primal.net', ok: true }]);
+    await pending;
+  });
 });

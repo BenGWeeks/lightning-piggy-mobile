@@ -17,11 +17,13 @@ type T = ReturnType<typeof useTranslation>;
 /** URL input + Add button; reports invalid (non-public) URLs inline. */
 function AddRelayInput({
   onAdd,
+  editable,
   testIDPrefix,
   styles,
   t,
 }: {
   onAdd: (url: string) => boolean;
+  editable: boolean;
   testIDPrefix: string;
   styles: PublishedRelayListsSectionStyles;
   t: T;
@@ -53,13 +55,16 @@ function AddRelayInput({
           autoCorrect={false}
           keyboardType="url"
           onSubmitEditing={submit}
+          editable={editable}
           testID={`${testIDPrefix}-add-input`}
           accessibilityLabel={t('publishedRelays.addUrlLabel')}
         />
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.addButton, !editable && styles.publishButtonDisabled]}
           onPress={submit}
+          disabled={!editable}
           testID={`${testIDPrefix}-add-button`}
+          accessibilityState={{ disabled: !editable }}
           accessibilityRole="button"
           accessibilityLabel={t('publishedRelays.addLabel')}
         >
@@ -173,11 +178,16 @@ export default function PublishedRelayListsSection() {
 
   const pill = (on: boolean, label: string, onPress: () => void, testID: string) => (
     <TouchableOpacity
-      style={[styles.pill, on && styles.pillOn]}
+      style={[
+        styles.pill,
+        on && styles.pillOn,
+        !editor.nip65Editable && styles.publishButtonDisabled,
+      ]}
       onPress={onPress}
+      disabled={!editor.nip65Editable}
       testID={testID}
       accessibilityRole="switch"
-      accessibilityState={{ checked: on }}
+      accessibilityState={{ checked: on, disabled: !editor.nip65Editable }}
       accessibilityLabel={label}
       hitSlop={6}
     >
@@ -185,20 +195,24 @@ export default function PublishedRelayListsSection() {
     </TouchableOpacity>
   );
 
-  const removeButton = (url: string, testID: string) => (
-    <TouchableOpacity
-      style={styles.removeButton}
-      onPress={() =>
-        testID.startsWith('nip65') ? editor.removeNip65(url) : editor.removeInbox(url)
-      }
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={t('publishedRelays.removeLabel', { url })}
-      hitSlop={8}
-    >
-      <XIcon size={16} color={colors.white} />
-    </TouchableOpacity>
-  );
+  const removeButton = (url: string, testID: string) => {
+    const editable = testID.startsWith('nip65') ? editor.nip65Editable : editor.inboxEditable;
+    return (
+      <TouchableOpacity
+        style={[styles.removeButton, !editable && styles.publishButtonDisabled]}
+        disabled={!editable}
+        onPress={() =>
+          testID.startsWith('nip65') ? editor.removeNip65(url) : editor.removeInbox(url)
+        }
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={t('publishedRelays.removeLabel', { url })}
+        hitSlop={8}
+      >
+        <XIcon size={16} color={colors.white} />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View testID="published-relay-lists">
@@ -242,7 +256,13 @@ export default function PublishedRelayListsSection() {
           </View>
         ))}
       </View>
-      <AddRelayInput onAdd={editor.addNip65} testIDPrefix="nip65" styles={styles} t={t} />
+      <AddRelayInput
+        onAdd={editor.addNip65}
+        editable={editor.nip65Editable}
+        testIDPrefix="nip65"
+        styles={styles}
+        t={t}
+      />
       <Text style={shared.fieldHint}>{t('publishedRelays.nip65Hint')}</Text>
       <PublishButton
         onPress={() => confirmPublish('nip65')}
@@ -275,11 +295,17 @@ export default function PublishedRelayListsSection() {
           </View>
         ))}
       </View>
-      <AddRelayInput onAdd={editor.addInbox} testIDPrefix="inbox" styles={styles} t={t} />
+      <AddRelayInput
+        onAdd={editor.addInbox}
+        editable={editor.inboxEditable}
+        testIDPrefix="inbox"
+        styles={styles}
+        t={t}
+      />
       <Text style={shared.fieldHint}>{t('publishedRelays.inboxHint')}</Text>
       <PublishButton
         onPress={() => confirmPublish('inbox')}
-        disabled={!editor.inboxDirty}
+        disabled={!editor.inboxDirty || editor.inboxLoading}
         busy={editor.publishing === 'inbox'}
         testID="inbox-publish"
         styles={styles}

@@ -14,16 +14,38 @@ export interface RelayPublishResult {
 export async function fetchDmInboxRelays(
   pubkey: string,
   relays: string[],
+  opts?: { onLatest?: (list: string[]) => void },
 ): Promise<string[] | null> {
   try {
     return await fetchSingleLatest<string[]>(
       { kinds: [10050], authors: [pubkey] } as Filter,
       [...new Set([...relays, ...RELAY_LIST_INDEXERS])],
       dmInboxRelaysFromTags,
+      { onLatest: opts?.onLatest },
     );
   } catch {
     return null;
   }
+}
+
+/**
+ * The NEWEST version of a replaceable list, not merely the first relay's reply:
+ * `fetchSingleLatest` resolves on the first event and reports a strictly newer
+ * one via `onLatest` when its ~3 s keep-open window closes, so wait that out.
+ * Use before letting the user edit — a stale baseline would overwrite a newer
+ * list set in another client.
+ */
+export async function fetchNewest<T>(
+  start: (onLatest: (value: T) => void) => Promise<T | null>,
+  windowMs = 3_500,
+): Promise<T | null> {
+  let newer: T | null = null;
+  const first = await start((value) => {
+    newer = value;
+  });
+  if (first === null) return null;
+  await new Promise((resolve) => setTimeout(resolve, windowMs));
+  return newer ?? first;
 }
 
 /**

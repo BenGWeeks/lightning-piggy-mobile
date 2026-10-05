@@ -101,6 +101,10 @@ interface NostrContextType extends UseReactionActionsResult {
   nip65Relays: RelayConfig[];
   /** Adopt (and cache) a relay list the user just published in-app. */
   applyPublishedRelayList: (pk: string, list: RelayConfig[]) => Promise<void>;
+  /** The user's own NIP-17 DM inbox relays (kind 10050); read for DMs. */
+  dmInboxRelays: string[];
+  /** Adopt (and cache) DM inbox relays the user just published in-app. */
+  applyPublishedDmInbox: (pk: string, list: string[]) => Promise<void>;
   /**
    * Add or update a user-managed relay. Replaces any existing entry
    * with the same URL (so toggling read/write on an existing user
@@ -326,8 +330,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // (#202). The exposed `relays` memo is the merge — defaults +
   // NIP-65 + user overrides — so every existing read/write filter
   // call site picks up user-added relays without further plumbing.
-  const { nip65Relays, setNip65Relays, loadRelaysFromCache, loadRelays, applyPublishedRelayList } =
-    useNip65Relays();
+  const {
+    nip65Relays,
+    dmInboxRelays,
+    resetRelayLists,
+    applyPublishedDmInbox,
+    loadRelaysFromCache,
+    loadRelays,
+    applyPublishedRelayList,
+  } = useNip65Relays();
   const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
   const relays = useMemo(
     () => mergeRelays({ nip65: nip65Relays, user: userRelays }),
@@ -416,8 +427,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getReadRelays = useCallback((): string[] => {
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-  }, [relays]);
+    const base = readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+    // Others deliver NIP-17 DMs to the user's own DM inbox relays — read them too.
+    return [...new Set([...base, ...dmInboxRelays])];
+  }, [relays, dmInboxRelays]);
 
   // DM inbox + conversation cluster (#703). State, refs, callbacks, and
   // the live-DM subscription effect for the NIP-04/NIP-17 inbox live in
@@ -1229,7 +1242,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPubkey(null);
     setProfile(null);
     setContacts([]);
-    setNip65Relays([]);
+    resetRelayLists();
     // NOTE: deliberately NOT clearing user-added relays on logout —
     // they're an in-app preference, not per-account secret material.
     // The next account login will see the same overrides. To wipe
@@ -1244,7 +1257,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     nostrService.cleanup();
   }, [
-    setNip65Relays,
+    resetRelayLists,
     pubkey,
     loadContactsFromCache,
     loadProfileFromCache,
@@ -1295,7 +1308,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Reset the NIP-65 slice only — user-added overrides are an
       // in-app preference and shared across identities (matches the
       // logout behaviour).
-      setNip65Relays([]);
+      resetRelayLists();
       setDmInbox([]);
 
       // Promote the target identity to "active" everywhere — write the legacy
@@ -1334,7 +1347,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [
       pubkey,
-      setNip65Relays,
+      resetRelayLists,
       loadContactsFromCache,
       hydrateDmInboxFromCache,
       loadRelays,
@@ -1613,6 +1626,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       userRelays,
       nip65Relays,
       applyPublishedRelayList,
+      dmInboxRelays,
+      applyPublishedDmInbox,
       addUserRelay,
       removeUserRelay,
       signerType,
@@ -1652,6 +1667,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       userRelays,
       nip65Relays,
       applyPublishedRelayList,
+      dmInboxRelays,
+      applyPublishedDmInbox,
       addUserRelay,
       removeUserRelay,
       signerType,

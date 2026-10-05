@@ -2303,7 +2303,8 @@
       "empty": "Add at least one relay first.",
       "no-write": "Keep at least one relay with Write turned on.",
       "not-signed": "The list wasn't signed. Check your signer and try again.",
-      "none-accepted": "No relay accepted it. Check your connection and try again."
+      "none-accepted": "No relay accepted it. Check your connection and try again.",
+      "busy": "Another publish is still in progress."
     },
     "notPublishable": "Not a public relay: dropped when you publish"
   }
