@@ -1489,6 +1489,7 @@
     "receivedTitle": "Платіж отримано!",
     "sentTitle": "Платіж надіслано!",
     "onchainHint": "On-chain · очікується 1 підтвердження",
+    "onchainSendHint": "On-chain · зазвичай підтверджується за 10–60 хв",
     "amountFromRecipient": "{{amount}} від {{name}}",
     "amountToRecipient": "{{amount}} до {{name}}",
     "connectionLostTitle": "Зʼєднання втрачено",

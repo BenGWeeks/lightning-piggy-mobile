@@ -68,6 +68,7 @@ import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import { getDefaultOnchainWalletId } from '../services/walletStorageService';
+import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 
 interface Props {
   visible: boolean;
@@ -82,7 +83,14 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createBoltzReceiveSheetStyles(colors), [colors]);
-  const { wallets, makeInvoiceForWallet, refreshBalanceForWallet, currency } = useWallet();
+  const {
+    wallets,
+    makeInvoiceForWallet,
+    refreshBalanceForWallet,
+    fetchTransactionsForWallet,
+    addPendingTransaction,
+    currency,
+  } = useWallet();
   const { btcPrice } = useWalletLive();
 
   const wallet = useMemo(() => wallets.find((w) => w.id === walletId) ?? null, [wallets, walletId]);
@@ -106,6 +114,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Session token guards stale callbacks when the user closes + reopens.
   const sessionRef = useRef(0);
+  // Swap id whose pending Home row has been added — one row per swap.
+  const placeholderSwapIdRef = useRef<string | null>(null);
 
   // A swap "flow" is in flight once we leave the amount step to create the
   // swap and until it's explicitly closed (creating the LN invoice / Boltz
@@ -207,6 +217,26 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
           if (cleanup.cancelled || sessionRef.current !== session) return;
           console.log(`[BoltzReceive] phase ${next} (raw=${raw})`);
           setPhase(next);
+          // Once the sender's on-chain payment is seen, show an incoming
+          // "Boltz swap in progress" row so the swap stays visible on Home
+          // after the sheet closes. Not added earlier: an address nobody pays
+          // must not leave a phantom row. Superseded by the tagged Lightning
+          // leg (recorded at creation) or dropped once resolved.
+          if (
+            (next === 'detected' || next === 'paying-invoice') &&
+            walletId &&
+            placeholderSwapIdRef.current !== swap.id
+          ) {
+            placeholderSwapIdRef.current = swap.id;
+            const { incoming } = buildSwapPlaceholders({
+              swapId: swap.id,
+              swapType: 'submarine',
+              sentSats: swap.expectedAmount,
+              receivedSats: amountSats,
+              nowSeconds: Math.floor(Date.now() / 1000),
+            });
+            addPendingTransaction(walletId, incoming);
+          }
         },
         // External-sender swap — they may take a while to actually
         // broadcast. 24h is well within the Boltz timeout (currently
@@ -216,12 +246,19 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
       )
       .then(async (result) => {
         if (cleanup.cancelled || sessionRef.current !== session) return;
+        // Final outcome known: the placeholder row goes on the next refresh.
+        if (result.phase === 'complete' || result.phase === 'failed') {
+          markSwapPlaceholdersResolved(swap.id);
+        }
         if (result.phase === 'complete') {
-          // Refresh the wallet balance so the user sees the credit
-          // immediately when they bounce back into the app.
+          // Refresh the wallet balance + list so the user sees the credit
+          // (and the settled row replaces the placeholder) immediately.
           if (walletId) {
             try {
-              await refreshBalanceForWallet(walletId);
+              await Promise.all([
+                refreshBalanceForWallet(walletId),
+                fetchTransactionsForWallet(walletId),
+              ]);
             } catch {}
           }
           await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
@@ -369,6 +406,9 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
           { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
         );
         await swapRecoveryService.registerPendingSubmarineSwap(created.id);
+        // Tag the incoming Lightning leg so it badges as a Boltz swap and
+        // replaces the pending row even if the sheet is closed first (#895).
+        await swapRecoveryService.recordSubmarineSwapLegs(null, invoice, created.id);
 
         setSwap(created);
         setPhase('awaiting-payment');
