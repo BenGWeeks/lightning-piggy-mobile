@@ -35,9 +35,36 @@ export function fetchMarketListings(
     // newest revision of its listing: record it as a deletion marker so the
     // reducer's newest-revision rule keeps older revisions hidden.
     const suppressions = new Map<string, Event>();
+    // A bulk deletion over the tag limit still withdraws listings: keep a
+    // trimmed copy with only the e / own-listing a tags, inside the budget.
+    const suppressOversizedDeletion = (event: Event) => {
+      if (suppressions.has(event.id) || events.size + suppressions.size >= MAX_EVENTS) return;
+      const tags = event.tags
+        .filter(
+          (t) =>
+            (t[0] === 'e' && /^[0-9a-f]{64}$/.test(t[1] ?? '')) ||
+            (t[0] === 'a' &&
+              /^(30018|30402):/.test(t[1] ?? '') &&
+              t[1]?.split(':')[1] === event.pubkey),
+        )
+        .slice(0, MAX_EVENTS)
+        .map((t) => [t[0], t[1]]);
+      if (tags.length === 0) return;
+      try {
+        if (!verifyEvent(event)) return;
+      } catch {
+        return;
+      }
+      suppressions.set(event.id, { ...event, content: '', tags });
+    };
     const suppressOversized = (event: Event) => {
       limited = true;
-      if (![30018, 30402].includes(event.kind) || event.content.length > 262144) return;
+      if (event.content.length > 262144) return;
+      if (event.kind === 5) {
+        suppressOversizedDeletion(event);
+        return;
+      }
+      if (![30018, 30402].includes(event.kind)) return;
       const d = event.tags.find((t) => t[0] === 'd')?.[1];
       // Over-long ids are rejected as listings anyway, so there's nothing to hide.
       if (!d || new TextEncoder().encode(d).length > 255) return;

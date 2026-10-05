@@ -230,3 +230,20 @@ it('bounds oversized-revision markers by the shared event budget', async () => {
   callbacks.oneose();
   expect(await pending).toEqual({ products: [], incomplete: true });
 }, 60000);
+it('honours a bulk deletion with more tags than the per-event limit', async () => {
+  const pending = fetchMarketListings(
+    [author],
+    ['wss://example.com'],
+    new AbortController().signal,
+  );
+  await opened();
+  callbacks.onevent(event);
+  const filler = Array.from({ length: 299 }, (_, i) => ['e', i.toString(16).padStart(64, '0')]);
+  const bulkDelete = finalizeEvent(
+    { kind: 5, created_at: 300, content: '', tags: [...filler, ['e', event.id]] },
+    key,
+  );
+  callbacks.onevent(bulkDelete);
+  callbacks.oneose();
+  expect(await pending).toMatchObject({ products: [], incomplete: true });
+});
