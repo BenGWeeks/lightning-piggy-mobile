@@ -22,9 +22,12 @@ export interface UseConversationLoaderParams {
   isLoggedIn: boolean;
   fetchConversation: (
     otherPubkey: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; protocol?: 'nip04' | 'nip17' },
   ) => Promise<ConversationMessage[]>;
-  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  loadInitialConversation: (
+    otherPubkey: string,
+    protocol?: 'nip04' | 'nip17',
+  ) => Promise<ConversationMessage[]>;
   persistDeliveryStatuses: (
     otherPubkey: string,
     statusById: Record<string, DeliveryStatus>,
@@ -103,7 +106,13 @@ export function useConversationLoader({
       // the preview. The relay fetch below is a background top-up, not a
       // precondition for showing anything. Only show the spinner if BOTH are
       // empty (a true cold open with nothing ingested yet).
-      const initial = filterMessagesByProtocol(await loadInitialConversation(pubkey), protocol);
+      // Per-protocol window (#1118): the store + fetch read only this thread,
+      // so another protocol's newer history can't use up its slice.
+      const storeProtocol = protocol === 'marmot' ? undefined : protocol;
+      const initial = filterMessagesByProtocol(
+        await loadInitialConversation(pubkey, storeProtocol),
+        protocol,
+      );
       if (signal.aborted || !isMountedRef.current) return;
       if (initial.length > 0) {
         setMessages((prev) =>
@@ -115,7 +124,7 @@ export function useConversationLoader({
       }
       try {
         const conv = filterMessagesByProtocol(
-          await fetchConversation(pubkey, { signal }),
+          await fetchConversation(pubkey, { signal, protocol: storeProtocol }),
           protocol,
         );
         // A superseding load (or unmount) aborted this fetch — drop the result

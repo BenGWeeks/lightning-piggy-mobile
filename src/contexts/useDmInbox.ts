@@ -73,13 +73,16 @@ export interface UseDmInboxResult {
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   fetchConversation: (
     otherPubkey: string,
-    opts?: { signal?: AbortSignal },
+    opts?: { signal?: AbortSignal; protocol?: 'nip04' | 'nip17' },
   ) => Promise<ConversationMessage[]>;
   // Read-through (#868, single-sourced in #850): the instant-paint set for a
   // thread open — the SAME encrypted-store rows the inbox preview is built
   // from (the plaintext per-conversation blob is retired). Guarantees the
   // thread is never behind the preview.
-  loadInitialConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  loadInitialConversation: (
+    otherPubkey: string,
+    protocol?: 'nip04' | 'nip17',
+  ) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   persistDeliveryStatuses: (
     otherPubkey: string,
@@ -267,7 +270,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // hook threads in the identity + relay + NIP-04 decrypt dependencies it
   // closes over; the body is unchanged.
   const fetchConversation = useCallback(
-    (otherPubkey: string, opts?: { signal?: AbortSignal }): Promise<ConversationMessage[]> =>
+    (
+      otherPubkey: string,
+      opts?: { signal?: AbortSignal; protocol?: 'nip04' | 'nip17' },
+    ): Promise<ConversationMessage[]> =>
       fetchConversationFor({
         pubkey,
         isLoggedIn,
@@ -276,6 +282,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         decryptNip04ViaSigner,
         otherPubkey,
         signal: opts?.signal,
+        protocol: opts?.protocol,
       }),
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
@@ -288,13 +295,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // — and the rows now carry the optimistic local- sends + delivery ticks the
   // retired plaintext blob used to.
   const loadInitialConversation = useCallback(
-    (otherPubkey: string): Promise<ConversationMessage[]> =>
+    (otherPubkey: string, protocol?: 'nip04' | 'nip17'): Promise<ConversationMessage[]> =>
       loadInitialConversationFor(otherPubkey, {
         getStoredRows: (peer) => {
           if (!pubkey) return Promise.resolve([] as DmMessageRow[]);
           const normalized = peer.trim().toLowerCase();
           if (!/^[0-9a-f]{64}$/.test(normalized)) return Promise.resolve([] as DmMessageRow[]);
-          return getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP });
+          return getConversationMessages(pubkey, normalized, { limit: DM_CONV_CAP, protocol });
         },
       }),
     [pubkey],

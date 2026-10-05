@@ -81,6 +81,16 @@ it('filters live refreshes and defaults missing kinds to NIP-17', async () => {
   expect(fetchConversation).toHaveBeenCalledTimes(2);
 });
 
+it("reads only this thread's protocol from the store and fetch (#1118)", async () => {
+  const { result, fetchConversation, loadInitialConversation } = setup('nip04');
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(loadInitialConversation).toHaveBeenCalledWith(expect.any(String), 'nip04');
+  expect(fetchConversation).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ protocol: 'nip04' }),
+  );
+});
+
 it('does not carry pending rows into a different protocol on route reuse', async () => {
   const { result, rerender } = setup('nip04');
   await waitFor(() => expect(result.current.loading).toBe(false));

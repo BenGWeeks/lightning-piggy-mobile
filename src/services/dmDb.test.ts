@@ -233,6 +233,16 @@ describe('dmDb', () => {
       expect(params).toEqual([OWNER, 'convA', 50]);
     });
 
+    it('filters by protocol before the LIMIT so threads get separate windows (#1118)', async () => {
+      await getConversationMessages(OWNER, 'convA', { limit: 500, protocol: 'nip04' });
+      let [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toMatch(/AND wire_kind = 4 ORDER BY created_at DESC LIMIT \?/);
+      expect(params).toEqual([OWNER, 'convA', 500]);
+      await getConversationMessages(OWNER, 'convA', { limit: 500, protocol: 'nip17' });
+      [sql] = mockExecute.mock.calls[1];
+      expect(sql).toMatch(/AND wire_kind <> 4 ORDER BY created_at DESC LIMIT \?/);
+    });
+
     it('pages backwards with beforeCreatedAt', async () => {
       await getConversationMessages(OWNER, 'convA', { limit: 20, beforeCreatedAt: 150 });
       const [sql, params] = mockExecute.mock.calls[0];

@@ -279,12 +279,16 @@ export async function updateDmDeliveryStatuses(
 export async function getConversationMessages(
   owner: string,
   conversation: string,
-  opts: { limit?: number; beforeCreatedAt?: number } = {},
+  opts: { limit?: number; beforeCreatedAt?: number; protocol?: 'nip04' | 'nip17' } = {},
 ): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
   const limit = opts.limit ?? 50;
   const params: (string | number)[] = [owner, conversation];
   let sql = `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ?`;
+  // Per-protocol thread (#1118): filter BEFORE the LIMIT so one protocol's
+  // newer history can't use up the other thread's whole slice.
+  if (opts.protocol === 'nip04') sql += ` AND wire_kind = 4`;
+  else if (opts.protocol === 'nip17') sql += ` AND wire_kind <> 4`;
   if (opts.beforeCreatedAt != null) {
     sql += ` AND created_at < ?`;
     params.push(opts.beforeCreatedAt);
