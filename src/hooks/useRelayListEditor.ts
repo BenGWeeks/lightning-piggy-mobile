@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import type { RelayConfig } from '../types/nostr';
-import { fetchRelayList } from '../services/nostrService';
 import {
   buildDmInboxEvent,
   buildRelayListEvent,
@@ -14,8 +13,7 @@ import {
   type UnsignedEvent,
 } from '../utils/relayListEvents';
 import {
-  fetchDmInboxRelays,
-  fetchNewest,
+  fetchLatestReplaceable,
   publishToRelays,
   type RelayPublishResult,
 } from '../services/nostrRelayLists';
@@ -60,24 +58,28 @@ export function useRelayListEditor() {
 
   const relayUrls = useMemo(() => relays.map((r) => r.url), [relays]);
   useEffect(() => {
+    // Per identity: drop any draft from the previous account, so one
+    // account's edits can never be signed and published by another.
+    setNip65Dirty(false);
+    setNip65Draft(nip65Relays);
+    setInboxDirty(false);
+    setInboxDraft([]);
+    setInboxBaseline([]);
     if (!pubkey) return;
     let cancelled = false;
     const sources = [...new Set([...relayUrls, ...RELAY_LIST_INDEXERS])];
     setNip65Loading(true);
     setInboxLoading(true);
-    void fetchNewest<RelayConfig[]>((onLatest) =>
-      fetchRelayList(pubkey, sources, { onLatest }),
-    ).then(async (fresh) => {
+    void fetchLatestReplaceable(pubkey, 10002, sources).then(async (event) => {
       if (cancelled) return;
-      if (fresh) await applyPublishedRelayList(pubkey, fresh);
+      if (event) await applyPublishedRelayList(pubkey, relayListFromTags(event.tags));
       if (!cancelled) setNip65Loading(false);
     });
-    void fetchNewest<string[]>((onLatest) =>
-      fetchDmInboxRelays(pubkey, sources, { onLatest }),
-    ).then((list) => {
+    void fetchLatestReplaceable(pubkey, 10050, sources).then((event) => {
       if (cancelled) return;
-      setInboxBaseline(list ?? []);
-      setInboxDraft(list ?? []);
+      const list = event ? dmInboxRelaysFromTags(event.tags) : [];
+      setInboxBaseline(list);
+      setInboxDraft(list);
       setInboxLoading(false);
     });
     return () => {

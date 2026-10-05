@@ -1,7 +1,5 @@
 import type { Event, Filter } from 'nostr-tools';
-import { fetchSingleLatest } from './nostrService';
 import { pool, trackRelays } from './nostrPool';
-import { dmInboxRelaysFromTags, RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 
 export interface RelayPublishResult {
   url: string;
@@ -10,42 +8,38 @@ export interface RelayPublishResult {
   message?: string;
 }
 
-/** The user's published NIP-17 DM inbox relays (kind 10050), or null if none/unreachable. */
-export async function fetchDmInboxRelays(
+/**
+ * The NEWEST version of a replaceable event (e.g. kind 10002 / 10050) across
+ * relays: collect every relay's reply until each finishes (EOSE) or `maxWaitMs`,
+ * then pick the latest by created_at (ties: lowest id, per NIP-01). Unlike a
+ * first-reply fetch, a fast relay holding an old copy can't win — needed
+ * before letting the user edit and republish a list.
+ */
+export async function fetchLatestReplaceable(
   pubkey: string,
+  kind: number,
   relays: string[],
-  opts?: { onLatest?: (list: string[]) => void },
-): Promise<string[] | null> {
+  maxWaitMs = 6_000,
+): Promise<Event | null> {
+  trackRelays(relays);
   try {
-    return await fetchSingleLatest<string[]>(
-      { kinds: [10050], authors: [pubkey] } as Filter,
-      [...new Set([...relays, ...RELAY_LIST_INDEXERS])],
-      dmInboxRelaysFromTags,
-      { onLatest: opts?.onLatest },
-    );
+    const events = await pool.querySync(relays, { kinds: [kind], authors: [pubkey] } as Filter, {
+      maxWait: maxWaitMs,
+    });
+    let best: Event | null = null;
+    for (const e of events) {
+      if (e.pubkey !== pubkey || e.kind !== kind) continue;
+      if (
+        !best ||
+        e.created_at > best.created_at ||
+        (e.created_at === best.created_at && e.id < best.id)
+      )
+        best = e;
+    }
+    return best;
   } catch {
     return null;
   }
-}
-
-/**
- * The NEWEST version of a replaceable list, not merely the first relay's reply:
- * `fetchSingleLatest` resolves on the first event and reports a strictly newer
- * one via `onLatest` when its ~3 s keep-open window closes, so wait that out.
- * Use before letting the user edit — a stale baseline would overwrite a newer
- * list set in another client.
- */
-export async function fetchNewest<T>(
-  start: (onLatest: (value: T) => void) => Promise<T | null>,
-  windowMs = 3_500,
-): Promise<T | null> {
-  let newer: T | null = null;
-  const first = await start((value) => {
-    newer = value;
-  });
-  if (first === null) return null;
-  await new Promise((resolve) => setTimeout(resolve, windowMs));
-  return newer ?? first;
 }
 
 /**

@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { RelayConfig } from '../types/nostr';
-import { fetchDmInboxRelays } from '../services/nostrRelayLists';
+import { fetchLatestReplaceable } from '../services/nostrRelayLists';
+import { dmInboxRelaysFromTags, RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 
 import {
   RELAY_LIST_CACHE_KEY_BASE,
@@ -27,22 +28,32 @@ export function useNip65Relays() {
   // app must READ them too (merged into getReadRelays by NostrContext).
   const [dmInboxRelays, setDmInboxRelays] = useState<string[]>([]);
 
+  // Bumped by resetRelayLists (logout / identity switch): a background load
+  // started for the previous identity must not restore its relays afterwards.
+  const generationRef = useRef(0);
+
   const loadDmInboxRelays = useCallback(async (pk: string) => {
+    const generation = generationRef.current;
+    const current = () => generation === generationRef.current;
     try {
       const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
       const cached = raw ? (JSON.parse(raw) as unknown) : null;
-      if (Array.isArray(cached)) setDmInboxRelays(cached.filter((u) => typeof u === 'string'));
+      if (current() && Array.isArray(cached))
+        setDmInboxRelays(cached.filter((u): u is string => typeof u === 'string'));
     } catch {
       /* corrupt cache — the network read below replaces it */
     }
-    const fresh = await fetchDmInboxRelays(pk, nostrService.DEFAULT_RELAYS);
-    if (fresh) {
-      setDmInboxRelays(fresh);
-      await AsyncStorage.setItem(
-        perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
-        JSON.stringify(fresh),
-      ).catch(() => {});
-    }
+    // The NEWEST published list across relays, not the first reply.
+    const event = await fetchLatestReplaceable(pk, 10050, [
+      ...new Set([...nostrService.DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
+    ]);
+    if (!event || !current()) return;
+    const fresh = dmInboxRelaysFromTags(event.tags);
+    setDmInboxRelays(fresh);
+    await AsyncStorage.setItem(
+      perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk),
+      JSON.stringify(fresh),
+    ).catch(() => {});
   }, []);
 
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
@@ -56,6 +67,7 @@ export function useNip65Relays() {
 
   /** Forget both lists (logout / identity switch). */
   const resetRelayLists = useCallback(() => {
+    generationRef.current += 1;
     setNip65Relays([]);
     setDmInboxRelays([]);
   }, []);

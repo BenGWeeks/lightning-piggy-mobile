@@ -1,18 +1,22 @@
-import { publishToRelays, fetchDmInboxRelays } from './nostrRelayLists';
+import { publishToRelays, fetchLatestReplaceable } from './nostrRelayLists';
 import { pool } from './nostrPool';
-import { fetchSingleLatest } from './nostrService';
 import type { Event } from 'nostr-tools';
 
-jest.mock('./nostrPool', () => ({ pool: { publish: jest.fn() }, trackRelays: jest.fn() }));
-jest.mock('./nostrService', () => ({ fetchSingleLatest: jest.fn() }));
+jest.mock('./nostrPool', () => ({
+  pool: { publish: jest.fn(), querySync: jest.fn() },
+  trackRelays: jest.fn(),
+}));
 const publish = pool.publish as jest.Mock;
-const fetchLatest = fetchSingleLatest as jest.Mock;
+const query = pool.querySync as jest.Mock;
 const event = { id: 'e', kind: 10002 } as unknown as Event;
-
-beforeEach(() => jest.useFakeTimers());
-afterEach(() => jest.useRealTimers());
+const PK = 'a'.repeat(64);
+const ev = (id: string, created_at: number, over: Partial<Event> = {}) =>
+  ({ id, created_at, pubkey: PK, kind: 10002, tags: [], content: '', sig: '', ...over }) as Event;
 
 describe('publishToRelays', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
   it('reports per-relay acceptance, rejection reasons and timeouts', async () => {
     publish.mockReturnValue([
       Promise.resolve('ok'),
@@ -29,17 +33,31 @@ describe('publishToRelays', () => {
   });
 });
 
-describe('fetchDmInboxRelays', () => {
-  it('queries kind 10050 on the given relays plus the indexers', async () => {
-    fetchLatest.mockResolvedValue(['wss://relay.primal.net']);
-    expect(await fetchDmInboxRelays('pk', ['wss://nos.lol'])).toEqual(['wss://relay.primal.net']);
-    const [filter, relays] = fetchLatest.mock.calls[0];
-    expect(filter).toEqual({ kinds: [10050], authors: ['pk'] });
-    expect(relays).toEqual(['wss://nos.lol', 'wss://purplepag.es', 'wss://user.kindpag.es']);
+describe('fetchLatestReplaceable', () => {
+  it('returns the NEWEST version even when an older copy arrives first', async () => {
+    query.mockResolvedValue([ev('old', 100), ev('new', 300), ev('mid', 200)]);
+    expect((await fetchLatestReplaceable(PK, 10002, ['wss://a']))?.id).toBe('new');
+    expect(query.mock.calls[0][1]).toEqual({ kinds: [10002], authors: [PK] });
   });
 
-  it('returns null rather than throwing when relays are unreachable', async () => {
-    fetchLatest.mockRejectedValue(new Error('offline'));
-    expect(await fetchDmInboxRelays('pk', [])).toBeNull();
+  it("ignores other authors' and other kinds' events", async () => {
+    query.mockResolvedValue([
+      ev('mine', 100),
+      ev('forged', 999, { pubkey: 'b'.repeat(64) }),
+      ev('wrongkind', 999, { kind: 1 }),
+    ]);
+    expect((await fetchLatestReplaceable(PK, 10002, ['wss://a']))?.id).toBe('mine');
+  });
+
+  it('breaks a created_at tie by lowest id (NIP-01)', async () => {
+    query.mockResolvedValue([ev('bbb', 100), ev('aaa', 100)]);
+    expect((await fetchLatestReplaceable(PK, 10002, ['wss://a']))?.id).toBe('aaa');
+  });
+
+  it('returns null when nothing is found or the query fails', async () => {
+    query.mockResolvedValue([]);
+    expect(await fetchLatestReplaceable(PK, 10050, ['wss://a'])).toBeNull();
+    query.mockRejectedValue(new Error('offline'));
+    expect(await fetchLatestReplaceable(PK, 10050, ['wss://a'])).toBeNull();
   });
 });

@@ -1,7 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useRelayListEditor } from './useRelayListEditor';
-import { fetchDmInboxRelays, publishToRelays } from '../services/nostrRelayLists';
-import { fetchRelayList } from '../services/nostrService';
+import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
 
 const mockSign = jest.fn();
 const mockApply = jest.fn().mockResolvedValue(undefined);
@@ -11,9 +10,10 @@ const PUBLISHED = [
   { url: 'wss://nostr.land', read: true, write: true },
 ];
 let mockNip65: typeof PUBLISHED = PUBLISHED;
+let mockPubkey = 'a'.repeat(64);
 jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({
-    pubkey: 'a'.repeat(64),
+    pubkey: mockPubkey,
     relays: PUBLISHED,
     nip65Relays: mockNip65,
     signEvent: mockSign,
@@ -21,22 +21,43 @@ jest.mock('../contexts/NostrContext', () => ({
     applyPublishedDmInbox: mockApplyInbox,
   }),
 }));
-jest.mock('../services/nostrService', () => ({ fetchRelayList: jest.fn() }));
 jest.mock('../services/nostrRelayLists', () => ({
-  fetchDmInboxRelays: jest.fn(),
+  fetchLatestReplaceable: jest.fn(),
   publishToRelays: jest.fn(),
-  // Production waits out the relay keep-open window; tests take the result directly.
-  fetchNewest: (start: (onLatest: () => void) => Promise<unknown>) => start(() => {}),
 }));
-const fetchInbox = fetchDmInboxRelays as jest.Mock;
-const fetchFresh = fetchRelayList as jest.Mock;
+const fetchLatest = fetchLatestReplaceable as jest.Mock;
+/** Network state per kind: 10002 → relay rows (as r tags), 10050 → inbox URLs. */
+let net10002: { url: string; read: boolean; write: boolean }[] | null = null;
+let net10050: string[] | null = ['wss://relay.damus.io'];
+const asEvent = (kind: number, tags: string[][]) => ({ kind, tags, created_at: 1 });
+function mockNetwork() {
+  fetchLatest.mockImplementation(async (_pk: string, kind: number) => {
+    if (kind === 10002)
+      return net10002
+        ? asEvent(
+            10002,
+            net10002.map((r) =>
+              r.read && r.write ? ['r', r.url] : ['r', r.url, r.read ? 'read' : 'write'],
+            ),
+          )
+        : null;
+    return net10050
+      ? asEvent(
+          10050,
+          net10050.map((u) => ['relay', u]),
+        )
+      : null;
+  });
+}
 const publish = publishToRelays as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockNip65 = PUBLISHED;
-  fetchInbox.mockResolvedValue(['wss://relay.damus.io']);
-  fetchFresh.mockResolvedValue(null); // network unchanged / unreachable → keep the cached list
+  mockPubkey = 'a'.repeat(64);
+  net10002 = null; // network unchanged / unreachable → keep the cached list
+  net10050 = ['wss://relay.damus.io'];
+  mockNetwork();
   mockSign.mockImplementation(async (e: object) => ({
     ...e,
     id: 'id',
@@ -157,7 +178,7 @@ it('loads the CURRENT published list before editing, so a stale cache is never p
     { url: 'wss://relay.primal.net', read: true, write: true },
     { url: 'wss://nostr.mom', read: true, write: true },
   ];
-  fetchFresh.mockResolvedValue(fresh);
+  net10002 = fresh;
   const h = renderHook(() => useRelayListEditor());
   expect(h.result.current.nip65Loading).toBe(true);
   await act(async () => {
@@ -171,7 +192,9 @@ it('loads the CURRENT published list before editing, so a stale cache is never p
 
 it('blocks edits while the current lists are still loading', async () => {
   let release!: (v: null) => void;
-  fetchFresh.mockReturnValue(new Promise((r) => (release = r)));
+  fetchLatest.mockImplementation((_pk: string, kind: number) =>
+    kind === 10002 ? new Promise((r) => (release = r)) : Promise.resolve(null),
+  );
   const h = renderHook(() => useRelayListEditor());
   expect(h.result.current.nip65Editable).toBe(false);
   act(() => {
@@ -240,4 +263,17 @@ it('freezes editing while a publish is in flight, so no edit is lost', async () 
     finish([{ url: 'wss://relay.primal.net', ok: true }]);
     await pending;
   });
+});
+
+it("drops the previous account's draft when the identity changes", async () => {
+  const h = await setup();
+  act(() => {
+    h.result.current.addNip65('wss://nostr.mom');
+  });
+  expect(h.result.current.nip65Dirty).toBe(true);
+  mockPubkey = 'c'.repeat(64);
+  h.rerender({});
+  await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
+  expect(h.result.current.nip65Dirty).toBe(false);
+  expect(h.result.current.nip65Draft.some((r) => r.url === 'wss://nostr.mom')).toBe(false);
 });
