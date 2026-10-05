@@ -150,6 +150,20 @@ export function useRelayListEditor() {
         // A lookup or local adoption failed; editing still proceeds from the
         // known lists rather than leaving the screen stuck.
         console.warn('[RelayListEditor] loading current lists failed:', e);
+        if (!cancelled) {
+          // Never edit from an empty inbox list (publishing it would drop the
+          // user's real inbox relays): start from the known one, and from the
+          // stored baselines so the next publish still supersedes them.
+          setInboxBaseline(knownInboxRef.current);
+          setInboxDraft(knownInboxRef.current);
+          for (const kind of [10002, 10050] as const) {
+            const stored = await readAdoptedCreatedAt(pubkey, kind);
+            latestCreatedAtRef.current[kind] = Math.max(
+              latestCreatedAtRef.current[kind] ?? 0,
+              stored,
+            );
+          }
+        }
       } finally {
         // Always finish loading (even if a cache write or lookup threw), so
         // the editor never stays stuck.

@@ -550,3 +550,12 @@ it("doesn't restore the previous account's draft when the switch lands during ad
   await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
   expect(h.result.current.nip65Draft.some((r) => r.url === 'wss://nostr.mom')).toBe(false);
 });
+
+it('starts the inbox draft from the known list when loading fails (never publishes it empty)', async () => {
+  mockInbox = ['wss://relay.primal.net', 'wss://nostr.mom'];
+  mockApply.mockRejectedValueOnce(new Error('disk full'));
+  net10002 = [{ url: 'wss://relay.primal.net', read: true, write: true }];
+  const h = renderHook(() => useRelayListEditor());
+  await waitFor(() => expect(h.result.current.inboxLoading).toBe(false));
+  expect(h.result.current.inboxDraft).toEqual(['wss://relay.primal.net', 'wss://nostr.mom']);
+});
