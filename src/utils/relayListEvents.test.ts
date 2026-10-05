@@ -39,6 +39,8 @@ describe('relay list events', () => {
       'ws://relay.example',
       'wss://192.168.1.89',
       'wss://box.local',
+      'wss://localhost.',
+      'wss://box.local.',
       'wss://[::1]',
       'wss://[fd00::1]',
       'wss://[fe80::1]',

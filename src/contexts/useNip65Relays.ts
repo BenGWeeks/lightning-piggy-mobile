@@ -87,13 +87,24 @@ export function useNip65Relays() {
     [adoptDmInbox],
   );
 
-  /** Adopt DM inbox relays the user just published (or the editor found). */
+  /** Adopt DM inbox relays the user just published (or the editor found).
+   * Refuses a list older than the one already adopted (returns false), so a
+   * stale relay copy can never replace a newer list. */
   const applyPublishedDmInbox = useCallback(
-    async (pk: string, list: string[], createdAt?: number) => {
+    async (pk: string, list: string[], createdAt?: number): Promise<boolean> => {
+      if (createdAt) {
+        const adoptedAt = Number(
+          (await AsyncStorage.getItem(perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk)).catch(
+            () => null,
+          )) ?? 0,
+        );
+        if (createdAt < adoptedAt) return false;
+      }
       // The newest list; invalidate any in-flight load that could still land
       // an older copy on top of it.
       generationRef.current += 1;
       await adoptDmInbox(pk, list, createdAt);
+      return true;
     },
     [adoptDmInbox],
   );

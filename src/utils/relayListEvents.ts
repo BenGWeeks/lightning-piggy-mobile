@@ -35,7 +35,8 @@ function mappedIPv4(v6: string): string | null {
 export function isPublishableRelayUrl(url: string): boolean {
   try {
     const u = new URL(norm(url));
-    const host = u.hostname.toLowerCase();
+    // Strip a terminal DNS dot ("localhost.") so it can't bypass the checks.
+    const host = u.hostname.toLowerCase().replace(/\.$/, '');
     if (u.protocol !== 'wss:' || !host) return false;
     if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
       return false;

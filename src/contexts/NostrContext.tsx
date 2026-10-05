@@ -104,7 +104,7 @@ interface NostrContextType extends UseReactionActionsResult {
   /** The user's own NIP-17 DM inbox relays (kind 10050); read for DMs. */
   dmInboxRelays: string[];
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
-  applyPublishedDmInbox: (pk: string, list: string[], createdAt?: number) => Promise<void>;
+  applyPublishedDmInbox: (pk: string, list: string[], createdAt?: number) => Promise<boolean>;
   /**
    * Add or update a user-managed relay. Replaces any existing entry
    * with the same URL (so toggling read/write on an existing user

@@ -185,15 +185,32 @@ it('never replaces a newer cached inbox list with an older relay copy', async ()
 });
 
 it('adopts lists in memory even when the cache write fails', async () => {
-  const spy = jest.spyOn(AsyncStorage, 'setItem').mockRejectedValue(new Error('disk full'));
+  const original = AsyncStorage.setItem;
+  (AsyncStorage as { setItem: unknown }).setItem = jest
+    .fn()
+    .mockRejectedValue(new Error('disk full'));
+  try {
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 1);
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://nostr.mom', read: true, write: true },
+      ]);
+    });
+    expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+    expect(result.current.nip65Relays).toHaveLength(1);
+  } finally {
+    (AsyncStorage as { setItem: unknown }).setItem = original;
+  }
+});
+
+it('refuses to adopt an inbox list older than the one already adopted', async () => {
   const { result } = renderHook(() => useNip65Relays());
   await act(async () => {
-    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom'], 1);
-    await result.current.applyPublishedRelayList(PK, [
-      { url: 'wss://nostr.mom', read: true, write: true },
-    ]);
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://new.example'], 500)).toBe(true);
   });
-  expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
-  expect(result.current.nip65Relays).toHaveLength(1);
-  spy.mockRestore();
+  await act(async () => {
+    expect(await result.current.applyPublishedDmInbox(PK, ['wss://old.example'], 400)).toBe(false);
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://new.example']);
 });

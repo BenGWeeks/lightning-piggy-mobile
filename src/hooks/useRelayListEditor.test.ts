@@ -4,7 +4,7 @@ import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayL
 
 const mockSign = jest.fn();
 const mockApply = jest.fn().mockResolvedValue(undefined);
-const mockApplyInbox = jest.fn().mockResolvedValue(undefined);
+const mockApplyInbox = jest.fn().mockResolvedValue(true);
 const PUBLISHED = [
   { url: 'wss://relay.primal.net', read: true, write: true },
   { url: 'wss://nostr.land', read: true, write: true },
@@ -64,6 +64,7 @@ const publish = publishToRelays as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockApplyInbox.mockResolvedValue(true);
   mockNip65 = PUBLISHED;
   mockPubkey = 'a'.repeat(64);
   mockInbox = [];
@@ -449,4 +450,15 @@ it("does not carry one account's list timestamp into another's publish", async (
   });
   const signedAt = mockSign.mock.calls.at(-1)?.[0].created_at;
   expect(signedAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 5);
+});
+
+it('keeps the known inbox list when the discovered copy is older (never restores stale relays)', async () => {
+  mockInbox = ['wss://new-inbox.example'];
+  net10050 = ['wss://old-inbox.example'];
+  mockApplyInbox.mockResolvedValue(false); // the app refuses the older copy
+  const { result } = await setup();
+  expect(result.current.inboxDraft).toEqual(['wss://new-inbox.example']);
+  // ...and the lookup searched the known inbox relays themselves.
+  const inboxCall = fetchLatest.mock.calls.find((c) => c[1] === 10050);
+  expect(inboxCall?.[2]).toContain('wss://new-inbox.example');
 });
