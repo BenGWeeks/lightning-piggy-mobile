@@ -67,9 +67,11 @@ const AccountScreenLayout: React.FC<Props> = ({
   return (
     <View style={styles.container}>
       <BrandGradientBackground />
+      {/* Android: edge-to-edge means the window doesn't resize for the
+          keyboard, so shrink the scroll area or bottom inputs stay hidden. */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <Image
           source={require('../../../assets/images/nostrich.png')}
