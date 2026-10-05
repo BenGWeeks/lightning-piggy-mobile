@@ -7,7 +7,7 @@ import Toast from '../components/BrandedToast';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { fireNotification } from '../services/notificationService';
-import { resolveRefundWalletId } from './refundDestination';
+import { resolveRefundDestination } from './refundDestination';
 import type { PersistedSubmarineSwap } from '../services/swapRecoveryService';
 
 jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
@@ -25,7 +25,7 @@ jest.mock('../services/swapRecoveryService', () => ({
 }));
 jest.mock('expo-secure-store', () => ({ deleteItemAsync: jest.fn() }));
 jest.mock('../services/notificationService', () => ({ fireNotification: jest.fn() }));
-jest.mock('./refundDestination', () => ({ resolveRefundWalletId: jest.fn() }));
+jest.mock('./refundDestination', () => ({ resolveRefundDestination: jest.fn() }));
 jest.mock('./swapSupportText', () => ({
   swapSupportHint: jest.fn().mockResolvedValue("Contact your swap server's operator with this ID."),
 }));
@@ -33,7 +33,8 @@ jest.mock('./swapSupportText', () => ({
 const alert = Alert.alert as jest.Mock;
 const toast = Toast.show as jest.Mock;
 const notify = fireNotification as jest.Mock;
-const resolveWallet = resolveRefundWalletId as jest.Mock;
+const resolveWallet = resolveRefundDestination as jest.Mock;
+const wallet = (walletId: string, alias = 'Savings') => ({ kind: 'wallet', walletId, alias });
 const lockup = boltzService.getSubmarineSwapLockup as jest.Mock;
 const nextAddress = onchainService.getNextReceiveAddress as jest.Mock;
 const height = onchainService.getBlockHeight as jest.Mock;
@@ -62,28 +63,29 @@ beforeEach(() => {
 });
 
 it('refunds into a wallet chosen now when none was recorded at swap creation', async () => {
-  resolveWallet.mockResolvedValue('chain-default');
+  resolveWallet.mockResolvedValue(wallet('chain-default', 'Savings'));
   await recoverSubmarineRefund(swap({ sourceWalletId: undefined, notifiedUnrecoverable: true }));
-  expect(resolveWallet).toHaveBeenCalledWith(undefined);
   expect(nextAddress).toHaveBeenCalledWith('chain-default');
   expect(alert.mock.calls[0][0]).toBe('Swap Failed — Refund Available');
+  // Names the destination so the user can see where it goes and decline.
+  expect(alert.mock.calls[0][1]).toMatch(/back to "Savings"/);
 });
 
 it('asks once per session for an on-chain wallet when there is none, via OS notification too', async () => {
-  resolveWallet.mockResolvedValue(null);
+  resolveWallet.mockResolvedValue({ kind: 'no-wallet' });
   const s = swap();
   await recoverSubmarineRefund(s);
   await recoverSubmarineRefund(s);
   expect(notify).toHaveBeenCalledTimes(1);
   expect(notify.mock.calls[0][0]).toMatchObject({
-    kind: 'payment',
+    kind: 'swap',
     title: 'Add an on-chain wallet for your refund',
   });
   expect(lockup).not.toHaveBeenCalled();
 });
 
 it('explains a pre-timeout wait once instead of offering a Refund that would be rejected', async () => {
-  resolveWallet.mockResolvedValue('chain-a');
+  resolveWallet.mockResolvedValue(wallet('chain-a'));
   height.mockResolvedValue(969_987); // 956 blocks before timeout
   const s = swap();
   await recoverSubmarineRefund(s);
@@ -98,4 +100,12 @@ it('points an unrecoverable swap at the right support contact and notifies the O
   expect(toast.mock.calls[0][0].text2).toMatch(/swap server's operator/);
   expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Swap needs attention' }));
   expect(resolveWallet).not.toHaveBeenCalled();
+});
+
+it("does nothing for another identity's swap — never redirects its refund", async () => {
+  resolveWallet.mockResolvedValue({ kind: 'other-identity' });
+  await recoverSubmarineRefund(swap());
+  expect(alert).not.toHaveBeenCalled();
+  expect(notify).not.toHaveBeenCalled();
+  expect(nextAddress).not.toHaveBeenCalled();
 });

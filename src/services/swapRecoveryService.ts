@@ -474,6 +474,9 @@ export interface PersistedSubmarineSwap {
   timeoutBlockHeight: number;
   swapTree?: unknown;
   sourceWalletId?: string;
+  /** Identity that created the swap; refunds never cross identities (#1124).
+   *  Absent on records created before this field existed. */
+  ownerPubkey?: string;
   createdAt?: number;
   notFoundCount?: number;
   /** Set once we've surfaced the funded-but-unrecoverable "needs attention"
@@ -932,7 +935,7 @@ async function recoverSubmarineSwaps(): Promise<void> {
             position: 'top',
             visibilityTime: 12000,
           });
-          void fireNotification({ kind: 'payment', title: 'Swap needs attention', body });
+          void fireNotification({ kind: 'swap', title: 'Swap needs attention', body });
           await SecureStore.setItemAsync(
             `submarine_swap_${swapId}`,
             JSON.stringify({ ...swap, notFoundCount: undefined, notifiedUnrecoverable: true }),

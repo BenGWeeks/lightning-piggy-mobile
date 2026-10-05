@@ -26,6 +26,7 @@ import {
   fireMessageNotification,
   firePaymentNotification,
   fireCacheNotification,
+  fireNotification,
   setLockScreenContentEnabled,
   __resetForTests,
 } from './notificationService';
@@ -231,6 +232,17 @@ describe('fireCacheNotification', () => {
     // The coord still rides in data for the tap router to pick up on
     // unlock — only the human-readable title/body is redacted.
     expect(content?.data).toMatchObject({ kind: 'cache', cacheCoord: '37516:abc:my-cache' });
+  });
+
+  it('redacts a swap-attention alert as "Action needed", never "Payment received" (#1124)', async () => {
+    await fireNotification({
+      kind: 'swap',
+      title: 'Swap needs attention',
+      body: 'A pending swap (5f3zBIcW…) with on-chain funds…',
+    });
+    const content = lastScheduledContent();
+    expect(content?.title).toBe('Action needed');
+    expect(content?.body).toBe('Open Lightning Piggy for details');
   });
 
   it('uses the real title/body once the user opts in', async () => {

@@ -67,7 +67,7 @@ import AmountEntryScreen from './AmountEntryScreen';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
-import { getDefaultOnchainWalletId } from '../services/walletStorageService';
+import { getActivePubkey, getDefaultOnchainWalletId } from '../services/walletStorageService';
 import { buildSwapPlaceholders, markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import { blockEta } from '../utils/blockEta';
 
@@ -429,6 +429,8 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             swapTree: created.swapTree,
             refundDestinationAddress: refundDestination?.address,
             sourceWalletId: refundDestination?.walletId,
+            // Refunds only ever land in the creating identity's wallets (#1124).
+            ownerPubkey: getActivePubkey() ?? undefined,
             createdAt: Date.now(),
           }),
           // Device-only accessibility so the refundPrivateKey in this record

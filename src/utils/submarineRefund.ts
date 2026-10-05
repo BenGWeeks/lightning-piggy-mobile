@@ -6,7 +6,7 @@ import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { PersistedSubmarineSwap } from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
 import { fireNotification } from '../services/notificationService';
-import { resolveRefundWalletId } from './refundDestination';
+import { resolveRefundDestination } from './refundDestination';
 import { swapSupportHint } from './swapSupportText';
 import { blockEtaText } from './blockEta';
 
@@ -19,7 +19,7 @@ const shownNoWallet = new Set<string>();
 /** Toast + OS notification, so a swap needing action isn't missed. */
 function notifySwapAttention(title: string, body: string): void {
   Toast.show({ type: 'error', text1: title, text2: body, position: 'top', visibilityTime: 12000 });
-  void fireNotification({ kind: 'payment', title, body });
+  void fireNotification({ kind: 'swap', title, body });
 }
 
 /**
@@ -35,6 +35,8 @@ export async function promptSubmarineRefund(
   swap: boltzService.SubmarineSwapResult,
   sourceWalletId: string,
   reason: string,
+  /** Shown in the prompt so the user can see — and decline — where it goes. */
+  destinationLabel?: string,
 ): Promise<void> {
   // Look up the on-chain lockup + a refund destination. Guarded because this
   // runs inside TransferSheet's detached background task — an unhandled reject
@@ -79,7 +81,7 @@ export async function promptSubmarineRefund(
   }
   Alert.alert(
     'Swap Failed — Refund Available',
-    `The swap failed (${reason}). Your on-chain funds become refundable at block ${swap.timeoutBlockHeight}. Tap Refund to broadcast the refund now — if that block hasn't been reached yet it will be rejected, so try again once it has.`,
+    `The swap failed (${reason}). Tap Refund to send your on-chain funds back${destinationLabel ? ` to "${destinationLabel}"` : ''}.`,
     [
       {
         text: 'Refund',
@@ -127,10 +129,11 @@ export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Prom
     );
     return;
   }
-  // The destination is chosen now, not at swap creation (#1124): a swap made
-  // before the user had an on-chain wallet can still refund into one added later.
-  const walletId = await resolveRefundWalletId(swap.sourceWalletId);
-  if (!walletId) {
+  // The destination is chosen now, not at swap creation (#1124), and never in
+  // another identity's wallets (see resolveRefundDestination).
+  const destination = await resolveRefundDestination(swap);
+  if (destination.kind === 'other-identity') return;
+  if (destination.kind === 'no-wallet') {
     if (!shownNoWallet.has(swap.id)) {
       shownNoWallet.add(swap.id);
       notifySwapAttention(
@@ -150,7 +153,8 @@ export async function recoverSubmarineRefund(swap: PersistedSubmarineSwap): Prom
       claimPublicKey: swap.claimPublicKey,
       swapTree: swap.swapTree as boltzService.SubmarineSwapResult['swapTree'],
     },
-    walletId,
+    destination.walletId,
     'recovered after app restart',
+    destination.alias,
   );
 }
