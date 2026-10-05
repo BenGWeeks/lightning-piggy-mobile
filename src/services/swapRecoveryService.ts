@@ -13,6 +13,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { extractLockupFromTxHex } from '../utils/lockupTx';
+import { markSwapPlaceholdersResolved } from '../utils/swapPendingMerge';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 import { getSwapBackendForId } from './swapBackendService';
@@ -854,6 +855,12 @@ async function recoverSubmarineSwaps(): Promise<void> {
         );
       }
 
+      // Final outcome known: drop any "Boltz swap in progress" placeholder on
+      // the next list refresh, even if the Receive sheet that added it has
+      // since closed (its own watcher stops on unmount).
+      if (SUBMARINE_SUCCESS_STATUSES.has(status) || SUBMARINE_FAIL_STATUSES.has(status)) {
+        markSwapPlaceholdersResolved(swapId);
+      }
       if (SUBMARINE_SUCCESS_STATUSES.has(status)) {
         await SecureStore.deleteItemAsync(`submarine_swap_${swapId}`);
         await unregisterPendingSubmarineSwap(swapId);
