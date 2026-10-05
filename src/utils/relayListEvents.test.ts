@@ -97,3 +97,15 @@ it('reads back exactly the rows that were signed', () => {
     { url: 'wss://nos.lol', read: true, write: false },
   ]);
 });
+
+it('merges separate read and write rows for one relay instead of dropping one', () => {
+  const e = buildRelayListEvent([
+    { url: 'wss://nos.lol', read: true, write: false },
+    { url: 'wss://nos.lol/', read: false, write: true },
+    { url: 'wss://relay.primal.net', read: true, write: false },
+  ]);
+  expect(e.tags).toEqual([
+    ['r', 'wss://nos.lol'],
+    ['r', 'wss://relay.primal.net', 'read'],
+  ]);
+});

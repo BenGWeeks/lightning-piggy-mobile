@@ -52,13 +52,19 @@ export function relayListFromTags(tags: string[][]): RelayConfig[] {
 
 /** NIP-65 kind 10002: `["r", url]` (read+write) / `["r", url, "read"|"write"]`. */
 export function buildRelayListEvent(relays: RelayConfig[], now = Date.now()): UnsignedEvent {
-  const seen = new Set<string>();
-  const tags: string[][] = [];
+  // Merge duplicate rows per URL (a list may carry separate read and write
+  // tags for one relay) so neither permission is silently dropped.
+  const merged = new Map<string, { read: boolean; write: boolean }>();
   for (const r of relays) {
     const url = norm(r.url);
-    if (seen.has(url) || !isPublishableRelayUrl(url) || (!r.read && !r.write)) continue;
-    seen.add(url);
-    tags.push(r.read && r.write ? ['r', url] : ['r', url, r.read ? 'read' : 'write']);
+    if (!isPublishableRelayUrl(url)) continue;
+    const prev = merged.get(url) ?? { read: false, write: false };
+    merged.set(url, { read: prev.read || r.read, write: prev.write || r.write });
+  }
+  const tags: string[][] = [];
+  for (const [url, { read, write }] of merged) {
+    if (!read && !write) continue;
+    tags.push(read && write ? ['r', url] : ['r', url, read ? 'read' : 'write']);
   }
   return { kind: 10002, created_at: Math.floor(now / 1000), tags, content: '' };
 }

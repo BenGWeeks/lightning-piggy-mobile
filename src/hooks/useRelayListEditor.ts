@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Event } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
 import type { RelayConfig } from '../types/nostr';
@@ -39,8 +39,19 @@ export type RelayListPublishOutcome =
  * publish is in flight (so no edit is lost when the result is adopted).
  */
 export function useRelayListEditor() {
-  const { pubkey, relays, nip65Relays, signEvent, applyPublishedRelayList, applyPublishedDmInbox } =
-    useNostr();
+  const {
+    pubkey,
+    relays,
+    nip65Relays,
+    dmInboxRelays,
+    signEvent,
+    applyPublishedRelayList,
+    applyPublishedDmInbox,
+  } = useNostr();
+  // The identity active NOW — a publish started under another identity must
+  // not be adopted (or signed) after the user switches accounts.
+  const activePubkeyRef = useRef(pubkey);
+  activePubkeyRef.current = pubkey;
 
   const [nip65Draft, setNip65Draft] = useState<RelayConfig[]>(nip65Relays);
   const [nip65Dirty, setNip65Dirty] = useState(false);
@@ -77,7 +88,9 @@ export function useRelayListEditor() {
     });
     void fetchLatestReplaceable(pubkey, 10050, sources).then((event) => {
       if (cancelled) return;
-      const list = event ? dmInboxRelaysFromTags(event.tags) : [];
+      // A failed lookup isn't "no inbox list": fall back to the known one so
+      // publishing extends it rather than silently replacing it.
+      const list = event ? dmInboxRelaysFromTags(event.tags) : dmInboxRelays;
       setInboxBaseline(list);
       setInboxDraft(list);
       setInboxLoading(false);
@@ -147,9 +160,12 @@ export function useRelayListEditor() {
 
   /** Sign, publish, and return the event as signed (so callers adopt exactly that). */
   const signAndPublish = useCallback(
-    async (unsigned: UnsignedEvent, targets: string[]) => {
+    async (unsigned: UnsignedEvent, targets: string[], pk: string) => {
       const signed = await signEvent(unsigned);
-      if (!signed) return { outcome: { ok: false as const, error: 'not-signed' as const } };
+      // Must be signed by the identity that started this publish, which must
+      // still be the active one (no cross-account publish after a switch).
+      if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
+        return { outcome: { ok: false as const, error: 'not-signed' as const } };
       const results = await publishToRelays(signed as unknown as Event, targets);
       const outcome: RelayListPublishOutcome = results.some((r) => r.ok)
         ? { ok: true, results }
@@ -174,8 +190,9 @@ export function useRelayListEditor() {
           nip65Relays.map((r) => r.url),
           nip65Draft.map((r) => r.url),
         ),
+        pubkey,
       );
-      if (outcome.ok && tags) {
+      if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
         // Adopt exactly what was signed (non-public rows were dropped).
         const published = relayListFromTags(tags);
         await applyPublishedRelayList(pubkey, published);
@@ -208,8 +225,9 @@ export function useRelayListEditor() {
       const { outcome, tags } = await signAndPublish(
         unsigned,
         relayListPublishTargets([...inboxBaseline, ...writeRelays], inboxDraft),
+        pubkey,
       );
-      if (outcome.ok && tags) {
+      if (outcome.ok && tags && activePubkeyRef.current === pubkey) {
         const published = dmInboxRelaysFromTags(tags);
         // The app must now READ these relays, or DMs sent there are missed.
         await applyPublishedDmInbox(pubkey, published);

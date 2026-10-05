@@ -11,11 +11,13 @@ const PUBLISHED = [
 ];
 let mockNip65: typeof PUBLISHED = PUBLISHED;
 let mockPubkey = 'a'.repeat(64);
+let mockInbox: string[] = [];
 jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({
     pubkey: mockPubkey,
     relays: PUBLISHED,
     nip65Relays: mockNip65,
+    dmInboxRelays: mockInbox,
     signEvent: mockSign,
     applyPublishedRelayList: mockApply,
     applyPublishedDmInbox: mockApplyInbox,
@@ -55,6 +57,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockNip65 = PUBLISHED;
   mockPubkey = 'a'.repeat(64);
+  mockInbox = [];
   net10002 = null; // network unchanged / unreachable → keep the cached list
   net10050 = ['wss://relay.damus.io'];
   mockNetwork();
@@ -276,4 +279,53 @@ it("drops the previous account's draft when the identity changes", async () => {
   await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
   expect(h.result.current.nip65Dirty).toBe(false);
   expect(h.result.current.nip65Draft.some((r) => r.url === 'wss://nostr.mom')).toBe(false);
+});
+
+it('falls back to the known inbox list when the lookup fails (never treats it as empty)', async () => {
+  mockInbox = ['wss://relay.primal.net', 'wss://nostr.mom'];
+  net10050 = null; // lookup failed / timed out
+  const { result } = await setup();
+  expect(result.current.inboxDraft).toEqual(['wss://relay.primal.net', 'wss://nostr.mom']);
+});
+
+it('rejects an event signed by a different identity', async () => {
+  mockSign.mockImplementation(async (e: object) => ({
+    ...e,
+    id: 'id',
+    sig: 'sig',
+    pubkey: 'c'.repeat(64),
+  }));
+  const { result } = await setup();
+  act(() => {
+    result.current.addNip65('wss://nostr.mom');
+  });
+  await act(async () => {
+    expect(await result.current.publishNip65()).toEqual({ ok: false, error: 'not-signed' });
+  });
+  expect(publish).not.toHaveBeenCalled();
+});
+
+it('does not adopt a publish that completes after the user switched accounts', async () => {
+  let finish!: (v: unknown) => void;
+  publish.mockReturnValue(new Promise((r) => (finish = r)));
+  const h = await setup();
+  act(() => {
+    h.result.current.addNip65('wss://nostr.mom');
+  });
+  let pending!: Promise<unknown>;
+  act(() => {
+    pending = h.result.current.publishNip65();
+  });
+  await waitFor(() => expect(publish).toHaveBeenCalled());
+  mockPubkey = 'c'.repeat(64); // switch identity while the publish is in flight
+  h.rerender({});
+  await act(async () => {
+    finish([{ url: 'wss://relay.primal.net', ok: true }]);
+    await pending;
+  });
+  expect(
+    mockApply.mock.calls.some((c) =>
+      (c[1] as { url: string }[]).some((r) => r.url === 'wss://nostr.mom'),
+    ),
+  ).toBe(false);
 });

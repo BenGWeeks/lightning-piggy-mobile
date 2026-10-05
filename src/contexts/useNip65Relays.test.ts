@@ -60,3 +60,19 @@ it('ignores a slow inbox load that finishes after an identity reset', async () =
   });
   expect(result.current.dmInboxRelays).toEqual([]);
 });
+
+it('a just-published inbox list is not overwritten by an older in-flight load', async () => {
+  let finish!: (v: unknown) => void;
+  fetchLatest.mockReturnValue(new Promise((r) => (finish = r)));
+  const { result } = renderHook(() => useNip65Relays());
+  await act(async () => {
+    await result.current.loadRelays(PK);
+  });
+  await act(async () => {
+    await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+  });
+  await act(async () => {
+    finish(inboxEvent(['wss://old-inbox.example'])); // older copy lands after the publish
+  });
+  expect(result.current.dmInboxRelays).toEqual(['wss://nostr.mom']);
+});
