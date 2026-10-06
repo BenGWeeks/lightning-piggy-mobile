@@ -25,6 +25,7 @@ jest.mock('expo-notifications', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { listNotifications } from './notificationHistory';
 import {
   setNotificationsForeground,
   setActiveThread,
@@ -356,5 +357,16 @@ describe('clearing read notifications (#1142)', () => {
   it('is best-effort when the native call fails', async () => {
     mockGetPresented.mockRejectedValueOnce(new Error('native'));
     expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
+  });
+});
+
+describe('in-app history owner (#1143)', () => {
+  it('records under the explicit owner when no account is loaded (headless run)', async () => {
+    const owner = 'c'.repeat(64);
+    await fireNotification({ kind: 'dm', title: 'Little Piggy', body: 'hi', owner });
+    // recordNotification is fire-and-forget; listNotifications awaits its queue.
+    const history = await listNotifications(owner);
+    expect(history.map((e) => e.title)).toEqual(['Little Piggy']);
+    expect(history[0].body).toBeUndefined();
   });
 });

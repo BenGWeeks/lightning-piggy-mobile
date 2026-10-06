@@ -22,9 +22,11 @@ export interface NotificationHistoryEntry {
   /** Epoch ms. */
   createdAt: number;
   read: boolean;
+  /** Source id (e.g. a payment hash): a retry with the same key is ignored. */
+  key?: string;
 }
 
-const KEY_BASE = 'notification_history_v1';
+export const NOTIFICATION_HISTORY_KEY_BASE = 'notification_history_v1';
 export const MAX_ENTRIES = 200;
 export const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -33,7 +35,7 @@ const listeners = new Set<Listener>();
 // Serialise read-modify-write so concurrent records can't drop each other.
 let queue: Promise<unknown> = Promise.resolve();
 
-const keyFor = (pubkey: string) => perAccountKey(KEY_BASE, pubkey);
+const keyFor = (pubkey: string) => perAccountKey(NOTIFICATION_HISTORY_KEY_BASE, pubkey);
 
 async function read(pubkey: string): Promise<NotificationHistoryEntry[]> {
   try {
@@ -72,7 +74,13 @@ function update(
 /** Record a fired notification. Best-effort; a no-op without an account. */
 export function recordNotification(
   pubkey: string | null,
-  entry: { kind: NotificationKind; title: string; body: string; data?: NotificationData },
+  entry: {
+    kind: NotificationKind;
+    title: string;
+    body: string;
+    data?: NotificationData;
+    historyKey?: string;
+  },
   now = Date.now(),
 ): Promise<void> {
   if (!pubkey) return Promise.resolve();
@@ -85,8 +93,11 @@ export function recordNotification(
     data: entry.data ?? {},
     createdAt: now,
     read: false,
+    ...(entry.historyKey ? { key: entry.historyKey } : {}),
   };
-  return update(pubkey, (entries) => [record, ...entries]).catch(() => {});
+  return update(pubkey, (entries) =>
+    record.key && entries.some((e) => e.key === record.key) ? entries : [record, ...entries],
+  ).catch(() => {});
 }
 
 export async function listNotifications(pubkey: string): Promise<NotificationHistoryEntry[]> {
@@ -100,6 +111,17 @@ export function markNotificationRead(pubkey: string, id: string): Promise<void> 
 
 export function markAllNotificationsRead(pubkey: string): Promise<void> {
   return update(pubkey, (entries) => entries.map((e) => (e.read ? e : { ...e, read: true })));
+}
+
+/** Delete an account's history (sign-out / identity removal). Runs through
+ * the write queue so a pending record can't recreate it afterwards. */
+export function clearNotificationHistory(pubkey: string): Promise<void> {
+  const run = queue.then(async () => {
+    await AsyncStorage.removeItem(keyFor(pubkey)).catch(() => {});
+    listeners.forEach((l) => l());
+  });
+  queue = run.catch(() => {});
+  return run;
 }
 
 export function subscribeNotificationHistory(listener: Listener): () => void {

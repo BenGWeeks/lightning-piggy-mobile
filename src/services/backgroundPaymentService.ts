@@ -115,6 +115,8 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
               // Already sats: the WebLN wrapper converts NIP-47 msats, exactly
               // as the foreground receive announcer reads the same rows.
               amountSats: tx.amount,
+              owner: activePubkey,
+              sourceId: tx.payment_hash,
             }),
           async () =>
             !appIsActive() &&

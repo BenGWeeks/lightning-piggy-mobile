@@ -280,6 +280,7 @@ async function handleWrap(input: {
     if (!claimWrapNotification(ev.id)) return;
     await fireMessageNotification({
       kind: 'dm',
+      owner: viewerPubkey,
       threadId: '__background__',
       title: 'New encrypted message',
       body: 'Open Lightning Piggy to read',
@@ -327,6 +328,7 @@ async function handleWrap(input: {
   const preview = dmRowPreview(textForRumor(rumor), rumor.kind);
   const notifId = await fireMessageNotification({
     kind: 'dm',
+    owner: viewerPubkey,
     threadId: dmThreadId(partnership.partnerPubkey, protocolForWireKind(rumor.kind)),
     title: senderName,
     body: preview,

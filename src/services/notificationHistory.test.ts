@@ -9,6 +9,7 @@ import {
   MAX_ENTRIES,
   MAX_AGE_MS,
   __resetNotificationHistoryForTests,
+  clearNotificationHistory,
   type NotificationHistoryEntry,
 } from './notificationHistory';
 
@@ -96,4 +97,24 @@ it('drops entries older than 30 days and keeps at most 200', () => {
   expect(pruned).toHaveLength(MAX_ENTRIES);
   expect(pruned).not.toContain(old);
   expect(pruned[0].createdAt).toBe(now);
+});
+
+it('ignores a retried notification with the same source key (#1143 review)', async () => {
+  const payment = {
+    kind: 'payment' as const,
+    title: 'Payment received',
+    body: '+21 sats',
+    historyKey: 'payment:w1:abc',
+  };
+  await recordNotification(A, payment, T + 1);
+  await recordNotification(A, payment, T + 2);
+  await recordNotification(A, { ...payment, historyKey: 'payment:w1:def' }, T + 3);
+  expect(await listNotifications(A)).toHaveLength(2);
+});
+
+it('clears an account through the write queue, so a pending record cannot recreate it', async () => {
+  const pending = recordNotification(A, { kind: 'zap', title: 'late', body: '' }, T + 1);
+  const cleared = clearNotificationHistory(A);
+  await Promise.all([pending, cleared]);
+  expect(await listNotifications(A)).toEqual([]);
 });

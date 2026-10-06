@@ -108,6 +108,13 @@ export interface NotificationPayload {
    * `setLockScreenContentEnabled` / `getLockScreenContentEnabled`. */
   body: string;
   data?: NotificationData;
+  /** Account the notification belongs to, for the in-app history (#1143).
+   * Background workers pass the identity they loaded (the React-hydrated
+   * active pubkey is unset in a headless run); defaults to the active one. */
+  owner?: string;
+  /** Stable source id (e.g. a payment hash) so a retried notification
+   * doesn't add a second history row. */
+  historyKey?: string;
 }
 
 let initialisingPromise: Promise<void> | null = null;
@@ -320,7 +327,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   try {
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
-    void recordNotification(getActivePubkey(), payload);
+    void recordNotification(payload.owner ?? getActivePubkey(), payload);
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -487,6 +494,7 @@ export async function fireMessageNotification(opts: {
   title: string;
   body: string;
   data: NotificationData;
+  owner?: string;
 }): Promise<string | null> {
   if (isThreadActivelyViewed(opts.threadId)) return null;
   return fireNotification({
@@ -494,6 +502,7 @@ export async function fireMessageNotification(opts: {
     title: opts.title,
     body: opts.body,
     data: opts.data,
+    owner: opts.owner,
   });
 }
 
@@ -514,6 +523,7 @@ export async function fireCacheNotification(opts: {
   cacheCoord: string;
   title: string;
   body: string;
+  owner?: string;
 }): Promise<string | null> {
   if (isCacheActivelyViewed(opts.cacheCoord)) return null;
   return fireNotification({
@@ -521,6 +531,7 @@ export async function fireCacheNotification(opts: {
     title: opts.title,
     body: opts.body,
     data: { cacheCoord: opts.cacheCoord },
+    owner: opts.owner,
   });
 }
 
@@ -531,6 +542,10 @@ export async function firePaymentNotification(opts: {
   walletId?: string;
   /** Zap comment / invoice memo, appended to the body when present. */
   comment?: string;
+  owner?: string;
+  /** Stable id of the payment (its hash, or a fallback for on-chain), so a
+   * retried notification doesn't add a second history row. */
+  sourceId?: string;
 }): Promise<string | null> {
   const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
   const sats = opts.amountSats.toLocaleString();
@@ -541,6 +556,10 @@ export async function firePaymentNotification(opts: {
     title: `${noun} received`,
     body,
     data: opts.walletId ? { walletId: opts.walletId } : undefined,
+    owner: opts.owner,
+    historyKey: opts.sourceId
+      ? `payment:${opts.walletId ?? ''}:${opts.sourceId.toLowerCase()}`
+      : undefined,
   });
 }
 
