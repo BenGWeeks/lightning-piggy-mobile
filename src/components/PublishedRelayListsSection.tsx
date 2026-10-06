@@ -11,6 +11,7 @@ import {
 } from '../styles/PublishedRelayListsSection.styles';
 import { useRelayListEditor, type RelayListPublishOutcome } from '../hooks/useRelayListEditor';
 import { isPublishableRelayUrl } from '../utils/relayListEvents';
+import RelayStatusDot from './RelayStatusDot';
 
 type T = ReturnType<typeof useTranslation>;
 
@@ -122,7 +123,12 @@ function PublishButton({
  * read/write their posts) and the NIP-17 DM inbox (where others send DMs).
  * Unlike the in-app relay overrides above it, these are signed and published.
  */
-export default function PublishedRelayListsSection() {
+export default function PublishedRelayListsSection({
+  connection,
+}: {
+  /** Live status by relay URL, for the per-row dots. */
+  connection?: Map<string, boolean>;
+}) {
   const colors = useThemeColors();
   const t = useTranslation();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
@@ -216,12 +222,8 @@ export default function PublishedRelayListsSection() {
 
   return (
     <View testID="published-relay-lists">
-      <Text style={[shared.sectionLabel, { marginTop: 24 }]}>{t('publishedRelays.title')}</Text>
+      <Text style={shared.sectionLabel}>{t('publishedRelays.nip65Title')}</Text>
       <Text style={shared.fieldHint}>{t('publishedRelays.intro')}</Text>
-
-      <Text style={[shared.sectionLabel, { marginTop: 12 }]}>
-        {t('publishedRelays.nip65Title')}
-      </Text>
       <View style={styles.list} testID="nip65-relay-list">
         {editor.nip65Loading ? (
           <ActivityIndicator style={{ paddingVertical: 10 }} testID="nip65-loading" />
@@ -232,6 +234,7 @@ export default function PublishedRelayListsSection() {
         )}
         {editor.nip65Draft.map((r) => (
           <View key={r.url} style={styles.row}>
+            <RelayStatusDot status={connection?.get(r.url)} testID={`nip65-status-${r.url}`} />
             <View style={styles.urlColumn}>
               <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
                 {r.url}
@@ -286,6 +289,7 @@ export default function PublishedRelayListsSection() {
         )}
         {editor.inboxDraft.map((url) => (
           <View key={url} style={styles.row}>
+            <RelayStatusDot status={connection?.get(url)} testID={`inbox-status-${url}`} />
             <View style={styles.urlColumn}>
               <Text style={styles.url} numberOfLines={1} ellipsizeMode="middle">
                 {url}
