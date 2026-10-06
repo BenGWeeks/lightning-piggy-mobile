@@ -46,6 +46,8 @@ import ExploreHomeScreen from '../screens/ExploreHomeScreen';
 import FriendsScreen from '../screens/FriendsScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
+import { getActivePubkey } from '../services/walletStorageService';
+import { resolveWrapConversation } from '../services/notificationWrapResolver';
 
 // Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
 // Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
@@ -207,6 +209,10 @@ export const navigateFromNotification = (data: {
   cacheCoord?: string;
   /** Display name when the caller already knows it (the Notifications screen). */
   name?: string;
+  /** NIP-17 gift wrap the background couldn't decrypt (#1154). */
+  wrapId?: string;
+  /** Account the notification belongs to. */
+  owner?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
   if (data.conversationPubkey) {
@@ -238,9 +244,25 @@ export const navigateFromNotification = (data: {
     return true;
   }
   // Generic message ping with no thread id (the background detect-and-ping
-  // path, which doesn't decrypt) → open the Messages list.
+  // path, which doesn't decrypt) → open the Messages list. With a wrap id,
+  // then open that message's conversation once the app has decrypted it —
+  // unless the user has moved on from the list meanwhile (#1154).
   if (data.kind === 'dm' || data.kind === 'group') {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    const owner = data.owner ?? getActivePubkey();
+    if (data.wrapId && owner) {
+      const stillOnList = () => navigationRef.getCurrentRoute()?.name === 'Messages';
+      void resolveWrapConversation(owner, data.wrapId, { shouldStop: () => !stillOnList() }).then(
+        (target) => {
+          if (target && stillOnList())
+            navigationRef.navigate('Conversation', {
+              pubkey: target.pubkey,
+              name: data.name ?? '',
+              protocol: target.protocol,
+            });
+        },
+      );
+    }
     return true;
   }
   // payment / zap (or anything else) → wallet home.

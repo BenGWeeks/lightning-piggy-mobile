@@ -27,6 +27,7 @@ import {
   hasConversationWith,
   deleteDmMessagesForOwner,
   type DmMessageRow,
+  getConversationForEvent,
 } from './dmDb';
 
 const OWNER = 'owner1';
@@ -366,5 +367,23 @@ describe('dmDb', () => {
       expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
       expect(params).toEqual([OWNER]);
     });
+  });
+});
+
+describe('getConversationForEvent (#1154)', () => {
+  it('returns the conversation and wire kind of a stored event, scoped to the owner', async () => {
+    mockExecute.mockResolvedValueOnce(
+      rowsResult([{ conversation: 'b'.repeat(64), wire_kind: 14 }]),
+    );
+    await expect(getConversationForEvent('a'.repeat(64), 'wrap')).resolves.toEqual({
+      conversation: 'b'.repeat(64),
+      wireKind: 14,
+    });
+    expect(mockExecute.mock.calls.at(-1)?.[1]).toEqual(['a'.repeat(64), 'wrap']);
+  });
+
+  it('returns null until the event has been stored', async () => {
+    mockExecute.mockResolvedValueOnce(rowsResult([]));
+    await expect(getConversationForEvent('a'.repeat(64), 'wrap')).resolves.toBeNull();
   });
 });

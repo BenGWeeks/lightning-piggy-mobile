@@ -284,7 +284,9 @@ async function handleWrap(input: {
       threadId: '__background__',
       title: 'New encrypted message',
       body: 'Open Lightning Piggy to read',
-      data: {},
+      // The sender is inside the encryption; the wrap id lets a tap open the
+      // right conversation once the app has decrypted it (#1154).
+      data: { wrapId: ev.id },
     });
     return;
   }

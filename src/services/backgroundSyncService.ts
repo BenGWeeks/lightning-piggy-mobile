@@ -32,6 +32,7 @@ import { pool } from './nostrService';
 import { loadIdentities } from './identitiesStore';
 import { getUserRelays } from './nostrRelayStorage';
 import { fireMessageNotification, fireCacheNotification } from './notificationService';
+import { messageNotificationTarget } from '../utils/messageNotificationTarget';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
 import { isOrderEvent } from '../utils/orderEvents';
@@ -193,9 +194,10 @@ async function runDmDetectAndPing(
         threadId: '__background__',
         title: freshCount > 1 ? 'New messages' : 'New message',
         body: 'Open Lightning Piggy to read',
-        // No conversation id (we didn't decrypt) → tap opens the Messages
-        // list rather than a specific thread.
-        data: {},
+        // Where a tap should go, without decrypting (#1154): a NIP-04 sender
+        // is public, and a lone NIP-17 wrap can be resolved after the app
+        // decrypts it. Anything else (mixed senders) opens the Messages list.
+        data: messageNotificationTarget(fresh),
       });
     }
     return { pinged: freshCount > 0, freshCount };
