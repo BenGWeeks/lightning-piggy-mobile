@@ -6,6 +6,8 @@
 const mockScheduleNotificationAsync = jest.fn().mockResolvedValue('notif-id');
 const mockGetPresented = jest.fn().mockResolvedValue([]);
 const mockDismiss = jest.fn().mockResolvedValue(undefined);
+const mockGetScheduled = jest.fn().mockResolvedValue([]);
+const mockCancel = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
@@ -15,6 +17,8 @@ jest.mock('expo-notifications', () => ({
   scheduleNotificationAsync: (...args: unknown[]) => mockScheduleNotificationAsync(...args),
   getPresentedNotificationsAsync: () => mockGetPresented(),
   dismissNotificationAsync: (id: string) => mockDismiss(id),
+  getAllScheduledNotificationsAsync: () => mockGetScheduled(),
+  cancelScheduledNotificationAsync: (id: string) => mockCancel(id),
   AndroidImportance: { HIGH: 4 },
   AndroidNotificationVisibility: { SECRET: -1, PRIVATE: 0, PUBLIC: 1 },
   SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
@@ -337,6 +341,16 @@ describe('clearing read notifications (#1142)', () => {
     ]);
     expect(await dismissNotificationsFor({ genericMessages: true })).toBe(1);
     expect(mockDismiss.mock.calls).toEqual([['n4']]);
+  });
+
+  it('also cancels a matching notification still pending its 1 s trigger', async () => {
+    mockDismiss.mockClear();
+    mockGetScheduled.mockResolvedValueOnce([
+      { identifier: 's1', content: { data: { kind: 'group', groupId: 'g1' } } },
+      { identifier: 's2', content: { data: { kind: 'group', groupId: 'g2' } } },
+    ]);
+    expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(1);
+    expect(mockCancel.mock.calls).toEqual([['s1']]);
   });
 
   it('is best-effort when the native call fails', async () => {

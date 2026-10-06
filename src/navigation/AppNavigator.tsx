@@ -587,6 +587,9 @@ export default function AppNavigator() {
       ref={navigationRef}
       theme={navTheme}
       initialState={initialNavState}
+      // A restored initialState doesn't fire onStateChange: sync (and clear the
+      // restored screen's notifications, #1142) once the tree is ready.
+      onReady={syncActiveThreadFromNav}
       onStateChange={(state) => {
         // Fire-and-forget — failures are swallowed inside the util so
         // a flaky AsyncStorage write can't crash navigation.

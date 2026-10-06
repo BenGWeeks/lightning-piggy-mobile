@@ -439,19 +439,28 @@ export function notificationMatchesTarget(
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
   try {
-    const presented = await Notifications.getPresentedNotificationsAsync();
+    const matching = (request: Notifications.NotificationRequest) =>
+      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID &&
+      notificationMatchesTarget(
+        request.content.data as NotificationData & { kind?: string },
+        target,
+      );
+    const [presented, scheduled] = await Promise.all([
+      Notifications.getPresentedNotificationsAsync(),
+      Notifications.getAllScheduledNotificationsAsync(),
+    ]);
     const ids = presented
-      .filter(
-        (n) =>
-          n.request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID &&
-          notificationMatchesTarget(
-            n.request.content.data as NotificationData & { kind?: string },
-            target,
-          ),
-      )
-      .map((n) => n.request.identifier);
-    await Promise.all(ids.map((id) => Notifications.dismissNotificationAsync(id)));
-    return ids.length;
+      .map((n) => n.request)
+      .filter(matching)
+      .map((r) => r.identifier);
+    // Android fires on a 1 s TIME_INTERVAL trigger, so one can still be
+    // pending as the thread opens — cancel it rather than let it appear.
+    const pending = scheduled.filter(matching).map((r) => r.identifier);
+    await Promise.all([
+      ...ids.map((id) => Notifications.dismissNotificationAsync(id)),
+      ...pending.map((id) => Notifications.cancelScheduledNotificationAsync(id)),
+    ]);
+    return ids.length + pending.length;
   } catch (err) {
     if (__DEV__) console.warn('[notificationService] dismissNotificationsFor failed:', err);
     return 0;
