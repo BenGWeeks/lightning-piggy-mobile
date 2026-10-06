@@ -4,6 +4,10 @@
 // would be scheduled without a device.
 
 const mockScheduleNotificationAsync = jest.fn().mockResolvedValue('notif-id');
+const mockGetPresented = jest.fn().mockResolvedValue([]);
+const mockDismiss = jest.fn().mockResolvedValue(undefined);
+const mockGetScheduled = jest.fn().mockResolvedValue([]);
+const mockCancel = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
@@ -11,6 +15,10 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
   requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true, status: 'granted' }),
   scheduleNotificationAsync: (...args: unknown[]) => mockScheduleNotificationAsync(...args),
+  getPresentedNotificationsAsync: () => mockGetPresented(),
+  dismissNotificationAsync: (id: string) => mockDismiss(id),
+  getAllScheduledNotificationsAsync: () => mockGetScheduled(),
+  cancelScheduledNotificationAsync: (id: string) => mockCancel(id),
   AndroidImportance: { HIGH: 4 },
   AndroidNotificationVisibility: { SECRET: -1, PRIVATE: 0, PUBLIC: 1 },
   SchedulableTriggerInputTypes: { TIME_INTERVAL: 'timeInterval' },
@@ -29,6 +37,9 @@ import {
   fireNotification,
   setLockScreenContentEnabled,
   __resetForTests,
+  notificationMatchesTarget,
+  dismissNotificationsFor,
+  FOREGROUND_SERVICE_NOTIFICATION_ID,
 } from './notificationService';
 
 const lastScheduledContent = () => mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content;
@@ -269,5 +280,81 @@ describe('fireCacheNotification', () => {
     });
     expect(id).toBe('notif-id');
     expect(mockScheduleNotificationAsync).toHaveBeenCalled();
+  });
+});
+
+describe('clearing read notifications (#1142)', () => {
+  const PK = 'a'.repeat(64);
+  const presented = (identifier: string, data: Record<string, unknown>) => ({
+    request: { identifier, content: { data } },
+  });
+
+  it('matches a 1:1 thread by pubkey and protocol (missing protocol = NIP-17)', () => {
+    const target = { conversationPubkey: PK, conversationProtocol: 'nip17' as const };
+    expect(
+      notificationMatchesTarget({ kind: 'dm', conversationPubkey: PK.toUpperCase() }, target),
+    ).toBe(true);
+    expect(
+      notificationMatchesTarget(
+        { kind: 'dm', conversationPubkey: PK, conversationProtocol: 'nip04' },
+        target,
+      ),
+    ).toBe(false);
+    expect(
+      notificationMatchesTarget({ kind: 'dm', conversationPubkey: 'b'.repeat(64) }, target),
+    ).toBe(false);
+  });
+
+  it('matches groups, cache find-logs and generic message pings separately', () => {
+    expect(notificationMatchesTarget({ kind: 'group', groupId: 'g1' }, { groupId: 'g1' })).toBe(
+      true,
+    );
+    expect(notificationMatchesTarget({ kind: 'group', groupId: 'g2' }, { groupId: 'g1' })).toBe(
+      false,
+    );
+    expect(
+      notificationMatchesTarget(
+        { kind: 'cache', cacheCoord: '37516:x:y' },
+        { cacheCoord: '37516:x:y' },
+      ),
+    ).toBe(true);
+    const generic = { genericMessages: true as const };
+    expect(notificationMatchesTarget({ kind: 'dm' }, generic)).toBe(true);
+    expect(notificationMatchesTarget({ kind: 'group', groupId: 'g1' }, generic)).toBe(false);
+    expect(notificationMatchesTarget({ kind: 'payment' }, generic)).toBe(false);
+  });
+
+  it("dismisses only the target's notifications, never the foreground-service one", async () => {
+    mockGetPresented.mockResolvedValueOnce([
+      presented('n1', { kind: 'group', groupId: 'g1' }),
+      presented('n2', { kind: 'group', groupId: 'g2' }),
+      presented('n3', { kind: 'payment' }),
+      presented(FOREGROUND_SERVICE_NOTIFICATION_ID, { kind: 'dm' }),
+    ]);
+    expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(1);
+    expect(mockDismiss.mock.calls).toEqual([['n1']]);
+
+    mockDismiss.mockClear();
+    mockGetPresented.mockResolvedValueOnce([
+      presented('n4', { kind: 'dm' }),
+      presented(FOREGROUND_SERVICE_NOTIFICATION_ID, { kind: 'dm' }),
+    ]);
+    expect(await dismissNotificationsFor({ genericMessages: true })).toBe(1);
+    expect(mockDismiss.mock.calls).toEqual([['n4']]);
+  });
+
+  it('also cancels a matching notification still pending its 1 s trigger', async () => {
+    mockDismiss.mockClear();
+    mockGetScheduled.mockResolvedValueOnce([
+      { identifier: 's1', content: { data: { kind: 'group', groupId: 'g1' } } },
+      { identifier: 's2', content: { data: { kind: 'group', groupId: 'g2' } } },
+    ]);
+    expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(1);
+    expect(mockCancel.mock.calls).toEqual([['s1']]);
+  });
+
+  it('is best-effort when the native call fails', async () => {
+    mockGetPresented.mockRejectedValueOnce(new Error('native'));
+    expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
   });
 });

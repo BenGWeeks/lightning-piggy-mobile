@@ -406,6 +406,67 @@ export function isCacheActivelyViewed(cacheCoord: string): boolean {
   return appInForeground && activeCacheCoord === cacheCoord;
 }
 
+/** What a focused screen has "read", for clearing its delivered
+ * notifications (#1142): a 1:1 thread, a group, a cache's find-logs, or the
+ * generic no-thread message pings (opened via the Messages list). */
+export type NotificationTarget =
+  | { conversationPubkey: string; conversationProtocol: 'nip04' | 'nip17' }
+  | { groupId: string }
+  | { cacheCoord: string }
+  | { genericMessages: true };
+
+/** Pure: does a delivered notification's `data` belong to `target`? */
+export function notificationMatchesTarget(
+  data: (NotificationData & { kind?: string }) | null | undefined,
+  target: NotificationTarget,
+): boolean {
+  if (!data) return false;
+  if ('conversationPubkey' in target)
+    return (
+      data.conversationPubkey?.toLowerCase() === target.conversationPubkey.toLowerCase() &&
+      // The tap-router treats a missing protocol as NIP-17; match it the same way.
+      (data.conversationProtocol ?? 'nip17') === target.conversationProtocol
+    );
+  if ('groupId' in target) return data.groupId === target.groupId;
+  if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
+  return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
+}
+
+/**
+ * Dismiss the delivered notifications a screen has now shown the user, so
+ * the tray entry and launcher dot clear (#1142). Never touches the
+ * foreground-service notification. Best-effort: returns how many it cleared.
+ */
+export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
+  try {
+    const matching = (request: Notifications.NotificationRequest) =>
+      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID &&
+      notificationMatchesTarget(
+        request.content.data as NotificationData & { kind?: string },
+        target,
+      );
+    const [presented, scheduled] = await Promise.all([
+      Notifications.getPresentedNotificationsAsync(),
+      Notifications.getAllScheduledNotificationsAsync(),
+    ]);
+    const ids = presented
+      .map((n) => n.request)
+      .filter(matching)
+      .map((r) => r.identifier);
+    // Android fires on a 1 s TIME_INTERVAL trigger, so one can still be
+    // pending as the thread opens — cancel it rather than let it appear.
+    const pending = scheduled.filter(matching).map((r) => r.identifier);
+    await Promise.all([
+      ...ids.map((id) => Notifications.dismissNotificationAsync(id)),
+      ...pending.map((id) => Notifications.cancelScheduledNotificationAsync(id)),
+    ]);
+    return ids.length + pending.length;
+  } catch (err) {
+    if (__DEV__) console.warn('[notificationService] dismissNotificationsFor failed:', err);
+    return 0;
+  }
+}
+
 /**
  * Fire a message (DM or group) notification, suppressed when the user is
  * actively viewing that exact thread. `threadId` is the partner pubkey

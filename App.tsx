@@ -24,6 +24,7 @@ import AppNavigator, {
   navigateToUnsupportedEntity,
   navigateToSend,
   navigateFromNotification,
+  dismissNotificationsForFocusedRoute,
 } from './src/navigation/AppNavigator';
 import { openLnurlWithdrawSheet, LnurlWithdrawHost } from './src/components/LnurlWithdrawSheet';
 import { fetchProfile, decodeProfileReference } from './src/services/nostrService';
@@ -149,8 +150,14 @@ export default function App() {
     // notification only when the app is active AND the user is on that
     // exact thread.
     setNotificationsForeground(AppState.currentState === 'active');
+    // On resume, clear notifications for the screen that was left open
+    // (#1142) — staggered ~3 s like other non-urgent resume work (#554).
+    let resumeDismissTimer: ReturnType<typeof setTimeout> | null = null;
     const appStateSub = AppState.addEventListener('change', (state) => {
       setNotificationsForeground(state === 'active');
+      if (resumeDismissTimer) clearTimeout(resumeDismissTimer);
+      resumeDismissTimer =
+        state === 'active' ? setTimeout(dismissNotificationsForFocusedRoute, 3000) : null;
     });
 
     // Tap routing. Retry briefly so a cold-start tap that races the nav
@@ -179,6 +186,7 @@ export default function App() {
 
     return () => {
       appStateSub.remove();
+      if (resumeDismissTimer) clearTimeout(resumeDismissTimer);
       responseSub.remove();
     };
   }, []);
