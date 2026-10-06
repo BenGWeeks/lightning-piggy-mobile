@@ -80,13 +80,15 @@ export function recordNotification(
     body: string;
     data?: NotificationData;
     historyKey?: string;
+    /** Shared with the tray notification's `data.historyId`. */
+    id?: string;
   },
   now = Date.now(),
 ): Promise<void> {
   if (!pubkey) return Promise.resolve();
   const isMessage = entry.kind === 'dm' || entry.kind === 'group';
   const record: NotificationHistoryEntry = {
-    id: `${now}-${Math.random().toString(36).slice(2, 10)}`,
+    id: entry.id ?? entry.historyKey ?? `${now}-${Math.random().toString(36).slice(2, 10)}`,
     kind: entry.kind,
     title: entry.title,
     ...(isMessage ? {} : { body: entry.body }),

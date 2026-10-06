@@ -42,6 +42,7 @@ import {
   dismissNotificationsFor,
   FOREGROUND_SERVICE_NOTIFICATION_ID,
   markHistoryReadFor,
+  markHistoryEntryRead,
 } from './notificationService';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
@@ -374,21 +375,43 @@ describe('in-app history owner (#1143)', () => {
 });
 
 describe('keeping the history in step with the tray (#1143)', () => {
-  it("matches a history row's own source exactly (kind + ids)", () => {
-    const source = { kind: 'payment' as const, walletId: 'w1' };
-    expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w1' }, { source })).toBe(true);
-    expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w2' }, { source })).toBe(false);
-    expect(notificationMatchesTarget({ kind: 'zap', walletId: 'w1' }, { source })).toBe(false);
-    const pk = 'e'.repeat(64);
-    const nip04 = {
-      kind: 'dm' as const,
-      conversationPubkey: pk,
-      conversationProtocol: 'nip04' as const,
-    };
-    expect(notificationMatchesTarget(nip04, { source: nip04 })).toBe(true);
-    expect(
-      notificationMatchesTarget({ kind: 'dm', conversationPubkey: pk }, { source: nip04 }),
-    ).toBe(false);
+  it('links each tray notification to exactly its own history row', async () => {
+    const owner = 'f'.repeat(64);
+    setActivePubkeyForWalletStorage(owner);
+    try {
+      mockScheduleNotificationAsync.mockClear();
+      // Two payments to one wallet: only distinguishable by their history ids.
+      await firePaymentNotification({
+        kind: 'payment',
+        amountSats: 1,
+        walletId: 'w',
+        sourceId: 'h1',
+      });
+      await firePaymentNotification({
+        kind: 'payment',
+        amountSats: 2,
+        walletId: 'w',
+        sourceId: 'h2',
+      });
+      const ids = mockScheduleNotificationAsync.mock.calls.map((c) => c[0].content.data.historyId);
+      const history = await listNotifications(owner);
+      expect(new Set(ids)).toEqual(new Set(history.map((e) => e.id)));
+      expect(new Set(ids).size).toBe(2);
+      expect(
+        notificationMatchesTarget({ kind: 'payment', historyId: ids[0] }, { historyId: ids[0] }),
+      ).toBe(true);
+      expect(
+        notificationMatchesTarget({ kind: 'payment', historyId: ids[1] }, { historyId: ids[0] }),
+      ).toBe(false);
+
+      // Tapping the first tray notification marks only its row read.
+      await markHistoryEntryRead(ids[0]);
+      const after = await listNotifications(owner);
+      expect(after.find((e) => e.id === ids[0])?.read).toBe(true);
+      expect(after.find((e) => e.id === ids[1])?.read).toBe(false);
+    } finally {
+      setActivePubkeyForWalletStorage(null);
+    }
   });
 
   it("marks the active account's matching history entries read when a screen shows them", async () => {

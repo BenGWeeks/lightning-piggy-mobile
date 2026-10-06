@@ -96,6 +96,8 @@ export interface NotificationData {
   /** `<kind>:<pubkey>:<d>` coordinate of the geo-cache the find-log
    * targets. Read on tap to open HuntPiggyDetail (#740). */
   cacheCoord?: string;
+  /** Links a tray notification to its in-app history row (#1143). */
+  historyId?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -327,7 +329,11 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
   try {
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
-    void recordNotification(payload.owner ?? getActivePubkey(), payload);
+    // One id for the history row and the tray notification, so opening either
+    // can mark / clear the other. A retry of the same source reuses it.
+    const historyId =
+      payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    void recordNotification(payload.owner ?? getActivePubkey(), { ...payload, id: historyId });
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -344,7 +350,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         body: presented.body,
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
-        data: { kind: payload.kind, ...(payload.data ?? {}) },
+        data: { kind: payload.kind, ...(payload.data ?? {}), historyId },
         sound: 'default',
       },
       // Android: a TIME_INTERVAL trigger is the supported way to pin a
@@ -428,8 +434,8 @@ export type NotificationTarget =
   | { genericMessages: true }
   /** Everything the app posted ("Mark all read", #1143). */
   | { all: true }
-  /** One notification's source (kind + its ids), e.g. a history row's. */
-  | { source: NotificationData & { kind: NotificationKind } };
+  /** The one tray notification behind a history row (#1143). */
+  | { historyId: string };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -446,21 +452,15 @@ export function notificationMatchesTarget(
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
   if ('all' in target) return true;
-  if ('source' in target) {
-    const { kind, conversationPubkey, groupId, walletId, cacheCoord } = target.source;
-    return (
-      data.kind === kind &&
-      (data.conversationPubkey ?? '').toLowerCase() === (conversationPubkey ?? '').toLowerCase() &&
-      // NIP-04 and NIP-17 threads with one contact are separate; missing = NIP-17.
-      (!conversationPubkey ||
-        (data.conversationProtocol ?? 'nip17') ===
-          (target.source.conversationProtocol ?? 'nip17')) &&
-      (data.groupId ?? '') === (groupId ?? '') &&
-      (data.walletId ?? '') === (walletId ?? '') &&
-      (data.cacheCoord ?? '') === (cacheCoord ?? '')
-    );
-  }
+  if ('historyId' in target) return data.historyId === target.historyId;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
+}
+
+/** Mark the history row behind a tapped tray notification read (#1143). */
+export function markHistoryEntryRead(historyId: string | undefined): Promise<void> {
+  const owner = getActivePubkey();
+  if (!owner || !historyId) return Promise.resolve();
+  return markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
 }
 
 /** Mark the active account's history entries for `target` read, so the

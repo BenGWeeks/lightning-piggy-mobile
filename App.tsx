@@ -38,6 +38,7 @@ import {
   ensureNotificationsInitialised,
   requestNotificationPermission,
   setNotificationsForeground,
+  markHistoryEntryRead,
 } from './src/services/notificationService';
 import { registerBackgroundSync } from './src/services/backgroundTask';
 import { setSubmarineRefundHandler } from './src/services/swapRecoveryService';
@@ -167,6 +168,8 @@ export default function App() {
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
         | undefined;
       if (!data) return;
+      // The tapped notification's in-app history row is now read (#1143).
+      void markHistoryEntryRead((data as { historyId?: string }).historyId);
       const tryNav = (attempt: number) => {
         if (navigateFromNotification(data)) return;
         if (attempt >= 20) return;
