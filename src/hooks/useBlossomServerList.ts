@@ -100,6 +100,8 @@ export function useBlossomServerList() {
         if (cancelled || published.length === 0 || activePubkeyRef.current !== pubkey) return;
         await setBlossomServers(published);
         await setPublishedBlossomServers(pubkey, published);
+        // The account may have changed while those writes were pending.
+        if (cancelled || activePubkeyRef.current !== pubkey) return;
         setServers(published);
         setPublishedList(published);
       } finally {

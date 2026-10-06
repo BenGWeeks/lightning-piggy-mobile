@@ -221,3 +221,32 @@ it('normalizes a legacy server before migrating it, so publishing clears the cha
   });
   expect(result.current.dirty).toBe(false);
 });
+
+it("doesn't apply an adopted list to the screen after switching account mid-load", async () => {
+  fetchLatest.mockResolvedValue(published);
+  // Hold the first storage write until the account has switched.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const realSet = AsyncStorage.setItem;
+  let held = false;
+  AsyncStorage.setItem = (async (k: string, v: string) => {
+    if (!held && k === 'blossom_servers_v1') {
+      held = true;
+      await gate;
+    }
+    return realSet(k, v);
+  }) as typeof AsyncStorage.setItem;
+  try {
+    const view = renderHook(() => useBlossomServerList());
+    await waitFor(() => expect(held).toBe(true));
+    mockPubkey = 'b'.repeat(64);
+    fetchLatest.mockResolvedValue(null);
+    view.rerender({});
+    await act(async () => release());
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+    // The server list is device-wide, but B never published: Publish stays available.
+    expect(view.result.current.dirty).toBe(true);
+  } finally {
+    AsyncStorage.setItem = realSet;
+  }
+});
