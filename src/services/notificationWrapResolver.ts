@@ -45,18 +45,19 @@ export async function resolveWrapConversation(
 }
 
 /**
- * A "the user moved on" check for a pending navigation to `routeName`: false
- * until that route has actually been focused (navigate() lands a moment
- * later), then true once the user leaves it.
+ * Tracks whether the user moved on from `routeName` while a navigation there
+ * is pending (#1154). Feed it every route change (`onRoute`); `movedOn()` is
+ * false until the route has been focused (navigate() lands a moment later),
+ * then true from the first change away from it — even between polls.
  */
-export function leftAfterReaching(
-  currentRouteName: () => string | undefined,
-  routeName: string,
-): () => boolean {
+export function createRouteLeaveTracker(routeName: string) {
   let reached = false;
-  return () => {
-    const onRoute = currentRouteName() === routeName;
-    if (onRoute) reached = true;
-    return reached && !onRoute;
+  let left = false;
+  return {
+    onRoute(current: string | undefined) {
+      if (current === routeName) reached = true;
+      else if (reached) left = true;
+    },
+    movedOn: () => left,
   };
 }

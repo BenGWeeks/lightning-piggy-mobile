@@ -47,7 +47,10 @@ import FriendsScreen from '../screens/FriendsScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
 import { getActivePubkey } from '../services/walletStorageService';
-import { leftAfterReaching, resolveWrapConversation } from '../services/notificationWrapResolver';
+import {
+  createRouteLeaveTracker,
+  resolveWrapConversation,
+} from '../services/notificationWrapResolver';
 
 // Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
 // Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
@@ -250,12 +253,18 @@ export const navigateFromNotification = (data: {
   if (data.kind === 'dm' || data.kind === 'group') {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     const owner = data.owner ?? getActivePubkey();
-    if (data.wrapId && owner) {
-      // The tab switch lands a moment after navigate(); leaving the list only
-      // counts as "moved on" once it has actually been focused.
-      const movedOn = leftAfterReaching(() => navigationRef.getCurrentRoute()?.name, 'Messages');
-      void resolveWrapConversation(owner, data.wrapId, { shouldStop: movedOn }).then((target) => {
-        if (target && !movedOn())
+    // Only for the active account: another account's stored wrap would open
+    // a conversation under the wrong identity, so its alert stays on the list.
+    if (data.wrapId && owner && owner === getActivePubkey()) {
+      // Every route change, so leaving the list is seen even between polls.
+      const tracker = createRouteLeaveTracker('Messages');
+      const report = () => tracker.onRoute(navigationRef.getCurrentRoute()?.name);
+      report();
+      const unsubscribe = navigationRef.addListener('state', report);
+      const cancelled = () => tracker.movedOn() || getActivePubkey() !== owner;
+      void resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) => {
+        unsubscribe();
+        if (target && !cancelled())
           navigationRef.navigate('Conversation', {
             pubkey: target.pubkey,
             name: data.name ?? '',
