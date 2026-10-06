@@ -5,10 +5,12 @@ import { DEFAULT_RELAYS } from '../services/nostrService';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
 import {
   DEFAULT_BLOSSOM_SERVER,
+  getBlossomServersCreatedAt,
   getPublishedBlossomServers,
   getSavedBlossomServers,
   getSavedLegacyBlossomServer,
   setBlossomServers,
+  setBlossomServersCreatedAt,
   setPublishedBlossomServers,
 } from '../services/walletStorageService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
@@ -49,12 +51,14 @@ export function useBlossomServerList() {
   activePubkeyRef.current = pubkey;
   // Newest kind-10063 created_at seen per identity (fetched or published):
   // each publish is signed strictly after it, or relays keep the old list.
+  // Also persisted, so it survives leaving the screen (a failed lookup can't
+  // then make the next publish older than a list already published).
   const latestCreatedAtRef = useRef(new Map<string, number>());
-  const noteCreatedAt = (pk: string, createdAt: number) =>
-    latestCreatedAtRef.current.set(
-      pk,
-      Math.max(latestCreatedAtRef.current.get(pk) ?? 0, createdAt),
-    );
+  const noteCreatedAt = (pk: string, createdAt: number) => {
+    const next = Math.max(latestCreatedAtRef.current.get(pk) ?? 0, createdAt);
+    latestCreatedAtRef.current.set(pk, next);
+    void setBlossomServersCreatedAt(pk, next);
+  };
   const mountedRef = useRef(true);
   // Synchronous re-entrancy guard: two quick taps land before the
   // `publishing` state re-render disables the button.
@@ -162,6 +166,7 @@ export function useBlossomServerList() {
         ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
       ]).catch(() => null);
       if (current) noteCreatedAt(pk, current.created_at);
+      noteCreatedAt(pk, await getBlossomServersCreatedAt(pk));
       const unsigned = buildBlossomServerListEvent(snapshot);
       // Never publish an empty list (e.g. only a legacy http:// server), which
       // would replace an existing one with nothing.

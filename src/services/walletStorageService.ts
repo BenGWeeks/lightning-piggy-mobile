@@ -385,6 +385,24 @@ export async function getPublishedBlossomServers(pubkey: string): Promise<string
   }
 }
 
+// created_at of the newest kind-10063 an identity has seen or published, so a
+// later publish is signed after it even when the pre-publish lookup fails.
+export const BLOSSOM_SERVERS_CREATED_AT_KEY_BASE = 'blossom_servers_created_at_v1';
+
+export async function getBlossomServersCreatedAt(pubkey: string): Promise<number> {
+  const raw = await AsyncStorage.getItem(
+    perAccountKey(BLOSSOM_SERVERS_CREATED_AT_KEY_BASE, pubkey),
+  ).catch(() => null);
+  return Number(raw) || 0;
+}
+
+export async function setBlossomServersCreatedAt(pubkey: string, createdAt: number): Promise<void> {
+  await AsyncStorage.setItem(
+    perAccountKey(BLOSSOM_SERVERS_CREATED_AT_KEY_BASE, pubkey),
+    String(createdAt),
+  ).catch(() => {});
+}
+
 export async function setPublishedBlossomServers(pubkey: string, urls: string[]): Promise<void> {
   await AsyncStorage.setItem(
     perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, pubkey),

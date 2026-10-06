@@ -20,6 +20,7 @@ import {
   deleteWalletCaches,
   bestEffortMultiRemove,
   BLOSSOM_SERVERS_PUBLISHED_KEY_BASE,
+  BLOSSOM_SERVERS_CREATED_AT_KEY_BASE,
 } from '../services/walletStorageService';
 import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
@@ -90,6 +91,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     perAccountKey(RELAY_LIST_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
     perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, loggedOutPubkey),
+    perAccountKey(BLOSSOM_SERVERS_CREATED_AT_KEY_BASE, loggedOutPubkey),
     perAccountKey(RELAY_LIST_CREATED_AT_KEY_BASE, loggedOutPubkey),
     perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, loggedOutPubkey),

@@ -250,3 +250,26 @@ it("doesn't apply an adopted list to the screen after switching account mid-load
     AsyncStorage.setItem = realSet;
   }
 });
+
+it('signs after a previously published list even when a later lookup fails (new visit)', async () => {
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  fetchLatest.mockResolvedValue({ ...published, created_at: future });
+  publish.mockResolvedValue([{ url: 'wss://default.example', ok: true }]);
+  const first = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(first.result.current.editable).toBe(true));
+  await act(async () => {
+    await first.result.current.publish();
+  });
+  first.unmount();
+
+  fetchLatest.mockResolvedValue(null); // the next lookup fails
+  const second = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(second.result.current.editable).toBe(true));
+  act(() => {
+    second.result.current.addServer('https://later.example');
+  });
+  await act(async () => {
+    await second.result.current.publish();
+  });
+  expect(mockSign.mock.calls.at(-1)[0].created_at).toBeGreaterThan(future);
+});
