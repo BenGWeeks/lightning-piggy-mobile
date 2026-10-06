@@ -46,8 +46,14 @@ export function useNotificationHistory() {
 
   const unreadCount = useMemo(() => entries.filter((e) => !e.read).length, [entries]);
 
+  // Also clears that row's tray notification (a payment row opens Home,
+  // which has no screen-specific clearing of its own).
   const markRead = useCallback(
-    (id: string) => (pubkey ? markNotificationRead(pubkey, id) : Promise.resolve()),
+    async (entry: NotificationHistoryEntry) => {
+      if (!pubkey) return;
+      await markNotificationRead(pubkey, entry.id);
+      await dismissNotificationsFor({ source: { kind: entry.kind, ...entry.data } });
+    },
     [pubkey],
   );
 

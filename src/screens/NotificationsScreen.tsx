@@ -40,7 +40,7 @@ export default function NotificationsScreen() {
 
   const handlePress = useCallback(
     (entry: NotificationHistoryEntry) => {
-      void markRead(entry.id);
+      void markRead(entry);
       const partner = entry.data.conversationPubkey?.toLowerCase();
       navigateFromNotification({
         kind: entry.kind,

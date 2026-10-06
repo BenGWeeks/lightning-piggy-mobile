@@ -23,6 +23,7 @@ import {
   setActiveThread,
   setActiveCache,
   dismissNotificationsFor,
+  markHistoryReadFor,
   type NotificationTarget,
 } from '../services/notificationService';
 import {
@@ -300,7 +301,10 @@ export function dismissNotificationsForFocusedRoute(): void {
   } else if (route?.name === 'Messages') {
     target = { genericMessages: true };
   }
-  if (target) void dismissNotificationsFor(target);
+  if (target) {
+    void dismissNotificationsFor(target);
+    void markHistoryReadFor(target);
+  }
 }
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

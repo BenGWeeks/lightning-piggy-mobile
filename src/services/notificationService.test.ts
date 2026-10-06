@@ -41,7 +41,9 @@ import {
   notificationMatchesTarget,
   dismissNotificationsFor,
   FOREGROUND_SERVICE_NOTIFICATION_ID,
+  markHistoryReadFor,
 } from './notificationService';
+import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
 const lastScheduledContent = () => mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content;
 
@@ -368,5 +370,34 @@ describe('in-app history owner (#1143)', () => {
     const history = await listNotifications(owner);
     expect(history.map((e) => e.title)).toEqual(['Little Piggy']);
     expect(history[0].body).toBeUndefined();
+  });
+});
+
+describe('keeping the history in step with the tray (#1143)', () => {
+  it("matches a history row's own source exactly (kind + ids)", () => {
+    const source = { kind: 'payment' as const, walletId: 'w1' };
+    expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w1' }, { source })).toBe(true);
+    expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w2' }, { source })).toBe(false);
+    expect(notificationMatchesTarget({ kind: 'zap', walletId: 'w1' }, { source })).toBe(false);
+  });
+
+  it("marks the active account's matching history entries read when a screen shows them", async () => {
+    const owner = 'd'.repeat(64);
+    setActivePubkeyForWalletStorage(owner);
+    try {
+      await fireNotification({
+        kind: 'group',
+        title: 'Piggy Pals',
+        body: 'x',
+        data: { groupId: 'g1' },
+      });
+      await fireNotification({ kind: 'group', title: 'Other', body: 'y', data: { groupId: 'g2' } });
+      await markHistoryReadFor({ groupId: 'g1' });
+      const history = await listNotifications(owner);
+      expect(history.find((e) => e.title === 'Piggy Pals')?.read).toBe(true);
+      expect(history.find((e) => e.title === 'Other')?.read).toBe(false);
+    } finally {
+      setActivePubkeyForWalletStorage(null);
+    }
   });
 });

@@ -42,7 +42,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { recordNotification } from './notificationHistory';
+import { markNotificationsReadWhere, recordNotification } from './notificationHistory';
 import { getActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
@@ -427,7 +427,9 @@ export type NotificationTarget =
   | { cacheCoord: string }
   | { genericMessages: true }
   /** Everything the app posted ("Mark all read", #1143). */
-  | { all: true };
+  | { all: true }
+  /** One notification's source (kind + its ids), e.g. a history row's. */
+  | { source: NotificationData & { kind: NotificationKind } };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -444,7 +446,27 @@ export function notificationMatchesTarget(
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
   if ('all' in target) return true;
+  if ('source' in target) {
+    const { kind, conversationPubkey, groupId, walletId, cacheCoord } = target.source;
+    return (
+      data.kind === kind &&
+      (data.conversationPubkey ?? '').toLowerCase() === (conversationPubkey ?? '').toLowerCase() &&
+      (data.groupId ?? '') === (groupId ?? '') &&
+      (data.walletId ?? '') === (walletId ?? '') &&
+      (data.cacheCoord ?? '') === (cacheCoord ?? '')
+    );
+  }
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
+}
+
+/** Mark the active account's history entries for `target` read, so the
+ * in-app badge agrees with the tray once a screen has shown them (#1143). */
+export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
+  const owner = getActivePubkey();
+  if (!owner) return Promise.resolve();
+  return markNotificationsReadWhere(owner, (e) =>
+    notificationMatchesTarget({ kind: e.kind, ...e.data }, target),
+  ).catch(() => {});
 }
 
 /**

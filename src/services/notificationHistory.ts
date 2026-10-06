@@ -109,6 +109,18 @@ export function markNotificationRead(pubkey: string, id: string): Promise<void> 
   return update(pubkey, (entries) => entries.map((e) => (e.id === id ? { ...e, read: true } : e)));
 }
 
+/** Mark every entry `match` selects as read (no write when none change). */
+export function markNotificationsReadWhere(
+  pubkey: string,
+  match: (entry: NotificationHistoryEntry) => boolean,
+): Promise<void> {
+  return update(pubkey, (entries) =>
+    entries.some((e) => !e.read && match(e))
+      ? entries.map((e) => (!e.read && match(e) ? { ...e, read: true } : e))
+      : entries,
+  );
+}
+
 export function markAllNotificationsRead(pubkey: string): Promise<void> {
   return update(pubkey, (entries) => entries.map((e) => (e.read ? e : { ...e, read: true })));
 }
