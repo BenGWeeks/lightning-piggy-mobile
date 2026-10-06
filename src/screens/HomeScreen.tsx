@@ -24,6 +24,7 @@ import WalletCarousel from '../components/WalletCarousel';
 import BrandGradientBackground from '../components/BrandGradientBackground';
 import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import TabHeader from '../components/TabHeader';
+import NotificationBell from '../components/NotificationBell';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
@@ -314,6 +315,7 @@ const HomeScreen: React.FC = () => {
           // read as section labels.
           titleStyle={{ fontSize: 22, fontWeight: '400' }}
           icon={<Home size={20} color={colors.brandPink} />}
+          rightAccessory={<NotificationBell />}
         />
 
         <WalletCarousel

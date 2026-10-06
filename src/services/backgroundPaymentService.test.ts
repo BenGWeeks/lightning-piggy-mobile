@@ -67,7 +67,13 @@ it('posts settled payments in sats and deduplicates against foreground delivery 
     fire({ kind: 'payment', amountSats: 1234 }),
   );
   expect(fire).toHaveBeenCalledTimes(1);
-  expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+  expect(fire).toHaveBeenCalledWith({
+    kind: 'payment',
+    walletId: 'w',
+    amountSats: 1234,
+    owner,
+    sourceId: tx.payment_hash,
+  });
 });
 it('announces the same sats amount the foreground receive path shows for the row', async () => {
   await check();
@@ -130,7 +136,13 @@ it.each(['account', 'credential', 'removed'])(
     });
     await check();
     expect(fire).toHaveBeenCalledTimes(1);
-    expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+    expect(fire).toHaveBeenCalledWith({
+      kind: 'payment',
+      walletId: 'w',
+      amountSats: 1234,
+      owner,
+      sourceId: tx.payment_hash,
+    });
   },
 );
 it('is watchable only when opted in, permitted, and the identity owns an NWC wallet', async () => {
@@ -272,7 +284,13 @@ it('notifies a recent explicitly settled receipt without a settlement timestamp 
     fire({ kind: 'payment', amountSats: 1234 }),
   );
   expect(fire).toHaveBeenCalledTimes(1);
-  expect(fire).toHaveBeenCalledWith({ kind: 'payment', walletId: 'w', amountSats: 1234 });
+  expect(fire).toHaveBeenCalledWith({
+    kind: 'payment',
+    walletId: 'w',
+    amountSats: 1234,
+    owner,
+    sourceId: tx.payment_hash,
+  });
 });
 
 it.each([undefined, '', 'pending', 'failed', 'expired', 'unknown'])(

@@ -52,7 +52,13 @@ export default function PaymentNotifier(): null {
       let attempted = false;
       const send = () => {
         attempted = true;
-        return firePaymentNotification(payload);
+        return firePaymentNotification({
+          ...payload,
+          owner: owner ?? undefined,
+          // Same identity as the background service uses, so a payment it
+          // already recorded isn't listed twice in the history (#1143).
+          sourceId: paymentHash ?? `${amountSats}:${at}`,
+        });
       };
       const outcome =
         !owner || !paymentHash

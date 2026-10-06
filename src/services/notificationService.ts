@@ -42,6 +42,12 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import {
+  markNotificationDelivered,
+  markNotificationsReadWhere,
+  recordNotification,
+} from './notificationHistory';
+import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -94,6 +100,10 @@ export interface NotificationData {
   /** `<kind>:<pubkey>:<d>` coordinate of the geo-cache the find-log
    * targets. Read on tap to open HuntPiggyDetail (#740). */
   cacheCoord?: string;
+  /** Links a tray notification to its in-app history row (#1143). */
+  historyId?: string;
+  /** Account the notification belongs to, so clearing stays per account. */
+  owner?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -106,6 +116,13 @@ export interface NotificationPayload {
    * `setLockScreenContentEnabled` / `getLockScreenContentEnabled`. */
   body: string;
   data?: NotificationData;
+  /** Account the notification belongs to, for the in-app history (#1143).
+   * Background workers pass the identity they loaded (the React-hydrated
+   * active pubkey is unset in a headless run); defaults to the active one. */
+  owner?: string;
+  /** Stable source id (e.g. a payment hash) so a retried notification
+   * doesn't add a second history row. */
+  historyKey?: string;
 }
 
 let initialisingPromise: Promise<void> | null = null;
@@ -316,6 +333,22 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
  */
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
   try {
+    // In-app history (#1143) — recorded even without OS permission, so the
+    // Notifications screen still lists what happened.
+    // One id for the history row and the tray notification, so opening either
+    // can mark / clear the other. A retry of the same source reuses it.
+    const historyId =
+      payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const owner = payload.owner ?? getActivePubkey() ?? undefined;
+    // Awaited (best-effort, never throws): a headless background task can be
+    // torn down as soon as delivery resolves, losing a detached write.
+    const { duplicateDelivered } = await recordNotification(owner ?? null, {
+      ...payload,
+      id: historyId,
+    });
+    // Same source already shown in the tray: report it as delivered (so the
+    // caller doesn't keep retrying) without posting a second entry.
+    if (duplicateDelivered) return historyId;
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -332,7 +365,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         body: presented.body,
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
-        data: { kind: payload.kind, ...(payload.data ?? {}) },
+        data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
         sound: 'default',
       },
       // Android: a TIME_INTERVAL trigger is the supported way to pin a
@@ -351,6 +384,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
             }
           : null,
     });
+    if (owner) await markNotificationDelivered(owner, historyId);
     return id;
   } catch (err) {
     if (__DEV__) console.warn('[notificationService] fireNotification failed:', err);
@@ -413,7 +447,12 @@ export type NotificationTarget =
   | { conversationPubkey: string; conversationProtocol: 'nip04' | 'nip17' }
   | { groupId: string }
   | { cacheCoord: string }
-  | { genericMessages: true };
+  | { genericMessages: true }
+  /** Everything one account was notified about ("Mark all read", #1143).
+   * Notifications without a recorded owner (older versions) are left alone. */
+  | { owner: string }
+  /** The one tray notification behind a history row (#1143). */
+  | { historyId: string };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -429,7 +468,53 @@ export function notificationMatchesTarget(
     );
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
+  if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
+  if ('historyId' in target) return data.historyId === target.historyId;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
+}
+
+/** Mark the history row behind a tapped tray notification read (#1143). */
+/** The active account, waiting (up to `timeoutMs`) for one to be restored —
+ * not merely for the first publication, which is `null` on a cold start. */
+function waitForActivePubkey(timeoutMs: number): Promise<string | null> {
+  const current = getActivePubkey();
+  if (current) return Promise.resolve(current);
+  return new Promise((resolve) => {
+    let unsubscribe = () => {};
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve(getActivePubkey());
+    }, timeoutMs);
+    unsubscribe = subscribeActivePubkey((pk) => {
+      if (!pk) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(pk);
+    });
+  });
+}
+
+export async function markHistoryEntryRead(
+  historyId: string | undefined,
+  notificationOwner?: string,
+): Promise<void> {
+  if (!historyId) return;
+  // The notification's own account (it may not be the active one); older
+  // payloads have none, so fall back to the restored active account — a
+  // cold-start tap can arrive before auto-login has restored it.
+  const owner = notificationOwner ?? (await waitForActivePubkey(15_000));
+  if (!owner) return;
+  await markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
+}
+
+/** Mark the active account's history entries for `target` read, so the
+ * in-app badge agrees with the tray once a screen has shown them (#1143). */
+export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
+  const owner = getActivePubkey();
+  if (!owner) return Promise.resolve();
+  return markNotificationsReadWhere(owner, (e) =>
+    notificationMatchesTarget({ kind: e.kind, ...e.data }, target),
+  ).catch(() => {});
 }
 
 /**
@@ -479,6 +564,7 @@ export async function fireMessageNotification(opts: {
   title: string;
   body: string;
   data: NotificationData;
+  owner?: string;
 }): Promise<string | null> {
   if (isThreadActivelyViewed(opts.threadId)) return null;
   return fireNotification({
@@ -486,6 +572,7 @@ export async function fireMessageNotification(opts: {
     title: opts.title,
     body: opts.body,
     data: opts.data,
+    owner: opts.owner,
   });
 }
 
@@ -506,6 +593,7 @@ export async function fireCacheNotification(opts: {
   cacheCoord: string;
   title: string;
   body: string;
+  owner?: string;
 }): Promise<string | null> {
   if (isCacheActivelyViewed(opts.cacheCoord)) return null;
   return fireNotification({
@@ -513,6 +601,7 @@ export async function fireCacheNotification(opts: {
     title: opts.title,
     body: opts.body,
     data: { cacheCoord: opts.cacheCoord },
+    owner: opts.owner,
   });
 }
 
@@ -523,6 +612,10 @@ export async function firePaymentNotification(opts: {
   walletId?: string;
   /** Zap comment / invoice memo, appended to the body when present. */
   comment?: string;
+  owner?: string;
+  /** Stable id of the payment (its hash, or a fallback for on-chain), so a
+   * retried notification doesn't add a second history row. */
+  sourceId?: string;
 }): Promise<string | null> {
   const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
   const sats = opts.amountSats.toLocaleString();
@@ -533,6 +626,10 @@ export async function firePaymentNotification(opts: {
     title: `${noun} received`,
     body,
     data: opts.walletId ? { walletId: opts.walletId } : undefined,
+    owner: opts.owner,
+    historyKey: opts.sourceId
+      ? `payment:${opts.walletId ?? ''}:${opts.sourceId.toLowerCase()}`
+      : undefined,
   });
 }
 

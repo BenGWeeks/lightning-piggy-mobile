@@ -22,6 +22,7 @@ import {
 } from '../services/walletStorageService';
 import { GROUP_MESSAGES_KEY_PREFIX } from '../services/groupMessagesStorageService';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
+import { clearNotificationHistory } from '../services/notificationHistory';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -49,6 +50,8 @@ import {
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  // In-app notification history (#1143): names, amounts and routing ids.
+  await clearNotificationHistory(loggedOutPubkey);
   // Read the per-account wallet list FIRST so we can delete the
   // per-wallet secrets that live in SecureStore (NWC URLs, xpubs,
   // mnemonics) and the per-wallet AsyncStorage tx caches. Without

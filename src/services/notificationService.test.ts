@@ -25,6 +25,7 @@ jest.mock('expo-notifications', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { listNotifications } from './notificationHistory';
 import {
   setNotificationsForeground,
   setActiveThread,
@@ -40,7 +41,10 @@ import {
   notificationMatchesTarget,
   dismissNotificationsFor,
   FOREGROUND_SERVICE_NOTIFICATION_ID,
+  markHistoryReadFor,
+  markHistoryEntryRead,
 } from './notificationService';
+import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
 const lastScheduledContent = () => mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content;
 
@@ -356,5 +360,142 @@ describe('clearing read notifications (#1142)', () => {
   it('is best-effort when the native call fails', async () => {
     mockGetPresented.mockRejectedValueOnce(new Error('native'));
     expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
+  });
+});
+
+describe('in-app history owner (#1143)', () => {
+  it('records under the explicit owner when no account is loaded (headless run)', async () => {
+    const owner = 'c'.repeat(64);
+    await fireNotification({ kind: 'dm', title: 'Little Piggy', body: 'hi', owner });
+    // recordNotification is fire-and-forget; listNotifications awaits its queue.
+    const history = await listNotifications(owner);
+    expect(history.map((e) => e.title)).toEqual(['Little Piggy']);
+    expect(history[0].body).toBeUndefined();
+  });
+});
+
+describe('keeping the history in step with the tray (#1143)', () => {
+  it('links each tray notification to exactly its own history row', async () => {
+    const owner = 'f'.repeat(64);
+    setActivePubkeyForWalletStorage(owner);
+    try {
+      mockScheduleNotificationAsync.mockClear();
+      // Two payments to one wallet: only distinguishable by their history ids.
+      await firePaymentNotification({
+        kind: 'payment',
+        amountSats: 1,
+        walletId: 'w',
+        sourceId: 'h1',
+      });
+      await firePaymentNotification({
+        kind: 'payment',
+        amountSats: 2,
+        walletId: 'w',
+        sourceId: 'h2',
+      });
+      const ids = mockScheduleNotificationAsync.mock.calls.map((c) => c[0].content.data.historyId);
+      const history = await listNotifications(owner);
+      expect(new Set(ids)).toEqual(new Set(history.map((e) => e.id)));
+      expect(new Set(ids).size).toBe(2);
+      expect(
+        notificationMatchesTarget({ kind: 'payment', historyId: ids[0] }, { historyId: ids[0] }),
+      ).toBe(true);
+      expect(
+        notificationMatchesTarget({ kind: 'payment', historyId: ids[1] }, { historyId: ids[0] }),
+      ).toBe(false);
+
+      // Tapping the first tray notification marks only its row read.
+      await markHistoryEntryRead(ids[0]);
+      const after = await listNotifications(owner);
+      expect(after.find((e) => e.id === ids[0])?.read).toBe(true);
+      expect(after.find((e) => e.id === ids[1])?.read).toBe(false);
+    } finally {
+      setActivePubkeyForWalletStorage(null);
+    }
+  });
+
+  it("marks the active account's matching history entries read when a screen shows them", async () => {
+    const owner = 'd'.repeat(64);
+    setActivePubkeyForWalletStorage(owner);
+    try {
+      await fireNotification({
+        kind: 'group',
+        title: 'Piggy Pals',
+        body: 'x',
+        data: { groupId: 'g1' },
+      });
+      await fireNotification({ kind: 'group', title: 'Other', body: 'y', data: { groupId: 'g2' } });
+      await markHistoryReadFor({ groupId: 'g1' });
+      const history = await listNotifications(owner);
+      expect(history.find((e) => e.title === 'Piggy Pals')?.read).toBe(true);
+      expect(history.find((e) => e.title === 'Other')?.read).toBe(false);
+    } finally {
+      setActivePubkeyForWalletStorage(null);
+    }
+  });
+});
+
+describe('account scoping and persistence (#1143)', () => {
+  it('"Mark all read" matches only the given account\'s tray notifications', () => {
+    const a = 'a'.repeat(64);
+    expect(notificationMatchesTarget({ kind: 'dm', owner: a }, { owner: a })).toBe(true);
+    expect(notificationMatchesTarget({ kind: 'dm', owner: 'b'.repeat(64) }, { owner: a })).toBe(
+      false,
+    );
+    // Older notifications without an owner are left alone.
+    expect(notificationMatchesTarget({ kind: 'dm' }, { owner: a })).toBe(false);
+  });
+
+  it('has persisted the history row by the time delivery resolves (headless runs)', async () => {
+    const owner = '9'.repeat(64);
+    // A slow storage write, as on a busy device: a detached write would still
+    // be pending when delivery resolves.
+    const realSetItem = AsyncStorage.setItem;
+    AsyncStorage.setItem = (async (key: string, value: string) => {
+      await new Promise((r) => setTimeout(r, 50));
+      return realSetItem(key, value);
+    }) as typeof AsyncStorage.setItem;
+    try {
+      await fireNotification({ kind: 'zap', title: 'Zap received', body: '+1 sats', owner });
+    } finally {
+      AsyncStorage.setItem = realSetItem;
+    }
+    // Read storage directly — not via listNotifications, which waits on the queue.
+    const raw = await AsyncStorage.getItem(`notification_history_v1_${owner}`);
+    expect(JSON.parse(raw ?? '[]')).toHaveLength(1);
+    const scheduled = mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content?.data;
+    expect(scheduled.owner).toBe(owner);
+  });
+});
+
+describe('repeated sources in the tray (#1143)', () => {
+  const owner = '8'.repeat(64);
+  const payment = {
+    kind: 'payment' as const,
+    amountSats: 21,
+    walletId: 'w',
+    owner,
+    sourceId: 'h-repeat',
+  };
+
+  it("doesn't post a second tray entry for a source already shown", async () => {
+    mockScheduleNotificationAsync.mockClear();
+    const first = await firePaymentNotification(payment);
+    const second = await firePaymentNotification(payment);
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull(); // reported delivered, so callers stop retrying
+  });
+
+  it('still posts a retry whose first tray post failed', async () => {
+    mockScheduleNotificationAsync.mockClear();
+    const retry = { ...payment, sourceId: 'h-failed' };
+    mockScheduleNotificationAsync.mockRejectedValueOnce(new Error('OS refused'));
+    expect(await firePaymentNotification(retry)).toBeNull();
+    expect(await firePaymentNotification(retry)).not.toBeNull();
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(2);
+    const history = await listNotifications(owner);
+    expect(history).toHaveLength(1); // one row despite the retry
+    expect(history[0].delivered).toBe(true);
   });
 });

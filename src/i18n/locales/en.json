@@ -2312,5 +2312,22 @@
       "superseded": "A newer list was found. Reopen this screen to see it, then try again."
     },
     "notPublishable": "Not a public relay: dropped when you publish"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "back": "Back",
+    "bell": "Notifications",
+    "bellUnread": "Notifications, {{count}} unread",
+    "markAllRead": "Mark all read",
+    "emptyTitle": "No notifications yet",
+    "emptyText": "Messages, payments and Piglet finds you're notified about will show here for 30 days.",
+    "kind": {
+      "dm": "Message",
+      "group": "Group message",
+      "payment": "Payment",
+      "zap": "Zap",
+      "cache": "Piglet find",
+      "swap": "Swap"
+    }
   }
 }

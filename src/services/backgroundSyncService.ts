@@ -186,6 +186,8 @@ async function runDmDetectAndPing(
     if (freshCount > 0) {
       await fireMessageNotification({
         kind: 'dm',
+        // Headless run: name the owner explicitly for the history (#1143).
+        owner: activePubkey,
         // Sentinel thread id — never matches an actively-viewed thread, so
         // the suppression gate always lets a background ping through.
         threadId: '__background__',
@@ -270,6 +272,7 @@ async function runCacheCommentDetectAndPing(
     const freshCount = fresh.length;
     if (freshCount > 0) {
       await fireCacheNotification({
+        owner: activePubkey,
         // Sentinel coord — never matches an actively-viewed cache, so the
         // suppression gate always lets a background ping through. The tap
         // router falls back to the Geo-caches list when the coord can't
