@@ -61,3 +61,13 @@ export function createRouteLeaveTracker(routeName: string) {
     movedOn: () => left,
   };
 }
+
+/** True when a message / group alert belongs to a signed-in account other than
+ * the active one — opening its thread would show the wrong identity's view. */
+export function isForAnotherAccount(
+  data: { kind?: string; owner?: string },
+  activePubkey: string | null,
+): boolean {
+  if (data.kind !== 'dm' && data.kind !== 'group') return false;
+  return !!data.owner && data.owner.toLowerCase() !== (activePubkey ?? '').toLowerCase();
+}

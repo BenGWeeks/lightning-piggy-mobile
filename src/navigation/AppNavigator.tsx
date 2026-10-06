@@ -49,6 +49,7 @@ import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/pe
 import { getActivePubkey } from '../services/walletStorageService';
 import {
   createRouteLeaveTracker,
+  isForAnotherAccount,
   resolveWrapConversation,
 } from '../services/notificationWrapResolver';
 
@@ -203,6 +204,10 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
  * Called from the notification-response listener in App.tsx. Returns false
  * if the nav tree isn't ready yet (caller retries on cold start).
  */
+// Bumped per handled notification tap, so a newer tap cancels an older one's
+// pending wrap resolution.
+let notificationNavGeneration = 0;
+
 export const navigateFromNotification = (data: {
   kind?: string;
   conversationPubkey?: string;
@@ -218,6 +223,14 @@ export const navigateFromNotification = (data: {
   owner?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
+  // Each tap supersedes any earlier one still resolving a wrap (#1154).
+  const generation = ++notificationNavGeneration;
+  // A message alert for another signed-in account would open that peer's
+  // thread under the wrong identity: show the list instead (#1154).
+  if (isForAnotherAccount(data, getActivePubkey())) {
+    navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    return true;
+  }
   if (data.conversationPubkey) {
     // `name` is required by the route type; the screen fills the header from
     // its own profile fetch, so seed it with what the caller knows, if anything.
@@ -261,7 +274,10 @@ export const navigateFromNotification = (data: {
       const report = () => tracker.onRoute(navigationRef.getCurrentRoute()?.name);
       report();
       const unsubscribe = navigationRef.addListener('state', report);
-      const cancelled = () => tracker.movedOn() || getActivePubkey() !== owner;
+      const cancelled = () =>
+        tracker.movedOn() ||
+        getActivePubkey() !== owner ||
+        generation !== notificationNavGeneration;
       void resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) => {
         unsubscribe();
         if (target && !cancelled())

@@ -1,4 +1,8 @@
-import { createRouteLeaveTracker, resolveWrapConversation } from './notificationWrapResolver';
+import {
+  createRouteLeaveTracker,
+  isForAnotherAccount,
+  resolveWrapConversation,
+} from './notificationWrapResolver';
 
 const PK = 'a'.repeat(64);
 const PARTNER = 'b'.repeat(64);
@@ -34,4 +38,12 @@ it("doesn't count the tap's own pending tab switch as moving on, but sees any la
   tracker.onRoute('Explore'); // left — recorded at the transition, not at a poll
   tracker.onRoute('Messages'); // even if they come back before the next poll
   expect(tracker.movedOn()).toBe(true);
+});
+
+it('treats a message alert for another signed-in account as not openable here', () => {
+  expect(isForAnotherAccount({ kind: 'dm', owner: PK }, PARTNER)).toBe(true);
+  expect(isForAnotherAccount({ kind: 'group', owner: PK }, PARTNER)).toBe(true);
+  expect(isForAnotherAccount({ kind: 'dm', owner: PK.toUpperCase() }, PK)).toBe(false);
+  expect(isForAnotherAccount({ kind: 'dm' }, PK)).toBe(false); // older alerts: no owner
+  expect(isForAnotherAccount({ kind: 'payment', owner: PK }, PARTNER)).toBe(false);
 });
