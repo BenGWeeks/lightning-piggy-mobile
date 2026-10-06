@@ -19,7 +19,7 @@ export default function BlossomServersSection() {
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const list = useMemo(() => createPublishedRelayListsSectionStyles(colors), [colors]);
   const styles = useMemo(() => createBlossomServersSectionStyles(colors), [colors]);
-  const { servers, dirty, publishing, addServer, removeServer, makePrimary, publish } =
+  const { servers, dirty, publishing, editable, addServer, removeServer, makePrimary, publish } =
     useBlossomServerList();
   const [input, setInput] = useState('');
   const [error, setError] = useState(false);
@@ -64,8 +64,9 @@ export default function BlossomServersSection() {
               </View>
             ) : (
               <TouchableOpacity
-                style={styles.makePrimary}
+                style={[styles.makePrimary, !editable && list.publishButtonDisabled]}
                 onPress={() => makePrimary(url)}
+                disabled={!editable}
                 accessibilityRole="button"
                 accessibilityLabel={t('blossomServers.makePrimaryLabel', { url })}
                 testID={`blossom-make-primary-${url}`}
@@ -75,8 +76,9 @@ export default function BlossomServersSection() {
             )}
             {servers.length > 1 && (
               <TouchableOpacity
-                style={list.removeButton}
+                style={[list.removeButton, !editable && list.publishButtonDisabled]}
                 onPress={() => removeServer(url)}
+                disabled={!editable}
                 accessibilityRole="button"
                 accessibilityLabel={t('blossomServers.removeLabel', { url })}
                 testID={`blossom-remove-${url}`}
@@ -102,12 +104,14 @@ export default function BlossomServersSection() {
           autoCorrect={false}
           keyboardType="url"
           onSubmitEditing={submit}
+          editable={editable}
           testID="blossom-add-input"
           accessibilityLabel={t('blossomServers.addLabel')}
         />
         <TouchableOpacity
-          style={list.addButton}
+          style={[list.addButton, !editable && list.publishButtonDisabled]}
           onPress={submit}
+          disabled={!editable}
           accessibilityRole="button"
           accessibilityLabel={t('blossomServers.addLabel')}
           testID="blossom-add-button"
@@ -122,11 +126,11 @@ export default function BlossomServersSection() {
       )}
       <Text style={shared.fieldHint}>{t('blossomServers.hint')}</Text>
       <TouchableOpacity
-        style={[list.publishButton, (!dirty || publishing) && list.publishButtonDisabled]}
+        style={[list.publishButton, (!dirty || !editable) && list.publishButtonDisabled]}
         onPress={() => void onPublish()}
-        disabled={!dirty || publishing}
+        disabled={!dirty || !editable}
         accessibilityRole="button"
-        accessibilityState={{ disabled: !dirty || publishing, busy: publishing }}
+        accessibilityState={{ disabled: !dirty || !editable, busy: publishing }}
         accessibilityLabel={t('blossomServers.publish')}
         testID="blossom-publish"
       >

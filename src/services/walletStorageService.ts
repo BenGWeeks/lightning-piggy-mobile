@@ -361,6 +361,26 @@ export async function getSavedBlossomServers(): Promise<string[] | null> {
   }
 }
 
+/** The single server the user explicitly saved before lists existed, or
+ * null if they never changed the default. */
+export async function getSavedLegacyBlossomServer(): Promise<string | null> {
+  const saved = await AsyncStorage.getItem(BLOSSOM_SERVER_KEY).catch(() => null);
+  return saved && saved.trim() ? saved.trim() : null;
+}
+
+// Set when the list changes on this device; cleared once that exact list is
+// published, so "Publish" stays available across visits until it is.
+const BLOSSOM_SERVERS_UNPUBLISHED_KEY = 'blossom_servers_unpublished_v1';
+
+export async function getBlossomServersUnpublished(): Promise<boolean> {
+  return (await AsyncStorage.getItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY).catch(() => null)) === '1';
+}
+
+export async function setBlossomServersUnpublished(unpublished: boolean): Promise<void> {
+  if (unpublished) await AsyncStorage.setItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY, '1');
+  else await AsyncStorage.removeItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY);
+}
+
 /** Servers to upload to, primary first. Never empty. */
 export async function getBlossomServers(): Promise<string[]> {
   return (await getSavedBlossomServers()) ?? [await getBlossomServer()];
