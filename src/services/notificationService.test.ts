@@ -434,3 +434,36 @@ describe('keeping the history in step with the tray (#1143)', () => {
     }
   });
 });
+
+describe('account scoping and persistence (#1143)', () => {
+  it('"Mark all read" matches only the given account\'s tray notifications', () => {
+    const a = 'a'.repeat(64);
+    expect(notificationMatchesTarget({ kind: 'dm', owner: a }, { owner: a })).toBe(true);
+    expect(notificationMatchesTarget({ kind: 'dm', owner: 'b'.repeat(64) }, { owner: a })).toBe(
+      false,
+    );
+    // Older notifications without an owner are left alone.
+    expect(notificationMatchesTarget({ kind: 'dm' }, { owner: a })).toBe(false);
+  });
+
+  it('has persisted the history row by the time delivery resolves (headless runs)', async () => {
+    const owner = '9'.repeat(64);
+    // A slow storage write, as on a busy device: a detached write would still
+    // be pending when delivery resolves.
+    const realSetItem = AsyncStorage.setItem;
+    AsyncStorage.setItem = (async (key: string, value: string) => {
+      await new Promise((r) => setTimeout(r, 50));
+      return realSetItem(key, value);
+    }) as typeof AsyncStorage.setItem;
+    try {
+      await fireNotification({ kind: 'zap', title: 'Zap received', body: '+1 sats', owner });
+    } finally {
+      AsyncStorage.setItem = realSetItem;
+    }
+    // Read storage directly — not via listNotifications, which waits on the queue.
+    const raw = await AsyncStorage.getItem(`notification_history_v1_${owner}`);
+    expect(JSON.parse(raw ?? '[]')).toHaveLength(1);
+    const scheduled = mockScheduleNotificationAsync.mock.calls.at(-1)?.[0]?.content?.data;
+    expect(scheduled.owner).toBe(owner);
+  });
+});

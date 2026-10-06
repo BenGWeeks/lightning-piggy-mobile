@@ -61,7 +61,8 @@ export function useNotificationHistory() {
   const markAllRead = useCallback(async () => {
     if (!pubkey) return;
     await markAllNotificationsRead(pubkey);
-    await dismissNotificationsFor({ all: true });
+    // Only this account's tray entries — another signed-in account's stay.
+    await dismissNotificationsFor({ owner: pubkey });
   }, [pubkey]);
 
   return { entries, unreadCount, markRead, markAllRead };

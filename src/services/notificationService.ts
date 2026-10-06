@@ -98,6 +98,8 @@ export interface NotificationData {
   cacheCoord?: string;
   /** Links a tray notification to its in-app history row (#1143). */
   historyId?: string;
+  /** Account the notification belongs to, so clearing stays per account. */
+  owner?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -333,7 +335,10 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // can mark / clear the other. A retry of the same source reuses it.
     const historyId =
       payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    void recordNotification(payload.owner ?? getActivePubkey(), { ...payload, id: historyId });
+    const owner = payload.owner ?? getActivePubkey() ?? undefined;
+    // Awaited (best-effort, never throws): a headless background task can be
+    // torn down as soon as delivery resolves, losing a detached write.
+    await recordNotification(owner ?? null, { ...payload, id: historyId });
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -350,7 +355,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         body: presented.body,
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
-        data: { kind: payload.kind, ...(payload.data ?? {}), historyId },
+        data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
         sound: 'default',
       },
       // Android: a TIME_INTERVAL trigger is the supported way to pin a
@@ -432,8 +437,9 @@ export type NotificationTarget =
   | { groupId: string }
   | { cacheCoord: string }
   | { genericMessages: true }
-  /** Everything the app posted ("Mark all read", #1143). */
-  | { all: true }
+  /** Everything one account was notified about ("Mark all read", #1143).
+   * Notifications without a recorded owner (older versions) are left alone. */
+  | { owner: string }
   /** The one tray notification behind a history row (#1143). */
   | { historyId: string };
 
@@ -451,7 +457,7 @@ export function notificationMatchesTarget(
     );
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
-  if ('all' in target) return true;
+  if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
