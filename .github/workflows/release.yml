@@ -142,7 +142,7 @@ jobs:
       - name: Fail if the iOS build or submission failed
         if: steps.ios.outcome == 'failure'
         run: |
-          echo "::error title=iOS build or TestFlight submission failed::Android still ran. Retry iOS with 'eas submit --platform ios --id <build-id>', then re-run this workflow with whats_new_build set."
+          echo "::error title=iOS build or TestFlight submission failed::Android still ran. If the build finished but submission failed, resubmit with 'eas submit --platform ios --id <build-id>'; if the build failed, re-run this workflow with platform=ios. Then re-run with whats_new_build set."
           exit 1
 
   set-testflight-whats-new:
