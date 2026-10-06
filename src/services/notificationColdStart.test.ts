@@ -22,8 +22,10 @@ it('marks a cold-start tap read once the identity hydrates', async () => {
     body: '+1 sats',
     id: 'h1',
   });
-  const marking = markHistoryEntryRead('h1'); // tapped before hydration
-  setActivePubkeyForWalletStorage(owner);
+  const marking = markHistoryEntryRead('h1'); // tapped before auto-login
+  setActivePubkeyForWalletStorage(null); // NostrProvider's initial publication
+  await new Promise((r) => setTimeout(r, 20)); // auto-login takes a moment
+  setActivePubkeyForWalletStorage(owner); // the restored account
   await marking;
   expect((await listNotifications(owner))[0].read).toBe(true);
 });

@@ -43,7 +43,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { markNotificationsReadWhere, recordNotification } from './notificationHistory';
-import { awaitActivePubkeyHydrated, getActivePubkey } from './walletStorageService';
+import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -457,11 +457,30 @@ export function notificationMatchesTarget(
 }
 
 /** Mark the history row behind a tapped tray notification read (#1143). */
+/** The active account, waiting (up to `timeoutMs`) for one to be restored —
+ * not merely for the first publication, which is `null` on a cold start. */
+function waitForActivePubkey(timeoutMs: number): Promise<string | null> {
+  const current = getActivePubkey();
+  if (current) return Promise.resolve(current);
+  return new Promise((resolve) => {
+    let unsubscribe = () => {};
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve(getActivePubkey());
+    }, timeoutMs);
+    unsubscribe = subscribeActivePubkey((pk) => {
+      if (!pk) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(pk);
+    });
+  });
+}
+
 export async function markHistoryEntryRead(historyId: string | undefined): Promise<void> {
   if (!historyId) return;
-  // A cold-start tap can arrive before the identity has hydrated.
-  await awaitActivePubkeyHydrated(10_000);
-  const owner = getActivePubkey();
+  // A cold-start tap can arrive before auto-login has restored the account.
+  const owner = await waitForActivePubkey(15_000);
   if (!owner) return;
   await markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
 }
