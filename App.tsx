@@ -169,7 +169,8 @@ export default function App() {
         | undefined;
       if (!data) return;
       // The tapped notification's in-app history row is now read (#1143).
-      void markHistoryEntryRead((data as { historyId?: string }).historyId);
+      const { historyId, owner } = data as { historyId?: string; owner?: string };
+      void markHistoryEntryRead(historyId, owner);
       const tryNav = (attempt: number) => {
         if (navigateFromNotification(data)) return;
         if (attempt >= 20) return;

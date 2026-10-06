@@ -14,6 +14,16 @@ import { markHistoryEntryRead } from './notificationService';
 import { recordNotification, listNotifications } from './notificationHistory';
 import { setActivePubkeyForWalletStorage } from './walletStorageService';
 
+it('marks a tapped notification read under its own account, not the active one', async () => {
+  const a = 'b'.repeat(64);
+  const b = 'c'.repeat(64);
+  await recordNotification(a, { kind: 'dm', title: 'For A', body: 'x', id: 'ha' });
+  setActivePubkeyForWalletStorage(b); // the user switched to account B
+  await markHistoryEntryRead('ha', a);
+  expect((await listNotifications(a))[0].read).toBe(true);
+  setActivePubkeyForWalletStorage(null);
+});
+
 it('marks a cold-start tap read once the identity hydrates', async () => {
   const owner = 'a'.repeat(64);
   await recordNotification(owner, {

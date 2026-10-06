@@ -483,10 +483,15 @@ function waitForActivePubkey(timeoutMs: number): Promise<string | null> {
   });
 }
 
-export async function markHistoryEntryRead(historyId: string | undefined): Promise<void> {
+export async function markHistoryEntryRead(
+  historyId: string | undefined,
+  notificationOwner?: string,
+): Promise<void> {
   if (!historyId) return;
-  // A cold-start tap can arrive before auto-login has restored the account.
-  const owner = await waitForActivePubkey(15_000);
+  // The notification's own account (it may not be the active one); older
+  // payloads have none, so fall back to the restored active account — a
+  // cold-start tap can arrive before auto-login has restored it.
+  const owner = notificationOwner ?? (await waitForActivePubkey(15_000));
   if (!owner) return;
   await markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
 }
