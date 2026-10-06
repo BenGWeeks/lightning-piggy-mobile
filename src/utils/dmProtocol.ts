@@ -33,3 +33,19 @@ export function dmMessageThreadId(message: { partnerPubkey: string; wireKind?: n
 export function isDmProtocolAvailable(protocol: DmProtocol): boolean {
   return protocol !== 'marmot';
 }
+
+/** Marmot (MLS group chat over Nostr, e.g. White Noise) inner kinds: 443
+ * KeyPackage, 444 Welcome (a group invite, delivered gift-wrapped like a
+ * NIP-17 DM), 445 Group Event. The app can't read them yet (#1140). */
+export const MARMOT_WELCOME_KIND = 444;
+export function isMarmotKind(kind: number | undefined): boolean {
+  return kind === 443 || kind === MARMOT_WELCOME_KIND || kind === 445;
+}
+
+/** i18n key for a Marmot message's "not supported yet" bubble, else null. */
+export function marmotBubbleKey(kind: number): string | null {
+  if (!isMarmotKind(kind)) return null;
+  return kind === MARMOT_WELCOME_KIND
+    ? 'messageBubble.marmotInvite'
+    : 'messageBubble.marmotMessage';
+}

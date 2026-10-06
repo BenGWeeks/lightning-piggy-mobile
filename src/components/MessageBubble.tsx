@@ -26,6 +26,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { PollTally } from '../utils/nip88Poll';
+import { marmotBubbleKey } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { type DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { extractUrls } from '../utils/extractUrls';
@@ -583,12 +584,17 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <View
           style={[styles.bubble, styles.unsupportedBubble]}
-          accessibilityLabel={t('messageBubble.unsupportedA11y', { kind: content.rawKind })}
+          accessibilityLabel={t(
+            marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedA11y',
+            { kind: content.rawKind },
+          )}
           testID={`${testIdPrefix}-unsupported-${id}`}
         >
           {SenderLabel}
           <Text style={styles.unsupportedText}>
-            {t('messageBubble.unsupportedText', { kind: content.rawKind })}
+            {t(marmotBubbleKey(content.rawKind) ?? 'messageBubble.unsupportedText', {
+              kind: content.rawKind,
+            })}
           </Text>
           {renderFooter([styles.bubbleTime])}
         </View>

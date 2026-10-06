@@ -1,6 +1,8 @@
 import { orderPreviewFromContent } from './orderEvents';
 import { pollPreviewFromContent } from './nip88Poll';
 import { NWC_SHARE_KIND, nwcSharePreviewFromContent } from './nwcShareMessage';
+import { isMarmotKind, MARMOT_WELCOME_KIND } from './dmProtocol';
+import { t } from '../i18n';
 
 /**
  * Secret-free inbox / notification preview for a stored DM row, dispatched by
@@ -18,6 +20,8 @@ import { NWC_SHARE_KIND, nwcSharePreviewFromContent } from './nwcShareMessage';
  *    to a label here. Plain kind-15 rows (bare blob URL, no secret) pass through.
  *  - Structured NIP-88 poll / vote (kind 1068/1018) → the poll summary.
  *  - Marketplace order / receipt (kind 16/17) → the order summary.
+ *  - Marmot group invite / message (kind 443–445) → a "not supported yet"
+ *    label, never the serialized MLS payload (#1140).
  *  - Everything else → the content unchanged (plain chat text, …).
  *
  * Shared by every store → preview projection (inbox refresh, live sub,
@@ -28,5 +32,7 @@ export function dmRowPreview(content: string, wireKind: number): string {
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);
   // its `&k=…&n=…` params are the decryption secret, so never let it through.
   if (wireKind === 15 && content.includes('#lpe=1')) return '📎 Attachment';
+  if (isMarmotKind(wireKind))
+    return `🔒 ${t(wireKind === MARMOT_WELCOME_KIND ? 'messageBubble.marmotInvitePreview' : 'messageBubble.marmotMessagePreview')}`;
   return pollPreviewFromContent(content, wireKind) ?? orderPreviewFromContent(content, wireKind);
 }
