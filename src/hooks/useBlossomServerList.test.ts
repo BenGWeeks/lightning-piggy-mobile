@@ -2,7 +2,12 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlossomServerList } from './useBlossomServerList';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
-import { DEFAULT_BLOSSOM_SERVER, setBlossomServer } from '../services/walletStorageService';
+import {
+  DEFAULT_BLOSSOM_SERVER,
+  getBlossomServersUnpublished,
+  setBlossomServer,
+  setBlossomServers,
+} from '../services/walletStorageService';
 
 const PK = 'a'.repeat(64);
 const mockSign = jest.fn();
@@ -73,4 +78,36 @@ it('remembers unpublished changes across visits, and a successful publish clears
     expect((await second.result.current.publish()).ok).toBe(true);
   });
   expect(second.result.current.dirty).toBe(false);
+});
+
+it('signs a publish after a future-dated published list', async () => {
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  act(() => {
+    result.current.addServer('https://backup.example');
+  });
+  fetchLatest.mockResolvedValue({ ...published, created_at: future });
+  publish.mockResolvedValueOnce([{ url: 'wss://default.example', ok: true }]);
+  await act(async () => {
+    await result.current.publish();
+  });
+  expect(mockSign.mock.calls.at(-1)[0].created_at).toBeGreaterThan(future);
+});
+
+it('keeps "unpublished" when the saved list changed while publishing', async () => {
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  act(() => {
+    result.current.addServer('https://backup.example');
+  });
+  publish.mockImplementationOnce(async () => {
+    // Another screen instance edits the list before the relays answer.
+    await setBlossomServers([DEFAULT_BLOSSOM_SERVER, 'https://newer.example']);
+    return [{ url: 'wss://default.example', ok: true }];
+  });
+  await act(async () => {
+    await result.current.publish();
+  });
+  expect(await getBlossomServersUnpublished()).toBe(true);
 });

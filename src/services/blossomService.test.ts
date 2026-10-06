@@ -3,13 +3,15 @@ import { uploadToBlossomServers, type BlossomSigner } from './blossomService';
 // Minimal XMLHttpRequest fake: each PUT is answered by `respond(url, body)`.
 type Call = { url: string; body: unknown; headers: Record<string, string> };
 let calls: Call[] = [];
-let respond: (url: string) => { status: number; responseText: string } | 'network-error';
+let respond: (url: string) => { status: number; responseText: string } | 'network-error' | 'hang';
 
 class FakeXhr {
   status = 0;
   responseText = '';
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  timeout = 0;
   private url = '';
   private headers: Record<string, string> = {};
   open(_method: string, url: string) {
@@ -23,6 +25,8 @@ class FakeXhr {
     const r = respond(this.url);
     setTimeout(() => {
       if (r === 'network-error') return this.onerror?.();
+      // A server that never answers: the request's timeout fires instead.
+      if (r === 'hang') return this.timeout > 0 ? this.ontimeout?.() : undefined;
       this.status = r.status;
       this.responseText = r.responseText;
       this.onload?.();
@@ -92,4 +96,12 @@ it('throws the last error when every server rejects the upload', async () => {
   await expect(
     uploadToBlossomServers('file.jpg', ['https://a.example', 'https://b.example'], signer, B64),
   ).rejects.toThrow('Blossom upload failed: 413 too big');
+});
+
+it('times out an unresponsive primary and fails over to the next server', async () => {
+  respond = (url) => (url.startsWith('https://a.example') ? 'hang' : ok(url));
+  await expect(
+    uploadToBlossomServers('file.jpg', ['https://a.example', 'https://b.example'], signer, B64),
+  ).resolves.toBe('https://b.example/upload');
+  await flush(); // let the background mirror to the hung server settle
 });

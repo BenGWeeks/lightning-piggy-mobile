@@ -45,6 +45,16 @@ export function useBlossomServerList() {
   const [publishing, setPublishing] = useState(false);
   const activePubkeyRef = useRef(pubkey);
   activePubkeyRef.current = pubkey;
+  // Newest kind-10063 created_at seen (fetched or published): each publish is
+  // signed strictly after it, or relays keep the old list (NIP-01).
+  const latestCreatedAtRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
   const relayUrls = useMemo(() => relays.map((r) => r.url), [relays]);
 
   useEffect(() => {
@@ -70,6 +80,8 @@ export function useBlossomServerList() {
         const event = await fetchLatestReplaceable(pubkey, BLOSSOM_SERVER_LIST_KIND, [
           ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
         ]).catch(() => null);
+        if (event)
+          latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, event.created_at);
         const published = event ? blossomServersFromTags(event.tags) : [];
         if (cancelled || published.length === 0 || activePubkeyRef.current !== pubkey) return;
         await setBlossomServers(published);
@@ -126,21 +138,32 @@ export function useBlossomServerList() {
     const snapshot = servers;
     setPublishing(true);
     try {
-      const signed = await signEvent(buildBlossomServerListEvent(snapshot));
+      // The newest list on the relays (another client, or a future-dated one).
+      const current = await fetchLatestReplaceable(pk, BLOSSOM_SERVER_LIST_KIND, [
+        ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
+      ]).catch(() => null);
+      if (current)
+        latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, current.created_at);
+      const unsigned = buildBlossomServerListEvent(snapshot);
+      unsigned.created_at = Math.max(unsigned.created_at, latestCreatedAtRef.current + 1);
+      const signed = await signEvent(unsigned);
       if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
         return { ok: false, error: 'not-signed' };
       const targets = [...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS])];
       const results = await publishToRelays(signed as unknown as Event, targets);
       const accepted = results.filter((r) => r.ok).length;
       if (accepted === 0) return { ok: false, error: 'none-accepted' };
-      // Editing is frozen while publishing, but only clear what was published.
-      if (sameList(snapshot, servers)) {
-        setDirty(false);
+      latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, unsigned.created_at);
+      // Clear "unpublished" only if the saved list is still the one published
+      // (a newer screen may have edited it while this publish was in flight).
+      const saved = await getSavedBlossomServers();
+      if (saved && sameList(snapshot, saved)) {
         await setBlossomServersUnpublished(false);
+        if (mountedRef.current) setDirty(false);
       }
       return { ok: true, accepted, total: results.length };
     } finally {
-      setPublishing(false);
+      if (mountedRef.current) setPublishing(false);
     }
   }, [pubkey, servers, signEvent, relayUrls]);
 

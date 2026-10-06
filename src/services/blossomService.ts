@@ -76,15 +76,22 @@ const trimServer = (url: string) => url.trim().replace(/\/+$/, '');
 
 /** PUT raw bytes (or a JSON body) with XHR — React Native's fetch() body
  * handling for binary is inconsistent, but XHR's `send(arrayBuffer)` is not. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+const MIRROR_TIMEOUT_MS = 30_000;
+
 function put(
   url: string,
   authHeader: string,
   contentType: string,
   body: ArrayBuffer | string,
+  timeoutMs: number,
 ): Promise<{ status: number; responseText: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url, true);
+    // Bounded, so an unresponsive server fails over instead of hanging.
+    xhr.timeout = timeoutMs;
+    xhr.ontimeout = () => reject(new Error('Blossom upload: timed out'));
     xhr.setRequestHeader('Authorization', authHeader);
     xhr.setRequestHeader('Content-Type', contentType);
     xhr.onload = () => resolve({ status: xhr.status, responseText: xhr.responseText });
@@ -169,11 +176,18 @@ export async function uploadToBlossomServers(
         authHeader,
         contentType,
         body,
+        UPLOAD_TIMEOUT_MS,
       );
       const url = descriptorUrl(status, responseText);
       // Backups: every other server mirrors the stored blob (fire-and-forget).
       for (const backup of servers.filter((_, j) => j !== i)) {
-        void put(`${backup}/mirror`, authHeader, 'application/json', JSON.stringify({ url }))
+        void put(
+          `${backup}/mirror`,
+          authHeader,
+          'application/json',
+          JSON.stringify({ url }),
+          MIRROR_TIMEOUT_MS,
+        )
           .then(({ status: s }) => {
             if (s < 200 || s >= 300) console.warn('[Blossom] mirror failed', backup, s);
           })
