@@ -187,12 +187,18 @@ export default function App() {
     // Cold start: the app may have been launched by a notification tap.
     // Clear the stored launch response once routed, so a later effect
     // re-run / remount doesn't re-handle the same cold-start tap.
+    // A warm tap handled before this lookup resolves is newer than the launch
+    // tap, so the launch tap must not supersede it (#1154).
+    let warmTapSeen = false;
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      routeFromResponse(response);
+      if (!warmTapSeen) routeFromResponse(response);
       void Notifications.clearLastNotificationResponseAsync?.();
     });
     // Warm taps while the app is already running.
-    const responseSub = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      warmTapSeen = true;
+      routeFromResponse(response);
+    });
 
     return () => {
       appStateSub.remove();
