@@ -205,3 +205,19 @@ it('ignores a second Publish tap while one is in flight (one signing prompt)', a
   expect(await second).toEqual({ ok: false, error: 'busy' });
   expect(mockSign).toHaveBeenCalledTimes(1);
 });
+
+it('normalizes a legacy server before migrating it, so publishing clears the change', async () => {
+  await setBlossomServer('https://mine.example/');
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  expect(result.current.servers).toEqual(['https://mine.example']);
+  act(() => {
+    result.current.addServer('https://mine.example');
+  });
+  expect(result.current.servers).toEqual(['https://mine.example']); // no duplicate
+  publish.mockResolvedValueOnce([{ url: 'wss://default.example', ok: true }]);
+  await act(async () => {
+    await result.current.publish();
+  });
+  expect(result.current.dirty).toBe(false);
+});

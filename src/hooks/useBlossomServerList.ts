@@ -81,7 +81,10 @@ export function useBlossomServerList() {
         }
         // A server explicitly chosen before lists existed: keep it.
         // (The old field also saved an unchanged default — not a real choice.)
-        const legacy = await getSavedLegacyBlossomServer();
+        const savedLegacy = await getSavedLegacyBlossomServer();
+        // Same form as every other entry (e.g. no trailing slash), so it
+        // matches what gets published and isn't duplicated on re-add.
+        const legacy = savedLegacy ? (normalizeBlossomServer(savedLegacy) ?? savedLegacy) : null;
         if (legacy && legacy !== DEFAULT_BLOSSOM_SERVER) {
           await setBlossomServers([legacy]);
           if (!cancelled) setServers([legacy]);
