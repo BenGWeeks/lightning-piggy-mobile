@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createGroupRowStyles } from '../styles/GroupRow.styles';
 import type { GroupSummary } from '../types/groups';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import GroupAvatar, { type ContactInfo } from './GroupAvatar';
+import DmProtocolTag from './DmProtocolTag';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
 
 interface Props {
@@ -46,7 +47,7 @@ function senderName(
 
 const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createGroupRowStyles(colors), [colors]);
   const { pubkey: myPubkey } = useNostr();
   const { contacts } = useNostrContacts();
   const { group, activity } = summary;
@@ -113,6 +114,8 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
           <Text style={styles.name} numberOfLines={1}>
             {group.name}
           </Text>
+          {/* Groups are NIP-17 group DMs — tag them like 1:1 rows (#1139). */}
+          <DmProtocolTag protocol="nip17" testID={`group-protocol-tag-${group.id}`} />
           <Text style={styles.timestamp} numberOfLines={1}>
             {timestamp}
           </Text>
@@ -124,40 +127,5 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
     </TouchableOpacity>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    container: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-      gap: 12,
-    },
-    info: {
-      flex: 1,
-      minWidth: 0,
-    },
-    topRow: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: 8,
-    },
-    name: {
-      flex: 1,
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    timestamp: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    preview: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-  });
 
 export default React.memo(GroupRow);

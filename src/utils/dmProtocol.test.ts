@@ -6,6 +6,8 @@ import {
   filterMessagesByProtocol,
   isDmProtocolAvailable,
   dmThreadId,
+  isMarmotKind,
+  marmotBubbleKey,
 } from './dmProtocol';
 
 describe('DM protocols', () => {
@@ -53,5 +55,18 @@ describe('dmThreadId', () => {
   it('keys a thread by lowercase pubkey and protocol', () => {
     expect(dmThreadId('ABC', 'nip04')).toBe('abc:nip04');
     expect(dmThreadId('abc', 'nip17')).not.toBe(dmThreadId('abc', 'nip04'));
+  });
+});
+
+describe('Marmot kinds (#1140)', () => {
+  it('recognises 443/444/445 and nothing else', () => {
+    expect([443, 444, 445].every(isMarmotKind)).toBe(true);
+    expect([4, 14, 15, 442, 446, undefined].some(isMarmotKind)).toBe(false);
+  });
+
+  it('picks the invite wording for a Welcome and the generic wording otherwise', () => {
+    expect(marmotBubbleKey(444)).toBe('messageBubble.marmotInvite');
+    expect(marmotBubbleKey(445)).toBe('messageBubble.marmotMessage');
+    expect(marmotBubbleKey(1068)).toBeNull();
   });
 });
