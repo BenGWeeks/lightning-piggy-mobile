@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState } from 'react-native';
 import { useNostr } from '../contexts/NostrContext';
 import {
   listNotifications,
@@ -27,9 +28,19 @@ export function useNotificationHistory() {
     };
     load();
     const unsubscribe = subscribeNotificationHistory(load);
+    // A background worker may record in a separate JS context, whose listeners
+    // can't reach this one: re-read on resume, staggered like other non-urgent
+    // resume work (#554).
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (resumeTimer) clearTimeout(resumeTimer);
+      resumeTimer = state === 'active' ? setTimeout(load, 3000) : null;
+    });
     return () => {
       cancelled = true;
       unsubscribe();
+      appStateSub.remove();
+      if (resumeTimer) clearTimeout(resumeTimer);
     };
   }, [pubkey]);
 
