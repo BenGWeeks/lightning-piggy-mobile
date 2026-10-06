@@ -47,7 +47,7 @@ import FriendsScreen from '../screens/FriendsScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
 import { getActivePubkey } from '../services/walletStorageService';
-import { resolveWrapConversation } from '../services/notificationWrapResolver';
+import { leftAfterReaching, resolveWrapConversation } from '../services/notificationWrapResolver';
 
 // Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
 // Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
@@ -251,17 +251,17 @@ export const navigateFromNotification = (data: {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     const owner = data.owner ?? getActivePubkey();
     if (data.wrapId && owner) {
-      const stillOnList = () => navigationRef.getCurrentRoute()?.name === 'Messages';
-      void resolveWrapConversation(owner, data.wrapId, { shouldStop: () => !stillOnList() }).then(
-        (target) => {
-          if (target && stillOnList())
-            navigationRef.navigate('Conversation', {
-              pubkey: target.pubkey,
-              name: data.name ?? '',
-              protocol: target.protocol,
-            });
-        },
-      );
+      // The tab switch lands a moment after navigate(); leaving the list only
+      // counts as "moved on" once it has actually been focused.
+      const movedOn = leftAfterReaching(() => navigationRef.getCurrentRoute()?.name, 'Messages');
+      void resolveWrapConversation(owner, data.wrapId, { shouldStop: movedOn }).then((target) => {
+        if (target && !movedOn())
+          navigationRef.navigate('Conversation', {
+            pubkey: target.pubkey,
+            name: data.name ?? '',
+            protocol: target.protocol,
+          });
+      });
     }
     return true;
   }

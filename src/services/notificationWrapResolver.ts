@@ -43,3 +43,20 @@ export async function resolveWrapConversation(
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
+
+/**
+ * A "the user moved on" check for a pending navigation to `routeName`: false
+ * until that route has actually been focused (navigate() lands a moment
+ * later), then true once the user leaves it.
+ */
+export function leftAfterReaching(
+  currentRouteName: () => string | undefined,
+  routeName: string,
+): () => boolean {
+  let reached = false;
+  return () => {
+    const onRoute = currentRouteName() === routeName;
+    if (onRoute) reached = true;
+    return reached && !onRoute;
+  };
+}

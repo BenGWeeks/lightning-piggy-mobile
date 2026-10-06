@@ -53,7 +53,7 @@ export default function NotificationsScreen() {
       (e) => e.data.wrapId && !e.data.conversationPubkey && !wrapTargets.has(e.data.wrapId),
     );
     if (pending.length === 0) return;
-    void (async () => {
+    const resolve = async () => {
       const found = new Map(wrapTargets);
       for (const e of pending) {
         const row = await getConversationForEvent(pubkey, e.data.wrapId!).catch(() => null);
@@ -64,9 +64,14 @@ export default function NotificationsScreen() {
           });
       }
       if (!cancelled && found.size > wrapTargets.size) setWrapTargets(found);
-    })();
+    };
+    void resolve();
+    // A message decrypted after the screen opened: re-check while rows remain
+    // unresolved (a successful lookup re-runs this effect with fewer pending).
+    const retry = setInterval(() => void resolve(), 3000);
     return () => {
       cancelled = true;
+      clearInterval(retry);
     };
   }, [entries, pubkey, wrapTargets]);
 

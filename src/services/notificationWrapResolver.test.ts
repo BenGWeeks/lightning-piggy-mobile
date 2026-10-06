@@ -1,4 +1,4 @@
-import { resolveWrapConversation } from './notificationWrapResolver';
+import { leftAfterReaching, resolveWrapConversation } from './notificationWrapResolver';
 
 const PK = 'a'.repeat(64);
 const PARTNER = 'b'.repeat(64);
@@ -23,4 +23,14 @@ it('gives up after the timeout, or as soon as the result is no longer wanted', a
   await expect(
     resolveWrapConversation(PK, 'wrap', { lookup, shouldStop: () => true }),
   ).resolves.toBeNull();
+});
+
+it("doesn't count the tap's own pending tab switch as the user moving on", () => {
+  let route: string | undefined = 'Home';
+  const movedOn = leftAfterReaching(() => route, 'Messages');
+  expect(movedOn()).toBe(false); // navigate() hasn't landed yet
+  route = 'Messages';
+  expect(movedOn()).toBe(false);
+  route = 'Explore'; // the user left the list
+  expect(movedOn()).toBe(true);
 });
