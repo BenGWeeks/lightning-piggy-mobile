@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -46,34 +46,42 @@ export default function NotificationsScreen() {
   const [wrapTargets, setWrapTargets] = useState<
     Map<string, { pubkey: string; protocol: 'nip04' | 'nip17' }>
   >(new Map());
-  useEffect(() => {
-    if (!pubkey) return;
-    let cancelled = false;
-    const pending = entries.filter(
-      (e) => e.data.wrapId && !e.data.conversationPubkey && !wrapTargets.has(e.data.wrapId),
-    );
-    if (pending.length === 0) return;
-    const resolve = async () => {
-      const found = new Map(wrapTargets);
-      for (const e of pending) {
-        const row = await getConversationForEvent(pubkey, e.data.wrapId!).catch(() => null);
-        if (row)
-          found.set(e.data.wrapId!, {
-            pubkey: row.conversation,
-            protocol: protocolForWireKind(row.wireKind),
-          });
-      }
-      if (!cancelled && found.size > wrapTargets.size) setWrapTargets(found);
-    };
-    void resolve();
-    // A message decrypted after the screen opened: re-check while rows remain
-    // unresolved (a successful lookup re-runs this effect with fewer pending).
-    const retry = setInterval(() => void resolve(), 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(retry);
-    };
-  }, [entries, pubkey, wrapTargets]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!pubkey) return;
+      let cancelled = false;
+      const pending = entries.filter(
+        (e) => e.data.wrapId && !e.data.conversationPubkey && !wrapTargets.has(e.data.wrapId),
+      );
+      if (pending.length === 0) return;
+      const resolve = async () => {
+        const found = new Map(wrapTargets);
+        for (const e of pending) {
+          const row = await getConversationForEvent(pubkey, e.data.wrapId!).catch(() => null);
+          if (row)
+            found.set(e.data.wrapId!, {
+              pubkey: row.conversation,
+              protocol: protocolForWireKind(row.wireKind),
+            });
+        }
+        if (!cancelled && found.size > wrapTargets.size) setWrapTargets(found);
+      };
+      void resolve();
+      // A message decrypted after the screen opened: re-check while rows remain
+      // unresolved (a hit re-runs this with fewer pending). Only while this
+      // screen is focused, and briefly — a wrap that never lands in the DM store
+      // (a group message, a declined decryption) mustn't poll forever.
+      let tries = 0;
+      const retry = setInterval(() => {
+        if (++tries > 10) clearInterval(retry);
+        else void resolve();
+      }, 3000);
+      return () => {
+        cancelled = true;
+        clearInterval(retry);
+      };
+    }, [entries, pubkey, wrapTargets]),
+  );
 
   const handlePress = useCallback(
     (entry: NotificationHistoryEntry) => {
