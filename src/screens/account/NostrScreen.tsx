@@ -13,6 +13,7 @@ import {
 } from '../../services/walletStorageService';
 import * as amberService from '../../services/amberService';
 import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
+import { connectionStatusByAppUrl } from '../../utils/relayConnectionStatus';
 import { GC_RELAYS } from '../../services/geocacheRelays';
 import { validateRelayUrl } from '../../services/nostrRelayStorage';
 import { useNostr } from '../../contexts/NostrContext';
@@ -61,7 +62,7 @@ const NostrScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       const tick = () => {
-        setConnStatus(new Map(getRelayConnectionStatus()));
+        setConnStatus(connectionStatusByAppUrl(getRelayConnectionStatus()));
         setNativeCryptoActive(isNativeCryptoActive());
       };
       tick();
