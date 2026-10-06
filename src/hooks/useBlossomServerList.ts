@@ -47,9 +47,14 @@ export function useBlossomServerList() {
   const [publishing, setPublishing] = useState(false);
   const activePubkeyRef = useRef(pubkey);
   activePubkeyRef.current = pubkey;
-  // Newest kind-10063 created_at seen (fetched or published): each publish is
-  // signed strictly after it, or relays keep the old list (NIP-01).
-  const latestCreatedAtRef = useRef(0);
+  // Newest kind-10063 created_at seen per identity (fetched or published):
+  // each publish is signed strictly after it, or relays keep the old list.
+  const latestCreatedAtRef = useRef(new Map<string, number>());
+  const noteCreatedAt = (pk: string, createdAt: number) =>
+    latestCreatedAtRef.current.set(
+      pk,
+      Math.max(latestCreatedAtRef.current.get(pk) ?? 0, createdAt),
+    );
   const mountedRef = useRef(true);
   useEffect(
     () => () => {
@@ -84,8 +89,7 @@ export function useBlossomServerList() {
         const event = await fetchLatestReplaceable(pubkey, BLOSSOM_SERVER_LIST_KIND, [
           ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
         ]).catch(() => null);
-        if (event)
-          latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, event.created_at);
+        if (event) noteCreatedAt(pubkey, event.created_at);
         const published = event ? blossomServersFromTags(event.tags) : [];
         if (cancelled || published.length === 0 || activePubkeyRef.current !== pubkey) return;
         await setBlossomServers(published);
@@ -147,13 +151,15 @@ export function useBlossomServerList() {
       const current = await fetchLatestReplaceable(pk, BLOSSOM_SERVER_LIST_KIND, [
         ...new Set([...relayUrls, ...DEFAULT_RELAYS, ...RELAY_LIST_INDEXERS]),
       ]).catch(() => null);
-      if (current)
-        latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, current.created_at);
+      if (current) noteCreatedAt(pk, current.created_at);
       const unsigned = buildBlossomServerListEvent(snapshot);
       // Never publish an empty list (e.g. only a legacy http:// server), which
       // would replace an existing one with nothing.
       if (unsigned.tags.length === 0) return { ok: false, error: 'no-valid-servers' };
-      unsigned.created_at = Math.max(unsigned.created_at, latestCreatedAtRef.current + 1);
+      unsigned.created_at = Math.max(
+        unsigned.created_at,
+        (latestCreatedAtRef.current.get(pk) ?? 0) + 1,
+      );
       const signed = await signEvent(unsigned);
       if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
         return { ok: false, error: 'not-signed' };
@@ -161,13 +167,14 @@ export function useBlossomServerList() {
       const results = await publishToRelays(signed as unknown as Event, targets);
       const accepted = results.filter((r) => r.ok).length;
       if (accepted === 0) return { ok: false, error: 'none-accepted' };
-      latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, unsigned.created_at);
+      noteCreatedAt(pk, unsigned.created_at);
       // Record exactly what was published; a list edited meanwhile (here or in
       // another screen instance) still differs from it, so stays publishable.
       // What was actually signed (invalid entries are dropped from the event).
       const sent = blossomServersFromTags(signed.tags);
       await setPublishedBlossomServers(pk, sent);
-      if (mountedRef.current) setPublishedList(sent);
+      // Only reflect it on screen if this is still the identity being shown.
+      if (mountedRef.current && activePubkeyRef.current === pk) setPublishedList(sent);
       return { ok: true, accepted, total: results.length };
     } finally {
       if (mountedRef.current) setPublishing(false);

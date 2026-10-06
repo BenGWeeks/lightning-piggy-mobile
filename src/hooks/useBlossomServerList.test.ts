@@ -164,3 +164,29 @@ it('refuses to publish a list with no valid https server (never an empty list)',
   expect(mockSign).not.toHaveBeenCalled();
   expect(publish).not.toHaveBeenCalled();
 });
+
+it("doesn't carry one account's future-dated list timestamp into another's publish", async () => {
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  fetchLatest.mockImplementation(async (pk: string) =>
+    pk === PK ? { ...published, created_at: future } : null,
+  );
+  publish.mockResolvedValue([{ url: 'wss://default.example', ok: true }]);
+  const view = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(view.result.current.editable).toBe(true));
+  await act(async () => {
+    await view.result.current.publish(); // account A: signed after its future list
+  });
+  mockPubkey = 'b'.repeat(64);
+  mockSign.mockImplementation(async (e: object) => ({
+    ...e,
+    id: 'i',
+    sig: 's',
+    pubkey: mockPubkey,
+  }));
+  view.rerender({});
+  await waitFor(() => expect(view.result.current.editable).toBe(true));
+  await act(async () => {
+    await view.result.current.publish(); // account B
+  });
+  expect(mockSign.mock.calls.at(-1)[0].created_at).toBeLessThan(future);
+});
