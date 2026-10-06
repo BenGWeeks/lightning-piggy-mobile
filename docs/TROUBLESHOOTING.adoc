@@ -807,3 +807,23 @@ with `adb -s emulator-5554 reverse tcp:10547 tcp:10547`, and temporarily put
 lasting fix is re-broadcasting the Piggies' signed fixture events to the
 default relays and republishing Big Piggy's relay list without the localhost
 entry.
+
+Resolved 2026-10-05: the three Piggies' kind-10002 and kind-10050 lists were
+republished with `nak` to public relays (no `localhost` entry), so a fresh
+sign-in finds them again.
+
+=== Release: iOS submission fails with "Something went wrong when submitting your app to Apple App Store Connect"
+
+Seen on v1.4.0 (2026-10-06): the EAS iOS build finished, but `eas submit` failed
+about 10 seconds later with only that generic message. The EAS submission had
+no error code, no log files and no App Store Connect upload record, so the
+build never reached Apple. App Store Connect → Business showed the cause: "The
+Apple Developer Program License Agreement has been updated and needs to be
+reviewed". Until the Account Holder accepts it, every upload is refused.
+
+Fix: accept the agreement in App Store Connect, wait a few minutes for Apple to
+apply it (an immediate retry still failed), then resubmit the existing build
+without rebuilding: `eas submit --platform ios --id <build-id> --non-interactive`.
+Then fill in TestFlight "What to Test" with the Release workflow's
+`whats_new_build` input (see `docs/DEPLOYMENT.adoc` → "Manual re-run without
+re-tagging").

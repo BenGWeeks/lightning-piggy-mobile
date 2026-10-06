@@ -18,6 +18,12 @@ on:
         # `eas credentials` (see docs/DEPLOYMENT.adoc).
         default: all
         options: [ios, android, all]
+      whats_new_build:
+        description: >-
+          Only set TestFlight "What to Test" for this existing iOS build number
+          (skips all builds) — e.g. after a submission was retried by hand.
+        type: string
+        default: ''
 
 concurrency:
   group: release-${{ github.event.release.tag_name || github.ref_name }}
@@ -37,6 +43,7 @@ jobs:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     outputs:
       platform: ${{ steps.platform.outputs.value }}
+      android: ${{ steps.android.outcome }}
     steps:
       - name: Verify EXPO_TOKEN is set
         run: |
@@ -88,16 +95,28 @@ jobs:
 
       - name: Resolve platform
         id: platform
+        env:
+          WHATS_NEW_BUILD: ${{ github.event.inputs.whats_new_build }}
         run: |
           # On Release events the input is empty, so default to building
           # both platforms. iOS is auto-submitted to TestFlight; Android
           # is built only (no Google Play submit until creds wired), then
           # the attach-android-apk job downloads the APK and attaches it
           # to the Release page for sideloading.
-          echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
+          # A "What to Test"-only re-run builds nothing.
+          if [ -n "$WHATS_NEW_BUILD" ]; then
+            echo "value=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: EAS build — iOS (auto-submit to TestFlight)
+        id: ios
         if: steps.platform.outputs.value == 'ios' || steps.platform.outputs.value == 'all'
+        # A failed iOS build or TestFlight submission (e.g. an Apple agreement
+        # awaiting acceptance — v1.4.0) must not skip the Android build. The
+        # last step below still fails the job so the failure stays visible.
+        continue-on-error: true
         run: |
           npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
             --profile production \
@@ -112,6 +131,7 @@ jobs:
         # `attach-android-apk` job below and attached to the Release.
         # Add `--auto-submit` here once `eas submit --platform android`
         # is configured in eas.json.
+        id: android
         if: steps.platform.outputs.value == 'android' || steps.platform.outputs.value == 'all'
         run: |
           npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
@@ -119,13 +139,19 @@ jobs:
             --platform android \
             --non-interactive
 
+      - name: Fail if the iOS build or submission failed
+        if: steps.ios.outcome == 'failure'
+        run: |
+          echo "::error title=iOS build or TestFlight submission failed::Android still ran. Retry iOS with 'eas submit --platform ios --id <build-id>', then re-run this workflow with whats_new_build set."
+          exit 1
+
   set-testflight-whats-new:
     name: Set TestFlight "What to Test"
     # iOS-only: the App Store Connect betaBuildLocalizations endpoint has no
     # Android equivalent (Play Console "What's New" is a separate flow that
     # eas submit handles natively once Android auto-submit is wired up).
     # Skip when the build job didn't include iOS.
-    if: contains(fromJSON('["ios","all"]'), needs.build-and-submit.outputs.platform)
+    if: contains(fromJSON('["ios","all"]'), needs.build-and-submit.outputs.platform) || github.event.inputs.whats_new_build != ''
     needs: build-and-submit
     runs-on: ubuntu-latest
     env:
@@ -184,7 +210,18 @@ jobs:
       - name: Resolve iOS build version from EAS
         if: steps.gate.outputs.skip != 'true'
         id: iosbuild
+        env:
+          WHATS_NEW_BUILD: ${{ github.event.inputs.whats_new_build }}
         run: |
+          # A "What to Test"-only re-run names the build directly.
+          if [ -n "$WHATS_NEW_BUILD" ]; then
+            if ! [[ "$WHATS_NEW_BUILD" =~ ^[0-9]+$ ]]; then
+              echo "::error::whats_new_build must be an iOS build number, e.g. 45"
+              exit 1
+            fi
+            echo "version=$WHATS_NEW_BUILD" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Pick the iOS build EAS just produced for this commit. The build
           # number (CFBundleVersion — the integer in parens TestFlight shows
           # next to the X.Y.Z marketing version) is `appBuildVersion` in
@@ -280,7 +317,8 @@ jobs:
     name: Attach Android APK to Release
     # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
     # AND only when the build job actually built for Android.
-    if: github.event_name == 'release' && contains(fromJSON('["android","all"]'), needs.build-and-submit.outputs.platform)
+    # always(): still attach when the build job failed only because of iOS.
+    if: always() && github.event_name == 'release' && needs.build-and-submit.outputs.android == 'success'
     needs: build-and-submit
     runs-on: ubuntu-latest
     env:
