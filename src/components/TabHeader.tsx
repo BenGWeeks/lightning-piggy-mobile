@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, type TextStyle } from 'react-native';
+import { View, Text, TouchableOpacity, type TextStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileIcon from './ProfileIcon';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createTabHeaderStyles } from '../styles/TabHeader.styles';
 import type { AccountDrawerNavigation } from '../navigation/types';
 
 interface Props {
@@ -27,6 +27,9 @@ interface Props {
    * it needs something different (currently none do).
    */
   rightAction?: React.ReactNode;
+  /** Rendered just before the right-hand slot, keeping the default profile
+   * icon (e.g. Home's notifications bell, #1143). */
+  rightAccessory?: React.ReactNode;
   /** Optional accessibility label for the title region (rarely useful — the
    * title text is already announced — but lets screens override for e.g.
    * Home's dynamic greeting). */
@@ -62,13 +65,14 @@ const TabHeader: React.FC<Props> = ({
   icon,
   title,
   rightAction,
+  rightAccessory,
   accessibilityLabel,
   titleStyle,
   onIconPress,
   iconAccessibilityLabel,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createTabHeaderStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { profile } = useNostr();
@@ -116,40 +120,10 @@ const TabHeader: React.FC<Props> = ({
         {title}
       </Text>
       <View style={styles.spacer} />
+      {rightAccessory}
       {rightAction ?? defaultRight}
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingHorizontal: 20,
-      paddingBottom: 16,
-    },
-    badge: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    title: {
-      color: colors.white,
-      // Slightly lighter than the previous per-screen 28/700 because Home's
-      // "Hello, <name>!" greeting reads better at a softer weight and the
-      // section titles (Messages / Friends / Explore) still look substantial.
-      fontSize: 24,
-      fontWeight: '600',
-      flexShrink: 1,
-    },
-    spacer: {
-      flex: 1,
-    },
-  });
 
 export default TabHeader;

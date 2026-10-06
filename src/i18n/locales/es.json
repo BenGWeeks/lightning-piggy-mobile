@@ -2312,5 +2312,22 @@
       "superseded": "Se encontró una lista más reciente. Vuelve a abrir esta pantalla para verla e inténtalo de nuevo."
     },
     "notPublishable": "No es un relay público: se quitará al publicar"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "back": "Atrás",
+    "bell": "Notificaciones",
+    "bellUnread": "Notificaciones, {{count}} sin leer",
+    "markAllRead": "Marcar todo como leído",
+    "emptyTitle": "Aún no hay notificaciones",
+    "emptyText": "Los mensajes, pagos y hallazgos de Piglets de los que te avisemos aparecerán aquí durante 30 días.",
+    "kind": {
+      "dm": "Mensaje",
+      "group": "Mensaje de grupo",
+      "payment": "Pago",
+      "zap": "Zap",
+      "cache": "Hallazgo de Piglet",
+      "swap": "Intercambio"
+    }
   }
 }

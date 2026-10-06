@@ -76,6 +76,7 @@ const GroupsScreen = lazyScreen(() => import('../screens/GroupsScreen'));
 const GroupConversationScreen = lazyScreen(() => import('../screens/GroupConversationScreen'));
 const ContactProfileScreen = lazyScreen(() => import('../screens/ContactProfileScreen'));
 const UnsupportedEntityScreen = lazyScreen(() => import('../screens/UnsupportedEntityScreen'));
+const NotificationsScreen = lazyScreen(() => import('../screens/NotificationsScreen'));
 const ProfileScreen = lazyScreen(() => import('../screens/account/ProfileScreen'));
 const WalletsScreen = lazyScreen(() => import('../screens/account/WalletsScreen'));
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
@@ -203,14 +204,16 @@ export const navigateFromNotification = (data: {
   groupId?: string;
   walletId?: string;
   cacheCoord?: string;
+  /** Display name when the caller already knows it (the Notifications screen). */
+  name?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
   if (data.conversationPubkey) {
-    // `name` is required by the route type but the screen fills the real
-    // header from its own profile fetch, so seed it empty.
+    // `name` is required by the route type; the screen fills the header from
+    // its own profile fetch, so seed it with what the caller knows, if anything.
     navigationRef.navigate('Conversation', {
       pubkey: data.conversationPubkey,
-      name: '',
+      name: data.name ?? '',
       protocol: data.conversationProtocol ?? 'nip17',
     });
     return true;
@@ -613,6 +616,7 @@ export default function AppNavigator() {
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
         <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
         <Stack.Screen name="UnsupportedEntity" component={UnsupportedEntityScreen} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

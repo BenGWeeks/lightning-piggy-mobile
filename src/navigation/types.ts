@@ -63,6 +63,8 @@ export type RootStackParamList = {
     entity: string;
     detail?: string;
   };
+  // In-app history of fired notifications (#1143), opened from Home's bell.
+  Notifications: undefined;
 };
 
 // Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons

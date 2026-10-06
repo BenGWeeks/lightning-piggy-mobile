@@ -42,6 +42,8 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { recordNotification } from './notificationHistory';
+import { getActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -316,6 +318,9 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
  */
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
   try {
+    // In-app history (#1143) — recorded even without OS permission, so the
+    // Notifications screen still lists what happened.
+    void recordNotification(getActivePubkey(), payload);
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -413,7 +418,9 @@ export type NotificationTarget =
   | { conversationPubkey: string; conversationProtocol: 'nip04' | 'nip17' }
   | { groupId: string }
   | { cacheCoord: string }
-  | { genericMessages: true };
+  | { genericMessages: true }
+  /** Everything the app posted ("Mark all read", #1143). */
+  | { all: true };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -429,6 +436,7 @@ export function notificationMatchesTarget(
     );
   if ('groupId' in target) return data.groupId === target.groupId;
   if ('cacheCoord' in target) return data.kind === 'cache' && data.cacheCoord === target.cacheCoord;
+  if ('all' in target) return true;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
