@@ -378,6 +378,8 @@ If a release run fails (EAS queue timeout, flaky network), re-run it via *Action
 
 Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
 
+A failed iOS build or TestFlight submission no longer skips the Android build: the iOS step continues on error, Android still builds (and attaches its APK on a Release run), and the job is then marked failed so the iOS problem stays visible. After fixing the cause: if only the *submission* failed (the build finished), resubmit that build with `eas submit --platform ios --id <build-id>`; if the *build* itself failed, re-run this workflow with `platform: ios` to build again. Then set the build's "What to Test" by running *Actions → Release → Run workflow* with `whats_new_build` set to the iOS build number (e.g. `45`). That run builds nothing; it only fills in the TestFlight notes from `docs/RELEASE_NOTES_NEXT.md`, so do it before the notes are reset.
+
 ==== Secrets
 
 - **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
