@@ -1,6 +1,6 @@
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { getBlossomServer } from './walletStorageService';
-import { uploadToBlossom, BlossomSigner } from './blossomService';
+import { getBlossomServers } from './walletStorageService';
+import { uploadToBlossomServers, BlossomSigner } from './blossomService';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 import { encryptFile } from './encryptedFile';
@@ -177,9 +177,9 @@ export async function uploadBlob(
   base64?: string | null,
 ): Promise<string> {
   if (signer) {
-    const server = await getBlossomServer();
+    const servers = await getBlossomServers();
     const payload = base64 ?? (await readFileAsBase64(fileUri));
-    return uploadToBlossom(fileUri, server, signer, payload);
+    return uploadToBlossomServers(fileUri, servers, signer, payload);
   }
   return uploadToNostrBuild(fileUri);
 }
@@ -218,12 +218,12 @@ export async function uploadEncryptedBlob(
   const plaintext = new Uint8Array(Buffer.from(payload, 'base64'));
   const { ciphertext, keyHex, nonceHex, sha256Hex } = encryptFile(plaintext);
   const ciphertextBase64 = Buffer.from(ciphertext).toString('base64');
-  const server = await getBlossomServer();
+  const servers = await getBlossomServers();
   // Upload as opaque bytes — the blob is ciphertext, so the original mime
   // travels in the kind-15 `file-type` tag instead of the Content-Type.
-  const url = await uploadToBlossom(
+  const url = await uploadToBlossomServers(
     fileUri,
-    server,
+    servers,
     signer,
     ciphertextBase64,
     'application/octet-stream',

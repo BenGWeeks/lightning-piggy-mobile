@@ -343,6 +343,36 @@ export async function setBlossomServer(url: string): Promise<void> {
   await AsyncStorage.setItem(BLOSSOM_SERVER_KEY, url);
 }
 
+// Ordered Blossom server list (#1149): the first is the primary, the rest
+// are backups that uploads are mirrored to. Device-level, like the single
+// server it replaces (which becomes the primary on first read).
+const BLOSSOM_SERVERS_KEY = 'blossom_servers_v1';
+
+/** The saved list, or null when the user has never set one on this device. */
+export async function getSavedBlossomServers(): Promise<string[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(BLOSSOM_SERVERS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!Array.isArray(parsed)) return null;
+    const list = parsed.filter((u): u is string => typeof u === 'string' && u.trim() !== '');
+    return list.length > 0 ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Servers to upload to, primary first. Never empty. */
+export async function getBlossomServers(): Promise<string[]> {
+  return (await getSavedBlossomServers()) ?? [await getBlossomServer()];
+}
+
+export async function setBlossomServers(urls: string[]): Promise<void> {
+  const list = [...new Set(urls.map((u) => u.trim()).filter(Boolean))];
+  await AsyncStorage.setItem(BLOSSOM_SERVERS_KEY, JSON.stringify(list));
+  // Keep the legacy single-server key in step with the primary.
+  if (list[0]) await AsyncStorage.setItem(BLOSSOM_SERVER_KEY, list[0]);
+}
+
 // --- Onboarding ---
 
 export async function isOnboarded(): Promise<boolean> {
