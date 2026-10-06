@@ -4,7 +4,6 @@ import { useBlossomServerList } from './useBlossomServerList';
 import { fetchLatestReplaceable, publishToRelays } from '../services/nostrRelayLists';
 import {
   DEFAULT_BLOSSOM_SERVER,
-  getBlossomServersUnpublished,
   setBlossomServer,
   setBlossomServers,
 } from '../services/walletStorageService';
@@ -95,8 +94,8 @@ it('signs a publish after a future-dated published list', async () => {
   expect(mockSign.mock.calls.at(-1)[0].created_at).toBeGreaterThan(future);
 });
 
-it('keeps "unpublished" when the saved list changed while publishing', async () => {
-  const { result } = renderHook(() => useBlossomServerList());
+it('keeps a list edited during a publish publishable on the next visit', async () => {
+  const { result, unmount } = renderHook(() => useBlossomServerList());
   await waitFor(() => expect(result.current.editable).toBe(true));
   act(() => {
     result.current.addServer('https://backup.example');
@@ -109,5 +108,24 @@ it('keeps "unpublished" when the saved list changed while publishing', async () 
   await act(async () => {
     await result.current.publish();
   });
-  expect(await getBlossomServersUnpublished()).toBe(true);
+  unmount();
+  const next = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(next.result.current.editable).toBe(true));
+  expect(next.result.current.servers).toEqual([DEFAULT_BLOSSOM_SERVER, 'https://newer.example']);
+  expect(next.result.current.dirty).toBe(true);
+});
+
+it('lets a list that was never published be published without an edit', async () => {
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  expect(result.current.dirty).toBe(true);
+});
+
+it('treats a saved-but-unchanged default as unconfigured, adopting a published list', async () => {
+  await setBlossomServer(DEFAULT_BLOSSOM_SERVER); // the old field saved it on blur
+  fetchLatest.mockResolvedValue(published);
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.servers).toEqual(['https://remote.example']);
+  expect(result.current.dirty).toBe(false); // adopted = already published
 });

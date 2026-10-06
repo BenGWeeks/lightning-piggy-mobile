@@ -105,3 +105,19 @@ it('times out an unresponsive primary and fails over to the next server', async 
   ).resolves.toBe('https://b.example/upload');
   await flush(); // let the background mirror to the hung server settle
 });
+
+it('keeps the upload authorization valid for the whole failover budget', async () => {
+  respond = (url) => ok(url);
+  const servers = [
+    'https://a.example',
+    'https://b.example',
+    'https://c.example',
+    'https://d.example',
+  ];
+  await uploadToBlossomServers('file.jpg', servers, signer, B64);
+  await flush();
+  const auth = (signer as jest.Mock).mock.calls[0][0];
+  const expiration = Number(auth.tags.find((t: string[]) => t[0] === 'expiration')[1]);
+  // Four attempts of up to 120 s each, plus the mirror window.
+  expect(expiration - auth.created_at).toBeGreaterThanOrEqual(4 * 120 + 300);
+});

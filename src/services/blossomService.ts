@@ -160,7 +160,12 @@ export async function uploadToBlossomServers(
     tags: [
       ['t', 'upload'],
       ['x', hashHex],
-      ['expiration', (nowSec + 300).toString()],
+      // Valid for every attempt (each up to UPLOAD_TIMEOUT_MS) plus the
+      // background mirrors, so failover can't outlive the authorization.
+      [
+        'expiration',
+        (nowSec + 300 + servers.length * Math.ceil(UPLOAD_TIMEOUT_MS / 1000)).toString(),
+      ],
     ],
   };
   const signed = await signer(unsigned);

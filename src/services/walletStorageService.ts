@@ -368,17 +368,22 @@ export async function getSavedLegacyBlossomServer(): Promise<string | null> {
   return saved && saved.trim() ? saved.trim() : null;
 }
 
-// Set when the list changes on this device; cleared once that exact list is
-// published, so "Publish" stays available across visits until it is.
-const BLOSSOM_SERVERS_UNPUBLISHED_KEY = 'blossom_servers_unpublished_v1';
+// The list last published (or adopted from a published kind-10063), so the
+// screen can tell whether the current list still needs publishing.
+const BLOSSOM_SERVERS_PUBLISHED_KEY = 'blossom_servers_published_v1';
 
-export async function getBlossomServersUnpublished(): Promise<boolean> {
-  return (await AsyncStorage.getItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY).catch(() => null)) === '1';
+export async function getPublishedBlossomServers(): Promise<string[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(BLOSSOM_SERVERS_PUBLISHED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string') : null;
+  } catch {
+    return null;
+  }
 }
 
-export async function setBlossomServersUnpublished(unpublished: boolean): Promise<void> {
-  if (unpublished) await AsyncStorage.setItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY, '1');
-  else await AsyncStorage.removeItem(BLOSSOM_SERVERS_UNPUBLISHED_KEY);
+export async function setPublishedBlossomServers(urls: string[]): Promise<void> {
+  await AsyncStorage.setItem(BLOSSOM_SERVERS_PUBLISHED_KEY, JSON.stringify(urls));
 }
 
 /** Servers to upload to, primary first. Never empty. */
