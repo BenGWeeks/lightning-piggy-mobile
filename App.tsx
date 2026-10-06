@@ -163,6 +163,9 @@ export default function App() {
 
     // Tap routing. Retry briefly so a cold-start tap that races the nav
     // tree's mount still lands (mirrors the deep-link tryNav pattern).
+    // Each tap supersedes earlier ones still retrying (e.g. waiting for the
+    // identity to hydrate), so an older tap can't override a newer one.
+    let latestTap = 0;
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
       const data = response?.notification?.request?.content?.data as
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
@@ -171,7 +174,9 @@ export default function App() {
       // The tapped notification's in-app history row is now read (#1143).
       const { historyId, owner } = data as { historyId?: string; owner?: string };
       void markHistoryEntryRead(historyId, owner);
+      const tap = ++latestTap;
       const tryNav = (attempt: number) => {
+        if (tap !== latestTap) return;
         if (navigateFromNotification(data)) return;
         // ~10 s: also covers identity hydration on a cold start (#1154).
         if (attempt >= 100) return;

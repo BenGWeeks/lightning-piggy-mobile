@@ -223,14 +223,15 @@ export const navigateFromNotification = (data: {
   owner?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
-  // Each tap supersedes any earlier one still resolving a wrap (#1154).
-  const generation = ++notificationNavGeneration;
   // A message alert for another signed-in account would open that peer's
   // thread under the wrong identity: show the list instead (#1154).
   // Cold start: the tap can arrive before the identity has hydrated. Unknown is
   // not "another account" — report not-ready so the caller retries.
   if ((data.kind === 'dm' || data.kind === 'group') && data.owner && !getActivePubkey())
     return false;
+  // Each handled tap supersedes any earlier one still resolving a wrap (#1154);
+  // counted only once it's actually routed, not per not-ready retry.
+  const generation = ++notificationNavGeneration;
   if (isForAnotherAccount(data, getActivePubkey())) {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
