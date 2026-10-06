@@ -43,7 +43,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { markNotificationsReadWhere, recordNotification } from './notificationHistory';
-import { getActivePubkey } from './walletStorageService';
+import { awaitActivePubkeyHydrated, getActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -457,10 +457,13 @@ export function notificationMatchesTarget(
 }
 
 /** Mark the history row behind a tapped tray notification read (#1143). */
-export function markHistoryEntryRead(historyId: string | undefined): Promise<void> {
+export async function markHistoryEntryRead(historyId: string | undefined): Promise<void> {
+  if (!historyId) return;
+  // A cold-start tap can arrive before the identity has hydrated.
+  await awaitActivePubkeyHydrated(10_000);
   const owner = getActivePubkey();
-  if (!owner || !historyId) return Promise.resolve();
-  return markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
+  if (!owner) return;
+  await markNotificationsReadWhere(owner, (e) => e.id === historyId).catch(() => {});
 }
 
 /** Mark the active account's history entries for `target` read, so the
