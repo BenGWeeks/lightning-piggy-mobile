@@ -19,7 +19,12 @@ import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import { setActiveThread, setActiveCache } from '../services/notificationService';
+import {
+  setActiveThread,
+  setActiveCache,
+  dismissNotificationsFor,
+  type NotificationTarget,
+} from '../services/notificationService';
 import {
   RootStackParamList,
   ExploreStackParamList,
@@ -267,6 +272,32 @@ function syncActiveThreadFromNav(): void {
   } else {
     setActiveCache(null);
   }
+  dismissNotificationsForFocusedRoute();
+}
+
+/**
+ * Clear the delivered notifications the focused screen has just shown the
+ * user, so the tray entry and launcher dot go away (#1142). Runs on every
+ * route change and (staggered) on app resume, for a screen left open.
+ */
+export function dismissNotificationsForFocusedRoute(): void {
+  const route = navigationRef.isReady() ? navigationRef.getCurrentRoute() : undefined;
+  const params = route?.params as
+    | { pubkey?: string; protocol?: DmProtocol; groupId?: string; coord?: string }
+    | undefined;
+  let target: NotificationTarget | null = null;
+  if (route?.name === 'Conversation' && params?.pubkey) {
+    const protocol = params.protocol ?? DEFAULT_DM_PROTOCOL;
+    if (protocol !== 'marmot')
+      target = { conversationPubkey: params.pubkey, conversationProtocol: protocol };
+  } else if (route?.name === 'GroupConversation' && params?.groupId) {
+    target = { groupId: params.groupId };
+  } else if (route?.name === 'HuntPiggyDetail' && params?.coord) {
+    target = { cacheCoord: params.coord };
+  } else if (route?.name === 'Messages') {
+    target = { genericMessages: true };
+  }
+  if (target) void dismissNotificationsFor(target);
 }
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
