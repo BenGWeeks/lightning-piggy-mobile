@@ -21,7 +21,7 @@ import {
 
 export type BlossomPublishOutcome =
   | { ok: true; accepted: number; total: number }
-  | { ok: false; error: 'not-signed' | 'none-accepted' | 'no-valid-servers' };
+  | { ok: false; error: 'not-signed' | 'none-accepted' | 'no-valid-servers' | 'busy' };
 
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((s, i) => s === b[i]);
@@ -56,6 +56,9 @@ export function useBlossomServerList() {
       Math.max(latestCreatedAtRef.current.get(pk) ?? 0, createdAt),
     );
   const mountedRef = useRef(true);
+  // Synchronous re-entrancy guard: two quick taps land before the
+  // `publishing` state re-render disables the button.
+  const publishingRef = useRef(false);
   useEffect(
     () => () => {
       mountedRef.current = false;
@@ -144,6 +147,8 @@ export function useBlossomServerList() {
   const publish = useCallback(async (): Promise<BlossomPublishOutcome> => {
     const pk = pubkey;
     if (!pk) return { ok: false, error: 'not-signed' };
+    if (publishingRef.current) return { ok: false, error: 'busy' };
+    publishingRef.current = true;
     const snapshot = servers;
     setPublishing(true);
     try {
@@ -177,6 +182,7 @@ export function useBlossomServerList() {
       if (mountedRef.current && activePubkeyRef.current === pk) setPublishedList(sent);
       return { ok: true, accepted, total: results.length };
     } finally {
+      publishingRef.current = false;
       if (mountedRef.current) setPublishing(false);
     }
   }, [pubkey, servers, signEvent, relayUrls]);

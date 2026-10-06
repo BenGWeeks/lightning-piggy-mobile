@@ -190,3 +190,18 @@ it("doesn't carry one account's future-dated list timestamp into another's publi
   });
   expect(mockSign.mock.calls.at(-1)[0].created_at).toBeLessThan(future);
 });
+
+it('ignores a second Publish tap while one is in flight (one signing prompt)', async () => {
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  publish.mockResolvedValue([{ url: 'wss://default.example', ok: true }]);
+  let first!: Promise<unknown>;
+  let second!: Promise<unknown>;
+  await act(async () => {
+    first = result.current.publish();
+    second = result.current.publish();
+    await Promise.all([first, second]);
+  });
+  expect(await second).toEqual({ ok: false, error: 'busy' });
+  expect(mockSign).toHaveBeenCalledTimes(1);
+});

@@ -10,6 +10,8 @@ it('accepts only https server URLs, without a trailing slash', () => {
   );
   expect(normalizeBlossomServer('http://insecure.example')).toBeNull();
   expect(normalizeBlossomServer('not a url')).toBeNull();
+  expect(normalizeBlossomServer('https://a.example/?token=x')).toBeNull();
+  expect(normalizeBlossomServer('https://a.example/#frag')).toBeNull();
 });
 
 it('builds and reads a BUD-03 kind-10063 list, keeping order and dropping junk', () => {

@@ -8,7 +8,8 @@ export function normalizeBlossomServer(input: string): string | null {
   const trimmed = input.trim().replace(/\/+$/, '');
   try {
     const u = new URL(trimmed);
-    if (u.protocol !== 'https:' || !u.hostname) return null;
+    // A query or fragment would swallow the `/upload` / `/mirror` suffix.
+    if (u.protocol !== 'https:' || !u.hostname || u.search || u.hash) return null;
     return trimmed;
   } catch {
     return null;

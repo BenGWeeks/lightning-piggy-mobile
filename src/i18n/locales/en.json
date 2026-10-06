@@ -2336,7 +2336,8 @@
     "error": {
       "not-signed": "The list wasn't signed, so nothing was published.",
       "none-accepted": "No relay accepted the list. Check your connection and try again.",
-      "no-valid-servers": "None of these servers can be published — use addresses starting with https://."
+      "no-valid-servers": "None of these servers can be published — use addresses starting with https://.",
+      "busy": "A publish is already in progress."
     }
   }
 }

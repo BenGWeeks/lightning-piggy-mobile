@@ -2336,7 +2336,8 @@
     "error": {
       "not-signed": "La lista no se firmó, así que no se publicó nada.",
       "none-accepted": "Ningún relé aceptó la lista. Revisa tu conexión e inténtalo de nuevo.",
-      "no-valid-servers": "Ninguno de estos servidores se puede publicar: usa direcciones que empiecen por https://."
+      "no-valid-servers": "Ninguno de estos servidores se puede publicar: usa direcciones que empiecen por https://.",
+      "busy": "Ya hay una publicación en curso."
     }
   }
 }
