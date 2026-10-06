@@ -1174,6 +1174,8 @@
     "unsupportedText": "Unsupported message type (kind {{kind}})",
     "marmotInvite": "Invited you to a Marmot group chat — Marmot isn't supported in Lightning Piggy yet.",
     "marmotMessage": "Marmot group message — Marmot isn't supported in Lightning Piggy yet.",
+    "marmotInvitePreview": "Group invite (Marmot not supported yet)",
+    "marmotMessagePreview": "Marmot message (not supported yet)",
     "secretMode": "Secret Mode",
     "secretModeSenderMemo": "Lightning Piggy will offer the recipient a button to toggle Secret Mode.",
     "secretModeReceiverMemo": "Unlocks dev / power-user surfaces in Lightning Piggy.",

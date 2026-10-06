@@ -2,6 +2,7 @@ import { orderPreviewFromContent } from './orderEvents';
 import { pollPreviewFromContent } from './nip88Poll';
 import { NWC_SHARE_KIND, nwcSharePreviewFromContent } from './nwcShareMessage';
 import { isMarmotKind, MARMOT_WELCOME_KIND } from './dmProtocol';
+import { t } from '../i18n';
 
 /**
  * Secret-free inbox / notification preview for a stored DM row, dispatched by
@@ -32,8 +33,6 @@ export function dmRowPreview(content: string, wireKind: number): string {
   // its `&k=…&n=…` params are the decryption secret, so never let it through.
   if (wireKind === 15 && content.includes('#lpe=1')) return '📎 Attachment';
   if (isMarmotKind(wireKind))
-    return wireKind === MARMOT_WELCOME_KIND
-      ? '🔒 Group invite (Marmot not supported yet)'
-      : '🔒 Marmot message (not supported yet)';
+    return `🔒 ${t(wireKind === MARMOT_WELCOME_KIND ? 'messageBubble.marmotInvitePreview' : 'messageBubble.marmotMessagePreview')}`;
   return pollPreviewFromContent(content, wireKind) ?? orderPreviewFromContent(content, wireKind);
 }

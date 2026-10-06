@@ -1146,6 +1146,8 @@
     "unsupportedText": "Непідтримуваний тип повідомлення (kind {{kind}})",
     "marmotInvite": "Запросив вас до групового чату Marmot — Lightning Piggy поки не підтримує Marmot.",
     "marmotMessage": "Групове повідомлення Marmot — Lightning Piggy поки не підтримує Marmot.",
+    "marmotInvitePreview": "Запрошення до групи (Marmot поки не підтримується)",
+    "marmotMessagePreview": "Повідомлення Marmot (поки не підтримується)",
     "secretMode": "Секретний режим",
     "secretModeSenderMemo": "Lightning Piggy запропонує одержувачу кнопку для перемикання Секретного режиму.",
     "secretModeReceiverMemo": "Розблоковує розробницькі / просунуті функції в Lightning Piggy.",
