@@ -451,6 +451,10 @@ export function notificationMatchesTarget(
     return (
       data.kind === kind &&
       (data.conversationPubkey ?? '').toLowerCase() === (conversationPubkey ?? '').toLowerCase() &&
+      // NIP-04 and NIP-17 threads with one contact are separate; missing = NIP-17.
+      (!conversationPubkey ||
+        (data.conversationProtocol ?? 'nip17') ===
+          (target.source.conversationProtocol ?? 'nip17')) &&
       (data.groupId ?? '') === (groupId ?? '') &&
       (data.walletId ?? '') === (walletId ?? '') &&
       (data.cacheCoord ?? '') === (cacheCoord ?? '')

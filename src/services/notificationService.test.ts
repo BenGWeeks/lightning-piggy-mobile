@@ -379,6 +379,16 @@ describe('keeping the history in step with the tray (#1143)', () => {
     expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w1' }, { source })).toBe(true);
     expect(notificationMatchesTarget({ kind: 'payment', walletId: 'w2' }, { source })).toBe(false);
     expect(notificationMatchesTarget({ kind: 'zap', walletId: 'w1' }, { source })).toBe(false);
+    const pk = 'e'.repeat(64);
+    const nip04 = {
+      kind: 'dm' as const,
+      conversationPubkey: pk,
+      conversationProtocol: 'nip04' as const,
+    };
+    expect(notificationMatchesTarget(nip04, { source: nip04 })).toBe(true);
+    expect(
+      notificationMatchesTarget({ kind: 'dm', conversationPubkey: pk }, { source: nip04 }),
+    ).toBe(false);
   });
 
   it("marks the active account's matching history entries read when a screen shows them", async () => {
