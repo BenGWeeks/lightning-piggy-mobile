@@ -1444,9 +1444,6 @@
     "failedToRemoveRelay": "Failed to remove relay.",
     "geoCacheRelays": "Geo-cache relays",
     "geoCacheRelaysHint": "Dedicated relays for Piglets and other geo-caches (NIP-GC). These mirror what the treasures.to web app reads and searches, so your Piglets stay discoverable on the web. They’re always used for geo-cache publishing and reading, in addition to any relays you add above.",
-    "imageServerBlossom": "Image Server (Blossom)",
-    "blossomImageServerLabel": "Blossom image server",
-    "blossomHint": "Hosts images you send in chats and set as your profile picture. Any Blossom (BUD-01/BUD-02) server works — e.g. blossom.primal.net or nostr.build.",
     "encryptedMessages": "Encrypted Messages (NIP-17)",
     "amberPermissionHint": "Amber hasn’t granted NIP-44 decrypt permission to this app yet — tap below to grant it. One dialog, then subsequent encrypted messages decrypt silently. Messages from people you don’t follow stay hidden either way.",
     "amberPermissionTitle": "Amber permission",
@@ -2319,6 +2316,28 @@
       "zap": "Zap",
       "cache": "Piglet find",
       "swap": "Swap"
+    }
+  },
+  "blossomServers": {
+    "title": "Image servers (Blossom)",
+    "intro": "Host the images and voice notes you send, and your profile picture. Uploads go to the primary server and are copied to the others as backups.",
+    "primary": "Primary",
+    "makePrimary": "Make primary",
+    "makePrimaryLabel": "Make {{url}} the primary server",
+    "removeLabel": "Remove {{url}}",
+    "add": "Add",
+    "addLabel": "Add an image server",
+    "invalid": "Use a server address starting with https://.",
+    "hint": "Changes apply to your next upload. Publish to share this list with other Nostr apps.",
+    "publish": "Publish",
+    "publishedTitle": "Server list published",
+    "acceptedCount": "Accepted by {{accepted}} of {{total}} relays.",
+    "notPublishedTitle": "Not published",
+    "error": {
+      "not-signed": "The list wasn't signed, so nothing was published.",
+      "none-accepted": "No relay accepted the list. Check your connection and try again.",
+      "no-valid-servers": "None of these servers can be published — use addresses starting with https://.",
+      "busy": "A publish is already in progress."
     }
   }
 }

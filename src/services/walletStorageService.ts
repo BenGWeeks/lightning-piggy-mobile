@@ -343,6 +343,85 @@ export async function setBlossomServer(url: string): Promise<void> {
   await AsyncStorage.setItem(BLOSSOM_SERVER_KEY, url);
 }
 
+// Ordered Blossom server list (#1149): the first is the primary, the rest
+// are backups that uploads are mirrored to. Device-level, like the single
+// server it replaces (which becomes the primary on first read).
+const BLOSSOM_SERVERS_KEY = 'blossom_servers_v1';
+
+/** The saved list, or null when the user has never set one on this device. */
+export async function getSavedBlossomServers(): Promise<string[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(BLOSSOM_SERVERS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!Array.isArray(parsed)) return null;
+    const list = parsed.filter((u): u is string => typeof u === 'string' && u.trim() !== '');
+    return list.length > 0 ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The single server the user explicitly saved before lists existed, or
+ * null if they never changed the default. */
+export async function getSavedLegacyBlossomServer(): Promise<string | null> {
+  const saved = await AsyncStorage.getItem(BLOSSOM_SERVER_KEY).catch(() => null);
+  return saved && saved.trim() ? saved.trim() : null;
+}
+
+// The list an identity last published (or adopted from its published
+// kind-10063), so the screen can tell whether the current list still needs
+// publishing. Per account: one identity publishing says nothing about another.
+export const BLOSSOM_SERVERS_PUBLISHED_KEY_BASE = 'blossom_servers_published_v1';
+
+export async function getPublishedBlossomServers(pubkey: string): Promise<string[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(
+      perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, pubkey),
+    );
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+// created_at of the newest kind-10063 an identity has seen or published, so a
+// later publish is signed after it even when the pre-publish lookup fails.
+export const BLOSSOM_SERVERS_CREATED_AT_KEY_BASE = 'blossom_servers_created_at_v1';
+
+export async function getBlossomServersCreatedAt(pubkey: string): Promise<number> {
+  const raw = await AsyncStorage.getItem(
+    perAccountKey(BLOSSOM_SERVERS_CREATED_AT_KEY_BASE, pubkey),
+  ).catch(() => null);
+  return Number(raw) || 0;
+}
+
+export async function setBlossomServersCreatedAt(pubkey: string, createdAt: number): Promise<void> {
+  await AsyncStorage.setItem(
+    perAccountKey(BLOSSOM_SERVERS_CREATED_AT_KEY_BASE, pubkey),
+    String(createdAt),
+  ).catch(() => {});
+}
+
+export async function setPublishedBlossomServers(pubkey: string, urls: string[]): Promise<void> {
+  await AsyncStorage.setItem(
+    perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, pubkey),
+    JSON.stringify(urls),
+  );
+}
+
+/** Servers to upload to, primary first. Never empty. */
+export async function getBlossomServers(): Promise<string[]> {
+  return (await getSavedBlossomServers()) ?? [await getBlossomServer()];
+}
+
+export async function setBlossomServers(urls: string[]): Promise<void> {
+  const list = [...new Set(urls.map((u) => u.trim()).filter(Boolean))];
+  await AsyncStorage.setItem(BLOSSOM_SERVERS_KEY, JSON.stringify(list));
+  // Keep the legacy single-server key in step with the primary.
+  if (list[0]) await AsyncStorage.setItem(BLOSSOM_SERVER_KEY, list[0]);
+}
+
 // --- Onboarding ---
 
 export async function isOnboarded(): Promise<boolean> {

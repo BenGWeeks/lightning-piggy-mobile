@@ -1444,9 +1444,6 @@
     "failedToRemoveRelay": "No se pudo eliminar el relay.",
     "geoCacheRelays": "Relays de geocaché",
     "geoCacheRelaysHint": "Relays dedicados a los Piglets y otros geocachés (NIP-GC). Reflejan lo que la app web treasures.to lee y busca, para que tus Piglets sigan siendo visibles en la web. Se usan siempre para publicar y leer geocachés, además de cualquier relay que añadas arriba.",
-    "imageServerBlossom": "Servidor de imágenes (Blossom)",
-    "blossomImageServerLabel": "Servidor de imágenes Blossom",
-    "blossomHint": "Aloja las imágenes que envías en los chats y la foto de perfil que estableces. Sirve cualquier servidor Blossom (BUD-01/BUD-02) — p. ej. blossom.primal.net o nostr.build.",
     "encryptedMessages": "Mensajes cifrados (NIP-17)",
     "amberPermissionHint": "Amber aún no ha concedido a esta app el permiso de descifrado NIP-44 — toca abajo para concederlo. Un solo diálogo y, luego, los mensajes cifrados se descifran en silencio. Los mensajes de personas que no sigues quedan ocultos de todos modos.",
     "amberPermissionTitle": "Permiso de Amber",
@@ -2319,6 +2316,28 @@
       "zap": "Zap",
       "cache": "Hallazgo de Piglet",
       "swap": "Intercambio"
+    }
+  },
+  "blossomServers": {
+    "title": "Servidores de imágenes (Blossom)",
+    "intro": "Alojan las imágenes y notas de voz que envías, y tu foto de perfil. Las subidas van al servidor principal y se copian a los demás como respaldo.",
+    "primary": "Principal",
+    "makePrimary": "Hacer principal",
+    "makePrimaryLabel": "Hacer {{url}} el servidor principal",
+    "removeLabel": "Quitar {{url}}",
+    "add": "Añadir",
+    "addLabel": "Añadir un servidor de imágenes",
+    "invalid": "Usa una dirección de servidor que empiece por https://.",
+    "hint": "Los cambios se aplican a tu próxima subida. Publica para compartir esta lista con otras apps de Nostr.",
+    "publish": "Publicar",
+    "publishedTitle": "Lista de servidores publicada",
+    "acceptedCount": "Aceptada por {{accepted}} de {{total}} relés.",
+    "notPublishedTitle": "No publicada",
+    "error": {
+      "not-signed": "La lista no se firmó, así que no se publicó nada.",
+      "none-accepted": "Ningún relé aceptó la lista. Revisa tu conexión e inténtalo de nuevo.",
+      "no-valid-servers": "Ninguno de estos servidores se puede publicar: usa direcciones que empiecen por https://.",
+      "busy": "Ya hay una publicación en curso."
     }
   }
 }

@@ -72,9 +72,61 @@ function inferContentType(imageUri: string, blobType: string | undefined): strin
   }
 }
 
-export async function uploadToBlossom(
+const trimServer = (url: string) => url.trim().replace(/\/+$/, '');
+
+/** PUT raw bytes (or a JSON body) with XHR — React Native's fetch() body
+ * handling for binary is inconsistent, but XHR's `send(arrayBuffer)` is not. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+const MIRROR_TIMEOUT_MS = 30_000;
+
+function put(
+  url: string,
+  authHeader: string,
+  contentType: string,
+  body: ArrayBuffer | string,
+  timeoutMs: number,
+): Promise<{ status: number; responseText: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url, true);
+    // Bounded, so an unresponsive server fails over instead of hanging.
+    xhr.timeout = timeoutMs;
+    xhr.ontimeout = () => reject(new Error('Blossom upload: timed out'));
+    xhr.setRequestHeader('Authorization', authHeader);
+    xhr.setRequestHeader('Content-Type', contentType);
+    xhr.onload = () => resolve({ status: xhr.status, responseText: xhr.responseText });
+    xhr.onerror = () => reject(new Error('Blossom upload: network error'));
+    xhr.send(body);
+  });
+}
+
+function descriptorUrl(status: number, responseText: string): string {
+  if (status < 200 || status >= 300) {
+    throw new Error(
+      `Blossom upload failed: ${status}${responseText ? ` ${responseText.slice(0, 200)}` : ''}`,
+    );
+  }
+  let descriptor: BlossomBlobDescriptor;
+  try {
+    descriptor = JSON.parse(responseText) as BlossomBlobDescriptor;
+  } catch {
+    throw new Error('Blossom server returned invalid JSON');
+  }
+  if (!descriptor?.url) throw new Error('Blossom server did not return a URL');
+  return descriptor.url;
+}
+
+/**
+ * Upload to the user's Blossom servers in order (#1149): the first that
+ * accepts the blob wins (so a down primary fails over), then the blob is
+ * mirrored to every other server in the background (BUD-04 `PUT /mirror`) as
+ * a backup. One signed kind-24242 authorization covers every server, so a
+ * remote signer (Amber / NIP-46) is asked once. Mirrors are best-effort and
+ * never delay or fail the upload. Returns the winning server's URL.
+ */
+export async function uploadToBlossomServers(
   imageUri: string,
-  serverUrl: string,
+  serverUrls: string[],
   signer: BlossomSigner,
   imageBase64?: string | null,
   // Force a specific Content-Type instead of inferring from the URI
@@ -83,8 +135,8 @@ export async function uploadToBlossom(
   // real mime travels in the NIP-17 kind-15 `file-type` tag).
   contentTypeOverride?: string,
 ): Promise<string> {
-  const server = serverUrl.trim().replace(/\/+$/, '');
-  if (!server) throw new Error('Blossom server URL is empty');
+  const servers = [...new Set(serverUrls.map(trimServer).filter(Boolean))];
+  if (servers.length === 0) throw new Error('Blossom server URL is empty');
 
   // Prefer the base64 payload returned directly by expo-image-picker (or
   // the file→base64 step in uploadBlob for non-image blobs) when the
@@ -96,11 +148,9 @@ export async function uploadToBlossom(
   }
   const bytes = Buffer.from(imageBase64, 'base64');
   if (bytes.length === 0) throw new Error('Selected file is empty');
-  console.log('[Blossom] read', bytes.length, 'bytes from base64');
 
   const hashHex = bytesToHex(sha256(bytes));
   const contentType = contentTypeOverride ?? inferContentType(imageUri, undefined);
-  console.log('[Blossom] hash', hashHex, 'type', contentType);
 
   const nowSec = Math.floor(Date.now() / 1000);
   const unsigned: UnsignedNostrEvent = {
@@ -110,50 +160,60 @@ export async function uploadToBlossom(
     tags: [
       ['t', 'upload'],
       ['x', hashHex],
-      ['expiration', (nowSec + 300).toString()],
+      // Valid for every attempt (each up to UPLOAD_TIMEOUT_MS) plus the
+      // background mirrors, so failover can't outlive the authorization.
+      [
+        'expiration',
+        (nowSec + 300 + servers.length * Math.ceil(UPLOAD_TIMEOUT_MS / 1000)).toString(),
+      ],
     ],
   };
-
   const signed = await signer(unsigned);
   if (!signed) throw new Error('Could not sign upload authorization');
-  console.log('[Blossom] event signed', signed.id);
-
   const authHeader = 'Nostr ' + Buffer.from(JSON.stringify(signed), 'utf-8').toString('base64');
+  const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
-  // Use XMLHttpRequest for the PUT — React Native's fetch() body handling
-  // for raw Uint8Array / ArrayBuffer is inconsistent across versions, but
-  // XHR reliably transmits binary bytes via `send(arrayBuffer)`.
-  const uploadUrl = `${server}/upload`;
-  console.log('[Blossom] PUT', uploadUrl, 'body size', bytes.length);
-
-  const { status, responseText } = await new Promise<{ status: number; responseText: string }>(
-    (resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', uploadUrl, true);
-      xhr.setRequestHeader('Authorization', authHeader);
-      xhr.setRequestHeader('Content-Type', contentType);
-      xhr.onload = () => resolve({ status: xhr.status, responseText: xhr.responseText });
-      xhr.onerror = () => reject(new Error('Blossom upload: network error'));
-      xhr.send(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    },
-  );
-  console.log('[Blossom] PUT status', status);
-
-  if (status < 200 || status >= 300) {
-    throw new Error(
-      `Blossom upload failed: ${status}${responseText ? ` ${responseText.slice(0, 200)}` : ''}`,
-    );
+  let lastError: unknown;
+  for (let i = 0; i < servers.length; i++) {
+    try {
+      const { status, responseText } = await put(
+        `${servers[i]}/upload`,
+        authHeader,
+        contentType,
+        body,
+        UPLOAD_TIMEOUT_MS,
+      );
+      const url = descriptorUrl(status, responseText);
+      // Backups: every other server mirrors the stored blob (fire-and-forget).
+      for (const backup of servers.filter((_, j) => j !== i)) {
+        void put(
+          `${backup}/mirror`,
+          authHeader,
+          'application/json',
+          JSON.stringify({ url }),
+          MIRROR_TIMEOUT_MS,
+        )
+          .then(({ status: s }) => {
+            if (s < 200 || s >= 300) console.warn('[Blossom] mirror failed', backup, s);
+          })
+          .catch((e: unknown) => console.warn('[Blossom] mirror failed', backup, e));
+      }
+      return url;
+    } catch (e) {
+      lastError = e;
+      console.warn('[Blossom] upload failed on', servers[i], e);
+    }
   }
+  throw lastError instanceof Error ? lastError : new Error('Blossom upload failed');
+}
 
-  let descriptor: BlossomBlobDescriptor;
-  try {
-    descriptor = JSON.parse(responseText) as BlossomBlobDescriptor;
-  } catch {
-    throw new Error('Blossom server returned invalid JSON');
-  }
-  if (!descriptor?.url) {
-    throw new Error('Blossom server did not return a URL');
-  }
-  console.log('[Blossom] uploaded', descriptor.url);
-  return descriptor.url;
+/** Single-server upload (no backups). */
+export function uploadToBlossom(
+  imageUri: string,
+  serverUrl: string,
+  signer: BlossomSigner,
+  imageBase64?: string | null,
+  contentTypeOverride?: string,
+): Promise<string> {
+  return uploadToBlossomServers(imageUri, [serverUrl], signer, imageBase64, contentTypeOverride);
 }

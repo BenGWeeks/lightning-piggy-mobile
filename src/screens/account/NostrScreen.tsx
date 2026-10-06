@@ -1,17 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, Switch } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
 import PublishedRelayListsSection from '../../components/PublishedRelayListsSection';
 import AdvancedRelaysSection from '../../components/AdvancedRelaysSection';
+import BlossomServersSection from '../../components/BlossomServersSection';
 import { useRelayConnectionStatus } from '../../hooks/useRelayConnectionStatus';
 import { createSharedAccountStyles } from './sharedStyles';
-import {
-  getBlossomServer,
-  setBlossomServer,
-  DEFAULT_BLOSSOM_SERVER,
-} from '../../services/walletStorageService';
 import * as amberService from '../../services/amberService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useNostrDmInbox } from '../../contexts/DmInboxContext';
@@ -58,7 +54,6 @@ const NostrScreen: React.FC = () => {
     },
     [removeUserRelay, t],
   );
-  const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
 
   // Experimental: native crypto tester toggle (#1057). Availability is a
   // stable capability probe (native platform + module linked) — compute once.
@@ -69,7 +64,6 @@ const NostrScreen: React.FC = () => {
   const [nativeCryptoActive, setNativeCryptoActive] = useState(false);
 
   useEffect(() => {
-    getBlossomServer().then(setBlossomServerInput);
     loadNativeCryptoEnabled().then(setNativeCryptoOn);
     setNativeCryptoActive(isNativeCryptoActive());
   }, []);
@@ -81,12 +75,6 @@ const NostrScreen: React.FC = () => {
     setNativeCryptoOn(next);
     await saveNativeCryptoEnabled(next);
   }, []);
-
-  const handleBlossomSave = async () => {
-    const normalized = blossomServer.trim() || DEFAULT_BLOSSOM_SERVER;
-    setBlossomServerInput(normalized);
-    await setBlossomServer(normalized);
-  };
 
   const grantAmberNip44Permission = useCallback(async () => {
     if (!profile?.pubkey) throw new Error(t('nostrScreen.noProfilePubkey'));
@@ -115,23 +103,7 @@ const NostrScreen: React.FC = () => {
         onRemoveDeviceRelay={handleRemoveRelay}
       />
 
-      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
-        {t('nostrScreen.imageServerBlossom')}
-      </Text>
-      <TextInput
-        style={sharedAccountStyles.textInput}
-        value={blossomServer}
-        onChangeText={setBlossomServerInput}
-        placeholder={DEFAULT_BLOSSOM_SERVER}
-        placeholderTextColor="rgba(0,0,0,0.3)"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        onBlur={handleBlossomSave}
-        testID="blossom-server-input"
-        accessibilityLabel={t('nostrScreen.blossomImageServerLabel')}
-      />
-      <Text style={sharedAccountStyles.fieldHint}>{t('nostrScreen.blossomHint')}</Text>
+      <BlossomServersSection />
 
       {signerType === 'amber' && amberNip44Permission === 'denied' && (
         <>
