@@ -467,3 +467,35 @@ describe('account scoping and persistence (#1143)', () => {
     expect(scheduled.owner).toBe(owner);
   });
 });
+
+describe('repeated sources in the tray (#1143)', () => {
+  const owner = '8'.repeat(64);
+  const payment = {
+    kind: 'payment' as const,
+    amountSats: 21,
+    walletId: 'w',
+    owner,
+    sourceId: 'h-repeat',
+  };
+
+  it("doesn't post a second tray entry for a source already shown", async () => {
+    mockScheduleNotificationAsync.mockClear();
+    const first = await firePaymentNotification(payment);
+    const second = await firePaymentNotification(payment);
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull(); // reported delivered, so callers stop retrying
+  });
+
+  it('still posts a retry whose first tray post failed', async () => {
+    mockScheduleNotificationAsync.mockClear();
+    const retry = { ...payment, sourceId: 'h-failed' };
+    mockScheduleNotificationAsync.mockRejectedValueOnce(new Error('OS refused'));
+    expect(await firePaymentNotification(retry)).toBeNull();
+    expect(await firePaymentNotification(retry)).not.toBeNull();
+    expect(mockScheduleNotificationAsync).toHaveBeenCalledTimes(2);
+    const history = await listNotifications(owner);
+    expect(history).toHaveLength(1); // one row despite the retry
+    expect(history[0].delivered).toBe(true);
+  });
+});

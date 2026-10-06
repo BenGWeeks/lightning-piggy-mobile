@@ -42,7 +42,11 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { markNotificationsReadWhere, recordNotification } from './notificationHistory';
+import {
+  markNotificationDelivered,
+  markNotificationsReadWhere,
+  recordNotification,
+} from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
 // Android notification channel ids. Stable strings — changing them
@@ -338,7 +342,13 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    await recordNotification(owner ?? null, { ...payload, id: historyId });
+    const { duplicateDelivered } = await recordNotification(owner ?? null, {
+      ...payload,
+      id: historyId,
+    });
+    // Same source already shown in the tray: report it as delivered (so the
+    // caller doesn't keep retrying) without posting a second entry.
+    if (duplicateDelivered) return historyId;
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 
@@ -374,6 +384,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
             }
           : null,
     });
+    if (owner) await markNotificationDelivered(owner, historyId);
     return id;
   } catch (err) {
     if (__DEV__) console.warn('[notificationService] fireNotification failed:', err);

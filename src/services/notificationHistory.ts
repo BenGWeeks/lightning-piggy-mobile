@@ -24,6 +24,8 @@ export interface NotificationHistoryEntry {
   read: boolean;
   /** Source id (e.g. a payment hash): a retry with the same key is ignored. */
   key?: string;
+  /** Its tray notification was posted (so a repeat needn't post another). */
+  delivered?: boolean;
 }
 
 export const NOTIFICATION_HISTORY_KEY_BASE = 'notification_history_v1';
@@ -84,8 +86,9 @@ export function recordNotification(
     id?: string;
   },
   now = Date.now(),
-): Promise<void> {
-  if (!pubkey) return Promise.resolve();
+): Promise<{ duplicateDelivered: boolean }> {
+  const fresh = { duplicateDelivered: false };
+  if (!pubkey) return Promise.resolve(fresh);
   const isMessage = entry.kind === 'dm' || entry.kind === 'group';
   const record: NotificationHistoryEntry = {
     id: entry.id ?? entry.historyKey ?? `${now}-${Math.random().toString(36).slice(2, 10)}`,
@@ -97,8 +100,23 @@ export function recordNotification(
     read: false,
     ...(entry.historyKey ? { key: entry.historyKey } : {}),
   };
+  // A repeat of a source already shown in the tray is reported, so the caller
+  // can skip a second tray entry; one whose tray post failed is retried.
+  let duplicateDelivered = false;
+  return update(pubkey, (entries) => {
+    const existing = record.key ? entries.find((e) => e.key === record.key) : undefined;
+    if (!existing) return [record, ...entries];
+    duplicateDelivered = existing.delivered === true;
+    return entries;
+  })
+    .then(() => ({ duplicateDelivered }))
+    .catch(() => fresh);
+}
+
+/** Note that an entry's tray notification was posted. */
+export function markNotificationDelivered(pubkey: string, id: string): Promise<void> {
   return update(pubkey, (entries) =>
-    record.key && entries.some((e) => e.key === record.key) ? entries : [record, ...entries],
+    entries.map((e) => (e.id === id && !e.delivered ? { ...e, delivered: true } : e)),
   ).catch(() => {});
 }
 
