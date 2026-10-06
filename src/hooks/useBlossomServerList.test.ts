@@ -10,8 +10,9 @@ import {
 
 const PK = 'a'.repeat(64);
 const mockSign = jest.fn();
+let mockPubkey = 'a'.repeat(64);
 jest.mock('../contexts/NostrContext', () => ({
-  useNostr: () => ({ pubkey: 'a'.repeat(64), relays: [], signEvent: mockSign }),
+  useNostr: () => ({ pubkey: mockPubkey, relays: [], signEvent: mockSign }),
 }));
 jest.mock('../services/nostrService', () => ({ DEFAULT_RELAYS: ['wss://default.example'] }));
 jest.mock('../services/nostrRelayLists', () => ({
@@ -24,6 +25,7 @@ const published = { kind: 10063, created_at: 1, tags: [['server', 'https://remot
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  mockPubkey = PK;
   jest.clearAllMocks();
   fetchLatest.mockResolvedValue(null);
   mockSign.mockImplementation(async (e: object) => ({ ...e, id: 'i', sig: 's', pubkey: PK }));
@@ -128,4 +130,37 @@ it('treats a saved-but-unchanged default as unconfigured, adopting a published l
   await waitFor(() => expect(result.current.loading).toBe(false));
   expect(result.current.servers).toEqual(['https://remote.example']);
   expect(result.current.dirty).toBe(false); // adopted = already published
+});
+
+it("doesn't let one account's publish disable another account's Publish", async () => {
+  const a = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(a.result.current.editable).toBe(true));
+  publish.mockResolvedValueOnce([{ url: 'wss://default.example', ok: true }]);
+  await act(async () => {
+    await a.result.current.publish();
+  });
+  expect(a.result.current.dirty).toBe(false);
+  a.unmount();
+
+  mockPubkey = 'b'.repeat(64);
+  mockSign.mockImplementation(async (e: object) => ({
+    ...e,
+    id: 'i',
+    sig: 's',
+    pubkey: mockPubkey,
+  }));
+  const b = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(b.result.current.editable).toBe(true));
+  expect(b.result.current.dirty).toBe(true);
+});
+
+it('refuses to publish a list with no valid https server (never an empty list)', async () => {
+  await setBlossomServer('http://legacy.example');
+  const { result } = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(result.current.editable).toBe(true));
+  await act(async () => {
+    expect(await result.current.publish()).toEqual({ ok: false, error: 'no-valid-servers' });
+  });
+  expect(mockSign).not.toHaveBeenCalled();
+  expect(publish).not.toHaveBeenCalled();
 });

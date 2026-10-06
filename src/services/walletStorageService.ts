@@ -368,13 +368,16 @@ export async function getSavedLegacyBlossomServer(): Promise<string | null> {
   return saved && saved.trim() ? saved.trim() : null;
 }
 
-// The list last published (or adopted from a published kind-10063), so the
-// screen can tell whether the current list still needs publishing.
-const BLOSSOM_SERVERS_PUBLISHED_KEY = 'blossom_servers_published_v1';
+// The list an identity last published (or adopted from its published
+// kind-10063), so the screen can tell whether the current list still needs
+// publishing. Per account: one identity publishing says nothing about another.
+export const BLOSSOM_SERVERS_PUBLISHED_KEY_BASE = 'blossom_servers_published_v1';
 
-export async function getPublishedBlossomServers(): Promise<string[] | null> {
+export async function getPublishedBlossomServers(pubkey: string): Promise<string[] | null> {
   try {
-    const raw = await AsyncStorage.getItem(BLOSSOM_SERVERS_PUBLISHED_KEY);
+    const raw = await AsyncStorage.getItem(
+      perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, pubkey),
+    );
     const parsed = raw ? (JSON.parse(raw) as unknown) : null;
     return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string') : null;
   } catch {
@@ -382,8 +385,11 @@ export async function getPublishedBlossomServers(): Promise<string[] | null> {
   }
 }
 
-export async function setPublishedBlossomServers(urls: string[]): Promise<void> {
-  await AsyncStorage.setItem(BLOSSOM_SERVERS_PUBLISHED_KEY, JSON.stringify(urls));
+export async function setPublishedBlossomServers(pubkey: string, urls: string[]): Promise<void> {
+  await AsyncStorage.setItem(
+    perAccountKey(BLOSSOM_SERVERS_PUBLISHED_KEY_BASE, pubkey),
+    JSON.stringify(urls),
+  );
 }
 
 /** Servers to upload to, primary first. Never empty. */

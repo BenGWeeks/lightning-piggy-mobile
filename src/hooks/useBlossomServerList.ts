@@ -21,7 +21,7 @@ import {
 
 export type BlossomPublishOutcome =
   | { ok: true; accepted: number; total: number }
-  | { ok: false; error: 'not-signed' | 'none-accepted' };
+  | { ok: false; error: 'not-signed' | 'none-accepted' | 'no-valid-servers' };
 
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((s, i) => s === b[i]);
@@ -64,7 +64,7 @@ export function useBlossomServerList() {
     setLoading(true);
     void (async () => {
       try {
-        const publishedBaseline = await getPublishedBlossomServers();
+        const publishedBaseline = pubkey ? await getPublishedBlossomServers(pubkey) : null;
         if (!cancelled) setPublishedList(publishedBaseline);
         const saved = await getSavedBlossomServers();
         if (saved) {
@@ -89,7 +89,7 @@ export function useBlossomServerList() {
         const published = event ? blossomServersFromTags(event.tags) : [];
         if (cancelled || published.length === 0 || activePubkeyRef.current !== pubkey) return;
         await setBlossomServers(published);
-        await setPublishedBlossomServers(published);
+        await setPublishedBlossomServers(pubkey, published);
         setServers(published);
         setPublishedList(published);
       } finally {
@@ -150,6 +150,9 @@ export function useBlossomServerList() {
       if (current)
         latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, current.created_at);
       const unsigned = buildBlossomServerListEvent(snapshot);
+      // Never publish an empty list (e.g. only a legacy http:// server), which
+      // would replace an existing one with nothing.
+      if (unsigned.tags.length === 0) return { ok: false, error: 'no-valid-servers' };
       unsigned.created_at = Math.max(unsigned.created_at, latestCreatedAtRef.current + 1);
       const signed = await signEvent(unsigned);
       if (!signed || signed.pubkey !== pk || activePubkeyRef.current !== pk)
@@ -161,8 +164,10 @@ export function useBlossomServerList() {
       latestCreatedAtRef.current = Math.max(latestCreatedAtRef.current, unsigned.created_at);
       // Record exactly what was published; a list edited meanwhile (here or in
       // another screen instance) still differs from it, so stays publishable.
-      await setPublishedBlossomServers(snapshot);
-      if (mountedRef.current) setPublishedList(snapshot);
+      // What was actually signed (invalid entries are dropped from the event).
+      const sent = blossomServersFromTags(signed.tags);
+      await setPublishedBlossomServers(pk, sent);
+      if (mountedRef.current) setPublishedList(sent);
       return { ok: true, accepted, total: results.length };
     } finally {
       if (mountedRef.current) setPublishing(false);
