@@ -227,6 +227,10 @@ export const navigateFromNotification = (data: {
   const generation = ++notificationNavGeneration;
   // A message alert for another signed-in account would open that peer's
   // thread under the wrong identity: show the list instead (#1154).
+  // Cold start: the tap can arrive before the identity has hydrated. Unknown is
+  // not "another account" — report not-ready so the caller retries.
+  if ((data.kind === 'dm' || data.kind === 'group') && data.owner && !getActivePubkey())
+    return false;
   if (isForAnotherAccount(data, getActivePubkey())) {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;

@@ -173,7 +173,8 @@ export default function App() {
       void markHistoryEntryRead(historyId, owner);
       const tryNav = (attempt: number) => {
         if (navigateFromNotification(data)) return;
-        if (attempt >= 20) return;
+        // ~10 s: also covers identity hydration on a cold start (#1154).
+        if (attempt >= 100) return;
         setTimeout(() => tryNav(attempt + 1), 100);
       };
       tryNav(0);
