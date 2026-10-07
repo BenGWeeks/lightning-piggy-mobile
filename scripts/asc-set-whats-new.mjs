@@ -18,7 +18,14 @@
 //   WHATS_NEW              the changelog text to set
 //
 // Optional:
-//   ASC_LOCALE             defaults to "en-US"
+//   ASC_LOCALE             comma-separated locales to set in addition to the
+//                          ones discovered (the build's existing localizations,
+//                          the app's TestFlight localizations and its primary
+//                          locale). "en-US" is used only if none are found —
+//                          a UK-primary app shows its en-GB text, so writing
+//                          only en-US left "What to Test" blank (#1156).
+//   ASC_SKIP_REVIEW        "1" to skip submitting the build for Beta App
+//                          Review (external testers need that submission)
 //   ASC_MAX_WAIT_SECS      max seconds to wait for the build to appear in
 //                          ASC after submission (default 900 = 15 min)
 //
@@ -103,6 +110,69 @@ async function findBuild({ jwt, appId, version }) {
   return builds[0] || null;
 }
 
+/** Every locale TestFlight might show for this build. */
+async function targetLocales({ jwt, appId, buildId, explicit }) {
+  const locales = new Set(explicit);
+  const add = (r) => {
+    for (const d of r.ok ? r.json.data || [] : [])
+      if (d.attributes?.locale) locales.add(d.attributes.locale);
+  };
+  add(await ascFetch(jwt, `/v1/builds/${buildId}/betaBuildLocalizations`));
+  add(await ascFetch(jwt, `/v1/apps/${appId}/betaAppLocalizations`));
+  const app = await ascFetch(jwt, `/v1/apps/${appId}`);
+  if (app.ok && app.json.data?.attributes?.primaryLocale)
+    locales.add(app.json.data.attributes.primaryLocale);
+  if (locales.size === 0) locales.add('en-US');
+  return [...locales];
+}
+
+/**
+ * Submit the build for Beta App Review so external groups (Public Beta) get
+ * it without a manual "Submit for Review" in App Store Connect (#1156).
+ * Waits for Apple to finish processing first; skips if already submitted.
+ * Soft-fails: a warning, never a failed release.
+ */
+async function submitForBetaReview({ jwt, buildId, maxWaitSecs }) {
+  const deadline = Date.now() + maxWaitSecs * 1000;
+  for (;;) {
+    const b = await ascFetch(jwt, `/v1/builds/${buildId}`);
+    const state = b.ok ? b.json.data?.attributes?.processingState : undefined;
+    if (state === 'VALID') break;
+    if (state === 'FAILED' || state === 'INVALID') {
+      console.error(`::warning title=Beta review not submitted::Build processing ${state}.`);
+      return;
+    }
+    if (Date.now() > deadline) {
+      console.error(
+        `::warning title=Beta review not submitted::Build still ${state ?? 'unknown'} after ${maxWaitSecs}s; submit it in App Store Connect.`,
+      );
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 30_000));
+  }
+  const existing = await ascFetch(jwt, `/v1/builds/${buildId}/betaAppReviewSubmission`);
+  if (existing.ok && existing.json.data) {
+    console.error(`[asc] build ${buildId} already submitted for beta review`);
+    return;
+  }
+  const r = await ascFetch(jwt, '/v1/betaAppReviewSubmissions', {
+    method: 'POST',
+    body: JSON.stringify({
+      data: {
+        type: 'betaAppReviewSubmissions',
+        relationships: { build: { data: { type: 'builds', id: buildId } } },
+      },
+    }),
+  });
+  if (r.ok) console.error(`[asc] submitted build ${buildId} for beta review`);
+  // 409: already submitted / in review — nothing to do.
+  else if (r.status === 409) console.error(`[asc] build ${buildId} already in beta review (409)`);
+  else
+    console.error(
+      `::warning title=Beta review not submitted::${r.status} ${JSON.stringify(r.json).slice(0, 300)}`,
+    );
+}
+
 async function getOrCreateLocalization({ jwt, buildId, locale }) {
   // List existing localizations on this build.
   const r = await ascFetch(jwt, `/v1/builds/${buildId}/betaBuildLocalizations`);
@@ -171,7 +241,10 @@ async function main() {
   const appId = requireEnv('ASC_APP_ID');
   const version = requireEnv('ASC_BUILD_VERSION');
   const whatsNew = requireEnv('WHATS_NEW').trimEnd();
-  const locale = process.env.ASC_LOCALE || 'en-US';
+  const explicitLocales = (process.env.ASC_LOCALE || '')
+    .split(',')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const parsedMaxWait = parseInt(process.env.ASC_MAX_WAIT_SECS || '', 10);
   const maxWaitSecs = Number.isFinite(parsedMaxWait) && parsedMaxWait > 0 ? parsedMaxWait : 900;
 
@@ -185,11 +258,18 @@ async function main() {
     return;
   }
 
-  const loc = await getOrCreateLocalization({ jwt, buildId: build.id, locale });
-  await setWhatsNew({ jwt, locId: loc.id, whatsNew });
-  console.error(
-    `[asc] set "What to Test" on build ${build.id} (${locale}, ${whatsNew.length} chars)`,
-  );
+  const locales = await targetLocales({ jwt, appId, buildId: build.id, explicit: explicitLocales });
+  for (const locale of locales) {
+    const loc = await getOrCreateLocalization({ jwt, buildId: build.id, locale });
+    await setWhatsNew({ jwt, locId: loc.id, whatsNew });
+    console.error(
+      `[asc] set "What to Test" on build ${build.id} (${locale}, ${whatsNew.length} chars)`,
+    );
+  }
+
+  if (process.env.ASC_SKIP_REVIEW !== '1') {
+    await submitForBetaReview({ jwt, buildId: build.id, maxWaitSecs });
+  }
 }
 
 main().catch((err) => {

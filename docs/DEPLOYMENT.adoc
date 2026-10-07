@@ -512,7 +512,8 @@ When opening a PR with a user-visible change, append a one-line bullet to `docs/
 
 . Reads bullets from `docs/RELEASE_NOTES_NEXT.md` (deduped, capped at 3 900 chars to stay under TestFlight's 4 000-char limit).
 . Falls back to `feat:` / `fix:` / `perf:` commit subjects since the previous tag if the file is empty.
-. Calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` to set the iOS build's `whatsNew` localisation (`en-US`).
+. Calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` to set the iOS build's `whatsNew` in **every locale TestFlight might show**: the build's existing localisations, the app's TestFlight (beta app) localisations and its primary locale (`en-US` only if none are found). Writing only `en-US` left the field blank for a UK-primary app, which shows its `en-GB` text.
+. Once Apple has processed the build, **submits it for Beta App Review** (`POST /v1/betaAppReviewSubmissions`) unless it's already submitted, so external groups (Public Beta) get it without a manual *Submit for Review*. This step only warns on failure and never fails the release. Set `ASC_SKIP_REVIEW=1` to skip it.
 . Archives the bullets into `docs/CHANGELOG.md` and resets `docs/RELEASE_NOTES_NEXT.md` to the placeholder by copying `docs/RELEASE_NOTES_NEXT.template.md`. The reset commit is pushed to `main` with `[skip ci]` so it doesn't kick off another CI run.
 
 If the release tagger forgot to populate the file and no qualifying commits are found, the workflow defaults to `Bug fixes and improvements.` rather than leaving the field blank.
