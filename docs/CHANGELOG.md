@@ -1,3 +1,14 @@
+## v1.4.1
+
+- **Notifications screen.** A bell on Home shows unread alerts; tap it to see the last 30 days of messages, payments, zaps and Piglet finds, open any of them, or mark all as read.
+- **Clearer relay settings.** Account → Nostr now leads with Your relays and DM inbox relays, each showing a live connection dot; app defaults and geo-cache relays sit under Advanced.
+- **Backup image servers.** Account → Nostr → Image servers (Blossom): add backup servers and pick a primary. Uploads switch to a backup if the primary is down and are copied to the others. Publish shares the list with other Nostr apps.
+- **Message alerts open that conversation**, even ones that arrived while the app couldn't read them yet, instead of just the Messages list.
+- **Opening a chat clears its alerts**, so the dot on the app icon goes away.
+- **Group chats show their NIP-17 tag**, like one-to-one chats.
+- **Relay dots show the real connection status** instead of always red.
+- **Marmot group invites** (e.g. from White Noise) now say "not supported yet" instead of showing unreadable text.
+
 ## v1.4.0
 
 - **Market in Explore.** Browse Lightning Piggy vendors and their products, filter by country, currency or merchant, read reviews, and check out in-app — pick shipping, place the order and pay the invoice. Listings from your friends now load live.
