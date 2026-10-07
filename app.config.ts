@@ -135,6 +135,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     './plugins/withLargeHeap',
+    // Android 12+ launch screen: brand pink with no icon, so a cold start
+    // doesn't flash the launcher icon before BootSplash's graffiti pig.
+    './plugins/withTransparentSplashIcon',
     // MapLibre Native — replaces the Leaflet-in-WebView map stack.
     // The library auto-links on iOS via CocoaPods and on Android via
     // Gradle; the Expo plugin (shipped with the package) wires the
