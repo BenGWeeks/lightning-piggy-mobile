@@ -378,6 +378,8 @@ describe('remote signer path: contentless notifications', () => {
         threadId: '__background__',
         title: 'New encrypted message',
         body: 'Open Lightning Piggy to read',
+        // The wrap id lets a tap open the conversation once decrypted (#1154).
+        data: { wrapId: 'w4' },
       }),
     );
   });

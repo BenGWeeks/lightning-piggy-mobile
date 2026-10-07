@@ -163,6 +163,9 @@ export default function App() {
 
     // Tap routing. Retry briefly so a cold-start tap that races the nav
     // tree's mount still lands (mirrors the deep-link tryNav pattern).
+    // Each tap supersedes earlier ones still retrying (e.g. waiting for the
+    // identity to hydrate), so an older tap can't override a newer one.
+    let latestTap = 0;
     const routeFromResponse = (response: Notifications.NotificationResponse | null) => {
       const data = response?.notification?.request?.content?.data as
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
@@ -171,9 +174,12 @@ export default function App() {
       // The tapped notification's in-app history row is now read (#1143).
       const { historyId, owner } = data as { historyId?: string; owner?: string };
       void markHistoryEntryRead(historyId, owner);
+      const tap = ++latestTap;
       const tryNav = (attempt: number) => {
+        if (tap !== latestTap) return;
         if (navigateFromNotification(data)) return;
-        if (attempt >= 20) return;
+        // ~10 s: also covers identity hydration on a cold start (#1154).
+        if (attempt >= 100) return;
         setTimeout(() => tryNav(attempt + 1), 100);
       };
       tryNav(0);
@@ -181,12 +187,18 @@ export default function App() {
     // Cold start: the app may have been launched by a notification tap.
     // Clear the stored launch response once routed, so a later effect
     // re-run / remount doesn't re-handle the same cold-start tap.
+    // A warm tap handled before this lookup resolves is newer than the launch
+    // tap, so the launch tap must not supersede it (#1154).
+    let warmTapSeen = false;
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      routeFromResponse(response);
+      if (!warmTapSeen) routeFromResponse(response);
       void Notifications.clearLastNotificationResponseAsync?.();
     });
     // Warm taps while the app is already running.
-    const responseSub = Notifications.addNotificationResponseReceivedListener(routeFromResponse);
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      warmTapSeen = true;
+      routeFromResponse(response);
+    });
 
     return () => {
       appStateSub.remove();

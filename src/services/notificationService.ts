@@ -102,6 +102,9 @@ export interface NotificationData {
   cacheCoord?: string;
   /** Links a tray notification to its in-app history row (#1143). */
   historyId?: string;
+  /** NIP-17 gift-wrap id of a message the background couldn't decrypt: on
+   * tap, its conversation is resolved once the app has decrypted it (#1154). */
+  wrapId?: string;
   /** Account the notification belongs to, so clearing stays per account. */
   owner?: string;
 }

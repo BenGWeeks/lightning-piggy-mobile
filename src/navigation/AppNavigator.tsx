@@ -46,6 +46,12 @@ import ExploreHomeScreen from '../screens/ExploreHomeScreen';
 import FriendsScreen from '../screens/FriendsScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
+import { getActivePubkey } from '../services/walletStorageService';
+import {
+  createRouteLeaveTracker,
+  isForAnotherAccount,
+  resolveWrapConversation,
+} from '../services/notificationWrapResolver';
 
 // Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
 // Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
@@ -198,6 +204,10 @@ export const navigateToUnsupportedEntity = (entity: string, detail?: string): bo
  * Called from the notification-response listener in App.tsx. Returns false
  * if the nav tree isn't ready yet (caller retries on cold start).
  */
+// Bumped per handled notification tap, so a newer tap cancels an older one's
+// pending wrap resolution.
+let notificationNavGeneration = 0;
+
 export const navigateFromNotification = (data: {
   kind?: string;
   conversationPubkey?: string;
@@ -207,8 +217,25 @@ export const navigateFromNotification = (data: {
   cacheCoord?: string;
   /** Display name when the caller already knows it (the Notifications screen). */
   name?: string;
+  /** NIP-17 gift wrap the background couldn't decrypt (#1154). */
+  wrapId?: string;
+  /** Account the notification belongs to. */
+  owner?: string;
 }): boolean => {
   if (!navigationRef.isReady()) return false;
+  // A message alert for another signed-in account would open that peer's
+  // thread under the wrong identity: show the list instead (#1154).
+  // Cold start: the tap can arrive before the identity has hydrated. Unknown is
+  // not "another account" — report not-ready so the caller retries.
+  if ((data.kind === 'dm' || data.kind === 'group') && data.owner && !getActivePubkey())
+    return false;
+  // Each handled tap supersedes any earlier one still resolving a wrap (#1154);
+  // counted only once it's actually routed, not per not-ready retry.
+  const generation = ++notificationNavGeneration;
+  if (isForAnotherAccount(data, getActivePubkey())) {
+    navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    return true;
+  }
   if (data.conversationPubkey) {
     // `name` is required by the route type; the screen fills the header from
     // its own profile fetch, so seed it with what the caller knows, if anything.
@@ -238,9 +265,34 @@ export const navigateFromNotification = (data: {
     return true;
   }
   // Generic message ping with no thread id (the background detect-and-ping
-  // path, which doesn't decrypt) → open the Messages list.
+  // path, which doesn't decrypt) → open the Messages list. With a wrap id,
+  // then open that message's conversation once the app has decrypted it —
+  // unless the user has moved on from the list meanwhile (#1154).
   if (data.kind === 'dm' || data.kind === 'group') {
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
+    const owner = data.owner ?? getActivePubkey();
+    // Only for the active account: another account's stored wrap would open
+    // a conversation under the wrong identity, so its alert stays on the list.
+    if (data.wrapId && owner && owner === getActivePubkey()) {
+      // Every route change, so leaving the list is seen even between polls.
+      const tracker = createRouteLeaveTracker('Messages');
+      const report = () => tracker.onRoute(navigationRef.getCurrentRoute()?.name);
+      report();
+      const unsubscribe = navigationRef.addListener('state', report);
+      const cancelled = () =>
+        tracker.movedOn() ||
+        getActivePubkey() !== owner ||
+        generation !== notificationNavGeneration;
+      void resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) => {
+        unsubscribe();
+        if (target && !cancelled())
+          navigationRef.navigate('Conversation', {
+            pubkey: target.pubkey,
+            name: data.name ?? '',
+            protocol: target.protocol,
+          });
+      });
+    }
     return true;
   }
   // payment / zap (or anything else) → wallet home.

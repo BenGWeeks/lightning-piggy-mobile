@@ -363,6 +363,21 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
  * live-sub's "is this marketplace partner already a conversation?" trust
  * check (#850; replaces scanning the retired plaintext inbox blob).
  */
+/** The conversation (and its protocol's wire kind) a stored event belongs to —
+ * for NIP-17 the event id is the gift-wrap id. Null until it's been stored. */
+export async function getConversationForEvent(
+  owner: string,
+  eventId: string,
+): Promise<{ conversation: string; wireKind: number } | null> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT conversation, wire_kind FROM dm_messages WHERE owner = ? AND event_id = ? LIMIT 1;`,
+    [owner, eventId],
+  );
+  const row = (res.rows ?? [])[0];
+  return row ? { conversation: String(row.conversation), wireKind: Number(row.wire_kind) } : null;
+}
+
 export async function hasConversationWith(owner: string, conversation: string): Promise<boolean> {
   const db = await getLocalDb();
   const res = await db.execute(
