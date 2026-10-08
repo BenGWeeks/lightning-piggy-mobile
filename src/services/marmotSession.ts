@@ -68,6 +68,8 @@ export interface MarmotGroupSummary {
   isDm: boolean;
   /** Relays the group's kind-445 traffic is published to. */
   relays: string[];
+  /** When this device first saw the group (ms) — MLS carries no creation time. */
+  createdAt: number;
 }
 
 export interface MarmotMessageEvent {
@@ -120,6 +122,7 @@ export class MarmotSession {
   private readonly listeners = new Set<MarmotSessionListener>();
   private readonly wiredGroups = new Set<string>();
   private readonly watermarks = new Map<string, number>();
+  private readonly firstSeen = new Map<string, number>();
   private connection: { unsubscribe(): void } | null = null;
   private stopped = false;
   private markReady!: () => void;
@@ -325,12 +328,18 @@ export class MarmotSession {
       adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
       isDm: name === '' && members.length === 2,
       relays: g.relays ?? [],
+      createdAt: this.firstSeen.get(g.idStr) ?? Date.now(),
     };
   }
 
   private wireGroup(g: MarmotGroup): void {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
+    if (!this.firstSeen.has(g.idStr)) {
+      const now = Date.now();
+      this.firstSeen.set(g.idStr, now);
+      void this.backend.set('firstSeen', g.idStr, String(now));
+    }
     g.on('applicationMessage', (data: Uint8Array) => {
       let rumor: MarmotRumor;
       try {
@@ -429,9 +438,14 @@ export class MarmotSession {
   }
 
   private async loadWatermarks(): Promise<void> {
-    for (const h of await this.backend.keys('watermark')) {
-      const v = Number(await this.backend.get('watermark', h));
-      if (Number.isFinite(v)) this.watermarks.set(h, v);
+    for (const [ns, map] of [
+      ['watermark', this.watermarks],
+      ['firstSeen', this.firstSeen],
+    ] as const) {
+      for (const key of await this.backend.keys(ns)) {
+        const v = Number(await this.backend.get(ns, key));
+        if (Number.isFinite(v)) map.set(key, v);
+      }
     }
   }
 }

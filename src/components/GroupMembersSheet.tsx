@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Text, TouchableOpacity, StyleSheet, View, BackHandler } from 'react-native';
+import { Text, TouchableOpacity, View, BackHandler } from 'react-native';
 import { Image } from 'expo-image';
 import {
   BottomSheetModal,
@@ -10,7 +10,8 @@ import {
 import { UserPlus, UserRound, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createGroupMembersSheetStyles } from '../styles/GroupMembersSheet.styles';
+import { marmotSendError } from '../services/marmotSend';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { Alert as BrandedAlert } from './BrandedAlert';
@@ -55,7 +56,7 @@ interface MemberRow {
 const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMemberTap }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createGroupMembersSheetStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
   const { pubkey: selfPubkey, profile: selfProfile } = useNostr();
   const { contacts } = useNostrContacts();
@@ -64,6 +65,22 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const group = groupId ? getGroup(groupId) : undefined;
+  // NIP-17 groups are editable by anyone; a Marmot group only by its admins
+  // (MLS rejects a non-admin's membership commit).
+  const canManage =
+    !group?.protocol ||
+    (!!selfPubkey && (group.adminPubkeys ?? []).includes(selfPubkey.toLowerCase()));
+  const reportFailure = useCallback(
+    (e: unknown) => {
+      if (__DEV__) console.warn('[Group] membership change failed:', e);
+      // NIP-17 changes are local-first and effectively can't fail; a Marmot
+      // change is an MLS commit (e.g. the friend has no key package yet).
+      if (group?.protocol === 'marmot') {
+        BrandedAlert.alert(t('createGroupSheet.createFailedTitle'), marmotSendError(e));
+      }
+    },
+    [group?.protocol, t],
+  );
 
   // Resolve memberPubkeys → friendly rows. We fall back to a short-pubkey
   // placeholder when no kind-0 profile is in `contacts` (matches the
@@ -141,26 +158,22 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
             text: t('groupMembersSheet.remove'),
             style: 'destructive',
             onPress: () => {
-              removeMemberFromGroup(groupId, m.pubkey).catch((e) => {
-                if (__DEV__) console.warn('[Group] removeMember failed:', e);
-              });
+              removeMemberFromGroup(groupId, m.pubkey).catch(reportFailure);
             },
           },
         ],
       );
     },
-    [groupId, removeMemberFromGroup, t],
+    [groupId, removeMemberFromGroup, t, reportFailure],
   );
 
   const handlePickerSelect = useCallback(
     (friend: PickedFriend) => {
       if (!groupId) return;
-      addMembersToGroup(groupId, [friend.pubkey]).catch((e) => {
-        if (__DEV__) console.warn('[Group] addMember failed:', e);
-      });
+      addMembersToGroup(groupId, [friend.pubkey]).catch(reportFailure);
       setPickerOpen(false);
     },
-    [groupId, addMembersToGroup],
+    [groupId, addMembersToGroup, reportFailure],
   );
 
   if (!group) return null;
@@ -229,7 +242,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
                   <Text style={styles.youTag}>{t('groupMembersSheet.youTag')}</Text>
                 ) : null}
               </Text>
-              {m.pubkey !== selfPubkey ? (
+              {m.pubkey !== selfPubkey && canManage ? (
                 <TouchableOpacity
                   style={styles.removeButton}
                   onPress={() => handleRemove(m)}
@@ -243,15 +256,17 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
             </TouchableOpacity>
           ))}
 
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setPickerOpen(true)}
-            accessibilityLabel={t('groupMembersSheet.addMembers')}
-            testID="group-members-add"
-          >
-            <UserPlus size={20} color={colors.brandPink} strokeWidth={2} />
-            <Text style={styles.addButtonText}>{t('groupMembersSheet.addMembers')}</Text>
-          </TouchableOpacity>
+          {canManage ? (
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setPickerOpen(true)}
+              accessibilityLabel={t('groupMembersSheet.addMembers')}
+              testID="group-members-add"
+            >
+              <UserPlus size={20} color={colors.brandPink} strokeWidth={2} />
+              <Text style={styles.addButtonText}>{t('groupMembersSheet.addMembers')}</Text>
+            </TouchableOpacity>
+          ) : null}
         </BottomSheetScrollView>
       </BottomSheetModal>
 
@@ -266,97 +281,5 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      flex: 1,
-      paddingHorizontal: 20,
-      paddingTop: 8,
-    },
-    contentContainer: {
-      paddingBottom: 60,
-    },
-    headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 16,
-    },
-    title: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    doneText: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.brandPink,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      gap: 12,
-    },
-    avatar: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.background,
-      justifyContent: 'center',
-      alignItems: 'center',
-      overflow: 'hidden',
-    },
-    avatarImage: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-    },
-    rowName: {
-      flex: 1,
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    youTag: {
-      fontWeight: '400',
-      color: colors.textSupplementary,
-    },
-    removeButton: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: colors.brandPinkLight,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    addButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      marginTop: 24,
-      paddingVertical: 14,
-      borderRadius: 12,
-      borderWidth: 1.5,
-      borderColor: colors.brandPink,
-      borderStyle: 'dashed',
-    },
-    addButtonText: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.brandPink,
-    },
-  });
 
 export default GroupMembersSheet;

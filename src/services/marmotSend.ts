@@ -85,3 +85,28 @@ export async function sendMarmotDm(
     return { success: false, error: marmotSendError(e) };
   }
 }
+
+/** Send an app rumor into a Marmot group (multi-member). Same "send the
+ * rumor as built" rule as {@link sendMarmotDm}. */
+export async function sendMarmotGroupRumor(
+  pubkey: string,
+  appGroupId: string,
+  draft: MarmotDraft,
+): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> {
+  try {
+    const session = requireMarmotSession(pubkey);
+    const rumor = buildMarmotRumor(pubkey, {
+      kind: marmotKindForAppKind(draft.kind),
+      content: draft.content,
+      tags: draft.tags,
+      created_at: draft.created_at,
+    });
+    const byRelay = await session.sendRumor(appGroupId, rumor);
+    const accepted = Object.values(byRelay).filter(Boolean).length;
+    return accepted > 0
+      ? { success: true, wrapsPublished: accepted }
+      : { success: false, error: 'No relay accepted the message' };
+  } catch (e) {
+    return { success: false, error: marmotSendError(e) };
+  }
+}
