@@ -49,6 +49,8 @@ const GROUP_EVENT_KIND = 445;
 // in a previous session (ingest state is durable), so this only bounds work.
 const GROUP_BACKFILL_SLACK_SECS = 2 * 24 * 60 * 60;
 const GROUP_BACKFILL_LIMIT = 500;
+// Safety stop for the paged backfill (500 × 40 = 20k events per group).
+const GROUP_BACKFILL_MAX_PAGES = 40;
 
 export interface MarmotRumor {
   id: string;
@@ -96,6 +98,8 @@ export interface MarmotSessionOptions {
   backend?: MarmotKvBackend;
   signer?: EventSigner;
   network?: ReturnType<typeof createMarmotNetwork>;
+  /** Test seam: kind-445 backfill page size (default 500). */
+  groupBackfillPageSize?: number;
 }
 
 export const toAppGroupId = (mlsGroupIdHex: string) => `${MARMOT_GROUP_ID_PREFIX}${mlsGroupIdHex}`;
@@ -236,6 +240,9 @@ export class MarmotSession {
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {
+    // Stored groups must be loaded first, or an existing DM is missed and a
+    // duplicate MLS group gets created for the same peer.
+    await this.ready;
     const existing = this.findDm(peer);
     if (existing) return existing;
     return this.createGroup('', [peer], { adminPubkeys: [this.pubkey, peer.toLowerCase()] });
@@ -246,6 +253,7 @@ export class MarmotSession {
     members: string[],
     opts: { description?: string; adminPubkeys?: string[] } = {},
   ): Promise<MarmotGroupSummary> {
+    await this.ready;
     // Resolve every key package first so a missing one fails before we
     // create an orphan group.
     const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
@@ -410,48 +418,101 @@ export class MarmotSession {
 
   /**
    * marmot-ts backfills a group with an UNBOUNDED `{kinds:[445], #h}` filter
-   * on every connect. Bound it to `since` (newest seen − slack) + `limit` so
-   * app start doesn't re-download each group's whole history (#perf rules).
+   * on every connect. Bound it (#perf rules) without losing history:
+   *  - `since` = newest *ingested* event − slack, so app start doesn't
+   *    re-download a group's whole history;
+   *  - the backfill pages backwards in `limit`-sized pages, so a device that
+   *    was offline through > `limit` events still gets every commit it needs
+   *    to decrypt later epochs;
+   *  - the durable watermark only advances once that backfill is ingested.
+   *    GroupsManager.connect drains the backfill BEFORE opening the live
+   *    subscription, so a request's newest timestamp is held as pending and
+   *    committed when the subscription for that group opens.
    */
   private boundGroupQueries(
     network: ReturnType<typeof createMarmotNetwork>,
   ): ReturnType<typeof createMarmotNetwork> {
-    const bound = (filters: Filter | Filter[]): Filter[] =>
-      (Array.isArray(filters) ? filters : [filters]).map((f) => {
-        const h = f['#h']?.[0];
-        if (!h || !f.kinds?.includes(GROUP_EVENT_KIND) || f.since !== undefined) return f;
-        const seen = this.watermarks.get(h);
-        return {
-          ...f,
-          limit: f.limit ?? GROUP_BACKFILL_LIMIT,
-          ...(seen ? { since: seen - GROUP_BACKFILL_SLACK_SECS } : {}),
-        };
-      });
-    const note = (event: NostrEvent) => {
-      if (event.kind !== GROUP_EVENT_KIND) return;
-      const h = event.tags.find((t) => t[0] === 'h')?.[1];
-      if (!h || event.created_at <= (this.watermarks.get(h) ?? 0)) return;
-      this.watermarks.set(h, event.created_at);
-      void this.backend.set('watermark', h, String(event.created_at));
+    const groupH = (f: Filter) =>
+      f.kinds?.includes(GROUP_EVENT_KIND) && f.since === undefined ? f['#h']?.[0] : undefined;
+    const bound = (f: Filter): Filter => {
+      const h = groupH(f);
+      if (!h) return f;
+      const seen = this.watermarks.get(h);
+      return {
+        ...f,
+        limit: f.limit ?? this.opts.groupBackfillPageSize ?? GROUP_BACKFILL_LIMIT,
+        ...(seen ? { since: seen - GROUP_BACKFILL_SLACK_SECS } : {}),
+      };
     };
+    const pending = new Map<string, number>();
+    const commit = (h: string, createdAt: number) => {
+      if (createdAt <= (this.watermarks.get(h) ?? 0)) return;
+      this.watermarks.set(h, createdAt);
+      void this.backend.set('watermark', h, String(createdAt));
+    };
+    const hOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'h')?.[1];
+
+    /** Page a bounded group filter backwards until a short page. */
+    const backfill = async (relays: string[], f: Filter): Promise<NostrEvent[]> => {
+      const limit = f.limit ?? GROUP_BACKFILL_LIMIT;
+      const byId = new Map<string, NostrEvent>();
+      let until: number | undefined;
+      for (let page = 0; page < GROUP_BACKFILL_MAX_PAGES; page++) {
+        const events = (await network.request(relays, {
+          ...f,
+          ...(until !== undefined ? { until } : {}),
+        })) as NostrEvent[];
+        const before = byId.size;
+        for (const e of events) byId.set(e.id, e);
+        if (events.length < limit || byId.size === before) break;
+        until = Math.min(...events.map((e) => e.created_at));
+      }
+      return [...byId.values()];
+    };
+
     return {
       ...network,
       request: async (relays, filters) => {
-        const events = await network.request(relays, bound(filters as Filter | Filter[]));
-        (events as NostrEvent[]).forEach(note);
-        return events;
+        const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
+        const batches = await Promise.all(
+          list.map((f) =>
+            groupH(f)
+              ? backfill(relays, bound(f))
+              : (network.request(relays, f) as Promise<NostrEvent[]>),
+          ),
+        );
+        const byId = new Map<string, NostrEvent>();
+        for (const e of batches.flat()) byId.set(e.id, e);
+        for (const e of byId.values()) {
+          const h = e.kind === GROUP_EVENT_KIND ? hOf(e) : undefined;
+          if (h && e.created_at > (pending.get(h) ?? 0)) pending.set(h, e.created_at);
+        }
+        return [...byId.values()];
       },
       subscription: (relays, filters) => {
-        const inner = network.subscription(relays, bound(filters as Filter | Filter[]));
+        const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
+        const inner = network.subscription(relays, list.map(bound));
         return {
-          subscribe: (observer) =>
-            inner.subscribe({
+          subscribe: (observer) => {
+            // Backfill for these groups has been ingested — commit it.
+            for (const f of list) {
+              const h = groupH(f);
+              const ts = h ? pending.get(h) : undefined;
+              if (h && ts) {
+                commit(h, ts);
+                pending.delete(h);
+              }
+            }
+            return inner.subscribe({
               ...observer,
               next: (e) => {
-                note(e as NostrEvent);
+                const ev = e as NostrEvent;
+                const h = ev.kind === GROUP_EVENT_KIND ? hOf(ev) : undefined;
+                if (h) commit(h, ev.created_at);
                 observer.next?.(e);
               },
-            }),
+            });
+          },
         };
       },
     };

@@ -54,10 +54,23 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribeMessages: (() => void) | null = null;
 
-    const flush = async () => {
+    // Flushes run strictly one after another: appendGroupMessage is an
+    // AsyncStorage read-modify-write, so overlapping flushes for one group
+    // could clobber each other's rows.
+    let chain: Promise<void> = Promise.resolve();
+    const flush = () => {
       timer = null;
       const batch = pending;
       pending = [];
+      if (batch.length === 0) return chain;
+      chain = chain
+        .then(() => writeBatch(batch))
+        .catch((e) => {
+          if (__DEV__) console.warn('[Marmot] group message write failed:', e);
+        });
+      return chain;
+    };
+    const writeBatch = async (batch: MarmotMessageEvent[]) => {
       const byGroup = new Map<string, GroupMessage[]>();
       for (const { group, rumor } of batch) {
         const list = byGroup.get(group.id) ?? [];

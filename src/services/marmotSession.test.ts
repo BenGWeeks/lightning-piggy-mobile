@@ -48,7 +48,15 @@ function makeRelay() {
       },
       async request(_relays: string[], filters: Filter | Filter[]) {
         requests.push(asArray(filters));
-        return events.filter((e) => matchFilters(asArray(filters), e));
+        // Like a real relay: per filter, newest-first, `until`-bounded, `limit`-capped.
+        return asArray(filters).flatMap((f) =>
+          events
+            .filter(
+              (e) => matchFilters([f], e) && (f.until === undefined || e.created_at <= f.until),
+            )
+            .sort((x, y) => y.created_at - x.created_at)
+            .slice(0, f.limit ?? Infinity),
+        );
       },
       subscription(_relays: string[], filters: Filter | Filter[]) {
         return {
@@ -176,7 +184,7 @@ async function waitFor(cond: () => boolean, ms = 10_000) {
   }
 }
 
-function makeSession(relay: ReturnType<typeof makeRelay>) {
+function makeSession(relay: ReturnType<typeof makeRelay>, pageSize?: number) {
   const who = makeSigner();
   const inbox: MarmotMessageEvent[] = [];
   const session = new MarmotSession({
@@ -187,6 +195,7 @@ function makeSession(relay: ReturnType<typeof makeRelay>) {
     backend: createMemoryMarmotBackend(),
     getWriteRelays: () => [RELAY],
     getLookupRelays: () => [RELAY],
+    groupBackfillPageSize: pageSize,
   });
   session.subscribe({ onMessage: (m) => inbox.push(m) });
   return { ...who, session, inbox };
@@ -309,6 +318,57 @@ describe('MarmotSession (no WebCrypto)', () => {
     expect(bob.session.getGroup(group.id)).toBeUndefined();
 
     for (const p of [alice, bob, carol]) p.session.stop();
+  }, 90_000);
+
+  it('pages the kind-445 backfill so a long offline gap loses no commits', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    await alice.session.start();
+    // Bob is "offline": he publishes a key package but only starts later,
+    // with a page size far smaller than the backlog.
+    const bobKeys = makeSigner();
+    const bobBackend = createMemoryMarmotBackend();
+    const bobOpts = {
+      pubkey: bobKeys.pubkey,
+      signerType: 'nsec' as const,
+      signer: bobKeys.signer,
+      network: relay.network,
+      backend: bobBackend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+      groupBackfillPageSize: 3,
+    };
+    const bobFirst = new MarmotSession(bobOpts);
+    await bobFirst.start();
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey));
+    const dm = await alice.session.getOrCreateDm(bobKeys.pubkey);
+    const [welcome] = unwrapWelcomes(relay, bobKeys);
+    await bobFirst.acceptWelcome(welcome);
+    bobFirst.stop();
+
+    // While Bob is away: 10 messages and an epoch-changing commit in between.
+    for (let i = 0; i < 5; i++) {
+      await alice.session.sendRumor(
+        dm.id,
+        buildMarmotRumor(alice.pubkey, { kind: 9, content: `m${i}` }),
+      );
+    }
+    await alice.session.rename(dm.id, ''); // commit (epoch++) — must not be skipped
+    const last = buildMarmotRumor(alice.pubkey, { kind: 9, content: 'latest' });
+    await alice.session.sendRumor(dm.id, last);
+
+    // Bob comes back with page size 3: the backlog (> 3 events) must be paged.
+    const bob = new MarmotSession(bobOpts);
+    const inbox: MarmotMessageEvent[] = [];
+    bob.subscribe({ onMessage: (m) => inbox.push(m) });
+    await bob.start();
+    await waitFor(() => inbox.some((m) => m.rumor.id === last.id));
+    const pages = relay.requests
+      .flat()
+      .filter((f) => f.kinds?.includes(445) && f.until !== undefined);
+    expect(pages.length).toBeGreaterThan(0);
+    alice.session.stop();
+    bob.stop();
   }, 90_000);
 
   it('refuses to start a chat with someone who has no key package', async () => {
