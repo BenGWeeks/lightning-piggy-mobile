@@ -10,6 +10,7 @@ import {
   wrapCacheFileName,
 } from './nostrDmCache';
 import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
+import { deleteMarmotStateForOwner } from '../services/marmotStore';
 
 /**
  * Per-account DM-store wipe, called from NostrContext's `wipeAccountCaches`
@@ -56,6 +57,8 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   await pendingDmStoreMigration(pubkey)?.catch(() => {});
   try {
     await deleteDmMessagesForOwner(pubkey);
+    // This account's Marmot MLS state (group secrets, key-package private keys).
+    await deleteMarmotStateForOwner(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[DmStore] per-owner DB wipe failed:', e);
   }
