@@ -43,6 +43,7 @@ import { fetchConversationFor } from './nostrFetchConversation';
 import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
+import type { DmProtocol } from '../utils/dmProtocol';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -82,7 +83,7 @@ export interface UseDmInboxResult {
   // thread is never behind the preview.
   loadInitialConversation: (
     otherPubkey: string,
-    protocol?: 'nip04' | 'nip17',
+    protocol?: DmProtocol,
   ) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   persistDeliveryStatuses: (
@@ -299,7 +300,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // — and the rows now carry the optimistic local- sends + delivery ticks the
   // retired plaintext blob used to.
   const loadInitialConversation = useCallback(
-    (otherPubkey: string, protocol?: 'nip04' | 'nip17'): Promise<ConversationMessage[]> =>
+    (otherPubkey: string, protocol?: DmProtocol): Promise<ConversationMessage[]> =>
       loadInitialConversationFor(otherPubkey, {
         getStoredRows: (peer) => {
           if (!pubkey) return Promise.resolve([] as DmMessageRow[]);

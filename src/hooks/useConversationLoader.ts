@@ -26,7 +26,7 @@ export interface UseConversationLoaderParams {
   ) => Promise<ConversationMessage[]>;
   loadInitialConversation: (
     otherPubkey: string,
-    protocol?: 'nip04' | 'nip17',
+    protocol?: DmProtocol,
   ) => Promise<ConversationMessage[]>;
   persistDeliveryStatuses: (
     otherPubkey: string,
@@ -108,9 +108,8 @@ export function useConversationLoader({
       // empty (a true cold open with nothing ingested yet).
       // Per-protocol window (#1118): the store + fetch read only this thread,
       // so another protocol's newer history can't use up its slice.
-      const storeProtocol = protocol === 'marmot' ? undefined : protocol;
       const initial = filterMessagesByProtocol(
-        await loadInitialConversation(pubkey, storeProtocol),
+        await loadInitialConversation(pubkey, protocol),
         protocol,
       );
       if (signal.aborted || !isMountedRef.current) return;
@@ -124,7 +123,11 @@ export function useConversationLoader({
       }
       try {
         const conv = filterMessagesByProtocol(
-          await fetchConversation(pubkey, { signal, protocol: storeProtocol }),
+          protocol === 'marmot'
+            ? // Marmot rows land in the store from the MLS session (marmotInbox),
+              // never from a relay gift-wrap fetch — re-read the store instead.
+              await loadInitialConversation(pubkey, protocol)
+            : await fetchConversation(pubkey, { signal, protocol }),
           protocol,
         );
         // A superseding load (or unmount) aborted this fetch — drop the result

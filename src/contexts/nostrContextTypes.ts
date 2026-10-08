@@ -1,4 +1,5 @@
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import type { DmProtocol } from '../utils/dmProtocol';
 
 /** Options accepted by `refreshDmInbox`. All fields optional so existing
  * callers continue to work without changes. `signal` lets a screen
@@ -54,4 +55,6 @@ export interface ConversationMessage {
   // the relay echo (which has a DIFFERENT `id` — the outer wrap id), so it keys
   // the delivery-status store. Set on our own sent rows only.
   rumorId?: string;
+  // Explicit thread protocol (Marmot). Absent = derived from `wireKind`.
+  protocol?: DmProtocol;
 }

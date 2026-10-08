@@ -1,5 +1,6 @@
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
+import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
 // Data-access layer for the `dm_messages` table in the encrypted local DB
 // (#695). One row per decrypted DM, keyed by (owner, event_id) — `owner` is
@@ -36,7 +37,14 @@ export interface DmMessageRow {
   /** NIP-17 inner-rumor event id (#857) — the delivery-store key, stable
    * across the optimistic local- row and the relay echo. Sent rows only. */
   rumorId?: string;
+  /** Explicit thread protocol (Marmot). Absent = derived from `wireKind`. */
+  protocol?: DmProtocol;
 }
+
+/** SQL for a row's effective protocol — mirrors `protocolForWireKind`. */
+const PROTOCOL_SQL = `COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)`;
+const isDmProtocol = (v: unknown): v is DmProtocol =>
+  v === 'nip04' || v === 'nip17' || v === 'marmot';
 
 /** Prefix of the optimistic send rows ConversationScreen appends before the
  * relay echo lands. Kept as first-class rows (#850) so a send survives a cold
@@ -88,6 +96,7 @@ const toRow = (r: Record<string, unknown>): DmMessageRow => {
     wireKind: Number(r.wire_kind),
     ...(deliveryStatus !== undefined ? { deliveryStatus } : {}),
     ...(rumorId !== undefined ? { rumorId } : {}),
+    ...(isDmProtocol(r.protocol) ? { protocol: r.protocol } : {}),
   };
 };
 
@@ -139,10 +148,17 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
       `SELECT event_id, delivery_status, rumor_id, created_at FROM dm_messages
         WHERE owner = ? AND conversation = ? AND from_me = 1 AND content = ?
           AND event_id LIKE '${LOCAL_DM_ID_PREFIX}%'
-          AND (wire_kind = 4) = (? = 4)
+          AND ${PROTOCOL_SQL} = ?
           AND created_at BETWEEN ? - ${LOCAL_DM_ECHO_WINDOW_SECS} AND ? + ${LOCAL_DM_ECHO_WINDOW_SECS};`,
-      // Same protocol only (wire_kind 4 = NIP-04): threads are split per protocol.
-      [m.owner, m.conversation, m.content, m.wireKind, m.createdAt, m.createdAt],
+      // Same protocol only: threads are split per protocol.
+      [
+        m.owner,
+        m.conversation,
+        m.content,
+        protocolForWireKind(m.wireKind, m.protocol),
+        m.createdAt,
+        m.createdAt,
+      ],
     );
     const candidates = res.rows ?? [];
     if (candidates.length > 0) {
@@ -168,9 +184,10 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
   await tx.execute(
     `INSERT INTO dm_messages
        (owner, event_id, conversation, created_at, sender, content, from_me, wire_kind,
-        delivery_status, rumor_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        delivery_status, rumor_id, protocol)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(owner, event_id) DO UPDATE SET
+       protocol        = COALESCE(excluded.protocol, dm_messages.protocol),
        conversation    = excluded.conversation,
        created_at      = excluded.created_at,
        sender          = excluded.sender,
@@ -190,6 +207,7 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
       m.wireKind,
       serializeDeliveryStatus(deliveryStatus),
       rumorId ?? null,
+      m.protocol ?? null,
     ],
   );
 }
@@ -223,8 +241,8 @@ export async function importDmMessages(rows: readonly DmMessageRow[]): Promise<v
       await tx.execute(
         `INSERT INTO dm_messages
            (owner, event_id, conversation, created_at, sender, content, from_me, wire_kind,
-            delivery_status, rumor_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            delivery_status, rumor_id, protocol)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(owner, event_id) DO UPDATE SET
            delivery_status = COALESCE(dm_messages.delivery_status, excluded.delivery_status),
            rumor_id        = COALESCE(dm_messages.rumor_id, excluded.rumor_id);`,
@@ -239,6 +257,7 @@ export async function importDmMessages(rows: readonly DmMessageRow[]): Promise<v
           m.wireKind,
           serializeDeliveryStatus(m.deliveryStatus),
           m.rumorId ?? null,
+          m.protocol ?? null,
         ],
       );
     }
@@ -279,7 +298,7 @@ export async function updateDmDeliveryStatuses(
 export async function getConversationMessages(
   owner: string,
   conversation: string,
-  opts: { limit?: number; beforeCreatedAt?: number; protocol?: 'nip04' | 'nip17' } = {},
+  opts: { limit?: number; beforeCreatedAt?: number; protocol?: DmProtocol } = {},
 ): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
   const limit = opts.limit ?? 50;
@@ -287,8 +306,10 @@ export async function getConversationMessages(
   let sql = `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ?`;
   // Per-protocol thread (#1118): filter BEFORE the LIMIT so one protocol's
   // newer history can't use up the other thread's whole slice.
-  if (opts.protocol === 'nip04') sql += ` AND wire_kind = 4`;
-  else if (opts.protocol === 'nip17') sql += ` AND wire_kind <> 4`;
+  if (opts.protocol) {
+    sql += ` AND ${PROTOCOL_SQL} = ?`;
+    params.push(opts.protocol);
+  }
   if (opts.beforeCreatedAt != null) {
     sql += ` AND created_at < ?`;
     params.push(opts.beforeCreatedAt);
@@ -347,9 +368,10 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const res = await db.execute(
     `SELECT m.* FROM dm_messages m
        JOIN (
-         SELECT conversation, (wire_kind = 4) AS is_nip04, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? GROUP BY conversation, (wire_kind = 4)
-       ) g ON m.conversation = g.conversation AND (m.wire_kind = 4) = g.is_nip04
+         SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
+         FROM dm_messages WHERE owner = ? GROUP BY conversation, ${PROTOCOL_SQL}
+       ) g ON m.conversation = g.conversation
+          AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
      WHERE m.owner = ?
      ORDER BY m.created_at DESC;`,
@@ -368,14 +390,20 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
 export async function getConversationForEvent(
   owner: string,
   eventId: string,
-): Promise<{ conversation: string; wireKind: number } | null> {
+): Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT conversation, wire_kind FROM dm_messages WHERE owner = ? AND event_id = ? LIMIT 1;`,
+    `SELECT conversation, wire_kind, protocol FROM dm_messages
+      WHERE owner = ? AND event_id = ? LIMIT 1;`,
     [owner, eventId],
   );
   const row = (res.rows ?? [])[0];
-  return row ? { conversation: String(row.conversation), wireKind: Number(row.wire_kind) } : null;
+  if (!row) return null;
+  return {
+    conversation: String(row.conversation),
+    wireKind: Number(row.wire_kind),
+    ...(isDmProtocol(row.protocol) ? { protocol: row.protocol } : {}),
+  };
 }
 
 export async function hasConversationWith(owner: string, conversation: string): Promise<boolean> {
@@ -398,7 +426,8 @@ export async function selectDmWrapIds(owner: string): Promise<string[]> {
   const db = await getLocalDb();
   const res = await db.execute(
     `SELECT event_id FROM dm_messages
-      WHERE owner = ? AND wire_kind != 4 AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%';`,
+      WHERE owner = ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%';`,
     [owner],
   );
   return (res.rows ?? []).map((r) => String(r.event_id));
@@ -416,7 +445,8 @@ export async function hasStoredWraps(owner: string): Promise<boolean> {
   const db = await getLocalDb();
   const res = await db.execute(
     `SELECT 1 AS present FROM dm_messages
-      WHERE owner = ? AND wire_kind != 4 AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%' LIMIT 1;`,
+      WHERE owner = ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%' LIMIT 1;`,
     [owner],
   );
   return (res.rows ?? []).length > 0;

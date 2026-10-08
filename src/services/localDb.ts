@@ -39,10 +39,23 @@ const SCHEMA: string[] = [
      wire_kind       INTEGER NOT NULL DEFAULT 14,
      delivery_status TEXT,
      rumor_id        TEXT,
+     protocol        TEXT,
      PRIMARY KEY (owner, event_id)
    );`,
   `CREATE INDEX IF NOT EXISTS idx_dm_owner_conversation_created
      ON dm_messages (owner, conversation, created_at DESC);`,
+  // Marmot (MLS) client state: group ratchet trees + epoch secrets, local
+  // key-package private keys, invites (see marmotStore.ts). Unlike the rows
+  // above this is NOT a rebuildable relay cache — losing it means being
+  // re-invited to every Marmot group — which is also exactly what MLS wants
+  // after a backup-restore wipe, since group state must never move devices.
+  `CREATE TABLE IF NOT EXISTS marmot_kv (
+     owner     TEXT NOT NULL,
+     namespace TEXT NOT NULL,
+     key       TEXT NOT NULL,
+     value     TEXT NOT NULL,
+     PRIMARY KEY (owner, namespace, key)
+   );`,
 ];
 
 // Columns added after the v2 table shipped (#850). SQLite supports in-place
@@ -51,6 +64,9 @@ const SCHEMA: string[] = [
 const ADDED_COLUMNS: readonly { name: string; ddl: string }[] = [
   { name: 'delivery_status', ddl: 'ALTER TABLE dm_messages ADD COLUMN delivery_status TEXT;' },
   { name: 'rumor_id', ddl: 'ALTER TABLE dm_messages ADD COLUMN rumor_id TEXT;' },
+  // Explicit thread protocol for transports whose inner kinds overlap NIP-17's
+  // (Marmot). NULL = derive from wire_kind (4 → NIP-04, else NIP-17).
+  { name: 'protocol', ddl: 'ALTER TABLE dm_messages ADD COLUMN protocol TEXT;' },
 ];
 
 let dbPromise: Promise<DB> | null = null;

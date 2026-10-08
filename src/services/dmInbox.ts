@@ -26,6 +26,7 @@ const rowToInboxEntry = (r: DmMessageRow): DmInboxEntry => ({
   // dmRowPreview so they redact identically.
   text: dmRowPreview(r.content, r.wireKind),
   wireKind: r.wireKind,
+  ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
 });
 
 /** Pure projection of stored rows → inbox entries. */

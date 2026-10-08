@@ -7,16 +7,30 @@ export const DM_PROTOCOL_LABEL: Record<DmProtocol, string> = {
   marmot: 'Marmot',
 };
 
-export function protocolForWireKind(wireKind: number | undefined): 'nip04' | 'nip17' {
+/** A message's protocol. NIP-04 vs NIP-17 is implied by the wire kind (4 =
+ * NIP-04); Marmot rows reuse NIP-17's inner kinds (9/14/15/…), so they carry
+ * an explicit `protocol` that wins. */
+export function protocolForWireKind(wireKind: number | undefined): 'nip04' | 'nip17';
+export function protocolForWireKind(
+  wireKind: number | undefined,
+  explicit: DmProtocol | null | undefined,
+): DmProtocol;
+export function protocolForWireKind(
+  wireKind: number | undefined,
+  explicit?: DmProtocol | null,
+): DmProtocol {
+  if (explicit) return explicit;
   return wireKind === 4 ? 'nip04' : 'nip17';
 }
 
 /** Read-side thread partition; preserves message order and object identity. */
-export function filterMessagesByProtocol<T extends { wireKind?: number }>(
+export function filterMessagesByProtocol<T extends { wireKind?: number; protocol?: DmProtocol }>(
   messages: readonly T[],
   protocol: DmProtocol,
 ): T[] {
-  return messages.filter((message) => protocolForWireKind(message.wireKind) === protocol);
+  return messages.filter(
+    (message) => protocolForWireKind(message.wireKind, message.protocol) === protocol,
+  );
 }
 
 /** Notification / active-thread identity for a 1:1 conversation. Threads are
@@ -26,8 +40,12 @@ export function dmThreadId(pubkey: string, protocol: DmProtocol): string {
 }
 
 /** Thread identity of a stored DM — matches the inbox summary row id. */
-export function dmMessageThreadId(message: { partnerPubkey: string; wireKind?: number }): string {
-  return dmThreadId(message.partnerPubkey, protocolForWireKind(message.wireKind));
+export function dmMessageThreadId(message: {
+  partnerPubkey: string;
+  wireKind?: number;
+  protocol?: DmProtocol;
+}): string {
+  return dmThreadId(message.partnerPubkey, protocolForWireKind(message.wireKind, message.protocol));
 }
 
 export function isDmProtocolAvailable(protocol: DmProtocol): boolean {

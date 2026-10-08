@@ -181,6 +181,8 @@ export interface DmInboxEntry {
    * swap (#857). `id` above is the OUTER wrap id (random per ephemeral key), so
    * it can't serve as that key. Absent for legacy / received rows. */
   rumorId?: string;
+  /** Explicit thread protocol (Marmot). Absent = derived from `wireKind`. */
+  protocol?: DmProtocol;
 }
 
 /** Generates the display name shown when we have no kind-0 profile yet.
@@ -237,7 +239,8 @@ export function buildDmSummaries(
     // any already in the store without a risky DB migration.
     if (!PUBKEY_HEX64.test(key)) continue;
     if (followPubkeys && !followPubkeys.has(key)) continue;
-    const threadKey = `${key}:${protocolForWireKind(entry.wireKind)}`;
+    const protocol = protocolForWireKind(entry.wireKind, entry.protocol);
+    const threadKey = `${key}:${protocol}`;
     const existing = winner.get(threadKey);
     if (!existing || entry.createdAt > existing.createdAt) {
       winner.set(threadKey, entry);
@@ -247,6 +250,7 @@ export function buildDmSummaries(
   const summaries: ConversationSummary[] = [];
   for (const entry of winner.values()) {
     const key = entry.partnerPubkey.toLowerCase();
+    const protocol = protocolForWireKind(entry.wireKind, entry.protocol);
     const contact = contactByPubkey.get(key);
     // Prefer the contact's profile; for a non-followed sender fall back to the
     // separately-fetched profile so name + avatar still resolve (#664).
@@ -257,7 +261,7 @@ export function buildDmSummaries(
       contact?.petname?.trim() ||
       fallbackName(entry.partnerPubkey);
     summaries.push({
-      id: `${key}:${protocolForWireKind(entry.wireKind)}`,
+      id: `${key}:${protocol}`,
       pubkey: key,
       name,
       picture: prof?.picture ?? null,
@@ -268,7 +272,7 @@ export function buildDmSummaries(
       lastDirection: entry.fromMe ? 'outgoing' : 'incoming',
       lastComment: entry.text,
       anonymous: false,
-      protocol: protocolForWireKind(entry.wireKind),
+      protocol,
     });
   }
 
