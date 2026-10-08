@@ -58,6 +58,14 @@ export function useConversationComposerActions(params: {
   // delivery tick (#856) survives a thread reload. The `deliveryStatus` rides
   // on the same row — only the local- send copy carries it, never the relay
   // echo, so the persisted tick is authoritative.
+  // Marmot rows reuse NIP-17's kinds, so the thread protocol is stored on
+  // the row explicitly — without it an optimistic Marmot bubble would be
+  // filed under the NIP-17 thread.
+  const protocolTag = useMemo(
+    () => (protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
+    [protocol],
+  );
+
   const appendOptimisticLocal = useCallback(
     (text: string, deliveryStatus?: DeliveryStatus) => {
       const optimistic = {
@@ -66,11 +74,12 @@ export function useConversationComposerActions(params: {
         text,
         createdAt: Math.floor(Date.now() / 1000),
         deliveryStatus,
+        ...protocolTag,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
     },
-    [appendLocalDmMessage, pubkey, setMessages],
+    [appendLocalDmMessage, pubkey, setMessages, protocolTag],
   );
 
   // Optimistic send (#857). The bubble paints IMMEDIATELY with a pending Clock,
@@ -131,6 +140,7 @@ export function useConversationComposerActions(params: {
               text,
               createdAt,
               wireKind: kind,
+              ...(sendProtocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
             };
             setMessages((prev) => [...prev, optimistic]);
             void appendLocalDmMessage(pubkey, optimistic);
@@ -164,7 +174,7 @@ export function useConversationComposerActions(params: {
 
   const sendFile = useCallback(
     async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
-      const result = await sendFileMessage(pubkey, file);
+      const result = await sendFileMessage(pubkey, file, protocol);
       if (!result.success) {
         const what = kind === 'image' ? 'image' : 'voice note';
         Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
@@ -182,12 +192,13 @@ export function useConversationComposerActions(params: {
         }),
         createdAt: Math.floor(Date.now() / 1000),
         deliveryStatus: result.delivery,
+        ...protocolTag,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage],
+    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage, protocol, protocolTag],
   );
 
   // Share an NWC wallet (#431). The connection string is a bearer secret sent
@@ -200,7 +211,7 @@ export function useConversationComposerActions(params: {
   // BEFORE invoking this.
   const shareNwcWallet = useCallback(
     async (card: NwcShareCard): Promise<boolean> => {
-      const result = await sendNwcShare(pubkey, card);
+      const result = await sendNwcShare(pubkey, card, protocol);
       if (!result.success) {
         Alert.alert('Could not share wallet', result.error ?? 'Please try again.');
         return false;
@@ -212,12 +223,13 @@ export function useConversationComposerActions(params: {
         createdAt: Math.floor(Date.now() / 1000),
         wireKind: NWC_SHARE_KIND,
         deliveryStatus: result.delivery,
+        ...protocolTag,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage],
+    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage, protocol, protocolTag],
   );
 
   // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
@@ -261,7 +273,12 @@ export function useConversationComposerActions(params: {
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders. (1:1 needs no canSend preflight —
   // the peer pubkey is always present from the route params.)
-  const sendAttachmentText = useCallback((text: string) => sendText(text, 'nip17'), [sendText]);
+  // Attachments (GIF / location / contact) on a NIP-04 thread upgrade to
+  // NIP-17; a Marmot thread keeps them inside its MLS group.
+  const sendAttachmentText = useCallback(
+    (text: string) => sendText(text, protocol === 'marmot' ? 'marmot' : 'nip17'),
+    [sendText, protocol],
+  );
   const strategy = useMemo(
     () => ({ sendText: sendAttachmentText, sendMessage: sendText, sendFile, confirmLocation }),
     [sendAttachmentText, sendText, sendFile, confirmLocation],

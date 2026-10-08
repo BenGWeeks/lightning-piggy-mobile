@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { sendNip04Message } from '../services/nostrNip04Send';
+import { sendMarmotDm } from '../services/marmotSend';
 import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -28,8 +29,8 @@ export interface SendResult {
   delivery?: DeliveryStatus;
 }
 
-// Per-send options. `protocol` picks the wire format for a text send (defaults
-// to NIP-17; NIP-04 is legacy; Marmot is rejected until it ships). The hooks
+// Per-send options. `protocol` picks the wire format for a send (defaults to
+// NIP-17; NIP-04 is legacy; Marmot rides the peer's MLS DM group). The hooks
 // drive the optimistic-send flow (#857): `onRumorReady` fires
 // synchronously once the stable rumor eventId is known (before publishing), so
 // the caller can paint the pending bubble keyed by it. It also carries the
@@ -85,15 +86,20 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
   const sendDirectMessage = useCallback(
     async (recipientPubkey: string, plaintext: string, hooks?: SendHooks): Promise<SendResult> => {
       const protocol = hooks?.protocol ?? DEFAULT_DM_PROTOCOL;
-      if (protocol === 'marmot') {
-        return { success: false, error: 'Marmot messaging is not available yet' };
-      }
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
       const normalizedRecipientPubkey = recipientPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
+      }
+      if (protocol === 'marmot') {
+        return sendMarmotDm(
+          pubkey,
+          normalizedRecipientPubkey,
+          { kind: 14, content: plaintext },
+          hooks,
+        );
       }
       // Union the user's published write relays with DEFAULT_RELAYS. Publish
       // uses Promise.any, so one responsive relay is enough — but a user
@@ -239,6 +245,12 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       if (normalized.length === 0) {
         return { success: false, error: 'No valid recipients' };
       }
+      if (hooks?.protocol === 'marmot') {
+        // A 1:1 Marmot thread: the one other party is the DM peer.
+        const peer = normalized.find((p) => p !== pubkey.toLowerCase());
+        if (!peer) return { success: false, error: 'No valid recipients' };
+        return sendMarmotDm(pubkey, peer, rumor, hooks);
+      }
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
@@ -304,7 +316,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
   // already encrypted + uploaded; this gift-wraps the URL + AES key/nonce
   // to the recipient (and the sender's own inbox copy).
   const sendFileMessage = useCallback(
-    async (recipientPubkey: string, file: EncryptedUpload): Promise<SendResult> => {
+    async (
+      recipientPubkey: string,
+      file: EncryptedUpload,
+      protocol?: DmProtocol,
+    ): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -325,6 +341,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           sha256Hex: file.sha256Hex,
           size: file.size,
         });
+        if (protocol === 'marmot') {
+          return await sendMarmotDm(pubkey, normalizedRecipientPubkey, rumor);
+        }
 
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);
@@ -432,7 +451,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
   // recipient's client rebuilds an "Add NWC Wallet" card from it. Mirrors
   // `sendFileMessage` (no delivery-tick hooks — the card has no tick UI).
   const sendNwcShare = useCallback(
-    async (recipientPubkey: string, card: NwcShareCard): Promise<SendResult> => {
+    async (
+      recipientPubkey: string,
+      card: NwcShareCard,
+      protocol?: DmProtocol,
+    ): Promise<SendResult> => {
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
@@ -450,6 +473,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           tags: [['p', normalizedRecipientPubkey]],
           content: serializeNwcShare(card),
         };
+        if (protocol === 'marmot') {
+          return await sendMarmotDm(pubkey, normalizedRecipientPubkey, rumor);
+        }
 
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);
@@ -530,3 +556,5 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
 
   return { sendDirectMessage, sendDirectRumor, sendFileMessage, sendNwcShare };
 }
+
+export type MessageSendApi = ReturnType<typeof useMessageSend>;

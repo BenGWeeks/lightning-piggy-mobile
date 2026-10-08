@@ -171,7 +171,7 @@ export default function DeliveryDetailSheet({
           <View style={styles.metaBlock}>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.protocol')}</Text>
-              <Text style={styles.metaValue}>{protocolLabel(info.wireKind)}</Text>
+              <Text style={styles.metaValue}>{protocolLabel(info.wireKind, info.protocol)}</Text>
             </View>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.kind')}</Text>

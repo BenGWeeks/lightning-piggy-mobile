@@ -1172,10 +1172,10 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Tipo de mensaje no compatible, kind {{kind}}",
     "unsupportedText": "Tipo de mensaje no compatible (kind {{kind}})",
-    "marmotInvite": "Te invitó a un chat de grupo de Marmot — Marmot aún no es compatible con Lightning Piggy.",
-    "marmotMessage": "Mensaje de grupo de Marmot — Marmot aún no es compatible con Lightning Piggy.",
-    "marmotInvitePreview": "Invitación de grupo (Marmot aún no es compatible)",
-    "marmotMessagePreview": "Mensaje de Marmot (aún no es compatible)",
+    "marmotInvite": "Te envió una invitación a un chat de Marmot: se abre como chat de Marmot en tus Mensajes.",
+    "marmotMessage": "Evento de grupo de Marmot: abre el chat de Marmot para leerlo.",
+    "marmotInvitePreview": "Invitación a chat de Marmot",
+    "marmotMessagePreview": "Mensaje de Marmot",
     "secretMode": "Modo secreto",
     "secretModeSenderMemo": "Lightning Piggy ofrecerá al destinatario un botón para activar el Modo secreto.",
     "secretModeReceiverMemo": "Desbloquea funciones para desarrolladores y usuarios avanzados en Lightning Piggy.",
@@ -2243,8 +2243,8 @@
       "description": "Oculta a los relés con quién hablas; funciona con la mayoría de las aplicaciones modernas de Nostr."
     },
     "marmot": {
-      "badge": "Próximamente",
-      "description": "Cifrado de extremo a extremo con MLS, utilizado por White Noise."
+      "badge": "Alfa",
+      "description": "Cifrado de extremo a extremo con MLS; compatible con White Noise. Aún en pruebas: usa NIP-17 para lo importante."
     },
     "nip04": {
       "badge": "Antiguo",

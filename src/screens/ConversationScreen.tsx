@@ -311,7 +311,7 @@ const ConversationScreen: React.FC = () => {
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText);
+  } = useMessageInfoSheet(resendText, protocol);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -336,7 +336,7 @@ const ConversationScreen: React.FC = () => {
   const handleShareLive = useCallback(
     async (durationMs: number) => {
       setLiveLocationPickerOpen(false);
-      const result = await startShare(pubkey, durationMs);
+      const result = await startShare(pubkey, durationMs, protocol);
       if (!result.ok) {
         Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
         return;
@@ -344,7 +344,7 @@ const ConversationScreen: React.FC = () => {
       // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
       appendOptimisticLocal(result.markerText);
     },
-    [pubkey, startShare, appendOptimisticLocal, t],
+    [pubkey, startShare, appendOptimisticLocal, t, protocol],
   );
 
   const handleStopLive = useCallback(
@@ -848,6 +848,7 @@ const ConversationScreen: React.FC = () => {
           picture: picture ?? null,
           lightningAddress: lightningAddress ?? null,
         }}
+        presetProtocol={protocol}
         onSent={(payload) => {
           appendOptimisticLocal(payload);
         }}

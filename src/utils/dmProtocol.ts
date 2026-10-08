@@ -48,13 +48,16 @@ export function dmMessageThreadId(message: {
   return dmThreadId(message.partnerPubkey, protocolForWireKind(message.wireKind, message.protocol));
 }
 
-export function isDmProtocolAvailable(protocol: DmProtocol): boolean {
-  return protocol !== 'marmot';
+/** Every protocol is selectable; Marmot ships as Alpha (picker badge). Kept
+ * as the single gate should a protocol need switching off again. */
+export function isDmProtocolAvailable(_protocol: DmProtocol): boolean {
+  return true;
 }
 
-/** Marmot (MLS group chat over Nostr, e.g. White Noise) inner kinds: 443
+/** Marmot (MLS group chat over Nostr, e.g. White Noise) wire kinds: 443
  * KeyPackage, 444 Welcome (a group invite, delivered gift-wrapped like a
- * NIP-17 DM), 445 Group Event. The app can't read them yet (#1140). */
+ * NIP-17 DM), 445 Group Event. A 444 seen in a NIP-17 thread is the invite
+ * record — the group itself is joined by marmotWelcomeRouter (#1140). */
 export const MARMOT_WELCOME_KIND = 444;
 export function isMarmotKind(kind: number | undefined): boolean {
   return kind === 443 || kind === MARMOT_WELCOME_KIND || kind === 445;

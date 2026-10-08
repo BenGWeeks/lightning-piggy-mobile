@@ -48,6 +48,8 @@ export interface OutgoingSession {
   /** True once the end marker DM has been sent. Prevents double-ends
    *  when a manual stop races with the expiry timer. */
   endMarkerSent: boolean;
+  /** Thread the start/end markers go to. Absent = NIP-17 (the default). */
+  protocol?: 'marmot';
 }
 
 export type Action =
@@ -60,6 +62,7 @@ export type Action =
       recipientPubkey: string;
       durationMs: number;
       now: number;
+      protocol?: 'marmot';
     }
   /** A coordinate ping just published — bumps `lastPingAt`. */
   | { type: 'ping'; sessionId: string; now: number }
@@ -107,6 +110,7 @@ export function reduce(
         status: 'active',
         startMarkerSent: false,
         endMarkerSent: false,
+        ...(action.protocol ? { protocol: action.protocol } : {}),
       });
       return next;
     }

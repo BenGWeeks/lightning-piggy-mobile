@@ -66,6 +66,8 @@ export interface MarmotGroupSummary {
   adminPubkeys: string[];
   /** White Noise DM convention: two members, empty name. */
   isDm: boolean;
+  /** Relays the group's kind-445 traffic is published to. */
+  relays: string[];
 }
 
 export interface MarmotMessageEvent {
@@ -120,6 +122,9 @@ export class MarmotSession {
   private readonly watermarks = new Map<string, number>();
   private connection: { unsubscribe(): void } | null = null;
   private stopped = false;
+  private markReady!: () => void;
+  /** Resolves once stored groups are loaded — joins must not race loadAll. */
+  private readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
 
   constructor(opts: MarmotSessionOptions) {
     installMarmotCryptoProvider();
@@ -156,8 +161,12 @@ export class MarmotSession {
     for (const evt of ['left', 'removed', 'destroyed', 'disbanded', 'unloaded'] as const) {
       groups.on(evt, () => this.emitGroupsChanged());
     }
-    const loaded = await groups.loadAll();
-    loaded.forEach((g) => this.wireGroup(g));
+    try {
+      const loaded = await groups.loadAll();
+      loaded.forEach((g) => this.wireGroup(g));
+    } finally {
+      this.markReady();
+    }
     if (this.stopped) return;
     this.connection = groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() });
     this.emitGroupsChanged();
@@ -262,8 +271,17 @@ export class MarmotSession {
     this.emitGroupsChanged();
   }
 
-  async sendRumor(appGroupId: string, rumor: MarmotRumor): Promise<void> {
-    await this.client.groups.send(toMlsGroupId(appGroupId), createApplicationMessageIntent(rumor));
+  /** Send an app event; resolves with relay URL → accepted. */
+  async sendRumor(appGroupId: string, rumor: MarmotRumor): Promise<Record<string, boolean>> {
+    const results = await this.client.groups.send(
+      toMlsGroupId(appGroupId),
+      createApplicationMessageIntent(rumor),
+    );
+    const byRelay: Record<string, boolean> = {};
+    for (const r of results) {
+      for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
+    }
+    return byRelay;
   }
 
   /**
@@ -272,6 +290,11 @@ export class MarmotSession {
    * Welcome isn't for a key package we hold (e.g. an old invite).
    */
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
+    await this.ready;
+    // Each Welcome is processed once: inbox refreshes re-surface the same
+    // gift wrap, and re-joining must never reset a group we already hold.
+    if (await this.backend.get('welcomes', welcomeRumor.id)) return null;
+    await this.backend.set('welcomes', welcomeRumor.id, String(Math.floor(Date.now() / 1000)));
     try {
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
       void this.ensureKeyPackage(); // the joined key package is now spent
@@ -301,6 +324,7 @@ export class MarmotSession {
       memberPubkeys: others,
       adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
       isDm: name === '' && members.length === 2,
+      relays: g.relays ?? [],
     };
   }
 
@@ -461,7 +485,9 @@ export function setMarmotSession(session: MarmotSession | null): void {
   for (const l of activeListeners) l(session);
 }
 
+/** Listen for the active session; fires immediately with the current one. */
 export function subscribeMarmotSession(listener: (s: MarmotSession | null) => void): () => void {
   activeListeners.add(listener);
+  listener(active);
   return () => activeListeners.delete(listener);
 }
