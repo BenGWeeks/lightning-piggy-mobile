@@ -81,6 +81,19 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
 
+=== Marmot (MLS over Nostr) — Alpha
+
+A third DM/group transport, wire-compatible with White Noise; full design in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging — Alpha".
+
+[cols="1,3",options="header"]
+|===
+| Kind | Use
+| 30443 | Key package (addressable; `d` = random 32-byte hex slot per device), published to the NIP-65 write relays.
+| 444 | Welcome (group invite), NIP-59 gift-wrapped to the invitee's kind-10050 inbox — unwrapped by the NIP-17 inbox path and routed by `marmotWelcomeRouter`.
+| 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
+| 9 (inner) | Chat text inside MLS. Every other inner kind (15 files, 1068/1018 polls, 16/17 orders, NWC shares) is the same rumor NIP-17 carries.
+|===
+
 === Live location: kind-20069 pings + NIP-17 markers (#206)
 
 Live-location sharing rides on the DM pipeline above plus one ephemeral event kind. A share has three on-wire parts:

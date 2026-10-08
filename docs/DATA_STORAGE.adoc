@@ -66,6 +66,12 @@ changing how anything is stored.
   per-relay delivery tick (`delivery_status`, #856), the NIP-17 rumor id
   (`rumor_id`, #857) and the optimistic `local-` send rows — so the store is
   the *only* at-rest home for 1:1 DM content; no plaintext side blobs.
+  Marmot 1:1 rows live here too, tagged `protocol = 'marmot'` (NULL on
+  NIP-04/NIP-17 rows, whose protocol is inferred from `wire_kind`).
+  `marmot_kv` holds every Marmot (MLS) store — group ratchet state, epoch
+  secrets, key-package private keys, invites — keyed `(owner, namespace,
+  key)`. Unlike `dm_messages` it is *not* a rebuildable relay cache: losing
+  it means being re-invited to each Marmot group.
 | *Decrypted DM plaintext* — the most sensitive bulk data on the device
 | *Whole-file SQLCipher encryption*, key in the OS keystore (#697). Signal's
   model — see <<keys>>.
@@ -234,6 +240,13 @@ erDiagram
         INTEGER wire_kind
         TEXT delivery_status
         TEXT rumor_id
+        TEXT protocol
+    }
+    marmot_kv {
+        TEXT owner PK
+        TEXT namespace PK
+        TEXT key PK
+        TEXT value
     }
     group_messages {
         TEXT event_id PK
