@@ -67,7 +67,9 @@ export const createNostrLoginSheetStyles = (colors: Palette) =>
       opacity: 0.5,
     },
     amberButton: {
-      height: 52,
+      minHeight: 52,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
       borderRadius: 12,
       justifyContent: 'center',
       alignItems: 'center',
@@ -79,6 +81,7 @@ export const createNostrLoginSheetStyles = (colors: Palette) =>
       color: colors.brandPink,
       fontSize: 16,
       fontWeight: '700',
+      textAlign: 'center',
     },
     dividerRow: {
       flexDirection: 'row',
