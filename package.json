@@ -30,6 +30,7 @@
     "@bitcoinerlab/secp256k1": "^1.2.0",
     "@getalby/sdk": "^7.0.0",
     "@gorhom/bottom-sheet": "^5.2.8",
+    "@internet-privacy/marmot-ts": "0.6.1-next.20261007214300",
     "@maplibre/maplibre-react-native": "^11.2.1",
     "@noble/ciphers": "2.1.1",
     "@noble/curves": "2.0.1",
