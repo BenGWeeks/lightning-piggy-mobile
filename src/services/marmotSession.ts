@@ -49,6 +49,11 @@ const GROUP_EVENT_KIND = 445;
 // in a previous session (ingest state is durable), so this only bounds work.
 const GROUP_BACKFILL_SLACK_SECS = 2 * 24 * 60 * 60;
 const GROUP_BACKFILL_LIMIT = 500;
+const DELIVERED_CACHE_SIZE = 2_000;
+// A Welcome that can never be joined: not for a key package we hold (spent
+// or deleted), or structurally invalid. Anything else is retried.
+const PERMANENT_WELCOME_FAILURE =
+  /No matching KeyPackage|Invalid welcome event|Expected welcome event kind/i;
 // Safety stop for the paged backfill (500 × 40 = 20k events per group).
 const GROUP_BACKFILL_MAX_PAGES = 40;
 
@@ -130,6 +135,9 @@ export class MarmotSession {
   private readonly wiredGroups = new Set<string>();
   private readonly watermarks = new Map<string, number>();
   private readonly firstSeen = new Map<string, number>();
+  private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
+  private readonly joiningWelcomes = new Set<string>();
+  private readonly deliveredRumors = new Set<string>();
   private connection: { unsubscribe(): void } | null = null;
   private stopped = false;
   private markReady!: () => void;
@@ -159,7 +167,6 @@ export class MarmotSession {
 
   /** Load + connect every stored group, then keep a key package published. */
   async start(): Promise<void> {
-    await this.loadWatermarks();
     const groups = this.client.groups;
     for (const evt of ['created', 'joined', 'loaded', 'imported'] as const) {
       groups.on(evt, (g) => {
@@ -171,6 +178,9 @@ export class MarmotSession {
       groups.on(evt, () => this.emitGroupsChanged());
     }
     try {
+      // Inside the try: a store failure must still open the `ready` gate, or
+      // every send/join awaiting it would hang instead of erroring.
+      await this.loadWatermarks();
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
     } finally {
@@ -179,7 +189,13 @@ export class MarmotSession {
     if (this.stopped) return;
     this.connection = groups.connectAll({ fallbackRelays: this.opts.getWriteRelays() });
     this.emitGroupsChanged();
-    void this.ensureKeyPackage();
+    // Publishing a key package needs a signature. Local keys sign silently;
+    // Amber / NIP-46 would prompt on every app start for an Alpha feature the
+    // user may never open — so for them it waits for first Marmot use (or an
+    // account that has used Marmot before and needs its package kept fresh).
+    if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
+      void this.ensureKeyPackage();
+    }
   }
 
   stop(): void {
@@ -243,9 +259,18 @@ export class MarmotSession {
     // Stored groups must be loaded first, or an existing DM is missed and a
     // duplicate MLS group gets created for the same peer.
     await this.ready;
-    const existing = this.findDm(peer);
+    const p = peer.toLowerCase();
+    const existing = this.findDm(p);
     if (existing) return existing;
-    return this.createGroup('', [peer], { adminPubkeys: [this.pubkey, peer.toLowerCase()] });
+    // Single-flight per peer: creating + inviting takes several relay round
+    // trips, and a second quick send must not create a second DM group.
+    const inFlight = this.creatingDms.get(p);
+    if (inFlight) return inFlight;
+    const creating = this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }).finally(() =>
+      this.creatingDms.delete(p),
+    );
+    this.creatingDms.set(p, creating);
+    return creating;
   }
 
   async createGroup(
@@ -263,6 +288,7 @@ export class MarmotSession {
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+    void this.ensureKeyPackage(); // first Marmot use: become reachable ourselves
     return this.summarise(group);
   }
 
@@ -318,17 +344,26 @@ export class MarmotSession {
    */
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
     await this.ready;
-    // Each Welcome is processed once: inbox refreshes re-surface the same
-    // gift wrap, and re-joining must never reset a group we already hold.
-    if (await this.backend.get('welcomes', welcomeRumor.id)) return null;
-    await this.backend.set('welcomes', welcomeRumor.id, String(Math.floor(Date.now() / 1000)));
+    // Each Welcome is joined at most once: inbox refreshes re-surface the
+    // same gift wrap, and re-joining must never reset a group we already
+    // hold. The marker is written on success or a PERMANENT failure only —
+    // a transient error (relay / store) leaves the invite retryable.
+    const id = welcomeRumor.id;
+    if (this.joiningWelcomes.has(id) || (await this.backend.get('welcomes', id))) return null;
+    this.joiningWelcomes.add(id);
+    const markHandled = () =>
+      this.backend.set('welcomes', id, String(Math.floor(Date.now() / 1000)));
     try {
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
+      await markHandled();
       void this.ensureKeyPackage(); // the joined key package is now spent
       return this.summarise(group);
     } catch (e) {
+      if (PERMANENT_WELCOME_FAILURE.test(String((e as Error)?.message ?? e))) await markHandled();
       if (__DEV__) console.warn('[Marmot] could not join from welcome:', e);
       return null;
+    } finally {
+      this.joiningWelcomes.delete(id);
     }
   }
 
@@ -375,6 +410,13 @@ export class MarmotSession {
       } catch (e) {
         if (__DEV__) console.warn('[Marmot] undecodable app payload:', e);
         return;
+      }
+      // The same app event can surface twice (relay replay across a
+      // reconnect); deliver it once so listeners never double-notify.
+      if (this.deliveredRumors.has(rumor.id)) return;
+      this.deliveredRumors.add(rumor.id);
+      if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
+        this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
       }
       const event = { group: this.summarise(g), rumor };
       for (const l of this.listeners) l.onMessage?.(event);

@@ -57,10 +57,15 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   await pendingDmStoreMigration(pubkey)?.catch(() => {});
   try {
     await deleteDmMessagesForOwner(pubkey);
-    // This account's Marmot MLS state (group secrets, key-package private keys).
-    await deleteMarmotStateForOwner(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[DmStore] per-owner DB wipe failed:', e);
+  }
+  // Independent of the DM rows: this account's Marmot MLS state (group
+  // secrets, key-package private keys) must go even if the row wipe failed.
+  try {
+    await deleteMarmotStateForOwner(pubkey);
+  } catch (e) {
+    if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);
   }
   forgetDmStoreMigration(pubkey);
 }

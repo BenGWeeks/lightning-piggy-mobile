@@ -184,12 +184,16 @@ async function waitFor(cond: () => boolean, ms = 10_000) {
   }
 }
 
-function makeSession(relay: ReturnType<typeof makeRelay>, pageSize?: number) {
+function makeSession(
+  relay: ReturnType<typeof makeRelay>,
+  pageSize?: number,
+  signerType: 'nsec' | 'amber' = 'nsec',
+) {
   const who = makeSigner();
   const inbox: MarmotMessageEvent[] = [];
   const session = new MarmotSession({
     pubkey: who.pubkey,
-    signerType: 'nsec',
+    signerType,
     signer: who.signer,
     network: relay.network,
     backend: createMemoryMarmotBackend(),
@@ -370,6 +374,33 @@ describe('MarmotSession (no WebCrypto)', () => {
     alice.session.stop();
     bob.stop();
   }, 90_000);
+
+  it('single-flights DM creation, joins each Welcome once, and defers remote-signer publishing', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    // An Amber-style account must not be prompted to sign at startup.
+    const carol = makeSession(relay, undefined, 'amber');
+    await Promise.all([alice, bob, carol].map((p) => p.session.start()));
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    expect(relay.events.some((e) => e.kind === 30443 && e.pubkey === carol.pubkey)).toBe(false);
+
+    // Two quick sends to a new peer → one DM group, one Welcome.
+    const [a, b] = await Promise.all([
+      alice.session.getOrCreateDm(bob.pubkey),
+      alice.session.getOrCreateDm(bob.pubkey),
+    ]);
+    expect(a.id).toBe(b.id);
+    const welcomes = unwrapWelcomes(relay, bob);
+    expect(welcomes).toHaveLength(1);
+
+    expect(await bob.session.acceptWelcome(welcomes[0])).not.toBeNull();
+    // The same gift wrap re-surfacing (inbox refresh) is not re-joined.
+    expect(await bob.session.acceptWelcome(welcomes[0])).toBeNull();
+    expect(bob.session.findDm(alice.pubkey)?.id).toBe(a.id);
+
+    for (const p of [alice, bob, carol]) p.session.stop();
+  }, 60_000);
 
   it('refuses to start a chat with someone who has no key package', async () => {
     const relay = makeRelay();

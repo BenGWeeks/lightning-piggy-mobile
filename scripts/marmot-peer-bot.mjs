@@ -11,7 +11,14 @@ import { SimplePool } from 'nostr-tools/pool';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 
 const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
-const sk = nip19.decode(process.env.MAESTRO_NSEC_BOT).data;
+const nsec = process.env.MAESTRO_NSEC_BOT;
+if (!nsec?.startsWith('nsec1')) {
+  console.error('Set MAESTRO_NSEC_BOT to a Piggy fixture nsec (e.g. $MAESTRO_NSEC_LITTLE).');
+  process.exit(1);
+}
+const decoded = nip19.decode(nsec);
+if (decoded.type !== 'nsec') throw new Error('MAESTRO_NSEC_BOT is not an nsec');
+const sk = decoded.data;
 const pk = getPublicKey(sk);
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const pool = new SimplePool();
@@ -43,9 +50,13 @@ const wire = (group) => {
     const r = deserializeApplicationData(data);
     log(`RECV kind=${r.kind} from=${r.pubkey.slice(0, 8)} content=${JSON.stringify(r.content.slice(0, 120))} tags=${JSON.stringify(r.tags).slice(0, 160)}`);
     if (r.pubkey === pk) return;
-    const reply = createChatRumor({ pubkey: pk, content: `pong: ${r.content.slice(0, 60)}` });
-    await client.groups.send(group.id, createApplicationMessageIntent(reply));
-    log('SENT reply', reply.id.slice(0, 8));
+    try {
+      const reply = createChatRumor({ pubkey: pk, content: `pong: ${r.content.slice(0, 60)}` });
+      await client.groups.send(group.id, createApplicationMessageIntent(reply));
+      log('SENT reply', reply.id.slice(0, 8));
+    } catch (e) {
+      log('reply failed (relay?)', e?.message ?? e); // keep the bot alive mid-test
+    }
   });
 };
 client.groups.on('joined', (g) => { log('JOINED group', g.idStr.slice(0, 8), 'name=', JSON.stringify(g.groupData?.name), 'members=', g.state ? 'ok' : '?'); wire(g); });
