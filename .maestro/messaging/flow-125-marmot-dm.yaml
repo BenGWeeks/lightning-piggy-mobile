@@ -1,0 +1,64 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: New Marmot (MLS) conversation → send to Little Piggy and receive a reply
+---
+# Start a new conversation with Little Piggy (`d9b33280…`, a Piggy fixture —
+# see .maestro/README.adoc), pick Marmot (Alpha) in the protocol picker and
+# send one message. The first send creates the 1:1 MLS group (White Noise DM
+# convention) and gift-wraps the Welcome to Little Piggy.
+#
+# Little Piggy must have a Marmot key package published and be online to
+# reply — run the peer bot alongside (it joins from the Welcome and answers
+# every message with "pong: <text>"):
+#   source .env && node --input-type=module < scripts/marmot-peer-bot.mjs
+#
+# Expects the signed-in user to be Big Piggy. Only ever messages a Piggy.
+#
+# Run: maestro --device emulator-5554 test .maestro/messaging/flow-125-marmot-dm.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-search'
+- inputText: 'Little Piggy'
+- extendedWaitUntil:
+    visible:
+      id: 'friend-picker-d9b33280'
+    timeout: 10000
+- tapOn:
+    id: 'friend-picker-d9b33280'
+- assertVisible:
+    id: 'dm-protocol-option-marmot'
+- tapOn:
+    id: 'dm-protocol-option-marmot'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-protocol-tag'
+    timeout: 10000
+- assertVisible:
+    text: 'Marmot'
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'hello over MLS'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: 'hello over MLS'
+    timeout: 30000
+# The peer's MLS reply arrives over kind 445 and lands in this thread.
+- extendedWaitUntil:
+    visible:
+      text: 'pong: hello over MLS'
+    timeout: 90000
+- tapOn:
+    id: 'conversation-back'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-d9b33280.*:marmot'
+    timeout: 15000

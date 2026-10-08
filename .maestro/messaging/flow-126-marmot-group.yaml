@@ -1,0 +1,75 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: New Marmot (MLS) group with Little Piggy → send and receive a reply
+---
+# Create a named group with Little Piggy (`d9b33280…`, a Piggy fixture),
+# choose Marmot (Alpha) on the naming step, and send one message. The MLS
+# group is created on our write relays and Little Piggy is invited by
+# gift-wrapped Welcome; the Messages row carries the Marmot pill.
+#
+# Little Piggy must be online with a Marmot key package — run the peer bot
+# alongside (joins from the Welcome, answers every message with "pong: …"):
+#   source .env && MAESTRO_NSEC_BOT=$MAESTRO_NSEC_LITTLE \
+#     node --input-type=module < scripts/marmot-peer-bot.mjs
+#
+# Expects the signed-in user to be Big Piggy. Only ever messages a Piggy.
+#
+# Run: maestro --device emulator-5554 test .maestro/messaging/flow-126-marmot-group.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-new-group'
+- waitForAnimationToEnd:
+    timeout: 2000
+- scrollUntilVisible:
+    element:
+      id: 'member-row-d9b33280ba73'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-d9b33280ba73'
+- tapOn:
+    id: 'create-group-next'
+- waitForAnimationToEnd:
+    timeout: 1500
+# BottomSheetTextInput doesn't expose its testID to Maestro — tap the
+# (unique) placeholder instead; see flow-022.
+- tapOn:
+    text: 'e.g. Family'
+- inputText: 'Oink MLS'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'create-group-protocol-marmot'
+- assertVisible:
+    text: 'Alpha'
+- tapOn:
+    id: 'create-group-submit'
+- extendedWaitUntil:
+    visible:
+      id: 'group-message-input'
+    timeout: 60000
+- assertVisible:
+    text: 'Oink MLS'
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hello group over MLS'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- extendedWaitUntil:
+    visible:
+      text: 'hello group over MLS'
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      text: 'pong: hello group over MLS'
+    timeout: 90000

@@ -23,8 +23,9 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - **Message alerts open that conversation**, even ones that arrived while the app couldn't read them yet, instead of just the Messages list.
 - **Opening a chat clears its alerts**, so the dot on the app icon goes away.
 - **Group chats show their NIP-17 tag**, like one-to-one chats.
+- **Marmot messaging (Alpha)** — end-to-end encrypted MLS chats that work with White Noise. Pick *Marmot* when starting a chat or creating a group; every message type works, including photos, voice notes, polls and invoices. Still being tested, so use NIP-17 for anything important.
 
 ### Fixed
 
 - **Relay dots show the real connection status** instead of always red.
-- **Marmot group invites** (e.g. from White Noise) now say "not supported yet" instead of showing unreadable text.
+- **Marmot invites** (e.g. from White Noise) from people you follow are now accepted automatically and open as Marmot chats.

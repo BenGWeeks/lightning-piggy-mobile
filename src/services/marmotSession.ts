@@ -182,7 +182,10 @@ export class MarmotSession {
     this.stopped = true;
     this.connection?.unsubscribe();
     this.connection = null;
-    for (const g of this.client.groups.loaded) g.removeAllListeners('applicationMessage');
+    for (const g of this.client.groups.loaded) {
+      g.removeAllListeners('applicationMessage');
+      g.removeAllListeners('stateChanged');
+    }
     this.listeners.clear();
   }
 
@@ -339,7 +342,9 @@ export class MarmotSession {
       description: view?.description ?? '',
       memberPubkeys: others,
       adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
-      isDm: name === '' && members.length === 2,
+      // White Noise DM: unnamed, two members. ≤2 so a DM mid-creation (just
+      // us, invite not yet committed) never flashes up as a 1-member group.
+      isDm: name === '' && members.length <= 2,
       relays: g.relays ?? [],
       createdAt: this.firstSeen.get(g.idStr) ?? Date.now(),
     };
@@ -348,6 +353,8 @@ export class MarmotSession {
   private wireGroup(g: MarmotGroup): void {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
+    // Membership / name changes (ours or another member's commit) move the epoch.
+    g.on('stateChanged', () => this.emitGroupsChanged());
     if (!this.firstSeen.has(g.idStr)) {
       const now = Date.now();
       this.firstSeen.set(g.idStr, now);

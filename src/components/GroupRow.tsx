@@ -114,8 +114,11 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
           <Text style={styles.name} numberOfLines={1}>
             {group.name}
           </Text>
-          {/* Groups are NIP-17 group DMs — tag them like 1:1 rows (#1139). */}
-          <DmProtocolTag protocol="nip17" testID={`group-protocol-tag-${group.id}`} />
+          {/* Tag groups by transport like 1:1 rows (#1139): NIP-17 or Marmot. */}
+          <DmProtocolTag
+            protocol={group.protocol ?? 'nip17'}
+            testID={`group-protocol-tag-${group.id}`}
+          />
           <Text style={styles.timestamp} numberOfLines={1}>
             {timestamp}
           </Text>

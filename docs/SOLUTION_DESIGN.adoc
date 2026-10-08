@@ -717,7 +717,28 @@ Client-side group chat layered on top of the existing NIP-17 DM pipeline. No rel
 
 NIP-29 (relay-enforced groups) and NIP-104 (MLS) were both considered. NIP-29 was rejected because it requires opt-in relay support for every member's read relay; NIP-104/MLS deferred until a maintained RN-friendly MLS library lands.
 
-1:1 conversations are split by partner pubkey + protocol, with separate inbox rows and timelines. Zaps live in the NIP-17 thread. Dual-published NIP-04/NIP-17 copies appear in both threads. Marmot will have a separate thread per MLS group. The header protocol picker navigates to the selected thread: NIP-17 is the default, NIP-04 is the legacy option, and Marmot is reserved and disabled until `marmot-ts` 1.0.0 implementing the adopted spec is published (https://github.com/marmot-protocol/marmot-ts/issues/79[marmot-protocol/marmot-ts#79]). The NIP methods are expected to be retired once Marmot ships.
+1:1 conversations are split by partner pubkey + protocol, with separate inbox rows and timelines. Zaps live in the NIP-17 thread. Dual-published NIP-04/NIP-17 copies appear in both threads. Marmot has its own thread per partner (its 1:1 MLS group). The header protocol picker navigates to the selected thread: NIP-17 is the default, NIP-04 is the legacy option, and Marmot is selectable with an *Alpha* badge (it rides the pre-1.0 `marmot-ts`, which still self-describes as alpha — see <<marmot-messaging>>). The NIP methods are expected to be retired once Marmot is stable.
+
+[[marmot-messaging]]
+=== Marmot (MLS) messaging — Alpha
+
+Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. The app uses `@internet-privacy/marmot-ts` (pinned to an exact `next` build) behind a small set of adapters in `src/services/marmot*.ts`:
+
+[cols="1,3"]
+|===
+| Module | Responsibility
+
+| `marmotCryptoProvider.ts` | Pure-JS MLS ciphersuite `0x0001` (X25519 / HKDF-SHA256 / AES-128-GCM / Ed25519) incl. RFC 9180 HPKE, on the `@noble` libraries. Hermes has no `crypto.subtle`, which both of the library's built-in providers need; `installMarmotCryptoProvider()` also re-points the library's default provider so no fallback path can reach WebCrypto. Verified byte-for-byte against the WebCrypto reference in Jest.
+| `marmotSigner.ts` | nsec / Amber / NIP-46 behind applesauce's `EventSigner`, serialised (Amber rejects concurrent Intents). The Nostr key only signs key packages and seals Welcomes — MLS traffic uses per-message ephemeral keys, so remote signers are not prompted per message.
+| `marmotNetwork.ts` | `NostrNetworkInterface` over the shared `SimplePool`.
+| `marmotStore.ts` | Every MLS store on one `marmot_kv` table in the SQLCipher DB, partitioned by (owner, namespace). Not a rebuildable cache: losing it means being re-invited (also the correct MLS outcome after a backup restore).
+| `marmotSession.ts` | One `MarmotClient` per signed-in account (started by `MarmotBridge`, 3 s after cold start). Bounds the library's unbounded kind-445 backfill with a persisted per-group `since` watermark + `limit`.
+| `marmotInbox.ts` / `marmotSend.ts` / `marmotWelcomeRouter.ts` | Map MLS app events into `dm_messages` (protocol `'marmot'`) or the group log; send seam; route kind-444 Welcomes (already unwrapped by the NIP-17 inbox path, after the follow gate) to the session.
+|===
+
+Interop conventions: a 1:1 chat is a two-member group with an empty name where both people are admins (White Noise's DM shape); chat text is kind 9 (stored as the app's kind 14, with the `protocol` column — not the kind — identifying the transport); key packages (kind 30443, random 32-byte `d` slot) go to the NIP-65 write relays; Welcomes go to the invitee's kind-10050 inbox. Every other message type is the same rumor the NIP-17 path builds, sent unchanged inside MLS, so files, polls, NWC shares, invoices, locations and live-location markers work as they do over NIP-17. Reactions, typing and live-location pings stay on their existing public channels.
+
+Known gaps (Alpha): no post-join `selfUpdate()` key rotation yet (the library warns an immediate rotation forks the group); MIP-04 encrypted media is not used (files use the NIP-17 AES-GCM + Blossom scheme, which White Noise won't render); invites from senders outside the follow gate are not joined.
 
 
 === Send path

@@ -30,7 +30,7 @@ export function marmotKindForAppKind(kind: number): number {
 
 export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): DmMessageRow | null {
   const peer = event.group.memberPubkeys[0];
-  if (!event.group.isDm || !peer) return null;
+  if (!event.group.isDm || !peer) return null; // a DM whose peer hasn't joined yet
   const { rumor } = event;
   const me = owner.toLowerCase();
   const fromMe = rumor.pubkey.toLowerCase() === me;
