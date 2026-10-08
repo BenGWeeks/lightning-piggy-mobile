@@ -22,6 +22,7 @@ import {
   type MarmotGroup,
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
+import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
 import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
@@ -39,7 +40,9 @@ import {
 export const MARMOT_CHAT_KIND = 9;
 /** App-level group id prefix, distinguishing Marmot groups from NIP-17 ones. */
 export const MARMOT_GROUP_ID_PREFIX = 'marmot:';
-const CLIENT_ID = 'lightning-piggy-mobile';
+/** Marks our key packages (`client` tag) — NOT the slot id; see keyPackageSlot. */
+const CLIENT_NAME = 'Lightning Piggy';
+const SLOT_ID_HEX = /^[0-9a-f]{64}$/;
 const GROUP_EVENT_KIND = 445;
 // Relays may skew / members' clocks may drift: re-read this far behind the
 // newest kind-445 we've seen for a group. Older events were already ingested
@@ -147,7 +150,6 @@ export class MarmotSession {
       ingestStateStore: store('ingest'),
       rewindStore: store('rewind'),
       removedMarkerStore: store('removed'),
-      clientId: CLIENT_ID,
     });
   }
 
@@ -192,7 +194,18 @@ export class MarmotSession {
   /** Publish an unused key package so others can start chats with us. */
   async ensureKeyPackage(): Promise<void> {
     try {
-      await this.client.keyPackages.ensurePublished({ relays: this.writeRelays() });
+      const keyPackages = this.client.keyPackages;
+      // Pre-fix builds used a fixed, non-hex `d` slot, which spec-conformant
+      // clients (White Noise) reject — retire those (publishes a NIP-09 delete).
+      const malformed = (await keyPackages.list()).filter(
+        (kp) => kp.identifier !== undefined && !SLOT_ID_HEX.test(kp.identifier),
+      );
+      if (malformed.length > 0) await keyPackages.purge(malformed.map((kp) => kp.keyPackageRef));
+      await keyPackages.ensurePublished({
+        relays: this.writeRelays(),
+        identifier: await this.keyPackageSlot(),
+        client: CLIENT_NAME,
+      });
     } catch (e) {
       if (__DEV__) console.warn('[Marmot] key package publish failed:', e);
     }
@@ -435,6 +448,19 @@ export class MarmotSession {
         };
       },
     };
+  }
+
+  /**
+   * The kind-30443 `d` slot: 32 random bytes, hex, generated once per account
+   * per device and reused for every replacement (transports/nostr.md — it
+   * MUST NOT be derived from identity material).
+   */
+  private async keyPackageSlot(): Promise<string> {
+    const stored = await this.backend.get('meta', 'keyPackageSlot');
+    if (stored && SLOT_ID_HEX.test(stored)) return stored;
+    const slot = bytesToHex(randomBytes(32));
+    await this.backend.set('meta', 'keyPackageSlot', slot);
+    return slot;
   }
 
   private async loadWatermarks(): Promise<void> {

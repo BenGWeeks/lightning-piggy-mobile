@@ -228,6 +228,10 @@ describe('MarmotSession (no WebCrypto)', () => {
     await Promise.all([alice.session.start(), bob.session.start()]);
     await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
 
+    // Spec: the kind-30443 `d` slot is 32 random bytes (hex), stable per device.
+    const bobKp = relay.events.find((e) => e.kind === 30443 && e.pubkey === bob.pubkey)!;
+    expect(bobKp.tags.find((t) => t[0] === 'd')?.[1]).toMatch(/^[0-9a-f]{64}$/);
+
     const dm = await alice.session.getOrCreateDm(bob.pubkey);
     expect(dm).toMatchObject({ name: '', isDm: true, memberPubkeys: [bob.pubkey] });
     expect(dm.adminPubkeys.sort()).toEqual([alice.pubkey, bob.pubkey].sort());
