@@ -279,6 +279,11 @@ export class MarmotSession {
     opts: { description?: string; adminPubkeys?: string[] } = {},
   ): Promise<MarmotGroupSummary> {
     await this.ready;
+    // First Marmot use: become reachable ourselves BEFORE resolving the
+    // invitees — otherwise two remote-signer accounts that both deferred
+    // publishing could never bootstrap a chat (each fails on the other's
+    // missing key package). Not awaited: the invite doesn't depend on it.
+    void this.ensureKeyPackage();
     // Resolve every key package first so a missing one fails before we
     // create an orphan group.
     const keyPackages = await Promise.all(members.map((m) => this.requireKeyPackage(m)));
@@ -288,7 +293,6 @@ export class MarmotSession {
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
-    void this.ensureKeyPackage(); // first Marmot use: become reachable ourselves
     return this.summarise(group);
   }
 
@@ -413,8 +417,10 @@ export class MarmotSession {
       }
       // The same app event can surface twice (relay replay across a
       // reconnect); deliver it once so listeners never double-notify.
-      if (this.deliveredRumors.has(rumor.id)) return;
-      this.deliveredRumors.add(rumor.id);
+      // Keyed per group: an identical rumor sent into two groups shares an id.
+      const deliveryKey = `${g.idStr}:${rumor.id}`;
+      if (this.deliveredRumors.has(deliveryKey)) return;
+      this.deliveredRumors.add(deliveryKey);
       if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
         this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
       }

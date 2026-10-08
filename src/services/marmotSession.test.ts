@@ -399,6 +399,14 @@ describe('MarmotSession (no WebCrypto)', () => {
     expect(await bob.session.acceptWelcome(welcomes[0])).toBeNull();
     expect(bob.session.findDm(alice.pubkey)?.id).toBe(a.id);
 
+    // First Marmot use by the Amber account publishes its key package even
+    // though the invite itself fails (dan has none) — so it becomes reachable.
+    const dan = getPublicKey(generateSecretKey());
+    await expect(carol.session.createGroup('x', [dan])).rejects.toBeInstanceOf(
+      MarmotNoKeyPackageError,
+    );
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === carol.pubkey));
+
     for (const p of [alice, bob, carol]) p.session.stop();
   }, 60_000);
 
