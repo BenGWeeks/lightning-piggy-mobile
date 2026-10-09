@@ -758,8 +758,9 @@ export function isUsableKeyPackage(
   );
 }
 
-/** The peer published key packages, but none Marmot can accept (expired,
- * over-long lifetime, malformed) — usually an outdated / long-closed client. */
+/** The peer published key packages, but none Marmot can accept: expired,
+ * over-long lifetime, or an older Marmot format the v2 library can't decode
+ * (e.g. MDK 0.8.x / older White Noise) — the peer needs a current client. */
 export class MarmotUnusableKeyPackageError extends Error {
   constructor(readonly pubkey: string) {
     super(`No usable Marmot key package for ${pubkey.slice(0, 8)}`);

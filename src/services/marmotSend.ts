@@ -43,7 +43,9 @@ export function marmotSendError(e: unknown): string {
     return "This person hasn't set up Marmot yet — try NIP-17 instead.";
   }
   if (e instanceof MarmotUnusableKeyPackageError) {
-    return "This person's Marmot app has published an invite key that's expired or invalid — ask them to open or update their Marmot app, or use NIP-17 for now.";
+    // Seen in the wild: MDK 0.8.x (older White Noise) key packages that the
+    // Marmot v2 library can't decode, and expired ones.
+    return "This person's Marmot app is out of date — its invite key isn't compatible. Ask them to update or reopen their Marmot app, or use NIP-17 for now.";
   }
   return (e as Error)?.message || 'Marmot send failed';
 }
