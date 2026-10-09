@@ -65,7 +65,10 @@ export function mapNwcTransactions(
           ? 'Boltz swap — sent via Lightning'
           : 'Boltz swap — received via Lightning'
         : (tx.description ?? undefined),
-      settled_at: tx.settled_at ?? (proof ? (tx.created_at ?? undefined) : undefined),
+      // Some backends report a pending row's settled_at as 0 — on the
+      // proof-backed path treat that as absent, not an epoch timestamp.
+      settled_at:
+        proof && !tx.settled_at ? (tx.created_at ?? undefined) : (tx.settled_at ?? undefined),
       settled:
         tx.state === 'settled' || proof
           ? true

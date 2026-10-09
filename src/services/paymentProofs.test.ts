@@ -62,6 +62,19 @@ describe('paymentProofs', () => {
     }
   });
 
+  it('rejects a stored pair whose preimage does not hash to its key', async () => {
+    await AsyncStorage.setItem(
+      'payment_proofs_v1',
+      JSON.stringify([
+        [hashOf(pre(1)), pre(2)], // mismatched: valid hex, wrong preimage
+        [hashOf(pre(3)), pre(3)],
+      ]),
+    );
+    await hydratePaymentProofs();
+    expect(getPaymentProof(hashOf(pre(1)))).toBeUndefined();
+    expect(getPaymentProof(hashOf(pre(3)))).toBe(pre(3));
+  });
+
   it('survives an app restart (persisted, then hydrated)', async () => {
     recordPaymentProof(pre(7));
     await new Promise((r) => setTimeout(r, 0)); // let the AsyncStorage write land

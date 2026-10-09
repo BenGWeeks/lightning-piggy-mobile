@@ -50,9 +50,14 @@ function parseStoredProofs(raw: string): [string, string][] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+    // Re-derive each hash from its preimage: a tampered pair (valid hex, but
+    // the preimage doesn't hash to the key) must never mark a row settled.
     return parsed.filter(
       (e): e is [string, string] =>
-        Array.isArray(e) && HEX64.test(String(e[0])) && HEX64.test(String(e[1])),
+        Array.isArray(e) &&
+        HEX64.test(String(e[0])) &&
+        HEX64.test(String(e[1])) &&
+        bytesToHex(sha256(hexToBytes(e[1]))) === e[0],
     );
   } catch {
     return [];

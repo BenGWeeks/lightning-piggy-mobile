@@ -246,6 +246,14 @@ describe('mapNwcTransactions — proof of payment (pending after a successful se
     expect(tx.settled_at).toBe(1_700_000_000);
   });
 
+  it('falls back to created_at when a proof-settled row reports settled_at 0', () => {
+    recordPaymentProof(preimage);
+    expect(mapNwcTransactions([pending({ settled_at: 0 })], [])[0].settled_at).toBe(1_700_000_000);
+    expect(mapNwcTransactions([pending({ settled_at: 1_700_000_500 })], [])[0].settled_at).toBe(
+      1_700_000_500,
+    );
+  });
+
   it('never trusts a preimage that does not hash to the payment hash', () => {
     recordPaymentProof('cd'.repeat(32));
     expect(mapNwcTransactions([pending()], [])[0].settled).toBe(false);
