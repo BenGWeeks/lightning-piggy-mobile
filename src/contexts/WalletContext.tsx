@@ -942,7 +942,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // Carries forward resolved zap-counterparties + optimistic rows the
           // server doesn't round-trip (see mapNwcTransactions).
           const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
-          txs = mapNwcTransactions(raw as NwcRawTransaction[], existing);
+          txs = mapNwcTransactions(raw as NwcRawTransaction[], existing, walletId);
         }
         // Unchanged-poll skip (#1014): JSON reused as content fingerprint.
         // Identical serialisation keeps old `wallet.transactions` identity,

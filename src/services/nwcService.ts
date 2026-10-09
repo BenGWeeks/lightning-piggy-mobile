@@ -572,18 +572,20 @@ export async function payInvoice(
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
-  const result = await payInvoiceOnce(walletId, bolt11, signalOrOptions);
+  const { preimage, confirmed } = await payInvoiceOnce(walletId, bolt11, signalOrOptions);
   // Proof of payment: lets the tx list show this send as settled even while
-  // the wallet's own list_transactions still reports it pending.
-  recordPaymentProof(result.preimage);
-  return result;
+  // the wallet's own list_transactions still reports it pending. Only for a
+  // confirmed result — a lookup can expose an UNPAID invoice's preimage (e.g.
+  // an invoice issued by the same backend), which proves nothing.
+  if (confirmed) recordPaymentProof(walletId, preimage);
+  return { preimage };
 }
 
 async function payInvoiceOnce(
   walletId: string,
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
-): Promise<{ preimage: string }> {
+): Promise<{ preimage: string; confirmed: boolean }> {
   const options: PayInvoiceOptions =
     signalOrOptions && 'aborted' in signalOrOptions
       ? { signal: signalOrOptions as AbortSignal }
@@ -595,7 +597,7 @@ async function payInvoiceOnce(
   try {
     const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
     throwIfAborted(signal);
-    return { preimage: result.preimage };
+    return { preimage: result.preimage, confirmed: true };
   } catch (error) {
     // Propagate user-initiated cancel straight away.
     if ((error as Error)?.name === 'AbortError') throw error;
@@ -629,7 +631,7 @@ async function payInvoiceOnce(
           );
           if (lookup?.preimage) {
             console.log('[NWC] Invoice already paid — returning existing preimage');
-            return { preimage: lookup.preimage };
+            return { preimage: lookup.preimage, confirmed: lookup.paid === true };
           }
         } catch {
           // lookup failed — fall through to retry. The wallet would refuse
@@ -638,7 +640,7 @@ async function payInvoiceOnce(
       }
       throwIfAborted(signal);
       const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
-      return { preimage: result.preimage };
+      return { preimage: result.preimage, confirmed: true };
     }
     if (msg.includes('reply timeout')) {
       // If the relay's fire-and-forget publish just failed, the NIP-47
@@ -682,7 +684,7 @@ async function payInvoiceOnce(
           );
           if (lookup?.preimage) {
             console.log('[NWC] Payment completed after timeout:', paymentHash);
-            return { preimage: lookup.preimage };
+            return { preimage: lookup.preimage, confirmed: lookup.paid === true };
           }
         } catch (err) {
           // AbortError must propagate so the caller sees the cancel.
@@ -725,7 +727,7 @@ async function payInvoiceOnce(
             console.warn(
               `[NWC] pay_invoice surfaced "${msg}" but lookup confirms paid + has preimage — returning it (paymentHash=${paymentHash.slice(0, 8)})`,
             );
-            return { preimage: lookup.preimage };
+            return { preimage: lookup.preimage, confirmed: true };
           }
           // No usable preimage — BUT the lookup's paid=false is NOT a
           // reliable "definitely failed" signal here. LNbits has been seen

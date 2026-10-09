@@ -38,6 +38,8 @@ export interface NwcRawTransaction {
 export function mapNwcTransactions(
   raw: readonly NwcRawTransaction[],
   existing: readonly WalletTransaction[],
+  // The wallet these rows belong to — scopes payment proofs (see paymentProofs).
+  walletId?: string,
 ): WalletTransaction[] {
   const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
   for (const prev of existing) {
@@ -52,7 +54,7 @@ export function mapNwcTransactions(
     // A wallet-reported `failed` / `expired` is left alone.
     const proof =
       tx.type === 'outgoing' && (tx.state === 'pending' || tx.state === undefined)
-        ? getPaymentProof(tx.payment_hash)
+        ? getPaymentProof(walletId, tx.payment_hash)
         : undefined;
     // Tag the Lightning leg of a Boltz swap (by payment hash) so it badges as
     // a swap rather than a generic Sent/Received (#895).

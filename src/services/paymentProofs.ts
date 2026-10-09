@@ -13,36 +13,49 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
-const STORAGE_KEY = 'payment_proofs_v1';
+// v2: proofs are scoped per wallet — a payment hash identifies the invoice,
+// not which of our wallets paid it (v1 keyed by hash alone).
+const STORAGE_KEY = 'payment_proofs_v2';
 const MAX_PROOFS = 200;
 const HEX64 = /^[0-9a-f]{64}$/;
 
-const proofs = new Map<string, string>(); // payment hash → preimage (insertion order = age)
-let hydrated: Promise<void> | null = null;
+// `${walletId}:${paymentHash}` → preimage (insertion order = age). The hash is
+// always the trailing 64 hex chars, so a ':' inside a wallet id is harmless.
+const proofs = new Map<string, string>();
+let hydrated: Promise<boolean> | null = null;
+
+const keyOf = (walletId: string, hash: string) => `${walletId}:${hash}`;
 
 function persist(): void {
   void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...proofs])).catch(() => undefined);
 }
 
 /** Load proofs saved by earlier sessions (idempotent). Stored (older) proofs
- * go first, then any recorded this session, so the cap evicts the oldest. */
-export function hydratePaymentProofs(): Promise<void> {
-  hydrated ??= AsyncStorage.getItem(STORAGE_KEY)
-    .then((raw) => {
-      if (!raw) return;
+ * go first, then any recorded this session, so the cap evicts the oldest.
+ * Resolves false if the store couldn't be read — nothing is persisted then
+ * (it would overwrite the unread store), and the next call retries. */
+export function hydratePaymentProofs(): Promise<boolean> {
+  hydrated ??= AsyncStorage.getItem(STORAGE_KEY).then(
+    (raw) => {
       // Parse + validate BEFORE touching the map: a corrupt store must never
       // wipe proofs already recorded this session.
-      const stored = parseStoredProofs(raw);
+      const stored = raw ? parseStoredProofs(raw) : [];
       const thisSession = [...proofs];
       proofs.clear();
-      for (const [hash, preimage] of stored) proofs.set(hash, preimage);
-      for (const [hash, preimage] of thisSession) {
-        proofs.delete(hash);
-        proofs.set(hash, preimage);
+      for (const [key, preimage] of stored) proofs.set(key, preimage);
+      for (const [key, preimage] of thisSession) {
+        proofs.delete(key);
+        proofs.set(key, preimage);
       }
       capProofs();
-    })
-    .catch(() => undefined);
+      if (thisSession.length > 0) persist(); // write the merged set
+      return true;
+    },
+    () => {
+      hydrated = null; // let the next call retry the read
+      return false;
+    },
+  );
   return hydrated;
 }
 
@@ -52,13 +65,18 @@ function parseStoredProofs(raw: string): [string, string][] {
     if (!Array.isArray(parsed)) return [];
     // Re-derive each hash from its preimage: a tampered pair (valid hex, but
     // the preimage doesn't hash to the key) must never mark a row settled.
-    return parsed.filter(
-      (e): e is [string, string] =>
-        Array.isArray(e) &&
-        HEX64.test(String(e[0])) &&
-        HEX64.test(String(e[1])) &&
-        bytesToHex(sha256(hexToBytes(e[1]))) === e[0],
-    );
+    return parsed.filter((e): e is [string, string] => {
+      if (!Array.isArray(e) || typeof e[0] !== 'string' || typeof e[1] !== 'string') return false;
+      const [key, preimage] = e as [string, string];
+      const hash = key.slice(-64);
+      return (
+        key.length > 65 &&
+        key[key.length - 65] === ':' &&
+        HEX64.test(hash) &&
+        HEX64.test(preimage) &&
+        bytesToHex(sha256(hexToBytes(preimage))) === hash
+      );
+    });
   } catch {
     return [];
   }
@@ -68,22 +86,30 @@ function capProofs(): void {
   while (proofs.size > MAX_PROOFS) proofs.delete(proofs.keys().next().value as string);
 }
 
-/** Record the preimage a successful payment returned. Ignores malformed input. */
-export function recordPaymentProof(preimage: string | undefined | null): void {
+/** Record the preimage a CONFIRMED payment from `walletId` returned. Ignores
+ * malformed input. */
+export function recordPaymentProof(walletId: string, preimage: string | undefined | null): void {
   const p = preimage?.toLowerCase();
-  if (!p || !HEX64.test(p)) return;
-  const hash = bytesToHex(sha256(hexToBytes(p)));
-  proofs.delete(hash);
-  proofs.set(hash, p);
+  if (!walletId || !p || !HEX64.test(p)) return;
+  const key = keyOf(walletId, bytesToHex(sha256(hexToBytes(p))));
+  proofs.delete(key);
+  proofs.set(key, p);
   capProofs();
   // Persist only after earlier sessions' proofs are loaded — a payment made
   // before the first tx-list fetch would otherwise overwrite them.
-  void hydratePaymentProofs().then(persist);
+  void hydratePaymentProofs().then((ok) => {
+    if (ok) persist();
+  });
 }
 
-/** The preimage proving `paymentHash` was paid by us, if we hold one. */
-export function getPaymentProof(paymentHash: string | undefined | null): string | undefined {
-  return paymentHash ? proofs.get(paymentHash.toLowerCase()) : undefined;
+/** The preimage proving `walletId` paid `paymentHash`, if we hold one. */
+export function getPaymentProof(
+  walletId: string | undefined,
+  paymentHash: string | undefined | null,
+): string | undefined {
+  return walletId && paymentHash
+    ? proofs.get(keyOf(walletId, paymentHash.toLowerCase()))
+    : undefined;
 }
 
 /** Test seam. */

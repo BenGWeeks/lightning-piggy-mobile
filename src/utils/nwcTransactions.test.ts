@@ -238,30 +238,38 @@ describe('mapNwcTransactions — proof of payment (pending after a successful se
   beforeEach(() => clearPaymentProofsForTests());
 
   it('shows our own pending send as settled once we hold its preimage', () => {
-    expect(mapNwcTransactions([pending()], [])[0].settled).toBe(false);
-    recordPaymentProof(preimage);
-    const [tx] = mapNwcTransactions([pending()], []);
+    expect(mapNwcTransactions([pending()], [], 'w1')[0].settled).toBe(false);
+    recordPaymentProof('w1', preimage);
+    const [tx] = mapNwcTransactions([pending()], [], 'w1');
     expect(tx.settled).toBe(true);
     expect(tx.preimage).toBe(preimage);
     expect(tx.settled_at).toBe(1_700_000_000);
   });
 
   it('falls back to created_at when a proof-settled row reports settled_at 0', () => {
-    recordPaymentProof(preimage);
-    expect(mapNwcTransactions([pending({ settled_at: 0 })], [])[0].settled_at).toBe(1_700_000_000);
-    expect(mapNwcTransactions([pending({ settled_at: 1_700_000_500 })], [])[0].settled_at).toBe(
-      1_700_000_500,
+    recordPaymentProof('w1', preimage);
+    expect(mapNwcTransactions([pending({ settled_at: 0 })], [], 'w1')[0].settled_at).toBe(
+      1_700_000_000,
     );
+    expect(
+      mapNwcTransactions([pending({ settled_at: 1_700_000_500 })], [], 'w1')[0].settled_at,
+    ).toBe(1_700_000_500);
   });
 
   it('never trusts a preimage that does not hash to the payment hash', () => {
-    recordPaymentProof('cd'.repeat(32));
+    recordPaymentProof('w1', 'cd'.repeat(32));
+    expect(mapNwcTransactions([pending()], [], 'w1')[0].settled).toBe(false);
+  });
+
+  it("never applies another wallet's proof", () => {
+    recordPaymentProof('w2', preimage);
+    expect(mapNwcTransactions([pending()], [], 'w1')[0].settled).toBe(false);
     expect(mapNwcTransactions([pending()], [])[0].settled).toBe(false);
   });
 
   it('leaves wallet-reported failures and incoming rows alone', () => {
-    recordPaymentProof(preimage);
-    expect(mapNwcTransactions([pending({ state: 'failed' })], [])[0].settled).toBe(false);
-    expect(mapNwcTransactions([pending({ type: 'incoming' })], [])[0].settled).toBe(false);
+    recordPaymentProof('w1', preimage);
+    expect(mapNwcTransactions([pending({ state: 'failed' })], [], 'w1')[0].settled).toBe(false);
+    expect(mapNwcTransactions([pending({ type: 'incoming' })], [], 'w1')[0].settled).toBe(false);
   });
 });
