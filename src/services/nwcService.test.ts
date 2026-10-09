@@ -51,6 +51,9 @@ import {
   isWalletConnected,
   payInvoice,
 } from './nwcService';
+import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 const VALID_NWC_URL =
   'nostr+walletconnect://' +
@@ -308,5 +311,61 @@ describe('nwcService.payInvoice — ambiguous "unknown Error" outcome (#891)', (
     mockLookupInvoiceImpl = async () => ({ paid: true, preimage });
 
     await expect(payInvoice(WALLET_ID, BOLT11)).resolves.toEqual({ preimage });
+  });
+});
+
+describe('nwcService.payInvoice — proof of payment is recorded only when confirmed (#1165)', () => {
+  const BOLT11 =
+    'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsy' +
+    'p3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4e' +
+    'vs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+  const preimage = 'c'.repeat(64);
+  const hash = bytesToHex(sha256(hexToBytes(preimage)));
+
+  beforeEach(() => clearPaymentProofsForTests());
+
+  it('records the proof, scoped to the paying wallet, on a direct pay_invoice success', async () => {
+    mockSendPaymentImpl = async () => ({ preimage });
+    await expect(payInvoice(WALLET_ID, BOLT11)).resolves.toEqual({ preimage });
+    expect(getPaymentProof(WALLET_ID, hash)).toBe(preimage);
+    expect(getPaymentProof('other-wallet', hash)).toBeUndefined();
+  });
+
+  it('does not record an unpaid lookup preimage after a publish failure', async () => {
+    let calls = 0;
+    mockSendPaymentImpl = async () => {
+      calls++;
+      throw new Error('failed to publish');
+    };
+    // NIP-47 lets lookup_invoice return a preimage for an UNPAID invoice
+    // (e.g. one this same backend issued).
+    mockLookupInvoiceImpl = async () => ({ paid: false, preimage });
+    const p = payInvoice(WALLET_ID, BOLT11);
+    await jest.runAllTimersAsync();
+    await expect(p).resolves.toEqual({ preimage }); // pre-existing return contract
+    expect(calls).toBe(1);
+    expect(getPaymentProof(WALLET_ID, hash)).toBeUndefined();
+  });
+
+  it('records the proof when the post-publish-failure lookup confirms paid', async () => {
+    mockSendPaymentImpl = async () => {
+      throw new Error('failed to publish');
+    };
+    mockLookupInvoiceImpl = async () => ({ paid: true, preimage });
+    const p = payInvoice(WALLET_ID, BOLT11);
+    await jest.runAllTimersAsync();
+    await expect(p).resolves.toEqual({ preimage });
+    expect(getPaymentProof(WALLET_ID, hash)).toBe(preimage);
+  });
+
+  it('does not record an unpaid lookup preimage after a reply timeout', async () => {
+    mockSendPaymentImpl = async () => {
+      throw new Error('reply timeout: event abc');
+    };
+    mockLookupInvoiceImpl = async () => ({ paid: false, preimage });
+    const p = payInvoice(WALLET_ID, BOLT11);
+    await jest.runAllTimersAsync();
+    await expect(p).resolves.toEqual({ preimage });
+    expect(getPaymentProof(WALLET_ID, hash)).toBeUndefined();
   });
 });

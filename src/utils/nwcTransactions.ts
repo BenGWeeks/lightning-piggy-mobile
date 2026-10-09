@@ -1,6 +1,7 @@
 import type { WalletTransaction } from '../types/wallet';
 import { getSwapMeta } from '../services/swapRecoveryService';
 import { preserveOptimisticSwapRows } from './swapPendingMerge';
+import { getPaymentProof } from '../services/paymentProofs';
 
 // The SDK WebLN listTransactions row (amount and fees already in sats).
 // Backends vary, so most
@@ -37,6 +38,8 @@ export interface NwcRawTransaction {
 export function mapNwcTransactions(
   raw: readonly NwcRawTransaction[],
   existing: readonly WalletTransaction[],
+  // The wallet these rows belong to — scopes payment proofs (see paymentProofs).
+  walletId?: string,
 ): WalletTransaction[] {
   const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
   for (const prev of existing) {
@@ -46,6 +49,13 @@ export function mapNwcTransactions(
   }
 
   let txs: WalletTransaction[] = raw.map((tx) => {
+    // Our own send that the wallet hasn't flipped from pending yet, but whose
+    // preimage we hold (pay_invoice returned it): that's proof it settled.
+    // A wallet-reported `failed` / `expired` is left alone.
+    const proof =
+      tx.type === 'outgoing' && (tx.state === 'pending' || tx.state === undefined)
+        ? getPaymentProof(walletId, tx.payment_hash)
+        : undefined;
     // Tag the Lightning leg of a Boltz swap (by payment hash) so it badges as
     // a swap rather than a generic Sent/Received (#895).
     const meta = tx.payment_hash ? getSwapMeta(tx.payment_hash) : undefined;
@@ -57,9 +67,12 @@ export function mapNwcTransactions(
           ? 'Boltz swap — sent via Lightning'
           : 'Boltz swap — received via Lightning'
         : (tx.description ?? undefined),
-      settled_at: tx.settled_at ?? undefined,
+      // Some backends report a pending row's settled_at as 0 — on the
+      // proof-backed path treat that as absent, not an epoch timestamp.
+      settled_at:
+        proof && !tx.settled_at ? (tx.created_at ?? undefined) : (tx.settled_at ?? undefined),
       settled:
-        tx.state === 'settled'
+        tx.state === 'settled' || proof
           ? true
           : tx.state === 'pending' || tx.state === 'failed' || tx.state === 'expired'
             ? false
@@ -68,7 +81,7 @@ export function mapNwcTransactions(
       bolt11: tx.invoice,
       invoice: tx.invoice,
       paymentHash: tx.payment_hash,
-      preimage: tx.preimage,
+      preimage: tx.preimage ?? proof,
       // NostrWebLNProvider has already converted NIP-47 msats to sats.
       feesSats: typeof tx.fees_paid === 'number' ? tx.fees_paid : undefined,
       zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
