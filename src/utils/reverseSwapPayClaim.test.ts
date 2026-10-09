@@ -11,6 +11,7 @@
 jest.mock('../services/boltzService', () => ({
   waitForLockup: jest.fn(),
   claimSwap: jest.fn(),
+  fetchSwapStatus: jest.fn(),
 }));
 jest.mock('../services/swapRecoveryService', () => ({
   registerPendingSwap: jest.fn(async () => undefined),
@@ -55,6 +56,7 @@ const LOCKUP = { txId: 'lockup-tx', vout: 0, amount: 29000, txHex: 'fixture' };
 
 const waitForLockup = boltzService.waitForLockup as jest.Mock;
 const claimSwap = boltzService.claimSwap as jest.Mock;
+const fetchSwapStatus = boltzService.fetchSwapStatus as jest.Mock;
 
 const named = (name: string, message = name) => Object.assign(new Error(message), { name });
 const flush = () => new Promise((r) => setImmediate(r));
@@ -136,6 +138,8 @@ beforeEach(async () => {
   tracked.length = 0;
   persisted = await persistReverseSwap(SWAP, 'bc1qdest');
   jest.clearAllMocks();
+  // Boltz hasn't seen our HTLC yet (or holds it pre-lockup) — not proof of anything.
+  fetchSwapStatus.mockResolvedValue('swap.created');
 });
 
 afterEach(async () => {
@@ -393,4 +397,135 @@ it('does not announce dispatch if the wallet throws synchronously', async () => 
     }),
   ).rejects.toThrow('disconnected');
   expect(onPaymentDispatched).not.toHaveBeenCalled();
+});
+
+// #1167: a dead swap is only declared when Boltz's own status proves the hold
+// invoice can never settle. Anything weaker keeps the #891 "still in flight".
+describe('payAndClaimReverseSwap — dead swap (#1167)', () => {
+  const expectRecordRetired = () => {
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('boltz_swap_sw1');
+    expect(swapRecoveryService.unregisterPendingSwap).toHaveBeenCalledWith('sw1');
+  };
+  const expectRecordKept = () => {
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+    expect(swapRecoveryService.unregisterPendingSwap).not.toHaveBeenCalled();
+  };
+
+  it.each(['swap.expired', 'invoice.expired', 'transaction.failed', 'transaction.refunded'])(
+    'Boltz fails the swap (%s) before lockup → nothing sent, without waiting on a lost wallet reply',
+    async (status) => {
+      const { state, payInvoice } = holdInvoiceSwap();
+      const done = run({ payInvoice });
+      await flush();
+      // The wallet's reply never arrives; Boltz's status watch reports the failure.
+      state.failLockup(new Error(`Swap failed with status: ${status}`));
+      const error = await done.catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).toBe('Error');
+      expect((error as Error).message).toBe(
+        `Boltz swap failed: Boltz reports ${status}; the Lightning payment never settled, nothing was sent`,
+      );
+      expect(claimSwap).not.toHaveBeenCalled();
+      expectRecordRetired();
+      // Reply polling is stopped; the late rejection is observed, not unhandled.
+      expect(state.paySignal?.aborted).toBe(true);
+      state.failPayment(named('AbortError'));
+    },
+  );
+
+  it('ambiguous wallet reply + Boltz says the invoice expired → nothing sent', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    fetchSwapStatus.mockResolvedValue('invoice.expired');
+    const done = run({ payInvoice });
+    await flush();
+    state.failPayment(named('ReplyTimeoutError', 'Wallet did not reply in time'));
+    await expect(done).rejects.toThrow('Boltz swap failed: Boltz reports invoice.expired');
+    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1');
+    expectRecordRetired();
+  });
+
+  it('ambiguous wallet reply + swap.created stays "in flight" — Boltz may hold the HTLC', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    const done = run({ payInvoice });
+    await flush();
+    state.failPayment(named('ReplyTimeoutError', 'Wallet did not reply in time'));
+    await expect(done).rejects.toMatchObject({ name: 'ReplyTimeoutError' });
+    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1');
+    expectRecordKept();
+  });
+
+  it.each(['transaction.mempool', 'transaction.confirmed', 'minerfee.paid'])(
+    'ambiguous wallet reply + %s stays "in flight"',
+    async (status) => {
+      const { state, payInvoice } = holdInvoiceSwap();
+      fetchSwapStatus.mockResolvedValue(status);
+      const done = run({ payInvoice });
+      await flush();
+      state.failPayment(named('ReplyTimeoutError'));
+      await expect(done).rejects.toMatchObject({ name: 'ReplyTimeoutError' });
+      expectRecordKept();
+    },
+  );
+
+  it('ambiguous wallet reply + unreachable Boltz stays "in flight"', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    fetchSwapStatus.mockRejectedValue(new Error('Boltz status check failed: 503'));
+    const done = run({ payInvoice });
+    await flush();
+    state.failPayment(named('ReplyTimeoutError'));
+    await expect(done).rejects.toMatchObject({ name: 'ReplyTimeoutError' });
+    expectRecordKept();
+  });
+
+  it('a non-terminal lockup failure still waits for the wallet, then asks Boltz', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    fetchSwapStatus.mockResolvedValue('swap.expired');
+    const done = run({ payInvoice });
+    await flush();
+    state.failLockup(new Error('Timeout waiting for swap sw1 after 900s'));
+    await flush();
+    expect(fetchSwapStatus).not.toHaveBeenCalled();
+    state.failPayment(named('ReplyTimeoutError'));
+    await expect(done).rejects.toThrow('Boltz swap failed: Boltz reports swap.expired');
+    expectRecordRetired();
+  });
+
+  it('a wallet-rejected payment never consults Boltz and keeps the record', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    const done = run({ payInvoice });
+    await flush();
+    state.failPayment(new Error('no route'));
+    await expect(done).rejects.toThrow('Boltz swap failed: no route');
+    expect(fetchSwapStatus).not.toHaveBeenCalled();
+  });
+
+  it('a lockup seen before Boltz later fails still claims — committed wins', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    const done = run({ payInvoice });
+    await flush();
+    state.releaseLockup();
+    await expect(done).resolves.toBe('claim-tx');
+    state.failLockup(new Error('Swap failed with status: swap.expired')); // no-op: already settled
+  });
+
+  it('still reports nothing sent when retiring the dead record fails', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    jest.mocked(SecureStore.deleteItemAsync).mockRejectedValueOnce(new Error('storage'));
+    const done = run({ payInvoice });
+    await flush();
+    state.failLockup(new Error('Swap failed with status: swap.expired'));
+    await expect(done).rejects.toThrow('Boltz swap failed: Boltz reports swap.expired');
+    state.failPayment(named('AbortError'));
+  });
+
+  it('a user cancel after dispatch stays "still settling" and keeps the record', async () => {
+    const { state, payInvoice } = holdInvoiceSwap();
+    const ctrl = new AbortController();
+    const done = run({ payInvoice, signal: ctrl.signal });
+    await flush();
+    ctrl.abort();
+    state.failPayment(named('AbortError', 'Payment cancelled'));
+    await expect(done).rejects.toMatchObject({ name: 'SwapSettlingError' });
+    expectRecordKept();
+  });
 });

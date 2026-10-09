@@ -15,6 +15,7 @@ import { getSwapBackendForId } from './swapBackendService';
 
 import {
   classifySubmarineSwapStatus,
+  fetchSwapStatus,
   waitForSwapStatus,
   watchSubmarineSwapStatus,
   type SubmarineSwapPhase,
@@ -211,4 +212,29 @@ it('uses the same pinned provider for WebSocket and polling fallback', async () 
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+describe('fetchSwapStatus', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+  const respond = (ok: boolean, body: unknown, status = ok ? 200 : 500) =>
+    (global.fetch = jest.fn(async () => ({ ok, status, json: async () => body })) as never);
+
+  it("reads the swap's status from its pinned backend", async () => {
+    respond(true, { status: 'swap.created' });
+    await expect(fetchSwapStatus('sw1')).resolves.toBe('swap.created');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.boltz.exchange/v2/swap/sw1',
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it('throws rather than guessing on a non-OK response or a missing status', async () => {
+    respond(false, {}, 503);
+    await expect(fetchSwapStatus('sw1')).rejects.toThrow('Boltz status check failed: 503');
+    respond(true, { error: 'no status' });
+    await expect(fetchSwapStatus('sw1')).rejects.toThrow('Boltz status missing');
+  });
 });

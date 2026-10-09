@@ -47,6 +47,7 @@ export { fetchWithTimeout } from './boltzApi';
 export {
   watchSubmarineSwapStatus,
   classifySubmarineSwapStatus,
+  fetchSwapStatus,
   type SubmarineSwapPhase,
 } from './boltzSwapStatus';
 

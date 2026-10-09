@@ -7,7 +7,6 @@ import {
   useWindowDimensions,
   ActivityIndicator,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import { humanizePaymentError } from '../utils/paymentErrors';
 import Animated, {
@@ -30,8 +29,14 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useSendingAnimation } from '../contexts/SendingAnimationContext';
 import LightningOverlay from './LightningOverlay';
-import { lightPalette, type Palette } from '../styles/palettes';
+import { lightPalette } from '../styles/palettes';
+import {
+  createPaymentProgressOverlayStyles,
+  paymentProgressOverlaySharedStyles as sharedStyles,
+} from '../styles/PaymentProgressOverlay.styles';
 import type { IncomingPaymentSource } from '../contexts/incomingPaymentSource';
+import type { ReverseSwapSendStage } from '../utils/reverseSwapSend';
+import { swapSendStageKey } from '../utils/swapSendStage';
 
 export type PaymentProgressState =
   | 'sending'
@@ -70,6 +75,13 @@ interface Props {
    * plain Lightning send that's slow to confirm. On a successful swap send,
    * a hint notes the on-chain leg still has to confirm. */
   inFlightIsSwap?: boolean;
+  /** Current stage of a Boltz reverse swap send, shown as a status line while
+   *  the swap is in flight (#1167). */
+  swapStage?: ReverseSwapSendStage | null;
+  /** The swap's hold-invoice payment has been dispatched: it can no longer be
+   *  cancelled, so `sending` offers "Continue in background" (→ `onDismiss`)
+   *  instead of Cancel (#1167, #891). */
+  canContinueInBackground?: boolean;
 }
 
 const BUBBLE_COUNT = 140;
@@ -315,10 +327,12 @@ export default function PaymentProgressOverlay({
   onDismiss,
   onCancel,
   inFlightIsSwap = false,
+  swapStage = null,
+  canContinueInBackground = false,
 }: Props) {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createPaymentProgressOverlayStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   // Which send animation the user picked in Appearance. Only affects the
   // outgoing (send) particle layer; receive keeps its confetti burst.
@@ -498,6 +512,8 @@ export default function PaymentProgressOverlay({
   };
 
   const showSpinner = state === 'sending' || state === 'in-flight-extended';
+  const swapStageText =
+    showSpinner && inFlightIsSwap && swapStage ? t(swapSendStageKey(swapStage)) : undefined;
 
   return (
     <Modal
@@ -565,6 +581,11 @@ export default function PaymentProgressOverlay({
 
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {swapStageText ? (
+            <Text style={styles.swapStage} testID="payment-overlay-swap-stage">
+              {swapStageText}
+            </Text>
+          ) : null}
           {onchainHint ? (
             <Text style={styles.hint} testID="payment-overlay-onchain-hint">
               {onchainHint}
@@ -630,6 +651,18 @@ export default function PaymentProgressOverlay({
                     : t('paymentProgressOverlay.ok')}
               </Text>
             </TouchableOpacity>
+          ) : canContinueInBackground ? (
+            <TouchableOpacity
+              style={styles.okButton}
+              onPress={onDismiss}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel={t('paymentProgressOverlay.continueInBackground')}
+              testID="payment-overlay-continue-background"
+            >
+              <Text style={styles.okButtonText}>
+                {t('paymentProgressOverlay.continueInBackground')}
+              </Text>
+            </TouchableOpacity>
           ) : onCancel ? (
             <TouchableOpacity
               style={styles.cancelButton}
@@ -646,123 +679,3 @@ export default function PaymentProgressOverlay({
     </Modal>
   );
 }
-
-// Colour-agnostic styles shared with the Bubble and Confetti subcomponents
-// so they don't need access to the themed styles created inside the main
-// component.
-const sharedStyles = StyleSheet.create({
-  bubble: {
-    position: 'absolute',
-  },
-  confetti: {
-    position: 'absolute',
-    borderRadius: 2,
-  },
-});
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: 'rgba(21, 23, 26, 0.45)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 24,
-    },
-    card: {
-      backgroundColor: colors.surface,
-      borderRadius: 28,
-      paddingVertical: 32,
-      paddingHorizontal: 28,
-      minWidth: 260,
-      maxWidth: 340,
-      alignItems: 'center',
-      gap: 14,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.2,
-      shadowRadius: 24,
-      elevation: 12,
-    },
-    iconSlot: {
-      width: 72,
-      height: 72,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    successCircle: {
-      borderRadius: 36,
-      backgroundColor: colors.green,
-    },
-    errorCircle: {
-      borderRadius: 36,
-      backgroundColor: colors.red,
-    },
-    // Amber, not red: a connection loss is "couldn't confirm", not a
-    // confirmed failure (#648).
-    connectionCircle: {
-      borderRadius: 36,
-      backgroundColor: colors.zapYellow,
-    },
-    title: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
-    hint: {
-      // Used for the on-chain mempool-pending tag (#134). Sits below
-      // the subtitle, brand-pink so it reads as a status flag rather
-      // than another fact about the payment.
-      marginTop: -6,
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.brandPink,
-      textAlign: 'center',
-      letterSpacing: 0.3,
-    },
-    okButton: {
-      marginTop: 12,
-      alignSelf: 'stretch',
-      backgroundColor: colors.brandPink,
-      paddingVertical: 12,
-      paddingHorizontal: 24,
-      borderRadius: 14,
-      alignItems: 'center',
-    },
-    okButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-      letterSpacing: 0.3,
-    },
-    cancelButton: {
-      marginTop: 8,
-      alignSelf: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-    },
-    cancelButtonText: {
-      color: colors.textSupplementary,
-      fontSize: 15,
-      fontWeight: '600',
-    },
-    detailsToggle: {
-      marginTop: -6,
-      fontSize: 12,
-      color: colors.textSupplementary,
-      textDecorationLine: 'underline',
-    },
-    detailText: {
-      marginTop: -6,
-      fontSize: 11,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
-    },
-  });

@@ -2,6 +2,11 @@ import * as SecureStore from 'expo-secure-store';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { createAbortError, isReplyTimeoutError } from '../services/nwcErrors';
+import {
+  createSwapNotPaidError,
+  isReverseSwapNeverSettlesStatus,
+  neverSettlesStatusFromLockupError,
+} from './reverseSwapNotPaid';
 
 /**
  * Thrown when the Lightning side of a reverse swap HAS committed (the payment
@@ -128,8 +133,10 @@ const detailOf = (e: unknown) => (e instanceof Error ? e.message || e.toString()
  *   - `SwapSettlingError` — the LN side committed but the lockup/claim
  *     failed; recovery finishes it → "still settling".
  *   - `Error('Boltz swap failed: …')` — a genuine pre-commit failure
- *     (the sats did not leave).
- * The recovery record is kept on every failure and dropped on success.
+ *     (the sats did not leave): the wallet rejected the payment, or Boltz's
+ *     own status proves the hold invoice can never settle (#1167).
+ * The recovery record is dropped on success and when Boltz proves the swap
+ * dead (mirroring swapRecoveryService); it is kept on every other failure.
  */
 export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise<string> {
   const { swap, destinationAddress } = params.persisted;
@@ -170,6 +177,38 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     return new Error(`Boltz swap failed: ${detailOf(e)}`);
   };
 
+  // Boltz has written the swap off before any lockup, so the hold invoice can
+  // never settle: nothing was sent. Retire the recovery record exactly as
+  // swapRecoveryService does for these statuses, then fail definitively.
+  const notPaid = async (status: string) => {
+    console.warn(`[Boltz] Swap ${swap.id} ended ${status} before any lockup; nothing was sent`);
+    try {
+      await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+      await swapRecoveryService.unregisterPendingSwap(swap.id);
+    } catch (error) {
+      console.warn('[Boltz] Dead swap cleanup failed; recovery will retire it:', error);
+    }
+    return createSwapNotPaidError(status);
+  };
+
+  // The wallet's reply was lost or ambiguous. Before reporting "still in
+  // flight", ask Boltz: only a terminal never-settles status proves the
+  // payment failed. `swap.created` does not — Boltz may be holding the HTLC
+  // while it prepares the lockup — so anything else (or no answer) stays
+  // ambiguous.
+  const preCommitFailure = async (e: unknown) => {
+    if (isReplyTimeoutError(e)) {
+      let status: string | null = null;
+      try {
+        status = await boltzService.fetchSwapStatus(swap.id);
+      } catch {
+        // Couldn't ask Boltz: the outcome stays ambiguous.
+      }
+      if (isReverseSwapNeverSettlesStatus(status)) return notPaid(status);
+    }
+    return preCommitError(e);
+  };
+
   // Once committed, NEVER surface a failure as pre-commit — even a user
   // cancel during lockup/claim must read as "still settling", or we
   // reintroduce the #891 double-send risk.
@@ -184,7 +223,7 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     if ('payment' in first) {
       // The payment resolved before any lockup was seen. A failure here means
       // Boltz never locked up for us; a success means the sats have left.
-      if (!first.payment.ok) throw preCommitError(first.payment.error);
+      if (!first.payment.ok) throw await preCommitFailure(first.payment.error);
       committed = true;
       lockup = await lockupWait;
     } else {
@@ -194,8 +233,13 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
       // No verified lockup: the payment's own outcome decides whether the
       // sats left. It is bounded by the wallet's reply timeout.
       if (!committed) {
+        // Boltz itself failed the swap before locking up: the hold invoice
+        // can never settle, so don't wait on a wallet reply that may never
+        // arrive (#1167).
+        const deadStatus = neverSettlesStatusFromLockupError(lockup.error);
+        if (deadStatus) throw await notPaid(deadStatus);
         const paid = await payment;
-        if (!paid.ok) throw preCommitError(paid.error);
+        if (!paid.ok) throw await preCommitFailure(paid.error);
         committed = true;
       }
       throw lockup.error;

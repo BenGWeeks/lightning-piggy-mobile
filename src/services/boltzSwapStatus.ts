@@ -172,6 +172,21 @@ export async function waitForSwapStatus(
   });
 }
 
+/**
+ * One-shot read of a swap's current Boltz status (`GET /swap/{id}` on the
+ * swap's pinned backend). Throws on a non-OK response or a missing status, so
+ * callers can tell "Boltz said X" apart from "couldn't ask".
+ */
+export async function fetchSwapStatus(swapId: string, signal?: AbortSignal): Promise<string> {
+  const backend = await getSwapBackendForId(swapId);
+  return fetchWithTimeout(`${backend}/swap/${swapId}`, { signal }, 10_000, async (res) => {
+    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
+    const data = await res.json();
+    if (typeof data?.status !== 'string') throw new Error('Boltz status missing');
+    return data.status as string;
+  });
+}
+
 /** Polling fallback for swap status. Honours `signal` so a caller-driven
  * cancel stops the loop between polls (and before the next fetch) instead of
  * running until the terminal status or timeout. */

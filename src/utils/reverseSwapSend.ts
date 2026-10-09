@@ -3,7 +3,12 @@ import {
   payAndClaimReverseSwap,
   persistReverseSwap,
   type PayInvoiceFn,
+  type ReverseSwapStage,
 } from './reverseSwapPayClaim';
+
+/** Every stage of a Send-screen reverse swap, in order: create the swap, then
+ *  `payAndClaimReverseSwap`'s pay+lockup → claim → cleanup. */
+export type ReverseSwapSendStage = 'createSwap' | ReverseSwapStage;
 
 export { SwapSettlingError, isSwapSettlingError } from './reverseSwapPayClaim';
 
@@ -18,6 +23,7 @@ export interface ReverseSwapParams {
   payInvoice: PayInvoiceFn;
   onReplyTimeout: () => void;
   onPaymentDispatched?: () => void;
+  onStage?: (stage: ReverseSwapSendStage) => void;
 }
 
 /**
@@ -30,6 +36,7 @@ export interface ReverseSwapParams {
  */
 export async function executeReverseSwap(params: ReverseSwapParams): Promise<void> {
   const { walletId, destinationAddress, amountSats, signal, payInvoice, onReplyTimeout } = params;
+  params.onStage?.('createSwap');
   const swap = await boltzService.createReverseSwap(
     destinationAddress,
     amountSats,
@@ -43,5 +50,6 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<voi
     signal,
     onReplyTimeout,
     onPaymentDispatched: params.onPaymentDispatched,
+    onStage: params.onStage,
   });
 }

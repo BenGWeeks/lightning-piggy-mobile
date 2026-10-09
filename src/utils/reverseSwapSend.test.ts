@@ -147,6 +147,34 @@ describe('executeReverseSwap — #891 error contract', () => {
   });
 });
 
+describe('executeReverseSwap — stages (#1167)', () => {
+  it('reports every Send-screen stage in order, starting before the swap is created', async () => {
+    const stages: string[] = [];
+    let createdAtFirstStage: boolean | undefined;
+    await executeReverseSwap(
+      params({
+        onStage: (stage) => {
+          if (stages.length === 0)
+            createdAtFirstStage =
+              (boltzService.createReverseSwap as jest.Mock).mock.calls.length > 0;
+          stages.push(stage);
+        },
+      }),
+    );
+    expect(stages).toEqual(['createSwap', 'payAndLockup', 'claimSwap', 'cleanup']);
+    expect(createdAtFirstStage).toBe(false);
+  });
+
+  it('stops at createSwap when Boltz rejects the swap', async () => {
+    (boltzService.createReverseSwap as jest.Mock).mockRejectedValueOnce(new Error('boltz down'));
+    const onStage = jest.fn();
+    const payInvoice = jest.fn();
+    await expect(executeReverseSwap(params({ onStage, payInvoice }))).rejects.toThrow('boltz down');
+    expect(onStage.mock.calls).toEqual([['createSwap']]);
+    expect(payInvoice).not.toHaveBeenCalled();
+  });
+});
+
 describe('executeReverseSwap — hold invoice', () => {
   it('binds the approved quote and persists + indexes before paying', async () => {
     const quote = { pairHash: 'h', percentage: 0.5, minerFee: 1, minAmount: 1, maxAmount: 9 };
