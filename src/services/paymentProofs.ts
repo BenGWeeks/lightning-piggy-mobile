@@ -30,11 +30,12 @@ export function hydratePaymentProofs(): Promise<void> {
   hydrated ??= AsyncStorage.getItem(STORAGE_KEY)
     .then((raw) => {
       if (!raw) return;
+      // Parse + validate BEFORE touching the map: a corrupt store must never
+      // wipe proofs already recorded this session.
+      const stored = parseStoredProofs(raw);
       const thisSession = [...proofs];
       proofs.clear();
-      for (const [hash, preimage] of JSON.parse(raw) as [string, string][]) {
-        proofs.set(hash, preimage);
-      }
+      for (const [hash, preimage] of stored) proofs.set(hash, preimage);
       for (const [hash, preimage] of thisSession) {
         proofs.delete(hash);
         proofs.set(hash, preimage);
@@ -43,6 +44,19 @@ export function hydratePaymentProofs(): Promise<void> {
     })
     .catch(() => undefined);
   return hydrated;
+}
+
+function parseStoredProofs(raw: string): [string, string][] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e): e is [string, string] =>
+        Array.isArray(e) && HEX64.test(String(e[0])) && HEX64.test(String(e[1])),
+    );
+  } catch {
+    return [];
+  }
 }
 
 function capProofs(): void {

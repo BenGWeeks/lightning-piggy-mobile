@@ -52,6 +52,16 @@ describe('paymentProofs', () => {
     expect(getPaymentProof(hashOf(pre(8)))).toBe(pre(8));
   });
 
+  it("ignores a corrupt store without losing this session's proofs", async () => {
+    for (const junk of ['{not json', '42', JSON.stringify([['x', 'y'], 5])]) {
+      clearPaymentProofsForTests();
+      await AsyncStorage.setItem('payment_proofs_v1', junk);
+      recordPaymentProof(pre(9));
+      await hydratePaymentProofs();
+      expect(getPaymentProof(hashOf(pre(9)))).toBe(pre(9));
+    }
+  });
+
   it('survives an app restart (persisted, then hydrated)', async () => {
     recordPaymentProof(pre(7));
     await new Promise((r) => setTimeout(r, 0)); // let the AsyncStorage write land
