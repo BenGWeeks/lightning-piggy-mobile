@@ -33,6 +33,7 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
 - Real-time balance display with fiat conversion
 - Transaction history
 - Nostr identity login (nsec or Amber signer on Android)
+- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS, Alpha)** end-to-end encrypted chats that work with [White Noise](https://www.whitenoise.chat)
 - Friends tab with Nostr contacts and phone contacts
 - Follow/unfollow Nostr contacts (kind 3 event publishing)
 - Add friends by pasting npub or scanning QR code
@@ -105,6 +106,8 @@ Group state for client-side group chat is propagated via a parameterised-replace
 `kind:30200` event (custom to this client; receivers reconcile by `groupId` + `created_at`).
 Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the schema.
 
+**Marmot** (MLS over Nostr, Alpha) — 1:1 and group chats via [`marmot-ts`](https://github.com/marmot-protocol/marmot-ts), wire-compatible with White Noise, including MIP-04 encrypted media and the send side of MIP-05 push notifications. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
+
 ### LUDs (LNURL specifications)
 
 | Standard                                                | Name                                                                                             |
@@ -161,7 +164,7 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 
 **Key data flows.**
 
-- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping — it notices new inbound traffic and fires a generic notification without decrypting; a persistent realtime relay foreground service is only scaffolded (manifest permissions via `withForegroundService.js`) and not yet implemented. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc).
+- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping — it notices new inbound traffic and fires a generic notification without decrypting; a persistent realtime relay foreground service is only scaffolded (manifest permissions via `withForegroundService.js`) and not yet implemented. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc). In a **Marmot** thread the same message is sent inside an MLS group (kind 445) instead — see [docs/SOLUTION_DESIGN.adoc](docs/SOLUTION_DESIGN.adoc) → "Marmot (MLS) messaging".
 - **Paying over NWC** — a scanned invoice (or an LNURL-pay / Lightning address resolved to a BOLT-11) is sent to the wallet service as an encrypted NIP-47 `pay_invoice` request over the NWC relay; the encrypted response updates balance and history. Zaps (kind 9734 request → 9735 receipt) ride the same rail.
 - **Publishing a geo-cache ("Piglet")** — a NIP-GC listing (kind 37516) is published with a NIP-32 payout label and a stable `d` tag; the LNURL-withdraw bearer stays on the physical NFC tag / QR and in the hider's secure store, never on the public event. Claims record a found-log (kind 7516).
 

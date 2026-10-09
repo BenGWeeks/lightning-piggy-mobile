@@ -74,6 +74,14 @@ Third-party packages used by the app. Updated when a dependency is added or its 
 | paulmillr
 | Audited pure-JS symmetric ciphers — `aes.js` (CBC) powers `nostr-tools`' NIP-04 `nip04.decrypt` / `nip04.encrypt`. Dep of `nostr-tools`, listed here because the DM perf work in `src/contexts/NostrContext.tsx` leans on its throughput (~1 ms / decrypt on mid-range mobile) to keep batched parallel decrypt responsive.
 
+| https://github.com/marmot-protocol/marmot-ts[`@internet-privacy/marmot-ts`]
+| Marmot protocol (vendored tarball in `vendor/`)
+| Marmot (MLS over Nostr) client — groups, key packages, Welcomes, encrypted media. Pinned to a build of upstream PR #83 (encrypted media v2 + the `0x800b` component White Noise requires) until that ships on npm. Runs on the app's pure-JS `marmotCryptoProvider` because Hermes has no WebCrypto.
+
+| https://github.com/ungap/structured-clone[`@ungap/structured-clone`]
+| ungap
+| `structuredClone` polyfill (`src/polyfills.ts`) — Hermes lacks it, and `marmot-ts` deep-copies MLS client state with it.
+
 |===
 
 NOTE: For DM URL preview cards (#441) we considered `link-preview-js` (which transitively pulls in `cheerio` ~1.6 MB) and `@flyerhq/react-native-link-preview` (bundles its own card UI). Both rejected on bundle weight — OG meta tags are a tightly-defined `<meta>`-in-`<head>` format that doesn't justify a full DOM parser. We ship a hand-rolled regex extractor instead: `src/utils/parseOgMeta.ts` (~90 lines, zero dependencies). See the "Internal utilities" table below for trade-offs.

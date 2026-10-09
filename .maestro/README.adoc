@@ -33,7 +33,8 @@ on their own).
   hunt/                flow-NNN  geo-cache discover/detail/publish/found + captures
   map/                 flow-NNN  render, permission-denied, nearby merchants
   market/              flow-NNN  grid, product detail, reviews/comments tabs
-  messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode
+  messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode,
+                       protocol picker (124), Marmot/MLS (125–130, via scripts/marmot-e2e.sh)
   payments/            flow-NNN  send/receive/pay/transfer/swap/amount entry
   profile/             flow-NNN  edit profile/picture, appearance, account drawer
   ui/                  flow-NNN  alerts, dialogs, events, NFC, explore tour, WoT

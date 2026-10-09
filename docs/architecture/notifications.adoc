@@ -184,6 +184,30 @@ This seam exists so we can:
 
 — all without an audit pass through every trigger site.
 
+== Marmot messages and MIP-05 push
+
+Marmot (MLS) messages raise the same local notifications as NIP-17 ones, but
+only while the app is running and its Marmot session is up
+(`useMarmotDmInbound` / `useMarmotGroups` → `fireMessageNotification`). The
+background detect-and-ping worker and the Android background message watch
+subscribe to gift wraps (kind 1059), not to kind-445 group events, so a
+Marmot message that arrives while the app is closed raises no alert.
+
+Marmot's own push scheme (MIP-05) is implemented on the *send* side only:
+when we message a group, `marmotPushNotifier.ts` gift-wraps the other
+members' encrypted device tokens to their notification server, which wakes
+their phones (White Noise users, via White Noise's Transponder). The app
+requests no push token and sends nothing to Apple or Google itself.
+
+Receiving MIP-05 pushes would need a Lightning Piggy notification server
+holding the app's APNs / FCM credentials, plus app-side registration (a
+native token, encrypted to that server and gossiped in each group). A server
+is deployed on `black-panther` (`npub1v5lrt4u7vhfnmxwk6c3uepcsrvs4jqyy3z3jrfm5kw73yp0wv2ts5pnwjs`)
+but its credentials are pending and the app side is not built. Doing it
+would revisit "Why no FCM" above: FCM delivery still needs Google Play
+Services on Android, so de-Googled devices would keep relying on local
+notifications. See `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
+
 == Status (as of the foundation PR)
 
 Landed:

@@ -164,9 +164,17 @@ This section documents where decrypted Nostr message content lives on disk and w
 | **Retired.** One-time migrations (#848 `dmStoreMigrationRunner`, #850 `dmBlobMigration`) import each cache into the encrypted DB, then delete it with verification (populate → delete → verify → flag; the flag is never set while plaintext survives). Pre-#288 unsuffixed remnants are deleted too.
 | n/a after migration — nothing writes these keys any more
 
-| Group-chat plaintext (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`)
+| Marmot (MLS) 1:1 plaintext
+| `dm_messages` rows with `protocol = 'marmot'`, same table as above
+| Same SQLCipher protection as other 1:1 DMs.
+
+| Marmot (MLS) state — group secrets, key-package private keys, each group's decrypted message history, photo file keys, MIP-05 push records
+| `marmot_kv` table in `lightningpiggy.db`, keyed by owner (see `DATA_STORAGE.adoc` → "Marmot (MLS) state")
+| Same SQLCipher protection. Deleted per account on sign-out (`deleteMarmotStateForOwner`).
+
+| Group-chat plaintext (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`), NIP-17 *and* Marmot groups
 | AsyncStorage (unencrypted)
-| **Known residual.** App sandbox + OS file-based encryption only. Wiped on logout/account-wipe (#944); moving it into the encrypted store is the tracked follow-up.
+| **Known residual.** App sandbox + OS file-based encryption only. Wiped on logout/account-wipe (#944); moving it into the encrypted store is the tracked follow-up. A Marmot group photo's row embeds its file keys (`#lpe=1` URL), so the residual covers those photos too.
 
 | Last-seen cursors (`*_last_seen_*`)
 | AsyncStorage
@@ -186,7 +194,14 @@ What it cannot protect against (out of scope at the app layer):
 * **Compelled or observed device unlock.** After first unlock the keystore will serve the DB key to the app; an adversary who can compel the passcode (or seize the phone unlocked and keep it powered) operates as the user. Raising this bar needs an *app-level* lock that gates the DB-key read behind a separate credential/biometric, plus optionally a panic-wipe — tracked as follow-ups, deliberately not bundled into the storage migration.
 * **Rooted device with the app running.** Decrypted rows transit RAM while rendered.
 * **Group-chat residual.** Until group messages get the same treatment, `group_messages_*` is readable from an unlocked seized device.
-* **Relay-side copies.** At-rest encryption protects the device only; NIP-17 wraps remain on relays and are re-fetchable by anyone holding the nsec.
+* **Relay-side copies.** At-rest encryption protects the device only; NIP-17 wraps remain on relays and are re-fetchable by anyone holding the nsec. Marmot kind-445 events also stay on relays, but the nsec alone can't decrypt them — that needs the MLS group state in `marmot_kv` (and MLS forward secrecy means even that can't read epochs it has already deleted).
+
+==== What servers see: Marmot messaging
+
+* **Nostr relays** see kind-445 group events signed by per-message ephemeral keys and tagged with the group's Nostr id (`h`), so they can link events of one group but not see members, content or the sender. Key packages (kind 30443) are public and signed by the account. Welcomes and push triggers are NIP-59 gift wraps, which show only the recipient.
+* **Blossom servers** store photo ciphertext and its hash. The key is derived from the group's MLS epoch secret and never leaves the group; uploads are `application/octet-stream`, and when the user's servers refuse that they go to the fallback servers in `ENCRYPTED_BLOB_FALLBACK_SERVERS`.
+* **Notification servers (MIP-05)** — e.g. White Noise's Transponder for White Noise users — receive kind-446 triggers we gift-wrap after a message: they decrypt the device tokens inside and learn *that* those devices should be woken, and when. They never see the message, the group or the sender. We never see anyone's device token; we only hold the encrypted ones members gossip in the group.
+* **Apple / Google (APNs / FCM)** deliver a content-free push, so they see push timing to a device only. (Lightning Piggy itself doesn't register for Marmot pushes yet.)
 
 ==== Rules for new code
 

@@ -170,6 +170,62 @@ folder deep by feature area — lives in `.maestro/README.adoc`):
 
 |===
 
+==== Marmot (MLS) E2E: flows 124–130 + the peer bot
+
+The Marmot flows under `.maestro/messaging/` need a second Marmot client on
+the other end. `scripts/marmot-peer-bot.mjs` is that client: a Node script on
+`marmot-ts` (with its own WebCrypto provider, so it also cross-checks the
+app's pure-JS Hermes crypto over the wire) that signs in as a Piggy fixture,
+publishes a key package, joins any Welcome it receives and answers every
+message with `pong: <text>`. It logs what it decrypted (`RECV kind=…`,
+`MEDIA OK v=encrypted-media-v2 …`), which is how a run proves content went
+over MLS rather than NIP-17. Its MLS state persists per identity in
+`~/.cache/lp-marmot-bot/<pubkey>/`, so it stays a member of groups it joined
+in earlier runs.
+
+[cols="1,3",options="header"]
+|===
+| Bot env var | Effect
+
+| `MAESTRO_NSEC_BOT` | Required: the fixture to run as (e.g. `$MAESTRO_NSEC_LITTLE`).
+| `BOT_INITIATE_TO` / `BOT_INITIATE_TEXT` | Start a White Noise-shaped DM to that hex pubkey (if none exists) and send the text.
+| `BOT_SEND_PHOTO` (+ `BOT_PHOTO_CAPTION`) | With `BOT_INITIATE_TO`: send that image file the White Noise way (kind 9 + `imeta`, encrypted-media-v2).
+| `BOT_RESET=1` | Forget the bot's MLS state first (as if reinstalled), e.g. to force a fresh invite.
+| `BOT_MINUTES` | How long to stay up (default 15).
+| `BOT_DEBUG=1` | Also log every kind-445 event seen.
+|===
+
+`scripts/marmot-e2e.sh` runs the flows end to end: it starts and stops the
+bot(s) per flow, runs Maestro against the LP emulator signed in as Big
+Piggy, and asserts the bots' logs. Each run tags its messages with a unique
+`RUN_TAG`, so a flow can't pass on bubbles left by an earlier run.
+
+[source,bash]
+----
+bash scripts/marmot-e2e.sh            # 125 126 127 128 129 130
+bash scripts/marmot-e2e.sh 127 129    # a subset
+----
+
+Needs `.env` with `MAESTRO_NSEC_{BIG,LITTLE,MIDDLE}`, Big following Little
+and Middle, Maestro on `PATH`, ImageMagick (`convert`, for flow 130) and
+`DEVICE` (default `emulator-5554`).
+
+[cols="1,3",options="header"]
+|===
+| Flow | Coverage
+
+| `flow-124-dm-protocol-picker` | Picker offers NIP-17 / Marmot (Alpha) / NIP-04; sends one NIP-04 DM into its own thread. No bot needed.
+| `flow-125-marmot-dm` | First Marmot DM to Little: creates the 1:1 MLS group and invites the bot.
+| `flow-126-marmot-group` | Creates a named Marmot group with Little; the row carries the Marmot pill.
+| `flow-127-marmot-dm-message-types` | Contact, location, GIF, poll (kind 1068), photo (MIP-04 v2) and invoice over Marmot; the runner asserts each inner kind in the bot log.
+| `flow-128-marmot-three-pigs-group` | Big, Little and Middle (two bots) in one group; rename, then remove Middle, who must stop receiving.
+| `flow-129-marmot-receive-invite` | The bot (as Middle) invites Big; Big auto-joins from the Welcome and replies over MLS.
+| `flow-130-marmot-photos` | Photos both ways: the bot's White Noise-format photo renders; ours is decrypted by the bot.
+|===
+
+Run flows 127 and 130 after 125 (they reuse its DM). The flows only ever
+message Piggy fixtures.
+
 ==== Writing Tests
 
 IMPORTANT: Never use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests. Coordinates are fragile and break across screen sizes, devices, and OS versions.

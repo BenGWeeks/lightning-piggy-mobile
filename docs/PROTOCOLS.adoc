@@ -6,7 +6,7 @@ This page documents which Nostr Improvement Proposals (NIPs) Lightning Piggy Mob
 
 ==== Summary
 
-Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **only** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients but are **never sent**. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor).
+Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **default** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients; one is only sent when the user explicitly picks NIP-04 in a thread's protocol picker. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor). **Marmot** (MLS over Nostr, Alpha) is a third, opt-in transport for 1:1 and group chats — see <<marmot-protocol>>.
 
 [cols="1,1,1,3", options="header"]
 |===
@@ -81,18 +81,42 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
 
+[[marmot-protocol]]
 === Marmot (MLS over Nostr) — Alpha
 
-A third DM/group transport, wire-compatible with White Noise; full design in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging — Alpha".
+A third DM/group transport, wire-compatible with White Noise; full design in `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging — Alpha". The library is `@internet-privacy/marmot-ts`, pinned to a build of upstream PR #83 (encrypted media v2).
 
 [cols="1,3",options="header"]
 |===
 | Kind | Use
-| 30443 | Key package (addressable; `d` = random 32-byte hex slot per device), published to the NIP-65 write relays.
-| 444 | Welcome (group invite), NIP-59 gift-wrapped to the invitee's kind-10050 inbox — unwrapped by the NIP-17 inbox path and routed by `marmotWelcomeRouter`.
+
+| 30443 | Key package (addressable; `d` = a random 32-byte hex slot per account per device, `client` = `Lightning Piggy`), published to the NIP-65 write relays. Advertises the `0x800b` encrypted-media-v2 component, which White Noise requires.
+| 450 (local-only) | Account-identity proof embedded in each MLS leaf, binding the leaf's signature key to the Nostr account. Signed by the account key alongside every key package; never published.
+| 444 | Welcome (group invite), NIP-59 gift-wrapped to the invitee's kind-10050 inbox — unwrapped by the NIP-17 inbox path (follow gate applies) and routed by `marmotWelcomeRouter`.
 | 445 | Group event (MLS commits + application messages), `h`-tagged with the Nostr group id; signed by per-message ephemeral keys.
-| 9 (inner) | Chat text inside MLS. Every other inner kind (15 files, 1068/1018 polls, 16/17 orders, NWC shares) is the same rumor NIP-17 carries.
+| 1059 → 446 | MIP-05 push trigger: a kind-446 rumor (concatenated encrypted device tokens, `["v","marmot-push-v1"]`) gift-wrapped to a notification server. Send side only.
+| 9 (inner) | Chat text. With an `imeta` tag, a MIP-04 photo. A GIF is the GIPHY URL plus a `via GIPHY` line.
+| 7 / 5 (inner) | Reaction (`content` = emoji, `e` = message id) and its retraction (`e` = reaction id), in 1:1 Marmot threads.
+| 447 / 448 / 449 (inner) | MIP-05 push-token update / list / removal, gossiped by group members. Kept as push state, never shown.
+| 451 (local-only) | MIP-05 owner proof that each push record's signature covers. Never published.
+| Other inner kinds | 15 (voice notes / files), 1068 (polls), 16/17 (orders), NWC shares: the same rumor NIP-17 carries, unchanged.
 |===
+
+Inner events are unsigned rumors (MLS authenticates the sender). Inner kinds that aren't messages — 5, 7, 447–449, 1009 (edit), 1200–1202, 1210, 1984, 1985, 4891 — are never stored as chat rows.
+
+==== MIP-04 encrypted media
+
+A photo is a kind-9 event with an `imeta` tag (`encrypted-media-v2`; v1 is still read). The blob on Blossom is ChaCha20-Poly1305 ciphertext; its key is derived from the MLS group's epoch secret and the `imeta` fields, so the key never travels in the message and exists only while that epoch is retained. The receiver derives one candidate key per retained epoch on arrival, stores them, and verifies both the plaintext and ciphertext SHA-256 on decrypt. Only a public-https Blossom URL that commits to the ciphertext hash is fetched. Ciphertext is uploaded as `application/octet-stream`, with fallback servers for Blossom hosts that refuse it (HTTP 415).
+
+==== MIP-05 push notifications (send side)
+
+Members publish encrypted native push tokens inside the group (447/448, removals 449; ≤32 entries, `v` = `marmot-push-v1`). Each entry is checked against its owner's kind-451 signature and ordered per (member, leaf, platform, server) by `(owner_ts, SHA-256(SignedRecord))`, with removal tombstones. After sending a kind 9 or 1068, the app gift-wraps the other members' tokens (≤19 per wrap) as kind-446 triggers to each token's notification server, published only to the records' relay hints or the server's own kind-10050 inbox. The server decrypts the token and sends a content-free push. Lightning Piggy doesn't yet publish tokens of its own, so it can't receive Marmot pushes (that needs a Lightning Piggy notification server — see `SOLUTION_DESIGN.adoc`).
+
+==== Fallback and interop
+
+* A 1:1 send to someone with no usable key package (none, expired, or a legacy MDK 0.8 one from the classic White Noise app) is re-sent over NIP-17 and the thread switches to NIP-17.
+* Key packages are read from the peer's NIP-65 write relays plus the lookup relays; the newest per `d` slot that passes the library's invite checks is used.
+* Typing indicators (ephemeral, content-free) and live-location pings (kind 20069) are not carried over MLS.
 
 === Live location: kind-20069 pings + NIP-17 markers (#206)
 
