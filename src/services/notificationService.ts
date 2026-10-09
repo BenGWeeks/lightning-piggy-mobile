@@ -54,6 +54,9 @@ import type { DmProtocol } from '../utils/dmProtocol';
 // orphans the user's per-channel mute state in system Settings.
 const CHANNEL_MESSAGES = 'messages';
 const CHANNEL_PAYMENTS = 'payments';
+// LOW importance: catch-up payments land in the shade with no sound or
+// heads-up, even if the app is backgrounded before the post fires.
+const CHANNEL_PAYMENTS_QUIET = 'payments-quiet';
 // Low-importance channel for the persistent "watching for messages"
 // foreground-service notification (#279 realtime upgrade). LOW so it
 // never buzzes or pops a banner — it's the ongoing status chip Android
@@ -205,6 +208,12 @@ async function initialiseInternal(): Promise<void> {
       name: 'Payments',
       importance: Notifications.AndroidImportance.HIGH,
       description: 'Incoming Lightning, on-chain payments, and zaps',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
+    await Notifications.setNotificationChannelAsync(CHANNEL_PAYMENTS_QUIET, {
+      name: 'Earlier payments',
+      importance: Notifications.AndroidImportance.LOW,
+      description: 'Payments that arrived while the app was closed, shown quietly',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     });
     // Importance LOW = no sound, no heads-up banner. This is the channel
@@ -371,6 +380,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // so the tap-router can reopen the right thread, which then loads the
     // actual message from the local store once the user has unlocked.
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
+    const quiet = payload.data?.quiet === true;
 
     const id = await Notifications.scheduleNotificationAsync({
       content: {
@@ -379,7 +389,10 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
         // `data` rides through to the tap handler. Always include
         // `kind` so the deep-link router can dispatch by source.
         data: { kind: payload.kind, ...(payload.data ?? {}), historyId, owner },
-        sound: 'default',
+        // Quiet is enforced natively too (not only by the foreground handler),
+        // so it holds if the app is backgrounded before the 1 s trigger fires.
+        sound: quiet ? false : 'default',
+        ...(quiet ? { interruptionLevel: 'passive' as const } : {}),
       },
       // Android: a TIME_INTERVAL trigger is the supported way to pin a
       // notification to a specific channel (`channelId` lives on the trigger,
@@ -393,7 +406,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
           ? {
               type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
               seconds: 1,
-              channelId: channelForKind(payload.kind),
+              channelId: quiet ? CHANNEL_PAYMENTS_QUIET : channelForKind(payload.kind),
             }
           : null,
     });

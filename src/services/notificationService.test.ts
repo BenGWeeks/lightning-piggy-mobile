@@ -184,6 +184,14 @@ describe('firePaymentNotification', () => {
     await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1' });
     expect(lastScheduledContent()?.data).not.toHaveProperty('quiet');
   });
+
+  it('enforces quiet natively — no sound, passive on iOS — so it holds in the background', async () => {
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1', quiet: true });
+    expect(lastScheduledContent()).toMatchObject({ sound: false, interruptionLevel: 'passive' });
+    await firePaymentNotification({ kind: 'zap', amountSats: 21, walletId: 'w1' });
+    expect(lastScheduledContent()?.sound).toBe('default');
+    expect(lastScheduledContent()).not.toHaveProperty('interruptionLevel');
+  });
 });
 
 describe('foreground presentation', () => {

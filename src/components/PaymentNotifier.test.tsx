@@ -5,7 +5,12 @@ import PaymentNotifier from './PaymentNotifier';
 import { firePaymentNotification } from '../services/notificationService';
 import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
 const mockHash = 'a'.repeat(64);
-type MockTx = { paymentHash: string; description: string; settled_at?: number };
+type MockTx = {
+  paymentHash: string;
+  description: string;
+  settled_at?: number;
+  created_at?: number;
+};
 let mockWallets: { id: string; transactions: MockTx[] }[] = [
   { id: 'w', transactions: [{ paymentHash: mockHash, description: 'test' }] },
 ];
@@ -99,4 +104,17 @@ it('posts a payment that settled hours ago quietly, and a fresh one normally', a
   render(<PaymentNotifier />);
   await waitFor(() => expect(firePaymentNotification).toHaveBeenCalledTimes(2));
   expect(jest.mocked(firePaymentNotification).mock.calls[1][0]).toMatchObject({ quiet: false });
+});
+
+it('an invoice created long ago but with no settled_at is live, not quiet', async () => {
+  const hoursAgo = Math.floor(Date.now() / 1000) - 3 * 3600;
+  mockWallets = [
+    {
+      id: 'w',
+      transactions: [{ paymentHash: mockHash, description: 'old invoice', created_at: hoursAgo }],
+    },
+  ];
+  render(<PaymentNotifier />);
+  await waitFor(() => expect(firePaymentNotification).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(firePaymentNotification).mock.calls[0][0]).toMatchObject({ quiet: false });
 });

@@ -32,7 +32,7 @@ import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
 import { hydrateWalletReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
-import type { IncomingPaymentSource } from './incomingPaymentSource';
+import type { IncomingPayment } from './incomingPayment';
 import {
   CardTheme,
   WalletMetadata,
@@ -55,30 +55,7 @@ perfLog('WalletContext module-eval');
 let __walletProviderFirstRenderLogged = false;
 let __walletProviderHydratedLogged = false;
 
-export interface IncomingPayment {
-  walletId: string;
-  amountSats: number;
-  // Timestamp; also serves as a stable React key for the overlay so a
-  // second payment with the same amount to the same wallet still
-  // re-mounts the animation.
-  at: number;
-  // The settled invoice's payment hash. Set on both detection paths now —
-  // expectPayment (by lookup) and the transaction-list detector (by tx
-  // identity). Kept nullable for backward-compat.
-  paymentHash: string | null;
-  // Which rail delivered this credit. Lets the overlay surface a
-  // small visual distinction (#134) — on-chain receives include a
-  // mempool/confirmation hint subtitle so users know an unconfirmed
-  // tx isn't yet final, while lightning lands instantly settled.
-  // Shared `IncomingPaymentSource` union (not an inline literal) so the
-  // event and the overlay's `ReceiveSource` prop can't drift as new
-  // rails are added.
-  source: IncomingPaymentSource;
-  // True when the receipt was found in an already-current transaction list, so
-  // the post-receive refresh effect can skip a redundant list_transactions
-  // round-trip (#655 review).
-  fromTxList?: boolean;
-}
+export type { IncomingPayment } from './incomingPayment';
 
 const CURRENCY_KEY = 'user_fiat_currency';
 const BTC_PRICE_CACHE_PREFIX = 'btc_price_';

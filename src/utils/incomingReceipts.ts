@@ -6,6 +6,9 @@ export interface NewReceipt {
   amountSats: number;
   /** Unix seconds the payment settled — used to pick the newest deterministically. */
   settledAt: number;
+  /** The wallet's own `settled_at`, when present — unlike `settledAt`, never
+   * falls back to the invoice's creation time, so it can judge staleness. */
+  reportedSettledAt?: number;
 }
 
 // A Lightning payment hash is 32 bytes → 64 hex chars. Some NWC backends return
@@ -42,6 +45,7 @@ export function pickNewReceipts(
       paymentHash: tx.paymentHash,
       amountSats: tx.amount,
       settledAt: tx.settled_at ?? tx.created_at ?? 0,
+      ...(tx.settled_at ? { reportedSettledAt: tx.settled_at } : {}),
     });
   }
   return fresh;

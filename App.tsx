@@ -50,6 +50,7 @@ import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
+import { isStaleReceipt } from './src/utils/incomingReceipts';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
@@ -61,6 +62,10 @@ import OfflineBanner from './src/components/OfflineBanner';
 // confetti pops no matter where the user is when a payment lands.
 function GlobalIncomingPaymentOverlay() {
   const { lastIncomingPayment, clearLastIncomingPayment } = useWalletLive();
+  // A catch-up receipt (settled well before we noticed it, e.g. found on app
+  // open) gets a quiet notification instead of a celebration.
+  const celebrate =
+    !!lastIncomingPayment && !isStaleReceipt(lastIncomingPayment.settledAt, lastIncomingPayment.at);
   // Key on the event timestamp so a second payment arriving while the
   // overlay is still visible remounts the component and re-arms the
   // confetti animation. Without this, a second `success` in a row
@@ -68,7 +73,7 @@ function GlobalIncomingPaymentOverlay() {
   return (
     <PaymentProgressOverlay
       key={lastIncomingPayment?.at ?? 'idle'}
-      state={lastIncomingPayment ? 'success' : 'hidden'}
+      state={celebrate ? 'success' : 'hidden'}
       direction="receive"
       amountSats={lastIncomingPayment?.amountSats}
       // Forwarded so the overlay can render an on-chain-specific

@@ -99,7 +99,8 @@ export default function PaymentNotifier(): null {
         amountSats,
         walletId,
         comment: zap?.comment || tx.description || undefined,
-        quiet: isStaleReceipt(tx.settled_at ?? tx.created_at, Date.now()),
+        // settled_at only: an invoice created long ago but paid just now is live.
+        quiet: isStaleReceipt(tx.settled_at, Date.now()),
       });
       return;
     }

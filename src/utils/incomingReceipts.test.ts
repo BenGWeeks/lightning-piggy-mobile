@@ -34,7 +34,7 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
   it('returns a settled incoming tx with an unseen hash', () => {
     const txns = [tx({ type: 'incoming', amount: 111, settled_at: 100, paymentHash: H1 })];
     expect(pickNewReceipts(txns, new Set())).toEqual([
-      { paymentHash: H1, amountSats: 111, settledAt: 100 },
+      { paymentHash: H1, amountSats: 111, settledAt: 100, reportedSettledAt: 100 },
     ]);
   });
 
@@ -75,7 +75,7 @@ describe('pickNewReceipts (#653 — dedup receives by payment_hash)', () => {
       tx({ type: 'incoming', amount: 222, settled_at: 200, paymentHash: H2 }),
     ];
     expect(pickNewReceipts(txns, new Set([H1]))).toEqual([
-      { paymentHash: H2, amountSats: 222, settledAt: 200 },
+      { paymentHash: H2, amountSats: 222, settledAt: 200, reportedSettledAt: 200 },
     ]);
   });
 });
@@ -166,5 +166,21 @@ describe('isStaleReceipt (catch-up payments notify quietly)', () => {
     expect(isStaleReceipt(undefined, now)).toBe(false);
     expect(isStaleReceipt(null, now)).toBe(false);
     expect(isStaleReceipt(0, now)).toBe(false);
+  });
+});
+
+describe('pickNewReceipts reportedSettledAt', () => {
+  it("carries the wallet's settled_at only — never created_at", () => {
+    const [withSettle] = pickNewReceipts(
+      [tx({ type: 'incoming', amount: 1, settled_at: 100, created_at: 50, paymentHash: H1 })],
+      new Set(),
+    );
+    expect(withSettle.reportedSettledAt).toBe(100);
+    const [noSettle] = pickNewReceipts(
+      [tx({ type: 'incoming', amount: 1, created_at: 50, settled: true, paymentHash: H1 })],
+      new Set(),
+    );
+    expect(noSettle.settledAt).toBe(50);
+    expect(noSettle.reportedSettledAt).toBeUndefined();
   });
 });
