@@ -140,7 +140,7 @@ export function useConversationReactions({
       const merged = [...prev];
       for (const r of fresh) {
         // NIP-09: only the reactor's own retraction counts.
-        if (retractionsRef.current.get(r.id)?.has(r.reactorPubkey)) continue;
+        if (retractionsRef.current.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
         if (!seen.has(r.id)) {
           merged.push(r);
           seen.add(r.id);
