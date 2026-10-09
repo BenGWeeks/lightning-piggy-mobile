@@ -4,6 +4,8 @@ import {
   settledIncomingHashes,
   isValidPaymentHash,
   shouldSeedBaseline,
+  isStaleReceipt,
+  STALE_RECEIPT_MS,
   type AnnouncedReceipt,
 } from './incomingReceipts';
 import type { WalletTransaction } from '../types/wallet';
@@ -151,4 +153,18 @@ it('announces and baselines Coinos settled rows without settlement timestamps', 
   expect(settledIncomingHashes([receipt])).toEqual(new Set([H1]));
   expect(pickNewReceipts([receipt], settledIncomingHashes([receipt]))).toEqual([]);
   expect(pickNewReceipts([{ ...receipt, settled: false }], new Set())).toEqual([]);
+});
+
+describe('isStaleReceipt (catch-up payments notify quietly)', () => {
+  const now = 1_700_000_000_000;
+  it('is fresh within the window and stale past it', () => {
+    expect(isStaleReceipt(now / 1000 - 30, now)).toBe(false);
+    expect(isStaleReceipt((now - STALE_RECEIPT_MS - 1000) / 1000, now)).toBe(true);
+    expect(isStaleReceipt(now / 1000 - 3 * 3600, now)).toBe(true);
+  });
+  it('treats a missing timestamp as fresh, so a live payment is never silenced', () => {
+    expect(isStaleReceipt(undefined, now)).toBe(false);
+    expect(isStaleReceipt(null, now)).toBe(false);
+    expect(isStaleReceipt(0, now)).toBe(false);
+  });
 });

@@ -99,3 +99,17 @@ export function settledIncomingHashes(transactions: readonly WalletTransaction[]
   }
   return hashes;
 }
+
+// A receipt that settled this long before we noticed it is "catch-up" news —
+// typically a payment that landed while the app was closed and is only found by
+// the tx-list refresh on open. It still gets a notification (drawer + in-app
+// history), just a quiet one, so opening the app isn't greeted by a heads-up
+// banner about a zap from hours ago.
+export const STALE_RECEIPT_MS = 5 * 60 * 1000;
+
+// `settledAtSec` is Unix seconds (NWC `settled_at`); a missing / zero value is
+// treated as fresh so a backend that omits it never silences a live payment.
+export function isStaleReceipt(settledAtSec: number | undefined | null, nowMs: number): boolean {
+  if (!settledAtSec || settledAtSec <= 0) return false;
+  return nowMs - settledAtSec * 1000 > STALE_RECEIPT_MS;
+}

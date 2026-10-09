@@ -3,6 +3,7 @@ import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
 import { getActivePubkey } from '../services/walletStorageService';
 import { firePaymentNotification } from '../services/notificationService';
+import { isStaleReceipt } from '../utils/incomingReceipts';
 
 /**
  * OS notification for incoming payments (#279). Mounted once at the app
@@ -11,7 +12,9 @@ import { firePaymentNotification } from '../services/notificationService';
  * with one hook, inheriting their announce-once-per-hash dedupe. Looks up
  * the settled tx to tell a NIP-57 zap (has a zap counterparty) from a plain
  * receive, and to pull a zap comment / memo for the body. Never suppressed —
- * money landing is always worth surfacing.
+ * money landing is always worth surfacing — but a payment that settled well
+ * before we noticed it (found by the refresh on app open) is posted quietly:
+ * drawer + history, no heads-up banner or sound.
  *
  * Classification waits for the settled tx: `lastIncomingPayment` can be set
  * by the expectPayment fast-path BEFORE `fetchTransactions` has populated the
@@ -96,6 +99,7 @@ export default function PaymentNotifier(): null {
         amountSats,
         walletId,
         comment: zap?.comment || tx.description || undefined,
+        quiet: isStaleReceipt(tx.settled_at ?? tx.created_at, Date.now()),
       });
       return;
     }

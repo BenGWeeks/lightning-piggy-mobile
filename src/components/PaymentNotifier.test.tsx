@@ -5,7 +5,10 @@ import PaymentNotifier from './PaymentNotifier';
 import { firePaymentNotification } from '../services/notificationService';
 import { notifyPaymentOnce } from '../services/paymentNotificationDedupe';
 const mockHash = 'a'.repeat(64);
-let mockWallets = [{ id: 'w', transactions: [{ paymentHash: mockHash, description: 'test' }] }];
+type MockTx = { paymentHash: string; description: string; settled_at?: number };
+let mockWallets: { id: string; transactions: MockTx[] }[] = [
+  { id: 'w', transactions: [{ paymentHash: mockHash, description: 'test' }] },
+];
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: () => ({ wallets: mockWallets }),
   useWalletLive: () => ({
@@ -70,4 +73,30 @@ it('a foreground alert prevents a later background duplicate', async () => {
     firePaymentNotification({ kind: 'payment', walletId: 'w', amountSats: 123 }),
   );
   expect(firePaymentNotification).toHaveBeenCalledTimes(1);
+});
+it('posts a payment that settled hours ago quietly, and a fresh one normally', async () => {
+  const hoursAgo = Math.floor(Date.now() / 1000) - 3 * 3600;
+  mockWallets = [
+    {
+      id: 'w',
+      transactions: [{ paymentHash: mockHash, description: 'old', settled_at: hoursAgo }],
+    },
+  ];
+  const { unmount } = render(<PaymentNotifier />);
+  await waitFor(() => expect(firePaymentNotification).toHaveBeenCalledTimes(1));
+  expect(jest.mocked(firePaymentNotification).mock.calls[0][0]).toMatchObject({ quiet: true });
+  unmount();
+
+  await AsyncStorage.clear();
+  mockWallets = [
+    {
+      id: 'w',
+      transactions: [
+        { paymentHash: mockHash, description: 'new', settled_at: Math.floor(Date.now() / 1000) },
+      ],
+    },
+  ];
+  render(<PaymentNotifier />);
+  await waitFor(() => expect(firePaymentNotification).toHaveBeenCalledTimes(2));
+  expect(jest.mocked(firePaymentNotification).mock.calls[1][0]).toMatchObject({ quiet: false });
 });

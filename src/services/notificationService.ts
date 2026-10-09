@@ -103,6 +103,9 @@ export interface NotificationData {
   cacheCoord?: string;
   /** Links a tray notification to its in-app history row (#1143). */
   historyId?: string;
+  /** Post without a heads-up banner or sound — drawer + history only. Read by
+   * the foreground handler; used for catch-up payments found on app open. */
+  quiet?: boolean;
   /** NIP-17 gift-wrap id of a message the background couldn't decrypt: on
    * tap, its conversation is resolved once the app has decrypted it (#1154). */
   wrapId?: string;
@@ -163,12 +166,18 @@ export async function ensureNotificationsInitialised(): Promise<void> {
 
 async function initialiseInternal(): Promise<void> {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      // A `quiet` notification still lands in the drawer, just without the
+      // heads-up banner or sound (Android: expo marks it silent, which also
+      // stops the HIGH channel from popping it).
+      const quiet = notification.request.content.data?.quiet === true;
+      return {
+        shouldShowBanner: !quiet,
+        shouldShowList: true,
+        shouldPlaySound: !quiet,
+        shouldSetBadge: false,
+      };
+    },
   });
 
   if (Platform.OS === 'android') {
@@ -620,6 +629,8 @@ export async function firePaymentNotification(opts: {
   /** Stable id of the payment (its hash, or a fallback for on-chain), so a
    * retried notification doesn't add a second history row. */
   sourceId?: string;
+  /** Catch-up payment (settled well before we noticed it): drawer only. */
+  quiet?: boolean;
 }): Promise<string | null> {
   const noun = opts.kind === 'zap' ? 'Zap' : 'Payment';
   const sats = opts.amountSats.toLocaleString();
@@ -629,7 +640,13 @@ export async function firePaymentNotification(opts: {
     kind: opts.kind,
     title: `${noun} received`,
     body,
-    data: opts.walletId ? { walletId: opts.walletId } : undefined,
+    data:
+      opts.walletId || opts.quiet
+        ? {
+            ...(opts.walletId ? { walletId: opts.walletId } : {}),
+            ...(opts.quiet ? { quiet: true } : {}),
+          }
+        : undefined,
     owner: opts.owner,
     historyKey: opts.sourceId
       ? `payment:${opts.walletId ?? ''}:${opts.sourceId.toLowerCase()}`
