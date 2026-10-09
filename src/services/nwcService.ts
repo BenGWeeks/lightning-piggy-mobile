@@ -1,4 +1,5 @@
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
+import { hydratePaymentProofs, recordPaymentProof } from './paymentProofs';
 import { NostrWebLNProvider } from '@getalby/sdk';
 import type { Nip47GetInfoResponse } from '@getalby/sdk';
 import { pinNip04IfNoInfoEvent, clearEncryptionDecision } from './nwcEncryption';
@@ -571,6 +572,18 @@ export async function payInvoice(
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
+  const result = await payInvoiceOnce(walletId, bolt11, signalOrOptions);
+  // Proof of payment: lets the tx list show this send as settled even while
+  // the wallet's own list_transactions still reports it pending.
+  recordPaymentProof(result.preimage);
+  return result;
+}
+
+async function payInvoiceOnce(
+  walletId: string,
+  bolt11: string,
+  signalOrOptions?: AbortSignal | PayInvoiceOptions,
+): Promise<{ preimage: string }> {
   const options: PayInvoiceOptions =
     signalOrOptions && 'aborted' in signalOrOptions
       ? { signal: signalOrOptions as AbortSignal }
@@ -796,6 +809,7 @@ export async function listTransactions(
 ): Promise<any[]> {
   const provider = await ensureConnected(walletId, isActive);
   if (!provider) throw new Error(`NWC wallet ${walletId} not connected — cannot list transactions`);
+  await hydratePaymentProofs(); // proofs from earlier sessions, before the list is mapped
   return listTransactionsWithRetry(
     walletId,
     provider,

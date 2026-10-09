@@ -8,6 +8,9 @@ jest.mock('../services/swapRecoveryService', () => ({
 import { mapNwcTransactions, type NwcRawTransaction } from './nwcTransactions';
 import { isTransactionSettled } from './transactionSettlement';
 import type { WalletTransaction } from '../types/wallet';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { clearPaymentProofsForTests, recordPaymentProof } from '../services/paymentProofs';
 
 const H1 = 'a'.repeat(64);
 const H2 = 'b'.repeat(64);
@@ -216,5 +219,41 @@ describe('Coinos settlement without settled_at', () => {
     const pending = mapNwcTransactions([raw({ state: 'pending', payment_hash: H1 })], []);
     const [settled] = mapNwcTransactions([raw({ state: 'settled', payment_hash: H1 })], pending);
     expect(isTransactionSettled(settled)).toBe(true);
+  });
+});
+
+describe('mapNwcTransactions — proof of payment (pending after a successful send)', () => {
+  const preimage = 'ab'.repeat(32);
+  const hash = bytesToHex(sha256(hexToBytes(preimage)));
+  const pending = (over: Record<string, unknown> = {}) => ({
+    type: 'outgoing' as const,
+    amount: 10_000,
+    state: 'pending',
+    created_at: 1_700_000_000,
+    settled_at: null,
+    payment_hash: hash,
+    ...over,
+  });
+
+  beforeEach(() => clearPaymentProofsForTests());
+
+  it('shows our own pending send as settled once we hold its preimage', () => {
+    expect(mapNwcTransactions([pending()], [])[0].settled).toBe(false);
+    recordPaymentProof(preimage);
+    const [tx] = mapNwcTransactions([pending()], []);
+    expect(tx.settled).toBe(true);
+    expect(tx.preimage).toBe(preimage);
+    expect(tx.settled_at).toBe(1_700_000_000);
+  });
+
+  it('never trusts a preimage that does not hash to the payment hash', () => {
+    recordPaymentProof('cd'.repeat(32));
+    expect(mapNwcTransactions([pending()], [])[0].settled).toBe(false);
+  });
+
+  it('leaves wallet-reported failures and incoming rows alone', () => {
+    recordPaymentProof(preimage);
+    expect(mapNwcTransactions([pending({ state: 'failed' })], [])[0].settled).toBe(false);
+    expect(mapNwcTransactions([pending({ type: 'incoming' })], [])[0].settled).toBe(false);
   });
 });
