@@ -23,6 +23,18 @@ afterEach(() => {
 });
 
 describe('useSendProgressOverlay — per-send scoping', () => {
+  it('a new send still aborts a stale send that was NOT backgrounded', () => {
+    const { result } = setup();
+    let a!: SendInvocation;
+    act(() => {
+      a = result.current.beginSend();
+    });
+    act(() => {
+      result.current.beginSend();
+    });
+    expect(a.controller.signal.aborted).toBe(true);
+  });
+
   it("a backgrounded swap A can't repaint send B's overlay", () => {
     const { result } = setup();
 
@@ -43,12 +55,13 @@ describe('useSendProgressOverlay — per-send scoping', () => {
     expect(swapRecoveryService.recoverPendingSwaps).toHaveBeenCalledTimes(1);
     expect(result.current.progressState).toBe('hidden');
 
-    // Send B starts on the reopened sheet; A is aborted but keeps its dismissal.
+    // Send B starts on the reopened sheet. A keeps running (it still has to
+    // claim its lockup) and keeps its dismissal.
     let b!: SendInvocation;
     act(() => {
       b = result.current.beginSend();
     });
-    expect(a.controller.signal.aborted).toBe(true);
+    expect(a.controller.signal.aborted).toBe(false);
     expect(a.dismissed).toBe(true);
     expect(b.dismissed).toBe(false);
     expect(result.current.progressState).toBe('sending');

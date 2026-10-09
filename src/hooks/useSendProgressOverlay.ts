@@ -56,8 +56,11 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
   const beginSend = useCallback((): SendInvocation => {
     // Abort any stale in-flight send (shouldn't happen in normal flow,
     // but guards against a cancel-then-resend race where the previous
-    // controller is still referenced).
-    currentSendRef.current?.controller.abort();
+    // controller is still referenced). Never one the user continued in the
+    // background: its dispatched swap must keep watching for the lockup and
+    // claim it — aborting would strand the funds until the next recovery pass.
+    const previous = currentSendRef.current;
+    if (previous && !previous.dismissed) previous.controller.abort();
     const send: SendInvocation = {
       controller: new AbortController(),
       dismissed: false,
