@@ -760,7 +760,31 @@ reply timeout`).
 | Encrypted uploads — Marmot photos (MIP-04) and NIP-17 kind-15 files — are opaque ciphertext sent as `application/octet-stream`, and media-only Blossom servers (including the default `blossom.primal.net` and nostr.build's free tier) refuse that type with a 415. `uploadEncryptedBlobToBlossom()` in `blossomService.ts` handles it: it tries the user's servers first, then falls back to `ENCRYPTED_BLOB_FALLBACK_SERVERS` (`blossom.divine.video`, `blossom.ditto.pub`, `cdn.hzrd149.com` — White Noise's defaults), mirroring only among those. The log line `[Blossom] encrypted upload refused by your servers; using fallbacks` confirms the path. If every fallback also fails, the error is from those servers, not the 415. Users can avoid the fallback by adding a server that accepts opaque blobs under Account → Nostr → Image servers.
 
 | Emulator dev client shows "Unable to load script" after the adb daemon restarted (e.g. `adb kill-server`, a USB re-plug, or another tool restarting adb)
-| `adb reverse` mappings live in the adb daemon and are lost when it restarts. A dev client that loads its bundle from `localhost:8081` on the device then has nothing behind that port. The LP Metro runs on host port 8090, so restore the mapping and reload: `adb -s <serial> reverse tcp:8081 tcp:8090` (device port 8081 → host port 8090), then force-stop and relaunch the app. Check what's mapped with `adb -s <serial> reverse --list`. If the app's `debug_http_host` points at `10.0.2.2:8090` instead (see the stale-bundle row above), it doesn't use `adb reverse` at all and this isn't the cause.
+| `adb reverse` mappings live in the adb daemon and are lost when it restarts. A dev client that loads its bundle from `localhost:8081` on the device then has nothing behind that port. The LP Metro runs on host port 8090, so restore the mapping and reload: `adb -s <serial> reverse tcp:8081 tcp:8090` (device port 8081 → host port 8090), then force-stop and relaunch the app. Check what's mapped with `adb -s <serial> reverse --list`. If the app's `debug_http_host` points at `10.0.2.2:8090` instead (see the stale-bundle row above), it doesn't use `adb reverse` at all and this isn't the cause. +
+*Pointing the dev client at Metro by deep link:* the dev app registers only the `lightningpiggy` scheme (there is no `exp+lightning-piggy-app` scheme), so use `adb -s <serial> shell am start -a android.intent.action.VIEW -d 'lightningpiggy://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'`.
+
+| Swap fails with "Boltz swap creation failed: … No connection established … Last error: null", yet *Test Boltz connection* on the swap server says "Connection verified"
+| Everything after `Boltz swap creation failed:` is the swap server's own error body, passed through verbatim by `boltzService.ts`. It means the Boltz backend can't reach its LND node. *Test Boltz connection* (`checkSwapBackend()` in `swapBackendService.ts`) only fetches the server's `/swap/reverse` and `/swap/submarine` pair lists, which Boltz answers without LND, so it still passes. +
+*Seen 2026-10-08* on a self-hosted server after an LND upgrade regenerated LND's TLS certificate: Boltz still held the old copy, and its logs showed `self-signed certificate` errors. *Fix (server side, nothing in the app):* copy LND's new `tls.cert` into the Boltz backend's LND config and restart Boltz. Self-hosters should re-copy the certificate after every LND upgrade.
+
+| Large swaps fail or time out on a self-hosted Boltz that shares its LND node with the LNbits wallets, while small swaps work
+| When the Boltz backend and the LNbits wallet sit on the same LND node, a swap paid from that wallet is a self-payment: it leaves through one external channel and comes back through another. LNbits' LND REST backend gives LND `timeout_seconds: 30` to complete the payment and caps its routing fee at the wallet's fee reserve (`lnbits_reserve_fee_percent`, default 1%, minimum 2 sats). A large amount with no route back that is cheap enough fails. +
+*Fixes:* rebalance or add inbound liquidity on the channels the loop uses, or give Boltz its own LND node. A shared node also needs self-payments allowed in Boltz: upstream Boltz never sets LND's `allow_self_payment`, so incoming swaps fail with `self-payments not allowed` unless the backend image is patched to pass `allowSelfPayment: true`. Re-apply the patch after every Boltz image upgrade.
+
+| On-chain send shows "Fee estimate unavailable" or "Swap fees could not be loaded. Check your connection or VPN, then retry.", and every swap fails
+| The default swap server, `api.boltz.exchange` (`DEFAULT_SWAP_BACKEND` in `swapBackendService.ts`), is no longer operating: as of 2026-10-09 the hostname doesn't resolve. Until the default changes (#1169), save a working Boltz-compatible server under Account → On-chain → *Swap server URL* → *Check and save*.
+
+| Receive shows "Couldn't generate invoice" with "This NWC connection has been retired; create a new one"
+| The second line is the wallet service's NWC error. `ReceiveSheet.tsx` shows the error message verbatim under the toast title; Lightning Piggy doesn't produce this text. The wallet has retired that connection. Create a new NWC connection in the wallet service, then in Lightning Piggy remove the wallet (wallet settings → *Remove*) and add it again with the new connection string. An NWC wallet's connection string can't be edited in place.
+
+| A Marmot message to a contact goes out as NIP-17 instead, with the toast "Sent with NIP-17 — <name> can't receive Marmot yet, so this thread now uses NIP-17"
+| The contact has no Marmot key package that this app can use. The usual cause is the classic White Noise app, which still publishes legacy MDK 0.8.x key packages that the current Marmot library can't decode. Expired key packages, or none at all, have the same effect. `marmotSend.ts` raises `MarmotUnusableKeyPackageError` or `MarmotNoKeyPackageError`. The composer then resends over NIP-17 and switches the thread to it. Nothing needs fixing in the app: Marmot works once the contact uses a current Marmot client.
+
+| A conversation shows "Unsupported message type (kind 447)" bubbles, or the Messages list previews raw JSON
+| Older builds stored every Marmot application event as a message. White Noise and Amethyst also send non-message kinds into each group, such as MIP-05 push-token updates (447–449, JSON payloads), deletes (5), reactions (7) and edits (1009). Current builds drop every kind in `MARMOT_NON_MESSAGE_KINDS` (`marmotInbox.ts`) on arrival. `useMarmotDmInbound.ts` also purges rows of those kinds that were already stored. Update the app.
+
+| Amber (or a NIP-46 signer) asks for two signatures when Marmot starts, before anything is sent
+| This is a key-package republish. On start, `ensureKeyPackage()` in `marmotSession.ts` rotates every published, unused key package that doesn't advertise encrypted media v2 (`0x800b`), because White Noise refuses to invite anyone without it. Each publication needs two signatures: a local-only kind-450 account-identity proof embedded in the MLS leaf, then the kind-30443 key package itself. Approve both. Once the package has been republished with v2, start-up no longer prompts for it. See the "Key packages" paragraph in `docs/SOLUTION_DESIGN.adoc`.
 |===
 
 
@@ -849,3 +873,67 @@ codex exec -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null
 
 (The sandbox override is the separate workaround for Codex's bubblewrap
 sandbox failing on this machine.)
+
+=== Jest in a git worktree: "Could not locate module uint8array-tools mapped as …"
+
+`jest.config.js` maps `uint8array-tools` to
+`<rootDir>/node_modules/bitcoinjs-lib/node_modules/uint8array-tools/src/cjs/index.cjs`.
+`<rootDir>` is the worktree, and a fresh worktree has no `node_modules` because
+it is git-ignored. Every suite that loads `bitcoinjs-lib` then fails with
+`Could not locate module uint8array-tools mapped as: …/<worktree>/node_modules/…`.
+To run Jest, symlink the main checkout's dependencies into the worktree, as long
+as both have the same `package-lock.json`:
+
+[source,bash]
+----
+ln -s <main-checkout>/node_modules <worktree>/node_modules
+----
+
+A symlink is fine for Jest. For a worktree that serves Metro to an emulator,
+install dependencies locally instead (see "Dynamic imports fail in an emulator
+worktree with shared dependencies" above).
+
+=== `marmotSession.test.ts` times out under heavy CPU load
+
+The group tests in `src/services/marmotSession.test.ts` run real MLS sessions
+for several members and allow 90 seconds (`90_000`). When the machine is busy
+(parallel Jest workers, an emulator, a Gradle build), they can exceed that and
+fail with a timeout. Before investigating, rerun the file on its own with
+`npx jest src/services/marmotSession.test.ts`. It passes in isolation.
+
+=== EAS preview builds don't bump `versionCode`
+
+`eas.json` sets `cli.appVersionSource: "remote"`, and only the `production`
+profile has `autoIncrement: true`. A preview build reuses the remote counter's
+current `versionCode`, so consecutive preview APKs carry the same number. Bump
+it before `eas build --profile preview`:
+
+[source,bash]
+----
+eas build:version:set --platform android --profile preview
+----
+
+The command prompts for the new value and has no non-interactive flag. From a
+script or agent shell without a TTY, run it through `script` so it gets one:
+`script -qfc "eas build:version:set --platform android --profile preview" /dev/null`.
+
+=== `pkill -f <pattern>` kills the shell that runs it
+
+`pkill -f` matches against full command lines. If the shell running it has the
+pattern in its own command line, that shell matches too. This happens with
+`bash -c '…'`, agent tool calls and `ssh host "…"`. For example,
+`bash -c 'pkill -f "expo start"; npx expo start …'` kills itself, and the rest
+of the command never runs. Look up the PID first with `pgrep -af "expo start"`,
+then `kill <pid>`. This also applies to the `pkill -f` commands in the entries
+above.
+
+=== CodeRabbit comments "Review limit reached" / "Review rate limited"
+
+CodeRabbit's review limits are per developer over a rolling one-hour window.
+On the OSS plan they are also per repository. A burst of pushes or review
+requests uses them up, and the comment then reads "You've used all free OSS
+reviews for now". Wait for the window to pass, then comment
+`@coderabbitai review` on the PR. In the meantime, get a second opinion from a
+Codex review, for example
+`codex exec -m gpt-6.1-sol -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null`
+(see the `codex exec` section above).
