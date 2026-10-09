@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, BackHandler } from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { Zap } from 'lucide-react-native';
+import { Copy, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createMessageActionsSheetStyles } from '../styles/MessageActionsSheet.styles';
 import { QUICK_REACTIONS } from '../utils/reactions';
 
 /**
@@ -60,6 +60,9 @@ interface Props {
    * yourself doesn't make product sense).
    */
   onZap?: () => void;
+  /** Copies the message's text. Undefined (row hidden) for non-text
+   *  messages — photos, polls, wallet shares. */
+  onCopyText?: () => void;
 }
 
 const MessageActionsSheet: React.FC<Props> = ({
@@ -68,10 +71,11 @@ const MessageActionsSheet: React.FC<Props> = ({
   myReactions,
   onToggleReaction,
   onZap,
+  onCopyText,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMessageActionsSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
 
   useEffect(() => {
@@ -132,6 +136,17 @@ const MessageActionsSheet: React.FC<Props> = ({
             );
           })}
         </View>
+        {onCopyText ? (
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={onCopyText}
+            accessibilityLabel={t('messageActionsSheet.copyText')}
+            testID="message-actions-copy"
+          >
+            <Copy size={18} color={colors.textHeader} />
+            <Text style={styles.copyButtonText}>{t('messageActionsSheet.copyText')}</Text>
+          </TouchableOpacity>
+        ) : null}
         {onZap ? (
           <TouchableOpacity
             style={styles.zapButton}
@@ -147,68 +162,5 @@ const MessageActionsSheet: React.FC<Props> = ({
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-    },
-    content: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 24,
-      gap: 16,
-    },
-    title: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    emojiRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    emojiButton: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      // Border keeps the button visually anchored against pink/blue
-      // backgrounds; the active state swaps the border to brandPink so
-      // "I've already reacted with this" reads at a glance.
-      borderWidth: 2,
-      borderColor: 'transparent',
-    },
-    emojiButtonActive: {
-      borderColor: colors.brandPink,
-      backgroundColor: colors.brandPink + '22',
-    },
-    emojiText: {
-      fontSize: 24,
-    },
-    zapButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 14,
-      borderRadius: 12,
-      backgroundColor: colors.brandPink,
-    },
-    zapButtonText: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.white,
-    },
-  });
 
 export default MessageActionsSheet;

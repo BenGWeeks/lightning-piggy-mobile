@@ -43,6 +43,20 @@ export function storedMarmotContent(
   return { text: textForRumor(rumor), kind: storedKindForMarmot(rumor.kind) };
 }
 
+/**
+ * Marmot application events that aren't chat messages: protocol plumbing and
+ * actions on other messages that White Noise / Amethyst send into every
+ * group — MIP-05 push tokens (447–449, JSON payloads), deletes (5),
+ * reactions (7), edits (1009), moderation (1984, 1985, 4891), agent streams
+ * (1200–1202) and group-system notices (1210). Never stored as rows, so they
+ * can't surface as "unsupported" bubbles or raw-JSON previews.
+ */
+export const MARMOT_NON_MESSAGE_KINDS: readonly number[] = [
+  5, 7, 447, 448, 449, 1009, 1200, 1201, 1202, 1210, 1984, 1985, 4891,
+];
+
+export const isMarmotMessageKind = (kind: number) => !MARMOT_NON_MESSAGE_KINDS.includes(kind);
+
 /** The Marmot wire kind for an app rumor kind — inverse of the above. */
 export function marmotKindForAppKind(kind: number): number {
   return kind === APP_TEXT_KIND ? MARMOT_CHAT_KIND : kind;
@@ -51,6 +65,7 @@ export function marmotKindForAppKind(kind: number): number {
 export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): DmMessageRow | null {
   const peer = event.group.memberPubkeys[0];
   if (!event.group.isDm || !peer) return null; // a DM whose peer hasn't joined yet
+  if (!isMarmotMessageKind(event.rumor.kind)) return null;
   const { rumor } = event;
   const me = owner.toLowerCase();
   const fromMe = rumor.pubkey.toLowerCase() === me;

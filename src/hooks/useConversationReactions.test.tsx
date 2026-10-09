@@ -172,3 +172,29 @@ describe('useConversationReactions — received kind-5 deletion', () => {
     expect(result.current.reactionsByTarget.get(TARGET)?.byEmoji['❤️']).toEqual([PEER_PK]);
   });
 });
+
+describe('useConversationReactions — copy text', () => {
+  const press = (item: Item) => {
+    const { result } = renderHook(() => useConversationReactions(makeParams()));
+    act(() => result.current.buildOnLongPress(item)?.());
+    return result.current.actionsForMessage;
+  };
+
+  it('offers plain chat text for copying', () => {
+    const item = { ...sentItem, text: 'meet at the oak tree' } as unknown as Item;
+    expect(press(item)?.copyText).toBe('meet at the oak tree');
+  });
+
+  it('never offers an encrypted file (its text embeds the key) or a structured payload', () => {
+    const photo = {
+      ...sentItem,
+      wireKind: 15,
+      text: 'https://blossom.example/abc#lpe=1&alg=aes-gcm&k=secret&n=nonce&m=image%2Fjpeg',
+    } as unknown as Item;
+    const legacyPhoto = { ...photo, wireKind: 14 } as unknown as Item;
+    const poll = { ...sentItem, wireKind: 1068, text: '{"question":"?"}' } as unknown as Item;
+    expect(press(photo)?.copyText).toBeUndefined();
+    expect(press(legacyPhoto)?.copyText).toBeUndefined();
+    expect(press(poll)?.copyText).toBeUndefined();
+  });
+});

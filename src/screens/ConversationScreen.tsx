@@ -73,6 +73,7 @@ import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
 import { Toast } from '../components/BrandedToast';
+import * as Clipboard from 'expo-clipboard';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -461,6 +462,14 @@ const ConversationScreen: React.FC = () => {
     fetchReactionDeletions: fetchReactionDeletionsForReactions,
     onZapMessage: () => setSendSheetOpen(true),
   });
+
+  const copyText = actionsForMessage?.copyText;
+  const handleCopyText = useCallback(async () => {
+    if (!copyText) return;
+    await Clipboard.setStringAsync(copyText);
+    Toast.show({ type: 'success', text1: t('messageActionsSheet.copied') });
+    closeMessageActions();
+  }, [copyText, t, closeMessageActions]);
 
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
@@ -910,6 +919,7 @@ const ConversationScreen: React.FC = () => {
             ? handleZapMessage
             : undefined
         }
+        onCopyText={copyText ? handleCopyText : undefined}
       />
       <ContactProfileSheet
         visible={profileSheetVisible}

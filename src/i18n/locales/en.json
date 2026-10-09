@@ -1141,7 +1141,9 @@
     "zapMessage": "Zap this message",
     "zapMessageA11y": "Send a zap for this message",
     "reactionFailedTitle": "Reaction failed",
-    "reactionFailedBody": "Could not publish your reaction. Check your relays and try again."
+    "reactionFailedBody": "Could not publish your reaction. Check your relays and try again.",
+    "copyText": "Copy text",
+    "copied": "Copied"
   },
   "messageBubble": {
     "imageSent": "Image sent",

@@ -453,6 +453,21 @@ export async function hasStoredWraps(owner: string): Promise<boolean> {
 }
 
 /**
+ * Delete `owner`'s Marmot rows of the given inner kinds — clears non-message
+ * events (push tokens, reactions, …) stored before they were filtered out.
+ */
+export async function deleteMarmotRowsOfKinds(owner: string, kinds: readonly number[]) {
+  if (kinds.length === 0) return;
+  const db = await getLocalDb();
+  await db.execute(
+    `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND wire_kind IN (${kinds
+      .map(() => '?')
+      .join(', ')});`,
+    [owner, ...kinds],
+  );
+}
+
+/**
  * Delete every row belonging to `owner` — the per-account half of the logout
  * wipe (#848). When the LAST identity signs out, NostrContext additionally
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
-import { marmotRumorToGroupMessage, storedMarmotContent } from '../services/marmotInbox';
+import {
+  isMarmotMessageKind,
+  marmotRumorToGroupMessage,
+  storedMarmotContent,
+} from '../services/marmotInbox';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { requireMarmotSession } from '../services/marmotSend';
 import {
@@ -86,6 +90,7 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
 
     const onMessage = (event: MarmotMessageEvent) => {
       if (event.group.isDm) return; // useMarmotDmInbound owns these
+      if (!isMarmotMessageKind(event.rumor.kind)) return; // plumbing, not a message
       pending.push(event);
       if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
       const { rumor, group } = event;

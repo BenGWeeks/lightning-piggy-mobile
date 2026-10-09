@@ -39,6 +39,17 @@ describe('marmotInbox', () => {
     expect(storedKindForMarmot(15)).toBe(15);
   });
 
+  it('never stores protocol plumbing (push tokens, reactions, edits…) as a message', () => {
+    // Amethyst / White Noise send MIP-05 push-token lists (kind 448, JSON
+    // content) into every group — they surfaced as "Unsupported (kind 448)"
+    // bubbles with a raw-JSON inbox preview.
+    for (const kind of [448, 447, 449, 7, 5, 1009, 1210]) {
+      expect(
+        marmotRumorToDmRow(ME, { group: dm, rumor: rumor({ kind, content: '{"t":1}' }) }),
+      ).toBeNull();
+    }
+  });
+
   it('ignores multi-member groups and DMs whose peer has not joined yet', () => {
     const group = { ...dm, isDm: false, memberPubkeys: [PEER, 'c'.repeat(64)] };
     expect(marmotRumorToDmRow(ME, { group, rumor: rumor() })).toBeNull();

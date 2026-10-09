@@ -61,6 +61,10 @@ interface ActionedMessage {
   fromMe: boolean;
   // kind-14 (NIP-17 chat) or kind-4 (NIP-04 DM); goes in the kind-7 `k` tag.
   targetKind: 14 | 4;
+  // The message's text when it's plain chat text (incl. links / invoices) —
+  // offered as "Copy text". Never set for encrypted files (their stored text
+  // embeds the decryption key) or structured payloads (polls, wallet shares).
+  copyText?: string;
 }
 
 export interface UseConversationReactionsResult {
@@ -331,7 +335,21 @@ export function useConversationReactions({
       const authorPubkey = item.fromMe ? myPubkey : peerPubkey;
       if (!authorPubkey) return null;
       const targetKind: 14 | 4 = item.kind === 'message' && item.wireKind === 4 ? 4 : 14;
-      return { targetId, authorPubkey, fromMe: item.fromMe, targetKind };
+      const text = item.kind === 'message' ? (item.text ?? '') : '';
+      const copyText =
+        item.kind === 'message' &&
+        (item.wireKind === undefined || item.wireKind === 4 || item.wireKind === 14) &&
+        !text.includes('#lpe=1') &&
+        text.trim() !== ''
+          ? text
+          : undefined;
+      return {
+        targetId,
+        authorPubkey,
+        fromMe: item.fromMe,
+        targetKind,
+        ...(copyText ? { copyText } : {}),
+      };
     },
     [myPubkey, peerPubkey],
   );

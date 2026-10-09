@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type React from 'react';
 
-import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
-import { marmotRumorToDmRow } from '../services/marmotInbox';
+import { deleteMarmotRowsOfKinds, upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -26,6 +26,8 @@ export function useMarmotDmInbound(
 ): void {
   useEffect(() => {
     if (!pubkey) return;
+    // Builds before the filter stored push-token / reaction events as rows.
+    void deleteMarmotRowsOfKinds(pubkey, MARMOT_NON_MESSAGE_KINDS).catch(() => undefined);
     const openedAtSec = Math.floor(Date.now() / 1000);
     let rows: DmMessageRow[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
