@@ -1530,7 +1530,11 @@
     "dismiss": "Cerrar",
     "ok": "OK",
     "cancelPaymentA11y": "Cancelar pago",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "swapStageCreating": "Creando el intercambio Boltz…",
+    "swapStagePaying": "Pagando la factura Lightning — esperando a que Boltz bloquee los fondos en cadena…",
+    "swapStageClaiming": "Boltz bloqueó los fondos en cadena — reclamándolos a tu dirección…",
+    "swapNotPaid": "No se envió nada: el pago Lightning a Boltz no se completó, así que ningún sat salió de tu billetera. Puedes intentarlo de nuevo."
   },
   "placeDetailScreen": {
     "notInCache": "Este lugar ya no está en nuestra lista en caché — intenta abrirlo desde el mapa.",

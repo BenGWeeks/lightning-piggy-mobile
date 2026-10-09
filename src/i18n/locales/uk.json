@@ -1502,7 +1502,11 @@
     "dismiss": "Закрити",
     "ok": "OK",
     "cancelPaymentA11y": "Скасувати платіж",
-    "cancel": "Скасувати"
+    "cancel": "Скасувати",
+    "swapStageCreating": "Створення обміну Boltz…",
+    "swapStagePaying": "Оплата рахунку Lightning — чекаємо, доки Boltz заблокує кошти on-chain…",
+    "swapStageClaiming": "Boltz заблокував кошти on-chain — отримуємо їх на вашу адресу…",
+    "swapNotPaid": "Нічого не надіслано: платіж Lightning до Boltz не пройшов, тож жоден sat не покинув ваш гаманець. Можна спробувати ще раз."
   },
   "placeDetailScreen": {
     "notInCache": "Цього місця більше немає в нашому кешованому списку — спробуйте відкрити його з мапи.",

@@ -1530,7 +1530,11 @@
     "dismiss": "Dismiss",
     "ok": "OK",
     "cancelPaymentA11y": "Cancel payment",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "swapStageCreating": "Creating Boltz swap…",
+    "swapStagePaying": "Paying the Lightning invoice — waiting for Boltz to lock up on-chain…",
+    "swapStageClaiming": "Boltz locked the funds on-chain — claiming them to your address…",
+    "swapNotPaid": "Nothing was sent — the Lightning payment to Boltz didn't go through, so no sats left your wallet. You can try again."
   },
   "placeDetailScreen": {
     "notInCache": "This place isn't in our cached list anymore — try opening it from the map.",

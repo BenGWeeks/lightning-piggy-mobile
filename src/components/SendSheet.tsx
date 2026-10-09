@@ -40,8 +40,9 @@ import { executeReverseSwap, isSwapSettlingError } from '../utils/reverseSwapSen
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
-import * as swapRecoveryService from '../services/swapRecoveryService';
-import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
+import PaymentProgressOverlay from './PaymentProgressOverlay';
+import { useSendProgressOverlay } from '../hooks/useSendProgressOverlay';
+import { isReverseSwapNotPaid } from '../utils/swapHandoff';
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
@@ -141,21 +142,24 @@ const SendSheet: React.FC<Props> = ({
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
-  const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
-  const [progressError, setProgressError] = useState<string | undefined>(undefined);
-  // Whether the in-flight send is a Boltz reverse swap (Lightning → on-chain).
-  // Drives the swap-aware "Boltz swap in progress" overlay copy vs the generic
-  // "Still in flight" used for a plain Lightning send that's slow to confirm.
-  const [inFlightIsSwap, setInFlightIsSwap] = useState(false);
+  const {
+    progressState,
+    progressError,
+    inFlightIsSwap,
+    setInFlightIsSwap,
+    swapStage,
+    canContinueInBackground,
+    beginSend,
+    endSend,
+    ownsOverlay,
+    showOutcome,
+    callbacksFor,
+    handleCancelPayment,
+    handleOverlayDismiss,
+  } = useSendProgressOverlay({ onClose, setSending });
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  // Per-send AbortController so the Cancel button on PaymentProgressOverlay
-  // can abort the NWC call's publish → reply-timeout → poll-for-preimage
-  // chain without waiting ~5 minutes for it to give up on its own (#175).
-  const paymentAbortRef = useRef<AbortController | null>(null);
-  const dismissedInFlightRef = useRef(false);
   // Bumped on every open, close and new target; see the deferred initialAddress prefill.
   const openSessionRef = useRef(0);
-  const reversePaymentDispatchedRef = useRef(false);
 
   // Programmatic value changes for the uncontrolled paste/memo fields go through
   // these helpers, which bump the remount key so the input picks up the new
@@ -389,19 +393,12 @@ const SendSheet: React.FC<Props> = ({
       });
       if (!confirmed) return;
     }
-    // Abort any stale in-flight send (shouldn't happen in normal flow,
-    // but guards against a cancel-then-resend race where the previous
-    // controller is still referenced).
-    paymentAbortRef.current?.abort();
-    const abortController = new AbortController();
-    paymentAbortRef.current = abortController;
-    const signal = abortController.signal;
+    // Every async overlay update below is scoped to THIS send: once it is
+    // superseded or continued in the background it must not repaint.
+    const send = beginSend();
+    const { signal } = send.controller;
+    const { onReplyTimeout } = callbacksFor(send);
     setSending(true);
-    setProgressError(undefined);
-    setProgressState('sending');
-    setInFlightIsSwap(false);
-    dismissedInFlightRef.current = false;
-    reversePaymentDispatchedRef.current = false;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -431,10 +428,7 @@ const SendSheet: React.FC<Props> = ({
             approvedQuote: boltzFees,
             signal,
             payInvoice: payInvoiceForWallet,
-            onReplyTimeout: handleReplyTimeout,
-            onPaymentDispatched: () => {
-              reversePaymentDispatchedRef.current = true;
-            },
+            ...callbacksFor(send),
           });
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
@@ -500,7 +494,7 @@ const SendSheet: React.FC<Props> = ({
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
         await payInvoiceForWallet(walletId!, bolt11, {
           signal,
-          onReplyTimeout: handleReplyTimeout,
+          onReplyTimeout,
         });
 
         if (__DEV__)
@@ -585,7 +579,7 @@ const SendSheet: React.FC<Props> = ({
         }
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
-          onReplyTimeout: handleReplyTimeout,
+          onReplyTimeout,
           amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
@@ -618,16 +612,13 @@ const SendSheet: React.FC<Props> = ({
         });
       }
       if (signal.aborted) return;
-      if (dismissedInFlightRef.current) return;
-      setProgressState('success');
+      showOutcome(send, 'success');
     } catch (error) {
       // Reply-timeout (ambiguous pay outcome) and a post-commit reverse-swap
       // settling error both mean "the money may have moved; it'll settle" —
       // surface "Still in flight", never "Payment failed" (#891).
       if (isReplyTimeoutError(error) || isSwapSettlingError(error)) {
-        if (dismissedInFlightRef.current) return;
-        setProgressError(undefined);
-        setProgressState('in-flight-extended');
+        showOutcome(send, 'in-flight-extended');
         return;
       }
       // User-initiated cancel via PaymentProgressOverlay's Cancel button:
@@ -641,26 +632,38 @@ const SendSheet: React.FC<Props> = ({
       // the payment may have settled. Surface "Connection lost" with a
       // check-before-retry warning instead of "Payment failed" (#648).
       if (isConnectionError(error)) {
-        if (dismissedInFlightRef.current) return;
-        setProgressError(undefined);
-        setProgressState('connection-lost');
+        showOutcome(send, 'connection-lost');
         return;
       }
       // Stale reverse-swap quote: nothing was created or paid. Show the
       // server's refreshed fee; the form keeps the amount and the user must
       // review it and tap Send again.
       const quoteChanged = boltzService.isQuoteChangedError(error) ? error.quote : null;
-      if (quoteChanged) setBoltzFees(quoteChanged);
-      if (dismissedInFlightRef.current) return;
+      // A reverse swap whose Lightning payment provably never settled — the
+      // wallet rejected it, or Boltz's own status wrote the swap off (#1167).
+      const swapNotPaid = isReverseSwapNotPaid(error);
+      if (!ownsOverlay(send)) {
+        // Continued in background: the overlay is gone, so say it here.
+        if (send.dismissed && swapNotPaid) {
+          Toast.show({
+            type: 'error',
+            text1: t('paymentProgressOverlay.failedTitle'),
+            text2: t('paymentProgressOverlay.swapNotPaid'),
+          });
+        }
+        return;
+      }
       const message = quoteChanged
         ? t('sendSheet.quoteChanged', {
             fee: boltzService.calculateSwapFee(currentSats, quoteChanged).toLocaleString(),
           })
-        : error instanceof Error
-          ? error.message
-          : t('sendSheet.paymentFailed');
-      setProgressError(message);
-      setProgressState('error');
+        : swapNotPaid
+          ? t('paymentProgressOverlay.swapNotPaid')
+          : error instanceof Error
+            ? error.message
+            : t('sendSheet.paymentFailed');
+      if (quoteChanged) setBoltzFees(quoteChanged);
+      showOutcome(send, 'error', message);
     } finally {
       // Only clear state if this invocation is still the active one.
       // A cancel-then-resend can leave the first (aborted) handleSend
@@ -668,60 +671,9 @@ const SendSheet: React.FC<Props> = ({
       // swapped in a new controller — clearing unconditionally here
       // would stomp that new send's state (re-enable Send button,
       // allow a double-tap). See Copilot review on #185.
-      if (paymentAbortRef.current === abortController) {
-        paymentAbortRef.current = null;
-        setSending(false);
-      }
+      if (endSend(send)) setSending(false);
     }
   };
-
-  const handleReplyTimeout = useCallback(() => {
-    setProgressError(undefined);
-    setProgressState((prev) => (prev === 'sending' ? 'in-flight-extended' : prev));
-  }, []);
-
-  const handleCancelPayment = useCallback(() => {
-    // Cancelling a reply cannot recall an already dispatched hold invoice.
-    // Keep the in-flight warning visible until the user chooses background recovery.
-    paymentAbortRef.current?.abort();
-    setProgressState(reversePaymentDispatchedRef.current ? 'in-flight-extended' : 'hidden');
-    setProgressError(undefined);
-    setSending(false);
-  }, []);
-
-  // Track progressState in a ref so handleOverlayDismiss doesn't recapture
-  // it on every state flip. Without this, the `sending` → `success`
-  // transition rebuilds the callback, but Android's touch system can still
-  // fire the previously-cached handler reference for an in-flight tap —
-  // that stale closure reads `wasSuccess === false`, hides the overlay,
-  // and never calls onClose. See #210.
-  const progressStateRef = useRef(progressState);
-  // Sync during render (not in a useEffect) so the ref is always current before any tap can fire. A useEffect runs after commit/paint, leaving a window where the OK button is visible but the ref still holds the previous value — which is exactly the race the second-round Copilot review on #210 flagged.
-  progressStateRef.current = progressState;
-
-  const handleOverlayDismiss = useCallback(() => {
-    // Dismissing the overlay after a successful payment also closes the
-    // parent sheet. On error we only dismiss the overlay so the user can
-    // retry from the filled-in form.
-    const prevState = progressStateRef.current;
-    const shouldCloseParent = prevState === 'success' || prevState === 'in-flight-extended';
-    if (prevState === 'in-flight-extended') {
-      dismissedInFlightRef.current = true;
-      // "Continue in background" on an in-flight swap: kick a recovery pass so
-      // the claim is retried now rather than waiting for the next app launch.
-      // Safe no-op (single-flight guarded) if the lockup isn't claimable yet —
-      // pull-to-refresh / next foreground will retry.
-      swapRecoveryService.recoverPendingSwaps().catch((e) => {
-        console.warn('[Send] continue-in-background swap recovery failed:', e);
-      });
-    }
-    setProgressState('hidden');
-    setProgressError(undefined);
-    // Defer the parent close so the overlay's hidden state renders first;
-    // otherwise on a slow JS thread the parent sheet can tear down the
-    // overlay component before the state update completes (#210).
-    if (shouldCloseParent) setTimeout(() => onClose(), 0);
-  }, [onClose]);
 
   const handleReset = () => {
     setInvoiceData(null);
@@ -1048,6 +1000,8 @@ const SendSheet: React.FC<Props> = ({
         onDismiss={handleOverlayDismiss}
         onCancel={handleCancelPayment}
         inFlightIsSwap={inFlightIsSwap}
+        swapStage={swapStage}
+        canContinueInBackground={canContinueInBackground}
       />
     </>
   );
