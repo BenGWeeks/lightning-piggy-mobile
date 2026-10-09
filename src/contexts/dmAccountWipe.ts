@@ -11,6 +11,7 @@ import {
 } from './nostrDmCache';
 import { forgetDmStoreMigration, pendingDmStoreMigration } from './dmStoreMigrationRunner';
 import { deleteMarmotStateForOwner } from '../services/marmotStore';
+import { quiesceMarmotSession } from '../services/marmotSession';
 
 /**
  * Per-account DM-store wipe, called from NostrContext's `wipeAccountCaches`
@@ -63,6 +64,8 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   // Independent of the DM rows: this account's Marmot MLS state (group
   // secrets, key-package private keys) must go even if the row wipe failed.
   try {
+    // A stopped session's queued push-state writes must not land after this.
+    await quiesceMarmotSession(pubkey);
     await deleteMarmotStateForOwner(pubkey);
   } catch (e) {
     if (__DEV__) console.warn('[Marmot] per-owner state wipe failed:', e);

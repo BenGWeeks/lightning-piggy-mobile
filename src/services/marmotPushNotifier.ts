@@ -33,6 +33,10 @@ export class MarmotPushNotifier {
   // can't select from a state an earlier event is still updating, and a cold
   // load can't overwrite a newer cached state.
   private readonly chains = new Map<string, Promise<unknown>>();
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  // Set on session teardown: no more writes (a wipe must not be undone by a
+  // late ingest) and no more publishes.
+  private stopped = false;
 
   constructor(
     private readonly deps: {
@@ -80,13 +84,29 @@ export class MarmotPushNotifier {
    * later macrotask and yielding between wraps, so it never delays the send.
    */
   trigger(group: PushGroup): void {
-    setTimeout(() => {
+    if (this.stopped) return;
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      if (this.stopped) return;
       void this.serial(group.idHex, async () =>
         selectTriggerTargets(await this.load(group.idHex), this.deps.pubkey, group.leaves),
       )
         .then((targets) => this.publish(targets))
         .catch(() => undefined);
     }, 0);
+    this.timers.add(timer);
+  }
+
+  /**
+   * Stop for good: cancel queued triggers, refuse further writes/publishes,
+   * and resolve once every queued state task has settled — so the caller can
+   * wipe this account's storage without a late ingest re-creating rows.
+   */
+  stop(): Promise<void> {
+    this.stopped = true;
+    for (const t of this.timers) clearTimeout(t);
+    this.timers.clear();
+    return Promise.all(this.chains.values()).then(() => undefined);
   }
 
   private async publish(targets: TriggerTarget[]): Promise<void> {
@@ -94,15 +114,23 @@ export class MarmotPushNotifier {
     const scheduler = createYieldScheduler({ safetyEvery: 1 });
     try {
       for (const { server, relayHints, tokens } of targets) {
+        if (this.stopped) return;
         // Spec publish targets: the records' relay hints, else the server's
         // own 10050 inbox — never a default relay.
         const relays = relayHints.length
           ? relayHints
           : await this.deps.transport.inboxRelays(server).catch(() => []);
         if (relays.length === 0) continue;
-        for (const wrap of buildTriggerWraps(server, tokens)) {
-          await this.deps.transport.publish(relays, wrap).catch(() => undefined);
-          await scheduler.maybeYield();
+        // One server's failure (e.g. wrap encryption throwing) must not cost
+        // the other servers their triggers.
+        try {
+          for (const wrap of buildTriggerWraps(server, tokens)) {
+            if (this.stopped) return;
+            await this.deps.transport.publish(relays, wrap).catch(() => undefined);
+            await scheduler.maybeYield();
+          }
+        } catch {
+          continue;
         }
         if (__DEV__) {
           console.log(`[Marmot] push trigger → ${server.slice(0, 8)} (${tokens.length} device(s))`);
@@ -137,6 +165,7 @@ export class MarmotPushNotifier {
   }
 
   private async save(groupId: string, state: PushRecordState): Promise<void> {
+    if (this.stopped) return;
     this.cache.set(groupId, state);
     await this.deps.backend.set(NAMESPACE, groupId, JSON.stringify(state));
   }

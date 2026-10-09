@@ -286,6 +286,7 @@ export class MarmotSession {
 
   stop(): void {
     this.stopped = true;
+    pushDrains.set(this.pubkey, this.push.stop());
     this.connection?.unsubscribe();
     this.connection = null;
     for (const g of this.client.groups.loaded) {
@@ -957,6 +958,19 @@ export class MarmotNoKeyPackageError extends Error {
 
 let active: MarmotSession | null = null;
 const activeListeners = new Set<(s: MarmotSession | null) => void>();
+// Per-owner promise for a stopped session's push work to settle.
+const pushDrains = new Map<string, Promise<void>>();
+
+/**
+ * Before wiping `owner`'s Marmot storage: stop their session if it is still
+ * active and wait for its queued push-state writes to settle, so none lands
+ * after the wipe.
+ */
+export async function quiesceMarmotSession(owner: string): Promise<void> {
+  if (active?.pubkey === owner) active.stop();
+  await pushDrains.get(owner)?.catch(() => undefined);
+  pushDrains.delete(owner);
+}
 
 export function getMarmotSession(): MarmotSession | null {
   return active;

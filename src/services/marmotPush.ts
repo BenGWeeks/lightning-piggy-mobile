@@ -17,7 +17,7 @@
 // dropped, and nothing ever affects message validity or group state.
 
 import { Buffer } from 'buffer';
-import { schnorr } from '@noble/curves/secp256k1.js';
+import { schnorr, secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { generateSecretKey, getEventHash, nip59, type Event as NostrEvent } from 'nostr-tools';
@@ -42,6 +42,18 @@ const PLATFORM_BYTE = { apns: 1, fcm: 2 } as const;
 export const PUSH_TRIGGERING_KINDS: readonly number[] = [9, 1068];
 
 const HEX64 = /^[0-9a-f]{64}$/;
+
+/** A server key must be a real secp256k1 x-only point: we NIP-44-encrypt the
+ * trigger to it, and a 64-hex non-point would throw mid-publish. */
+function isXOnlyPubkey(hex: string): boolean {
+  if (!HEX64.test(hex)) return false;
+  try {
+    secp256k1.Point.fromHex(`02${hex}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 const HEX128 = /^[0-9a-f]{128}$/;
 const FINGERPRINT = /^sha256:[0-9a-f]{24}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -88,7 +100,7 @@ function parseIdentity(raw: Record<string, unknown>, nowMs: number): Removal | n
   if (!isUint(leaf_index, 0xffffffff)) return null;
   if (platform !== 'apns' && platform !== 'fcm') return null;
   if (typeof token_fingerprint !== 'string' || !FINGERPRINT.test(token_fingerprint)) return null;
-  if (typeof server_pubkey_hex !== 'string' || !HEX64.test(server_pubkey_hex)) return null;
+  if (typeof server_pubkey_hex !== 'string' || !isXOnlyPubkey(server_pubkey_hex)) return null;
   if (!isUint(owner_ts, Number.MAX_SAFE_INTEGER) || owner_ts > nowMs + MAX_FUTURE_MS) return null;
   if (typeof owner_sig !== 'string' || !HEX128.test(owner_sig)) return null;
   return {
@@ -278,7 +290,8 @@ export interface TriggerTarget {
 }
 
 /** Whose devices to wake for a message we send: every other member's active
- * record, newest per (member, platform, server) like MDK, grouped by server. */
+ * record — newest per (member, leaf, platform, server), so each of a member's
+ * devices (sibling leaves) is woken — grouped by server. */
 export function selectTriggerTargets(
   state: PushRecordState,
   myPubkey: string,
@@ -290,14 +303,14 @@ export function selectTriggerTargets(
     if (!record || record.member === me || !leaves.has(leafKey(record.member, record.leaf))) {
       continue;
     }
-    const k = `${record.member}|${record.platform}|${record.server}`;
+    const k = `${record.member}|${record.leaf}|${record.platform}|${record.server}`;
     const prev = newest.get(k);
     if (!prev || newer(stamp, prev.stamp)) newest.set(k, { stamp, record });
   }
   const byServer = new Map<string, TriggerTarget>();
   for (const { record } of newest.values()) {
     const t = byServer.get(record.server) ?? { server: record.server, relayHints: [], tokens: [] };
-    t.tokens.push(record.encryptedToken);
+    if (!t.tokens.includes(record.encryptedToken)) t.tokens.push(record.encryptedToken);
     if (record.relayHint && !t.relayHints.includes(record.relayHint)) {
       t.relayHints.push(record.relayHint);
     }

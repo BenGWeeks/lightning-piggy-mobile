@@ -3,6 +3,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
 
+import * as marmotPush from './marmotPush';
 import { leafKey, ownerProofEventId, type PushRecord } from './marmotPush';
 import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { createMemoryMarmotBackend } from './marmotStore';
@@ -95,5 +96,49 @@ describe('MarmotPushNotifier', () => {
     notifier.trigger(g); // not awaited: must still run after the ingest
     await settle();
     expect(published).toHaveLength(1);
+  });
+
+  it('one failing server does not cost the other servers their triggers', async () => {
+    const { notifier, published, group, settle } = setup();
+    const OTHER = getPublicKey(generateSecretKey());
+    const g = group([leafKey(bob, 1), leafKey(bob, 2)]);
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 1, server: OTHER }));
+    await notifier.ingest(g, 448, tokenPayload({ leaf: 2 }));
+    const real = marmotPush.buildTriggerWraps;
+    const spy = jest
+      .spyOn(marmotPush, 'buildTriggerWraps')
+      .mockImplementation(function* (server, tokens) {
+        if (server === OTHER) throw new Error('bad server key');
+        yield* real(server, tokens);
+      });
+    notifier.trigger(g);
+    await settle();
+    expect(spy).toHaveBeenCalledTimes(2);
+    // The failing server is tried FIRST, so the valid one only publishes if
+    // the failure is isolated.
+    expect(spy.mock.calls[0][0]).toBe(OTHER);
+    expect(published).toEqual([{ relays: ['wss://server-inbox.example'], kind: 1059 }]);
+    spy.mockRestore();
+  });
+
+  it('after stop(), a paused ingest writes nothing and queued triggers never publish', async () => {
+    const backend = createMemoryMarmotBackend();
+    const transport = {
+      publish: jest.fn(async () => undefined),
+      inboxRelays: jest.fn(async () => ['wss://x']),
+    };
+    const notifier = new MarmotPushNotifier({ pubkey: me, backend, transport });
+    const g: PushGroup = {
+      idHex: GROUP_HEX,
+      id: hexToBytes(GROUP_HEX),
+      leaves: new Set([leafKey(bob, 1)]),
+    };
+    const ingest = notifier.ingest(g, 448, tokenPayload()); // queued behind its signature check
+    notifier.trigger(g);
+    await notifier.stop();
+    await ingest;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await backend.get('pushRecords', GROUP_HEX)).toBeNull();
+    expect(transport.publish).not.toHaveBeenCalled();
   });
 });

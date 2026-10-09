@@ -106,7 +106,7 @@ Inner events are unsigned rumors (MLS authenticates the sender). Inner kinds tha
 
 ==== MIP-04 encrypted media
 
-A photo is a kind-9 event with an `imeta` tag (`encrypted-media-v2`; v1 is still read). The blob on Blossom is ChaCha20-Poly1305 ciphertext; its key is derived from the MLS group's epoch secret and the `imeta` fields, so the key never travels in the message and exists only while that epoch is retained. The receiver derives one candidate key per retained epoch on arrival, stores them, and verifies both the plaintext and ciphertext SHA-256 on decrypt. Only a public-https Blossom URL that commits to the ciphertext hash is fetched. Ciphertext is uploaded as `application/octet-stream`, with fallback servers for Blossom hosts that refuse it (HTTP 415).
+A photo is a kind-9 event with an `imeta` tag (`encrypted-media-v2`; v1 is still read). The blob on Blossom is ChaCha20-Poly1305 ciphertext; its key is derived from the MLS group's epoch secret and the `imeta` fields, so the key never travels in the message and can only be *derived* while that epoch's state is retained. The receiver derives one candidate key per retained epoch on arrival and stores them (in `mediaKeys:<group>` and the stored message row), so an already-received photo stays decryptable on this device after the epoch is gone, until those copies are deleted. It verifies both the plaintext and ciphertext SHA-256 on decrypt. Only a public-https Blossom URL that commits to the ciphertext hash is fetched. Ciphertext is uploaded as `application/octet-stream`, with fallback servers for Blossom hosts that refuse it (HTTP 415).
 
 ==== MIP-05 push notifications (send side)
 

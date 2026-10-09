@@ -222,3 +222,38 @@ describe('MIP-05 strict decoding (review fixes)', () => {
     ).toEqual({});
   });
 });
+
+describe('MIP-05 review fixes (round 2)', () => {
+  const alice = member();
+  const bob = member();
+  const leaves = new Set([leafKey(alice.pk, 0), leafKey(bob.pk, 1), leafKey(bob.pk, 2)]);
+  const GROUP2 = { idHex: GROUP_HEX, id: hexToBytes(GROUP_HEX), leaves };
+
+  it("wakes each of a member's devices (sibling leaves), and drops only the one that leaves", async () => {
+    const state = await applyPushPayload(
+      {},
+      448,
+      payload('tokens', [
+        signedRecord(bob, { leaf: 1, ownerTs: 1_700_000_000_001 }),
+        signedRecord(bob, { leaf: 2, ownerTs: 1_700_000_000_002 }),
+      ]),
+      GROUP2,
+      NOW,
+    );
+    expect(selectTriggerTargets(state, alice.pk, leaves)[0].tokens).toHaveLength(2);
+    const remaining = new Set([leafKey(alice.pk, 0), leafKey(bob.pk, 2)]);
+    const pruned = pruneToLeaves(state, remaining);
+    expect(selectTriggerTargets(pruned, alice.pk, remaining)[0].tokens).toHaveLength(1);
+  });
+
+  it('rejects a server key that is 64 hex but not a curve point, even when owner-signed', async () => {
+    const state = await applyPushPayload(
+      {},
+      448,
+      payload('tokens', [signedRecord(bob, { server: 'ff'.repeat(32) })]),
+      GROUP2,
+      NOW,
+    );
+    expect(Object.keys(state)).toHaveLength(0);
+  });
+});
