@@ -68,6 +68,7 @@ import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import type { Item } from '../utils/conversationItems';
 import { useConversationReactions } from '../hooks/useConversationReactions';
+import { useReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
@@ -440,6 +441,22 @@ const ConversationScreen: React.FC = () => {
   const { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining } =
     useConversationLiveLocation({ items, isLoggedIn, myPubkey, pubkey, signerType, relays });
 
+  const relayReactionBackend = useMemo(
+    () => ({
+      fetchReactionsForMessages,
+      publishReaction,
+      deleteReaction,
+      fetchReactionDeletions: fetchReactionDeletionsForReactions,
+    }),
+    [
+      fetchReactionsForMessages,
+      publishReaction,
+      deleteReaction,
+      fetchReactionDeletionsForReactions,
+    ],
+  );
+  const reactionBackend = useReactionBackend(protocol, myPubkey, pubkey, relayReactionBackend);
+
   // Per-message reactions + long-press action state (#205) — kind-7 fetch /
   // reduce, optimistic publish/retract toggle, and the actioned-message
   // descriptor — live in a hook so this screen stays composition.
@@ -456,10 +473,7 @@ const ConversationScreen: React.FC = () => {
     messages,
     myPubkey,
     peerPubkey: pubkey,
-    fetchReactionsForMessages,
-    publishReaction,
-    deleteReaction,
-    fetchReactionDeletions: fetchReactionDeletionsForReactions,
+    ...reactionBackend,
     onZapMessage: () => setSendSheetOpen(true),
   });
 

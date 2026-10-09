@@ -623,7 +623,8 @@ describe('MarmotSession (no WebCrypto)', () => {
 
     // Bob's row: an image (kind 15, `#lpe=1` URL) that decrypts with no group state.
     const received = bob.inbox.find((m) => m.rumor.id === rumor.id)!;
-    expect(received.mediaKeys?.[enc.attachment.ciphertextSha256]).toContain(enc.keyHex);
+    expect(received.mediaKeys?.[enc.attachment.ciphertextSha256]).toMatchObject({ url });
+    expect(received.mediaKeys?.[enc.attachment.ciphertextSha256]?.keysHex).toContain(enc.keyHex);
     const stored = storedMarmotContent(received.rumor, received.mediaKeys);
     expect(stored.kind).toBe(15);
     const image = parseImageMessage(stored.text)!;
@@ -632,6 +633,46 @@ describe('MarmotSession (no WebCrypto)', () => {
 
     // Without keys (none derived) the event stays plain text — never a broken image.
     expect(storedMarmotContent(received.rumor, undefined)).toEqual({ text: '', kind: 14 });
+
+    alice.session.stop();
+    bob.session.stop();
+  }, 60_000);
+
+  it('reactions: White Noise-format kind 7 / kind 5 inside the group, read back from history', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    await Promise.all([alice.session.start(), bob.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    const dm = await alice.session.getOrCreateDm(bob.pubkey);
+    await bob.session.acceptWelcome(unwrapWelcomes(relay, bob)[0]);
+
+    const hello = buildMarmotRumor(alice.pubkey, { kind: MARMOT_CHAT_KIND, content: 'oink' });
+    await alice.session.sendRumor(dm.id, hello);
+    await waitFor(() => bob.inbox.some((m) => m.rumor.id === hello.id));
+
+    // MDK's shape: content = the emoji, one `e` tag → the message.
+    const reaction = buildMarmotRumor(bob.pubkey, {
+      kind: 7,
+      content: '🐷',
+      tags: [['e', hello.id]],
+    });
+    await bob.session.sendRumor(dm.id, reaction);
+    await waitFor(() => alice.inbox.some((m) => m.rumor.id === reaction.id));
+    // Both sides read it back from history (the sender's own copy included).
+    for (const who of [alice, bob]) {
+      const found = await who.session.queryHistory(dm.id, { kinds: [7], '#e': [hello.id] });
+      expect(found.map((r) => r.content)).toEqual(['🐷']);
+    }
+    const retract = buildMarmotRumor(bob.pubkey, {
+      kind: 5,
+      content: '',
+      tags: [['e', reaction.id]],
+    });
+    await bob.session.sendRumor(dm.id, retract);
+    await waitFor(() => alice.inbox.some((m) => m.rumor.id === retract.id));
+    const deletions = await alice.session.queryHistory(dm.id, { kinds: [5], '#e': [reaction.id] });
+    expect(deletions.map((d) => d.pubkey)).toEqual([bob.pubkey]);
 
     alice.session.stop();
     bob.session.stop();

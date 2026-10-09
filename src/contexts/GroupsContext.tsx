@@ -32,6 +32,7 @@ import { perAccountKey } from '../services/perAccountStorage';
 import { useTrustGraph } from './TrustGraphContext';
 import { saveWotSettings, type WotTier } from '../services/wotSettingsService';
 import { deriveInitialWotTier } from '../utils/wotMigration';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { useMarmotGroups } from './useMarmotGroups';
 
@@ -155,7 +156,9 @@ function activityFromMessages(
   // `types/groups.ts:GroupActivity.lastActivityAt`.
   return {
     lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
-    lastText: last.text,
+    // An encrypted file's stored text (`#lpe=1…`, NIP-17 or Marmot) embeds its
+    // decryption key — redact it to the attachment label like DM previews.
+    lastText: dmRowPreview(last.text, last.text.includes('#lpe=1') ? 15 : 14),
     lastMessageId: last.id,
     lastSenderPubkey: last.senderPubkey.toLowerCase(),
     recentSenderPubkeys: computeRecentSenders(messages),

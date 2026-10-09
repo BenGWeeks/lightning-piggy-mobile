@@ -23,6 +23,15 @@
  */
 export const QUICK_REACTIONS: readonly string[] = ['👍', '❤️', '😄', '😮', '😢', '🙏'];
 
+/** The "more" grid behind the quick row — any of these (and any emoji a peer
+ * sends, e.g. from White Noise's full picker) renders as a pill. */
+export const MORE_REACTIONS: readonly string[] = [
+  '😂', '🤣', '😍', '🥰', '😘', '😊', '😉', '😎', '🤔', '🤗',
+  '😅', '😭', '😡', '🤯', '🥳', '😴', '🙄', '😬', '🤝', '👏',
+  '🙌', '💪', '👌', '✌️', '🤞', '👀', '🔥', '✨', '💯', '🎉',
+  '⚡', '🐷', '🌟', '💜', '💔', '✅', '❌', '🚀', '🍕', '☕',
+]; // prettier-ignore
+
 /**
  * The unsigned event body for a NIP-25 reaction. Caller hands this to
  * `signEvent` (NostrContext) and then `publishSignedEvent`.

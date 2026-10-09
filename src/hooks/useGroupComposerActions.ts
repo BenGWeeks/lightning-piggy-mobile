@@ -289,7 +289,7 @@ export function useGroupComposerActions(params: {
   // keep stable identities across renders.
   const isMarmot = !!group && isMarmotGroupId(group.id);
   const strategy = useMemo(
-    () => ({ sendText, sendFile, ...(isMarmot ? { sendImage } : {}), canSend }),
+    () => ({ sendText, sendFile, ...(isMarmot ? { sendImage, gifEnvelope: true } : {}), canSend }),
     [sendText, sendFile, sendImage, isMarmot, canSend],
   );
 

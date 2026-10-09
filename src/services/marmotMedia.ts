@@ -9,12 +9,15 @@
 
 import {
   BLOSSOM_LOCATOR_KIND,
+  blossomContentHashFromUrl,
   canonicalizeMimeType,
   decryptMediaFileWithKeys,
   deriveMediaEncryptionKey,
   encodeMediaImetaTag,
   encryptMediaFile,
   getMediaAttachments,
+  isSafeBlossomFetchUrl,
+  resolveMediaFetchUrls,
   type GroupRumorHistory,
   type MarmotGroup,
   type MediaAttachment,
@@ -28,9 +31,28 @@ import type { MarmotImageParams } from '../utils/messageContent';
 type Group = MarmotGroup<GroupRumorHistory>;
 type GroupState = Group['state'];
 type Ciphersuite = Group['ciphersuite'];
+type MediaPolicy = Group['mediaService']['mediaPolicy'];
 
-/** Candidate file keys per attachment, keyed by its ciphertext sha256. */
-export type MarmotMediaKeys = Record<string, string[]>;
+/** A received attachment's vetted fetch URL + candidate file keys. */
+export interface MarmotMediaRef {
+  url: string;
+  keysHex: string[];
+}
+/** Per attachment, keyed by its ciphertext sha256. */
+export type MarmotMediaKeys = Record<string, MarmotMediaRef>;
+
+/**
+ * The URL to fetch an attachment from, or undefined if none is safe. The
+ * locator is sender-controlled: only a public-https Blossom URL that commits
+ * to the ciphertext hash and that the group's policy allows (MDK's fetch
+ * rules) is ever stored — so a peer can't make the app dial a LAN or
+ * loopback address just by rendering a bubble.
+ */
+export function mediaFetchUrl(a: MediaAttachment, policy: MediaPolicy): string | undefined {
+  return resolveMediaFetchUrls(a, policy).find(
+    (u) => isSafeBlossomFetchUrl(u) && blossomContentHashFromUrl(u) === a.ciphertextSha256,
+  );
+}
 
 /** The group state(s) a received attachment may have been keyed under:
  * the current epoch first, then every still-retained one (deduped). */
@@ -60,14 +82,17 @@ export function imageAttachments(tags: string[][]): MediaAttachment[] {
 export async function deriveMediaKeys(
   states: GroupState[],
   ciphersuite: Ciphersuite,
+  policy: MediaPolicy,
   tags: string[][],
 ): Promise<MarmotMediaKeys> {
   const keys: MarmotMediaKeys = {};
   for (const a of imageAttachments(tags)) {
+    const url = mediaFetchUrl(a, policy);
+    if (!url) continue;
     const derived = await Promise.all(
       states.map((s) => deriveMediaEncryptionKey(s, ciphersuite, a)),
     );
-    keys[a.ciphertextSha256] = derived.map(bytesToHex);
+    keys[a.ciphertextSha256] = { url, keysHex: derived.map(bytesToHex) };
   }
   return keys;
 }
@@ -80,14 +105,13 @@ export function marmotMediaText(
 ): string | null {
   if (!keys) return null;
   for (const a of imageAttachments(tags)) {
-    const keysHex = keys[a.ciphertextSha256];
-    const url = a.locators.find((l) => l.kind === BLOSSOM_LOCATOR_KIND)?.value;
-    if (!keysHex?.length || !url) continue;
+    const ref = keys[a.ciphertextSha256];
+    if (!ref?.url || !ref.keysHex?.length) continue;
     return encodeMarmotMediaUrl({
-      url,
+      url: ref.url,
+      keysHex: ref.keysHex,
       version: a.version,
       mime: a.mediaType,
-      keysHex,
       nonceHex: a.nonce,
       filename: a.filename,
       plaintextSha256: a.plaintextSha256,
@@ -104,16 +128,23 @@ export async function encryptMarmotMedia(
   plaintext: Uint8Array,
   mime: string,
   filename: string,
-): Promise<{ encrypted: Uint8Array; attachment: MediaAttachment; keyHex: string }> {
+): Promise<{
+  encrypted: Uint8Array;
+  attachment: MediaAttachment;
+  keyHex: string;
+  /** The epoch the key is bound to. */
+  epoch: bigint;
+}> {
   const fields = {
     version: group.mediaService.mediaVersion,
     plaintextSha256: bytesToHex(sha256(plaintext)),
     mediaType: canonicalizeMimeType(mime),
     filename,
   };
-  const key = await deriveMediaEncryptionKey(group.state, group.ciphersuite, fields);
+  const state = group.state;
+  const key = await deriveMediaEncryptionKey(state, group.ciphersuite, fields);
   const { encrypted, attachment } = encryptMediaFile(plaintext, key, fields);
-  return { encrypted, attachment, keyHex: bytesToHex(key) };
+  return { encrypted, attachment, keyHex: bytesToHex(key), epoch: state.groupContext.epoch };
 }
 
 /** The kind-9 `imeta` tag for an uploaded attachment. */

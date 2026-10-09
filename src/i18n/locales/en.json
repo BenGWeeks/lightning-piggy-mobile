@@ -1143,7 +1143,8 @@
     "reactionFailedTitle": "Reaction failed",
     "reactionFailedBody": "Could not publish your reaction. Check your relays and try again.",
     "copyText": "Copy text",
-    "copied": "Copied"
+    "copied": "Copied",
+    "moreEmoji": "More emoji"
   },
   "messageBubble": {
     "imageSent": "Image sent",

@@ -138,6 +138,8 @@ export async function sendMarmotGroupRumor(
 
 /** App kind the photo row is stored under (NIP-17's file kind — see marmotInbox). */
 const MARMOT_IMAGE_ROW_KIND = 15;
+/** Re-encrypt + re-upload at most this many times if the epoch keeps moving. */
+const MAX_EPOCH_RETRIES = 3;
 
 export interface MarmotImage {
   /** Local file uri (names the upload) + its bytes as base64. */
@@ -177,25 +179,32 @@ export async function sendMarmotImage(
     if (!group) throw new Error('This group is not available yet.');
     const plaintext = new Uint8Array(Buffer.from(image.base64, 'base64'));
     const filename = `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
-    const { encrypted, attachment, keyHex } = await session.encryptMedia(
-      group.id,
-      plaintext,
-      image.mime,
-      filename,
+    // The file key is bound to the epoch we encrypt under. If a commit moves
+    // the group on during a slow upload, a member added by it never held that
+    // epoch and couldn't decrypt — so re-encrypt under the new one.
+    let sealed: Awaited<ReturnType<MarmotSession['encryptMedia']>>;
+    let url: string;
+    let attempts = 0;
+    do {
+      sealed = await session.encryptMedia(group.id, plaintext, image.mime, filename);
+      // Opaque bytes: the real type travels in the `imeta` tag.
+      url = await uploadEncryptedBlobToBlossom(
+        image.uri,
+        await getBlossomServers(),
+        signer,
+        Buffer.from(sealed.encrypted).toString('base64'),
+      );
+    } while (
+      ++attempts < MAX_EPOCH_RETRIES &&
+      (await session.mediaEpoch(group.id)) !== sealed.epoch
     );
-    // Opaque bytes: the real type travels in the `imeta` tag.
-    const url = await uploadEncryptedBlobToBlossom(
-      image.uri,
-      await getBlossomServers(),
-      signer,
-      Buffer.from(encrypted).toString('base64'),
-    );
+    const { attachment, keyHex } = sealed;
     const rumor = buildMarmotRumor(pubkey, {
       kind: MARMOT_CHAT_KIND,
       content: '',
       tags: [marmotImetaTag(attachment, url)],
     });
-    const keys = { [attachment.ciphertextSha256]: [keyHex] };
+    const keys = { [attachment.ciphertextSha256]: { url, keysHex: [keyHex] } };
     await session.rememberMediaKeys(group.id, rumor.id, keys);
     const text = encodeMarmotMediaUrl({
       url,

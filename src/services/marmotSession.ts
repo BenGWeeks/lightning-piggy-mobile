@@ -418,6 +418,23 @@ export class MarmotSession {
     return encryptMarmotMedia(group, plaintext, mime, filename);
   }
 
+  /**
+   * Events from a group's durable history (ours included) — e.g. the kind-7
+   * reactions to some messages. Reactions arrive once over MLS, like every
+   * app event, so the history is where a reopened thread reads them back.
+   */
+  async queryHistory(appGroupId: string, filter: Filter): Promise<MarmotRumor[]> {
+    await this.ready;
+    const group = this.client.groups.loaded.find((g) => g.idStr === toMlsGroupId(appGroupId));
+    if (!group?.history) return [];
+    return (await group.history.queryRumors(filter)) as MarmotRumor[];
+  }
+
+  /** The group's current MLS epoch (a photo's key is bound to one). */
+  async mediaEpoch(appGroupId: string): Promise<bigint> {
+    return (await this.client.groups.get(toMlsGroupId(appGroupId))).state.groupContext.epoch;
+  }
+
   /** Record the key of a photo we're sending, so its row reads back the
    * same when the startup replay re-delivers our own message. */
   async rememberMediaKeys(appGroupId: string, rumorId: string, keys: MarmotMediaKeys) {
@@ -569,7 +586,12 @@ export class MarmotSession {
     try {
       const saved = await this.backend.get(ns, rumor.id);
       if (saved) return JSON.parse(saved) as MarmotMediaKeys;
-      const keys = await deriveMediaKeys(states, g.ciphersuite, rumor.tags);
+      const keys = await deriveMediaKeys(
+        states,
+        g.ciphersuite,
+        g.mediaService.mediaPolicy,
+        rumor.tags,
+      );
       await this.backend.set(ns, rumor.id, JSON.stringify(keys));
       return keys;
     } catch (e) {

@@ -161,6 +161,16 @@ export async function getTrending(limit = DEFAULT_LIMIT): Promise<Gif[]> {
 // animated WebP, both this regex and the send path need to agree.
 const GIPHY_URL_REGEX = /\bhttps?:\/\/(?:i|media\d*)\.giphy\.com\/[^\s]+\.gif\b/i;
 
+// White Noise's GIF message (its iOS picker sends it; its Android app only
+// renders a GIF inline in this shape): the media URL, then an attribution
+// line — `via GIPHY` or `via GIPHY · <creator>`.
+const GIPHY_ATTRIBUTION_LINE = /\nvia GIPHY(?: · [^\n]+)?$/;
+
+/** The message text for a GIF in White Noise's envelope (Marmot chats). */
+export function giphyEnvelope(url: string): string {
+  return `${url}\nvia GIPHY`;
+}
+
 /**
  * If the DM body is just a GIPHY URL (with optional surrounding
  * whitespace), return the URL so the conversation renderer can inline it
@@ -169,7 +179,7 @@ const GIPHY_URL_REGEX = /\bhttps?:\/\/(?:i|media\d*)\.giphy\.com\/[^\s]+\.gif\b/
  */
 export function extractGifUrl(text: string): string | null {
   if (!text) return null;
-  const trimmed = text.trim();
+  const trimmed = text.trim().replace(GIPHY_ATTRIBUTION_LINE, '');
   const match = trimmed.match(GIPHY_URL_REGEX);
   if (!match) return null;
   // Only treat the message as a GIF card when the URL *is* the whole

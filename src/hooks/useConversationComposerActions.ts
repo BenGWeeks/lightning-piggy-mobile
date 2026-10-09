@@ -131,7 +131,6 @@ export function useConversationComposerActions(params: {
       // Marmot (no usable key package) — re-sends over NIP-17.
       fallback?: () => Promise<boolean>,
     ): Promise<boolean> => {
-      const createdAt = Math.floor(Date.now() / 1000);
       let eventId: string | null = null;
       // Target relays for THIS send, captured from onRumorReady. Carried onto the
       // pending + watchdog-failed statuses so the message-info sheet lists the
@@ -168,7 +167,10 @@ export function useConversationComposerActions(params: {
               rumorId: id,
               fromMe: true,
               text: rowText ?? text,
-              createdAt,
+              // Stamped when the rumor is built, not when the send began: a
+              // photo's upload can take a while, and a stale time would fall
+              // outside the echo-dedup window and leave a duplicate bubble.
+              createdAt: Math.floor(Date.now() / 1000),
               wireKind: kind,
               ...(sendProtocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
             };
@@ -371,7 +373,7 @@ export function useConversationComposerActions(params: {
       sendText: sendAttachmentText,
       sendMessage: sendText,
       sendFile,
-      ...(protocol === 'marmot' ? { sendImage } : {}),
+      ...(protocol === 'marmot' ? { sendImage, gifEnvelope: true } : {}),
       confirmLocation,
     }),
     [sendAttachmentText, sendText, sendFile, sendImage, protocol, confirmLocation],

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
 import {
   BottomSheetModal,
@@ -6,11 +6,11 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { Copy, Zap } from 'lucide-react-native';
+import { Copy, Plus, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMessageActionsSheetStyles } from '../styles/MessageActionsSheet.styles';
-import { QUICK_REACTIONS } from '../utils/reactions';
+import { MORE_REACTIONS, QUICK_REACTIONS } from '../utils/reactions';
 
 /**
  * Per-message action sheet — opens on long-press of a `MessageBubble`.
@@ -77,9 +77,12 @@ const MessageActionsSheet: React.FC<Props> = ({
   const t = useTranslation();
   const styles = useMemo(() => createMessageActionsSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
+  // The "more emoji" grid starts collapsed each time the sheet opens.
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setShowMore(false);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
@@ -104,6 +107,27 @@ const MessageActionsSheet: React.FC<Props> = ({
     [],
   );
 
+  const renderEmoji = (emoji: string) => {
+    const myReactionId = myReactions[emoji] ?? null;
+    const active = myReactionId !== null;
+    return (
+      <TouchableOpacity
+        key={emoji}
+        style={[styles.emojiButton, active && styles.emojiButtonActive]}
+        onPress={() => onToggleReaction(emoji, myReactionId)}
+        accessibilityLabel={
+          active
+            ? t('messageActionsSheet.removeReaction', { emoji })
+            : t('messageActionsSheet.reactWith', { emoji })
+        }
+        accessibilityState={{ selected: active }}
+        testID={`message-actions-emoji-${emoji}`}
+      >
+        <Text style={styles.emojiText}>{emoji}</Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <BottomSheetModal
       ref={sheetRef}
@@ -115,27 +139,22 @@ const MessageActionsSheet: React.FC<Props> = ({
       <BottomSheetView style={styles.content}>
         <Text style={styles.title}>{t('messageActionsSheet.title')}</Text>
         <View style={styles.emojiRow} testID="message-actions-emoji-row">
-          {QUICK_REACTIONS.map((emoji) => {
-            const myReactionId = myReactions[emoji] ?? null;
-            const active = myReactionId !== null;
-            return (
-              <TouchableOpacity
-                key={emoji}
-                style={[styles.emojiButton, active && styles.emojiButtonActive]}
-                onPress={() => onToggleReaction(emoji, myReactionId)}
-                accessibilityLabel={
-                  active
-                    ? t('messageActionsSheet.removeReaction', { emoji })
-                    : t('messageActionsSheet.reactWith', { emoji })
-                }
-                accessibilityState={{ selected: active }}
-                testID={`message-actions-emoji-${emoji}`}
-              >
-                <Text style={styles.emojiText}>{emoji}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {QUICK_REACTIONS.map(renderEmoji)}
+          <TouchableOpacity
+            style={[styles.emojiButton, showMore && styles.emojiButtonActive]}
+            onPress={() => setShowMore((v) => !v)}
+            accessibilityLabel={t('messageActionsSheet.moreEmoji')}
+            accessibilityState={{ expanded: showMore }}
+            testID="message-actions-more-emoji"
+          >
+            <Plus size={22} color={colors.textHeader} />
+          </TouchableOpacity>
         </View>
+        {showMore ? (
+          <View style={styles.moreEmojiGrid} testID="message-actions-more-emoji-grid">
+            {MORE_REACTIONS.map(renderEmoji)}
+          </View>
+        ) : null}
         {onCopyText ? (
           <TouchableOpacity
             style={styles.copyButton}

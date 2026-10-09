@@ -28,10 +28,17 @@ export const createMessageActionsSheetStyles = (colors: Palette) =>
       justifyContent: 'space-between',
       gap: 8,
     },
+    moreEmojiGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    // 44pt (the iOS/Android minimum touch target) so the six quick
+    // reactions + the "more" button share one row on a typical phone.
     emojiButton: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: colors.background,
       alignItems: 'center',
       justifyContent: 'center',

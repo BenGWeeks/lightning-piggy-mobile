@@ -53,6 +53,18 @@ export interface UseConversationReactionsParams {
   >;
   // Opens the SendSheet preset to the peer — the "Zap this message" action.
   onZapMessage: () => void;
+  // Reactions / retractions arriving live (Marmot: they come over MLS while
+  // the thread is open, not from a relay query). Returns an unsubscribe.
+  subscribeLiveReactions?: (
+    onEvent: (event: {
+      id: string;
+      pubkey: string;
+      kind: number;
+      content: string;
+      created_at: number;
+      tags: string[][];
+    }) => void,
+  ) => () => void;
 }
 
 interface ActionedMessage {
@@ -99,6 +111,7 @@ export function useConversationReactions({
   deleteReaction,
   fetchReactionDeletions,
   onZapMessage,
+  subscribeLiveReactions,
 }: UseConversationReactionsParams): UseConversationReactionsResult {
   const t = useTranslation();
   // `reactionRecords` is the flat list of every kind-7 seen for any message in
@@ -149,6 +162,18 @@ export function useConversationReactions({
       return next.length === prev.length ? prev : next;
     });
   }, []);
+
+  useEffect(() => {
+    if (!subscribeLiveReactions) return;
+    return subscribeLiveReactions((event) => {
+      if (event.kind === 5) {
+        applyDeletionEvents([event]);
+        return;
+      }
+      const record = parseReactionEvent(event);
+      if (record) mergeFreshRecords([record]);
+    });
+  }, [subscribeLiveReactions, applyDeletionEvents, mergeFreshRecords]);
 
   // Fetch reactions for any new target ids (the cross-peer-stable rumor id).
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
