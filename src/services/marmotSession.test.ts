@@ -469,6 +469,82 @@ describe('MarmotSession (no WebCrypto)', () => {
     bobAgain.stop();
   }, 60_000);
 
+  it('uses the newest DM with a peer after they lose state and start a fresh one', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bobKeys = makeSigner();
+    const bobOpts = (backend: ReturnType<typeof createMemoryMarmotBackend>) => ({
+      pubkey: bobKeys.pubkey,
+      signerType: 'nsec' as const,
+      signer: bobKeys.signer,
+      network: relay.network,
+      backend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+    });
+    await alice.session.start();
+    // Bob's first install starts a DM with Alice.
+    const bobOld = new MarmotSession(bobOpts(createMemoryMarmotBackend()));
+    await bobOld.start();
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === alice.pubkey));
+    const oldDm = await bobOld.getOrCreateDm(alice.pubkey);
+    await alice.session.acceptWelcome(unwrapWelcomes(relay, alice).at(-1)!);
+    bobOld.stop();
+    // Bob reinstalls (same keys, no MLS state) and starts a new DM.
+    await new Promise((r) => setTimeout(r, 5)); // distinct firstSeen
+    const bobNew = new MarmotSession(bobOpts(createMemoryMarmotBackend()));
+    await bobNew.start();
+    const newDm = await bobNew.getOrCreateDm(alice.pubkey);
+    expect(newDm.id).not.toBe(oldDm.id);
+    await alice.session.acceptWelcome(unwrapWelcomes(relay, alice).at(-1)!);
+    expect(alice.session.findDm(bobKeys.pubkey)?.id).toBe(newDm.id);
+
+    alice.session.stop();
+    bobNew.stop();
+  }, 60_000);
+
+  it('re-delivers a message the app never stored (died after MLS processed it)', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bobKeys = makeSigner();
+    const bobBackend = createMemoryMarmotBackend();
+    const bobOpts = {
+      pubkey: bobKeys.pubkey,
+      signerType: 'nsec' as const,
+      signer: bobKeys.signer,
+      network: relay.network,
+      backend: bobBackend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+    };
+    // Bob's first run: joins and MLS-processes the message, but nothing is
+    // listening — the app "died" before persisting it to its own stores.
+    const bobFirst = new MarmotSession(bobOpts);
+    await Promise.all([alice.session.start(), bobFirst.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey));
+    const dm = await alice.session.getOrCreateDm(bobKeys.pubkey);
+    await bobFirst.acceptWelcome(unwrapWelcomes(relay, bobKeys).at(-1)!);
+    const lost = buildMarmotRumor(alice.pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: 'do not lose me',
+    });
+    await alice.session.sendRumor(dm.id, lost);
+    await waitFor(() => relay.events.filter((e) => e.kind === 445).length >= 2);
+    await new Promise((r) => setTimeout(r, 300)); // let bobFirst ingest it
+    bobFirst.stop();
+
+    // Next start: the message is replayed from the durable history.
+    const bob = new MarmotSession(bobOpts);
+    const inbox: MarmotMessageEvent[] = [];
+    bob.subscribe({ onMessage: (m) => inbox.push(m) });
+    await bob.start();
+    expect(inbox.map((m) => m.rumor.id)).toContain(lost.id);
+    expect(inbox.filter((m) => m.rumor.id === lost.id)).toHaveLength(1);
+
+    alice.session.stop();
+    bob.stop();
+  }, 60_000);
+
   it('refuses to start a chat with someone who has no key package', async () => {
     const relay = makeRelay();
     const alice = makeSession(relay);

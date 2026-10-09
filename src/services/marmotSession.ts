@@ -19,6 +19,7 @@ import {
   getGroupMembers,
   getPubkeyLeafNodeIndexes,
   Proposals,
+  GroupRumorHistory,
   type MarmotGroup,
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
@@ -35,6 +36,8 @@ import {
   createSqliteMarmotBackend,
   type MarmotKvBackend,
 } from './marmotStore';
+import { makeKeyValueRumorHistoryFactory } from '@internet-privacy/marmot-ts/extra';
+import type { Rumor } from 'applesauce-common/helpers/gift-wrap';
 
 /** Marmot's default chat-message kind (foundation/application-messages.md). */
 export const MARMOT_CHAT_KIND = 9;
@@ -52,6 +55,11 @@ const GROUP_EVENT_KIND = 445;
 const GROUP_BACKFILL_SLACK_SECS = 10 * 60;
 const GROUP_BACKFILL_LIMIT = 500;
 const DELIVERED_CACHE_SIZE = 2_000;
+// Startup replay window + retained history per group (see replayHistory).
+const HISTORY_REPLAY_SECS = 7 * 24 * 60 * 60;
+const HISTORY_KEEP = 500;
+const historyNamespace = (groupIdHex: string) => `history:${groupIdHex}`;
+type SessionGroup = MarmotGroup<GroupRumorHistory>;
 // Relay `created_at` is sender-controlled: an event dated in the future
 // (anyone can publish a kind-445 with a group's public `h` tag) must never
 // push the durable since-watermark past real traffic.
@@ -138,7 +146,7 @@ export class MarmotSession {
   readonly pubkey: string;
   private readonly opts: MarmotSessionOptions;
   private readonly backend: MarmotKvBackend;
-  private readonly client: MarmotClient;
+  private readonly client: MarmotClient<GroupRumorHistory>;
   private readonly listeners = new Set<MarmotSessionListener>();
   private readonly wiredGroups = new Set<string>();
   private readonly watermarks = new Map<string, number>();
@@ -170,6 +178,11 @@ export class MarmotSession {
       ingestStateStore: store('ingest'),
       rewindStore: store('rewind'),
       removedMarkerStore: store('removed'),
+      // Durable per-group message history: the safety net that makes delivery
+      // survive the app dying between MLS processing and our own store write.
+      historyFactory: makeKeyValueRumorHistoryFactory((groupId) =>
+        store<Rumor>(historyNamespace(bytesToHex(groupId))),
+      ),
     });
   }
 
@@ -191,6 +204,11 @@ export class MarmotSession {
       await this.loadWatermarks();
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
+      for (const g of loaded) {
+        await this.replayHistory(g).catch((e) => {
+          if (__DEV__) console.warn('[Marmot] history replay failed:', e);
+        });
+      }
     } finally {
       this.markReady();
     }
@@ -270,7 +288,11 @@ export class MarmotSession {
   /** The DM group with `peer`, if one exists. */
   findDm(peer: string): MarmotGroupSummary | undefined {
     const p = peer.toLowerCase();
-    return this.listGroups().find((g) => g.isDm && g.memberPubkeys[0] === p);
+    // Newest wins: if the peer lost their MLS state (reinstall, new device)
+    // and started a fresh DM, the old group is a dead end they can't read.
+    return this.listGroups()
+      .filter((g) => g.isDm && g.memberPubkeys[0] === p)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
   }
 
   /** Whether `peer` has published a Marmot key package we could invite. */
@@ -316,6 +338,8 @@ export class MarmotSession {
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+    if (__DEV__)
+      console.log(`[Marmot] created ${group.idStr.slice(0, 8)}, invited ${members.length}`);
     return this.summarise(group);
   }
 
@@ -361,6 +385,12 @@ export class MarmotSession {
     for (const r of results) {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
     }
+    if (__DEV__) {
+      const ok = Object.values(byRelay).filter(Boolean).length;
+      console.log(
+        `[Marmot] sent kind ${rumor.kind} to ${appGroupId.slice(7, 15)}: ${ok}/${Object.keys(byRelay).length} relays`,
+      );
+    }
     return byRelay;
   }
 
@@ -389,6 +419,7 @@ export class MarmotSession {
     try {
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
       await markHandled();
+      if (__DEV__) console.log(`[Marmot] joined ${group.idStr.slice(0, 8)} from welcome`);
       void this.ensureKeyPackage(); // the joined key package is now spent
       return this.summarise(group);
     } catch (e) {
@@ -406,7 +437,7 @@ export class MarmotSession {
     return this.opts.getWriteRelays();
   }
 
-  private summarise(g: MarmotGroup): MarmotGroupSummary {
+  private summarise(g: SessionGroup): MarmotGroupSummary {
     const view = g.groupData;
     const me = this.pubkey.toLowerCase();
     const members = getGroupMembers(g.state).map((p) => p.toLowerCase());
@@ -426,7 +457,7 @@ export class MarmotSession {
     };
   }
 
-  private wireGroup(g: MarmotGroup): void {
+  private wireGroup(g: SessionGroup): void {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
     // Membership / name changes (ours or another member's commit) move the epoch.
@@ -444,18 +475,45 @@ export class MarmotSession {
         if (__DEV__) console.warn('[Marmot] undecodable app payload:', e);
         return;
       }
-      // The same app event can surface twice (relay replay across a
-      // reconnect); deliver it once so listeners never double-notify.
-      // Keyed per group: an identical rumor sent into two groups shares an id.
-      const deliveryKey = `${g.idStr}:${rumor.id}`;
-      if (this.deliveredRumors.has(deliveryKey)) return;
-      this.deliveredRumors.add(deliveryKey);
-      if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
-        this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
-      }
-      const event = { group: this.summarise(g), rumor };
-      for (const l of this.listeners) l.onMessage?.(event);
+      this.deliver(g, rumor);
     });
+  }
+
+  private deliver(g: SessionGroup, rumor: MarmotRumor): void {
+    // The same app event can surface twice (relay replay across a reconnect,
+    // or the startup history replay); deliver it once so listeners never
+    // double-notify. Keyed per group: an identical rumor sent into two
+    // groups shares an id.
+    const deliveryKey = `${g.idStr}:${rumor.id}`;
+    if (this.deliveredRumors.has(deliveryKey)) return;
+    this.deliveredRumors.add(deliveryKey);
+    if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
+      this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
+    }
+    const event = { group: this.summarise(g), rumor };
+    if (__DEV__) console.log(`[Marmot] recv kind ${rumor.kind} in ${g.idStr.slice(0, 8)}`);
+    for (const l of this.listeners) l.onMessage?.(event);
+  }
+
+  /**
+   * MLS delivers an app event exactly once: marmot-ts durably marks it
+   * processed before emitting it, so if the app dies before its own stores
+   * persist the message it is never re-delivered. The library saves it to
+   * the (durable) group history first, though — so on start, replay recent
+   * history into the listeners (their stores upsert idempotently by id; old
+   * messages are past the notification window). Also prunes the history.
+   */
+  private async replayHistory(g: SessionGroup): Promise<void> {
+    if (!g.history) return;
+    const since = Math.floor(Date.now() / 1000) - HISTORY_REPLAY_SECS;
+    const recent = (await g.history.queryRumors({ since })) as MarmotRumor[];
+    recent.sort((a, b) => a.created_at - b.created_at).forEach((r) => this.deliver(g, r));
+    const ns = historyNamespace(g.idStr);
+    const ids = await this.backend.keys(ns);
+    if (ids.length <= HISTORY_KEEP) return;
+    const all = (await g.history.queryRumors({})) as MarmotRumor[];
+    all.sort((a, b) => b.created_at - a.created_at);
+    for (const old of all.slice(HISTORY_KEEP)) await this.backend.remove(ns, old.id);
   }
 
   private emitGroupsChanged(): void {

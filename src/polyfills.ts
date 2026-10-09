@@ -18,6 +18,15 @@ if (typeof global.crypto === 'undefined') {
   (global as unknown as { crypto: object }).crypto = {};
 }
 
+// structuredClone: marmot-ts deep-copies MLS client state with it when a group
+// is disbanded (a peer client can disband a group we're in). Hermes may not
+// provide it — install the spec-faithful ponyfill only when it's missing.
+if (typeof (global as { structuredClone?: unknown }).structuredClone !== 'function') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const structuredClonePonyfill = require('@ungap/structured-clone').default;
+  (global as unknown as { structuredClone: unknown }).structuredClone = structuredClonePonyfill;
+}
+
 // Set up TextEncoder/TextDecoder
 Object.assign(global, {
   TextEncoder: TextEncodingPolyfill.TextEncoder,
