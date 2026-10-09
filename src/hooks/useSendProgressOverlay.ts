@@ -9,10 +9,31 @@ interface Options {
 }
 
 /**
+ * One tap of Send. Dismissal and dispatch state live HERE, not in shared refs,
+ * so a send the user continued in the background can never repaint — or
+ * un-dismiss — the overlay of the send that follows it.
+ */
+export interface SendInvocation {
+  /** Per-send AbortController so the Cancel button on PaymentProgressOverlay
+   *  can abort the NWC call's publish → reply-timeout → poll-for-preimage
+   *  chain without waiting ~5 minutes for it to give up on its own (#175). */
+  readonly controller: AbortController;
+  /** The user chose "Continue in background" for this send. */
+  dismissed: boolean;
+  /** This send's reverse-swap hold invoice has been dispatched. */
+  dispatched: boolean;
+}
+
+type OutcomeState = Exclude<PaymentProgressState, 'hidden' | 'sending'>;
+
+/**
  * SendSheet's PaymentProgressOverlay state machine: the overlay state/error,
- * the per-send AbortController, the Boltz reverse-swap stage + dispatch flag
+ * the current send invocation, the Boltz reverse-swap stage + dispatch flag
  * (#1167), and the Cancel / reply-timeout / dismiss handlers — including
  * "Continue in background", which hands an in-flight swap to recovery.
+ *
+ * Every asynchronous overlay update is scoped to the invocation that made it:
+ * it only lands while that send is still current and not backgrounded.
  */
 export function useSendProgressOverlay({ onClose, setSending }: Options) {
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
@@ -23,57 +44,76 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
   const [inFlightIsSwap, setInFlightIsSwap] = useState(false);
   const [swapStage, setSwapStage] = useState<ReverseSwapSendStage | null>(null);
   const [swapDispatched, setSwapDispatched] = useState(false);
-  // Per-send AbortController so the Cancel button on PaymentProgressOverlay
-  // can abort the NWC call's publish → reply-timeout → poll-for-preimage
-  // chain without waiting ~5 minutes for it to give up on its own (#175).
-  const paymentAbortRef = useRef<AbortController | null>(null);
-  const dismissedInFlightRef = useRef(false);
-  const reversePaymentDispatchedRef = useRef(false);
+  const currentSendRef = useRef<SendInvocation | null>(null);
 
-  /** Reset the overlay for a new send and return its AbortController. */
-  const beginSend = useCallback((): AbortController => {
+  /** True while `send` may still paint the overlay. */
+  const ownsOverlay = useCallback(
+    (send: SendInvocation) => currentSendRef.current === send && !send.dismissed,
+    [],
+  );
+
+  /** Reset the overlay for a new send and return its invocation. */
+  const beginSend = useCallback((): SendInvocation => {
     // Abort any stale in-flight send (shouldn't happen in normal flow,
     // but guards against a cancel-then-resend race where the previous
     // controller is still referenced).
-    paymentAbortRef.current?.abort();
-    const abortController = new AbortController();
-    paymentAbortRef.current = abortController;
+    currentSendRef.current?.controller.abort();
+    const send: SendInvocation = {
+      controller: new AbortController(),
+      dismissed: false,
+      dispatched: false,
+    };
+    currentSendRef.current = send;
     setProgressError(undefined);
     setProgressState('sending');
     setInFlightIsSwap(false);
     setSwapStage(null);
     setSwapDispatched(false);
-    dismissedInFlightRef.current = false;
-    reversePaymentDispatchedRef.current = false;
-    return abortController;
+    return send;
   }, []);
 
-  /** Reverse-swap progress callbacks for one send. A superseded send (the
-   *  user cancelled and sent again) must not repaint the new one. */
-  const swapCallbacksFor = useCallback((abortController: AbortController) => {
-    const isCurrent = () => paymentAbortRef.current === abortController;
-    return {
+  /** Mark `send` finished. Returns true if it was still the current send. */
+  const endSend = useCallback((send: SendInvocation) => {
+    if (currentSendRef.current !== send) return false;
+    currentSendRef.current = null;
+    return true;
+  }, []);
+
+  /** Paint a terminal/extended outcome for `send` — ignored once superseded or backgrounded. */
+  const showOutcome = useCallback(
+    (send: SendInvocation, state: OutcomeState, error?: string) => {
+      if (!ownsOverlay(send)) return;
+      setProgressError(error);
+      setProgressState(state);
+    },
+    [ownsOverlay],
+  );
+
+  /** Progress callbacks for one send's payment / reverse swap. */
+  const callbacksFor = useCallback(
+    (send: SendInvocation) => ({
+      onReplyTimeout: () => {
+        if (!ownsOverlay(send)) return;
+        setProgressError(undefined);
+        setProgressState((prev) => (prev === 'sending' ? 'in-flight-extended' : prev));
+      },
       onStage: (stage: ReverseSwapSendStage) => {
-        if (isCurrent()) setSwapStage(stage);
+        if (ownsOverlay(send)) setSwapStage(stage);
       },
       onPaymentDispatched: () => {
-        if (!isCurrent()) return;
-        reversePaymentDispatchedRef.current = true;
-        setSwapDispatched(true);
+        send.dispatched = true;
+        if (ownsOverlay(send)) setSwapDispatched(true);
       },
-    };
-  }, []);
-
-  const handleReplyTimeout = useCallback(() => {
-    setProgressError(undefined);
-    setProgressState((prev) => (prev === 'sending' ? 'in-flight-extended' : prev));
-  }, []);
+    }),
+    [ownsOverlay],
+  );
 
   const handleCancelPayment = useCallback(() => {
     // Cancelling a reply cannot recall an already dispatched hold invoice.
     // Keep the in-flight warning visible until the user chooses background recovery.
-    paymentAbortRef.current?.abort();
-    setProgressState(reversePaymentDispatchedRef.current ? 'in-flight-extended' : 'hidden');
+    const send = currentSendRef.current;
+    send?.controller.abort();
+    setProgressState(send?.dispatched ? 'in-flight-extended' : 'hidden');
     setProgressError(undefined);
     setSending(false);
   }, [setSending]);
@@ -93,15 +133,15 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
     // parent sheet. On error we only dismiss the overlay so the user can
     // retry from the filled-in form.
     const prevState = progressStateRef.current;
+    const send = currentSendRef.current;
     // "Continue in background": either the in-flight-extended state, or a
     // swap still `sending` whose hold-invoice payment is already dispatched
     // (#1167). The live flow keeps running; its outcome is no longer painted.
     const continueInBackground =
-      prevState === 'in-flight-extended' ||
-      (prevState === 'sending' && reversePaymentDispatchedRef.current);
+      prevState === 'in-flight-extended' || (prevState === 'sending' && !!send?.dispatched);
     const shouldCloseParent = prevState === 'success' || continueInBackground;
     if (continueInBackground) {
-      dismissedInFlightRef.current = true;
+      if (send) send.dismissed = true;
       // Kick a recovery pass so the claim is retried now rather than waiting
       // for the next app launch. Safe no-op (single-flight guarded) if the
       // lockup isn't claimable yet — pull-to-refresh / next foreground will retry.
@@ -119,18 +159,16 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
 
   return {
     progressState,
-    setProgressState,
     progressError,
-    setProgressError,
     inFlightIsSwap,
     setInFlightIsSwap,
     swapStage,
     canContinueInBackground: inFlightIsSwap && swapDispatched,
-    paymentAbortRef,
-    dismissedInFlightRef,
     beginSend,
-    swapCallbacksFor,
-    handleReplyTimeout,
+    endSend,
+    ownsOverlay,
+    showOutcome,
+    callbacksFor,
     handleCancelPayment,
     handleOverlayDismiss,
   };

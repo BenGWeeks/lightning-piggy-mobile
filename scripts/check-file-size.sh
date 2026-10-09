@@ -24,7 +24,7 @@ declare -A BASELINE=(
   ["src/components/TransferSheet.tsx"]=1418
   ["src/screens/ExploreHomeScreen.tsx"]=1306
   ["src/services/nfcService.ts"]=1242
-  ["src/components/SendSheet.tsx"]=1019
+  ["src/components/SendSheet.tsx"]=1010
 )
 
 # GitHub Actions error annotation when running in CI; plain echo locally.
