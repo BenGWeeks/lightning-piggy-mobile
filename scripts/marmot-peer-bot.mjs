@@ -4,7 +4,12 @@
 // "pong: <text>" to every message. Uses marmot-ts's own WebCrypto provider,
 // so it also cross-checks LP's pure-JS Hermes crypto over the wire.
 //   source .env && MAESTRO_NSEC_BOT=$MAESTRO_NSEC_LITTLE node --input-type=module < scripts/marmot-peer-bot.mjs
-import { MarmotClient, createApplicationMessageIntent, createChatRumor, deserializeApplicationData } from '@internet-privacy/marmot-ts';
+import {
+  MarmotClient,
+  createApplicationMessageIntent,
+  createChatRumor,
+  deserializeApplicationData,
+} from '@internet-privacy/marmot-ts';
 import { InMemoryKeyValueStore } from '@internet-privacy/marmot-ts/extra';
 import { nip19, getPublicKey, finalizeEvent, nip44, matchFilters } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
@@ -26,30 +31,57 @@ const arr = (f) => (Array.isArray(f) ? f : [f]);
 const network = {
   async publish(relays, ev) {
     const r = await Promise.allSettled(pool.publish(relays.length ? relays : RELAYS, ev));
-    return Object.fromEntries((relays.length ? relays : RELAYS).map((u, i) => [u, { from: u, ok: r[i].status === 'fulfilled' }]));
+    return Object.fromEntries(
+      (relays.length ? relays : RELAYS).map((u, i) => [
+        u,
+        { from: u, ok: r[i].status === 'fulfilled' },
+      ]),
+    );
   },
   async request(relays, filters) {
     const out = [];
-    for (const f of arr(filters)) out.push(...(await pool.querySync(relays.length ? relays : RELAYS, f, { maxWait: 6000 })));
+    for (const f of arr(filters))
+      out.push(...(await pool.querySync(relays.length ? relays : RELAYS, f, { maxWait: 6000 })));
     return out;
   },
   subscription(relays, filters) {
-    return { subscribe(o) { const cs = arr(filters).map((f) => pool.subscribeMany(relays.length ? relays : RELAYS, f, { onevent: (e) => o.next?.(e) })); return { unsubscribe: () => cs.forEach((c) => c.close()) }; } };
+    return {
+      subscribe(o) {
+        const cs = arr(filters).map((f) =>
+          pool.subscribeMany(relays.length ? relays : RELAYS, f, { onevent: (e) => o.next?.(e) }),
+        );
+        return { unsubscribe: () => cs.forEach((c) => c.close()) };
+      },
+    };
   },
-  async getUserInboxRelays() { return RELAYS; },
+  async getUserInboxRelays() {
+    return RELAYS;
+  },
 };
 const signer = {
   getPublicKey: () => pk,
   signEvent: (d) => finalizeEvent(d, sk),
-  nip44: { encrypt: (p, t) => nip44.encrypt(t, nip44.getConversationKey(sk, p)), decrypt: (p, c) => nip44.decrypt(c, nip44.getConversationKey(sk, p)) },
+  nip44: {
+    encrypt: (p, t) => nip44.encrypt(t, nip44.getConversationKey(sk, p)),
+    decrypt: (p, c) => nip44.decrypt(c, nip44.getConversationKey(sk, p)),
+  },
 };
-const client = new MarmotClient({ signer, network, groupStateStore: new InMemoryKeyValueStore(), keyPackageStore: new InMemoryKeyValueStore() });
+const client = new MarmotClient({
+  signer,
+  network,
+  groupStateStore: new InMemoryKeyValueStore(),
+  keyPackageStore: new InMemoryKeyValueStore(),
+});
 
 const wire = (group) => {
   group.on('applicationMessage', async (data) => {
     const r = deserializeApplicationData(data);
-    log(`RECV kind=${r.kind} from=${r.pubkey.slice(0, 8)} content=${JSON.stringify(r.content.slice(0, 120))} tags=${JSON.stringify(r.tags).slice(0, 160)}`);
+    log(
+      `RECV kind=${r.kind} from=${r.pubkey.slice(0, 8)} content=${JSON.stringify(r.content.slice(0, 120))} tags=${JSON.stringify(r.tags).slice(0, 160)}`,
+    );
     if (r.pubkey === pk) return;
+    // Never answer another bot's pong (two bots in one group would loop).
+    if (r.content.startsWith('pong: ')) return;
     try {
       const reply = createChatRumor({ pubkey: pk, content: `pong: ${r.content.slice(0, 60)}` });
       await client.groups.send(group.id, createApplicationMessageIntent(reply));
@@ -59,23 +91,78 @@ const wire = (group) => {
     }
   });
 };
-client.groups.on('joined', (g) => { log('JOINED group', g.idStr.slice(0, 8), 'name=', JSON.stringify(g.groupData?.name), 'members=', g.state ? 'ok' : '?'); wire(g); });
-const kp = await client.keyPackages.create({ relays: RELAYS, identifier: bytesToHex(randomBytes(32)) });
+client.groups.on('joined', (g) => {
+  log(
+    'JOINED group',
+    g.idStr.slice(0, 8),
+    'name=',
+    JSON.stringify(g.groupData?.name),
+    'members=',
+    g.state ? 'ok' : '?',
+  );
+  wire(g);
+});
+const kp = await client.keyPackages.create({
+  relays: RELAYS,
+  identifier: bytesToHex(randomBytes(32)),
+});
 log('bot pubkey', pk.slice(0, 12), 'key package published');
 client.groups.connectAll({ fallbackRelays: RELAYS });
 
 const since = Math.floor(Date.now() / 1000) - 3 * 24 * 3600; // NIP-59 randomises created_at back up to 2 days
-pool.subscribeMany(RELAYS, { kinds: [1059], '#p': [pk], since }, {
-  onevent: async (wrap) => {
-    try {
-      await client.invites.ingestEvent(wrap);
-      await client.invites.decryptGiftWraps();
-      for (const w of await client.invites.getUnread()) {
-        log('WELCOME from', w.pubkey.slice(0, 8));
-        try { await client.joinGroupFromWelcome({ welcomeRumor: w }); } catch (e) { log('join failed', e.message); }
-        await client.invites.markAsRead(w.id);
+pool.subscribeMany(
+  RELAYS,
+  { kinds: [1059], '#p': [pk], since },
+  {
+    onevent: async (wrap) => {
+      try {
+        await client.invites.ingestEvent(wrap);
+        await client.invites.decryptGiftWraps();
+        for (const w of await client.invites.getUnread()) {
+          log('WELCOME from', w.pubkey.slice(0, 8));
+          try {
+            await client.joinGroupFromWelcome({ welcomeRumor: w });
+          } catch (e) {
+            log('join failed', e.message);
+          }
+          await client.invites.markAsRead(w.id);
+        }
+      } catch (e) {
+        /* not a welcome for us */
       }
-    } catch (e) { /* not a welcome for us */ }
+    },
   },
-});
-setTimeout(() => { log('bot timeout, exiting'); process.exit(0); }, Number(process.env.BOT_MINUTES ?? 15) * 60_000);
+);
+// BOT_INITIATE_TO=<hex pubkey>: start a Marmot DM (White Noise shape: no
+// name, both admins) to that account and send BOT_INITIATE_TEXT — exercises
+// the app's invite-receive path (kind-444 Welcome → auto-join).
+if (process.env.BOT_INITIATE_TO) {
+  const target = process.env.BOT_INITIATE_TO.toLowerCase();
+  const text = process.env.BOT_INITIATE_TEXT ?? 'hello from the bot over MLS';
+  try {
+    // Their key package lives on their NIP-65 write relays; our RELAYS overlap the app's defaults.
+    const [targetKp] = (
+      await network.request(RELAYS, { kinds: [30443], authors: [target], limit: 10 })
+    ).sort((a, b) => b.created_at - a.created_at);
+    if (!targetKp) throw new Error('target has no key package yet (open the app first)');
+    const group = await client.groups.create('', { relays: RELAYS, adminPubkeys: [pk, target] });
+    wire(group);
+    await client.groups.invite(group.id, targetKp);
+    log('INITIATED DM to', target.slice(0, 8), 'group', group.idStr.slice(0, 8));
+    await client.groups.send(
+      group.id,
+      createApplicationMessageIntent(createChatRumor({ pubkey: pk, content: text })),
+    );
+    log('SENT initiate text');
+  } catch (e) {
+    log('initiate failed:', e?.message ?? e);
+  }
+}
+
+setTimeout(
+  () => {
+    log('bot timeout, exiting');
+    process.exit(0);
+  },
+  Number(process.env.BOT_MINUTES ?? 15) * 60_000,
+);

@@ -97,7 +97,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return sendMarmotDm(
           pubkey,
           normalizedRecipientPubkey,
-          { kind: 14, content: plaintext },
+          // The p tag makes the rumor id recipient-specific: identical text
+          // to two peers in the same second must not collide on event id.
+          { kind: 14, content: plaintext, tags: [['p', normalizedRecipientPubkey]] },
           hooks,
         );
       }

@@ -44,12 +44,20 @@ export const MARMOT_GROUP_ID_PREFIX = 'marmot:';
 const CLIENT_NAME = 'Lightning Piggy';
 const SLOT_ID_HEX = /^[0-9a-f]{64}$/;
 const GROUP_EVENT_KIND = 445;
-// Relays may skew / members' clocks may drift: re-read this far behind the
-// newest kind-445 we've seen for a group. Older events were already ingested
-// in a previous session (ingest state is durable), so this only bounds work.
-const GROUP_BACKFILL_SLACK_SECS = 2 * 24 * 60 * 60;
+// Re-read this far behind the newest INGESTED kind-445 (honest clock drift
+// between members). The watermark only advances after ingestion and ignores
+// future-dated events, so a short margin loses nothing — and every second of
+// margin is re-fetched and trial-decrypted on the JS thread at each app start
+// (spec: `since` is a fetch hint — transports/nostr.md).
+const GROUP_BACKFILL_SLACK_SECS = 10 * 60;
 const GROUP_BACKFILL_LIMIT = 500;
 const DELIVERED_CACHE_SIZE = 2_000;
+// Relay `created_at` is sender-controlled: an event dated in the future
+// (anyone can publish a kind-445 with a group's public `h` tag) must never
+// push the durable since-watermark past real traffic.
+const MAX_FUTURE_SKEW_SECS = 5 * 60;
+const isPlausibleTimestamp = (createdAt: number) =>
+  createdAt <= Math.floor(Date.now() / 1000) + MAX_FUTURE_SKEW_SECS;
 // A Welcome that can never be joined: not for a key package we hold (spent
 // or deleted), or structurally invalid. Anything else is retried.
 const PERMANENT_WELCOME_FAILURE =
@@ -195,6 +203,21 @@ export class MarmotSession {
     // account that has used Marmot before and needs its package kept fresh).
     if (this.opts.signerType === 'nsec' || (await this.client.keyPackages.count()) > 0) {
       void this.ensureKeyPackage();
+    }
+    void this.retryPendingWelcomes();
+  }
+
+  /** Re-attempt Welcomes whose join failed transiently in an earlier session. */
+  private async retryPendingWelcomes(): Promise<void> {
+    for (const id of await this.backend.keys('pendingWelcomes')) {
+      if (this.stopped) return;
+      const raw = await this.backend.get('pendingWelcomes', id);
+      if (!raw) continue;
+      try {
+        await this.acceptWelcome(JSON.parse(raw) as MarmotRumor);
+      } catch {
+        // leave it pending for the next start
+      }
     }
   }
 
@@ -355,8 +378,14 @@ export class MarmotSession {
     const id = welcomeRumor.id;
     if (this.joiningWelcomes.has(id) || (await this.backend.get('welcomes', id))) return null;
     this.joiningWelcomes.add(id);
-    const markHandled = () =>
-      this.backend.set('welcomes', id, String(Math.floor(Date.now() / 1000)));
+    // Durable until joined or permanently rejected: the inbox stores the
+    // invite's gift wrap as processed and never re-routes it, so a transient
+    // failure is retried from here (next session start) instead.
+    await this.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
+    const markHandled = async () => {
+      await this.backend.set('welcomes', id, String(Math.floor(Date.now() / 1000)));
+      await this.backend.remove('pendingWelcomes', id);
+    };
     try {
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
       await markHandled();
@@ -494,6 +523,7 @@ export class MarmotSession {
     };
     const pending = new Map<string, number>();
     const commit = (h: string, createdAt: number) => {
+      if (!isPlausibleTimestamp(createdAt)) return;
       if (createdAt <= (this.watermarks.get(h) ?? 0)) return;
       this.watermarks.set(h, createdAt);
       void this.backend.set('watermark', h, String(createdAt));
@@ -533,7 +563,9 @@ export class MarmotSession {
         for (const e of batches.flat()) byId.set(e.id, e);
         for (const e of byId.values()) {
           const h = e.kind === GROUP_EVENT_KIND ? hOf(e) : undefined;
-          if (h && e.created_at > (pending.get(h) ?? 0)) pending.set(h, e.created_at);
+          if (h && isPlausibleTimestamp(e.created_at) && e.created_at > (pending.get(h) ?? 0)) {
+            pending.set(h, e.created_at);
+          }
         }
         return [...byId.values()];
       },

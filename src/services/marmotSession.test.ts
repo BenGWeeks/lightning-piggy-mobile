@@ -410,6 +410,65 @@ describe('MarmotSession (no WebCrypto)', () => {
     for (const p of [alice, bob, carol]) p.session.stop();
   }, 60_000);
 
+  it('retries a Welcome left pending by a transient failure, and ignores future-dated 445s for the watermark', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bobKeys = makeSigner();
+    const bobBackend = createMemoryMarmotBackend();
+    const bobOpts = {
+      pubkey: bobKeys.pubkey,
+      signerType: 'nsec' as const,
+      signer: bobKeys.signer,
+      network: relay.network,
+      backend: bobBackend,
+      getWriteRelays: () => [RELAY],
+      getLookupRelays: () => [RELAY],
+    };
+    const bobFirst = new MarmotSession(bobOpts);
+    await Promise.all([alice.session.start(), bobFirst.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bobKeys.pubkey));
+    const dm = await alice.session.getOrCreateDm(bobKeys.pubkey);
+    const [welcome] = unwrapWelcomes(relay, bobKeys);
+    bobFirst.stop();
+
+    // Simulate a join that failed transiently last session: the invite is
+    // still pending (its gift wrap won't be re-routed by the inbox).
+    await bobBackend.set('pendingWelcomes', welcome.id, JSON.stringify(welcome));
+
+    // An attacker publishes a validly-signed 445 with the group's public h
+    // tag, dated a year ahead.
+    const h = relay.events.find((e) => e.kind === 445)!.tags.find((t) => t[0] === 'h')![1];
+    const attacker = generateSecretKey();
+    relay.events.push(
+      finalizeEvent(
+        {
+          kind: 445,
+          created_at: Math.floor(Date.now() / 1000) + 365 * 86400,
+          tags: [['h', h]],
+          content: 'x',
+        },
+        attacker,
+      ),
+    );
+
+    const bob = new MarmotSession(bobOpts);
+    await bob.start();
+    await waitFor(() => bob.findDm(alice.pubkey)?.id === dm.id);
+    expect(await bobBackend.keys('pendingWelcomes')).toEqual([]);
+
+    // A later reconnect must not ask relays only for events after the fake date.
+    bob.stop();
+    relay.requests.length = 0;
+    const bobAgain = new MarmotSession(bobOpts);
+    await bobAgain.start();
+    await waitFor(() => relay.requests.flat().some((f) => f['#h']?.[0] === h));
+    const since = relay.requests.flat().find((f) => f['#h']?.[0] === h)?.since ?? 0;
+    expect(since).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+
+    alice.session.stop();
+    bobAgain.stop();
+  }, 60_000);
+
   it('refuses to start a chat with someone who has no key package', async () => {
     const relay = makeRelay();
     const alice = makeSession(relay);

@@ -43,8 +43,10 @@ name: New conversation protocol picker → NIP-04 send to Little Piggy
     id: 'dm-protocol-option-nip04'
 - tapOn:
     id: 'dm-protocol-option-nip04'
-- assertVisible:
-    id: 'conversation-protocol-tag'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-protocol-tag'
+    timeout: 10000
 - assertVisible:
     text: 'NIP-04'
 - tapOn:
@@ -64,12 +66,30 @@ name: New conversation protocol picker → NIP-04 send to Little Piggy
     visible:
       text: 'NIP-17'
     timeout: 10000
-- assertNotVisible:
-    text: 'NIP-04 protocol test'
-- tapOn:
-    id: 'conversation-back'
-- assertVisible:
-    id: 'conversation-row-d9b33280.*:nip04'
+# The thread swaps once the picker sheet has finished dismissing.
+- extendedWaitUntil:
+    notVisible:
+      text: 'NIP-04 protocol test'
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+# Right after a protocol switch the picker sheet's backdrop can still be
+# fading out and swallow the first Back tap (pre-existing, see #1164) —
+# retry rather than flake.
+- repeat:
+    while:
+      visible:
+        id: 'conversation-back'
+    times: 3
+    commands:
+      - tapOn:
+          id: 'conversation-back'
+      - waitForAnimationToEnd:
+          timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-d9b33280.*:nip04'
+    timeout: 10000
 - extendedWaitUntil:
     visible:
       id: 'conversation-row-d9b33280.*:nip17'

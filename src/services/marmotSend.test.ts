@@ -58,6 +58,16 @@ describe('sendMarmotDm', () => {
     expect(ready.mock.calls[0][0].kind).toBe(14);
   });
 
+  it('gives identical text to different recipients different ids (p tag kept)', async () => {
+    const sent = fakeSession();
+    const created_at = 1_700_000_000;
+    const other = 'c'.repeat(64);
+    await sendMarmotDm(ME, PEER, { kind: 14, content: 'oink', tags: [['p', PEER]], created_at });
+    await sendMarmotDm(ME, other, { kind: 14, content: 'oink', tags: [['p', other]], created_at });
+    expect(sent[0].rumor.id).not.toBe(sent[1].rumor.id);
+    expect(sent[0].rumor.tags).toEqual([['p', PEER]]);
+  });
+
   it('explains a missing key package instead of failing opaquely', async () => {
     fakeSession({
       getOrCreateDm: async () => {

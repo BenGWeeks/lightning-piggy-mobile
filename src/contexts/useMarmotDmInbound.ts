@@ -36,9 +36,14 @@ export function useMarmotDmInbound(
       const batch = rows;
       rows = [];
       if (batch.length === 0) return;
-      void upsertDmMessages(batch).catch((e) => {
-        if (__DEV__) console.warn('[Marmot] DM store write failed:', e);
-      });
+      // An open thread re-reads the store on notify, so notify only once the
+      // batch has committed (else it can re-read stale rows and miss it).
+      const peers = new Set(batch.map((r) => r.conversation));
+      void upsertDmMessages(batch)
+        .catch((e) => {
+          if (__DEV__) console.warn('[Marmot] DM store write failed:', e);
+        })
+        .then(() => peers.forEach((peer) => notifyDmMessage(peer)));
       const entries: DmInboxEntry[] = batch.map((r) => ({
         id: r.eventId,
         partnerPubkey: r.conversation,
@@ -52,7 +57,6 @@ export function useMarmotDmInbound(
       }));
       const ids = new Set(entries.map((e) => e.id));
       setDmInbox((prev) => [...entries, ...prev.filter((e) => !ids.has(e.id))]);
-      for (const peer of new Set(batch.map((r) => r.conversation))) notifyDmMessage(peer);
     };
 
     const onMessage = (event: MarmotMessageEvent) => {
