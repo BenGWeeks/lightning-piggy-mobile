@@ -39,6 +39,14 @@ import {
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { createMarmotNetwork } from './marmotNetwork';
+import {
+  leafKey,
+  PUSH_TOKEN_LIST_KIND,
+  PUSH_TOKEN_REMOVAL_KIND,
+  PUSH_TOKEN_UPDATE_KIND,
+  PUSH_TRIGGERING_KINDS,
+} from './marmotPush';
+import { MarmotPushNotifier, type PushGroup } from './marmotPushNotifier';
 import { createMarmotSigner } from './marmotSigner';
 import {
   createMarmotKvStore,
@@ -179,6 +187,7 @@ export class MarmotSession {
   private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
   private readonly joiningWelcomes = new Set<string>();
   private readonly deliveredRumors = new Set<string>();
+  private readonly push: MarmotPushNotifier;
   private connection: { unsubscribe(): void } | null = null;
   private stopped = false;
   private markReady!: () => void;
@@ -192,6 +201,7 @@ export class MarmotSession {
     this.backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     const network = opts.network ?? createMarmotNetwork(opts.getLookupRelays);
+    this.push = new MarmotPushNotifier({ pubkey: opts.pubkey, backend: this.backend, network });
     this.client = new MarmotClient({
       signer: opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType),
       network: this.boundGroupQueries(network),
@@ -480,6 +490,15 @@ export class MarmotSession {
         `[Marmot] sent kind ${rumor.kind} to ${appGroupId.slice(7, 15)}: ${ok}/${Object.keys(byRelay).length} relays`,
       );
     }
+    // MIP-05: wake the other members' devices (best-effort, off the send path).
+    const sent = this.client.groups.loaded.find((g) => g.idStr === toMlsGroupId(appGroupId));
+    if (
+      sent &&
+      PUSH_TRIGGERING_KINDS.includes(rumor.kind) &&
+      Object.values(byRelay).some(Boolean)
+    ) {
+      void this.push.trigger(this.pushGroup(sent)).catch(() => undefined);
+    }
     return byRelay;
   }
 
@@ -580,6 +599,14 @@ export class MarmotSession {
     if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
       this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
     }
+    if (
+      rumor.kind === PUSH_TOKEN_UPDATE_KIND ||
+      rumor.kind === PUSH_TOKEN_LIST_KIND ||
+      rumor.kind === PUSH_TOKEN_REMOVAL_KIND
+    ) {
+      // MIP-05 token gossip: kept as local push state, never a chat row.
+      void this.push.ingest(this.pushGroup(g), rumor.kind, rumor.content).catch(() => undefined);
+    }
     if (rumor.kind === MARMOT_CHAT_KIND && imageAttachments(rumor.tags).length > 0) {
       // Capture the epochs NOW: the photo's key comes from the epoch it was
       // sent in, and retained epochs are pruned as the group moves on.
@@ -588,6 +615,17 @@ export class MarmotSession {
       return;
     }
     this.emit(g, rumor);
+  }
+
+  /** A group as MIP-05 push state sees it: id + its current member leaves. */
+  private pushGroup(g: SessionGroup): PushGroup {
+    const leaves = new Set<string>();
+    for (const member of getGroupMembers(g.state)) {
+      for (const leaf of getPubkeyLeafNodeIndexes(g.state, member)) {
+        leaves.add(leafKey(member.toLowerCase(), Number(leaf)));
+      }
+    }
+    return { idHex: g.idStr, id: g.id, leaves };
   }
 
   private emit(g: SessionGroup, rumor: MarmotRumor, mediaKeys?: MarmotMediaKeys): void {
