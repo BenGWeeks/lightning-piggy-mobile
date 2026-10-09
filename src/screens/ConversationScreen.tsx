@@ -698,7 +698,7 @@ const ConversationScreen: React.FC = () => {
           </Text>
         )}
         <ConversationComposer
-          attachmentsEnabled={protocol === 'nip17'}
+          attachmentsEnabled={protocol !== 'nip04'}
           value={draft}
           onChangeText={(text) => {
             setDraft(text);

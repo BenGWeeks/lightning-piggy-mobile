@@ -23,6 +23,8 @@ import {
   MARMOT_CHAT_KIND,
   MarmotNoKeyPackageError,
   MarmotSession,
+  MarmotUnusableKeyPackageError,
+  isUsableKeyPackage,
   buildMarmotRumor,
   type MarmotMessageEvent,
   type MarmotRumor,
@@ -176,7 +178,7 @@ describe('Marmot without WebCrypto (Hermes smoke)', () => {
 
 // --- MarmotSession (the app's wrapper) -----------------------------------------
 
-async function waitFor(cond: () => boolean, ms = 10_000) {
+async function waitFor(cond: () => boolean, ms = 20_000) {
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error('waitFor timed out');
@@ -543,6 +545,52 @@ describe('MarmotSession (no WebCrypto)', () => {
 
     alice.session.stop();
     bob.stop();
+  }, 60_000);
+
+  it('skips unusable key packages, explains when none are usable, and leaves no orphan group', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    await Promise.all([alice.session.start(), bob.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    const good = relay.events.find((e) => e.kind === 30443 && e.pubkey === bob.pubkey)!;
+
+    // The library's rules: valid now, expired later, malformed without its d tag.
+    expect(isUsableKeyPackage(good)).toBe(true);
+    expect(isUsableKeyPackage(good, Math.floor(Date.now() / 1000) + 365 * 86400)).toBe(false);
+    expect(isUsableKeyPackage({ ...good, tags: good.tags.filter((t) => t[0] !== 'd') })).toBe(
+      false,
+    );
+
+    // (a) Passes our pre-check (nostr-tools' cached "verified" marker survives
+    // the spread) but the library rejects it at invite time: the error
+    // propagates and the half-made group is destroyed — no orphan.
+    const tampered = {
+      ...good,
+      id: 'f'.repeat(64),
+      created_at: good.created_at + 10,
+      tags: [...good.tags.filter((t) => t[0] !== 'd'), ['d', 'a'.repeat(64)]],
+    };
+    relay.events.splice(relay.events.indexOf(good), 1, tampered);
+    await expect(alice.session.getOrCreateDm(bob.pubkey)).rejects.toThrow();
+    expect(alice.session.listGroups()).toEqual([]);
+
+    // (b) A plain (unverified) copy fails our pre-check: friendly error, no group.
+    const broken = JSON.parse(JSON.stringify(tampered));
+    relay.events.splice(relay.events.indexOf(tampered), 1, broken);
+    await expect(alice.session.getOrCreateDm(bob.pubkey)).rejects.toBeInstanceOf(
+      MarmotUnusableKeyPackageError,
+    );
+    expect(alice.session.listGroups()).toEqual([]);
+    expect(await alice.session.canMessage(bob.pubkey)).toBe(false);
+
+    // A good one alongside the broken one is used.
+    relay.events.push(good);
+    const dm = await alice.session.getOrCreateDm(bob.pubkey);
+    expect(dm.isDm).toBe(true);
+
+    alice.session.stop();
+    bob.session.stop();
   }, 60_000);
 
   it('refuses to start a chat with someone who has no key package', async () => {

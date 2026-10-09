@@ -9,6 +9,7 @@ import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { marmotKindForAppKind } from './marmotInbox';
 import {
   MarmotNoKeyPackageError,
+  MarmotUnusableKeyPackageError,
   buildMarmotRumor,
   getMarmotSession,
   type MarmotSession,
@@ -40,6 +41,9 @@ export function marmotDelivery(
 export function marmotSendError(e: unknown): string {
   if (e instanceof MarmotNoKeyPackageError) {
     return "This person hasn't set up Marmot yet — try NIP-17 instead.";
+  }
+  if (e instanceof MarmotUnusableKeyPackageError) {
+    return "This person's Marmot app has published an invite key that's expired or invalid — ask them to open or update their Marmot app, or use NIP-17 for now.";
   }
   return (e as Error)?.message || 'Marmot send failed';
 }

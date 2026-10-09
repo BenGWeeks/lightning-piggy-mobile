@@ -17,6 +17,7 @@ import {
   createApplicationMessageIntent,
   deserializeApplicationData,
   getGroupMembers,
+  getKeyPackageLifetime,
   getPubkeyLeafNodeIndexes,
   Proposals,
   GroupRumorHistory,
@@ -24,7 +25,7 @@ import {
 } from '@internet-privacy/marmot-ts';
 import type { EventSigner } from 'applesauce-core';
 import { bytesToHex, randomBytes } from '@noble/hashes/utils.js';
-import { getEventHash, type Event as NostrEvent, type Filter } from 'nostr-tools';
+import { getEventHash, verifyEvent, type Event as NostrEvent, type Filter } from 'nostr-tools';
 
 import type { SignerType } from '../types/nostr';
 import { relayListFromTags } from '../utils/relayListEvents';
@@ -297,7 +298,7 @@ export class MarmotSession {
 
   /** Whether `peer` has published a Marmot key package we could invite. */
   async canMessage(peer: string): Promise<boolean> {
-    return (await this.fetchKeyPackage(peer)) !== null;
+    return (await this.fetchKeyPackage(peer).catch(() => null)) !== null;
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {
@@ -337,7 +338,15 @@ export class MarmotSession {
       relays: this.writeRelays(),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
-    for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+    try {
+      for (const kp of keyPackages) await this.client.groups.invite(group.id, kp);
+    } catch (e) {
+      // Don't leave an empty, invisible group (and its relay sub) behind —
+      // a retry would otherwise create another one each time.
+      await this.client.groups.destroy(group.id).catch(() => undefined);
+      this.emitGroupsChanged();
+      throw e;
+    }
     if (__DEV__)
       console.log(`[Marmot] created ${group.idStr.slice(0, 8)}, invited ${members.length}`);
     return this.summarise(group);
@@ -545,10 +554,24 @@ export class MarmotSession {
     const events = (await network.request([...writeSet, ...lookup], {
       kinds: [30443],
       authors: [author],
-      limit: 10,
+      limit: 20,
     })) as NostrEvent[];
-    events.sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
-    return events[0] ?? null;
+    // Newest per publication slot (`d`), then newest first; take the first
+    // one the library will accept — a peer's client may have published an
+    // expired / over-long one alongside a good one (or only bad ones).
+    const newestPerSlot = new Map<string, NostrEvent>();
+    for (const e of events) {
+      const slot = e.tags.find((t) => t[0] === 'd')?.[1] ?? e.id;
+      const prev = newestPerSlot.get(slot);
+      if (!prev || e.created_at > prev.created_at) newestPerSlot.set(slot, e);
+    }
+    const candidates = [...newestPerSlot.values()].sort(
+      (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+    );
+    const usable = candidates.find((e) => isUsableKeyPackage(e));
+    if (usable) return usable;
+    if (candidates.length > 0) throw new MarmotUnusableKeyPackageError(peer);
+    return null;
   }
 
   /**
@@ -707,6 +730,41 @@ function spreadProposals(
         return proposals[i];
       }) as SingleProposalAction,
   );
+}
+
+// Mirrors marmot-ts's invite-time KeyPackage checks (createInviteIntent): a
+// valid signature, the singleton d / i / mls_protocol_version=1.0 tags, and a
+// LeafNode lifetime within the 7,261,200 s cap and current (±1 h grace).
+const KEY_PACKAGE_LIFETIME_CAP_SECS = 7_261_200;
+const KEY_PACKAGE_LIFETIME_GRACE_SECS = 3_600;
+export function isUsableKeyPackage(
+  e: NostrEvent,
+  nowSecs = Math.floor(Date.now() / 1000),
+): boolean {
+  const single = (name: string) => {
+    const tags = e.tags.filter((t) => t[0] === name);
+    return tags.length === 1 ? tags[0][1] : undefined;
+  };
+  if (!single('d') || !single('i') || single('mls_protocol_version') !== '1.0') return false;
+  if (!verifyEvent(e)) return false;
+  const lifetime = getKeyPackageLifetime(e);
+  if (!lifetime) return false;
+  const notBefore = Number(lifetime.notBefore);
+  const notAfter = Number(lifetime.notAfter);
+  return (
+    notAfter - notBefore <= KEY_PACKAGE_LIFETIME_CAP_SECS &&
+    nowSecs >= notBefore - KEY_PACKAGE_LIFETIME_GRACE_SECS &&
+    nowSecs <= notAfter + KEY_PACKAGE_LIFETIME_GRACE_SECS
+  );
+}
+
+/** The peer published key packages, but none Marmot can accept (expired,
+ * over-long lifetime, malformed) — usually an outdated / long-closed client. */
+export class MarmotUnusableKeyPackageError extends Error {
+  constructor(readonly pubkey: string) {
+    super(`No usable Marmot key package for ${pubkey.slice(0, 8)}`);
+    this.name = 'MarmotUnusableKeyPackageError';
+  }
 }
 
 export class MarmotNoKeyPackageError extends Error {
