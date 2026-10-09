@@ -6,11 +6,14 @@
 import { textForRumor } from '../utils/nip17Unwrap';
 import type { DmMessageRow } from './dmDb';
 import type { GroupMessage } from './groupMessagesStorageService';
+import { marmotMediaText, type MarmotMediaKeys } from './marmotMedia';
 import { MARMOT_CHAT_KIND, type MarmotMessageEvent, type MarmotRumor } from './marmotSession';
 
 /** NIP-17's chat kind — the app's text pipeline (renderer, message-info,
  * previews) keys on it. */
 const APP_TEXT_KIND = 14;
+/** NIP-17's file kind — the app's attachment pipeline (previews redact it). */
+const APP_FILE_KIND = 15;
 
 /**
  * The wire kind a Marmot app event is stored under. Marmot chat is kind 9;
@@ -21,6 +24,23 @@ const APP_TEXT_KIND = 14;
  */
 export function storedKindForMarmot(kind: number): number {
   return kind === MARMOT_CHAT_KIND ? APP_TEXT_KIND : kind;
+}
+
+/**
+ * Stored text + kind for a Marmot app event. A photo (MIP-04: kind 9 with an
+ * `imeta` attachment) is stored like a NIP-17 encrypted file — the `#lpe=1`
+ * URL, kind 15 — so the image bubble and the redacted previews apply; its
+ * file keys come from the session (`mediaKeys`). A caption is dropped.
+ */
+export function storedMarmotContent(
+  rumor: MarmotRumor,
+  mediaKeys?: MarmotMediaKeys,
+): { text: string; kind: number } {
+  if (rumor.kind === MARMOT_CHAT_KIND) {
+    const media = marmotMediaText(rumor.tags, mediaKeys);
+    if (media) return { text: media, kind: APP_FILE_KIND };
+  }
+  return { text: textForRumor(rumor), kind: storedKindForMarmot(rumor.kind) };
 }
 
 /** The Marmot wire kind for an app rumor kind — inverse of the above. */
@@ -34,6 +54,7 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
   const { rumor } = event;
   const me = owner.toLowerCase();
   const fromMe = rumor.pubkey.toLowerCase() === me;
+  const stored = storedMarmotContent(rumor, event.mediaKeys);
   return {
     owner,
     // The Marmot app-event id is stable across every member's copy.
@@ -41,9 +62,9 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
     conversation: peer,
     createdAt: rumor.created_at,
     sender: fromMe ? me : peer,
-    content: textForRumor(rumor),
+    content: stored.text,
     fromMe,
-    wireKind: storedKindForMarmot(rumor.kind),
+    wireKind: stored.kind,
     // Reaction / per-message zap target for both directions (#205), and the
     // delivery-store key for our own rows (#857) — same as NIP-17.
     rumorId: rumor.id,
@@ -51,11 +72,14 @@ export function marmotRumorToDmRow(owner: string, event: MarmotMessageEvent): Dm
   };
 }
 
-export function marmotRumorToGroupMessage(rumor: MarmotRumor): GroupMessage {
+export function marmotRumorToGroupMessage(
+  rumor: MarmotRumor,
+  mediaKeys?: MarmotMediaKeys,
+): GroupMessage {
   return {
     id: rumor.id,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: textForRumor(rumor),
+    text: storedMarmotContent(rumor, mediaKeys).text,
     createdAt: rumor.created_at,
   };
 }

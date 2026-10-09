@@ -3,7 +3,7 @@
 # flows against the LP emulator signed in as Big Piggy, and asserts from the
 # bots' logs that the content really travelled over MLS (not NIP-17).
 #
-#   bash scripts/marmot-e2e.sh            # all: 125 126 127 128 129
+#   bash scripts/marmot-e2e.sh            # all: 125 126 127 128 129 130
 #   bash scripts/marmot-e2e.sh 127 129    # a subset
 #
 # Needs: .env with MAESTRO_NSEC_{BIG,LITTLE,MIDDLE}; Big follows Little and
@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 set -a; source .env; set +a
 DEVICE="${DEVICE:-emulator-5554}"
 export PATH="$PATH:$HOME/.maestro/bin"
-FLOWS=("$@"); [ ${#FLOWS[@]} -eq 0 ] && FLOWS=(125 126 127 128 129)
+FLOWS=("$@"); [ ${#FLOWS[@]} -eq 0 ] && FLOWS=(125 126 127 128 129 130)
 LOGDIR="$(mktemp -d /tmp/marmot-e2e.XXXX)"
 # Unique per run: messages + assertions carry it, so a flow can never pass on
 # bubbles left over from an earlier run.
@@ -85,7 +85,7 @@ for f in "${FLOWS[@]}"; do
           expect_log little 'RECV kind=9 .*Shared contact' "contact share (kind 9)"
           expect_log little 'RECV kind=9 .*geo:' "location (kind 9)"
           expect_log little 'RECV kind=1068 ' "structured poll (kind 1068)"
-          expect_log little 'RECV kind=15 ' "encrypted photo (kind 15)"
+          expect_log little 'MEDIA OK v=encrypted-media-v2 image/' "photo (MIP-04 v2, decrypted by the bot)"
           expect_log little 'RECV kind=9 .*lnbc' "Lightning invoice (kind 9)"
           ;;
       esac
@@ -111,6 +111,22 @@ for f in "${FLOWS[@]}"; do
       expect_log middle 'INITIATED DM' "created a fresh DM and invited Big"
       run_flow .maestro/messaging/flow-129-marmot-receive-invite.yaml keep-app
       expect_log middle "RECV kind=9 .*got your invite $RUN_TAG" "received Big's reply over MLS"
+      stop_bots ;;
+    130)
+      # Photos both ways: the bot sends one White Noise-style; we send one
+      # from the gallery (pushed here) that the bot must decrypt.
+      convert -size 640x480 gradient:'#ff5c8a-#3b6cff' -gravity center -pointsize 40 -fill white \
+        -annotate 0 "Photo from Little (bot)\n$RUN_TAG" "$LOGDIR/bot-photo.png"
+      convert -size 640x480 gradient:'#3bd17a-#ff9f1c' -gravity center -pointsize 40 -fill white \
+        -annotate 0 "Photo from Big\n$RUN_TAG" "$LOGDIR/lp-photo.jpg"
+      adb -s "$DEVICE" push "$LOGDIR/lp-photo.jpg" /sdcard/Pictures/ >/dev/null
+      adb -s "$DEVICE" shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
+        -d file:///sdcard/Pictures/lp-photo.jpg >/dev/null
+      start_bot little "$MAESTRO_NSEC_LITTLE" BOT_INITIATE_TO="$BIG_HEX" \
+        BOT_INITIATE_TEXT="hi Big from Little $RUN_TAG" BOT_SEND_PHOTO="$LOGDIR/bot-photo.png" || { fail=1; continue; }
+      expect_log little 'SENT photo v=encrypted-media-v2' "sent a White Noise-format photo"
+      run_flow .maestro/messaging/flow-130-marmot-photos.yaml
+      expect_log little 'MEDIA OK v=encrypted-media-v2 image/' "decrypted our photo (MIP-04 v2)"
       stop_bots ;;
     *) echo "unknown flow $f"; fail=1 ;;
   esac

@@ -4,12 +4,18 @@
 // instead. The rumor rides inside the DM's MLS group, so every message type
 // the app supports works unchanged.
 
+import { Buffer } from 'buffer';
 import type { SendHooks, SendResult } from '../contexts/useMessageSend';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
+import { uploadEncryptedBlobToBlossom, type BlossomSigner } from './blossomService';
 import { marmotKindForAppKind } from './marmotInbox';
+import { marmotImetaTag } from './marmotMedia';
+import { getBlossomServers } from './walletStorageService';
 import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
+  MARMOT_CHAT_KIND,
   buildMarmotRumor,
   getMarmotSession,
   type MarmotSession,
@@ -43,11 +49,24 @@ export function marmotSendError(e: unknown): string {
     return "This person hasn't set up Marmot yet — try NIP-17 instead.";
   }
   if (e instanceof MarmotUnusableKeyPackageError) {
-    // Seen in the wild: MDK 0.8.x (older White Noise) key packages that the
-    // Marmot v2 library can't decode, and expired ones.
-    return "This person's Marmot app is out of date — its invite key isn't compatible. Ask them to update or reopen their Marmot app, or use NIP-17 for now.";
+    // Seen in the wild: legacy MDK 0.8.x key packages (the classic White
+    // Noise app still ships it) that this current-protocol library can't
+    // decode, and expired ones. Not the peer's fault — the protocols differ.
+    return "This person's Marmot app uses an older version of Marmot that Lightning Piggy can't talk to yet — use NIP-17 for now.";
   }
   return (e as Error)?.message || 'Marmot send failed';
+}
+
+/** A failed send's result: the user-facing reason, plus whether the peer
+ * simply can't be reached over Marmot (so NIP-17 would still work). */
+function marmotFailure(e: unknown): SendResult {
+  const marmotUnreachable =
+    e instanceof MarmotNoKeyPackageError || e instanceof MarmotUnusableKeyPackageError;
+  return {
+    success: false,
+    error: marmotSendError(e),
+    ...(marmotUnreachable ? { marmotUnreachable } : {}),
+  };
 }
 
 export function requireMarmotSession(pubkey: string): MarmotSession {
@@ -88,7 +107,7 @@ export async function sendMarmotDm(
       ? { success: true, delivery }
       : { success: false, delivery, error: 'No relay accepted the message' };
   } catch (e) {
-    return { success: false, error: marmotSendError(e) };
+    return marmotFailure(e);
   }
 }
 
@@ -114,5 +133,88 @@ export async function sendMarmotGroupRumor(
       : { success: false, error: 'No relay accepted the message' };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };
+  }
+}
+
+/** App kind the photo row is stored under (NIP-17's file kind — see marmotInbox). */
+const MARMOT_IMAGE_ROW_KIND = 15;
+
+export interface MarmotImage {
+  /** Local file uri (names the upload) + its bytes as base64. */
+  uri: string;
+  base64: string;
+  mime: string;
+}
+
+/**
+ * Send a photo the Marmot way (MIP-04): encrypt it under the group's epoch,
+ * upload the ciphertext to Blossom, and send a kind-9 chat event carrying its
+ * `imeta` tag — the shape White Noise and other Marmot clients render.
+ * `target` is a 1:1 peer (DM created on first use) or an app group id.
+ * `onRumorReady` carries the row text (the `#lpe=1` URL) for the optimistic bubble.
+ */
+export async function sendMarmotImage(
+  pubkey: string,
+  target: { peer: string } | { groupId: string },
+  image: MarmotImage,
+  signer: BlossomSigner,
+  hooks?: {
+    onRumorReady?: (meta: {
+      eventId: string;
+      kind: number;
+      relays: string[];
+      text: string;
+    }) => void;
+    onDeliveryFinalized?: SendHooks['onDeliveryFinalized'];
+  },
+): Promise<SendResult> {
+  try {
+    const session = requireMarmotSession(pubkey);
+    const group =
+      'peer' in target
+        ? await session.getOrCreateDm(target.peer)
+        : session.getGroup(target.groupId);
+    if (!group) throw new Error('This group is not available yet.');
+    const plaintext = new Uint8Array(Buffer.from(image.base64, 'base64'));
+    const filename = `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
+    const { encrypted, attachment, keyHex } = await session.encryptMedia(
+      group.id,
+      plaintext,
+      image.mime,
+      filename,
+    );
+    // Opaque bytes: the real type travels in the `imeta` tag.
+    const url = await uploadEncryptedBlobToBlossom(
+      image.uri,
+      await getBlossomServers(),
+      signer,
+      Buffer.from(encrypted).toString('base64'),
+    );
+    const rumor = buildMarmotRumor(pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: '',
+      tags: [marmotImetaTag(attachment, url)],
+    });
+    const keys = { [attachment.ciphertextSha256]: [keyHex] };
+    await session.rememberMediaKeys(group.id, rumor.id, keys);
+    const text = encodeMarmotMediaUrl({
+      url,
+      version: attachment.version,
+      mime: attachment.mediaType,
+      keysHex: [keyHex],
+      nonceHex: attachment.nonce,
+      filename,
+      plaintextSha256: attachment.plaintextSha256,
+      ciphertextSha256: attachment.ciphertextSha256,
+    });
+    const meta = { eventId: rumor.id, kind: MARMOT_IMAGE_ROW_KIND };
+    hooks?.onRumorReady?.({ ...meta, relays: group.relays, text });
+    const delivery = marmotDelivery(await session.sendRumor(group.id, rumor), meta);
+    hooks?.onDeliveryFinalized?.(delivery);
+    return delivery.delivered
+      ? { success: true, delivery }
+      : { success: false, delivery, error: 'No relay accepted the photo' };
+  } catch (e) {
+    return marmotFailure(e);
   }
 }

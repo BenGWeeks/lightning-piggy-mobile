@@ -310,7 +310,9 @@
     "closeFullscreenGif": "Cerrar el GIF a pantalla completa",
     "shareContactTitle": "Compartir un contacto con {{name}}",
     "shareContactSubtitle": "Lo verán como una tarjeta de perfil de Nostr que pueden abrir.",
-    "typing": "escribiendo…"
+    "typing": "escribiendo…",
+    "marmotFallbackTitle": "Enviado con NIP-17",
+    "marmotFallbackBody": "{{name}} todavía no puede recibir Marmot, así que esta conversación ahora usa NIP-17."
   },
   "nwcShareSheet": {
     "title": "Compartir una cartera",

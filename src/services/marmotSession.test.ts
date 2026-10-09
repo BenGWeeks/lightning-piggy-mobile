@@ -30,6 +30,9 @@ import {
   type MarmotRumor,
 } from './marmotSession';
 import { createMemoryMarmotBackend, decodeMarmotValue, encodeMarmotValue } from './marmotStore';
+import { storedMarmotContent } from './marmotInbox';
+import { decryptMarmotImage, marmotImetaTag } from './marmotMedia';
+import { parseImageMessage } from '../utils/messageContent';
 
 const RELAY = 'wss://relay.test';
 
@@ -588,6 +591,47 @@ describe('MarmotSession (no WebCrypto)', () => {
     relay.events.push(good);
     const dm = await alice.session.getOrCreateDm(bob.pubkey);
     expect(dm.isDm).toBe(true);
+
+    alice.session.stop();
+    bob.session.stop();
+  }, 60_000);
+
+  it('photos: White Noise-compatible v2 media that decrypts from the stored row alone', async () => {
+    const relay = makeRelay();
+    const alice = makeSession(relay);
+    const bob = makeSession(relay);
+    await Promise.all([alice.session.start(), bob.session.start()]);
+    await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === bob.pubkey));
+    // White Noise only invites people whose key package supports media v2.
+    const bobKp = relay.events.find((e) => e.kind === 30443 && e.pubkey === bob.pubkey)!;
+    expect(bobKp.tags.find((t) => t[0] === 'app_components')).toContain('0x800b');
+
+    const dm = await alice.session.getOrCreateDm(bob.pubkey);
+    await bob.session.acceptWelcome(unwrapWelcomes(relay, bob)[0]);
+
+    const photo = new Uint8Array(4096).map((_, i) => (i * 31) % 256);
+    const enc = await alice.session.encryptMedia(dm.id, photo, 'image/png', 'photo.png');
+    expect(enc.attachment.version).toBe('encrypted-media-v2');
+    const url = `https://blossom.example/${enc.attachment.ciphertextSha256}.bin`;
+    const rumor = buildMarmotRumor(alice.pubkey, {
+      kind: MARMOT_CHAT_KIND,
+      content: '',
+      tags: [marmotImetaTag(enc.attachment, url)],
+    });
+    await alice.session.sendRumor(dm.id, rumor);
+    await waitFor(() => bob.inbox.some((m) => m.rumor.id === rumor.id));
+
+    // Bob's row: an image (kind 15, `#lpe=1` URL) that decrypts with no group state.
+    const received = bob.inbox.find((m) => m.rumor.id === rumor.id)!;
+    expect(received.mediaKeys?.[enc.attachment.ciphertextSha256]).toContain(enc.keyHex);
+    const stored = storedMarmotContent(received.rumor, received.mediaKeys);
+    expect(stored.kind).toBe(15);
+    const image = parseImageMessage(stored.text)!;
+    expect(image).toMatchObject({ url, mime: 'image/png', encrypted: true });
+    expect(decryptMarmotImage(enc.encrypted, { ...image, marmot: image.marmot! })).toEqual(photo);
+
+    // Without keys (none derived) the event stays plain text — never a broken image.
+    expect(storedMarmotContent(received.rumor, undefined)).toEqual({ text: '', kind: 14 });
 
     alice.session.stop();
     bob.session.stop();

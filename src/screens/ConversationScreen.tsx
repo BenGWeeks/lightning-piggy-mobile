@@ -72,6 +72,7 @@ import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
+import { Toast } from '../components/BrandedToast';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -269,6 +270,17 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
+  // The peer can't be reached over Marmot, so the message went over NIP-17:
+  // move the thread there (same in-place switch as the protocol picker).
+  const handleMarmotFallback = useCallback(() => {
+    navigation.setParams({ protocol: 'nip17' });
+    Toast.show({
+      type: 'info',
+      text1: t('conversationScreen.marmotFallbackTitle'),
+      text2: t('conversationScreen.marmotFallbackBody', { name }),
+    });
+  }, [navigation, t, name]);
+
   // Append an optimistic local- message to BOTH React state (instant
   // paint) AND the per-conversation cache on disk (survives back-then-
   // reopen before the NIP-17 self-wrap echo arrives). The merge-side
@@ -300,6 +312,7 @@ const ConversationScreen: React.FC = () => {
     setContactPickerOpen,
     setGifPickerOpen,
     setVoiceSheetOpen,
+    onMarmotFallback: handleMarmotFallback,
   });
 
   // Tap a bubble → message-info sheet (#856), for sent + received. Logic lives

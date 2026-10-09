@@ -7,6 +7,7 @@ import { legacyPollToStored, type DisplayPoll } from './nip88Poll';
 import { parseLiveLocationMarker, type LiveLocationMarker } from '../services/liveLocationService';
 import { isBitcoinAddress } from '../services/boltzService';
 import { parseBip21, ParsedBip21 } from './bip21';
+import { isMarmotMediaVersion, type MarmotMediaVersion } from './encryptedFileUrl';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -154,6 +155,17 @@ export interface ParsedImageMessage {
   encrypted: boolean;
   keyHex?: string;
   nonceHex?: string;
+  /** Set for a Marmot (MIP-04) photo — decrypted with these instead of AES-GCM. */
+  marmot?: MarmotImageParams;
+}
+
+/** The MIP-04 fields a Marmot photo needs to decrypt (see encodeMarmotMediaUrl). */
+export interface MarmotImageParams {
+  version: MarmotMediaVersion;
+  keysHex: string[];
+  filename: string;
+  plaintextSha256: string;
+  ciphertextSha256: string;
 }
 
 /**
@@ -177,11 +189,12 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
       const keyHex = params.get('k') ?? undefined;
       const nonceHex = params.get('n') ?? undefined;
       const mime = params.get('m') ?? 'application/octet-stream';
-      // We only implement AES-GCM (see encryptedFile.ts). A kind-15 file with
-      // a different `alg` falls back to plain rendering rather than show an
-      // image card that fails to decrypt. `alg` is always emitted by our
-      // encoder, so absence is tolerated.
       const alg = params.get('alg') ?? 'aes-gcm';
+      if (isMarmotMediaVersion(alg)) return parseMarmotImage(alg, url, mime, nonceHex, params);
+      // Otherwise we only implement AES-GCM (see encryptedFile.ts). A kind-15
+      // file with a different `alg` falls back to plain rendering rather than
+      // show an image card that fails to decrypt. `alg` is always emitted by
+      // our encoder, so absence is tolerated.
       if (alg !== 'aes-gcm') return null;
       // Only images here — encrypted audio is handled by parseVoiceNote.
       if (!keyHex || !nonceHex || !mime.startsWith('image/')) return null;
@@ -190,6 +203,28 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
   }
   const plain = extractImageUrl(trimmed);
   return plain ? { url: plain, mime: 'image/jpeg', encrypted: false } : null;
+}
+
+function parseMarmotImage(
+  version: MarmotMediaVersion,
+  url: string,
+  mime: string,
+  nonceHex: string | undefined,
+  params: URLSearchParams,
+): ParsedImageMessage | null {
+  const keysHex = (params.get('k') ?? '').split(',').filter(Boolean);
+  const filename = params.get('f');
+  const plaintextSha256 = params.get('ps');
+  const ciphertextSha256 = params.get('cs');
+  if (!mime.startsWith('image/') || keysHex.length === 0 || !nonceHex) return null;
+  if (!filename || !plaintextSha256 || !ciphertextSha256) return null;
+  return {
+    url,
+    mime,
+    encrypted: true,
+    nonceHex,
+    marmot: { version, keysHex, filename, plaintextSha256, ciphertextSha256 },
+  };
 }
 
 export function extractInvoice(text: string): DecodedInvoice | null {

@@ -310,7 +310,9 @@
     "closeFullscreenGif": "Закрити повноекранний GIF",
     "shareContactTitle": "Поділитися контактом з {{name}}",
     "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити.",
-    "typing": "друкує…"
+    "typing": "друкує…",
+    "marmotFallbackTitle": "Надіслано через NIP-17",
+    "marmotFallbackBody": "{{name}} поки не може отримувати Marmot, тож ця розмова тепер використовує NIP-17."
   },
   "courseDetailScreen": {
     "courseNotFound": "Курс не знайдено",

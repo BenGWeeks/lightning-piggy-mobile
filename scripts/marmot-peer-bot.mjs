@@ -9,8 +9,11 @@ import {
   createApplicationMessageIntent,
   createChatRumor,
   deserializeApplicationData,
+  encodeMediaImetaTag,
   getGroupMembers,
+  getMediaAttachments,
 } from '@internet-privacy/marmot-ts';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -146,8 +149,25 @@ const wire = (group) => {
     if (r.pubkey === pk) return;
     // Never answer another bot's pong (two bots in one group would loop).
     if (r.content.startsWith('pong: ')) return;
+    // A photo (MIP-04): fetch + verify + decrypt it, as White Noise would.
+    let mediaNote = '';
+    for (const att of getMediaAttachments(r.tags)) {
+      try {
+        const { data } = await group.downloadMedia(att);
+        log(
+          `MEDIA OK v=${att.version} ${att.mediaType} ${att.filename} bytes=${data.length} sha=${bytesToHex(sha256(data)).slice(0, 12)}`,
+        );
+        mediaNote = '[photo ok]';
+      } catch (e) {
+        log(`MEDIA FAILED v=${att.version} ${att.mediaType}: ${e?.message ?? e}`);
+        mediaNote = '[photo failed]';
+      }
+    }
     try {
-      const reply = createChatRumor({ pubkey: pk, content: `pong: ${r.content.slice(0, 60)}` });
+      const reply = createChatRumor({
+        pubkey: pk,
+        content: `pong: ${mediaNote || r.content.slice(0, 60)}`,
+      });
       await client.groups.send(group.id, createApplicationMessageIntent(reply));
       log('SENT reply', reply.id.slice(0, 8));
     } catch (e) {
@@ -247,6 +267,39 @@ if (process.env.BOT_INITIATE_TO && hasDmWith(process.env.BOT_INITIATE_TO.toLower
     log('SENT initiate text');
   } catch (e) {
     log('initiate failed:', e?.message ?? e);
+  }
+}
+
+// BOT_SEND_PHOTO=<file> (with BOT_INITIATE_TO): send that image into the DM
+// the way White Noise does — encrypted-media-v2 on Blossom, kind 9 + imeta.
+if (process.env.BOT_SEND_PHOTO && process.env.BOT_INITIATE_TO) {
+  const dm = dmWith(process.env.BOT_INITIATE_TO.toLowerCase());
+  try {
+    if (!dm) throw new Error('no DM with the target');
+    const bytes = readFileSync(process.env.BOT_SEND_PHOTO);
+    const type = process.env.BOT_SEND_PHOTO.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    const { attachment } = await dm.uploadMedia(
+      new Blob([bytes], { type }),
+      { filename: process.env.BOT_SEND_PHOTO.split('/').pop(), type },
+      // White Noise's defaults: encrypted blobs need servers that accept
+      // opaque octet-stream (media-only servers reject them).
+      {
+        servers: [
+          'https://blossom.divine.video',
+          'https://blossom.ditto.pub',
+          'https://cdn.hzrd149.com',
+        ],
+      },
+    );
+    const rumor = createChatRumor({
+      pubkey: pk,
+      content: process.env.BOT_PHOTO_CAPTION ?? '',
+      tags: [encodeMediaImetaTag(attachment)],
+    });
+    await client.groups.send(dm.id, createApplicationMessageIntent(rumor));
+    log(`SENT photo v=${attachment.version} sha=${attachment.plaintextSha256.slice(0, 12)}`);
+  } catch (e) {
+    log('send photo failed:', e?.message ?? e);
   }
 }
 

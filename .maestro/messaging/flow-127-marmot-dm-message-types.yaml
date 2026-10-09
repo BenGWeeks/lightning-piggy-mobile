@@ -7,7 +7,7 @@ name: Marmot DM — every attachment type to Little Piggy rides MLS
 # (scripts/marmot-e2e.sh) asserts those kinds, proving the content went over
 # Marmot, not NIP-17:
 #   contact (kind 9 text) · location (kind 9) · GIF (kind 9) · poll (kind 1068)
-#   · photo (kind 15) · invoice (kind 9, via ReceiveSheet presetProtocol).
+#   · photo (kind 9 + imeta, MIP-04 v2) · invoice (kind 9, via ReceiveSheet presetProtocol).
 #
 # Prereqs: flow-125 has run (the Marmot DM exists) and the peer bot is
 # running as Little Piggy. Only ever messages a Piggy.
@@ -121,7 +121,7 @@ name: Marmot DM — every attachment type to Little Piggy rides MLS
     commands:
       - pressKey: back
 
-# Photo (kind 15, AES-GCM + Blossom). The system photo picker is OS-owned
+# Photo (MIP-04: kind 9 + imeta, encrypted-media-v2 on Blossom). The system photo picker is OS-owned
 # UI with no testIDs — `point:` is the documented last resort there only.
 - tapOn:
     id: 'conversation-attach'

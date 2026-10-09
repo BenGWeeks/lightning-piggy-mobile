@@ -722,7 +722,7 @@ NIP-29 (relay-enforced groups) and NIP-104 (MLS) were both considered. NIP-29 wa
 [[marmot-messaging]]
 === Marmot (MLS) messaging — Alpha
 
-Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. The app uses `@internet-privacy/marmot-ts` (pinned to an exact `next` build) behind a small set of adapters in `src/services/marmot*.ts`:
+Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. The app uses `@internet-privacy/marmot-ts` behind a small set of adapters in `src/services/marmot*.ts`:
 
 [cols="1,3"]
 |===
@@ -734,11 +734,16 @@ Marmot is MLS (RFC 9420) carried over Nostr, wire-compatible with White Noise. T
 | `marmotStore.ts` | Every MLS store on one `marmot_kv` table in the SQLCipher DB, partitioned by (owner, namespace). Not a rebuildable cache: losing it means being re-invited (also the correct MLS outcome after a backup restore).
 | `marmotSession.ts` | One `MarmotClient` per signed-in account (started by `MarmotBridge`, 3 s after cold start). Bounds the library's unbounded kind-445 backfill with a persisted per-group `since` watermark + `limit`.
 | `marmotInbox.ts` / `marmotSend.ts` / `marmotWelcomeRouter.ts` | Map MLS app events into `dm_messages` (protocol `'marmot'`) or the group log; send seam; route kind-444 Welcomes (already unwrapped by the NIP-17 inbox path, after the follow gate) to the session.
+| `marmotMedia.ts` | MIP-04 encrypted media (photos): encrypt under the group's epoch, derive the file keys on receipt, decrypt for display.
 |===
 
-Interop conventions: a 1:1 chat is a two-member group with an empty name where both people are admins (White Noise's DM shape); chat text is kind 9 (stored as the app's kind 14, with the `protocol` column — not the kind — identifying the transport); key packages (kind 30443, random 32-byte `d` slot) go to the NIP-65 write relays; Welcomes go to the invitee's kind-10050 inbox. Every other message type is the same rumor the NIP-17 path builds, sent unchanged inside MLS, so files, polls, NWC shares, invoices, locations and live-location markers work as they do over NIP-17. Reactions, typing and live-location pings stay on their existing public channels.
+*Library pin.* The package is a vendored tarball (`vendor/internet-privacy-marmot-ts-0.6.1-pr83.624102f.tgz`): `marmot-ts` built from upstream PR #83 (encrypted media v2 + the `0x800b` media component, live-tested against MDK by its author). Without it White Noise can neither start a chat with a Lightning Piggy user (our key packages wouldn't advertise `0x800b`, which every White Noise group requires) nor show photos in the chats we start. Switch back to the npm release once it ships.
 
-Known gaps (Alpha): no post-join `selfUpdate()` key rotation yet (the library warns an immediate rotation forks the group); MIP-04 encrypted media is not used (files use the NIP-17 AES-GCM + Blossom scheme, which White Noise won't render); invites from senders outside the follow gate are not joined.
+Interop conventions: a 1:1 chat is a two-member group with an empty name where both people are admins (White Noise's DM shape); chat text is kind 9 (stored as the app's kind 14, with the `protocol` column — not the kind — identifying the transport); key packages (kind 30443, random 32-byte `d` slot) go to the NIP-65 write relays; Welcomes go to the invitee's kind-10050 inbox. Photos use Marmot's own format (MIP-04, `encrypted-media-v2`): a kind-9 event with an `imeta` tag, ChaCha20-Poly1305 ciphertext on Blossom, the file key derived from the group's epoch secret. The key exists only while that epoch is retained, so it is derived when the message arrives (one candidate per retained epoch — `imeta` doesn't name the epoch), persisted per message (`mediaKeys:<group>` in `marmot_kv`) so the startup replay can't overwrite it, and folded into the stored row as the `#lpe=1` URL (`alg=encrypted-media-v2`, row kind 15) — the renderer then needs no group state. Every other message type is the same rumor the NIP-17 path builds, sent unchanged inside MLS, so voice notes, polls, NWC shares, invoices, locations and live-location markers work as they do over NIP-17 (White Noise shows the text ones as plain text and ignores kind 15 / 1068-specific rendering it lacks).
+
+*Unreachable peers.* A 1:1 send to someone with no usable key package — none, or only legacy MDK 0.8 ones, which the classic White Noise app (Flutter, store release) still publishes and this current-protocol library can't decode — is re-sent over NIP-17 automatically and the thread switches to NIP-17 with a toast. Nothing is lost, and the peer can reply from any NIP-17 client. Reactions, typing and live-location pings stay on their existing public channels.
+
+Known gaps (Alpha): no post-join `selfUpdate()` key rotation yet (the library warns an immediate rotation forks the group); chats created before the media pin carry no `0x800b` component, so White Noise won't send or show photos in them (a new chat does); only the first image of a multi-attachment message renders and a photo's caption is dropped; voice notes still use the NIP-17 kind-15 scheme; classic White Noise users (legacy MDK 0.8) are reachable only via the NIP-17 fallback; invites from senders outside the follow gate are not joined.
 
 
 === Send path

@@ -1,6 +1,10 @@
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getBlossomServers } from './walletStorageService';
-import { uploadToBlossomServers, BlossomSigner } from './blossomService';
+import {
+  uploadEncryptedBlobToBlossom,
+  uploadToBlossomServers,
+  BlossomSigner,
+} from './blossomService';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 import { encryptFile } from './encryptedFile';
@@ -221,13 +225,7 @@ export async function uploadEncryptedBlob(
   const servers = await getBlossomServers();
   // Upload as opaque bytes — the blob is ciphertext, so the original mime
   // travels in the kind-15 `file-type` tag instead of the Content-Type.
-  const url = await uploadToBlossomServers(
-    fileUri,
-    servers,
-    signer,
-    ciphertextBase64,
-    'application/octet-stream',
-  );
+  const url = await uploadEncryptedBlobToBlossom(fileUri, servers, signer, ciphertextBase64);
   return { url, keyHex, nonceHex, sha256Hex, size: ciphertext.length, mime };
 }
 

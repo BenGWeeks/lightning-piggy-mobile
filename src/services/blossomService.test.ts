@@ -1,4 +1,9 @@
-import { uploadToBlossomServers, type BlossomSigner } from './blossomService';
+import {
+  ENCRYPTED_BLOB_FALLBACK_SERVERS,
+  uploadEncryptedBlobToBlossom,
+  uploadToBlossomServers,
+  type BlossomSigner,
+} from './blossomService';
 
 // Minimal XMLHttpRequest fake: each PUT is answered by `respond(url, body)`.
 type Call = { url: string; body: unknown; headers: Record<string, string> };
@@ -120,4 +125,39 @@ it('keeps the upload authorization valid for the whole failover budget', async (
   const expiration = Number(auth.tags.find((t: string[]) => t[0] === 'expiration')[1]);
   // Four attempts of up to 120 s each, plus the mirror window.
   expect(expiration - auth.created_at).toBeGreaterThanOrEqual(4 * 120 + 300);
+});
+
+describe('uploadEncryptedBlobToBlossom', () => {
+  const refuse = { status: 415, responseText: 'unsupported media type application/octet-stream' };
+
+  it("falls back to servers that store ciphertext when the user's refuse it", async () => {
+    // blossom.primal.net (the default) answers octet-stream with a 415.
+    respond = (url) => (url.startsWith('https://blossom.primal.net') ? refuse : ok(url));
+    const url = await uploadEncryptedBlobToBlossom(
+      'f',
+      ['https://blossom.primal.net'],
+      signer,
+      B64,
+    );
+    await flush();
+    expect(url).toBe(`${ENCRYPTED_BLOB_FALLBACK_SERVERS[0]}/upload`);
+    // Refused by the user's server, stored on the first fallback…
+    expect(calls.slice(0, 2).map((c) => c.url)).toEqual([
+      'https://blossom.primal.net/upload',
+      'https://blossom.divine.video/upload',
+    ]);
+    expect(calls[1].headers['Content-Type']).toBe('application/octet-stream');
+    // …and mirrored among the fallbacks only, never back to the refusing server.
+    expect(calls.slice(2).map((c) => c.url)).toEqual([
+      'https://blossom.ditto.pub/mirror',
+      'https://cdn.hzrd149.com/mirror',
+    ]);
+  });
+
+  it("keeps using the user's server when it accepts ciphertext", async () => {
+    respond = (url) => ok(url);
+    const url = await uploadEncryptedBlobToBlossom('f', ['https://mine.example'], signer, B64);
+    expect(url).toBe('https://mine.example/upload');
+    expect(calls).toHaveLength(1);
+  });
 });

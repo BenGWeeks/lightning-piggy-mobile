@@ -34,7 +34,7 @@ const PUBKEY = 'a'.repeat(64);
 // pending/failed status can seed its relay breakdown for the info sheet.
 const RELAYS = ['wss://a', 'wss://b'];
 
-function setup(protocol?: DmProtocol) {
+function setup(protocol?: DmProtocol, onMarmotFallback?: () => void) {
   const setMessages = jest.fn();
   const setDraft = jest.fn();
   const { result } = renderHook(() =>
@@ -49,6 +49,7 @@ function setup(protocol?: DmProtocol) {
       setContactPickerOpen: jest.fn(),
       setGifPickerOpen: jest.fn(),
       setVoiceSheetOpen: jest.fn(),
+      onMarmotFallback,
     }),
   );
   return { result, setMessages };
@@ -104,6 +105,45 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
       PUBKEY,
       expect.objectContaining({ wireKind: 14 }),
     );
+  });
+
+  it('re-sends over NIP-17 (and switches the thread) when Marmot cannot reach the peer', async () => {
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, _text: string, hooks?: SendHooks): Promise<SendResult> => {
+        if (hooks?.protocol === 'marmot') {
+          // No key package / a legacy one: fails before any bubble is painted.
+          return { success: false, error: 'older Marmot', marmotUnreachable: true };
+        }
+        hooks?.onRumorReady?.({ eventId: EVENT_ID, kind: 14, relays: RELAYS });
+        return { success: true };
+      },
+    );
+    const onMarmotFallback = jest.fn();
+    const { result } = setup('marmot', onMarmotFallback);
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(mockSendDirectMessage.mock.calls.map((c) => (c[2] as SendHooks).protocol)).toEqual([
+      'marmot',
+      'nip17',
+    ]);
+    expect(onMarmotFallback).toHaveBeenCalledTimes(1);
+    expect(mockAlert).not.toHaveBeenCalled();
+    // The bubble is the NIP-17 send's: not filed under the Marmot thread.
+    expect(mockAppendLocalDmMessage).toHaveBeenCalledTimes(1);
+    expect(mockAppendLocalDmMessage.mock.calls[0][1]).not.toHaveProperty('protocol');
+  });
+
+  it('does not fall back for an ordinary Marmot failure', async () => {
+    mockSendDirectMessage.mockResolvedValue({ success: false, error: 'relay down' });
+    const onMarmotFallback = jest.fn();
+    const { result } = setup('marmot', onMarmotFallback);
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(onMarmotFallback).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenCalledWith('Send failed', 'relay down');
   });
 
   it('paints a pending bubble immediately, then settles it to delivered', async () => {

@@ -19,6 +19,7 @@ import {
   getGroupMembers,
   getKeyPackageLifetime,
   getPubkeyLeafNodeIndexes,
+  GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID,
   Proposals,
   GroupRumorHistory,
   type MarmotGroup,
@@ -30,6 +31,13 @@ import { getEventHash, verifyEvent, type Event as NostrEvent, type Filter } from
 import type { SignerType } from '../types/nostr';
 import { relayListFromTags } from '../utils/relayListEvents';
 import { installMarmotCryptoProvider, marmotCryptoProvider } from './marmotCryptoProvider';
+import {
+  candidateMediaStates,
+  deriveMediaKeys,
+  encryptMarmotMedia,
+  imageAttachments,
+  type MarmotMediaKeys,
+} from './marmotMedia';
 import { createMarmotNetwork } from './marmotNetwork';
 import { createMarmotSigner } from './marmotSigner';
 import {
@@ -71,6 +79,11 @@ const isPlausibleTimestamp = (createdAt: number) =>
 // or deleted), or structurally invalid. Anything else is retried.
 const PERMANENT_WELCOME_FAILURE =
   /No matching KeyPackage|Invalid welcome event|Expected welcome event kind/i;
+const MEDIA_V2_COMPONENT_TAG = `0x${GROUP_ENCRYPTED_MEDIA_V2_COMPONENT_ID.toString(16)}`;
+const advertisesMediaV2 = (events: NostrEvent[]) =>
+  events.some((e) =>
+    e.tags.some((t) => t[0] === 'app_components' && t.includes(MEDIA_V2_COMPONENT_TAG)),
+  );
 // Safety stop for the paged backfill (500 × 40 = 20k events per group).
 const GROUP_BACKFILL_MAX_PAGES = 40;
 
@@ -102,6 +115,8 @@ export interface MarmotGroupSummary {
 export interface MarmotMessageEvent {
   group: MarmotGroupSummary;
   rumor: MarmotRumor;
+  /** File keys for the rumor's photos (MIP-04), derived when it arrived. */
+  mediaKeys?: MarmotMediaKeys;
 }
 
 export interface MarmotSessionListener {
@@ -266,6 +281,19 @@ export class MarmotSession {
         (kp) => kp.identifier !== undefined && !SLOT_ID_HEX.test(kp.identifier),
       );
       if (malformed.length > 0) await keyPackages.purge(malformed.map((kp) => kp.keyPackageRef));
+      // White Noise requires every invitee to support encrypted media v2
+      // (0x800b) — key packages published before we did can't be invited by
+      // it. Republish them in place (same slot, so relays replace them).
+      const lacksMediaV2 = (await keyPackages.list()).filter(
+        (kp) =>
+          !kp.used && !kp.nonCurrent && kp.published?.length && !advertisesMediaV2(kp.published),
+      );
+      for (const kp of lacksMediaV2) {
+        await keyPackages.rotate(kp.keyPackageRef, {
+          relays: this.writeRelays(),
+          client: CLIENT_NAME,
+        });
+      }
       await keyPackages.ensurePublished({
         relays: this.writeRelays(),
         identifier: await this.keyPackageSlot(),
@@ -384,6 +412,18 @@ export class MarmotSession {
     this.emitGroupsChanged();
   }
 
+  /** Encrypt a photo (MIP-04) under the group's current epoch. */
+  async encryptMedia(appGroupId: string, plaintext: Uint8Array, mime: string, filename: string) {
+    const group = await this.client.groups.get(toMlsGroupId(appGroupId));
+    return encryptMarmotMedia(group, plaintext, mime, filename);
+  }
+
+  /** Record the key of a photo we're sending, so its row reads back the
+   * same when the startup replay re-delivers our own message. */
+  async rememberMediaKeys(appGroupId: string, rumorId: string, keys: MarmotMediaKeys) {
+    await this.backend.set(`mediaKeys:${toMlsGroupId(appGroupId)}`, rumorId, JSON.stringify(keys));
+  }
+
   /** Send an app event; resolves with relay URL → accepted. */
   async sendRumor(appGroupId: string, rumor: MarmotRumor): Promise<Record<string, boolean>> {
     const results = await this.client.groups.send(
@@ -499,9 +539,43 @@ export class MarmotSession {
     if (this.deliveredRumors.size > DELIVERED_CACHE_SIZE) {
       this.deliveredRumors.delete(this.deliveredRumors.values().next().value as string);
     }
-    const event = { group: this.summarise(g), rumor };
+    if (rumor.kind === MARMOT_CHAT_KIND && imageAttachments(rumor.tags).length > 0) {
+      // Capture the epochs NOW: the photo's key comes from the epoch it was
+      // sent in, and retained epochs are pruned as the group moves on.
+      const states = candidateMediaStates(g);
+      void this.mediaKeysFor(g, rumor, states).then((mediaKeys) => this.emit(g, rumor, mediaKeys));
+      return;
+    }
+    this.emit(g, rumor);
+  }
+
+  private emit(g: SessionGroup, rumor: MarmotRumor, mediaKeys?: MarmotMediaKeys): void {
+    const event = { group: this.summarise(g), rumor, ...(mediaKeys ? { mediaKeys } : {}) };
     if (__DEV__) console.log(`[Marmot] recv kind ${rumor.kind} in ${g.idStr.slice(0, 8)}`);
     for (const l of this.listeners) l.onMessage?.(event);
+  }
+
+  /**
+   * A photo message's file keys, derived once and kept: the startup history
+   * replay re-delivers it after its epoch may have been pruned, and must not
+   * replace the stored keys with ones that can no longer decrypt it.
+   */
+  private async mediaKeysFor(
+    g: SessionGroup,
+    rumor: MarmotRumor,
+    states: SessionGroup['state'][],
+  ): Promise<MarmotMediaKeys | undefined> {
+    const ns = `mediaKeys:${g.idStr}`;
+    try {
+      const saved = await this.backend.get(ns, rumor.id);
+      if (saved) return JSON.parse(saved) as MarmotMediaKeys;
+      const keys = await deriveMediaKeys(states, g.ciphersuite, rumor.tags);
+      await this.backend.set(ns, rumor.id, JSON.stringify(keys));
+      return keys;
+    } catch (e) {
+      if (__DEV__) console.warn('[Marmot] media key derivation failed:', e);
+      return undefined;
+    }
   }
 
   /**
@@ -522,7 +596,10 @@ export class MarmotSession {
     if (ids.length <= HISTORY_KEEP) return;
     const all = (await g.history.queryRumors({})) as MarmotRumor[];
     all.sort((a, b) => b.created_at - a.created_at);
-    for (const old of all.slice(HISTORY_KEEP)) await this.backend.remove(ns, old.id);
+    for (const old of all.slice(HISTORY_KEEP)) {
+      await this.backend.remove(ns, old.id);
+      await this.backend.remove(`mediaKeys:${g.idStr}`, old.id);
+    }
   }
 
   private emitGroupsChanged(): void {

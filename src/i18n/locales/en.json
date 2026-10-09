@@ -310,7 +310,9 @@
     "closeFullscreenGif": "Close full-screen GIF",
     "shareContactTitle": "Share a contact with {{name}}",
     "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
-    "typing": "typing…"
+    "typing": "typing…",
+    "marmotFallbackTitle": "Sent with NIP-17",
+    "marmotFallbackBody": "{{name}} can't receive Marmot yet, so this thread now uses NIP-17."
   },
   "nwcShareSheet": {
     "title": "Share a wallet",

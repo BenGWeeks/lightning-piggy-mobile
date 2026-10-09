@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
-import { marmotRumorToGroupMessage } from '../services/marmotInbox';
+import { marmotRumorToGroupMessage, storedMarmotContent } from '../services/marmotInbox';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { requireMarmotSession } from '../services/marmotSend';
 import {
   subscribeMarmotSession,
@@ -72,9 +73,9 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     };
     const writeBatch = async (batch: MarmotMessageEvent[]) => {
       const byGroup = new Map<string, GroupMessage[]>();
-      for (const { group, rumor } of batch) {
+      for (const { group, rumor, mediaKeys } of batch) {
         const list = byGroup.get(group.id) ?? [];
-        list.push(marmotRumorToGroupMessage(rumor));
+        list.push(marmotRumorToGroupMessage(rumor, mediaKeys));
         byGroup.set(group.id, list);
       }
       for (const [groupId, messages] of byGroup) {
@@ -90,7 +91,9 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       const { rumor, group } = event;
       const fromMe = rumor.pubkey.toLowerCase() === pubkey.toLowerCase();
       if (!fromMe && rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
-        const text = marmotRumorToGroupMessage(rumor).text;
+        // Redacted like the DM inbox: a photo's stored text embeds its keys.
+        const stored = storedMarmotContent(rumor, event.mediaKeys);
+        const text = dmRowPreview(stored.text, stored.kind);
         void fireMessageNotification({
           kind: 'group',
           threadId: group.id,

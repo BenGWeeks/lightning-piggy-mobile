@@ -75,7 +75,12 @@ describe('sendMarmotDm', () => {
       },
     });
     const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
-    expect(result).toEqual({ success: false, error: expect.stringMatching(/set up Marmot/) });
+    // Flagged so the 1:1 composer re-sends it over NIP-17 instead.
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringMatching(/set up Marmot/),
+      marmotUnreachable: true,
+    });
   });
 
   it('fails cleanly before the session has started', async () => {

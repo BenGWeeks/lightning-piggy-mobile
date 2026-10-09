@@ -27,6 +27,9 @@ export interface SendResult {
   success: boolean;
   error?: string;
   delivery?: DeliveryStatus;
+  /** A Marmot send that failed because the peer has no usable key package —
+   *  the caller may fall back to NIP-17. */
+  marmotUnreachable?: boolean;
 }
 
 // Per-send options. `protocol` picks the wire format for a send (defaults to

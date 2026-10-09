@@ -1,11 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Image, ActivityIndicator } from 'react-native';
 import { writeAsStringAsync, getInfoAsync, cacheDirectory } from 'expo-file-system/legacy';
 import { AlertCircle } from 'lucide-react-native';
 import { Buffer } from 'buffer';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
 import { decryptFile } from '../services/encryptedFile';
+import { decryptMarmotImage } from '../services/marmotMedia';
+import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
  * Renders an inline chat image that may be either plain or encrypted (#688):
@@ -34,6 +36,8 @@ interface Props {
   keyHex?: string;
   nonceHex?: string;
   mime?: string;
+  /** A Marmot (MIP-04) photo: decrypted with these instead of `keyHex`. */
+  marmot?: MarmotImageParams;
   /** Style applied to the rendered <Image>. */
   style?: React.ComponentProps<typeof Image>['style'];
   accessibilityLabel?: string;
@@ -63,12 +67,13 @@ const DecryptedImage: React.FC<Props> = ({
   keyHex,
   nonceHex,
   mime,
+  marmot,
   style,
   accessibilityLabel,
   onResolved,
 }) => {
   const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createDecryptedImageStyles(colors), [colors]);
 
   // For plain images we feed the URL straight to <Image>. For encrypted ones
   // we resolve a cache `file://` URI after fetch+decrypt; seed from the cache
@@ -77,10 +82,16 @@ const DecryptedImage: React.FC<Props> = ({
     encrypted ? (decryptedUriCache.get(url) ?? null) : null,
   );
   const [failed, setFailed] = useState(false);
+  // parseImageMessage builds a fresh `marmot` object every render; key the
+  // effect on its content so a re-render doesn't restart a decrypt.
+  const marmotRef = useRef(marmot);
+  marmotRef.current = marmot;
+  const marmotSig = marmot ? `${marmot.ciphertextSha256}:${marmot.keysHex.join(',')}` : '';
 
   useEffect(() => {
     if (!encrypted) return;
-    if (!keyHex || !nonceHex) {
+    const marmotParams = marmotRef.current;
+    if ((!keyHex && !marmotParams) || !nonceHex) {
       setFailed(true);
       return;
     }
@@ -105,7 +116,13 @@ const DecryptedImage: React.FC<Props> = ({
           const res = await fetch(url);
           if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
           const cipher = new Uint8Array(await res.arrayBuffer());
-          const plain = decryptFile(cipher, keyHex, nonceHex);
+          const plain = marmotParams
+            ? decryptMarmotImage(cipher, {
+                mime: mime ?? 'image/jpeg',
+                nonceHex,
+                marmot: marmotParams,
+              })
+            : decryptFile(cipher, keyHex as string, nonceHex);
           await writeAsStringAsync(target, Buffer.from(plain).toString('base64'), {
             encoding: 'base64',
           });
@@ -123,7 +140,7 @@ const DecryptedImage: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [encrypted, url, keyHex, nonceHex, mime, onResolved]);
+  }, [encrypted, url, keyHex, nonceHex, mime, marmotSig, onResolved]);
 
   if (failed) {
     return (
@@ -151,10 +168,5 @@ const DecryptedImage: React.FC<Props> = ({
     />
   );
 };
-
-const createStyles = (_colors: Palette) =>
-  StyleSheet.create({
-    center: { alignItems: 'center', justifyContent: 'center' },
-  });
 
 export default DecryptedImage;

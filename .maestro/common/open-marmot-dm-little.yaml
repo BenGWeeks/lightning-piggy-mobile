@@ -4,10 +4,13 @@ appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 # Little Piggy from the Messages list. Run flow-125 once first to create it.
 - tapOn:
     id: 'tab-messages'
-- extendedWaitUntil:
-    visible:
+# The list can come back scrolled down (and a busy relay can land the row
+# late), so scroll up until it's on screen rather than only waiting.
+- scrollUntilVisible:
+    element:
       id: 'conversation-row-d9b33280.*:marmot'
-    timeout: 20000
+    direction: UP
+    timeout: 60000
 - tapOn:
     id: 'conversation-row-d9b33280.*:marmot'
 - extendedWaitUntil:
