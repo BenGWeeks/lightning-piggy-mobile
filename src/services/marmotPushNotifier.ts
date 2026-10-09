@@ -5,8 +5,6 @@
 // marmot_kv store) and publishing. Always best-effort — a failure here never
 // touches message delivery.
 
-import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
-
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import {
   applyPushPayload,
@@ -14,7 +12,9 @@ import {
   pruneToLeaves,
   selectTriggerTargets,
   type PushRecordState,
+  type TriggerTarget,
 } from './marmotPush';
+import type { PushTransport } from './marmotNetwork';
 import type { MarmotKvBackend } from './marmotStore';
 
 const NAMESPACE = 'pushRecords';
@@ -29,14 +29,16 @@ export interface PushGroup {
 
 export class MarmotPushNotifier {
   private readonly cache = new Map<string, PushRecordState>();
-  // One write chain per group so overlapping events can't lose each other.
+  // Every read and write of a group's state runs on one chain, so a trigger
+  // can't select from a state an earlier event is still updating, and a cold
+  // load can't overwrite a newer cached state.
   private readonly chains = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly deps: {
       pubkey: string;
       backend: MarmotKvBackend;
-      network: Pick<NostrNetworkInterface, 'publish' | 'getUserInboxRelays'>;
+      transport: PushTransport;
     },
   ) {}
 
@@ -60,25 +62,55 @@ export class MarmotPushNotifier {
     });
   }
 
-  /** Wake the group's other members after we sent a message. Fire-and-forget. */
-  async trigger(group: PushGroup): Promise<void> {
-    const state = await this.load(group.idHex);
-    const targets = selectTriggerTargets(state, this.deps.pubkey, group.leaves);
-    await Promise.all(
-      targets.map(async ({ server, relayHints, tokens }) => {
-        // Spec: the records' relay hints, else the server's inbox (10050) relays.
+  /** After a membership change: forget records and tombstones of leaves that
+   * left, so a later occupant of the same leaf index starts clean. */
+  reconcile(group: PushGroup): Promise<void> {
+    return this.serial(group.idHex, async () => {
+      const state = await this.load(group.idHex);
+      const pruned = pruneToLeaves(state, group.leaves);
+      if (Object.keys(pruned).length !== Object.keys(state).length) {
+        await this.save(group.idHex, pruned);
+      }
+    });
+  }
+
+  /**
+   * Wake the group's other members after we sent a message. Selection runs on
+   * the group's chain; building + publishing the wraps happens off it, on a
+   * later macrotask and yielding between wraps, so it never delays the send.
+   */
+  trigger(group: PushGroup): void {
+    setTimeout(() => {
+      void this.serial(group.idHex, async () =>
+        selectTriggerTargets(await this.load(group.idHex), this.deps.pubkey, group.leaves),
+      )
+        .then((targets) => this.publish(targets))
+        .catch(() => undefined);
+    }, 0);
+  }
+
+  private async publish(targets: TriggerTarget[]): Promise<void> {
+    if (targets.length === 0) return;
+    const scheduler = createYieldScheduler({ safetyEvery: 1 });
+    try {
+      for (const { server, relayHints, tokens } of targets) {
+        // Spec publish targets: the records' relay hints, else the server's
+        // own 10050 inbox — never a default relay.
         const relays = relayHints.length
           ? relayHints
-          : await this.deps.network.getUserInboxRelays(server).catch(() => []);
-        if (relays.length === 0) return;
+          : await this.deps.transport.inboxRelays(server).catch(() => []);
+        if (relays.length === 0) continue;
         for (const wrap of buildTriggerWraps(server, tokens)) {
-          await this.deps.network.publish(relays, wrap).catch(() => undefined);
+          await this.deps.transport.publish(relays, wrap).catch(() => undefined);
+          await scheduler.maybeYield();
         }
         if (__DEV__) {
           console.log(`[Marmot] push trigger → ${server.slice(0, 8)} (${tokens.length} device(s))`);
         }
-      }),
-    );
+      }
+    } finally {
+      scheduler.dispose();
+    }
   }
 
   private serial<T>(groupId: string, task: () => Promise<T>): Promise<T> {

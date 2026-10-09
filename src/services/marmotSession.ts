@@ -38,7 +38,7 @@ import {
   imageAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
-import { createMarmotNetwork } from './marmotNetwork';
+import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   leafKey,
   PUSH_TOKEN_LIST_KIND,
@@ -201,7 +201,17 @@ export class MarmotSession {
     this.backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     const network = opts.network ?? createMarmotNetwork(opts.getLookupRelays);
-    this.push = new MarmotPushNotifier({ pubkey: opts.pubkey, backend: this.backend, network });
+    this.push = new MarmotPushNotifier({
+      pubkey: opts.pubkey,
+      backend: this.backend,
+      // Tests inject a fake network; the app uses strict relay access.
+      transport: opts.network
+        ? {
+            publish: async (relays, event) => void (await network.publish(relays, event)),
+            inboxRelays: (pk) => network.getUserInboxRelays(pk),
+          }
+        : createPushTransport(opts.getLookupRelays),
+    });
     this.client = new MarmotClient({
       signer: opts.signer ?? createMarmotSigner(opts.pubkey, opts.signerType),
       network: this.boundGroupQueries(network),
@@ -497,7 +507,7 @@ export class MarmotSession {
       PUSH_TRIGGERING_KINDS.includes(rumor.kind) &&
       Object.values(byRelay).some(Boolean)
     ) {
-      void this.push.trigger(this.pushGroup(sent)).catch(() => undefined);
+      this.push.trigger(this.pushGroup(sent));
     }
     return byRelay;
   }
@@ -570,7 +580,11 @@ export class MarmotSession {
     if (this.wiredGroups.has(g.idStr)) return;
     this.wiredGroups.add(g.idStr);
     // Membership / name changes (ours or another member's commit) move the epoch.
-    g.on('stateChanged', () => this.emitGroupsChanged());
+    g.on('stateChanged', () => {
+      this.emitGroupsChanged();
+      // A member left → drop their push records (MIP-05 "Record state").
+      void this.push.reconcile(this.pushGroup(g)).catch(() => undefined);
+    });
     if (!this.firstSeen.has(g.idStr)) {
       const now = Date.now();
       this.firstSeen.set(g.idStr, now);

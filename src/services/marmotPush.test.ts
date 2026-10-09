@@ -192,7 +192,7 @@ describe('MIP-05 trigger (kind 446)', () => {
   it('gift-wraps the encrypted tokens to the server: rumor and seal share one ephemeral key, only the v tag', () => {
     const server = member();
     const tokens = Array.from({ length: 20 }, (_, i) => Buffer.alloc(1084, i).toString('base64'));
-    const wraps = buildTriggerWraps(server.pk, tokens);
+    const wraps = [...buildTriggerWraps(server.pk, tokens)];
     expect(wraps).toHaveLength(2); // 19 + 1, like MDK
     const rumor = nip59.unwrapEvent(wraps[0], server.sk);
     expect(rumor.kind).toBe(446);
@@ -200,5 +200,25 @@ describe('MIP-05 trigger (kind 446)', () => {
     expect(Buffer.from(rumor.content, 'base64')).toHaveLength(19 * 1084);
     expect(wraps[0].kind).toBe(1059);
     expect(wraps[0].tags).toEqual([['p', server.pk]]);
+  });
+});
+
+describe('MIP-05 strict decoding (review fixes)', () => {
+  const bob = member();
+  const leaves = new Set([leafKey(bob.pk, 1)]);
+  it('rejects non-canonical base64 (non-zero padding bits) even when owner-signed', async () => {
+    const canonical = Buffer.alloc(1084, 0).toString('base64'); // ends "AA=="
+    const sloppy = canonical.slice(0, -3) + 'B=='; // decodes to the same bytes
+    expect(Buffer.from(sloppy, 'base64').equals(Buffer.from(canonical, 'base64'))).toBe(true);
+    const entry = signedRecord(bob, { encryptedToken: sloppy });
+    expect(
+      await applyPushPayload({}, 447, payload('tokens', [entry]), { ...GROUP, leaves }, NOW),
+    ).toEqual({});
+  });
+  it("rejects a relay hint too long for SignedRecord's u16 length", async () => {
+    const entry = signedRecord(bob, { relayHint: 'wss://' + 'a'.repeat(70_000) });
+    expect(
+      await applyPushPayload({}, 447, payload('tokens', [entry]), { ...GROUP, leaves }, NOW),
+    ).toEqual({});
   });
 });

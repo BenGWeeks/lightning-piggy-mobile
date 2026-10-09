@@ -93,3 +93,37 @@ export function createMarmotNetwork(getFallbackRelays: () => string[]): NostrNet
     },
   };
 }
+
+/**
+ * Strict relay access for MIP-05 push triggers: publish ONLY to the given
+ * relays and read a server's inbox list without falling back to defaults —
+ * the spec's publish targets are the records' relay hints, else the server's
+ * own 10050 inbox; anywhere else would just leak the trigger.
+ */
+export interface PushTransport {
+  publish(relays: string[], event: NostrEvent): Promise<void>;
+  inboxRelays(pubkey: string): Promise<string[]>;
+}
+
+export function createPushTransport(getLookupRelays: () => string[]): PushTransport {
+  return {
+    async publish(relays, event) {
+      const targets = cleanRelays(relays);
+      if (targets.length === 0) return;
+      trackRelays(targets);
+      await Promise.allSettled(
+        pool.publish(targets, event).map((p) => withTimeout(p, PUBLISH_TIMEOUT_MS)),
+      );
+    },
+    async inboxRelays(pubkey) {
+      const lookup = cleanRelays([...getLookupRelays(), ...DEFAULT_RELAYS]);
+      const events = await pool.querySync(
+        lookup,
+        { kinds: [10050], authors: [pubkey], limit: 1 },
+        { maxWait: REQUEST_MAX_WAIT_MS },
+      );
+      const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
+      return latest ? cleanRelays(dmInboxRelaysFromTags(latest.tags)) : [];
+    },
+  };
+}

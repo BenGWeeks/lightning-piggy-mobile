@@ -104,7 +104,10 @@ function parseIdentity(raw: Record<string, unknown>, nowMs: number): Removal | n
 
 function decodeEncryptedToken(v: unknown): string | null {
   if (typeof v !== 'string' || v.length % 4 !== 0 || !BASE64.test(v)) return null;
-  return Buffer.from(v, 'base64').length === ENCRYPTED_TOKEN_LEN ? v : null;
+  const bytes = Buffer.from(v, 'base64');
+  // Canonical only: Buffer ignores non-zero padding bits ("…AB=="), which a
+  // strict decoder (MDK) rejects — and the owner proof signs the exact string.
+  return bytes.length === ENCRYPTED_TOKEN_LEN && bytes.toString('base64') === v ? v : null;
 }
 
 /** Shape-valid entries of a 447/448 (`tokens`) or 449 (`removals`) payload.
@@ -142,6 +145,8 @@ export function parsePushPayload(
     if (!encryptedToken) continue;
     const hint = (raw as { relay_hint?: unknown }).relay_hint;
     if (hint !== undefined && typeof hint !== 'string') continue;
+    // SignedRecord carries the hint's length as a u16.
+    if (hint && utf8ToBytes(hint).length > 0xffff) continue;
     out.records.push({
       ...id,
       encryptedToken,
@@ -307,18 +312,16 @@ export function selectTriggerTargets(
  * `["v","marmot-push-v1"]`; rumor and seal share one fresh ephemeral key, the
  * wrap another (nostr-tools nip59).
  */
-export function buildTriggerWraps(server: string, tokens: string[]): NostrEvent[] {
-  const wraps: NostrEvent[] = [];
+export function* buildTriggerWraps(server: string, tokens: string[]): Generator<NostrEvent> {
+  // A generator: each wrap is a sign + two NIP-44 encryptions, so callers can
+  // yield the JS thread between wraps instead of building them all at once.
   for (let i = 0; i < tokens.length; i += TOKENS_PER_WRAP) {
     const chunk = tokens.slice(i, i + TOKENS_PER_WRAP).map((t) => Buffer.from(t, 'base64'));
     const content = Buffer.concat(chunk).toString('base64');
-    wraps.push(
-      nip59.wrapEvent(
-        { kind: PUSH_TRIGGER_KIND, content, tags: [['v', PUSH_VERSION]] },
-        generateSecretKey(),
-        server,
-      ),
+    yield nip59.wrapEvent(
+      { kind: PUSH_TRIGGER_KIND, content, tags: [['v', PUSH_VERSION]] },
+      generateSecretKey(),
+      server,
     );
   }
-  return wraps;
 }
