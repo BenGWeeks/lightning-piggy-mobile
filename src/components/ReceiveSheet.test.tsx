@@ -97,6 +97,7 @@ const resolveNow = (id: string, value: string) => {
 const mockGetReceiveAddress = jest.fn((id: string) => deferFor(id));
 const mockMakeInvoice = jest.fn((id: string) => deferFor(id));
 const mockExpectPayment = jest.fn();
+let mockLastIncoming: Record<string, unknown> | null = null;
 jest.mock('../contexts/WalletContext', () => ({
   useWallet: () => ({
     makeInvoiceForWallet: mockMakeInvoice,
@@ -108,7 +109,7 @@ jest.mock('../contexts/WalletContext', () => ({
     getReceiveAddress: mockGetReceiveAddress,
     expectPayment: mockExpectPayment,
   }),
-  useWalletLive: () => ({ btcPrice: null, lastIncomingPayment: null }),
+  useWalletLive: () => ({ btcPrice: null, lastIncomingPayment: mockLastIncoming }),
 }));
 jest.mock('../utils/bolt11', () => ({ paymentHashFromBolt11: (inv: string) => `hash-${inv}` }));
 jest.mock('../contexts/NostrContext', () => ({
@@ -408,4 +409,29 @@ it('exposes copy/share as disabled buttons until an address is ready', async () 
   for (const name of ['receiveSheet.copy', 'receiveSheet.share']) {
     expect(screen.getByRole('button', { name, disabled: false })).toBeTruthy();
   }
+});
+
+describe('received checkmark vs catch-up receipts', () => {
+  afterEach(() => {
+    mockLastIncoming = null;
+  });
+  const showAddress = async () => {
+    mockGetReceiveAddress.mockImplementation(() => Promise.resolve('bc1qalpha000000'));
+    render(<ReceiveSheet visible onClose={onClose} />);
+    await act(async () => {});
+  };
+
+  it('ignores a receipt that settled long before it was noticed (found on app open)', async () => {
+    const at = Date.now();
+    mockLastIncoming = { walletId: 'A', amountSats: 21, at, settledAt: at / 1000 - 3 * 3600 };
+    await showAddress();
+    expect(screen.queryByText('\u2713')).toBeNull();
+  });
+
+  it('still ticks for a live receipt', async () => {
+    const at = Date.now();
+    mockLastIncoming = { walletId: 'A', amountSats: 21, at, settledAt: at / 1000 - 5 };
+    await showAddress();
+    expect(screen.getByText('\u2713')).toBeTruthy();
+  });
 });

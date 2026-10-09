@@ -215,6 +215,10 @@ async function initialiseInternal(): Promise<void> {
       importance: Notifications.AndroidImportance.LOW,
       description: 'Payments that arrived while the app was closed, shown quietly',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      // Explicitly silent, not just LOW importance: a user who raises the
+      // channel's importance in Settings still gets no sound or buzz.
+      sound: null,
+      enableVibrate: false,
     });
     // Importance LOW = no sound, no heads-up banner. This is the channel
     // the persistent foreground-service chip rides on (#279 realtime
