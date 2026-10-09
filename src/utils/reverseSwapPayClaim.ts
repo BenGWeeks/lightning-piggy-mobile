@@ -200,9 +200,9 @@ export async function payAndClaimReverseSwap(params: PayAndClaimParams): Promise
     if (isReplyTimeoutError(e)) {
       let status: string | null = null;
       try {
-        status = await boltzService.fetchSwapStatus(swap.id);
+        status = await boltzService.fetchSwapStatus(swap.id, payCtrl.signal);
       } catch {
-        // Couldn't ask Boltz: the outcome stays ambiguous.
+        // Couldn't ask Boltz (or the user cancelled): the outcome stays ambiguous.
       }
       if (isReverseSwapNeverSettlesStatus(status)) return notPaid(status);
     }

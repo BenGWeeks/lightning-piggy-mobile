@@ -440,7 +440,7 @@ describe('payAndClaimReverseSwap — dead swap (#1167)', () => {
     await flush();
     state.failPayment(named('ReplyTimeoutError', 'Wallet did not reply in time'));
     await expect(done).rejects.toThrow('Boltz swap failed: Boltz reports invoice.expired');
-    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1');
+    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1', expect.any(AbortSignal));
     expectRecordRetired();
   });
 
@@ -450,7 +450,7 @@ describe('payAndClaimReverseSwap — dead swap (#1167)', () => {
     await flush();
     state.failPayment(named('ReplyTimeoutError', 'Wallet did not reply in time'));
     await expect(done).rejects.toMatchObject({ name: 'ReplyTimeoutError' });
-    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1');
+    expect(fetchSwapStatus).toHaveBeenCalledWith('sw1', expect.any(AbortSignal));
     expectRecordKept();
   });
 
