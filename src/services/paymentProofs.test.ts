@@ -39,6 +39,19 @@ describe('paymentProofs', () => {
     expect(getPaymentProof(hashOf(last))).toBe(last);
   });
 
+  it("keeps earlier sessions' proofs when paying before the first hydration", async () => {
+    recordPaymentProof(pre(7));
+    await hydratePaymentProofs();
+    await new Promise((r) => setTimeout(r, 0));
+    clearPaymentProofsForTests(); // restart
+    recordPaymentProof(pre(8)); // pay before any tx-list fetch hydrated
+    await new Promise((r) => setTimeout(r, 0));
+    clearPaymentProofsForTests(); // restart again
+    await hydratePaymentProofs();
+    expect(getPaymentProof(hashOf(pre(7)))).toBe(pre(7));
+    expect(getPaymentProof(hashOf(pre(8)))).toBe(pre(8));
+  });
+
   it('survives an app restart (persisted, then hydrated)', async () => {
     recordPaymentProof(pre(7));
     await new Promise((r) => setTimeout(r, 0)); // let the AsyncStorage write land

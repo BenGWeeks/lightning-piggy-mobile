@@ -24,17 +24,29 @@ function persist(): void {
   void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...proofs])).catch(() => undefined);
 }
 
-/** Load proofs saved by earlier sessions (idempotent). */
+/** Load proofs saved by earlier sessions (idempotent). Stored (older) proofs
+ * go first, then any recorded this session, so the cap evicts the oldest. */
 export function hydratePaymentProofs(): Promise<void> {
   hydrated ??= AsyncStorage.getItem(STORAGE_KEY)
     .then((raw) => {
       if (!raw) return;
+      const thisSession = [...proofs];
+      proofs.clear();
       for (const [hash, preimage] of JSON.parse(raw) as [string, string][]) {
-        if (!proofs.has(hash)) proofs.set(hash, preimage);
+        proofs.set(hash, preimage);
       }
+      for (const [hash, preimage] of thisSession) {
+        proofs.delete(hash);
+        proofs.set(hash, preimage);
+      }
+      capProofs();
     })
     .catch(() => undefined);
   return hydrated;
+}
+
+function capProofs(): void {
+  while (proofs.size > MAX_PROOFS) proofs.delete(proofs.keys().next().value as string);
 }
 
 /** Record the preimage a successful payment returned. Ignores malformed input. */
@@ -44,8 +56,10 @@ export function recordPaymentProof(preimage: string | undefined | null): void {
   const hash = bytesToHex(sha256(hexToBytes(p)));
   proofs.delete(hash);
   proofs.set(hash, p);
-  while (proofs.size > MAX_PROOFS) proofs.delete(proofs.keys().next().value as string);
-  persist();
+  capProofs();
+  // Persist only after earlier sessions' proofs are loaded — a payment made
+  // before the first tx-list fetch would otherwise overwrite them.
+  void hydratePaymentProofs().then(persist);
 }
 
 /** The preimage proving `paymentHash` was paid by us, if we hold one. */
