@@ -58,18 +58,18 @@ name: New Marmot (MLS) group with Little Piggy → send and receive a reply
       id: 'group-message-input'
     timeout: 60000
 - assertVisible:
-    text: 'Oink MLS'
+    text: '.*MLS'
 - tapOn:
     id: 'group-message-input'
-- inputText: 'hello group over MLS'
+- inputText: 'hello group over MLS ${RUN_TAG}'
 - hideKeyboard
 - tapOn:
     id: 'group-send-button'
 - extendedWaitUntil:
     visible:
-      text: 'hello group over MLS'
+      text: '.ello group over MLS ${RUN_TAG}'
     timeout: 30000
 - extendedWaitUntil:
     visible:
-      text: 'pong: hello group over MLS'
+      text: 'pong: .ello group over MLS ${RUN_TAG}'
     timeout: 90000

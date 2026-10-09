@@ -1,0 +1,24 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+---
+# Building block (never run alone): open Big Piggy's existing Marmot DM with
+# Little Piggy from the Messages list. Run flow-125 once first to create it.
+- tapOn:
+    id: 'tab-messages'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-row-d9b33280.*:marmot'
+    timeout: 20000
+- tapOn:
+    id: 'conversation-row-d9b33280.*:marmot'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-protocol-tag'
+    timeout: 10000
+- assertVisible:
+    text: 'Marmot'
+# The runner's bot posts this on start; wait for it so the app is reading
+# the live DM group before anything is sent.
+- extendedWaitUntil:
+    visible:
+      text: 'hi Big from Little ${RUN_TAG}'
+    timeout: 120000

@@ -9,8 +9,11 @@ import {
   createApplicationMessageIntent,
   createChatRumor,
   deserializeApplicationData,
+  getGroupMembers,
 } from '@internet-privacy/marmot-ts';
-import { InMemoryKeyValueStore } from '@internet-privacy/marmot-ts/extra';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { nip19, getPublicKey, finalizeEvent, nip44, matchFilters } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
@@ -48,7 +51,18 @@ const network = {
     return {
       subscribe(o) {
         const cs = arr(filters).map((f) =>
-          pool.subscribeMany(relays.length ? relays : RELAYS, f, { onevent: (e) => o.next?.(e) }),
+          pool.subscribeMany(relays.length ? relays : RELAYS, f, {
+            onevent: (e) => {
+              if (process.env.BOT_DEBUG && e.kind === 445)
+                log(
+                  'EVT 445',
+                  e.id.slice(0, 8),
+                  'h=',
+                  (e.tags.find((t) => t[0] === 'h') ?? [])[1]?.slice(0, 8),
+                );
+              o.next?.(e);
+            },
+          }),
         );
         return { unsubscribe: () => cs.forEach((c) => c.close()) };
       },
@@ -66,11 +80,61 @@ const signer = {
     decrypt: (p, c) => nip44.decrypt(c, nip44.getConversationKey(sk, p)),
   },
 };
+// Persistent per-identity MLS state, so a bot stays a member of the groups it
+// joined in earlier runs (an in-memory bot is a brand-new client each start
+// and can't read anything sent to its old groups). JSON with Uint8Array/bigint
+// tagged — same codec as the app's src/services/marmotStore.ts.
+const STATE_DIR = join(homedir(), '.cache', 'lp-marmot-bot', pk);
+// BOT_RESET=1: forget all MLS state (as if reinstalled) — e.g. to make the bot
+// send a brand-new invite instead of reusing an existing DM.
+if (process.env.BOT_RESET) rmSync(STATE_DIR, { recursive: true, force: true });
+mkdirSync(STATE_DIR, { recursive: true });
+const encode = (v) =>
+  JSON.stringify(v, function (k, val) {
+    const raw = k === '' ? val : this[k];
+    if (raw instanceof Uint8Array) return { $u8: Buffer.from(raw).toString('base64') };
+    if (typeof raw === 'bigint') return { $bi: raw.toString() };
+    return val;
+  });
+const decode = (s) =>
+  JSON.parse(s, (_k, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const keys = Object.keys(v);
+      if (keys.length === 1 && keys[0] === '$u8')
+        return new Uint8Array(Buffer.from(v.$u8, 'base64'));
+      if (keys.length === 1 && keys[0] === '$bi') return BigInt(v.$bi);
+    }
+    return v;
+  });
+function fileStore(ns) {
+  const file = join(STATE_DIR, `${ns}.json`);
+  const data = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  const save = () => writeFileSync(file, JSON.stringify(data));
+  return {
+    getItem: async (k) => (k in data ? decode(data[k]) : null),
+    setItem: async (k, v) => ((data[k] = encode(v)), save(), v),
+    removeItem: async (k) => {
+      delete data[k];
+      save();
+    },
+    clear: async () => {
+      for (const k of Object.keys(data)) delete data[k];
+      save();
+    },
+    keys: async () => Object.keys(data),
+  };
+}
+const meta = fileStore('meta');
+const slot =
+  (await meta.getItem('slot')) ?? (await meta.setItem('slot', bytesToHex(randomBytes(32))));
 const client = new MarmotClient({
   signer,
   network,
-  groupStateStore: new InMemoryKeyValueStore(),
-  keyPackageStore: new InMemoryKeyValueStore(),
+  groupStateStore: fileStore('groups'),
+  keyPackageStore: fileStore('keyPackages'),
+  inviteStore: fileStore('invites'),
+  ingestStateStore: fileStore('ingest'),
+  lifecycleStore: fileStore('lifecycle'),
 });
 
 const wire = (group) => {
@@ -102,10 +166,11 @@ client.groups.on('joined', (g) => {
   );
   wire(g);
 });
-const kp = await client.keyPackages.create({
-  relays: RELAYS,
-  identifier: bytesToHex(randomBytes(32)),
-});
+for (const g of await client.groups.loadAll()) {
+  log('LOADED group', g.idStr.slice(0, 8), 'name=', JSON.stringify(g.groupData?.name));
+  wire(g);
+}
+await client.keyPackages.ensurePublished({ relays: RELAYS, identifier: slot });
 log('bot pubkey', pk.slice(0, 12), 'key package published');
 client.groups.connectAll({ fallbackRelays: RELAYS });
 
@@ -122,6 +187,8 @@ pool.subscribeMany(
           log('WELCOME from', w.pubkey.slice(0, 8));
           try {
             await client.joinGroupFromWelcome({ welcomeRumor: w });
+            // The joined key package is spent: publish a fresh one in our slot.
+            await client.keyPackages.ensurePublished({ relays: RELAYS, identifier: slot });
           } catch (e) {
             log('join failed', e.message);
           }
@@ -136,7 +203,31 @@ pool.subscribeMany(
 // BOT_INITIATE_TO=<hex pubkey>: start a Marmot DM (White Noise shape: no
 // name, both admins) to that account and send BOT_INITIATE_TEXT — exercises
 // the app's invite-receive path (kind-444 Welcome → auto-join).
-if (process.env.BOT_INITIATE_TO) {
+const hasDmWith = (target) =>
+  client.groups.loaded.some((g) => {
+    const members = getGroupMembers(g.state).map((m) => m.toLowerCase());
+    return (g.groupData?.name ?? '') === '' && members.length === 2 && members.includes(target);
+  });
+const dmWith = (target) =>
+  client.groups.loaded.find((g) => {
+    const members = getGroupMembers(g.state).map((m) => m.toLowerCase());
+    return (g.groupData?.name ?? '') === '' && members.length === 2 && members.includes(target);
+  });
+if (process.env.BOT_INITIATE_TO && hasDmWith(process.env.BOT_INITIATE_TO.toLowerCase())) {
+  // Say hello in the existing DM so the flow can wait for it (proves the app
+  // is reading this group before it replies).
+  const dm = dmWith(process.env.BOT_INITIATE_TO.toLowerCase());
+  const text = process.env.BOT_INITIATE_TEXT ?? 'hello from the bot over MLS';
+  try {
+    await client.groups.send(
+      dm.id,
+      createApplicationMessageIntent(createChatRumor({ pubkey: pk, content: text })),
+    );
+    log('DM with target already exists — SENT hello in', dm.idStr.slice(0, 8));
+  } catch (e) {
+    log('hello in existing DM failed:', e?.message ?? e);
+  }
+} else if (process.env.BOT_INITIATE_TO) {
   const target = process.env.BOT_INITIATE_TO.toLowerCase();
   const text = process.env.BOT_INITIATE_TEXT ?? 'hello from the bot over MLS';
   try {

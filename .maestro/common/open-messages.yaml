@@ -1,0 +1,6 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+---
+# Building block (never run alone): switch to the Messages tab without
+# relaunching the app.
+- tapOn:
+    id: 'tab-messages'

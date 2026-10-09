@@ -1,0 +1,135 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot group — Big, Little and Middle Piggy message each other, then manage it
+---
+# Big Piggy creates a Marmot (Alpha) group with Little (`d9b33280…`) and
+# Middle (`4b2fcb4e…`), both run by the peer bot (two instances). Each bot
+# joins from its Welcome and answers Big's message with "pong: <text>"; the
+# bots never answer each other's pongs. Big must see BOTH replies — i.e. all
+# three pigs exchange MLS messages in one group. Then Big renames the group
+# and removes Middle (an MLS commit), and Little's next reply still lands.
+#
+# Prereqs: Big Piggy follows Little and Middle; both bots running.
+# Run: bash scripts/marmot-e2e.sh 128
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-new-group'
+- waitForAnimationToEnd:
+    timeout: 2000
+- scrollUntilVisible:
+    element:
+      id: 'member-row-d9b33280ba73'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-d9b33280ba73'
+- scrollUntilVisible:
+    element:
+      id: 'member-row-4b2fcb4e3c30'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-4b2fcb4e3c30'
+- tapOn:
+    id: 'create-group-next'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: 'e.g. Family'
+- inputText: 'Three Pigs MLS'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'create-group-protocol-marmot'
+- tapOn:
+    id: 'create-group-submit'
+- extendedWaitUntil:
+    visible:
+      id: 'group-message-input'
+    timeout: 90000
+- assertVisible:
+    text: '.*Pigs MLS'
+- assertVisible:
+    text: '3 members'
+
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hello three pigs ${RUN_TAG}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- extendedWaitUntil:
+    visible:
+      text: '.ello three pigs ${RUN_TAG}'
+    timeout: 30000
+# Both bots reply; each reply is attributed to its sender in the thread.
+- extendedWaitUntil:
+    visible:
+      text: '(?i)little piggy'
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      text: '(?i)middle piggy'
+    timeout: 120000
+
+# Rename (MLS group-profile commit)
+- tapOn:
+    id: 'group-title'
+- extendedWaitUntil:
+    visible:
+      id: 'rename-group-input'
+    timeout: 10000
+- tapOn:
+    id: 'rename-group-input'
+- eraseText: 30
+- inputText: 'Two Pigs MLS'
+- tapOn:
+    id: 'rename-group-save'
+- extendedWaitUntil:
+    visible:
+      text: '.*wo Pigs MLS'
+    timeout: 60000
+
+# Remove Middle (MLS remove commit), then Little's next reply still arrives.
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'group-member-count'
+- extendedWaitUntil:
+    visible:
+      id: 'group-member-remove-4b2fcb4e3c30'
+    timeout: 10000
+- tapOn:
+    id: 'group-member-remove-4b2fcb4e3c30'
+- tapOn:
+    id: 'branded-alert-button-1'
+- extendedWaitUntil:
+    notVisible:
+      id: 'group-member-remove-4b2fcb4e3c30'
+    timeout: 60000
+- pressKey: back
+- extendedWaitUntil:
+    visible:
+      text: '2 members'
+    timeout: 30000
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'just two now ${RUN_TAG}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- extendedWaitUntil:
+    visible:
+      text: 'pong: .ust two now ${RUN_TAG}'
+    timeout: 120000

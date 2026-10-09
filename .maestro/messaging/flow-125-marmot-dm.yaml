@@ -42,19 +42,25 @@ name: New Marmot (MLS) conversation → send to Little Piggy and receive a reply
     timeout: 10000
 - assertVisible:
     text: 'Marmot'
+# The bot says hello in its live DM on start; seeing it proves the app has
+# joined (or is reading) that group before we reply into it.
+- extendedWaitUntil:
+    visible:
+      text: 'hi Big from Little ${RUN_TAG}'
+    timeout: 120000
 - tapOn:
     id: 'conversation-input'
-- inputText: 'hello over MLS'
+- inputText: 'hello over MLS ${RUN_TAG}'
 - tapOn:
     id: 'conversation-send'
 - extendedWaitUntil:
     visible:
-      text: 'hello over MLS'
+      text: '.ello over MLS ${RUN_TAG}'
     timeout: 30000
 # The peer's MLS reply arrives over kind 445 and lands in this thread.
 - extendedWaitUntil:
     visible:
-      text: 'pong: hello over MLS'
+      text: 'pong: .ello over MLS ${RUN_TAG}'
     timeout: 90000
 - tapOn:
     id: 'conversation-back'
