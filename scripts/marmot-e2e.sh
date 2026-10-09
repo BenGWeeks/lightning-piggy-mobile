@@ -17,7 +17,7 @@ FLOWS=("$@"); [ ${#FLOWS[@]} -eq 0 ] && FLOWS=(125 126 127 128 129 130)
 LOGDIR="$(mktemp -d /tmp/marmot-e2e.XXXX)"
 # Unique per run: messages + assertions carry it, so a flow can never pass on
 # bubbles left over from an earlier run.
-RUN_TAG="r$(date +%H%M%S)"
+RUN_TAG="r$(date +%m%d%H%M%S)$((RANDOM % 1000))"
 BOT_PIDS=()
 fail=0
 prev=start

@@ -127,12 +127,20 @@ export function useConversationReactions({
   // when a slow relay + optimistic-append churn re-run the effect.
   const reactionFetchScheduledRef = useRef(new Set<string>());
 
+  // Retractions seen so far (reaction id → who retracted it). Enforced on
+  // every merge: a retraction can arrive before its reaction (live Marmot
+  // events), or a slower history read can return a reaction after its live
+  // retraction — either way it must stay gone.
+  const retractionsRef = useRef(new Map<string, Set<string>>());
+
   const mergeFreshRecords = useCallback((fresh: ReactionRecord[]) => {
     if (fresh.length === 0) return;
     setReactionRecords((prev) => {
       const seen = new Set(prev.map((r) => r.id));
       const merged = [...prev];
       for (const r of fresh) {
+        // NIP-09: only the reactor's own retraction counts.
+        if (retractionsRef.current.get(r.id)?.has(r.reactorPubkey)) continue;
         if (!seen.has(r.id)) {
           merged.push(r);
           seen.add(r.id);
@@ -150,6 +158,15 @@ export function useConversationReactions({
   // actually matched, so an unrelated deletion batch doesn't force a re-render.
   const applyDeletionEvents = useCallback((deletions: { pubkey: string; tags: string[][] }[]) => {
     if (deletions.length === 0) return;
+    for (const d of deletions) {
+      for (const t of d.tags) {
+        if (t[0] !== 'e' || typeof t[1] !== 'string' || t[1].length === 0) continue;
+        const id = t[1].toLowerCase();
+        const by = retractionsRef.current.get(id) ?? new Set<string>();
+        by.add(d.pubkey.toLowerCase());
+        retractionsRef.current.set(id, by);
+      }
+    }
     setReactionRecords((prev) => {
       let next = prev;
       for (const d of deletions) {

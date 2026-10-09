@@ -198,3 +198,63 @@ describe('useConversationReactions — copy text', () => {
     expect(press(poll)?.copyText).toBeUndefined();
   });
 });
+
+describe('useConversationReactions — live (Marmot) reactions', () => {
+  const live = () => {
+    let emit: (
+      e: Parameters<
+        Parameters<NonNullable<ReturnType<typeof makeParams>['subscribeLiveReactions']>>[0]
+      >[0],
+    ) => void = () => undefined;
+    const subscribeLiveReactions = jest.fn((onEvent: typeof emit) => {
+      emit = onEvent;
+      return () => undefined;
+    });
+    return { subscribeLiveReactions, emit: (e: Parameters<typeof emit>[0]) => emit(e) };
+  };
+  const reaction = {
+    id: 'r1',
+    pubkey: PEER_PK,
+    kind: 7,
+    content: '🐷',
+    created_at: 1,
+    tags: [['e', TARGET]],
+  };
+  const retraction = {
+    id: 'd1',
+    pubkey: PEER_PK,
+    kind: 5,
+    content: '',
+    created_at: 2,
+    tags: [['e', 'r1']],
+  };
+
+  it('shows a reaction that arrives live', () => {
+    const feed = live();
+    const { result } = renderHook(() =>
+      useConversationReactions(makeParams({ subscribeLiveReactions: feed.subscribeLiveReactions })),
+    );
+    act(() => feed.emit(reaction));
+    expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
+  });
+
+  it('keeps a reaction hidden when its retraction arrived first', () => {
+    const feed = live();
+    const { result } = renderHook(() =>
+      useConversationReactions(makeParams({ subscribeLiveReactions: feed.subscribeLiveReactions })),
+    );
+    act(() => feed.emit(retraction));
+    act(() => feed.emit(reaction));
+    expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+  });
+
+  it('ignores a retraction by someone other than the reactor', () => {
+    const feed = live();
+    const { result } = renderHook(() =>
+      useConversationReactions(makeParams({ subscribeLiveReactions: feed.subscribeLiveReactions })),
+    );
+    act(() => feed.emit({ ...retraction, pubkey: MY_PK }));
+    act(() => feed.emit(reaction));
+    expect(result.current.reactionsByTarget.get(TARGET)).toBeDefined();
+  });
+});

@@ -182,22 +182,24 @@ export async function sendMarmotImage(
     // The file key is bound to the epoch we encrypt under. If a commit moves
     // the group on during a slow upload, a member added by it never held that
     // epoch and couldn't decrypt — so re-encrypt under the new one.
-    let sealed: Awaited<ReturnType<MarmotSession['encryptMedia']>>;
-    let url: string;
-    let attempts = 0;
-    do {
-      sealed = await session.encryptMedia(group.id, plaintext, image.mime, filename);
+    let sealed: Awaited<ReturnType<MarmotSession['encryptMedia']>> | undefined;
+    let url = '';
+    for (let attempt = 0; attempt < MAX_EPOCH_RETRIES; attempt++) {
+      const candidate = await session.encryptMedia(group.id, plaintext, image.mime, filename);
       // Opaque bytes: the real type travels in the `imeta` tag.
       url = await uploadEncryptedBlobToBlossom(
         image.uri,
         await getBlossomServers(),
         signer,
-        Buffer.from(sealed.encrypted).toString('base64'),
+        Buffer.from(candidate.encrypted).toString('base64'),
       );
-    } while (
-      ++attempts < MAX_EPOCH_RETRIES &&
-      (await session.mediaEpoch(group.id)) !== sealed.epoch
-    );
+      if ((await session.mediaEpoch(group.id)) === candidate.epoch) {
+        sealed = candidate;
+        break;
+      }
+    }
+    // Never send a photo some members provably can't decrypt.
+    if (!sealed) throw new Error('This chat is changing right now — try sending the photo again.');
     const { attachment, keyHex } = sealed;
     const rumor = buildMarmotRumor(pubkey, {
       kind: MARMOT_CHAT_KIND,

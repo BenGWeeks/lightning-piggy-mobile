@@ -84,6 +84,15 @@ const advertisesMediaV2 = (events: NostrEvent[]) =>
   events.some((e) =>
     e.tags.some((t) => t[0] === 'app_components' && t.includes(MEDIA_V2_COMPONENT_TAG)),
   );
+const isMediaKeys = (v: unknown): v is MarmotMediaKeys =>
+  !!v &&
+  typeof v === 'object' &&
+  Object.values(v).every(
+    (ref) =>
+      !!ref &&
+      typeof (ref as { url?: unknown }).url === 'string' &&
+      Array.isArray((ref as { keysHex?: unknown }).keysHex),
+  );
 // Safety stop for the paged backfill (500 × 40 = 20k events per group).
 const GROUP_BACKFILL_MAX_PAGES = 40;
 
@@ -419,15 +428,29 @@ export class MarmotSession {
   }
 
   /**
-   * Events from a group's durable history (ours included) — e.g. the kind-7
-   * reactions to some messages. Reactions arrive once over MLS, like every
-   * app event, so the history is where a reopened thread reads them back.
+   * Every event in a group's durable history (ours included), optionally
+   * narrowed to `kinds`. Reactions arrive once over MLS like every app event,
+   * so a reopened thread reads them back from here. Callers filter further
+   * themselves: the history backend only honours kinds/authors/time bounds,
+   * not tag filters such as `#e`.
    */
-  async queryHistory(appGroupId: string, filter: Filter): Promise<MarmotRumor[]> {
+  async queryHistory(appGroupId: string, kinds?: number[]): Promise<MarmotRumor[]> {
     await this.ready;
     const group = this.client.groups.loaded.find((g) => g.idStr === toMlsGroupId(appGroupId));
     if (!group?.history) return [];
-    return (await group.history.queryRumors(filter)) as MarmotRumor[];
+    return (await group.history.queryRumors(kinds ? { kinds } : {})) as MarmotRumor[];
+  }
+
+  /** Every DM group with `peer`, newest first — once stored groups have loaded.
+   * (A peer who lost their MLS state leaves older DMs behind; messages there
+   * still belong to the same conversation.) */
+  async dmGroupIdsWith(peer: string): Promise<string[]> {
+    await this.ready;
+    const p = peer.toLowerCase();
+    return this.listGroups()
+      .filter((g) => g.isDm && g.memberPubkeys[0] === p)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((g) => g.id);
   }
 
   /** The group's current MLS epoch (a photo's key is bound to one). */
@@ -474,15 +497,16 @@ export class MarmotSession {
     const id = welcomeRumor.id;
     if (this.joiningWelcomes.has(id) || (await this.backend.get('welcomes', id))) return null;
     this.joiningWelcomes.add(id);
-    // Durable until joined or permanently rejected: the inbox stores the
-    // invite's gift wrap as processed and never re-routes it, so a transient
-    // failure is retried from here (next session start) instead.
-    await this.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
     const markHandled = async () => {
       await this.backend.set('welcomes', id, String(Math.floor(Date.now() / 1000)));
       await this.backend.remove('pendingWelcomes', id);
     };
     try {
+      // Durable until joined or permanently rejected: the inbox stores the
+      // invite's gift wrap as processed and never re-routes it, so a transient
+      // failure is retried from here (next session start) instead. Inside the
+      // try so a failed write still releases `joiningWelcomes`.
+      await this.backend.set('pendingWelcomes', id, JSON.stringify(welcomeRumor));
       const { group } = await this.client.joinGroupFromWelcome({ welcomeRumor });
       await markHandled();
       if (__DEV__) console.log(`[Marmot] joined ${group.idStr.slice(0, 8)} from welcome`);
@@ -585,7 +609,10 @@ export class MarmotSession {
     const ns = `mediaKeys:${g.idStr}`;
     try {
       const saved = await this.backend.get(ns, rumor.id);
-      if (saved) return JSON.parse(saved) as MarmotMediaKeys;
+      // Only trust a saved entry in the current shape; anything else (an
+      // older dev build's format) is re-derived rather than read as empty.
+      const parsed = saved ? (JSON.parse(saved) as unknown) : null;
+      if (isMediaKeys(parsed)) return parsed;
       const keys = await deriveMediaKeys(
         states,
         g.ciphersuite,

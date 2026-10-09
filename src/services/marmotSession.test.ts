@@ -661,7 +661,9 @@ describe('MarmotSession (no WebCrypto)', () => {
     await waitFor(() => alice.inbox.some((m) => m.rumor.id === reaction.id));
     // Both sides read it back from history (the sender's own copy included).
     for (const who of [alice, bob]) {
-      const found = await who.session.queryHistory(dm.id, { kinds: [7], '#e': [hello.id] });
+      const found = (await who.session.queryHistory(dm.id, [7])).filter((r) =>
+        r.tags.some((t) => t[0] === 'e' && t[1] === hello.id),
+      );
       expect(found.map((r) => r.content)).toEqual(['🐷']);
     }
     const retract = buildMarmotRumor(bob.pubkey, {
@@ -671,7 +673,9 @@ describe('MarmotSession (no WebCrypto)', () => {
     });
     await bob.session.sendRumor(dm.id, retract);
     await waitFor(() => alice.inbox.some((m) => m.rumor.id === retract.id));
-    const deletions = await alice.session.queryHistory(dm.id, { kinds: [5], '#e': [reaction.id] });
+    const deletions = (await alice.session.queryHistory(dm.id, [5])).filter((r) =>
+      r.tags.some((t) => t[0] === 'e' && t[1] === reaction.id),
+    );
     expect(deletions.map((d) => d.pubkey)).toEqual([bob.pubkey]);
 
     alice.session.stop();
