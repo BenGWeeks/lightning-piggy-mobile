@@ -38,8 +38,12 @@ import { setActivePubkeyForWalletStorage } from '../services/walletStorageServic
 import { NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY, NIP46_CONNECTION_KEY } from './nostrAuthKeys';
 import { persistActiveIdentityKeys } from './persistActiveIdentityKeys';
 import { promoteSuccessorIdentity } from './promoteSuccessorIdentity';
-import { useMessageSend, type SendResult, type SendHooks } from './useMessageSend';
-import type { NwcShareCard } from '../utils/nwcShareMessage';
+import {
+  useMessageSend,
+  type MessageSendApi,
+  type SendResult,
+  type SendHooks,
+} from './useMessageSend';
 import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
@@ -180,24 +184,20 @@ interface NostrContextType extends UseReactionActionsResult {
    * NIP-88 poll or kind-1018 vote) to one or more recipients, keeping its
    * structured tags on the wire. See #203.
    */
-  sendDirectRumor: (
-    recipientPubkeys: string[],
-    rumor: { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string },
-    hooks?: SendHooks,
-  ) => Promise<SendResult>;
+  sendDirectRumor: MessageSendApi['sendDirectRumor'];
   /**
    * Send an encrypted NIP-17 kind-15 file message (e.g. a voice note) to a
    * 1:1 recipient. The blob is already AES-encrypted + uploaded; this
    * gift-wraps the URL + decryption key. See #235.
    */
-  sendFileMessage: (recipientPubkey: string, file: EncryptedUpload) => Promise<SendResult>;
+  sendFileMessage: MessageSendApi['sendFileMessage'];
   /**
    * Share an NWC wallet with a 1:1 recipient (#431). The NWC connection string
    * is a bearer secret, so it is gift-wrapped into an encrypted NIP-17 DM
    * (inner kind `NWC_SHARE_KIND`) — never a public event. The recipient's
    * client renders it as an "Add NWC Wallet" card.
    */
-  sendNwcShare: (recipientPubkey: string, card: NwcShareCard) => Promise<SendResult>;
+  sendNwcShare: MessageSendApi['sendNwcShare'];
   /**
    * Persist an optimistic local- DM message to the per-conversation
    * cache so it survives navigating away + back before the NIP-17

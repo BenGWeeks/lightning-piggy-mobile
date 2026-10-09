@@ -30,6 +30,9 @@ A glossary of key terms used throughout this document.
 | **Bitcoin**
 | A decentralised digital currency using peer-to-peer technology. Lightning Piggy enables Bitcoin payments via the Lightning Network.
 
+| **Blossom**
+| A protocol for storing files on simple HTTP servers addressed by their SHA-256 hash, with Nostr-signed upload authorisation. Lightning Piggy uploads images (when a signer is available), encrypted voice notes and files, and encrypted Marmot photos to the user's Blossom servers.
+
 | **BOLT11**
 | The standard Lightning Network invoice format (https://github.com/lightning/bolts/blob/master/11-payment-encoding.md[BOLT #11]). Encodes payment amount, description, expiry, and routing hints in a bech32-encoded string starting with `lnbc`.
 
@@ -107,8 +110,14 @@ The repo's perf suite (`scripts/perf-suite.sh`) parses `dumpsys gfxinfo` and sur
 | **Maestro**
 | A mobile UI testing framework used for end-to-end (E2E) tests. Tests are written in YAML and interact with the app via accessibility labels and test IDs.
 
+| **Marmot**
+| A protocol that carries MLS group messaging over Nostr (https://github.com/marmot-protocol/marmot[marmot-protocol]). Lightning Piggy's third messaging option (Alpha), alongside NIP-17 and legacy NIP-04, for both 1:1 chats and groups. Its extensions are numbered MIPs — e.g. MIP-04 (encrypted media) and MIP-05 (push notifications).
+
 | **Metro**
 | The JavaScript bundler used by React Native. Metro compiles and serves the JavaScript bundle to the app during development.
+
+| **MLS**
+| Messaging Layer Security (https://www.rfc-editor.org/rfc/rfc9420[RFC 9420]) — an IETF standard for end-to-end encrypted group messaging with forward secrecy and post-compromise security. Members share a ratcheting group key that changes each *epoch* (on every membership change or key update).
 
 | **MuSig2**
 | A multi-signature scheme (https://bips.dev/327/[BIP-327]) that aggregates multiple Schnorr signatures into a single signature. Used by Boltz for cooperative Taproot key-path spending.
@@ -187,6 +196,9 @@ The repo's perf suite (`scripts/perf-suite.sh`) parses `dumpsys gfxinfo` and sur
 
 | **Watch-only Wallet**
 | A wallet that can generate addresses and monitor balance/transactions but cannot sign transactions (no private key). Created by importing an xpub/ypub/zpub.
+
+| **White Noise**
+| A Marmot messaging app for iOS and Android. Lightning Piggy's Marmot chats are wire-compatible with current White Noise releases; the classic White Noise app, which still uses an older Marmot format, is reached via NIP-17 instead.
 
 | **xpub / ypub / zpub**
 | Extended public keys for HD (hierarchical deterministic) wallets. `xpub` = BIP-44 (legacy), `ypub` = BIP-49 (wrapped segwit), `zpub` = BIP-84 (native segwit). All contain the same key data with different version byte prefixes.

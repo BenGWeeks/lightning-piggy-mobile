@@ -310,7 +310,9 @@
     "closeFullscreenGif": "Close full-screen GIF",
     "shareContactTitle": "Share a contact with {{name}}",
     "shareContactSubtitle": "They'll see it as a Nostr profile card they can open.",
-    "typing": "typing…"
+    "typing": "typing…",
+    "marmotFallbackTitle": "Sent with NIP-17",
+    "marmotFallbackBody": "{{name}} can't receive Marmot yet, so this thread now uses NIP-17."
   },
   "nwcShareSheet": {
     "title": "Share a wallet",
@@ -1139,7 +1141,10 @@
     "zapMessage": "Zap this message",
     "zapMessageA11y": "Send a zap for this message",
     "reactionFailedTitle": "Reaction failed",
-    "reactionFailedBody": "Could not publish your reaction. Check your relays and try again."
+    "reactionFailedBody": "Could not publish your reaction. Check your relays and try again.",
+    "copyText": "Copy text",
+    "copied": "Copied",
+    "moreEmoji": "More emoji"
   },
   "messageBubble": {
     "imageSent": "Image sent",
@@ -1172,10 +1177,10 @@
     "accuracyOsm": "± {{meters}} m · OpenStreetMap",
     "unsupportedA11y": "Unsupported message type, kind {{kind}}",
     "unsupportedText": "Unsupported message type (kind {{kind}})",
-    "marmotInvite": "Invited you to a Marmot group chat — Marmot isn't supported in Lightning Piggy yet.",
-    "marmotMessage": "Marmot group message — Marmot isn't supported in Lightning Piggy yet.",
-    "marmotInvitePreview": "Group invite (Marmot not supported yet)",
-    "marmotMessagePreview": "Marmot message (not supported yet)",
+    "marmotInvite": "Sent you a Marmot chat invite — it opens as a Marmot chat in your Messages.",
+    "marmotMessage": "Marmot group event — open the Marmot chat to read it.",
+    "marmotInvitePreview": "Marmot chat invite",
+    "marmotMessagePreview": "Marmot message",
     "secretMode": "Secret Mode",
     "secretModeSenderMemo": "Lightning Piggy will offer the recipient a button to toggle Secret Mode.",
     "secretModeReceiverMemo": "Unlocks dev / power-user surfaces in Lightning Piggy.",
@@ -2247,8 +2252,8 @@
       "description": "Hides who you’re talking to from relays; works with most modern Nostr apps."
     },
     "marmot": {
-      "badge": "Coming soon",
-      "description": "End-to-end encrypted with MLS, used by White Noise."
+      "badge": "Alpha",
+      "description": "End-to-end encrypted with MLS; works with White Noise. Still being tested — use NIP-17 for anything important."
     },
     "nip04": {
       "badge": "Legacy",

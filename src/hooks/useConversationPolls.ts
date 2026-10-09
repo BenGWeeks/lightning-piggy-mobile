@@ -141,13 +141,14 @@ export function useConversationPolls({
         text,
         createdAt: Math.floor(Date.now() / 1000),
         wireKind: kind,
+        ...(protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
       };
       setMessages((prev) => [...prev, optimistic]);
       // Persist so the sent poll/vote survives a navigate-away + back before the
       // self-wrap echo lands; the real-id echo dedups it via text+window match.
       void appendLocalDmMessage(pubkey, optimistic);
     },
-    [pubkey, appendLocalDmMessage, setMessages],
+    [pubkey, appendLocalDmMessage, setMessages, protocol],
   );
 
   const handleSendPoll = useCallback(
@@ -170,6 +171,7 @@ export function useConversationPolls({
       }
       const stored = serializePollFromRumor(rumor);
       const result = await sendDirectRumor([pubkey], rumor, {
+        ...(protocol === 'marmot' ? { protocol } : {}),
         onRumorReady: ({ eventId, kind }) => {
           if (stored) appendOptimistic(eventId, kind, stored);
         },
@@ -180,7 +182,7 @@ export function useConversationPolls({
       }
       return true;
     },
-    [myPubkey, pubkey, sendDirectRumor, appendOptimistic],
+    [myPubkey, pubkey, sendDirectRumor, appendOptimistic, protocol],
   );
 
   const handleVotePoll = useCallback(
@@ -203,6 +205,7 @@ export function useConversationPolls({
             text: payload,
             createdAt: Math.floor(Date.now() / 1000),
             wireKind: protocol === 'nip04' ? 4 : 14,
+            ...(protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
           },
         ]);
         return;
@@ -234,6 +237,7 @@ export function useConversationPolls({
       });
       const stored = serializeVoteFromRumor(rumor);
       const result = await sendDirectRumor([pubkey], rumor, {
+        ...(protocol === 'marmot' ? { protocol } : {}),
         onRumorReady: ({ eventId, kind }) => {
           if (stored) appendOptimistic(eventId, kind, stored);
         },

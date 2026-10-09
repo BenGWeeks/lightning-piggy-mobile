@@ -14,7 +14,8 @@ import {
 } from '../services/locationService';
 import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import type { PickedFriend } from '../components/FriendPickerSheet';
-import type { Gif } from '../services/giphyService';
+import { giphyEnvelope, type Gif } from '../services/giphyService';
+import type { MarmotImage } from '../services/marmotSend';
 
 /**
  * The send-side behaviour that differs between the 1:1 and group composers —
@@ -37,6 +38,13 @@ export interface ComposerSendStrategy {
    *  optimistic append. Returns true on success. The `kind` lets the wrapper
    *  pick the right failure copy ("voice note" vs "image"). */
   sendFile: (file: EncryptedUpload, kind: 'voice' | 'image') => Promise<boolean>;
+  /** Optional photo sender that owns encryption + upload itself — a Marmot
+   *  thread sends photos the Marmot way (MIP-04), keyed by the MLS group,
+   *  so they skip the AES-GCM upload. Owns the optimistic append. */
+  sendImage?: (image: MarmotImage) => Promise<boolean>;
+  /** Send GIFs in White Noise's two-line envelope (URL + `via GIPHY`) —
+   *  Marmot threads, where White Noise only renders a GIF in that shape. */
+  gifEnvelope?: boolean;
   /** Optional gate before a location send. The 1:1 composer shows a confirm
    *  dialog (and resolves true/false); the group composer omits it and sends
    *  immediately. */
@@ -116,6 +124,10 @@ export function useComposerActions({
           : /\.gif$/i.test(scrubbed.uri)
             ? 'image/gif'
             : 'image/jpeg';
+        if (strategy.sendImage) {
+          await strategy.sendImage({ uri: scrubbed.uri, base64: scrubbed.base64, mime });
+          return;
+        }
         const file = await uploadEncryptedBlob(scrubbed.uri, signEvent, mime, scrubbed.base64);
         await strategy.sendFile(file, 'image');
       } catch (error) {
@@ -187,7 +199,7 @@ export function useComposerActions({
     async (gif: Gif) => {
       setGifPickerOpen(false);
       closeAttachPanel();
-      await strategy.sendText(gif.url);
+      await strategy.sendText(strategy.gifEnvelope ? giphyEnvelope(gif.url) : gif.url);
     },
     [closeAttachPanel, strategy, setGifPickerOpen],
   );

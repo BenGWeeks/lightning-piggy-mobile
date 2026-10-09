@@ -4,12 +4,14 @@ import { Alert } from '../components/BrandedAlert';
 import { useNostr } from '../contexts/NostrContext';
 import { formatCoordsForDisplay, type SharedLocation } from '../services/locationService';
 import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
-import type { EncryptedUpload } from '../services/imageUploadService';
+import { uploadEncryptedBlob, type EncryptedUpload } from '../services/imageUploadService';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/dmDeliveryStatus';
 import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
 import { useComposerActions } from './useComposerActions';
 import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
+import type { SendHooks, SendResult } from '../contexts/useMessageSend';
+import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 
 // Upper bound before the optimistic bubble's pending Clock flips to the red
 // failed tick if the send hasn't settled (#857). Past nostr-tools' ~4.4s relay
@@ -37,6 +39,9 @@ export function useConversationComposerActions(params: {
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  /** A Marmot send was re-sent over NIP-17 because the peer can't be reached
+   *  over Marmot — the screen switches the thread and tells the user. */
+  onMarmotFallback?: () => void;
 }) {
   const {
     pubkey,
@@ -49,15 +54,31 @@ export function useConversationComposerActions(params: {
     setContactPickerOpen,
     setGifPickerOpen,
     setVoiceSheetOpen,
+    onMarmotFallback,
   } = params;
 
-  const { sendDirectMessage, sendFileMessage, sendNwcShare, appendLocalDmMessage } = useNostr();
+  const {
+    pubkey: myPubkey,
+    signEvent,
+    sendDirectMessage,
+    sendFileMessage,
+    sendNwcShare,
+    appendLocalDmMessage,
+  } = useNostr();
 
   // Optimistically append a locally-sent row; the relay echo dedups in
   // mergeConversationMessages. Also persisted via appendLocalDmMessage so the
   // delivery tick (#856) survives a thread reload. The `deliveryStatus` rides
   // on the same row — only the local- send copy carries it, never the relay
   // echo, so the persisted tick is authoritative.
+  // Marmot rows reuse NIP-17's kinds, so the thread protocol is stored on
+  // the row explicitly — without it an optimistic Marmot bubble would be
+  // filed under the NIP-17 thread.
+  const protocolTag = useMemo(
+    () => (protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
+    [protocol],
+  );
+
   const appendOptimisticLocal = useCallback(
     (text: string, deliveryStatus?: DeliveryStatus) => {
       const optimistic = {
@@ -66,11 +87,12 @@ export function useConversationComposerActions(params: {
         text,
         createdAt: Math.floor(Date.now() / 1000),
         deliveryStatus,
+        ...protocolTag,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
     },
-    [appendLocalDmMessage, pubkey, setMessages],
+    [appendLocalDmMessage, pubkey, setMessages, protocolTag],
   );
 
   // Optimistic send (#857). The bubble paints IMMEDIATELY with a pending Clock,
@@ -89,9 +111,26 @@ export function useConversationComposerActions(params: {
   // share. A failed send keeps the bubble (red tick + Re-publish), and the
   // draft is cleared on send either way (Ben-confirmed standard-messaging
   // behaviour) — retry is via the bubble.
-  const sendText = useCallback(
-    async (text: string, sendProtocol: DmProtocol = protocol): Promise<boolean> => {
-      const createdAt = Math.floor(Date.now() / 1000);
+  // `send` runs the actual publish; its `onRumorReady` may carry the row text
+  // when the sender builds it (a Marmot photo's `#lpe=1` URL), else `text`.
+  const sendWithBubble = useCallback(
+    async (
+      text: string,
+      sendProtocol: DmProtocol,
+      send: (
+        hooks: Required<Pick<SendHooks, 'onDeliveryFinalized'>> & {
+          onRumorReady: (meta: {
+            eventId: string;
+            kind: number;
+            relays: string[];
+            text?: string;
+          }) => void;
+        },
+      ) => Promise<SendResult>,
+      // Run instead of the failure alert when the peer can't be reached over
+      // Marmot (no usable key package) — re-sends over NIP-17.
+      fallback?: () => Promise<boolean>,
+    ): Promise<boolean> => {
       let eventId: string | null = null;
       // Target relays for THIS send, captured from onRumorReady. Carried onto the
       // pending + watchdog-failed statuses so the message-info sheet lists the
@@ -112,9 +151,8 @@ export function useConversationComposerActions(params: {
           setDmDeliveryStatus(eventId, failedDelivery({ eventId, relays: targetRelays }));
       }, SEND_SETTLE_WATCHDOG_MS);
       try {
-        const result = await sendDirectMessage(pubkey, text, {
-          protocol: sendProtocol,
-          onRumorReady: ({ eventId: id, kind, relays }) => {
+        const result = await send({
+          onRumorReady: ({ eventId: id, kind, relays, text: rowText }) => {
             eventId = id;
             targetRelays = relays;
             // Paint the pending bubble immediately. The ROW id stays `local-`
@@ -128,9 +166,13 @@ export function useConversationComposerActions(params: {
               id: `local-${id}`,
               rumorId: id,
               fromMe: true,
-              text,
-              createdAt,
+              text: rowText ?? text,
+              // Stamped when the rumor is built, not when the send began: a
+              // photo's upload can take a while, and a stale time would fall
+              // outside the echo-dedup window and leave a duplicate bubble.
+              createdAt: Math.floor(Date.now() / 1000),
               wireKind: kind,
+              ...(sendProtocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
             };
             setMessages((prev) => [...prev, optimistic]);
             void appendLocalDmMessage(pubkey, optimistic);
@@ -150,6 +192,7 @@ export function useConversationComposerActions(params: {
             result.delivery ?? failedDelivery({ eventId, relays: targetRelays }),
           );
         } else if (!result.success) {
+          if (result.marmotUnreachable && fallback) return fallback();
           // Never reached the rumor stage (e.g. not logged in) — no bubble was
           // painted, so fall back to the alert.
           Alert.alert('Send failed', result.error ?? 'Could not send message.');
@@ -159,12 +202,45 @@ export function useConversationComposerActions(params: {
         clearTimeout(watchdog);
       }
     },
-    [protocol, pubkey, sendDirectMessage, appendLocalDmMessage, setMessages],
+    [pubkey, appendLocalDmMessage, setMessages],
+  );
+
+  // Someone Marmot can't reach (no key package, or a legacy one the classic
+  // White Noise app still publishes) still gets the message: re-send it over
+  // NIP-17, then the screen moves the thread there.
+  const viaNip17 = useCallback(
+    async (send: () => Promise<boolean>): Promise<boolean> => {
+      const ok = await send();
+      if (ok) onMarmotFallback?.();
+      return ok;
+    },
+    [onMarmotFallback],
+  );
+
+  const sendText = useCallback(
+    (text: string, sendProtocol: DmProtocol = protocol) => {
+      const send = (p: DmProtocol): Promise<boolean> =>
+        sendWithBubble(
+          text,
+          p,
+          (hooks) => sendDirectMessage(pubkey, text, { protocol: p, ...hooks }),
+          p === 'marmot' ? () => viaNip17(() => send('nip17')) : undefined,
+        );
+      return send(sendProtocol);
+    },
+    [protocol, pubkey, sendDirectMessage, sendWithBubble, viaNip17],
   );
 
   const sendFile = useCallback(
-    async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
-      const result = await sendFileMessage(pubkey, file);
+    async (
+      file: EncryptedUpload,
+      kind: 'voice' | 'image',
+      sendProtocol: DmProtocol = protocol,
+    ): Promise<boolean> => {
+      const result = await sendFileMessage(pubkey, file, sendProtocol);
+      if (!result.success && result.marmotUnreachable && sendProtocol === 'marmot') {
+        return viaNip17(() => sendFile(file, kind, 'nip17'));
+      }
       if (!result.success) {
         const what = kind === 'image' ? 'image' : 'voice note';
         Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
@@ -182,12 +258,36 @@ export function useConversationComposerActions(params: {
         }),
         createdAt: Math.floor(Date.now() / 1000),
         deliveryStatus: result.delivery,
+        ...(sendProtocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage],
+    [pubkey, sendFileMessage, setMessages, appendLocalDmMessage, protocol, viaNip17],
+  );
+
+  // Marmot photos go the Marmot way (MIP-04) so White Noise and other Marmot
+  // clients can show them; NIP-17 / NIP-04 threads keep the kind-15 upload.
+  const sendImage = useCallback(
+    (image: MarmotImage) =>
+      sendWithBubble(
+        '',
+        'marmot',
+        (hooks) =>
+          myPubkey
+            ? sendMarmotImage(myPubkey, { peer: pubkey }, image, signEvent, hooks)
+            : Promise.resolve({ success: false, error: 'Not signed in' }),
+        () =>
+          viaNip17(async () =>
+            sendFile(
+              await uploadEncryptedBlob(image.uri, signEvent, image.mime, image.base64),
+              'image',
+              'nip17',
+            ),
+          ),
+      ),
+    [myPubkey, pubkey, signEvent, sendWithBubble, sendFile, viaNip17],
   );
 
   // Share an NWC wallet (#431). The connection string is a bearer secret sent
@@ -200,7 +300,7 @@ export function useConversationComposerActions(params: {
   // BEFORE invoking this.
   const shareNwcWallet = useCallback(
     async (card: NwcShareCard): Promise<boolean> => {
-      const result = await sendNwcShare(pubkey, card);
+      const result = await sendNwcShare(pubkey, card, protocol);
       if (!result.success) {
         Alert.alert('Could not share wallet', result.error ?? 'Please try again.');
         return false;
@@ -212,12 +312,13 @@ export function useConversationComposerActions(params: {
         createdAt: Math.floor(Date.now() / 1000),
         wireKind: NWC_SHARE_KIND,
         deliveryStatus: result.delivery,
+        ...protocolTag,
       };
       setMessages((prev) => [...prev, optimistic]);
       void appendLocalDmMessage(pubkey, optimistic);
       return true;
     },
-    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage],
+    [pubkey, sendNwcShare, setMessages, appendLocalDmMessage, protocol, protocolTag],
   );
 
   // 1:1 confirms before sharing location. `pressed` guards against `onDismiss`
@@ -261,10 +362,21 @@ export function useConversationComposerActions(params: {
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders. (1:1 needs no canSend preflight —
   // the peer pubkey is always present from the route params.)
-  const sendAttachmentText = useCallback((text: string) => sendText(text, 'nip17'), [sendText]);
+  // Attachments (GIF / location / contact) on a NIP-04 thread upgrade to
+  // NIP-17; a Marmot thread keeps them inside its MLS group.
+  const sendAttachmentText = useCallback(
+    (text: string) => sendText(text, protocol === 'marmot' ? 'marmot' : 'nip17'),
+    [sendText, protocol],
+  );
   const strategy = useMemo(
-    () => ({ sendText: sendAttachmentText, sendMessage: sendText, sendFile, confirmLocation }),
-    [sendAttachmentText, sendText, sendFile, confirmLocation],
+    () => ({
+      sendText: sendAttachmentText,
+      sendMessage: sendText,
+      sendFile,
+      ...(protocol === 'marmot' ? { sendImage, gifEnvelope: true } : {}),
+      confirmLocation,
+    }),
+    [sendAttachmentText, sendText, sendFile, sendImage, protocol, confirmLocation],
   );
 
   const actions = useComposerActions({

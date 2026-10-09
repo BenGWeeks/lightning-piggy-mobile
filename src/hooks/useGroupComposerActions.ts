@@ -10,6 +10,8 @@ import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { Group } from '../types/groups';
 import { useComposerActions } from './useComposerActions';
+import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
+import { isMarmotGroupId } from '../services/marmotSession';
 
 /**
  * Group GroupConversationScreen composer actions. A thin wrapper over the
@@ -55,7 +57,7 @@ export function useGroupComposerActions(params: {
     setVoiceSheetOpen,
   } = params;
 
-  const { sendGroupMessage, pubkey: myPubkey } = useNostr();
+  const { sendGroupMessage, pubkey: myPubkey, signEvent } = useNostr();
 
   // Optimistically append a `local_…` row (dup window vs the inbound self-wrap
   // is a known follow-up, PR #227) and scroll to it.
@@ -242,13 +244,54 @@ export function useGroupComposerActions(params: {
     ],
   );
 
+  // A Marmot group's photos go the Marmot way (MIP-04) so White Noise and
+  // other Marmot members can show them. Same optimistic-row semantics as sendText.
+  const sendImage = useCallback(
+    async (image: MarmotImage): Promise<boolean> => {
+      if (!group || !myPubkey) return false;
+      const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
+        current: null,
+      };
+      const result = await sendMarmotImage(myPubkey, { groupId: group.id }, image, signEvent, {
+        onRumorReady: ({ text }) => {
+          optimistic.current = appendOptimisticGroupRow(text);
+        },
+      });
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send image.');
+        if (optimistic.current) {
+          await optimistic.current.persisted;
+          await removeOptimisticRow(optimistic.current.row.id);
+        }
+        return false;
+      }
+      if (optimistic.current && !(await optimistic.current.persisted)) {
+        alertSavedOnRelayOnly();
+        return false;
+      }
+      return true;
+    },
+    [
+      group,
+      myPubkey,
+      signEvent,
+      appendOptimisticGroupRow,
+      removeOptimisticRow,
+      alertSavedOnRelayOnly,
+    ],
+  );
+
   // Preflight so the shared hook can skip an expensive encrypt+upload (voice /
   // image) when there's no valid group target to send to.
   const canSend = useCallback(() => !!group && !!myPubkey, [group, myPubkey]);
 
   // Memoise the strategy so the shared hook's callbacks (which depend on it)
   // keep stable identities across renders.
-  const strategy = useMemo(() => ({ sendText, sendFile, canSend }), [sendText, sendFile, canSend]);
+  const isMarmot = !!group && isMarmotGroupId(group.id);
+  const strategy = useMemo(
+    () => ({ sendText, sendFile, ...(isMarmot ? { sendImage, gifEnvelope: true } : {}), canSend }),
+    [sendText, sendFile, sendImage, isMarmot, canSend],
+  );
 
   const actions = useComposerActions({
     strategy,

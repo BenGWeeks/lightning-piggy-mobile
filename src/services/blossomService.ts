@@ -207,6 +207,50 @@ export async function uploadToBlossomServers(
   throw lastError instanceof Error ? lastError : new Error('Blossom upload failed');
 }
 
+// Servers known to store opaque encrypted blobs — White Noise's defaults
+// (MDK DEFAULT_BLOSSOM_SERVER_URLS). Media-only servers, including the
+// default blossom.primal.net and nostr.build's free tier, refuse
+// `application/octet-stream` with a 415, which every encrypted upload is.
+export const ENCRYPTED_BLOB_FALLBACK_SERVERS = [
+  'https://blossom.divine.video',
+  'https://blossom.ditto.pub',
+  'https://cdn.hzrd149.com',
+];
+
+/**
+ * Upload ciphertext (NIP-17 kind-15 files, Marmot photos). Tries the user's
+ * servers first; if none accepts opaque bytes, falls back to servers that do
+ * (mirrored among themselves only — never back to the refusing ones).
+ */
+export async function uploadEncryptedBlobToBlossom(
+  fileUri: string,
+  serverUrls: string[],
+  signer: BlossomSigner,
+  ciphertextBase64: string,
+): Promise<string> {
+  try {
+    return await uploadToBlossomServers(
+      fileUri,
+      serverUrls,
+      signer,
+      ciphertextBase64,
+      'application/octet-stream',
+    );
+  } catch (e) {
+    const tried = new Set(serverUrls.map(trimServer));
+    const fallbacks = ENCRYPTED_BLOB_FALLBACK_SERVERS.filter((u) => !tried.has(trimServer(u)));
+    if (fallbacks.length === 0) throw e;
+    console.warn('[Blossom] encrypted upload refused by your servers; using fallbacks');
+    return uploadToBlossomServers(
+      fileUri,
+      fallbacks,
+      signer,
+      ciphertextBase64,
+      'application/octet-stream',
+    );
+  }
+}
+
 /** Single-server upload (no backups). */
 export function uploadToBlossom(
   imageUri: string,

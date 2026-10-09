@@ -277,7 +277,11 @@ export function mergeConversationMessages(
         if (prev.text !== m.text) continue;
         // Threads are split per protocol: a NIP-17 echo must never retire a
         // NIP-04 optimistic row with the same text (or vice versa).
-        if (protocolForWireKind(prev.wireKind) !== protocolForWireKind(m.wireKind)) continue;
+        if (
+          protocolForWireKind(prev.wireKind, prev.protocol) !==
+          protocolForWireKind(m.wireKind, m.protocol)
+        )
+          continue;
         const delta = Math.abs(prev.createdAt - m.createdAt);
         if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
         if (delta < bestDelta) {

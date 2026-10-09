@@ -12,6 +12,7 @@ import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { loadNip17SkipSet, writeNip17SkipSet } from './nostrDmCache';
+import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 
 // The one NIP-17 inbox-wrap ingest engine (#848). Both refreshDmInbox signer
 // branches (nsec + Amber) and the cold thread-open path in
@@ -166,6 +167,9 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           }
           return null;
         }
+        // A Marmot invite from a trusted sender: join it (the row below
+        // still records the invite in this NIP-17 thread).
+        routeMarmotWelcome(rumor, owner);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show

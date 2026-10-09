@@ -17,14 +17,15 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - **Notifications screen.** A bell on Home shows unread alerts; tap it to see the last 30 days of messages, payments, zaps and Piglet finds, open any of them, or mark all as read.
 - **Clearer relay settings.** Account → Nostr now leads with Your relays and DM inbox relays, each showing a live connection dot; app defaults and geo-cache relays sit under Advanced.
 - **Backup image servers.** Account → Nostr → Image servers (Blossom): add backup servers and pick a primary. Uploads switch to a backup if the primary is down and are copied to the others. Publish shares the list with other Nostr apps.
+- **Marmot messaging (Alpha)** — end-to-end encrypted MLS chats that work with White Noise. Pick _Marmot_ when starting a chat or creating a group; every message type works between Lightning Piggy users, including photos, voice notes, polls and invoices. With White Noise, photos, GIFs, polls and emoji reactions show up on both sides (photos in chats started from this version on); voice notes don't play there yet, and invoices and locations appear as plain text. If someone can't receive Marmot yet — for example on the classic White Noise app — your message is sent with NIP-17 instead and the chat switches over. Invites from people you follow (e.g. on White Noise) are accepted automatically and open as Marmot chats. Friends on White Noise get a notification on their phone when you message them over Marmot. Still being tested, so use NIP-17 for anything important.
 
 ### Improved
 
 - **Message alerts open that conversation**, even ones that arrived while the app couldn't read them yet, instead of just the Messages list.
 - **Opening a chat clears its alerts**, so the dot on the app icon goes away.
 - **Group chats show their NIP-17 tag**, like one-to-one chats.
+- **Copy a message's text and react with more emoji.** Long-press a text message in a one-to-one chat for _Copy text_, or tap _+_ beside the quick reactions for more emoji.
 
 ### Fixed
 
 - **Relay dots show the real connection status** instead of always red.
-- **Marmot group invites** (e.g. from White Noise) now say "not supported yet" instead of showing unreadable text.

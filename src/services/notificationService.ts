@@ -48,6 +48,7 @@ import {
   recordNotification,
 } from './notificationHistory';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
+import type { DmProtocol } from '../utils/dmProtocol';
 
 // Android notification channel ids. Stable strings — changing them
 // orphans the user's per-channel mute state in system Settings.
@@ -94,7 +95,7 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 's
  */
 export interface NotificationData {
   conversationPubkey?: string;
-  conversationProtocol?: 'nip04' | 'nip17';
+  conversationProtocol?: DmProtocol;
   groupId?: string;
   walletId?: string;
   /** `<kind>:<pubkey>:<d>` coordinate of the geo-cache the find-log
@@ -447,7 +448,7 @@ export function isCacheActivelyViewed(cacheCoord: string): boolean {
  * notifications (#1142): a 1:1 thread, a group, a cache's find-logs, or the
  * generic no-thread message pings (opened via the Messages list). */
 export type NotificationTarget =
-  | { conversationPubkey: string; conversationProtocol: 'nip04' | 'nip17' }
+  | { conversationPubkey: string; conversationProtocol: DmProtocol }
   | { groupId: string }
   | { cacheCoord: string }
   | { genericMessages: true }

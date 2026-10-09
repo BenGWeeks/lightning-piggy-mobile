@@ -1,15 +1,15 @@
 import { getConversationForEvent } from './dmDb';
-import { protocolForWireKind } from '../utils/dmProtocol';
+import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
 export interface ResolvedConversation {
   pubkey: string;
-  protocol: 'nip04' | 'nip17';
+  protocol: DmProtocol;
 }
 
 type Lookup = (
   owner: string,
   eventId: string,
-) => Promise<{ conversation: string; wireKind: number } | null>;
+) => Promise<{ conversation: string; wireKind: number; protocol?: DmProtocol } | null>;
 
 /**
  * The conversation a NIP-17 gift wrap belongs to (#1154). A message alert the
@@ -38,7 +38,11 @@ export async function resolveWrapConversation(
   for (;;) {
     if (shouldStop()) return null;
     const row = await lookup(owner, wrapId).catch(() => null);
-    if (row) return { pubkey: row.conversation, protocol: protocolForWireKind(row.wireKind) };
+    if (row)
+      return {
+        pubkey: row.conversation,
+        protocol: protocolForWireKind(row.wireKind, row.protocol),
+      };
     if (Date.now() + intervalMs > deadline) return null;
     await new Promise((r) => setTimeout(r, intervalMs));
   }

@@ -44,10 +44,26 @@ describe('DM protocols', () => {
     expect(dmMessageThreadId({ partnerPubkey: pk, wireKind: 15 })).toBe(`${'a'.repeat(64)}:nip17`);
   });
 
-  it('reserves Marmot without enabling it', () => {
+  it('enables every protocol, Marmot included (Alpha)', () => {
     expect(isDmProtocolAvailable('nip04')).toBe(true);
     expect(isDmProtocolAvailable('nip17')).toBe(true);
-    expect(isDmProtocolAvailable('marmot')).toBe(false);
+    expect(isDmProtocolAvailable('marmot')).toBe(true);
+  });
+
+  it('lets an explicit protocol override the wire-kind inference (Marmot rows)', () => {
+    const pk = 'b'.repeat(64);
+    expect(dmMessageThreadId({ partnerPubkey: pk, wireKind: 14, protocol: 'marmot' })).toBe(
+      `${pk}:marmot`,
+    );
+    expect(protocolForWireKind(15, 'marmot')).toBe('marmot');
+    expect(protocolForWireKind(4, undefined)).toBe('nip04');
+    const rows = [
+      { id: 'a', wireKind: 14 },
+      { id: 'b', wireKind: 14, protocol: 'marmot' as const },
+      { id: 'c', wireKind: 4 },
+    ];
+    expect(filterMessagesByProtocol(rows, 'marmot').map((r) => r.id)).toEqual(['b']);
+    expect(filterMessagesByProtocol(rows, 'nip17').map((r) => r.id)).toEqual(['a']);
   });
 });
 

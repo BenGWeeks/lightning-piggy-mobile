@@ -216,6 +216,7 @@ const ImageBubble: React.FC<{
           keyHex={image.keyHex}
           nonceHex={image.nonceHex}
           mime={image.mime}
+          marmot={image.marmot}
           style={styles.imageBubbleImage}
           accessibilityLabel={t('messageBubble.sharedImage')}
           onResolved={image.encrypted ? setDisplayUri : undefined}

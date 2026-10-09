@@ -34,6 +34,7 @@ import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
+import type { DmProtocol } from '../utils/dmProtocol';
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
@@ -44,6 +45,9 @@ interface Props {
   // invoice (or lightning address) directly to this friend. Used when the
   // sheet is opened from inside a conversation — the friend is implicit.
   presetFriend?: PickedFriend;
+  // Thread protocol for a send to `presetFriend` (a Marmot thread keeps the
+  // invoice inside its MLS group). Other friends get the NIP-17 default.
+  presetProtocol?: DmProtocol;
   // Group-equivalent of `presetFriend`: the sheet jumps to amount entry
   // and the eventual payload is posted to the named group via
   // `onSendToGroup` instead of DM'd to a single peer. Should be mutually
@@ -68,6 +72,7 @@ const ReceiveSheet: React.FC<Props> = ({
   visible,
   onClose,
   presetFriend,
+  presetProtocol,
   presetGroup,
   onSendToGroup,
   onSent,
@@ -436,7 +441,13 @@ const ReceiveSheet: React.FC<Props> = ({
           : mode === 'address'
             ? `lightning:${friendShareValue}`
             : friendShareValue;
-        const result = await sendDirectMessage(friend.pubkey, payload);
+        const result = await sendDirectMessage(
+          friend.pubkey,
+          payload,
+          presetProtocol && friend.pubkey === presetFriend?.pubkey
+            ? { protocol: presetProtocol }
+            : undefined,
+        );
         if (result.success) onSent?.(payload);
         if (!result.success) {
           Toast.show({
@@ -484,6 +495,7 @@ const ReceiveSheet: React.FC<Props> = ({
       navigation,
       onClose,
       presetFriend,
+      presetProtocol,
       onSent,
     ],
   );

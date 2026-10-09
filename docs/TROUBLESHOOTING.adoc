@@ -755,6 +755,12 @@ reply timeout`).
 
 | iOS Simulator dev client loads a bundle from the WRONG project's Metro — crashes with `TurboModuleRegistry.getEnforcing(...): 'PlatformConstants' could not be found`, your Metro logs zero requests
 | expo-dev-launcher auto-connects to any packager answering on the default port 8081 *before* honouring `simctl openurl` deep links — on a multi-project dev Mac, another project's forgotten Metro on 8081 hijacks the app and serves it a bundle from the wrong RN tree (hence `PlatformConstants` missing — bundle/binary mismatch). Uninstall/reinstall does NOT fix it (the auto-connect probe wins again). Fix: identify the squatter with `lsof -i :8081 -sTCP:LISTEN` + `ps -o lstart,command -p <pid>` (the command line shows which project it serves), stop it if abandoned, and run your Metro on 8081. Also check for TWO booted simulators with the same device name (`xcrun simctl list devices | grep -i booted`) — `simctl … booted` targets an arbitrary one, so screenshots/deep-links may hit a stale twin with a months-old app install; shut the twin down and address the device by UDID.
+
+| Sending a photo (or voice note) fails with HTTP 415 from `blossom.primal.net` or nostr.build
+| Encrypted uploads — Marmot photos (MIP-04) and NIP-17 kind-15 files — are opaque ciphertext sent as `application/octet-stream`, and media-only Blossom servers (including the default `blossom.primal.net` and nostr.build's free tier) refuse that type with a 415. `uploadEncryptedBlobToBlossom()` in `blossomService.ts` handles it: it tries the user's servers first, then falls back to `ENCRYPTED_BLOB_FALLBACK_SERVERS` (`blossom.divine.video`, `blossom.ditto.pub`, `cdn.hzrd149.com` — White Noise's defaults), mirroring only among those. The log line `[Blossom] encrypted upload refused by your servers; using fallbacks` confirms the path. If every fallback also fails, the error is from those servers, not the 415. Users can avoid the fallback by adding a server that accepts opaque blobs under Account → Nostr → Image servers.
+
+| Emulator dev client shows "Unable to load script" after the adb daemon restarted (e.g. `adb kill-server`, a USB re-plug, or another tool restarting adb)
+| `adb reverse` mappings live in the adb daemon and are lost when it restarts. A dev client that loads its bundle from `localhost:8081` on the device then has nothing behind that port. The LP Metro runs on host port 8090, so restore the mapping and reload: `adb -s <serial> reverse tcp:8081 tcp:8090` (device port 8081 → host port 8090), then force-stop and relaunch the app. Check what's mapped with `adb -s <serial> reverse --list`. If the app's `debug_http_host` points at `10.0.2.2:8090` instead (see the stale-bundle row above), it doesn't use `adb reverse` at all and this isn't the cause.
 |===
 
 
@@ -827,3 +833,19 @@ without rebuilding: `eas submit --platform ios --id <build-id> --non-interactive
 Then fill in TestFlight "What to Test" with the Release workflow's
 `whats_new_build` input (see `docs/DEPLOYMENT.adoc` → "Manual re-run without
 re-tagging").
+
+=== `codex exec` hangs on "Reading additional input from stdin"
+
+When `codex exec` (the OpenAI Codex CLI, used for second-opinion reviews and
+digests) runs from a script, a background job or another agent's shell, its
+stdin is a pipe or an open terminal that never closes. Codex then waits for
+more prompt text after printing `Reading additional input from stdin...` and
+never starts. Pass the prompt as an argument and close stdin explicitly:
+
+[source,bash]
+----
+codex exec -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null
+----
+
+(The sandbox override is the separate workaround for Codex's bubblewrap
+sandbox failing on this machine.)

@@ -103,6 +103,8 @@ export interface MessageInfo {
   eventId: string;
   // The on-wire protocol: 4 = NIP-04, 14/15 = NIP-17 rumor kind.
   wireKind?: number;
+  // Set for Marmot threads, whose rumors reuse NIP-17's kinds.
+  protocol?: 'marmot';
   // Present only for sent messages — drives the relay breakdown + tick.
   deliveryStatus?: DeliveryStatus;
   // Raw text to hand Re-publish (sent kind-14 only); empty otherwise.
@@ -110,7 +112,8 @@ export interface MessageInfo {
 }
 
 /** Human label for the wire protocol shown in the message-info sheet. */
-export function protocolLabel(wireKind: number | undefined): string {
+export function protocolLabel(wireKind: number | undefined, protocol?: 'marmot'): string {
+  if (protocol === 'marmot') return 'Marmot (MLS)';
   if (wireKind === 4) return 'NIP-04 (legacy DM)';
   if (wireKind === 14 || wireKind === 15) return 'NIP-17 (gift-wrapped)';
   return 'Unknown';

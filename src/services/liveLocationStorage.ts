@@ -31,6 +31,7 @@ interface PersistedSession {
   durationMs: number;
   startMarkerSent: boolean;
   endMarkerSent: boolean;
+  protocol?: 'marmot';
 }
 
 /**
@@ -78,6 +79,7 @@ export async function loadPersistedSessions(pubkey: string): Promise<OutgoingSes
         status: 'paused',
         startMarkerSent,
         endMarkerSent,
+        ...(e.protocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
       });
     }
     return out;
@@ -108,6 +110,7 @@ export async function savePersistedSessions(
       durationMs: session.durationMs,
       startMarkerSent: session.startMarkerSent,
       endMarkerSent: session.endMarkerSent,
+      ...(session.protocol ? { protocol: session.protocol } : {}),
     });
   }
   try {

@@ -1,0 +1,183 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot DM — every attachment type to Little Piggy rides MLS
+---
+# In Big Piggy's Marmot DM with Little Piggy (`d9b33280…`), send one of each
+# message type the composer offers. Each must render in OUR thread, and the
+# peer bot logs the inner kind it decrypted from MLS — the runner script
+# (scripts/marmot-e2e.sh) asserts those kinds, proving the content went over
+# Marmot, not NIP-17:
+#   contact (kind 9 text) · location (kind 9) · GIF (kind 9) · poll (kind 1068)
+#   · photo (kind 9 + imeta, MIP-04 v2) · invoice (kind 9, via ReceiveSheet presetProtocol).
+#
+# Prereqs: flow-125 has run (the Marmot DM exists) and the peer bot is
+# running as Little Piggy. Only ever messages a Piggy.
+#
+# Run: bash scripts/marmot-e2e.sh 127   (starts/stops the bot for you)
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- runFlow:
+    file: ../common/open-marmot-dm-little.yaml
+    env:
+      RUN_TAG: ${RUN_TAG}
+
+# Contact share
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'Send to .*'
+- extendedWaitUntil:
+    visible:
+      text: 'Contact shared'
+    timeout: 30000
+
+# Location (snapshot)
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-share-location'
+- tapOn:
+    text: 'Allow.*|While using the app|Only this time'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'Share'
+- extendedWaitUntil:
+    visible:
+      text: 'Location sent'
+    timeout: 30000
+
+# Poll (structured NIP-88, kind 1068)
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-share-poll'
+- extendedWaitUntil:
+    visible:
+      id: 'poll-composer-question'
+    timeout: 5000
+- tapOn:
+    id: 'poll-composer-question'
+- inputText: 'Marmot poll?'
+- hideKeyboard
+- tapOn:
+    id: 'poll-composer-option-1'
+- inputText: 'Oink'
+- hideKeyboard
+- tapOn:
+    id: 'poll-composer-option-2'
+- inputText: 'Squeak'
+- hideKeyboard
+- tapOn:
+    id: 'poll-composer-send'
+- extendedWaitUntil:
+    visible:
+      text: 'Marmot poll?'
+    timeout: 30000
+
+# GIF (only when a GIPHY key is configured in this build)
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-gif'
+    commands:
+      - tapOn:
+          id: 'attach-send-gif'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: 'Send GIF:.*'
+      - waitForAnimationToEnd:
+          timeout: 8000
+- runFlow:
+    when:
+      visible:
+        id: 'conversation-attach-panel'
+    commands:
+      - pressKey: back
+
+# Photo (MIP-04: kind 9 + imeta, encrypted-media-v2 on Blossom). The system photo picker is OS-owned
+# UI with no testIDs — `point:` is the documented last resort there only.
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-send-image'
+- tapOn:
+    text: 'Allow.*|Photos and videos|Selected photos|While using the app'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    point: '50%,40%'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'Add|Done|Use|Select'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 60000
+
+# Lightning invoice via ReceiveSheet (presetProtocol keeps it on Marmot)
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-send-invoice'
+- tapOn:
+    id: 'receive-enter-custom-amount'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 10000
+- tapOn:
+    id: 'amount-entry-key-2'
+- tapOn:
+    id: 'amount-entry-key-1'
+- tapOn:
+    id: 'amount-entry-confirm'
+- extendedWaitUntil:
+    visible:
+      id: 'receive-send-to-friend'
+    timeout: 20000
+- tapOn:
+    id: 'receive-send-to-friend'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 30000

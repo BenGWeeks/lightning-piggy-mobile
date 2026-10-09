@@ -1,0 +1,69 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot DM — photos both ways in White Noise's format (MIP-04 v2)
+---
+# Big Piggy ↔ Little Piggy (peer bot) in their Marmot DM:
+#   1. the bot sends a photo the way White Noise does (kind 9 + `imeta`,
+#      encrypted-media-v2 on Blossom) — it must render as an image here;
+#   2. we send a gallery photo — the bot fetches + decrypts it with the
+#      MLS-derived key and logs `MEDIA OK`, which the runner asserts.
+#
+# Prereqs: flow-125 has run (the Marmot DM exists); the runner starts the bot
+# with BOT_SEND_PHOTO and pushes lp-photo.jpg into the emulator gallery.
+# Only ever messages a Piggy.
+#
+# Run: bash scripts/marmot-e2e.sh 130   (starts/stops the bot for you)
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- runFlow:
+    file: ../common/open-marmot-dm-little.yaml
+    env:
+      RUN_TAG: ${RUN_TAG}
+
+# 1. The bot's photo (sent right after its hello) renders as an image bubble.
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-image-.*'
+    timeout: 120000
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: marmot-photo-received
+
+# 2. Send a gallery photo. The system photo picker is OS-owned UI with no
+# testIDs — `point:` is the documented last resort there only.
+- tapOn:
+    id: 'conversation-attach'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-attach-panel'
+    timeout: 5000
+- tapOn:
+    id: 'attach-send-image'
+- tapOn:
+    text: 'Allow.*|Photos and videos|Selected photos|While using the app'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    point: '50%,40%'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'Add|Done|Use|Select'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 60000
+# The bot answers a decrypted photo with "pong: [photo ok]". Incoming
+# messages don't auto-scroll the thread (a "New messages" pill appears), so
+# scroll down to it.
+- scrollUntilVisible:
+    element:
+      text: 'pong: \[photo ok\]'
+    direction: DOWN
+    timeout: 120000
+- takeScreenshot: marmot-photo-sent

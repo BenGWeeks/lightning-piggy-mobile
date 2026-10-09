@@ -7,6 +7,8 @@ import { createGroupFileRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
+import { isMarmotGroupId } from '../services/marmotSession';
+import { sendMarmotGroupRumor } from '../services/marmotSend';
 
 /**
  * Provider-owned slices the group-messaging callbacks close over: the
@@ -129,6 +131,12 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         // caller can paint the optimistic bubble before any async work (#1033).
         const rumorId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ rumorId, kind: rumor.kind });
+
+        // Marmot group: the same rumor rides the group's MLS session instead
+        // of a per-member gift-wrap fan-out (no per-recipient signer prompts).
+        if (isMarmotGroupId(input.groupId)) {
+          return sendMarmotGroupRumor(pubkey, input.groupId, rumor);
+        }
 
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);

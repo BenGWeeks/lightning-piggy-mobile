@@ -211,7 +211,7 @@ let notificationNavGeneration = 0;
 export const navigateFromNotification = (data: {
   kind?: string;
   conversationPubkey?: string;
-  conversationProtocol?: 'nip04' | 'nip17';
+  conversationProtocol?: DmProtocol;
   groupId?: string;
   walletId?: string;
   cacheCoord?: string;
@@ -344,8 +344,7 @@ export function dismissNotificationsForFocusedRoute(): void {
   let target: NotificationTarget | null = null;
   if (route?.name === 'Conversation' && params?.pubkey) {
     const protocol = params.protocol ?? DEFAULT_DM_PROTOCOL;
-    if (protocol !== 'marmot')
-      target = { conversationPubkey: params.pubkey, conversationProtocol: protocol };
+    target = { conversationPubkey: params.pubkey, conversationProtocol: protocol };
   } else if (route?.name === 'GroupConversation' && params?.groupId) {
     target = { groupId: params.groupId };
   } else if (route?.name === 'HuntPiggyDetail' && params?.coord) {

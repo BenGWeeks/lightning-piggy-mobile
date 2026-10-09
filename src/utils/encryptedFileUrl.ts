@@ -31,3 +31,38 @@ export function encodeEncryptedFileUrl(input: {
   const base = input.url.split('#')[0];
   return `${base}#${frag}`;
 }
+
+// --- Marmot encrypted media (MIP-04 `encrypted-media-v1` / `-v2`) ---
+//
+// Marmot photos are ChaCha20-Poly1305 blobs whose key is derived from the
+// MLS group's epoch secret, not a random key in the message. The session
+// derives the key(s) on receipt (one candidate per retained epoch — the
+// `imeta` tag doesn't say which epoch) and folds them, plus the fields the
+// AEAD binds, into the same `#lpe=1…` fragment (`alg` = the media version)
+// so the renderer needs no group state. Lives here for the same
+// dependency-free reason as above.
+export const MARMOT_MEDIA_VERSIONS = ['encrypted-media-v1', 'encrypted-media-v2'] as const;
+export type MarmotMediaVersion = (typeof MARMOT_MEDIA_VERSIONS)[number];
+
+export const isMarmotMediaVersion = (alg: string): alg is MarmotMediaVersion =>
+  (MARMOT_MEDIA_VERSIONS as readonly string[]).includes(alg);
+
+export interface MarmotMediaUrlParams {
+  url: string;
+  version: MarmotMediaVersion;
+  mime: string;
+  /** Candidate 32-byte file keys (hex), tried in order. */
+  keysHex: string[];
+  nonceHex: string;
+  filename: string;
+  plaintextSha256: string;
+  ciphertextSha256: string;
+}
+
+export function encodeMarmotMediaUrl(input: MarmotMediaUrlParams): string {
+  const frag =
+    `${LPE_MARKER}&alg=${input.version}&k=${input.keysHex.join(',')}&n=${input.nonceHex}` +
+    `&m=${encodeURIComponent(input.mime)}&f=${encodeURIComponent(input.filename)}` +
+    `&ps=${input.plaintextSha256}&cs=${input.ciphertextSha256}`;
+  return `${input.url.split('#')[0]}#${frag}`;
+}

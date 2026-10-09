@@ -23,6 +23,7 @@ export function mapStoredRowsToMessages(rows: DmMessageRow[]): ConversationMessa
     wireKind: r.wireKind,
     ...(r.deliveryStatus !== undefined ? { deliveryStatus: r.deliveryStatus } : {}),
     ...(r.rumorId !== undefined ? { rumorId: r.rumorId } : {}),
+    ...(r.protocol !== undefined ? { protocol: r.protocol } : {}),
   }));
 }
 

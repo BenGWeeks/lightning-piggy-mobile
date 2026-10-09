@@ -310,7 +310,9 @@
     "closeFullscreenGif": "Закрити повноекранний GIF",
     "shareContactTitle": "Поділитися контактом з {{name}}",
     "shareContactSubtitle": "Вони побачать це як картку профілю Nostr, яку можна відкрити.",
-    "typing": "друкує…"
+    "typing": "друкує…",
+    "marmotFallbackTitle": "Надіслано через NIP-17",
+    "marmotFallbackBody": "{{name}} поки не може отримувати Marmot, тож ця розмова тепер використовує NIP-17."
   },
   "courseDetailScreen": {
     "courseNotFound": "Курс не знайдено",
@@ -1111,7 +1113,10 @@
     "zapMessage": "Zap для цього повідомлення",
     "zapMessageA11y": "Надіслати zap за це повідомлення",
     "reactionFailedTitle": "Не вдалося відреагувати",
-    "reactionFailedBody": "Не вдалося опублікувати вашу реакцію. Перевірте свої релеї та спробуйте ще раз."
+    "reactionFailedBody": "Не вдалося опублікувати вашу реакцію. Перевірте свої релеї та спробуйте ще раз.",
+    "copyText": "Копіювати текст",
+    "copied": "Скопійовано",
+    "moreEmoji": "Більше емодзі"
   },
   "messageBubble": {
     "imageSent": "Зображення надіслано",
@@ -1144,10 +1149,10 @@
     "accuracyOsm": "± {{meters}} м · OpenStreetMap",
     "unsupportedA11y": "Непідтримуваний тип повідомлення, kind {{kind}}",
     "unsupportedText": "Непідтримуваний тип повідомлення (kind {{kind}})",
-    "marmotInvite": "Запросив вас до групового чату Marmot — Lightning Piggy поки не підтримує Marmot.",
-    "marmotMessage": "Групове повідомлення Marmot — Lightning Piggy поки не підтримує Marmot.",
-    "marmotInvitePreview": "Запрошення до групи (Marmot поки не підтримується)",
-    "marmotMessagePreview": "Повідомлення Marmot (поки не підтримується)",
+    "marmotInvite": "Надіслав вам запрошення до чату Marmot — він відкриється як чат Marmot у ваших Повідомленнях.",
+    "marmotMessage": "Подія групи Marmot — відкрийте чат Marmot, щоб прочитати.",
+    "marmotInvitePreview": "Запрошення до чату Marmot",
+    "marmotMessagePreview": "Повідомлення Marmot",
     "secretMode": "Секретний режим",
     "secretModeSenderMemo": "Lightning Piggy запропонує одержувачу кнопку для перемикання Секретного режиму.",
     "secretModeReceiverMemo": "Розблоковує розробницькі / просунуті функції в Lightning Piggy.",
@@ -2247,8 +2252,8 @@
       "description": "Приховує від реле, з ким ви спілкуєтеся; працює з більшістю сучасних застосунків Nostr."
     },
     "marmot": {
-      "badge": "Незабаром",
-      "description": "Наскрізне шифрування за допомогою MLS, яке використовує White Noise."
+      "badge": "Альфа",
+      "description": "Наскрізне шифрування за допомогою MLS; працює з White Noise. Ще тестується — для важливого використовуйте NIP-17."
     },
     "nip04": {
       "badge": "Застарілий",

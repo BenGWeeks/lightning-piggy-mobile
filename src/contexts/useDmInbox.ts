@@ -43,6 +43,8 @@ import { fetchConversationFor } from './nostrFetchConversation';
 import { loadInitialConversation as loadInitialConversationFor } from './conversationReadThrough';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
+import type { DmProtocol } from '../utils/dmProtocol';
+import { useMarmotDmInbound } from './useMarmotDmInbound';
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -82,7 +84,7 @@ export interface UseDmInboxResult {
   // thread is never behind the preview.
   loadInitialConversation: (
     otherPubkey: string,
-    protocol?: 'nip04' | 'nip17',
+    protocol?: DmProtocol,
   ) => Promise<ConversationMessage[]>;
   appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   persistDeliveryStatuses: (
@@ -101,6 +103,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const { pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays } = options;
 
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
+  // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
+  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInbox);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Gates the live NIP-17 DM sub useEffect below. False on cold boot
   // so we don't burn JS-thread cycles unwrapping wraps the user can't
@@ -237,6 +241,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             wireKind: msg.wireKind ?? 14,
             deliveryStatus: msg.deliveryStatus,
             rumorId: msg.rumorId,
+            protocol: msg.protocol,
           },
         ]);
       } catch (e) {
@@ -299,7 +304,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // — and the rows now carry the optimistic local- sends + delivery ticks the
   // retired plaintext blob used to.
   const loadInitialConversation = useCallback(
-    (otherPubkey: string, protocol?: 'nip04' | 'nip17'): Promise<ConversationMessage[]> =>
+    (otherPubkey: string, protocol?: DmProtocol): Promise<ConversationMessage[]> =>
       loadInitialConversationFor(otherPubkey, {
         getStoredRows: (peer) => {
           if (!pubkey) return Promise.resolve([] as DmMessageRow[]);

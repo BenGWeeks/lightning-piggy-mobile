@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { DeliveryStatus, MessageInfo } from '../utils/dmDeliveryStatus';
+import type { DmProtocol } from '../utils/dmProtocol';
 
 // Args MessageBubble hands up when a bubble is tapped (#856). The hook turns
 // these into a `MessageInfo` for the detail sheet and tracks the resend payload.
@@ -21,29 +22,36 @@ export interface ShowMessageInfoArgs {
  * `resendText` is the composer's send function — Re-publish runs the full send
  * path again so it gets its own bubble + fresh tick.
  */
-export function useMessageInfoSheet(resendText: (text: string) => Promise<boolean>) {
+export function useMessageInfoSheet(
+  resendText: (text: string) => Promise<boolean>,
+  protocol?: DmProtocol,
+) {
   const [messageInfo, setMessageInfo] = useState<{
     info: MessageInfo;
     resendText: string;
   } | null>(null);
 
-  const showInfo = useCallback((args: ShowMessageInfoArgs) => {
-    // The optimistic local- sent row has no `wireKind` yet (it's known once
-    // decrypted/echoed), but the send result's `deliveryStatus.kind` carries
-    // the rumor kind — fall back to it so a just-sent bubble still shows the
-    // right protocol/kind instead of "Unknown" (Copilot #858).
-    const wireKind = args.wireKind ?? args.deliveryStatus?.kind;
-    setMessageInfo({
-      info: {
-        direction: args.fromMe ? 'sent' : 'received',
-        eventId: args.eventId,
-        wireKind,
-        deliveryStatus: args.deliveryStatus,
+  const showInfo = useCallback(
+    (args: ShowMessageInfoArgs) => {
+      // The optimistic local- sent row has no `wireKind` yet (it's known once
+      // decrypted/echoed), but the send result's `deliveryStatus.kind` carries
+      // the rumor kind — fall back to it so a just-sent bubble still shows the
+      // right protocol/kind instead of "Unknown" (Copilot #858).
+      const wireKind = args.wireKind ?? args.deliveryStatus?.kind;
+      setMessageInfo({
+        info: {
+          direction: args.fromMe ? 'sent' : 'received',
+          eventId: args.eventId,
+          wireKind,
+          ...(protocol === 'marmot' ? { protocol } : {}),
+          deliveryStatus: args.deliveryStatus,
+          resendText: args.resendText,
+        },
         resendText: args.resendText,
-      },
-      resendText: args.resendText,
-    });
-  }, []);
+      });
+    },
+    [protocol],
+  );
 
   const closeInfo = useCallback(() => setMessageInfo(null), []);
 

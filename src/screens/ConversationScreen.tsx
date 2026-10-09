@@ -68,10 +68,13 @@ import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import type { Item } from '../utils/conversationItems';
 import { useConversationReactions } from '../hooks/useConversationReactions';
+import { useReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
+import { Toast } from '../components/BrandedToast';
+import * as Clipboard from 'expo-clipboard';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -269,6 +272,17 @@ const ConversationScreen: React.FC = () => {
     [presentContactSheet],
   );
 
+  // The peer can't be reached over Marmot, so the message went over NIP-17:
+  // move the thread there (same in-place switch as the protocol picker).
+  const handleMarmotFallback = useCallback(() => {
+    navigation.setParams({ protocol: 'nip17' });
+    Toast.show({
+      type: 'info',
+      text1: t('conversationScreen.marmotFallbackTitle'),
+      text2: t('conversationScreen.marmotFallbackBody', { name }),
+    });
+  }, [navigation, t, name]);
+
   // Append an optimistic local- message to BOTH React state (instant
   // paint) AND the per-conversation cache on disk (survives back-then-
   // reopen before the NIP-17 self-wrap echo arrives). The merge-side
@@ -300,6 +314,7 @@ const ConversationScreen: React.FC = () => {
     setContactPickerOpen,
     setGifPickerOpen,
     setVoiceSheetOpen,
+    onMarmotFallback: handleMarmotFallback,
   });
 
   // Tap a bubble → message-info sheet (#856), for sent + received. Logic lives
@@ -311,7 +326,7 @@ const ConversationScreen: React.FC = () => {
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText);
+  } = useMessageInfoSheet(resendText, protocol);
 
   // Live-location entry point (#206). The Attach → Location tile opens a
   // chooser sheet — snapshot or live for N — instead of going straight
@@ -336,7 +351,7 @@ const ConversationScreen: React.FC = () => {
   const handleShareLive = useCallback(
     async (durationMs: number) => {
       setLiveLocationPickerOpen(false);
-      const result = await startShare(pubkey, durationMs);
+      const result = await startShare(pubkey, durationMs, protocol);
       if (!result.ok) {
         Alert.alert(t('conversationScreen.couldNotStartLiveShareTitle'), result.error);
         return;
@@ -344,7 +359,7 @@ const ConversationScreen: React.FC = () => {
       // Append the exact published marker text so the optimistic bubble dedupes against the relay echo (mergeConversationMessages matches on identical text — a hand-built copy with a different startedAt would leave two "started" bubbles).
       appendOptimisticLocal(result.markerText);
     },
-    [pubkey, startShare, appendOptimisticLocal, t],
+    [pubkey, startShare, appendOptimisticLocal, t, protocol],
   );
 
   const handleStopLive = useCallback(
@@ -426,6 +441,22 @@ const ConversationScreen: React.FC = () => {
   const { liveLocationLatest, liveLocationBubbleStatus, liveLocationBubbleRemaining } =
     useConversationLiveLocation({ items, isLoggedIn, myPubkey, pubkey, signerType, relays });
 
+  const relayReactionBackend = useMemo(
+    () => ({
+      fetchReactionsForMessages,
+      publishReaction,
+      deleteReaction,
+      fetchReactionDeletions: fetchReactionDeletionsForReactions,
+    }),
+    [
+      fetchReactionsForMessages,
+      publishReaction,
+      deleteReaction,
+      fetchReactionDeletionsForReactions,
+    ],
+  );
+  const reactionBackend = useReactionBackend(protocol, myPubkey, pubkey, relayReactionBackend);
+
   // Per-message reactions + long-press action state (#205) — kind-7 fetch /
   // reduce, optimistic publish/retract toggle, and the actioned-message
   // descriptor — live in a hook so this screen stays composition.
@@ -442,12 +473,17 @@ const ConversationScreen: React.FC = () => {
     messages,
     myPubkey,
     peerPubkey: pubkey,
-    fetchReactionsForMessages,
-    publishReaction,
-    deleteReaction,
-    fetchReactionDeletions: fetchReactionDeletionsForReactions,
+    ...reactionBackend,
     onZapMessage: () => setSendSheetOpen(true),
   });
+
+  const copyText = actionsForMessage?.copyText;
+  const handleCopyText = useCallback(async () => {
+    if (!copyText) return;
+    await Clipboard.setStringAsync(copyText);
+    Toast.show({ type: 'success', text1: t('messageActionsSheet.copied') });
+    closeMessageActions();
+  }, [copyText, t, closeMessageActions]);
 
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
@@ -698,7 +734,7 @@ const ConversationScreen: React.FC = () => {
           </Text>
         )}
         <ConversationComposer
-          attachmentsEnabled={protocol === 'nip17'}
+          attachmentsEnabled={protocol !== 'nip04'}
           value={draft}
           onChangeText={(text) => {
             setDraft(text);
@@ -848,6 +884,7 @@ const ConversationScreen: React.FC = () => {
           picture: picture ?? null,
           lightningAddress: lightningAddress ?? null,
         }}
+        presetProtocol={protocol}
         onSent={(payload) => {
           appendOptimisticLocal(payload);
         }}
@@ -896,6 +933,7 @@ const ConversationScreen: React.FC = () => {
             ? handleZapMessage
             : undefined
         }
+        onCopyText={copyText ? handleCopyText : undefined}
       />
       <ContactProfileSheet
         visible={profileSheetVisible}

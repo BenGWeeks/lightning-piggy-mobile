@@ -7,7 +7,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
 import { getConversationForEvent } from '../services/dmDb';
-import { protocolForWireKind } from '../utils/dmProtocol';
+import { protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 import BrandGradientBackground from '../components/BrandGradientBackground';
 import NotificationRow from '../components/NotificationRow';
 import { useNotificationHistory } from '../hooks/useNotificationHistory';
@@ -44,7 +44,7 @@ export default function NotificationsScreen() {
   // Rows from alerts the background couldn't decrypt carry only a NIP-17 wrap
   // id; once the app has stored that message, learn its conversation (#1154).
   const [wrapTargets, setWrapTargets] = useState<
-    Map<string, { pubkey: string; protocol: 'nip04' | 'nip17' }>
+    Map<string, { pubkey: string; protocol: DmProtocol }>
   >(new Map());
   useFocusEffect(
     useCallback(() => {
@@ -61,7 +61,7 @@ export default function NotificationsScreen() {
           if (row)
             found.set(e.data.wrapId!, {
               pubkey: row.conversation,
-              protocol: protocolForWireKind(row.wireKind),
+              protocol: protocolForWireKind(row.wireKind, row.protocol),
             });
         }
         if (!cancelled && found.size > wrapTargets.size) setWrapTargets(found);

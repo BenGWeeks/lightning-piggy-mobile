@@ -4,6 +4,11 @@ export interface Group {
   memberPubkeys: string[];
   createdAt: number;
   updatedAt: number;
+  /** Marmot (MLS) group — id is `marmot:<mls group id>`; membership lives in
+   * the MLS session, not AsyncStorage. Absent = NIP-17 group. */
+  protocol?: 'marmot';
+  /** Marmot only: pubkeys allowed to rename / add / remove. */
+  adminPubkeys?: string[];
 }
 
 /**

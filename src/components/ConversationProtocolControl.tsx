@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import DmProtocolTag from './DmProtocolTag';
@@ -8,7 +8,6 @@ import { isDmProtocolAvailable, type DmProtocol } from '../utils/dmProtocol';
 
 export default function ConversationProtocolControl({ protocol }: { protocol: DmProtocol }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const route = useRoute<RouteProp<RootStackParamList, 'Conversation'>>();
   const [visible, setVisible] = useState(false);
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
@@ -17,10 +16,14 @@ export default function ConversationProtocolControl({ protocol }: { protocol: Dm
       if (!isDmProtocolAvailable(value)) return;
       close();
       if (value !== protocol) {
-        navigation.replace('Conversation', { ...route.params, protocol: value });
+        // Switch in place rather than replace(): the picker is a sheet portalled
+        // to the app root, and unmounting its screen mid-dismiss orphaned its
+        // backdrop over the new thread, swallowing taps (e.g. Back). The loader
+        // already handles a protocol change on a reused screen.
+        navigation.setParams({ protocol: value });
       }
     },
-    [navigation, route.params, protocol, close],
+    [navigation, protocol, close],
   );
   return (
     <>

@@ -39,6 +39,7 @@ import {
   encodeEncryptedFileUrl,
   deriveGroupWireKind,
 } from './messageContent';
+import { encodeMarmotMediaUrl } from './encryptedFileUrl';
 
 // A syntactically-shaped bolt11 (the BOLT11 spec's 2500u example). Long enough
 // to satisfy the {50,} floor; its real bech32 validity is irrelevant here
@@ -408,5 +409,45 @@ describe('extractInvoice (bolt11 detection → in-chat invoice card, #948)', () 
     expect(inv).not.toBeNull();
     expect(inv!.raw).toBe(SAMPLE_BOLT11);
     expect(inv!.amountSats).toBeNull();
+  });
+});
+
+describe('parseImageMessage — Marmot photos (MIP-04)', () => {
+  const base = {
+    url: 'https://blossom.example/' + 'cc'.repeat(32) + '.bin',
+    version: 'encrypted-media-v2' as const,
+    mime: 'image/jpeg',
+    keysHex: ['aa'.repeat(32), 'dd'.repeat(32)],
+    nonceHex: 'bb'.repeat(12),
+    filename: 'photo 1.jpg',
+    plaintextSha256: 'ee'.repeat(32),
+    ciphertextSha256: 'cc'.repeat(32),
+  };
+
+  it('round-trips every field the decrypt binds, including all candidate keys', () => {
+    const parsed = parseImageMessage(encodeMarmotMediaUrl(base));
+    expect(parsed).toEqual({
+      url: base.url,
+      mime: 'image/jpeg',
+      encrypted: true,
+      nonceHex: base.nonceHex,
+      marmot: {
+        version: 'encrypted-media-v2',
+        keysHex: base.keysHex,
+        filename: 'photo 1.jpg',
+        plaintextSha256: base.plaintextSha256,
+        ciphertextSha256: base.ciphertextSha256,
+      },
+    });
+    // Not misread as an AES-GCM image or a voice note.
+    expect(parsed?.keyHex).toBeUndefined();
+    expect(parseVoiceNote(encodeMarmotMediaUrl(base))).toBeNull();
+  });
+
+  it('rejects a fragment missing a field, or a non-image', () => {
+    const encoded = encodeMarmotMediaUrl(base);
+    expect(parseImageMessage(encoded.replace(/&ps=[0-9a-f]+/, ''))).toBeNull();
+    expect(parseImageMessage(encoded.replace(/&k=[0-9a-f,]+/, '&k='))).toBeNull();
+    expect(parseImageMessage(encodeMarmotMediaUrl({ ...base, mime: 'video/mp4' }))).toBeNull();
   });
 });

@@ -53,6 +53,18 @@ export interface UseConversationReactionsParams {
   >;
   // Opens the SendSheet preset to the peer — the "Zap this message" action.
   onZapMessage: () => void;
+  // Reactions / retractions arriving live (Marmot: they come over MLS while
+  // the thread is open, not from a relay query). Returns an unsubscribe.
+  subscribeLiveReactions?: (
+    onEvent: (event: {
+      id: string;
+      pubkey: string;
+      kind: number;
+      content: string;
+      created_at: number;
+      tags: string[][];
+    }) => void,
+  ) => () => void;
 }
 
 interface ActionedMessage {
@@ -61,6 +73,10 @@ interface ActionedMessage {
   fromMe: boolean;
   // kind-14 (NIP-17 chat) or kind-4 (NIP-04 DM); goes in the kind-7 `k` tag.
   targetKind: 14 | 4;
+  // The message's text when it's plain chat text (incl. links / invoices) —
+  // offered as "Copy text". Never set for encrypted files (their stored text
+  // embeds the decryption key) or structured payloads (polls, wallet shares).
+  copyText?: string;
 }
 
 export interface UseConversationReactionsResult {
@@ -95,6 +111,7 @@ export function useConversationReactions({
   deleteReaction,
   fetchReactionDeletions,
   onZapMessage,
+  subscribeLiveReactions,
 }: UseConversationReactionsParams): UseConversationReactionsResult {
   const t = useTranslation();
   // `reactionRecords` is the flat list of every kind-7 seen for any message in
@@ -110,12 +127,20 @@ export function useConversationReactions({
   // when a slow relay + optimistic-append churn re-run the effect.
   const reactionFetchScheduledRef = useRef(new Set<string>());
 
+  // Retractions seen so far (reaction id → who retracted it). Enforced on
+  // every merge: a retraction can arrive before its reaction (live Marmot
+  // events), or a slower history read can return a reaction after its live
+  // retraction — either way it must stay gone.
+  const retractionsRef = useRef(new Map<string, Set<string>>());
+
   const mergeFreshRecords = useCallback((fresh: ReactionRecord[]) => {
     if (fresh.length === 0) return;
     setReactionRecords((prev) => {
       const seen = new Set(prev.map((r) => r.id));
       const merged = [...prev];
       for (const r of fresh) {
+        // NIP-09: only the reactor's own retraction counts.
+        if (retractionsRef.current.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
         if (!seen.has(r.id)) {
           merged.push(r);
           seen.add(r.id);
@@ -133,6 +158,15 @@ export function useConversationReactions({
   // actually matched, so an unrelated deletion batch doesn't force a re-render.
   const applyDeletionEvents = useCallback((deletions: { pubkey: string; tags: string[][] }[]) => {
     if (deletions.length === 0) return;
+    for (const d of deletions) {
+      for (const t of d.tags) {
+        if (t[0] !== 'e' || typeof t[1] !== 'string' || t[1].length === 0) continue;
+        const id = t[1].toLowerCase();
+        const by = retractionsRef.current.get(id) ?? new Set<string>();
+        by.add(d.pubkey.toLowerCase());
+        retractionsRef.current.set(id, by);
+      }
+    }
     setReactionRecords((prev) => {
       let next = prev;
       for (const d of deletions) {
@@ -145,6 +179,18 @@ export function useConversationReactions({
       return next.length === prev.length ? prev : next;
     });
   }, []);
+
+  useEffect(() => {
+    if (!subscribeLiveReactions) return;
+    return subscribeLiveReactions((event) => {
+      if (event.kind === 5) {
+        applyDeletionEvents([event]);
+        return;
+      }
+      const record = parseReactionEvent(event);
+      if (record) mergeFreshRecords([record]);
+    });
+  }, [subscribeLiveReactions, applyDeletionEvents, mergeFreshRecords]);
 
   // Fetch reactions for any new target ids (the cross-peer-stable rumor id).
   // Optimistic-local / warm-cache rows without a rumorId are skipped — they'll
@@ -331,7 +377,21 @@ export function useConversationReactions({
       const authorPubkey = item.fromMe ? myPubkey : peerPubkey;
       if (!authorPubkey) return null;
       const targetKind: 14 | 4 = item.kind === 'message' && item.wireKind === 4 ? 4 : 14;
-      return { targetId, authorPubkey, fromMe: item.fromMe, targetKind };
+      const text = item.kind === 'message' ? (item.text ?? '') : '';
+      const copyText =
+        item.kind === 'message' &&
+        (item.wireKind === undefined || item.wireKind === 4 || item.wireKind === 14) &&
+        !text.includes('#lpe=1') &&
+        text.trim() !== ''
+          ? text
+          : undefined;
+      return {
+        targetId,
+        authorPubkey,
+        fromMe: item.fromMe,
+        targetKind,
+        ...(copyText ? { copyText } : {}),
+      };
     },
     [myPubkey, peerPubkey],
   );

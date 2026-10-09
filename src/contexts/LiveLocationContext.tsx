@@ -37,6 +37,7 @@ import { createLiveLocationPingEvent } from '../services/nostrLiveLocation';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { useNostr } from './NostrContext';
+import type { DmProtocol } from '../utils/dmProtocol';
 import {
   DEFAULT_PING_INTERVAL_MS,
   LIVE_LOCATION_PING_KIND,
@@ -70,7 +71,11 @@ export interface LiveLocationContextValue {
   sessionsByRecipient: Map<string, OutgoingSession[]>;
   /** Start a new live share. Picks a single GPS fix synchronously,
    *  publishes the start marker DM, then begins the watcher. */
-  startShare: (recipientPubkey: string, durationMs: number) => Promise<LiveShareStartResult>;
+  startShare: (
+    recipientPubkey: string,
+    durationMs: number,
+    protocol?: DmProtocol,
+  ) => Promise<LiveShareStartResult>;
   /** Stop an in-progress share. Publishes the end marker DM and
    *  flips the session to `ended` so storage can drop it. */
   stopShare: (sessionId: string) => Promise<LiveShareStopResult>;
@@ -241,7 +246,11 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
               startedAt: session.startedAt,
               location,
             });
-      const result = await sendDirectMessage(session.recipientPubkey, text);
+      const result = await sendDirectMessage(
+        session.recipientPubkey,
+        text,
+        session.protocol ? { protocol: session.protocol } : undefined,
+      );
       return { ok: result.success, text };
     },
     [sendDirectMessage],
@@ -250,7 +259,12 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // ---- Lifecycle: start / stop ------------------------------------------
 
   const startShare = useCallback(
-    async (recipientPubkey: string, durationMs: number): Promise<LiveShareStartResult> => {
+    async (
+      recipientPubkey: string,
+      durationMs: number,
+      protocol?: DmProtocol,
+    ): Promise<LiveShareStartResult> => {
+      const markerProtocol = protocol === 'marmot' ? ('marmot' as const) : undefined;
       if (!pubkey || !isLoggedIn) return { ok: false, error: 'Not logged in' };
       const fix = await getCurrentLocation();
       if (!fix.ok) return { ok: false, error: fix.message };
@@ -268,6 +282,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         recipientPubkey,
         durationMs: cappedDurationMs,
         now,
+        protocol: markerProtocol,
       });
       const installed: OutgoingSession = {
         sessionId,
@@ -279,6 +294,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         status: 'active',
         startMarkerSent: false,
         endMarkerSent: false,
+        ...(markerProtocol ? { protocol: markerProtocol } : {}),
       };
       // Remember the start fix as the last-ditch end-marker fallback.
       startLocationRef.current.set(sessionId, fix.location);

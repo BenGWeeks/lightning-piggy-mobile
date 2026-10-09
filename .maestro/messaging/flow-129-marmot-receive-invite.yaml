@@ -1,0 +1,42 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot invite received — Middle Piggy starts an MLS DM, Big auto-joins
+---
+# The inbound half: the peer bot, as Middle Piggy (`4b2fcb4e…`), creates a
+# White Noise-shaped Marmot DM to Big Piggy, gift-wraps the kind-444 Welcome
+# to Big's inbox and sends a message. Big (who follows Middle, so the
+# follow gate passes) must auto-join from the Welcome and show the message in
+# a Marmot thread — with an invite record in the NIP-17 thread — and can
+# reply over MLS.
+#
+# Prereqs: Big follows Middle; the bot is started with BOT_INITIATE_TO=<Big>.
+# Run: bash scripts/marmot-e2e.sh 129
+
+# No relaunch: the runner opens Messages BEFORE the bot sends its invite, so
+# the Welcome gift wrap arrives on the live subscription (a relaunch after
+# the wrap was published would rely on the randomised-timestamp backfill).
+- launchApp:
+    stopApp: false
+- tapOn:
+    id: 'tab-messages'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-4b2fcb4e.*:marmot'
+    direction: UP
+    timeout: 120000
+- tapOn:
+    id: 'conversation-row-4b2fcb4e.*:marmot'
+- extendedWaitUntil:
+    visible:
+      text: 'hello Big from Middle over MLS.*'
+    timeout: 30000
+- assertVisible:
+    text: 'Marmot'
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'got your invite ${RUN_TAG}'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: 'pong: .ot your invite ${RUN_TAG}'
+    timeout: 120000

@@ -66,10 +66,50 @@ changing how anything is stored.
   per-relay delivery tick (`delivery_status`, #856), the NIP-17 rumor id
   (`rumor_id`, #857) and the optimistic `local-` send rows — so the store is
   the *only* at-rest home for 1:1 DM content; no plaintext side blobs.
+  Marmot 1:1 rows live here too, tagged `protocol = 'marmot'` (NULL on
+  NIP-04/NIP-17 rows, whose protocol is inferred from `wire_kind`).
+  `marmot_kv` holds every Marmot (MLS) store — group ratchet state, epoch
+  secrets, key-package private keys, invites, each group's decrypted
+  message history, photo file keys and MIP-05 push records — keyed
+  `(owner, namespace, key)` (namespaces in <<marmot-kv>>). Unlike
+  `dm_messages` it is *not* a rebuildable relay cache: losing it means being
+  re-invited to each Marmot group.
 | *Decrypted DM plaintext* — the most sensitive bulk data on the device
 | *Whole-file SQLCipher encryption*, key in the OS keystore (#697). Signal's
   model — see <<keys>>.
 |===
+
+[[marmot-kv]]
+=== Marmot (MLS) state: `marmot_kv` namespaces
+
+One row per `(owner, namespace, key)`; values are JSON with `Uint8Array` /
+`bigint` tagged (`marmotStore.ts`). `owner` is the account pubkey, so accounts
+on one device never share MLS state, and a per-account sign-out deletes every
+row for that owner (`deleteMarmotStateForOwner`, from `wipeDmStoresForAccount`).
+
+[cols="1,3",options="header"]
+|===
+| Namespace | Contents
+
+| `groups` | MLS group state per group (ratchet tree, epoch secrets, retained epochs) — owned by `marmot-ts`.
+| `keyPackages` | Our key packages' private keys and the events they were published as.
+| `invites`, `lifecycle`, `ingest`, `rewind`, `removed` | Other `marmot-ts` client stores: received invites, group lifecycle records, ingest / convergence evidence, the per-group fork-history tree used for fork recovery, and "removed from this group" markers.
+| `history:<group id>` | Durable decrypted app events (rumors, ours included) per group. Replayed for the last 7 days on start so a message the app died before storing is recovered; pruned to the newest 500 per group. Reactions in Marmot 1:1 threads are read back from here.
+| `mediaKeys:<group id>` | Per photo message: the vetted Blossom URL and candidate file keys (MIP-04), derived on arrival or on send. Pruned with its `history:` entry.
+| `pushRecords` | Per group: verified MIP-05 push records (encrypted device tokens, server pubkey, relay hint, owner proof) and removal tombstones, keyed by (member, leaf, platform, server).
+| `pendingWelcomes` | Welcomes whose join failed transiently, retried at the next session start.
+| `welcomes` | Welcome rumor ids already joined or permanently rejected (each Welcome is joined at most once).
+| `firstSeen` | When this device first saw each group (ms) — MLS carries no creation time; it orders DMs (newest wins) and groups.
+| `watermark` | Per group: `created_at` of the newest *ingested* kind-445, the `since` for the bounded backfill.
+| `meta` | `keyPackageSlot` — the random 32-byte `d` slot reused for every key package this account publishes from this device.
+|===
+
+`dm_messages.protocol` is `'marmot'` on Marmot 1:1 rows and NULL otherwise.
+Marmot text is stored as kind 14 and photos as kind 15 (the `#lpe=1` URL with
+`alg=encrypted-media-v2`), so the column, not the kind, identifies the
+transport. Marmot rows of non-message kinds (reactions, deletions, push-token
+gossip, …) are never written, and rows earlier dev builds stored are purged
+on start (`deleteMarmotRowsOfKinds`).
 
 [[threat]]
 == Threat model: device seizure
@@ -93,6 +133,9 @@ possibly while powered on and after first unlock.
   (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`) still live in
   AsyncStorage — wiped on logout (#944) but readable from a seized unlocked
   device until they get the same encrypted-store treatment (follow-up).
+  This includes *Marmot* group logs (`group_messages_marmot:<mls group id>`),
+  whose photo rows embed the photo's file keys in the `#lpe=1` URL. Marmot
+  1:1 rows and all MLS state are in the encrypted DB.
   Public caches (places, profiles, geo-caches) are public data by
   definition; the eventual move into the one encrypted DB is a metadata-
   privacy nicety, not a confidentiality requirement.
@@ -234,6 +277,13 @@ erDiagram
         INTEGER wire_kind
         TEXT delivery_status
         TEXT rumor_id
+        TEXT protocol
+    }
+    marmot_kv {
+        TEXT owner PK
+        TEXT namespace PK
+        TEXT key PK
+        TEXT value
     }
     group_messages {
         TEXT event_id PK

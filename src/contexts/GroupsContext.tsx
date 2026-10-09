@@ -32,6 +32,9 @@ import { perAccountKey } from '../services/perAccountStorage';
 import { useTrustGraph } from './TrustGraphContext';
 import { saveWotSettings, type WotTier } from '../services/wotSettingsService';
 import { deriveInitialWotTier } from '../utils/wotMigration';
+import { dmRowPreview } from '../utils/dmRowPreview';
+import { isMarmotGroupId } from '../services/marmotSession';
+import { useMarmotGroups } from './useMarmotGroups';
 
 const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
 // One-shot migration marker keyed off the legacy followingOnly → wotTier
@@ -83,7 +86,7 @@ interface GroupsContextType {
    */
   setSecretMode: (next: boolean) => void;
   loading: boolean;
-  createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
+  createGroup: (name: string, memberPubkeys: string[], protocol?: 'marmot') => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
   /** Append unique pubkeys to the group's member list. Returns the
    * updated group, or null if the group doesn't exist. Re-publishes
@@ -153,7 +156,9 @@ function activityFromMessages(
   // `types/groups.ts:GroupActivity.lastActivityAt`.
   return {
     lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
-    lastText: last.text,
+    // An encrypted file's stored text (`#lpe=1…`, NIP-17 or Marmot) embeds its
+    // decryption key — redact it to the attachment label like DM previews.
+    lastText: dmRowPreview(last.text, last.text.includes('#lpe=1') ? 15 : 14),
     lastMessageId: last.id,
     lastSenderPubkey: last.senderPubkey.toLowerCase(),
     recentSenderPubkeys: computeRecentSenders(messages),
@@ -163,7 +168,8 @@ function activityFromMessages(
 const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
 
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [groups, setGroups] = useState<Group[]>([]);
+  // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
+  const [storedGroups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [secretMode, setSecretModeState] = useState(false);
   // Tier source-of-truth lives in TrustGraphContext (#547). We read it here
@@ -180,6 +186,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // listener below + a local hook from GroupConversationScreen sends.
   const [activityByGroup, setActivityByGroup] = useState<Record<string, GroupActivity>>({});
   const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  const marmot = useMarmotGroups(pubkey);
+  const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
   const reconcilerRef = useRef<
@@ -341,8 +349,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so NostrContext's NIP-17 decrypt loop can resolve which group an
   // inbound rumor belongs to without going through context.
   useEffect(() => {
-    setKnownGroups(groups);
-  }, [groups]);
+    setKnownGroups(storedGroups); // NIP-17 routing only — never match a Marmot group
+  }, [storedGroups]);
 
   // Eagerly hydrate `activityByGroup` from the disk cache as soon as the
   // user identity is known. Without this, the Messages tab renders group
@@ -455,8 +463,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // mutation array.
   const groupsRef = useRef<Group[]>([]);
   useEffect(() => {
-    groupsRef.current = groups;
-  }, [groups]);
+    groupsRef.current = storedGroups;
+  }, [storedGroups]);
 
   const persist = useCallback(
     async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
@@ -550,7 +558,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [persist]);
 
   const createGroup = useCallback(
-    async (name: string, memberPubkeys: string[]): Promise<Group> => {
+    async (name: string, memberPubkeys: string[], protocol?: 'marmot'): Promise<Group> => {
+      if (protocol === 'marmot') return marmot.create(name, memberPubkeys);
       const now = Date.now();
       const group: Group = {
         id: createGroupId(),
@@ -572,11 +581,12 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return group;
     },
-    [persist, publishGroupState],
+    [persist, publishGroupState, marmot],
   );
 
   const renameGroup = useCallback(
     async (groupId: string, newName: string): Promise<boolean> => {
+      if (isMarmotGroupId(groupId)) return marmot.rename(groupId, newName);
       const trimmed = newName.trim();
       if (!trimmed) return false;
       let updated: Group | null = null;
@@ -599,7 +609,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return true;
     },
-    [persist, publishGroupState],
+    [persist, publishGroupState, marmot],
   );
 
   // ---------------------------------------------------------------------------
@@ -619,6 +629,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // ---------------------------------------------------------------------------
   const addMembersToGroup = useCallback(
     async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
+      if (isMarmotGroupId(groupId)) return marmot.addMembers(groupId, pubkeys);
       let updated: Group | null = null;
       let didChange = false;
       await persist((curr) => {
@@ -659,11 +670,12 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       return updated;
     },
-    [persist, publishGroupState],
+    [persist, publishGroupState, marmot],
   );
 
   const removeMemberFromGroup = useCallback(
     async (groupId: string, pubkey: string): Promise<Group | null> => {
+      if (isMarmotGroupId(groupId)) return marmot.removeMember(groupId, pubkey);
       let updated: Group | null = null;
       await persist((curr) => {
         const idx = curr.findIndex((g) => g.id === groupId);
@@ -692,14 +704,16 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return finalUpdated;
     },
-    [persist, publishGroupState],
+    [persist, publishGroupState, marmot],
   );
 
   const deleteGroup = useCallback(
     async (groupId: string): Promise<void> => {
+      // A Marmot group is left (an MLS self-remove), not just forgotten.
+      if (isMarmotGroupId(groupId)) return marmot.leave(groupId);
       await persist((curr) => curr.filter((g) => g.id !== groupId));
     },
-    [persist],
+    [persist, marmot],
   );
 
   const getGroup = useCallback(

@@ -39,6 +39,7 @@ custom native modules, so Expo Go is not used).
 | Language | TypeScript (strict) | `npx tsc --noEmit` must pass; Prettier + ESLint gated in CI.
 | Navigation | `@react-navigation` (native-stack, bottom-tabs, drawer) | See <<navigation>>.
 | Nostr | `nostr-tools` 2.x + `@noble/*` (ciphers, hashes, curves) | NIP-04 / NIP-44 / NIP-59 / NIP-17 crypto.
+| Marmot (MLS) | `@internet-privacy/marmot-ts` (vendored build of upstream PR #83) | Alpha MLS-over-Nostr chats, wire-compatible with White Noise. Runs on a pure-JS `@noble` crypto provider (`marmotCryptoProvider.ts`) because Hermes has no WebCrypto. See `SOLUTION_DESIGN.adoc` → "Marmot (MLS) messaging".
 | Lightning | Nostr Wallet Connect (NWC) as the primary rail | `src/services/nwcService.ts`.
 | On-chain | `bdk-rn` (BenGWeeks fork), `bitcoinjs-lib`, `@scure/btc-signer`, Electrum client | Watch-only (xpub) + hot-wallet (mnemonic) support; Boltz swaps for LN ↔ on-chain.
 | Encrypted DB | `@op-engineering/op-sqlite` with SQLCipher | Encrypted local DM store (`"op-sqlite": { "sqlcipher": true }` in `package.json`).
@@ -167,6 +168,7 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 
 | Nostr core | `nostrService.ts` (relay queries, event building, NIP-59/17/04/44 ops), `amberService.ts`, `nostrRelayStorage.ts`, `trustGraphService.ts`
 | Direct messages | `dmInbox.ts`, `dmIngest.ts`, `dmDb.ts`, `dmLiveSubscription.ts`, `nostrLiveDmSub.ts` (lives in `src/contexts/`, not `src/services/`), `nostrDmPublish.ts`, `nostrFileMessage.ts`, `dmStoreMigration.ts`
+| Marmot (MLS) messaging | `marmotSession.ts` (one client per account), `marmotSend.ts`, `marmotInbox.ts`, `marmotWelcomeRouter.ts`, `marmotMedia.ts` (MIP-04 photos), `marmotReactions.ts`, `marmotPush.ts` / `marmotPushNotifier.ts` (MIP-05, send side), adapters `marmotSigner.ts` / `marmotNetwork.ts` / `marmotStore.ts` / `marmotCryptoProvider.ts`. React glue: `MarmotBridge.tsx`, `useMarmotDmInbound.ts`, `useMarmotGroups.ts` (in `src/contexts/`).
 | Background sync / DM ping | `backgroundTask.ts` (registers the periodic `expo-background-task` — WorkManager on Android / BGTaskScheduler on iOS — that runs while the UI isn't mounted), `backgroundSyncService.ts` (the headless detect-and-ping worker: notices new encrypted inbound traffic and fires a generic notification without decrypting — works for both nsec and Amber users). See `architecture/notifications.adoc`.
 | Nostr places (NIP-52 / NIP-GC) | `nostrPlacesService.ts`, `nostrPlacesPublisher.ts`, `nostrPlacesStorage.ts`, `nostrPlacesNip52.ts`, `republishPiggyService.ts`
 | Wallet — Lightning | `nwcService.ts`, `nwcEncryption.ts`, `nwcRelayHealth.ts`, `nwcErrors.ts`, `lnurlService.ts`, `lnurlWithdrawService.ts`
@@ -218,16 +220,24 @@ full wire formats.
 | 4 | NIP-04 legacy encrypted DM | inbox fetch stores `wire_kind=4`
 | 13 | NIP-59 seal (inner layer of a gift wrap) | `nostrService.ts` wrap builders
 | 14 | NIP-17 chat rumor (1:1 + group) | `nostrService.ts` (`buildChatRumor` / `buildGroupMessageRumor`)
+| 444 | Marmot Welcome (group invite), gift-wrapped | `marmotWelcomeRouter.ts`, `marmotSession.ts`
+| 445 | Marmot group event (MLS commits + messages) | `marmotSession.ts` (via `marmot-ts`)
+| 446 | Marmot MIP-05 push trigger, gift-wrapped to a notification server | `marmotPushNotifier.ts`
 | 1059 | NIP-59 gift wrap (outer envelope) | inbox fetch, wrap builders, decrypt-once gate
 | 1111 | NIP-22 comment | Hunt "Piglet" comments
 | 7516 | NIP-GC found-log | recorded when a Piglet is claimed
 | 9734 | NIP-57 zap request | `nostrService.ts` (`buildZapRequest`)
 | 9735 | NIP-57 zap receipt | `nostrService.ts` (`fetchZapReceipts`, `parseZapReceipt`)
 | 10002 | NIP-65 relay list | `nostrService.ts` (`fetchRelayList`)
+| 30443 | Marmot key package | `marmotSession.ts` (`ensureKeyPackage`)
 | 20069 | Ephemeral live-location coordinate (in-DM sharing) | live-location feature
 | 31923 | NIP-52 calendar event (meetups, read-only) | Explore → Events
 | 37516 | NIP-GC geo-cache listing ("Piglet") | `nostrPlacesService.ts`
 |===
+
+Inside Marmot groups the app events are unsigned rumors: kind 9 (text, and
+MIP-04 photos), 7 / 5 (reactions), 447–449 (MIP-05 push-token gossip), and
+otherwise the same kinds NIP-17 carries. See `PROTOCOLS.adoc` → "Marmot".
 
 The Gamma Markets marketplace kinds (30402 / 16 / 17) are on the roadmap but are
 not wired into the shipped code as of this writing — treat them as planned.
@@ -322,6 +332,13 @@ location-picker sheet, which renders through `LibreMiniMap` — and no
   (detect-and-ping). A persistent foreground service for realtime delivery is
   scaffolded (permissions only) but not yet implemented — see
   `architecture/notifications.adoc`.
+. *Marmot thread (Alpha):* the same rumor goes to `marmotSend.ts` instead and
+  is sent inside the peer's MLS DM group (kind 445; text becomes kind 9),
+  creating the group and gift-wrapping a kind-444 Welcome on first use.
+  Inbound MLS messages are stored as `dm_messages` rows with
+  `protocol = 'marmot'` by `useMarmotDmInbound`. If the peer has no usable
+  key package, the message is re-sent over NIP-17 and the thread switches.
+  Background detect-and-ping does not watch kind-445 events yet.
 
 === Paying an invoice over NWC
 

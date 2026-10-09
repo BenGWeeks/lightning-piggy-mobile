@@ -13,6 +13,7 @@ import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { fireMessageNotification } from '../services/notificationService';
 import { claimWrapNotification } from '../services/dmWrapNotificationDedupe';
+import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
 
 /**
@@ -128,6 +129,8 @@ export function createLiveRumorSurfacer(
       return;
     }
 
+    // Trusted-sender Marmot invite: join it (the row below still records it).
+    routeMarmotWelcome(rumor, viewerPubkey);
     const wrapText = textForRumor(rumor);
     const wrapRow: DmMessageRow = {
       owner: viewerPubkey,

@@ -13,6 +13,7 @@ import { WalletProvider, useWalletLive } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
+import { MarmotBridge } from './src/contexts/MarmotBridge';
 import { LiveLocationProvider } from './src/contexts/LiveLocationContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { LocaleProvider } from './src/contexts/LocaleContext';
@@ -535,6 +536,9 @@ export default function App() {
                       {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
                       <GroupsProvider>
+                        {/* Marmot (MLS) session lifecycle — needs the signer +
+                      relays from Nostr; Groups/DM inbox consume its events. */}
+                        <MarmotBridge />
                         {/* LiveLocationProvider sits inside Nostr (uses the
                       signer + sendDirectMessage) but outside the
                       navigator so an active share survives screen

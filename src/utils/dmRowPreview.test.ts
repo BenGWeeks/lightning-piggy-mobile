@@ -6,19 +6,19 @@ describe('dmRowPreview — Marmot (#1140)', () => {
 
   it('labels a Marmot group invite instead of showing its raw payload', () => {
     const preview = dmRowPreview(MLS, 444);
-    expect(preview).toBe('🔒 Group invite (Marmot not supported yet)');
+    expect(preview).toBe('🔒 Marmot chat invite');
     expect(preview).not.toContain(MLS);
   });
 
-  it('labels other Marmot kinds as not supported yet', () => {
-    expect(dmRowPreview(MLS, 443)).toBe('🔒 Marmot message (not supported yet)');
-    expect(dmRowPreview(MLS, 445)).toBe('🔒 Marmot message (not supported yet)');
+  it('labels other Marmot wire kinds generically', () => {
+    expect(dmRowPreview(MLS, 443)).toBe('🔒 Marmot message');
+    expect(dmRowPreview(MLS, 445)).toBe('🔒 Marmot message');
   });
 
   it("uses the app's language for the label", () => {
     i18n.locale = 'es';
     try {
-      expect(dmRowPreview(MLS, 444)).toBe('🔒 Invitación de grupo (Marmot aún no es compatible)');
+      expect(dmRowPreview(MLS, 444)).toBe('🔒 Invitación a chat de Marmot');
     } finally {
       i18n.locale = 'en';
     }

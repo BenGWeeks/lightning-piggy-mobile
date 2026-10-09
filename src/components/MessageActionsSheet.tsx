@@ -1,16 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, BackHandler } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, BackHandler } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { Zap } from 'lucide-react-native';
+import { Copy, Plus, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
-import { QUICK_REACTIONS } from '../utils/reactions';
+import { createMessageActionsSheetStyles } from '../styles/MessageActionsSheet.styles';
+import { MORE_REACTIONS, QUICK_REACTIONS } from '../utils/reactions';
 
 /**
  * Per-message action sheet — opens on long-press of a `MessageBubble`.
@@ -60,6 +60,9 @@ interface Props {
    * yourself doesn't make product sense).
    */
   onZap?: () => void;
+  /** Copies the message's text. Undefined (row hidden) for non-text
+   *  messages — photos, polls, wallet shares. */
+  onCopyText?: () => void;
 }
 
 const MessageActionsSheet: React.FC<Props> = ({
@@ -68,14 +71,18 @@ const MessageActionsSheet: React.FC<Props> = ({
   myReactions,
   onToggleReaction,
   onZap,
+  onCopyText,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createMessageActionsSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
+  // The "more emoji" grid starts collapsed each time the sheet opens.
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setShowMore(false);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
@@ -100,6 +107,27 @@ const MessageActionsSheet: React.FC<Props> = ({
     [],
   );
 
+  const renderEmoji = (emoji: string) => {
+    const myReactionId = myReactions[emoji] ?? null;
+    const active = myReactionId !== null;
+    return (
+      <TouchableOpacity
+        key={emoji}
+        style={[styles.emojiButton, active && styles.emojiButtonActive]}
+        onPress={() => onToggleReaction(emoji, myReactionId)}
+        accessibilityLabel={
+          active
+            ? t('messageActionsSheet.removeReaction', { emoji })
+            : t('messageActionsSheet.reactWith', { emoji })
+        }
+        accessibilityState={{ selected: active }}
+        testID={`message-actions-emoji-${emoji}`}
+      >
+        <Text style={styles.emojiText}>{emoji}</Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <BottomSheetModal
       ref={sheetRef}
@@ -111,27 +139,33 @@ const MessageActionsSheet: React.FC<Props> = ({
       <BottomSheetView style={styles.content}>
         <Text style={styles.title}>{t('messageActionsSheet.title')}</Text>
         <View style={styles.emojiRow} testID="message-actions-emoji-row">
-          {QUICK_REACTIONS.map((emoji) => {
-            const myReactionId = myReactions[emoji] ?? null;
-            const active = myReactionId !== null;
-            return (
-              <TouchableOpacity
-                key={emoji}
-                style={[styles.emojiButton, active && styles.emojiButtonActive]}
-                onPress={() => onToggleReaction(emoji, myReactionId)}
-                accessibilityLabel={
-                  active
-                    ? t('messageActionsSheet.removeReaction', { emoji })
-                    : t('messageActionsSheet.reactWith', { emoji })
-                }
-                accessibilityState={{ selected: active }}
-                testID={`message-actions-emoji-${emoji}`}
-              >
-                <Text style={styles.emojiText}>{emoji}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {QUICK_REACTIONS.map(renderEmoji)}
+          <TouchableOpacity
+            style={[styles.emojiButton, showMore && styles.emojiButtonActive]}
+            onPress={() => setShowMore((v) => !v)}
+            accessibilityLabel={t('messageActionsSheet.moreEmoji')}
+            accessibilityState={{ expanded: showMore }}
+            testID="message-actions-more-emoji"
+          >
+            <Plus size={22} color={colors.textHeader} />
+          </TouchableOpacity>
         </View>
+        {showMore ? (
+          <View style={styles.moreEmojiGrid} testID="message-actions-more-emoji-grid">
+            {MORE_REACTIONS.map(renderEmoji)}
+          </View>
+        ) : null}
+        {onCopyText ? (
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={onCopyText}
+            accessibilityLabel={t('messageActionsSheet.copyText')}
+            testID="message-actions-copy"
+          >
+            <Copy size={18} color={colors.textHeader} />
+            <Text style={styles.copyButtonText}>{t('messageActionsSheet.copyText')}</Text>
+          </TouchableOpacity>
+        ) : null}
         {onZap ? (
           <TouchableOpacity
             style={styles.zapButton}
@@ -147,68 +181,5 @@ const MessageActionsSheet: React.FC<Props> = ({
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-    },
-    content: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 24,
-      gap: 16,
-    },
-    title: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    emojiRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    emojiButton: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      // Border keeps the button visually anchored against pink/blue
-      // backgrounds; the active state swaps the border to brandPink so
-      // "I've already reacted with this" reads at a glance.
-      borderWidth: 2,
-      borderColor: 'transparent',
-    },
-    emojiButtonActive: {
-      borderColor: colors.brandPink,
-      backgroundColor: colors.brandPink + '22',
-    },
-    emojiText: {
-      fontSize: 24,
-    },
-    zapButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 14,
-      borderRadius: 12,
-      backgroundColor: colors.brandPink,
-    },
-    zapButtonText: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.white,
-    },
-  });
 
 export default MessageActionsSheet;
