@@ -1,0 +1,43 @@
+appId: com.greenart7c3.nostrsigner
+name: Internal — import a Piggy nsec into a fresh Amber install
+---
+# Building block (never run alone). One-shot Amber setup for the signer matrix:
+# walks Amber's first-run screens, imports the nsec in AMBER_NSEC and keeps the
+# default "Approve basic actions" policy.
+#
+# Amber is a third-party app, so only TEXT selectors (its own English copy,
+# verified against Amber v6.6.7). The nsec reaches Maestro through the
+# environment (MAESTRO_NSEC_* is picked up automatically — see the caller), and
+# `label:` keeps it out of Maestro's console output.
+#
+# Caller passes: AMBER_NSEC — a Piggy fixture nsec (Middle Piggy for the matrix).
+- launchApp:
+    appId: com.greenart7c3.nostrsigner
+- extendedWaitUntil:
+    visible: 'Use your private key'
+    timeout: 15000
+- tapOn: 'Use your private key'
+- tapOn: 'Nsec / private key'
+- inputText:
+    text: ${AMBER_NSEC}
+    label: 'Enter the Piggy nsec (redacted)'
+- hideKeyboard
+- tapOn: 'Next'
+- waitForAnimationToEnd:
+    timeout: 3000
+# "Permissions and connection" — keep the default "Approve basic actions"
+# (auto-approves the common requests, so LP's sign/encrypt round-trips don't
+# stack a prompt each); anything outside that set is handled by
+# common/approve-amber-prompt.yaml.
+- extendedWaitUntil:
+    visible: 'Approve basic actions'
+    timeout: 10000
+- tapOn: 'Approve basic actions'
+- tapOn: 'Finish'
+# Android's notification-permission dialog (curly apostrophe → regex dot).
+- tapOn:
+    text: 'Don.t allow'
+    optional: true
+- extendedWaitUntil:
+    visible: 'Applications'
+    timeout: 10000

@@ -1,0 +1,272 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Marmot between Big Piggy (nsec) and Middle Piggy (Amber) — message and reply
+---
+# Signer matrix: Marmot (MLS) with Amber on one side, both accounts on this one
+# LP install (multi-account switching, no peer bot).
+#
+#   A. Big (nsec) sends Middle a NIP-17 hello — gives Middle a thread with Big.
+#   B. Middle (Amber) reads it (NIP-17 unwrap via Amber), switches the thread to
+#      Marmot and sends. This is Middle's first Marmot use, so LP publishes its
+#      key package (kind 30443 + identity proof, signed by Amber) and seals a
+#      Welcome to Big (NIP-44 + kind 13 via Amber). Any Amber prompts are
+#      answered and counted by the runner.
+#   C. Big (nsec) creates a two-member Marmot group with Middle (inviting the
+#      key package Middle just published) and sends.
+#   D. Middle (Amber) receives the Welcome (gift-wrap unwrap via Amber), joins,
+#      sees Big's message and replies over MLS.
+#   E. Big sees the reply.  F. Restore: Big active, Middle signed out.
+#
+# Why Big invites (C) rather than answering Middle's DM from (B): MLS is per
+# device. The fixture accounts are signed in on several devices / agents, so
+# Big's newest key package on the relays is often held by a different install
+# (Big then can't join Middle's Welcome: "No matching secret found"), and Big's
+# existing DM with Middle belongs to the Middle peer bot (flow-129). A freshly
+# created group invites the key package this run's Middle just published, so
+# the test is deterministic. Only Piggy fixtures (Big ccedbff9 / Middle
+# 4b2fcb4e — see .maestro/README.adoc); the group is named per run.
+#
+# Prerequisites: flow-131 (Amber holds Middle's key). Run:
+#   bash scripts/signer-matrix-e2e.sh 133
+- runScript: ../common/run-tag.js
+
+# --- A. Big → Middle, NIP-17 -------------------------------------------------
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-search'
+- inputText: 'Middle Piggy'
+- extendedWaitUntil:
+    visible:
+      id: 'friend-picker-4b2fcb4e'
+    timeout: 45000
+- tapOn:
+    id: 'friend-picker-4b2fcb4e'
+- runFlow:
+    when:
+      visible:
+        id: 'dm-protocol-picker-sheet'
+    commands:
+      - tapOn:
+          id: 'dm-protocol-option-nip17'
+      - runFlow: ../common/close-protocol-picker.yaml
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 10000
+- runFlow:
+    when:
+      notVisible:
+        text: 'NIP-17'
+    commands:
+      - tapOn:
+          id: 'conversation-protocol-tag'
+      - tapOn:
+          id: 'dm-protocol-option-nip17'
+      - runFlow: ../common/close-protocol-picker.yaml
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'matrix hi Middle from Big ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Middle from Big ${output.tag}'
+    timeout: 20000
+- tapOn:
+    id: 'conversation-back'
+
+# --- B. Middle (Amber): read it, start Marmot, send --------------------------
+- runFlow: ../common/login-amber-middle.yaml
+- tapOn:
+    id: 'tab-messages'
+- runFlow: ../common/approve-amber-prompt.yaml
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 90000
+# Retry: a tap while the list re-renders can miss, and the row preview
+# carries the same text the thread does.
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'conversation-row-ccedbff9.*:nip17'
+      - extendedWaitUntil:
+          visible:
+            id: 'conversation-input'
+          timeout: 15000
+- runFlow: ../common/approve-amber-prompt.yaml
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Middle from Big ${output.tag}'
+    timeout: 60000
+- takeScreenshot: signer-matrix-133-middle-amber-reads-nip17
+- tapOn:
+    id: 'conversation-protocol-tag'
+- extendedWaitUntil:
+    visible:
+      id: 'dm-protocol-option-marmot'
+      enabled: true
+    timeout: 20000
+- tapOn:
+    id: 'dm-protocol-option-marmot'
+- runFlow: ../common/close-protocol-picker.yaml
+- extendedWaitUntil:
+    visible:
+      text: 'Marmot'
+    timeout: 10000
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'matrix marmot from Middle ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+- runFlow:
+    file: ../common/approve-amber-prompt.yaml
+    env:
+      AMBER_WAIT_MS: 10000
+- extendedWaitUntil:
+    visible:
+      text: '.atrix marmot from Middle ${output.tag}'
+    timeout: 60000
+# Settled, not just optimistic: the MLS message reached relays.
+- extendedWaitUntil:
+    visible:
+      text: 'Sent to .*'
+      below:
+        text: '.atrix marmot from Middle ${output.tag}'
+    timeout: 60000
+- assertNotVisible:
+    text: 'Send failed'
+- takeScreenshot: signer-matrix-133-middle-amber-sent-marmot
+- tapOn:
+    id: 'conversation-back'
+
+# --- C. Big (nsec): new two-member Marmot group with Middle -----------------
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-new-group'
+- scrollUntilVisible:
+    element:
+      id: 'member-row-4b2fcb4e3c30'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-4b2fcb4e3c30'
+- tapOn:
+    id: 'create-group-next'
+- tapOn:
+    id: 'create-group-name'
+- inputText: 'Signer matrix ${output.tag}'
+- pressKey: back
+- tapOn:
+    id: 'create-group-protocol-marmot'
+- tapOn:
+    id: 'create-group-submit'
+- extendedWaitUntil:
+    visible:
+      id: 'group-message-input'
+    timeout: 60000
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'matrix hi Middle over MLS ${output.tag}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Middle over MLS ${output.tag}'
+    timeout: 30000
+- takeScreenshot: signer-matrix-133-big-nsec-sent-group
+- pressKey: back
+
+# --- D. Middle (Amber): join from the Welcome, read, reply -------------------
+- runFlow:
+    file: ../common/switch-to-piggy.yaml
+    env:
+      PIGGY_PREFIX: '4b2fcb4e'
+      PIGGY_NPUB: 'npub1fvhukn3…8vtatq'
+- tapOn:
+    id: 'tab-messages'
+# Joining spends Middle's key package, so LP rotates it — Amber pops a "sign
+# Account identity proof" prompt at whatever moment that happens. Keep
+# answering prompts while the Welcome is processed and the group row lands.
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        text: '.igner .atrix ${output.tag}'
+    commands:
+      - runFlow:
+          file: ../common/approve-amber-prompt.yaml
+          env:
+            AMBER_WAIT_MS: 8000
+- runFlow: ../common/approve-amber-prompt.yaml
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: '.igner .atrix ${output.tag}'
+      - extendedWaitUntil:
+          visible:
+            id: 'group-message-input'
+          timeout: 15000
+- runFlow: ../common/approve-amber-prompt.yaml
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Middle over MLS ${output.tag}'
+    timeout: 120000
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'matrix reply from Middle over MLS ${output.tag}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- runFlow: ../common/approve-amber-prompt.yaml
+- extendedWaitUntil:
+    visible:
+      text: '.atrix reply from Middle over MLS ${output.tag}'
+    timeout: 30000
+- assertNotVisible:
+    text: 'Send failed'
+- takeScreenshot: signer-matrix-133-middle-amber-replied
+- pressKey: back
+
+# --- E. Big (nsec): sees the reply --------------------------------------------
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- extendedWaitUntil:
+    visible:
+      text: '.igner .atrix ${output.tag}'
+    timeout: 60000
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: '.igner .atrix ${output.tag}'
+      - extendedWaitUntil:
+          visible:
+            id: 'group-message-input'
+          timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.atrix reply from Middle over MLS ${output.tag}'
+    timeout: 120000
+- takeScreenshot: signer-matrix-133-big-nsec-got-reply
+- pressKey: back
+
+# --- F. Restore ----------------------------------------------------------------
+- runFlow: ../common/login-nsec-big.yaml
+- runFlow:
+    file: ../common/forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: '4b2fcb4e'

@@ -226,6 +226,125 @@ and Middle, Maestro on `PATH`, ImageMagick (`convert`, for flow 130) and
 Run flows 127 and 130 after 125 (they reuse its DM). The flows only ever
 message Piggy fixtures.
 
+==== Signer matrix E2E: flows 131–135 (nsec / Amber / NIP-46)
+
+LP signs and decrypts through three signer backends (`signerType` in
+`NostrContext.tsx`), and each has its own failure modes — Amber's Intent
+round-trips and prompts, NIP-46's relay round-trips and a remote side that can
+say no or say nothing. The signer matrix runs real flows through each one, one
+Piggy fixture per signer:
+
+[cols="1,1,2",options="header"]
+|===
+| Piggy | Signer | Set up by
+
+| Big Piggy | `nsec` | `MAESTRO_NSEC_BIG` — the device default
+| Middle Piggy | Amber (NIP-55) | Amber on the emulator holding `MAESTRO_NSEC_MIDDLE` (`flow-131`)
+| Little Piggy | NIP-46 | `scripts/nip46-test-bunker.sh` on the host holding `MAESTRO_NSEC_LITTLE`
+|===
+
+[cols="1,3",options="header"]
+|===
+| Flow | Coverage
+
+| `authentication/flow-131-amber-import-middle` | One-time setup: imports Middle's key into a fresh Amber ("Approve basic actions").
+| `authentication/flow-132-signer-matrix-smoke` | Logs in as each Piggy with its signer, checks Home + the drawer identity, restores Big.
+| `messaging/flow-133-marmot-big-nsec-middle-amber` | Big → Middle NIP-17 (Middle unwraps via Amber); Middle's first Marmot send (Amber signs the key package + seals the Welcome); Big creates a Marmot group with Middle; Middle joins via Amber and replies; Big sees it.
+| `messaging/flow-134-nip17-dm-nip46-approve-decline-timeout` | Little (NIP-46) reads Big's NIP-17 DM and replies with the bunker approving, declining (bubble must settle to "Send failed") and never answering (LP's 20 s send watchdog must flip it to "Send failed"); Big receives only the approved reply.
+| `authentication/flow-135-nip46-pairing-timeout` | Bunker ignores the pairing → after LP's 120 s wait the sheet shows "Pairing took too long — try again" and Big is still signed in. Slow; not in the default run.
+|===
+
+===== One-time setup
+
+. *Amber* — install the latest release from
+  https://github.com/greenart7c3/Amber/releases[greenart7c3/Amber] (x86_64 APK
+  for the emulator) and verify it first: `gpg --verify manifest-vX.txt.sig
+  manifest-vX.txt` against key `44F0AAEB77F373747E3D5444885822EED3A26A6D`,
+  `sha256sum` against the manifest, and `apksigner verify --print-certs` against
+  the README's certificate fingerprint (`E8:AB:8C:69…:BF`). Then
+  `adb -s emulator-5554 install amber-x86_64-vX.apk` and
+  `bash scripts/signer-matrix-e2e.sh setup-amber`. Amber must hold only
+  Middle's key.
+. *NIP-46 bunker* — nothing to install: `scripts/nip46-test-bunker.mjs` is a
+  small NIP-46 remote signer on `nostr-tools` (already a dependency). The runner
+  starts and stops it. `nak bunker` handles the same `nostrconnect://` pairing
+  but can't decline or ignore single methods, which the DECLINE / TIMEOUT cases
+  need.
+
+===== Running
+
+[source,bash]
+----
+bash scripts/signer-matrix-e2e.sh            # 132 133 134
+bash scripts/signer-matrix-e2e.sh 134 135    # a subset; 135 = slow pairing timeout
+DEVICE=emulator-5556 OUT=/tmp/sm bash scripts/signer-matrix-e2e.sh
+LOCK_FILE=/path/to/emulator.lock bash scripts/signer-matrix-e2e.sh   # shared emulator
+----
+
+The runner refuses non-emulator serials unless `SIGNER_MATRIX_ALLOW_DEVICE=1`.
+Per flow it prints the Amber prompts the flow had to answer, and at the end the
+bunker's request counts — the quickest way to spot a prompt storm.
+
+Driving the bunker by hand (the flows do this through its control API via
+`.maestro/common/nip46-bunker.js`):
+
+[source,bash]
+----
+bash scripts/nip46-test-bunker.sh start             # Little Piggy, mode=approve
+bash scripts/nip46-test-bunker.sh mode decline      # approve | decline | silent | decline-all | silent-all
+bash scripts/nip46-test-bunker.sh pair-from-screen  # decode LP's pairing QR on $NIP46_DEVICE and answer it
+bash scripts/nip46-test-bunker.sh status            # {"mode":…, "counts":{"sign_event:kind=13":1, …}}
+bash scripts/nip46-test-bunker.sh log
+bash scripts/nip46-test-bunker.sh stop
+----
+
+`decline` / `silent` apply to `sign_event` and the `*_encrypt` methods only, so
+the session and inbox decrypts keep working. The `-all` variants also cover the
+decrypts and new pairings. The session handshake (`connect`, `ping`,
+`get_public_key`, `switch_relays`) is answered in every mode, so an existing
+pairing stays alive.
+
+The control API is bound to `127.0.0.1` and needs the bunker's per-start token
+(`$XDG_RUNTIME_DIR/lp-nip46-bunker-<uid>/token`, mode 0600); the runner exports
+it as `MAESTRO_NIP46_TOKEN` for the flows. Pairing URIs may only name
+allow-listed relays.
+
+===== Known app issues the matrix surfaces
+
+* *#1198* — LP pairs NIP-46 only over `wss://relay.nsec.app`, which is down, so
+  on a stock build the NIP-46 steps (132's Little login, 134, 135) can't pair:
+  the sheet shows "Pairing took too long" after ~10 s. To exercise the rest of
+  the NIP-46 stack locally, point `NIP46_DEFAULT_RELAY` in
+  `NostrLoginSheet.tsx` at an allow-listed relay (e.g. `wss://nos.lol`) in a
+  scratch checkout — the bunker follows whatever relay the pairing URI names.
+* *#1213* — with a reachable relay, NIP-46 pairing never times out, so
+  flow 135 fails until it's fixed.
+* *#1207* — after a NIP-46 decline / timeout the failed bubble only renders
+  once the thread is reopened; flow 134 reopens it before asserting.
+* *#1164* — the DM protocol picker can stay open after a pick; the flows swipe
+  it closed (`common/close-protocol-picker.yaml`).
+* *#1199 / #1200* — Amber prompts on Marmot use (twice on Reject; unsolicited /
+  duplicated identity-proof prompts) — `approve-amber-prompt.yaml` answers
+  them and the runner counts them.
+
+===== Counting signer prompts (PR #1177 push registration)
+
+#1177 promises that remote signers are only asked on a user action — one
+signature (a kind-451 owner proof) per Marmot group when push is enabled /
+"Finish setup" runs, and nothing on app start or in background passes. With
+#1177 checked out on the device:
+
+* *NIP-46*: `bash scripts/nip46-test-bunker.sh reset-stats`, log in as Little
+  (`common/login-nip46-little.yaml`), enable *Account → Security → Message
+  notifications via push (Marmot)*, then `status`: `sign_event:kind=451` must
+  equal Little's Marmot group count. Restart the app and wait — the counter must
+  not move. Decline path: `mode decline` before enabling; enabling must stop at
+  the first decline (`verdict:decline` = 1).
+* *Amber*: log in as Middle (`common/login-amber-middle.yaml`), enable push and
+  answer with `common/approve-amber-prompt.yaml`; the runner-style count of
+  `Tap on "Accept"` lines in Maestro's `maestro.log` is the prompt count (one
+  per group). Rejecting the first prompt must stop the pass.
+
 ==== Writing Tests
 
 IMPORTANT: Never use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests. Coordinates are fragile and break across screen sizes, devices, and OS versions.

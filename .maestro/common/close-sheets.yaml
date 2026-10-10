@@ -1,0 +1,62 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — dismiss any LP account / login sheet left open
+---
+# Building block (never run alone). Clears sheets an earlier (possibly failed)
+# run can leave on top of the tabs — Maestro still "sees" the elements behind
+# a sheet, so taps would land on the sheet instead. No-op when none is open.
+#
+#   React Native's dev LogBox (dev-client builds only: a console.error such
+#     as an NWC timeout can open it full screen) → its own "Dismiss" button
+#   "Payment received!" overlay (a Piggy wallet got paid mid-run) → its OK
+#   DM protocol picker stuck open (#1164) → close-protocol-picker.yaml
+#   NIP-46 pairing view → its Cancel button (aborts the pairing)
+#   Connect Nostr login sheet → Back (the sheet handles Back itself)
+#   Accounts sheet → swipe down from its title (it ignores Back); an
+#     element-anchored swipe, not coordinates
+- repeat:
+    times: 40
+    while:
+      visible:
+        text: 'Minimize'
+    commands:
+      - tapOn: 'Dismiss'
+      - waitForAnimationToEnd:
+          timeout: 1000
+- runFlow:
+    when:
+      visible:
+        id: 'payment-overlay-ok'
+    commands:
+      - tapOn:
+          id: 'payment-overlay-ok'
+      - waitForAnimationToEnd:
+          timeout: 1500
+- runFlow: close-protocol-picker.yaml
+- runFlow:
+    when:
+      visible:
+        id: 'cancel-nip46'
+    commands:
+      - tapOn:
+          id: 'cancel-nip46'
+      - waitForAnimationToEnd:
+          timeout: 1500
+- runFlow:
+    when:
+      visible:
+        id: 'nip46-button'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 2000
+- runFlow:
+    when:
+      visible:
+        id: 'account-switcher-add-existing'
+    commands:
+      - swipe:
+          from:
+            text: 'Accounts'
+          direction: DOWN
+      - waitForAnimationToEnd:
+          timeout: 2000

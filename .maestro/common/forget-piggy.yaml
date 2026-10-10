@@ -1,0 +1,42 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — sign a Piggy out of LP's account registry (if it's there)
+---
+# Building block (never run alone). Used by the signer matrix so Middle / Little
+# always start from a clean slate with the signer under test (an earlier run
+# may have registered them with a different signer), and to leave the device
+# as it was found (Big Piggy only) afterwards.
+#
+# Signing an identity out wipes that identity's per-account caches (DMs,
+# Marmot state, wallets) on this device — it is only ever pointed at a Piggy.
+#
+# Signing out the ACTIVE identity makes LP promote the next one (Big).
+#
+# Caller passes: PIGGY_PREFIX — 8-hex pubkey prefix of a Piggy fixture
+# (Middle 4b2fcb4e / Little d9b33280; never Big ccedbff9 — Big is the default).
+- runFlow: open-drawer.yaml
+- runFlow:
+    when:
+      visible:
+        id: 'account-switcher-button'
+    commands:
+      - tapOn:
+          id: 'account-switcher-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'account-switcher-add-existing'
+          timeout: 5000
+      - runFlow:
+          when:
+            visible:
+              id: 'account-switcher-signout-${PIGGY_PREFIX}'
+          commands:
+            - tapOn:
+                id: 'account-switcher-signout-${PIGGY_PREFIX}'
+            # [Cancel, Sign out]
+            - tapOn:
+                id: 'branded-alert-button-1'
+            - extendedWaitUntil:
+                notVisible:
+                  id: 'account-switcher-row-${PIGGY_PREFIX}'
+                timeout: 10000
+      - runFlow: close-sheets.yaml

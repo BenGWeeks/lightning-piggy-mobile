@@ -1,0 +1,13 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — make Big Piggy the active identity (nsec signer)
+---
+# Building block. Reads MAESTRO_NSEC_BIG from the environment — Maestro picks up
+# MAESTRO_* variables itself, so the nsec never goes on the command line.
+# scripts/signer-matrix-e2e.sh exports only the three Piggy nsecs.
+- runFlow:
+    file: login-nsec.yaml
+    env:
+      PIGGY_NSEC: ${MAESTRO_NSEC_BIG}
+      PIGGY_PREFIX: 'ccedbff9'
+      PIGGY_NPUB: 'npub1enkml7d…65f4st'
+      PIGGY_NAME: 'Big Piggy'

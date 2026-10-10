@@ -1,0 +1,271 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never answers
+---
+# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
+# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
+# Signer matrix: NIP-17 1:1 send through a NIP-46 remote signer, driving the
+# local test bunker's modes from the flow (runScript → its 127.0.0.1 API):
+#
+#   A. Big (nsec) sends Little a NIP-17 hello — gives Little a thread with Big.
+#   B. Little (NIP-46) opens it (gift-wrap unwrap via the bunker) and replies
+#      with the bunker in APPROVE mode → delivered, no failure tick.
+#   C. DECLINE: bunker answers sign_event / *_encrypt with an error → the
+#      bubble must settle to "Send failed" (red tick) instead of hanging
+#      (asserted after reopening the thread — see #1207).
+#   D. TIMEOUT: bunker never answers → LP's 20 s send watchdog must flip the
+#      bubble to "Send failed" (also asserted after a reopen, #1207).
+#   E. Restore: Little signed out (Big promoted back); as Big, the APPROVE
+#      reply arrived and the declined / timed-out ones never did.
+#
+# Only Piggy fixtures (Big ccedbff9 / Little d9b33280). Prerequisite: the
+# bunker is running —  bash scripts/nip46-test-bunker.sh start  — easiest via
+#   bash scripts/signer-matrix-e2e.sh 134
+- runScript: ../common/run-tag.js
+
+# --- A. Big → Little, NIP-17 -------------------------------------------------
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- tapOn:
+    id: 'start-conversation-button'
+- tapOn:
+    id: 'friend-picker-search'
+- inputText: 'Little Piggy'
+- extendedWaitUntil:
+    visible:
+      id: 'friend-picker-d9b33280'
+    timeout: 45000
+- tapOn:
+    id: 'friend-picker-d9b33280'
+- runFlow:
+    when:
+      visible:
+        id: 'dm-protocol-picker-sheet'
+    commands:
+      - tapOn:
+          id: 'dm-protocol-option-nip17'
+      - runFlow: ../common/close-protocol-picker.yaml
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 10000
+- runFlow:
+    when:
+      notVisible:
+        text: 'NIP-17'
+    commands:
+      - tapOn:
+          id: 'conversation-protocol-tag'
+      - tapOn:
+          id: 'dm-protocol-option-nip17'
+      - runFlow: ../common/close-protocol-picker.yaml
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'matrix hi Little from Big ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Little from Big ${output.tag}'
+    timeout: 20000
+- tapOn:
+    id: 'conversation-back'
+
+# --- B. Little (NIP-46): read + reply, APPROVE --------------------------------
+- runFlow: ../common/login-nip46-little.yaml
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: reset-stats
+- tapOn:
+    id: 'tab-messages'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 120000
+# Retry: a tap while the list re-renders can miss, and the row preview
+# carries the same text the thread does.
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'conversation-row-ccedbff9.*:nip17'
+      - extendedWaitUntil:
+          visible:
+            id: 'conversation-input'
+          timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.atrix hi Little from Big ${output.tag}'
+    timeout: 90000
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'matrix nip46 approve ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+- extendedWaitUntil:
+    visible:
+      text: '.atrix nip46 approve ${output.tag}'
+    timeout: 20000
+# Seal (kind 13) signed by the bunker → the send really went through NIP-46.
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: expect-count
+      COUNTER: 'sign_event:kind=13'
+# Settled, not just optimistic: the tick under the bubble reports relays.
+- extendedWaitUntil:
+    visible:
+      text: 'Sent to .*'
+      below:
+        text: '.atrix nip46 approve ${output.tag}'
+    timeout: 30000
+- assertNotVisible:
+    text: 'Send failed'
+- takeScreenshot: signer-matrix-134-little-nip46-approved
+
+# --- C. DECLINE ----------------------------------------------------------------
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: decline
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'matrix nip46 decline ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+# The bunker refused the seal's NIP-44 encrypt / sign.
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: expect-count
+      COUNTER: 'verdict:decline'
+# Known bug #1207: in the open thread the failed bubble is a
+# 1 px-tall, invisible row and the draft stays in the composer; the red tick
+# only shows once the thread is reopened. Reopen, then assert. Drop the
+# reopen once the bug is fixed so the flow checks the live thread.
+- tapOn:
+    id: 'conversation-back'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 30000
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'conversation-row-ccedbff9.*:nip17'
+      - extendedWaitUntil:
+          visible:
+            id: 'conversation-input'
+          timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: 'Send failed'
+      below:
+        text: '.atrix nip46 decline ${output.tag}'
+    timeout: 25000
+- takeScreenshot: signer-matrix-134-little-nip46-declined
+# The composer must still be usable after a declined signature.
+- assertVisible:
+    id: 'conversation-input'
+    enabled: true
+
+# --- D. TIMEOUT (bunker never answers) ---------------------------------------
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: silent
+# The declined draft is still in the composer (same bug) — clear it.
+- tapOn:
+    id: 'conversation-input'
+- eraseText
+- inputText: 'matrix nip46 timeout ${output.tag}'
+- tapOn:
+    id: 'conversation-send'
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: expect-count
+      COUNTER: 'verdict:silent'
+# NIP-46 requests have no timeout of their own (the send never settles and
+# the spinner never stops); SEND_SETTLE_WATCHDOG_MS = 20 s
+# (useConversationComposerActions.ts) flips the bubble to failed.
+- extendedWaitUntil:
+    visible: 'NEVER-MATCHES-wait-for-the-send-watchdog'
+    timeout: 25000
+    optional: true
+# Known bug #1207: in the open thread the failed bubble is a
+# 1 px-tall, invisible row and the draft stays in the composer; the red tick
+# only shows once the thread is reopened. Reopen, then assert. Drop the
+# reopen once the bug is fixed so the flow checks the live thread.
+- tapOn:
+    id: 'conversation-back'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 30000
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'conversation-row-ccedbff9.*:nip17'
+      - extendedWaitUntil:
+          visible:
+            id: 'conversation-input'
+          timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: 'Send failed'
+      below:
+        text: '.atrix nip46 timeout ${output.tag}'
+    timeout: 25000
+- takeScreenshot: signer-matrix-134-little-nip46-timeout
+- assertVisible:
+    id: 'conversation-input'
+    enabled: true
+
+# --- E. Restore + end-to-end check as Big ------------------------------------
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: approve
+- tapOn:
+    id: 'conversation-back'
+- runFlow: ../common/sign-out-nip46-little.yaml
+- runFlow: ../common/login-nsec-big.yaml
+- tapOn:
+    id: 'tab-messages'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-d9b33280.*:nip17'
+    direction: UP
+    timeout: 60000
+# Retry: a tap while the list re-renders can miss, and the row preview
+# carries the same text the thread does.
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          id: 'conversation-row-d9b33280.*:nip17'
+      - extendedWaitUntil:
+          visible:
+            id: 'conversation-input'
+          timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.atrix nip46 approve ${output.tag}'
+    timeout: 90000
+- assertNotVisible:
+    text: '.atrix nip46 decline ${output.tag}'
+- assertNotVisible:
+    text: '.atrix nip46 timeout ${output.tag}'
+- takeScreenshot: signer-matrix-134-big-received-approved-only
+- tapOn:
+    id: 'conversation-back'

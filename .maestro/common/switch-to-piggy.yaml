@@ -1,0 +1,29 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — switch to an already-registered Piggy account
+---
+# Building block (never run alone). Taps the Piggy's avatar in the drawer
+# header (keeps whatever signer it was registered with) and verifies the
+# drawer now shows its name. Fails if the Piggy isn't registered.
+#
+# Caller passes: PIGGY_PREFIX (8-hex Piggy pubkey prefix) and PIGGY_NPUB (the
+# drawer's truncated npub — the identity check).
+- runFlow: open-drawer.yaml
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-account-switch-${PIGGY_PREFIX}'
+    commands:
+      - tapOn:
+          id: 'drawer-account-switch-${PIGGY_PREFIX}'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - runFlow: open-drawer.yaml
+- extendedWaitUntil:
+    visible:
+      text: '${PIGGY_NPUB}'
+    timeout: 15000
+- pressKey: back
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 5000

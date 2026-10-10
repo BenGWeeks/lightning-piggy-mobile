@@ -1,0 +1,19 @@
+appId: com.greenart7c3.nostrsigner
+name: Signer matrix setup — import Middle Piggy's key into a fresh Amber
+---
+# One-shot setup for the signer matrix (Middle Piggy = Amber). Imports
+# MAESTRO_NSEC_MIDDLE into a FRESH Amber install with the "Approve basic
+# actions" policy. Amber must hold only Middle's key, so LP's "Use Amber
+# Signer" always returns Middle Piggy.
+#
+# Install Amber first (verify it — see docs/TESTING.adoc → Signer matrix):
+#   adb -s emulator-5554 install amber-x86_64-v6.6.7.apk
+# A previously-used Amber install: `adb -s emulator-5554 shell pm clear
+# com.greenart7c3.nostrsigner` (wipes Amber's keys — emulator only).
+#
+# Run (the nsec comes from the environment, never the command line):
+#   bash scripts/signer-matrix-e2e.sh setup-amber
+- runFlow:
+    file: ../common/amber-import-key.yaml
+    env:
+      AMBER_NSEC: ${MAESTRO_NSEC_MIDDLE}

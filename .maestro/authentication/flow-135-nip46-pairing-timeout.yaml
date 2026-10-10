@@ -1,0 +1,58 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: NIP-46 pairing the bunker never answers → "took too long" error, Big still signed in
+---
+# NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
+# (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
+# EXPECTED TO FAIL until #1213 is fixed: with a reachable relay LP's 120 s
+# pairing timeout never fires (nostr-tools treats maxWait as an EOSE timeout).
+# Signer matrix: the NIP-46 login sheet's pairing timeout. The bunker is put in
+# `silent-all` mode, so it ignores LP's nostrconnect:// pairing; after LP's
+# 120 s wait the sheet must fall back to the login view with
+# "Pairing took too long — try again", and the previously active account
+# (Big Piggy) must be untouched. Slow (~2.5 min) — not in the quick matrix.
+#
+#   bash scripts/signer-matrix-e2e.sh 135
+- runFlow: ../common/login-nsec-big.yaml
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: silent-all
+- runFlow: ../common/open-drawer.yaml
+- tapOn:
+    id: 'account-switcher-button'
+- tapOn:
+    id: 'account-switcher-add-existing'
+- tapOn:
+    id: 'nip46-button'
+- extendedWaitUntil:
+    visible:
+      id: 'cancel-nip46'
+    timeout: 10000
+# The bunker sees the QR but stays silent (logged as PAIR … -> silent).
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: pair-from-screen
+      WAIT: 10
+      EXPECT_PAIRED: 'false'
+# No screenshot here: the QR on screen carries the pairing secret.
+- extendedWaitUntil:
+    visible:
+      text: 'Pairing took too long — try again'
+    timeout: 150000
+- assertVisible:
+    id: 'nip46-button'
+- takeScreenshot: signer-matrix-135-pairing-timed-out
+- runScript:
+    file: ../common/nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: approve
+# Big must still be the active account — checked directly (by npub), not via
+# a login/switch that could paper over a regression.
+- pressKey: back
+- runFlow: ../common/open-drawer.yaml
+- assertVisible:
+    text: 'npub1enkml7d…65f4st'
+- pressKey: back

@@ -1,0 +1,71 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — answer any Amber signing / connection prompts that are showing
+---
+# Building block (never run alone). Amber (com.greenart7c3.nostrsigner) is a
+# third-party app, so this uses Amber's own English button copy as TEXT
+# selectors — never coordinates. Maestro sees whichever app is on screen, so
+# this works while LP is the flow's appId. Amber v6.6.7 has three shapes:
+#   first request from an app  → "Cancel" / "Connect"
+#   one signing request        → "Reject" / "Accept"
+#   several queued requests    → per-request "Deny" / "Approve", then "Confirm"
+# Each leaves "Remember my choice" / "Automatically sign this for" on "Never",
+# so every run sees the same prompts (the runner counts them).
+#
+# Answers up to AMBER_MAX_PROMPTS (default 6) prompts, then returns. With
+# Amber's "Approve basic actions" policy most of LP's requests are
+# auto-approved and this is a no-op; it exists for requests outside that set
+# (e.g. the kind-30443 Marmot key package's identity proof).
+#
+# Caller may pass:
+#   AMBER_ANSWER       'accept' (default) or 'reject'
+#   AMBER_MAX_PROMPTS  upper bound on prompts answered in one call
+#   AMBER_WAIT_MS      how long to wait for a first prompt (default 4000)
+- extendedWaitUntil:
+    visible:
+      text: 'Accept|Reject|Connect|Confirm'
+    timeout: ${AMBER_WAIT_MS || 4000}
+    optional: true
+# Only ever answer AMBER's screens: every Amber prompt (connect, single,
+# batched) prints the requesting app's package id as text, which LP's own UI
+# never shows — so LP's dialogs (which can also say "Confirm") are never
+# touched. (Amber's prompt activity is Compose without resource ids, so an
+# id-based guard can't see it.)
+- repeat:
+    times: ${AMBER_MAX_PROMPTS || 6}
+    while:
+      visible:
+        text: 'com\.lightningpiggy\.app(\.dev|\.preview)?'
+    commands:
+      # Android's notification-permission dialog can sit on top of Amber's
+      # first prompt (curly apostrophe → regex dot).
+      - tapOn:
+          text: 'Don.t allow'
+          optional: true
+      - runFlow:
+          when:
+            visible:
+              text: 'Connect'
+          commands:
+            - tapOn: 'Connect'
+      - runFlow:
+          when:
+            visible:
+              text: 'Accept'
+          commands:
+            - tapOn: '${(AMBER_ANSWER || "accept") === "reject" ? "Reject" : "Accept"}'
+      # Batched requests: answer each, then Confirm.
+      - repeat:
+          times: 10
+          while:
+            visible:
+              text: 'Approve|Deny'
+          commands:
+            - tapOn: '${(AMBER_ANSWER || "accept") === "reject" ? "Deny" : "Approve"}'
+      - runFlow:
+          when:
+            visible:
+              text: 'Confirm'
+          commands:
+            - tapOn: 'Confirm'
+      - waitForAnimationToEnd:
+          timeout: 2000
