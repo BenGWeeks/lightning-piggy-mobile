@@ -110,8 +110,9 @@ export interface DeletePiggyResult {
 /**
  * Delete an owned Piglet: expire-now republish (belt) THEN kind-5
  * deletion request (suspenders), strictly in that order. Throws if the
- * signer declines either step so the caller can surface a failure toast
- * and leave the row in place.
+ * signer returns no signature for either step (declined, no response or
+ * busy — `signEvent` doesn't say which, so the copy doesn't guess) so the
+ * caller can surface a failure toast and leave the row in place.
  */
 export const deletePiggy = async ({
   coord,
@@ -131,7 +132,7 @@ export const deletePiggy = async ({
   if (piggy) {
     const signedListing = await signEvent(buildExpireNowListing(piggy, nowSec));
     if (!signedListing) {
-      throw new Error('Signer declined — Piglet not deleted.');
+      throw new Error('No signature from your signer — Piglet not deleted.');
     }
     await publishCacheEvent(signedListing, relays);
     expired = true;
@@ -141,7 +142,7 @@ export const deletePiggy = async ({
   // the same relay set so compliant relays purge the listing they hold.
   const signedDeletion = await signEvent(buildDeletionRequest([coord], nowSec));
   if (!signedDeletion) {
-    throw new Error('Signer declined — deletion request not sent.');
+    throw new Error('No signature from your signer — deletion request not sent.');
   }
   await publishCacheEvent(signedDeletion, relays);
 

@@ -134,6 +134,13 @@
     "addWalletButton": "Añadir cartera",
     "connectButton": "Conectar"
   },
+  "amberSigner": {
+    "declined": "La solicitud se rechazó o se cerró en Amber. Inténtalo de nuevo y apruébala en Amber.",
+    "noResponse": "Amber no devolvió ninguna respuesta a Lightning Piggy. Inténtalo de nuevo: Amber se volverá a abrir.",
+    "busy": "Amber todavía está atendiendo otra solicitud. Termínala o ciérrala en Amber y vuelve a intentarlo.",
+    "unavailable": "No se pudo abrir Amber. Comprueba que esté instalado y vuelve a intentarlo.",
+    "failed": "Amber no pudo completar la solicitud. Inténtalo de nuevo."
+  },
   "alphabetBar": {
     "alphabetIndex": "Índice alfabético",
     "jumpTo": "Ir a {{letter}}",
@@ -690,7 +697,7 @@
     "savedLocallyDropPin": "Guardado localmente: coloca un pin para publicar",
     "savedLocallyDropPinBody": "Los Piggies públicos necesitan un pin de ubicación para que los buscadores puedan descubrirlos.",
     "couldNotSignListing": "No se pudo firmar la publicación del Piggy",
-    "couldNotSignListingBody": "Inicio de sesión / Amber rechazado. Guardado localmente; reintenta la publicación más tarde.",
+    "couldNotSignListingBody": "Tu firmador no devolvió una firma. Guardado localmente; reintenta la publicación más tarde.",
     "piggyRepublished": "Piggy vuelto a publicar 🐷",
     "piggyPublished": "Piggy publicado 🐷",
     "updatedListingLive": "Publicación actualizada en directo en los relays.",

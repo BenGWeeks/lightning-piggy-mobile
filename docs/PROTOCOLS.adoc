@@ -28,6 +28,7 @@ Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as t
 * Inner rumor is built by `createDirectMessageRumor` (1:1) or `createGroupChatRumor` (groups) — both produce a `kind: 14` event with a `pubkey` field but no signature.
 * `sendNip17ToManyWithNsec` (nsec signer) seals + wraps the rumor for each recipient via `nostr-tools` `nip59.wrapManyEvents`, which also wraps for the sender so the message lands in the user's own inbox on other devices.
 * `sendNip17ToManyWithSigner` (Amber signer) does the same SEQUENTIALLY because Amber's native module rejects concurrent intents with `BUSY`. Per recipient: 1× `nip44Encrypt` + 1× `signEvent` for the seal; the gift wrap is signed locally with a fresh ephemeral key (never the user's key) so it does not need a signer round-trip.
+* The `BUSY` guard only holds while Amber can still answer. A request whose result never comes back (Amber hands focus to another app, or never opens) is settled as `NO_RESULT` when Lightning Piggy returns to the foreground, or by a launch watchdog if Lightning Piggy still holds window focus. Late results carry a per-launch request code (never reused while the abandoned Amber activity could still answer) and are ignored, so they can't settle a newer request. `src/services/amberErrors.ts` maps the native codes to declined / no-response / busy / unavailable copy (#1186).
 * Wraps are published in parallel via `pool.publish` to the union of the user's NIP-65 write relays and `DEFAULT_RELAYS`.
 
 ==== Receive path (display)

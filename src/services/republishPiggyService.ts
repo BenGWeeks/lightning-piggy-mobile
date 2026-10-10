@@ -70,7 +70,7 @@ export const republishPiggy = async (
   const unsigned = buildCacheListing(refreshed);
   const signed = await signEvent(unsigned);
   if (!signed) {
-    throw new Error('Signer declined — Piggy not republished.');
+    throw new Error('No signature from your signer — Piggy not republished.');
   }
   // GC_RELAYS is the geo-cache fallback (publishCacheEvent unions it in
   // regardless, but passing it here keeps the no-user-relays path explicit

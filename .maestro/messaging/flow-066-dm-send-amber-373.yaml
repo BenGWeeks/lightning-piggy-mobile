@@ -76,8 +76,13 @@ name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
     text: 'Send failed'
 - assertNotVisible:
     text: 'Amber returned empty signed seal'
+# Amber failure copy (#1186): declined / no response / busy.
 - assertNotVisible:
-    text: 'User cancelled the Amber request'
+    text: '.*declined or closed in Amber.*'
+- assertNotVisible:
+    text: '.*send an answer back to Lightning Piggy.*'
+- assertNotVisible:
+    text: '.*Amber is still handling another request.*'
 
 # AND the message must actually land in the thread. The composer
 # clears on success, and the rumor we just signed comes back through
