@@ -1,31 +1,38 @@
-// Bounded inventory of an account's public invitation keys. No secrets leave storage.
-import { getKeyPackageLifetime } from '@internet-privacy/marmot-ts';
-import { type Event as NostrEvent, type Filter } from 'nostr-tools';
+// Relay side of "Devices that can get new chats" (#1236): a bounded inventory
+// of the account's public invitation keys, and removing other devices' keys
+// through #1230's retirement path. No private key material is read or
+// changed here, and this phone's own key is never removed from this screen —
+// it can only be refreshed (MarmotSession.refreshInvitationKey).
+import { type Event as NostrEvent, type EventTemplate, type Filter } from 'nostr-tools';
+
 import { isRelayUrl, relayListFromTags } from '../utils/relayListEvents';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS } from './nostrService';
 import { newestEvent } from './marmotKeyPackages';
 import { createSqliteMarmotBackend } from './marmotStore';
-import { localKeyPackageFootprint, retireMarmotKeyPackages } from './marmotKeyPackageRetire';
-import { getMarmotSession } from './marmotSession';
-import type { EventTemplate } from 'nostr-tools';
-import { KEY_PUBLICATION_PAUSED } from './marmotKeyMaintenance';
+import {
+  localKeyPackageFootprint,
+  retireFootprint,
+  type RetireTransport,
+} from './marmotKeyPackageRetire';
+import {
+  shapeInvitationKeys,
+  stillOldDevices,
+  type InvitationDevice,
+  type InvitationKey,
+} from './marmotInvitationDevices';
 
 const MAX_RELAYS = 12;
 const PER_RELAY_LIMIT = 100;
-export interface InvitationKey {
-  event: NostrEvent;
-  slot: string;
-  client: string;
-  thisPhone: boolean;
-  expires?: number;
-  relays: string[];
-}
+
 export interface InvitationInventory {
   keys: InvitationKey[];
+  /** Some relay failed or hit the limit: the list may be missing devices. */
   partial: boolean;
-  paused: boolean;
+  /** This phone's current publication slot, if it has one. */
+  localSlot?: string;
 }
+
 export type InventoryQuery = (relays: string[], filter: Filter) => Promise<NostrEvent[]>;
 export const queryInvitationKeys: InventoryQuery = (relays, filter) => {
   trackRelays(relays);
@@ -51,56 +58,6 @@ export const queryInvitationKeys: InventoryQuery = (relays, filter) => {
   });
 };
 
-/** Keep all observed versions grouped by slot; an empty newest version retires that slot. */
-export function shapeInvitationKeys(
-  owner: string,
-  responses: { relay: string; events: NostrEvent[] }[],
-  localSlots: string[],
-): InvitationKey[] {
-  const byId = new Map<string, InvitationKey>();
-  for (const { relay, events } of responses) {
-    for (const event of events) {
-      if (event.pubkey !== owner || event.kind !== 30443) continue;
-      const slot = event.tags.find((t) => t[0] === 'd')?.[1];
-      if (!slot) continue;
-      const existing = byId.get(event.id);
-      if (existing) {
-        if (!existing.relays.includes(relay)) existing.relays.push(relay);
-        continue;
-      }
-      let expires: number | undefined;
-      try {
-        const lifetime = getKeyPackageLifetime(event);
-        if (lifetime) expires = Number(lifetime.notAfter);
-      } catch {
-        /* old / malformed keys remain removable */
-      }
-      byId.set(event.id, {
-        event,
-        slot,
-        expires,
-        relays: [relay],
-        thisPhone: localSlots.includes(slot),
-        client: event.tags.find((t) => t[0] === 'client')?.[1] ?? '',
-      });
-    }
-  }
-  const newest = new Map<string, NostrEvent>();
-  for (const key of byId.values())
-    newest.set(
-      key.slot,
-      newestEvent([key.event, ...(newest.has(key.slot) ? [newest.get(key.slot)!] : [])])!,
-    );
-  return [...byId.values()]
-    .filter((key) => key.event.content && newest.get(key.slot)?.content)
-    .sort(
-      (a, b) =>
-        a.slot.localeCompare(b.slot) ||
-        b.event.created_at - a.event.created_at ||
-        a.event.id.localeCompare(b.event.id),
-    );
-}
-
 export async function loadInvitationKeys(
   owner: string,
   relays: string[],
@@ -120,7 +77,7 @@ export async function loadInvitationKeys(
     ...new Set([...(latest ? relayListFromTags(latest.tags).map((r) => r.url) : []), ...lookup]),
   ].filter(isRelayUrl);
   const targets = allTargets.slice(0, MAX_RELAYS);
-  // No since: old and expired packages are precisely what this screen manages.
+  // No since: old and expired keys are precisely what this screen manages.
   const results = await Promise.allSettled(
     targets.map(async (relay) => ({
       relay,
@@ -130,6 +87,7 @@ export async function loadInvitationKeys(
   const responses = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (!responses.length) throw new Error('Invitation-key relays unavailable');
   const local = await localKeyPackageFootprint(backend);
+  const localSlot = (await backend.get('meta', 'keyPackageSlot')) ?? undefined;
   return {
     keys: shapeInvitationKeys(owner, responses, local.slots),
     partial:
@@ -137,55 +95,63 @@ export async function loadInvitationKeys(
       allTargets.length > MAX_RELAYS ||
       results.some((r) => r.status === 'rejected') ||
       responses.some((r) => r.events.length >= PER_RELAY_LIMIT),
-    paused: (await backend.get('meta', KEY_PUBLICATION_PAUSED)) === 'true',
+    ...(localSlot ? { localSlot } : {}),
   };
 }
 
-/** Only whole old slots: never retire a newer key because an older version is old. */
-export function oldInvitationKeys(
-  keys: InvitationKey[],
-  now = Math.floor(Date.now() / 1000),
-): InvitationKey[] {
-  const slots = new Map<string, InvitationKey[]>();
-  for (const key of keys) slots.set(key.slot, [...(slots.get(key.slot) ?? []), key]);
-  return [...slots.values()]
-    .filter((versions) =>
-      versions.every(
-        (key) =>
-          !key.thisPhone &&
-          (key.event.created_at < now - 30 * 86400 ||
-            (key.expires !== undefined && key.expires < now)),
-      ),
-    )
-    .flat();
-}
-
-export async function removeInvitationKeys(args: {
+export interface RemoveDevicesArgs {
   owner: string;
-  selected: InvitationKey[];
-  inventory: InvitationKey[];
+  devices: InvitationDevice[];
+  /** The account's relays — the removal goes to these and each key's own relays. */
   relays: string[];
   sign: (template: EventTemplate) => Promise<NostrEvent>;
+  /** False once the active account changed: nothing more is signed. */
   isCurrent: () => boolean;
-}): Promise<void> {
-  if (!args.isCurrent() || !args.selected.length) throw new Error('Account changed');
-  if (args.selected.some((key) => key.event.pubkey !== args.owner || key.event.kind !== 30443))
+  /** Bulk "Remove old devices": skip any device relays no longer show as old. */
+  onlyIfStillOld?: boolean;
+  transport?: RetireTransport;
+  now?: number;
+}
+
+/**
+ * Stop invites to other devices: a NIP-09 deletion plus an empty replacement
+ * in each device's slot (#1230's retireFootprint). Resolves with how many
+ * devices were removed; rejects when no relay or not every source relay took
+ * it. Never this phone's slot — that would stop new chats reaching it while
+ * its private key stays here unused.
+ */
+export async function removeInvitationDevices(args: RemoveDevicesArgs): Promise<number> {
+  const { owner, devices } = args;
+  if (!args.isCurrent() || !devices.length) throw new Error('Account changed');
+  if (
+    devices.some(
+      (d) =>
+        !d.versions.length ||
+        d.versions.some((k) => k.event.pubkey !== owner || k.event.kind !== 30443),
+    )
+  )
     throw new Error('Invitation key belongs to another account');
-  const selectedIds = new Set(args.selected.map((k) => k.event.id));
-  const slots = [...new Set(args.selected.map((k) => k.slot))].filter((slot) =>
-    args.inventory.filter((k) => k.slot === slot).every((k) => selectedIds.has(k.event.id)),
-  );
-  const local = args.selected.some((k) => k.thisPhone && slots.includes(k.slot));
-  const session = getMarmotSession();
-  const backend = createSqliteMarmotBackend(args.owner);
-  if (local) {
-    if (session?.pubkey !== args.owner) throw new Error('Marmot session unavailable');
-    await session.pauseInvitationKey();
-  }
-  const outcome = await retireMarmotKeyPackages({
-    owner: args.owner,
-    relays: [...new Set([...args.relays, ...args.selected.flatMap((k) => k.relays)])],
-    footprint: { slots, eventIds: [...selectedIds] },
+  const local = await localKeyPackageFootprint(createSqliteMarmotBackend(owner));
+  if (devices.some((d) => d.kind === 'thisPhone' || local.slots.includes(d.slot)))
+    throw new Error("This phone's invitation key can only be refreshed");
+  let removed = devices.length;
+  const outcome = await retireFootprint({
+    owner,
+    footprint: {
+      slots: devices.map((d) => d.slot),
+      eventIds: devices.flatMap((d) => d.versions.map((k) => k.event.id)),
+      relays: [...new Set(devices.flatMap((d) => d.relays))],
+    },
+    relays: args.relays,
+    transport: args.transport,
+    cancelled: () => !args.isCurrent(),
+    recheck: args.onlyIfStillOld
+      ? (onRelays) => {
+          const still = stillOldDevices(devices, owner, onRelays, args.now);
+          removed = still.slots.length;
+          return still;
+        }
+      : undefined,
     sign: async (template) => {
       if (!args.isCurrent()) throw new Error('Account changed');
       const signed = await args.sign(template);
@@ -193,9 +159,6 @@ export async function removeInvitationKeys(args: {
       return signed;
     },
   });
-  if (local)
-    await backend.set('meta', 'keyPackageResumeAfter', String(Math.floor(Date.now() / 1000) + 2));
-  // Leave local publication paused even after partial failure: otherwise it
-  // could immediately undo an accepted deletion. Refresh is the explicit retry.
-  if (outcome !== 'deleted') throw new Error('Invitation-key removal incomplete');
+  if (outcome === 'failed') throw new Error('Invitation-key removal incomplete');
+  return outcome === 'nothing' ? 0 : removed;
 }

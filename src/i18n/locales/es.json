@@ -2481,31 +2481,74 @@
     "notRemovedBody": "No pudimos quitar de los relés las claves de invitación de Marmot de esta cuenta, así que es posible que sigan llegando invitaciones de Marmot a este teléfono. Lo volveremos a intentar automáticamente la próxima vez que esta cuenta inicie sesión aquí."
   },
   "invitationKeys": {
+    "title": "Dispositivos que pueden recibir chats nuevos",
+    "entrySubtitle": "Mira con qué dispositivos pueden iniciar chats privados contigo",
+    "description": "Para iniciar un chat privado contigo, las apps de otras personas usan una clave de invitación que cada uno de tus dispositivos comparte en tus relés. Quita los dispositivos que ya no usas para que los chats nuevos no vayan a un sitio donde nunca los verás. Tus chats actuales no se ven afectados.",
+    "thisPhone": "Este teléfono",
+    "otherDevice": "Otro dispositivo con Lightning Piggy",
+    "whiteNoise": "White Noise",
+    "otherApp": "Otra app",
+    "oldBadge": "Sin usar más de 30 días",
+    "notShared": "Aún no compartida. Toca Actualizar para que puedan iniciar chats nuevos contigo aquí.",
+    "updatedJustNow": "Actualizado hace un momento",
+    "updatedHours": {
+      "one": "Actualizado hace %{count} hora",
+      "other": "Actualizado hace %{count} horas"
+    },
+    "updatedDays": {
+      "one": "Actualizado hace %{count} día",
+      "other": "Actualizado hace %{count} días"
+    },
+    "details": "Detalles",
+    "detailsA11y": "Mostrar detalles de %{device}",
+    "deviceId": "ID del dispositivo: %{id}…",
+    "app": "App: %{app}",
+    "expires": "La clave de invitación caduca: %{date}",
+    "unknownExpiry": "desconocido",
+    "versions": {
+      "one": "%{count} copia encontrada en los relés",
+      "other": "%{count} copias encontradas en los relés"
+    },
+    "relays": "Compartida en:\n%{relays}",
+    "refresh": "Actualizar",
+    "refreshA11y": "Actualizar la clave de invitación de este teléfono",
+    "refreshed": "Este teléfono está listo para chats nuevos",
+    "refreshFailedTitle": "No se pudo actualizar este teléfono",
+    "refreshFailedBody": "Ningún relé aceptó la nueva clave de invitación o tu firmador no respondió. Revisa tu conexión e inténtalo de nuevo.",
+    "stop": "Dejar de enviar invitaciones a este dispositivo",
+    "stopA11y": "Dejar de enviar invitaciones a %{device}, %{age}",
+    "stopTitle": "¿Dejar de enviar invitaciones a %{device}?",
+    "stopBody": "Los chats nuevos dejarán de llegar a este dispositivo. Si todavía se usa, puede perderse chats nuevos hasta que vuelva a actualizar su clave de invitación, lo que puede tardar hasta una semana. Tus chats actuales no se ven afectados.",
+    "stopConfirm": "Dejar de enviar",
+    "stopped": "Ya no se envían invitaciones a ese dispositivo",
+    "removeOld": {
+      "zero": "Quitar dispositivos antiguos",
+      "one": "Quitar %{count} dispositivo antiguo",
+      "other": "Quitar %{count} dispositivos antiguos"
+    },
+    "removeOldA11y": {
+      "zero": "Quitar dispositivos antiguos. No hay ninguno",
+      "one": "Quitar %{count} dispositivo antiguo",
+      "other": "Quitar %{count} dispositivos antiguos"
+    },
+    "removeOldHint": "Los dispositivos antiguos no han actualizado su clave de invitación en 30 días, o ha caducado. Este teléfono nunca se quita.",
+    "removeOldTitle": {
+      "one": "¿Quitar %{count} dispositivo antiguo?",
+      "other": "¿Quitar %{count} dispositivos antiguos?"
+    },
+    "removeOldBody": "Los chats nuevos dejarán de llegar a los dispositivos que no se han actualizado en 30 días. Cualquier dispositivo que se actualice antes de terminar se conserva. Tus chats actuales no se ven afectados.",
+    "removeOldConfirm": "Quitar",
+    "removedOld": {
+      "one": "Se quitó %{count} dispositivo antiguo",
+      "other": "Se quitaron %{count} dispositivos antiguos"
+    },
+    "nothingRemoved": "No se quitó nada: esos dispositivos se han actualizado",
+    "signerApprovals": "Tu firmador te pedirá que apruebes %{count} veces.",
+    "reload": "Comprobar de nuevo",
+    "partial": "No se pudieron comprobar algunos relés, así que esta lista puede estar incompleta. Quitar dispositivos antiguos no está disponible hasta que respondan todos.",
+    "loadFailed": "No se pudieron comprobar tus relés. Inténtalo de nuevo cuando tengas conexión.",
     "cancel": "Cancelar",
-    "title": "Claves de invitación",
-    "description": "Las claves de invitación permiten iniciar chats cifrados con tus dispositivos. Cada dispositivo guarda su propia clave privada. Esta lista muestra las claves encontradas en tus relays, agrupadas por dispositivo.",
-    "thisPhone": "Lightning Piggy (este teléfono)",
-    "otherDevice": "Lightning Piggy (otro dispositivo)",
-    "unknownClient": "Aplicación desconocida",
-    "slot": "Identificador de dispositivo %{slot}…",
-    "published": "Publicada: %{date}",
-    "expires": "Caduca: %{date}",
-    "unknownExpiry": "Desconocida",
-    "relays": "Relays:\n%{relays}",
-    "refresh": "Renovar la clave de este teléfono",
-    "remove": "Eliminar",
-    "removeOld": "Eliminar todas las antiguas",
-    "reload": "Consultar los relays de nuevo",
-    "paused": "Este teléfono ya no publica una clave de invitación. Renueva su clave para recibir nuevas invitaciones aquí.",
-    "partial": "No se pudieron consultar algunos relays o se alcanzó el límite de resultados. La lista puede estar incompleta. No se pueden eliminar todas las antiguas hasta comprobar todos los relays.",
-    "loadFailed": "No se pudieron consultar las claves. Inténtalo de nuevo cuando tengas conexión.",
-    "empty": "No se encontraron claves de invitación publicadas.",
-    "removeTitle": "¿Eliminar la clave de invitación?",
-    "removeBody": "Este dispositivo podría dejar de recibir nuevas invitaciones. Eliminar su clave más reciente también elimina las versiones anteriores del mismo dispositivo. Los chats existentes seguirán disponibles. Los relays pueden tardar en actualizarse.",
-    "removeOldBody": "Eliminar claves de más de 30 días o caducadas, solo de dispositivos sin una clave reciente. Se conservan las claves de este teléfono. Los otros dispositivos podrían necesitar publicar una nueva clave para recibir invitaciones.",
-    "removed": "Se ha solicitado eliminar la clave",
-    "refreshed": "Clave de este teléfono renovada",
-    "failedTitle": "No se pudieron actualizar las claves",
-    "failedBody": "Algunos relays o tu firmante no respondieron. Consulta la lista antes de reintentar. Si eliminaste la clave de este teléfono, usa Renovar para publicar una nueva."
+    "failedTitle": "No se pudieron detener las invitaciones",
+    "failedBody": "Algunos relés o tu firmador no respondieron. Toca Comprobar de nuevo y vuelve a intentarlo."
   }
 }
