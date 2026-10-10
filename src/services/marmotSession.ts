@@ -37,6 +37,7 @@ import {
   renderableAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
+import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
 import { MarmotNoKeyPackageError, pickKeyPackage } from './marmotKeyPackages';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
@@ -266,8 +267,12 @@ export class MarmotSession {
     }
     for (const evt of ['left', 'removed', 'destroyed', 'disbanded'] as const) {
       groups.on(evt, (id: Uint8Array, ..._rest: unknown[]) => {
-        // We're out of it: forget what we published there (MIP-05 state).
+        // We're out of it: forget what we published there (MIP-05 state)
+        // and its "delete for everyone" tombstones.
         this.pushRegistration.forgetGroup(bytesToHex(id));
+        void forgetMarmotDeletionsForGroup(this.pubkey, toAppGroupId(bytesToHex(id))).catch(
+          () => undefined,
+        );
         this.emitGroupsChanged();
       });
     }

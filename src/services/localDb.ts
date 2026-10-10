@@ -56,6 +56,21 @@ const SCHEMA: string[] = [
      value     TEXT NOT NULL,
      PRIMARY KEY (owner, namespace, key)
    );`,
+  // Marmot "delete for everyone" tombstones (marmotDeletionStore.ts): which
+  // message ids a member (or, with any_author, an admin) deleted in a group, so
+  // a history replay can't bring them back. Capped per deleter, group and
+  // owner; ordered by rowid for oldest-first eviction.
+  `CREATE TABLE IF NOT EXISTS marmot_deletions (
+     owner      TEXT NOT NULL,
+     scope      TEXT NOT NULL,
+     target     TEXT NOT NULL,
+     deleter    TEXT NOT NULL,
+     any_author INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (owner, scope, target, deleter)
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_marmot_deletions_target ON marmot_deletions (owner, target);`,
+  `CREATE INDEX IF NOT EXISTS idx_marmot_deletions_deleter
+     ON marmot_deletions (owner, scope, deleter);`,
 ];
 
 // Columns added after the v2 table shipped (#850). SQLite supports in-place

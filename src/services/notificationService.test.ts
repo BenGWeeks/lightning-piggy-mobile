@@ -42,6 +42,8 @@ import {
   __resetForTests,
   notificationMatchesTarget,
   dismissNotificationsFor,
+  marmotMessageRefMatcher,
+  retractMarmotMessageNotifications,
   FOREGROUND_SERVICE_NOTIFICATION_ID,
   markHistoryReadFor,
   markHistoryEntryRead,
@@ -355,6 +357,21 @@ describe('clearing read notifications (#1142)', () => {
     expect(
       notificationMatchesTarget({ kind: 'dm', conversationPubkey: 'b'.repeat(64) }, target),
     ).toBe(false);
+  });
+
+  it('matches a deleted Marmot message by id, account, group and authorised author', () => {
+    const matches = marmotMessageRefMatcher([
+      { owner: 'alice', groupId: 'g', messageId: 'm1', sender: 'bob' },
+      { owner: 'alice', groupId: 'g', messageId: 'm2', sender: null },
+    ]);
+    const data = { owner: 'alice', marmotGroupId: 'g', senderPubkey: 'BOB' };
+    expect(matches({ ...data, messageId: 'm1' })).toBe(true);
+    expect(matches({ ...data, messageId: 'm1', senderPubkey: 'mallory' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm2', senderPubkey: 'carol' })).toBe(true); // admin
+    expect(matches({ ...data, messageId: 'm1', owner: 'other' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm1', marmotGroupId: 'h' })).toBe(false);
+    expect(matches({ ...data, messageId: 'm3' })).toBe(false);
+    expect(matches({})).toBe(false);
   });
 
   it('matches groups, cache find-logs and generic message pings separately', () => {
@@ -745,4 +762,104 @@ describe('notification watcher pushes', () => {
     mockGetPresented.mockResolvedValueOnce(presentedList);
     expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
   });
+});
+
+const bobRef = { owner: 'alice', groupId: 'g', messageId: 'm', sender: 'bob' };
+
+it('suppresses creation paused before scheduling when an authorized scoped deletion arrives', async () => {
+  let release!: (value: boolean) => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  const firing = fireMessageNotification({
+    kind: 'group',
+    threadId: 'g',
+    title: 'Group',
+    body: 'deleted text',
+    owner: 'alice',
+    data: { messageId: 'm', marmotGroupId: 'g', senderPubkey: 'bob' },
+    shouldSuppress: () => {
+      entered();
+      return gate;
+    },
+  });
+  await started;
+  // In-memory cancellation only: no tray query.
+  mockGetPresented.mockClear();
+  await retractMarmotMessageNotifications([bobRef], { tray: false });
+  expect(mockGetPresented).not.toHaveBeenCalled();
+  release(false);
+  expect(await firing).toBeNull();
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it.each(['bob', 'mallory', 'other-account', 'other-group'])(
+  'handles an in-flight schedule with cancellation scope %s',
+  async (scope) => {
+    await setLockScreenContentEnabled(true);
+    let release!: (id: string) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    mockScheduleNotificationAsync.mockImplementationOnce(() => {
+      entered();
+      return new Promise<string>((resolve) => {
+        release = resolve;
+      });
+    });
+    const firing = fireMessageNotification({
+      kind: 'group',
+      threadId: 'g',
+      title: 'Group',
+      body: 'deleted text',
+      owner: 'alice',
+      data: { messageId: 'm', marmotGroupId: 'g', senderPubkey: 'bob' },
+    });
+    await started;
+    mockCancel.mockClear();
+    mockDismiss.mockClear();
+    await retractMarmotMessageNotifications(
+      [
+        {
+          messageId: 'm',
+          owner: scope === 'other-account' ? scope : 'alice',
+          groupId: scope === 'other-group' ? scope : 'g',
+          sender: scope === 'mallory' ? scope : 'bob',
+        },
+      ],
+      { tray: false },
+    );
+    release('late-notification');
+    expect(await firing).toBe(scope === 'bob' ? null : 'late-notification');
+    if (scope === 'bob') {
+      expect(mockCancel).toHaveBeenCalledWith('late-notification');
+      expect(mockDismiss).toHaveBeenCalledWith('late-notification');
+    } else expect(mockCancel).not.toHaveBeenCalledWith('late-notification');
+  },
+);
+
+it('clears every deleted message from the tray in one query', async () => {
+  const shown = (identifier: string, data: Record<string, unknown>) => ({
+    request: { identifier, content: { data } },
+  });
+  const base = { owner: 'alice', marmotGroupId: 'g', senderPubkey: 'bob' };
+  mockGetPresented.mockClear();
+  mockDismiss.mockClear();
+  mockGetPresented.mockResolvedValueOnce([
+    shown('n1', { ...base, messageId: 'm1' }),
+    shown('n2', { ...base, messageId: 'm2' }),
+    shown('n3', { ...base, messageId: 'm3' }),
+  ]);
+  const refs = ['m1', 'm2', ...Array.from({ length: 500 }, (_, i) => `x${i}`)].map((messageId) => ({
+    ...bobRef,
+    messageId,
+  }));
+  expect(await retractMarmotMessageNotifications(refs, { tray: true })).toBe(2);
+  expect(mockGetPresented).toHaveBeenCalledTimes(1);
+  expect(mockDismiss.mock.calls).toEqual([['n1'], ['n2']]);
 });

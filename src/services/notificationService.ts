@@ -123,6 +123,11 @@ export interface NotificationData {
   owner?: string;
   /** The generic "New message" a Marmot push wake posted (Android). */
   marmotPush?: boolean;
+  /** Marmot app-event id of the message shown — lets a "delete for everyone"
+   * clear the tray notification that still carries its text. */
+  messageId?: string;
+  marmotGroupId?: string;
+  senderPubkey?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -142,6 +147,8 @@ export interface NotificationPayload {
   /** Stable source id (e.g. a payment hash) so a retried notification
    * doesn't add a second history row. */
   historyKey?: string;
+  /** Rechecked immediately before scheduling, including durable deletion state. */
+  shouldSuppress?: () => Promise<boolean>;
 }
 
 let initialisingPromise: Promise<void> | null = null;
@@ -394,7 +401,14 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
  * after init), INCLUDING the background sync task — it only ever
  * *checks* permission (`hasNotificationPermission`), never prompts.
  */
+const inFlightNotifications = new Set<{ data: NotificationData; cancelled: boolean }>();
+
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
+  const flight = {
+    data: { ...payload.data, owner: payload.owner ?? getActivePubkey() ?? undefined },
+    cancelled: false,
+  };
+  inFlightNotifications.add(flight);
   try {
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
@@ -423,6 +437,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
     const quiet = payload.data?.quiet === true;
 
+    if ((await payload.shouldSuppress?.()) || flight.cancelled) return null;
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: presented.title,
@@ -451,11 +466,20 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
             }
           : null,
     });
+    if (flight.cancelled) {
+      await Promise.all([
+        Notifications.cancelScheduledNotificationAsync(id),
+        Notifications.dismissNotificationAsync(id),
+      ]);
+      return null;
+    }
     if (owner) await markNotificationDelivered(owner, historyId);
     return id;
   } catch (err) {
     if (__DEV__) console.warn('[notificationService] fireNotification failed:', err);
     return null;
+  } finally {
+    inFlightNotifications.delete(flight);
   }
 }
 
@@ -594,42 +618,102 @@ export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
  * foreground-service notification. Best-effort: returns how many it cleared.
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
+  return dismissRequestsWhere((request) => {
+    // The watcher's "New message" is a generic ping like the Marmot one —
+    // cleared with them (so a Marmot welcome announced by both collapses).
+    // Its other categories aren't messages.
+    const watcher = watcherCategoryOf(request);
+    if (watcher) {
+      return watcher === 'dm' && ('genericMessages' in target || 'marmotPushAlerts' in target);
+    }
+    const data = request.content.data as (NotificationData & { kind?: string }) | null;
+    // A server-sent Marmot alert (iOS) carries no data: it is a generic
+    // "New message" — cleared with the generic pings / push alerts.
+    if (isRemotePushRequest(request) && !data?.kind) {
+      return 'genericMessages' in target || 'marmotPushAlerts' in target;
+    }
+    return notificationMatchesTarget(data, target);
+  });
+}
+
+/** One Marmot message whose notification a "delete for everyone" retracts. */
+export interface MarmotMessageRef {
+  owner: string;
+  groupId: string;
+  messageId: string;
+  /** The author the deletion is valid for; null = an admin removal (any author). */
+  sender: string | null;
+}
+
+/** Pure: a matcher for notifications showing any of `refs` (indexed by id). */
+export function marmotMessageRefMatcher(
+  refs: readonly MarmotMessageRef[],
+): (data: NotificationData | null | undefined) => boolean {
+  const byId = new Map<string, MarmotMessageRef[]>();
+  for (const ref of refs) {
+    const list = byId.get(ref.messageId) ?? [];
+    list.push(ref);
+    byId.set(ref.messageId, list);
+  }
+  return (data) => {
+    const candidates = data?.messageId ? byId.get(data.messageId) : undefined;
+    return !!candidates?.some(
+      (ref) =>
+        data!.owner === ref.owner &&
+        data!.marmotGroupId === ref.groupId &&
+        (ref.sender === null || data!.senderPubkey?.toLowerCase() === ref.sender.toLowerCase()),
+    );
+  };
+}
+
+/**
+ * Retract notifications that show deleted Marmot messages. Notifications
+ * still being created are always cancelled (in memory, cheap). `tray: true`
+ * also clears delivered/pending ones from the OS tray — one tray query for
+ * the whole set, so callers batch (live deletions, plus one sweep for the
+ * deletions a history replay re-delivers).
+ */
+export async function retractMarmotMessageNotifications(
+  refs: readonly MarmotMessageRef[],
+  { tray }: { tray: boolean },
+): Promise<number> {
+  if (refs.length === 0) return 0;
+  const matches = marmotMessageRefMatcher(refs);
+  for (const flight of inFlightNotifications) {
+    if (matches(flight.data)) flight.cancelled = true;
+  }
+  if (!tray) return 0;
+  return dismissRequestsWhere((request) =>
+    matches(request.content.data as NotificationData | null),
+  );
+}
+
+/** Dismiss delivered + cancel pending notifications `matching` selects. Never
+ * touches the foreground-service notification. Best-effort count. */
+async function dismissRequestsWhere(
+  matching: (request: Notifications.NotificationRequest) => boolean,
+): Promise<number> {
   try {
-    const matching = (request: Notifications.NotificationRequest) => {
-      if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
-      // The watcher's "New message" is a generic ping like the Marmot one —
-      // cleared with them (so a Marmot welcome announced by both collapses).
-      // Its other categories aren't messages.
-      const watcher = watcherCategoryOf(request);
-      if (watcher) {
-        return watcher === 'dm' && ('genericMessages' in target || 'marmotPushAlerts' in target);
-      }
-      const data = request.content.data as (NotificationData & { kind?: string }) | null;
-      // A server-sent Marmot alert (iOS) carries no data: it is a generic
-      // "New message" — cleared with the generic pings / push alerts.
-      if (isRemotePushRequest(request) && !data?.kind) {
-        return 'genericMessages' in target || 'marmotPushAlerts' in target;
-      }
-      return notificationMatchesTarget(data, target);
-    };
+    const select = (request: Notifications.NotificationRequest) =>
+      request.identifier !== FOREGROUND_SERVICE_NOTIFICATION_ID && matching(request);
     const [presented, scheduled] = await Promise.all([
       Notifications.getPresentedNotificationsAsync(),
       Notifications.getAllScheduledNotificationsAsync(),
     ]);
     const ids = presented
       .map((n) => n.request)
-      .filter(matching)
+      .filter(select)
       .map((r) => r.identifier);
     // Android fires on a 1 s TIME_INTERVAL trigger, so one can still be
     // pending as the thread opens — cancel it rather than let it appear.
-    const pending = scheduled.filter(matching).map((r) => r.identifier);
+    const pending = scheduled.filter(select).map((r) => r.identifier);
     await Promise.all([
       ...ids.map((id) => Notifications.dismissNotificationAsync(id)),
       ...pending.map((id) => Notifications.cancelScheduledNotificationAsync(id)),
     ]);
     return ids.length + pending.length;
   } catch (err) {
-    if (__DEV__) console.warn('[notificationService] dismissNotificationsFor failed:', err);
+    if (__DEV__) console.warn('[notificationService] notification dismissal failed:', err);
     return 0;
   }
 }
@@ -677,6 +761,7 @@ export async function fireMessageNotification(opts: {
   body: string;
   data: NotificationData;
   owner?: string;
+  shouldSuppress?: () => Promise<boolean>;
 }): Promise<string | null> {
   const marmot = isMarmotMessage(opts.data);
   if (isThreadActivelyViewed(opts.threadId)) {
@@ -690,6 +775,7 @@ export async function fireMessageNotification(opts: {
     body: opts.body,
     data: opts.data,
     owner: opts.owner,
+    shouldSuppress: opts.shouldSuppress,
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();

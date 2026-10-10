@@ -11,6 +11,7 @@ import {
   clearGroupMessages,
   loadGroupMessages,
   removeGroupMessage,
+  removeGroupMessagesWhere,
   GROUP_MESSAGES_KEY_PREFIX,
   type GroupMessage,
 } from './groupMessagesStorageService';
@@ -214,4 +215,45 @@ describe('GROUP_MESSAGES_KEY_PREFIX — logout-wipe contract', () => {
     expect(groupKeys).toContain(`${GROUP_MESSAGES_KEY_PREFIX}${GROUP}`);
     expect(groupKeys).toHaveLength(1);
   });
+});
+
+describe('removeGroupMessagesWhere', () => {
+  it('erases flagged messages from storage and leaves the rest', async () => {
+    await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'secret', 1));
+    await appendGroupMessage(GROUP, wrap('b'.repeat(64), 'keep', 2, OTHER_SENDER));
+    const left = await removeGroupMessagesWhere(GROUP, (m) => m.text === 'secret');
+    expect(left.map((m) => m.text)).toEqual(['keep']);
+    expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['keep']);
+    expect(JSON.stringify(await AsyncStorage.getAllKeys())).toContain(GROUP);
+    expect(await AsyncStorage.getItem(`${GROUP_MESSAGES_KEY_PREFIX}${GROUP}`)).not.toContain(
+      'secret',
+    );
+  });
+});
+
+it.each([false, true])('serializes append and deletion (append first: %s)', async (appendFirst) => {
+  await appendGroupMessage(GROUP, wrap('target', 'deleted plaintext', 1));
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const pause = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const original = AsyncStorage.setItem;
+  (AsyncStorage.setItem as jest.Mock).mockImplementationOnce(async (key, value) => {
+    entered();
+    await pause;
+    // The one-shot implementation has been consumed; use the underlying mock.
+    return original(key, value);
+  });
+  const append = () => appendGroupMessage(GROUP, local('local_new', 'new send', 2));
+  const remove = () => removeGroupMessagesWhere(GROUP, (m) => m.id === 'target');
+  const first = appendFirst ? append() : remove();
+  await started;
+  const second = appendFirst ? remove() : append();
+  release();
+  await Promise.all([first, second]);
+  expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['new send']);
 });

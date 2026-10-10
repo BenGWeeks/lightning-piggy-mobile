@@ -26,6 +26,7 @@ import {
   hasStoredWraps,
   hasConversationWith,
   deleteDmMessagesForOwner,
+  deleteMarmotMessages,
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
@@ -369,6 +370,30 @@ describe('dmDb', () => {
       );
       // A first-ever optimistic send must not fake a completed ingest (#850).
       expect(sql).toContain(`event_id NOT LIKE 'local-%'`);
+    });
+  });
+
+  describe('deleteMarmotMessages', () => {
+    it('deletes Marmot rows by id in the conversation, only those the sender wrote', async () => {
+      mockExecute.mockResolvedValueOnce(rowsResult([{ event_id: 'm1' }]));
+      expect(await deleteMarmotMessages(OWNER, 'convA', ['m1', 'm2'], 'peer')).toEqual(['m1']);
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).toContain("protocol = 'marmot'");
+      expect(sql).toContain('conversation = ?');
+      expect(sql).toContain('sender = ?');
+      expect(sql).toContain('event_id IN (?,?)');
+      expect(sql).toContain('RETURNING event_id');
+      expect(params).toEqual([OWNER, 'convA', 'peer', 'm1', 'm2']);
+    });
+    it('an admin removal (null sender) takes any member’s message', async () => {
+      await deleteMarmotMessages(OWNER, 'convA', ['m1'], null);
+      const [sql, params] = mockExecute.mock.calls[0];
+      expect(sql).not.toContain('sender = ?');
+      expect(params).toEqual([OWNER, 'convA', 'm1']);
+    });
+    it('does nothing for no ids', async () => {
+      await deleteMarmotMessages(OWNER, 'convA', [], 'peer');
+      expect(mockExecute).not.toHaveBeenCalled();
     });
   });
 
