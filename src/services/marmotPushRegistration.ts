@@ -327,7 +327,13 @@ async function enableNow(): Promise<EnableOutcome> {
   // we're about to hand out at the next start.
   if (await retirementPending()) {
     await retireDeviceToken();
-    await AsyncStorage.removeItem(RETIRE_PENDING_KEY).catch(() => undefined);
+    // The marker must be gone for good before a new token is handed out,
+    // or the next start would delete it.
+    try {
+      await AsyncStorage.removeItem(RETIRE_PENDING_KEY);
+    } catch {
+      return { status: 'unavailable' };
+    }
     retiring = false;
   }
   try {
@@ -346,6 +352,8 @@ export interface DisableOutcome {
   sync: SyncResult | null;
   /** False when Apple/Google couldn't be reached — retried at next start. */
   tokenDeleted: boolean;
+  /** False when the "off" setting couldn't be stored (it may come back on). */
+  saved: boolean;
 }
 
 /** Turn push off (user action): retract from every group, then delete the
@@ -355,10 +363,15 @@ export function disableMarmotPush(): Promise<DisableOutcome> {
     // Explicitly off — an unreadable store doesn't change that.
     await ensureSettings().catch(() => undefined);
     settings.enabled = false;
-    await AsyncStorage.setItem(ENABLED_KEY, '0');
     registration = null;
+    // Retract + revoke regardless of whether the setting could be saved.
+    const saved = await AsyncStorage.setItem(ENABLED_KEY, '0').then(
+      () => true,
+      () => false,
+    );
     const sync = await syncActiveSession().catch(() => null);
-    return { sync, tokenDeleted: await retireDeviceToken() };
+    const tokenDeleted = await retireDeviceToken();
+    return { sync, tokenDeleted, saved };
   });
 }
 

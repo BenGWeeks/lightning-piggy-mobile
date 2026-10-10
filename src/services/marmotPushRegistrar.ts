@@ -346,6 +346,7 @@ export class MarmotPushRegistrar {
     // Write-ahead: once it may be out there, a later pass must know to
     // retract or re-send it — even if the write after publishing fails.
     await this.save(group.idHex, { record, leaves, acked: false });
+    live(); // the write was an await: still current?
     if (!(await this.deps.send(group.idHex, tokenUpdateEvent(record)))) return false;
     await this.save(group.idHex, { record, leaves });
     return true;

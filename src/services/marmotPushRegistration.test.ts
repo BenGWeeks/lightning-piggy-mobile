@@ -317,4 +317,22 @@ describe('native token reads', () => {
     expect(lastRegistration()).not.toBeNull();
     stop();
   });
+
+  it('disabling still retracts and revokes when the setting cannot be saved', async () => {
+    await enableMarmotPush();
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    const off = await disableMarmotPush();
+    expect(off.saved).toBe(false);
+    expect(lastRegistration()).toBeNull();
+    expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalled();
+  });
+
+  it('re-enable fails (retryably) when a stale deletion marker cannot be cleared', async () => {
+    await AsyncStorage.setItem('marmot_push_retire_pending_v1', '1');
+    (AsyncStorage.removeItem as jest.Mock)
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockRejectedValueOnce(new Error('locked'));
+    expect((await enableMarmotPush()).status).toBe('unavailable');
+    expect((await enableMarmotPush()).status).toBe('enabled');
+  });
 });

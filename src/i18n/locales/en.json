@@ -1759,6 +1759,7 @@
     "marmotPushDeclined": "Your signer declined, so push isn't set up in every chat yet. Tap Finish setup to try again.",
     "marmotPushOn": "Push notifications are on",
     "marmotPushOff": "Push notifications are off",
+    "marmotPushSaveFailed": "Push was turned off for now, but the setting couldn't be saved. Turn it off again later.",
     "marmotPushNoToken": "Not set up yet: this phone has no push token right now.",
     "marmotPushRetirePending": "Push is off. Apple/Google couldn't be reached to delete this phone's push token — the app will retry next time it opens."
   },

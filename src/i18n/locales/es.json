@@ -1759,6 +1759,7 @@
     "marmotPushDeclined": "Tu firmador lo rechazó, así que el push aún no está configurado en todos los chats. Toca Terminar configuración para volver a intentarlo.",
     "marmotPushOn": "Las notificaciones push están activadas",
     "marmotPushOff": "Las notificaciones push están desactivadas",
+    "marmotPushSaveFailed": "El push se ha desactivado por ahora, pero no se pudo guardar el ajuste. Vuelve a desactivarlo más tarde.",
     "marmotPushNoToken": "Aún no configurado: este teléfono no tiene ahora un token push.",
     "marmotPushRetirePending": "El push está desactivado. No se pudo contactar con Apple/Google para borrar el token push de este teléfono; la app lo reintentará la próxima vez que se abra."
   },
