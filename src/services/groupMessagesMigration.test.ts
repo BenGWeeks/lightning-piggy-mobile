@@ -6,6 +6,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  GROUP_ACTIVITY_PRUNED_KEY,
   GROUP_MESSAGES_CAP,
   mergeGroupLogs,
   resetGroupMessagesMigrationForTests,
@@ -90,8 +91,10 @@ describe('runGroupMessagesMigration', () => {
     expect(await readOwned(CHILD, MARMOT_GROUP)).toBeNull();
   });
 
-  it('also treats an account whose activity rollup lists the group as an owner', async () => {
+  it('does NOT treat an activity rollup as ownership (pre-#1214 rollups leaked across accounts)', async () => {
     await seedLegacy(MARMOT_GROUP, [msg('m1', 1)]);
+    // The child's rollup is a stale copy of the parent's — the real device
+    // state this PR was validated against.
     await AsyncStorage.setItem(
       `nostr_group_activity_${CHILD}`,
       JSON.stringify({ [MARMOT_GROUP]: { lastActivityAt: 1 } }),
@@ -99,7 +102,8 @@ describe('runGroupMessagesMigration', () => {
 
     const result = await runGroupMessagesMigration({ marmotOwners: async () => [PARENT] });
 
-    expect(result.migrated[MARMOT_GROUP]).toEqual([PARENT, CHILD].sort());
+    expect(result.migrated[MARMOT_GROUP]).toEqual([PARENT]);
+    expect(await readOwned(CHILD, MARMOT_GROUP)).toBeNull();
   });
 
   it('keeps a blob no account owns on disk, and never shows it', async () => {
@@ -177,7 +181,7 @@ describe('runGroupMessagesMigration', () => {
 
     const second = await runGroupMessagesMigration(noMarmot);
 
-    expect(second).toEqual({ migrated: {}, unowned: [], deferred: [] });
+    expect(second).toEqual({ migrated: {}, unowned: [], deferred: [], prunedActivity: 0 });
     expect(await AsyncStorage.multiGet(await AsyncStorage.getAllKeys())).toEqual(snapshot);
   });
 
@@ -218,7 +222,61 @@ describe('runGroupMessagesMigration', () => {
     const result = await runGroupMessagesMigration({ marmotOwners });
 
     expect(marmotOwners).not.toHaveBeenCalled();
-    expect(result).toEqual({ migrated: {}, unowned: [], deferred: [] });
+    expect(result).toEqual({ migrated: {}, unowned: [], deferred: [], prunedActivity: 0 });
+  });
+});
+
+describe('one-time prune of leaked activity rollup entries', () => {
+  const entry = (text: string) => ({
+    lastActivityAt: 1,
+    lastText: text,
+    lastSenderPubkey: null,
+    recentSenderPubkeys: [],
+  });
+
+  it("drops entries for groups the rollup's account doesn't own, keeps its own", async () => {
+    await seedGroupList(CHILD, ['g_child']);
+    await AsyncStorage.setItem(
+      `nostr_group_activity_${CHILD}`,
+      JSON.stringify({
+        g_child: entry('mine'),
+        g_parent: entry("parent's plaintext"),
+        [MARMOT_GROUP]: entry("parent's marmot plaintext"),
+        'marmot:c0ffee': entry('child marmot'),
+      }),
+    );
+    const marmotOwners = async (mls: string) => (mls === 'c0ffee' ? [CHILD] : [PARENT]);
+
+    const result = await runGroupMessagesMigration({ marmotOwners });
+
+    expect(result.prunedActivity).toBe(2);
+    const kept = JSON.parse((await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`))!);
+    expect(Object.keys(kept).sort()).toEqual(['g_child', 'marmot:c0ffee']);
+    expect(await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)).toBe('1');
+  });
+
+  it('runs once: a later foreign entry is left alone after the flag is set', async () => {
+    await runGroupMessagesMigration(noMarmot);
+    await AsyncStorage.setItem(
+      `nostr_group_activity_${CHILD}`,
+      JSON.stringify({ g_parent: entry('x') }),
+    );
+
+    expect((await runGroupMessagesMigration(noMarmot)).prunedActivity).toBe(0);
+  });
+
+  it('changes nothing and retries later when a Marmot lookup fails', async () => {
+    const rollup = JSON.stringify({ g_parent: entry('x'), [MARMOT_GROUP]: entry('y') });
+    await AsyncStorage.setItem(`nostr_group_activity_${CHILD}`, rollup);
+
+    await runGroupMessagesMigration({
+      marmotOwners: async () => {
+        throw new Error('db locked');
+      },
+    });
+
+    expect(await AsyncStorage.getItem(`nostr_group_activity_${CHILD}`)).toBe(rollup);
+    expect(await AsyncStorage.getItem(GROUP_ACTIVITY_PRUNED_KEY)).toBeNull();
   });
 });
 

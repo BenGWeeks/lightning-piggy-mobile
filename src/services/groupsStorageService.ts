@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group, GroupActivity } from '../types/groups';
+import { ensureGroupMessagesMigrated } from './groupMessagesMigration';
 import { perAccountKey } from './perAccountStorage';
 
 // Account scoping: per-account namespaced under `nostr_groups_${pubkey}`
@@ -57,6 +58,9 @@ function isValidGroupActivity(v: unknown): v is GroupActivity {
 }
 
 export async function loadGroupActivity(pubkey: string): Promise<Record<string, GroupActivity>> {
+  // The #1240 migration prunes rollup entries leaked from other accounts —
+  // read only after it, or the stale copy would be hydrated and saved back.
+  await ensureGroupMessagesMigrated();
   try {
     const raw = await AsyncStorage.getItem(GROUP_ACTIVITY_KEY(pubkey));
     if (!raw) return {};

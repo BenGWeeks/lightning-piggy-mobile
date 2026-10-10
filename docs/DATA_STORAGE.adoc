@@ -142,12 +142,14 @@ possibly while powered on and after first unlock.
 * *Group-chat logs are per account (#1240).* Before #1240 they were
   device-wide (`group_messages_<groupId>`) and any sign-out deleted every
   account's logs. On upgrade, `groupMessagesMigration.ts` *copies* each legacy
-  blob to every local account that owns the group (its `nostr_groups_<pk>` /
-  `nostr_group_activity_<pk>` lists it, or its `marmot_kv` state holds it),
-  and only then deletes the legacy key. A blob no account owns stays on disk,
-  unread; it is adopted on a later launch if an account picks the group up.
-  The storage service awaits the migration before any read or write and never
-  falls back to a legacy key.
+  blob to every local account that owns the group (its `nostr_groups_<pk>`
+  lists it, or its `marmot_kv` state holds it), and only then deletes the
+  legacy key. A blob no account owns stays on disk, unread; it is adopted on
+  a later launch if an account picks the group up. Activity rollups are not
+  ownership evidence — pre-#1214 builds saved one account's rollup under
+  another's key — and the same pass prunes those leaked rollup entries once
+  (flag `group_activity_owner_pruned_v1`). Group history and rollup reads
+  await the migration and never fall back to a legacy key.
   Public caches (places, profiles, geo-caches) are public data by
   definition; the eventual move into the one encrypted DB is a metadata-
   privacy nicety, not a confidentiality requirement.

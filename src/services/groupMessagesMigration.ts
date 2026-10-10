@@ -8,10 +8,11 @@
  * (MLS) history can't be re-fetched (forward secrecy). So each blob is COPIED
  * to every local account that owns the group, then deleted:
  *
- *  - owners = accounts whose saved group list (`nostr_groups_<pk>`) or
- *    activity rollup (`nostr_group_activity_<pk>`) lists the group, plus — for
- *    `marmot:` groups — accounts with state for it in the encrypted DB
- *    (`marmot_kv`, read-only);
+ *  - owners = accounts whose saved group list (`nostr_groups_<pk>`) lists the
+ *    group, plus — for `marmot:` groups — accounts with state for it in the
+ *    encrypted DB (`marmot_kv`, read-only). Activity rollups are deliberately
+ *    NOT evidence: pre-#1214 builds saved one account's rollup under another
+ *    account's key, so trusting them would copy history across accounts;
  *  - copies MERGE into any existing per-account log (union by id), so a
  *    re-run after a crash between "copy" and "delete" converges instead of
  *    duplicating or clobbering;
@@ -21,10 +22,14 @@
  *  - a Marmot owner lookup failure (DB unavailable) defers that blob to the
  *    next launch rather than guessing.
  *
- * Runs once per app process, before any group read or write (the storage
- * service awaits `ensureGroupMessagesMigrated()`), so nothing writes the new
- * keys while it merges. Idempotent: with no legacy keys left it is one
- * `getAllKeys()` scan.
+ * The same pass prunes, once, the activity rollup entries that leaked into
+ * another account's `nostr_group_activity_<pk>` (their previews are the other
+ * account's plaintext and would outlive its sign-out).
+ *
+ * Runs once per app process, before any group history or rollup read (the
+ * storage services await `ensureGroupMessagesMigrated()`), so nothing writes
+ * those keys while it runs. Idempotent: with no legacy keys left and the prune
+ * flag set it is one `getAllKeys()` scan.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -35,8 +40,12 @@ import { listMarmotOwnersForGroup } from './marmotStore';
 /** Mirrors the per-group cap in groupMessagesStorageService. */
 export const GROUP_MESSAGES_CAP = 500;
 
+/** Set once the leaked activity-rollup entries have been pruned. */
+export const GROUP_ACTIVITY_PRUNED_KEY = 'group_activity_owner_pruned_v1';
+
 const MARMOT_PREFIX = 'marmot:';
-const OWNER_LIST_KEY = /^(nostr_groups|nostr_group_activity)_([0-9a-f]{64})$/;
+const GROUP_LIST_KEY = /^nostr_groups_([0-9a-f]{64})$/;
+const ACTIVITY_KEY = /^nostr_group_activity_([0-9a-f]{64})$/;
 
 export interface GroupMessagesMigrationDeps {
   /** Owners with Marmot state for an MLS group (lowercase hex id). */
@@ -50,18 +59,26 @@ export interface GroupMessagesMigrationResult {
   unowned: string[];
   /** Legacy blobs kept for a retry next launch (owner lookup failed). */
   deferred: string[];
+  /** Activity rollup entries removed from accounts that don't own the group. */
+  prunedActivity: number;
 }
 
 const defaultDeps: GroupMessagesMigrationDeps = { marmotOwners: listMarmotOwnersForGroup };
 
+function parseJson(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A stored log, `[]` when absent, or null when unparseable. */
 function parseLog(raw: string | null): GroupMessage[] | null {
   if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as GroupMessage[]) : null;
-  } catch {
-    return null;
-  }
+  const parsed = parseJson(raw);
+  return Array.isArray(parsed) ? (parsed as GroupMessage[]) : null;
 }
 
 /** Union by id (newer createdAt wins a collision), oldest first, capped. */
@@ -76,29 +93,19 @@ export function mergeGroupLogs(a: GroupMessage[], b: GroupMessage[]): GroupMessa
   return all.length <= GROUP_MESSAGES_CAP ? all : all.slice(all.length - GROUP_MESSAGES_CAP);
 }
 
-/** groupId → owners, from every account's saved group list + activity rollup. */
+/** groupId → owners, from every account's saved group list. */
 async function groupOwnersFromLists(keys: readonly string[]): Promise<Map<string, Set<string>>> {
   const owners = new Map<string, Set<string>>();
-  const listKeys = keys.filter((k) => OWNER_LIST_KEY.test(k));
+  const listKeys = keys.filter((k) => GROUP_LIST_KEY.test(k));
   if (listKeys.length === 0) return owners;
-  const add = (groupId: unknown, owner: string) => {
-    if (typeof groupId !== 'string' || !groupId) return;
-    const set = owners.get(groupId) ?? new Set<string>();
-    set.add(owner);
-    owners.set(groupId, set);
-  };
   for (const [key, raw] of await AsyncStorage.multiGet(listKeys)) {
-    const owner = OWNER_LIST_KEY.exec(key)?.[2];
-    if (!owner || !raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        for (const g of parsed) add((g as { id?: unknown } | null)?.id, owner);
-      } else if (parsed && typeof parsed === 'object') {
-        for (const groupId of Object.keys(parsed)) add(groupId, owner);
-      }
-    } catch {
-      // A corrupt list attributes nothing; its groups stay unowned (kept).
+    const owner = GROUP_LIST_KEY.exec(key)?.[1];
+    const parsed = parseJson(raw);
+    if (!owner || !Array.isArray(parsed)) continue; // corrupt list attributes nothing
+    for (const g of parsed) {
+      const id = (g as { id?: unknown } | null)?.id;
+      if (typeof id !== 'string' || !id) continue;
+      owners.set(id, (owners.get(id) ?? new Set<string>()).add(owner));
     }
   }
   return owners;
@@ -107,29 +114,48 @@ async function groupOwnersFromLists(keys: readonly string[]): Promise<Map<string
 export async function runGroupMessagesMigration(
   deps: GroupMessagesMigrationDeps = defaultDeps,
 ): Promise<GroupMessagesMigrationResult> {
-  const result: GroupMessagesMigrationResult = { migrated: {}, unowned: [], deferred: [] };
+  const result: GroupMessagesMigrationResult = {
+    migrated: {},
+    unowned: [],
+    deferred: [],
+    prunedActivity: 0,
+  };
   const keys = await AsyncStorage.getAllKeys();
   const legacy = keys.flatMap((key) => {
     const groupId = legacyGroupIdFromKey(key);
     return groupId ? [{ key, groupId }] : [];
   });
-  if (legacy.length === 0) return result;
+  const pruneActivity = !keys.includes(GROUP_ACTIVITY_PRUNED_KEY);
+  if (legacy.length === 0 && !pruneActivity) return result;
 
   const listOwners = await groupOwnersFromLists(keys);
-  for (const { key, groupId } of legacy) {
+  const marmotCache = new Map<string, Promise<string[]>>();
+  /** Owners of a group; throws when the Marmot lookup fails. */
+  const ownersOf = async (groupId: string): Promise<Set<string>> => {
     const owners = new Set(listOwners.get(groupId) ?? []);
     if (groupId.startsWith(MARMOT_PREFIX)) {
-      try {
-        const mlsId = groupId.slice(MARMOT_PREFIX.length).toLowerCase();
-        for (const pk of await deps.marmotOwners(mlsId)) {
-          const owner = normaliseGroupOwner(pk);
-          if (owner) owners.add(owner);
-        }
-      } catch (e) {
-        if (__DEV__) console.warn(`[GroupHistory] Marmot owner lookup failed for ${groupId}:`, e);
-        result.deferred.push(groupId);
-        continue;
+      const mlsId = groupId.slice(MARMOT_PREFIX.length).toLowerCase();
+      let lookup = marmotCache.get(mlsId);
+      if (!lookup) {
+        lookup = deps.marmotOwners(mlsId);
+        marmotCache.set(mlsId, lookup);
       }
+      for (const pk of await lookup) {
+        const owner = normaliseGroupOwner(pk);
+        if (owner) owners.add(owner);
+      }
+    }
+    return owners;
+  };
+
+  for (const { key, groupId } of legacy) {
+    let owners: Set<string>;
+    try {
+      owners = await ownersOf(groupId);
+    } catch (e) {
+      if (__DEV__) console.warn(`[GroupHistory] Marmot owner lookup failed for ${groupId}:`, e);
+      result.deferred.push(groupId);
+      continue;
     }
     if (owners.size === 0) {
       result.unowned.push(groupId);
@@ -151,12 +177,56 @@ export async function runGroupMessagesMigration(
     await AsyncStorage.removeItem(key);
     result.migrated[groupId] = copiedTo;
   }
+
+  if (pruneActivity) {
+    try {
+      result.prunedActivity = await pruneForeignActivity(keys, ownersOf);
+      await AsyncStorage.setItem(GROUP_ACTIVITY_PRUNED_KEY, '1');
+    } catch (e) {
+      // Leave the flag unset: the prune retries next launch.
+      if (__DEV__) console.warn('[GroupHistory] activity prune failed:', e);
+    }
+  }
+
   if (result.unowned.length > 0 || result.deferred.length > 0) {
     console.warn(
       `[GroupHistory] kept ${result.unowned.length} unowned and ${result.deferred.length} deferred legacy group log(s) on disk (not shown)`,
     );
   }
   return result;
+}
+
+/**
+ * Drop rollup entries for groups the rollup's account doesn't own. All owner
+ * lookups run before anything is written, so a failure changes nothing.
+ * Entries are a rebuildable cache: a wrongly dropped one only costs a
+ * placeholder preview until the group's log is read again.
+ */
+async function pruneForeignActivity(
+  keys: readonly string[],
+  ownersOf: (groupId: string) => Promise<Set<string>>,
+): Promise<number> {
+  const activityKeys = keys.filter((k) => ACTIVITY_KEY.test(k));
+  if (activityKeys.length === 0) return 0;
+  const writes: [string, string][] = [];
+  let pruned = 0;
+  for (const [key, raw] of await AsyncStorage.multiGet(activityKeys)) {
+    const owner = ACTIVITY_KEY.exec(key)?.[1];
+    const parsed = parseJson(raw);
+    if (!owner || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const kept: Record<string, unknown> = {};
+    let dropped = 0;
+    for (const [groupId, entry] of Object.entries(parsed as Record<string, unknown>)) {
+      if ((await ownersOf(groupId)).has(owner)) kept[groupId] = entry;
+      else dropped += 1;
+    }
+    if (dropped > 0) {
+      writes.push([key, JSON.stringify(kept)]);
+      pruned += dropped;
+    }
+  }
+  if (writes.length > 0) await AsyncStorage.multiSet(writes);
+  return pruned;
 }
 
 let migration: Promise<void> | null = null;
@@ -171,7 +241,11 @@ export function ensureGroupMessagesMigrated(): Promise<void> {
     migration = runGroupMessagesMigration().then(
       (r) => {
         const n = Object.keys(r.migrated).length;
-        if (__DEV__ && n > 0) console.log(`[GroupHistory] migrated ${n} group log(s) per account`);
+        if (__DEV__ && (n > 0 || r.prunedActivity > 0)) {
+          console.log(
+            `[GroupHistory] migrated ${n} group log(s) per account; pruned ${r.prunedActivity} foreign activity entr(ies)`,
+          );
+        }
       },
       (e) => {
         console.warn('[GroupHistory] legacy migration failed; retrying next launch:', e);
