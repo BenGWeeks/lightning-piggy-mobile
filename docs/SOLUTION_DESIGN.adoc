@@ -96,7 +96,9 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chai
 
 1. Generate random 32-byte preimage + SHA-256 hash
 2. Generate temporary secp256k1 claim keypair
-3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`, `referralId`
+3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `referralId` and either:
+   - `onchainAmount` = recipient amount + claim-fee budget — the Send sheet (#1175). The recipient gets exactly what was asked; Boltz's fee, its lockup fee and our claim fee all land on the invoice (`utils/reverseSwapAmounts.ts` mirrors Boltz's `calculateReverseSwapAmounts` so the invoice amount can be verified exactly). Boltz echoes no `onchainAmount` in this mode; the lockup is verified against ours. The claim pays the recipient exactly when the budget still covers the live claim fee, otherwise the live fee comes out of the lockup.
+   - `invoiceAmount` — Move to an own on-chain wallet; fees come off the on-chain side.
 4. Boltz returns a Lightning invoice + swap tree (Taproot HTLC scripts)
 5. **Persist** the full swap state to SecureStore (preimage, claimPrivateKey, lockupAddress, destinationAddress, refundPublicKey, swapTree) AND register the swap ID in `swapRecoveryService` — see "Persistence + Recovery contract" below
 6. Pay the Lightning invoice via NWC
