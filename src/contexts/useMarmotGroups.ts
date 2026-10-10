@@ -3,15 +3,22 @@ import { useCallback, useEffect, useMemo } from 'react';
 
 import {
   appendGroupMessage,
+  loadGroupMessages,
   removeGroupMessagesWhere,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
-import { DeletionLedger, parseMarmotDeletion } from '../services/marmotDeletions';
+import {
+  DeletionLedger,
+  mayDelete,
+  parseMarmotDeletion,
+  type MarmotDeletion,
+} from '../services/marmotDeletions';
 import {
   isMarmotMessageKind,
   marmotRumorToGroupMessage,
   storedMarmotContent,
 } from '../services/marmotInbox';
+import { rememberMarmotDeletions, isMarmotDeleted } from '../services/marmotDeletionStore';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { requireMarmotSession } from '../services/marmotSend';
 import {
@@ -63,6 +70,7 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       return;
     }
     const openedAtSec = Math.floor(Date.now() / 1000);
+    let disposed = false;
     let pending: MarmotMessageEvent[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribeMessages: (() => void) | null = null;
@@ -86,14 +94,19 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
     // "Delete for everyone": what has been deleted per group (arrival order
     // and history replays can put a delete before its target).
     const ledger = new DeletionLedger();
+    // Retain authority until durable writes finish, even if the cache evicts it.
+    const unpersisted = new Set<MarmotMessageEvent>();
     const writeBatch = async (batch: MarmotMessageEvent[]) => {
       const byGroup = new Map<string, GroupMessage[]>();
-      const deletedIn = new Set<string>();
+      const deletedIn = new Map<string, MarmotDeletion[]>();
       for (const { group, rumor, mediaKeys } of batch) {
         const list = byGroup.get(group.id) ?? [];
         byGroup.set(group.id, list);
-        if (parseMarmotDeletion(rumor, group)) {
-          deletedIn.add(group.id);
+        const deletion = parseMarmotDeletion(rumor, group);
+        if (deletion) {
+          const instructions = deletedIn.get(group.id) ?? [];
+          instructions.push(deletion);
+          deletedIn.set(group.id, instructions);
           continue;
         }
         const message = marmotRumorToGroupMessage(rumor, mediaKeys);
@@ -101,16 +114,23 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
         if (!ledger.blocks(message.id, message.senderPubkey, group.id)) list.push(message);
       }
       for (const [groupId, messages] of byGroup) {
+        const deletions = deletedIn.get(groupId) ?? [];
+        await rememberMarmotDeletions(groupId, deletions);
+        for (const event of batch) if (event.group.id === groupId) unpersisted.delete(event);
         for (const m of messages) await appendGroupMessage(groupId, m);
         // Erase what's already stored (earlier batches / sessions).
         if (deletedIn.has(groupId)) {
           await removeGroupMessagesWhere(groupId, (m) =>
-            ledger.blocks(m.id, m.senderPubkey, groupId),
+            deletions.some((d) => d.targets.includes(m.id) && mayDelete(d, m.senderPubkey)),
           );
         }
         if (messages.length > 0 || deletedIn.has(groupId)) {
-          notifyGroupMessage(groupId, messages[messages.length - 1]);
+          const remaining = await loadGroupMessages(groupId);
+          if (!disposed) notifyGroupMessage(groupId, remaining[remaining.length - 1]);
         }
+      }
+      for (const event of batch) {
+        if (isMarmotMessageKind(event.rumor.kind)) notifyMessage(event);
       }
     };
 
@@ -119,18 +139,25 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       const deletion = parseMarmotDeletion(event.rumor, event.group);
       if (deletion) {
         ledger.add(deletion, event.group.id);
+        unpersisted.add(event);
         pending.push(event);
         if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
-        // A notification already showing the deleted text goes too (only a
-        // live deletion can have one — a replayed old one has long gone).
-        if (event.rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
-          for (const messageId of deletion.targets) void dismissNotificationsFor({ messageId });
-        }
+        for (const messageId of deletion.targets)
+          void dismissNotificationsFor({
+            messageId,
+            owner: pubkey,
+            marmotGroupId: event.group.id,
+            ...(deletion.anyAuthor ? {} : { senderPubkey: deletion.deleter }),
+          });
         return;
       }
       if (!isMarmotMessageKind(event.rumor.kind)) return; // plumbing, not a message
       pending.push(event);
       if (!timer) timer = setTimeout(() => void flush(), FLUSH_MS);
+    };
+
+    const notifyMessage = (event: MarmotMessageEvent) => {
+      if (disposed) return;
       const { rumor, group } = event;
       const fromMe = rumor.pubkey.toLowerCase() === pubkey.toLowerCase();
       if (ledger.blocks(rumor.id, rumor.pubkey, group.id)) return; // already deleted
@@ -143,7 +170,25 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
           threadId: group.id,
           title: group.name || 'New group message',
           body: text,
-          data: { groupId: group.id, messageId: rumor.id },
+          data: {
+            groupId: group.id,
+            messageId: rumor.id,
+            marmotGroupId: group.id,
+            senderPubkey: rumor.pubkey,
+          },
+          shouldSuppress: async () =>
+            disposed ||
+            ledger.blocks(rumor.id, rumor.pubkey, group.id) ||
+            [...unpersisted].some((event) => {
+              const deletion = parseMarmotDeletion(event.rumor, event.group);
+              return (
+                event.group.id === group.id &&
+                deletion &&
+                deletion.targets.includes(rumor.id) &&
+                mayDelete(deletion, rumor.pubkey)
+              );
+            }) ||
+            (await isMarmotDeleted(group.id, rumor.id, rumor.pubkey)),
           owner: pubkey,
         });
       }
@@ -160,6 +205,7 @@ export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
       unsubscribeMessages = session.subscribe({ onMessage, onGroupsChanged: setSummaries });
     });
     return () => {
+      disposed = true;
       unsubscribeSession();
       unsubscribeMessages?.();
       if (timer) clearTimeout(timer);

@@ -83,13 +83,16 @@ export const mayDelete = (d: MarmotDeletion, sender: string): boolean =>
  * Scoped by group: an event id is only deletable by a deletion sent into the
  * group the message lives in (an admin of one group has no say in another). */
 export class DeletionLedger {
-  private readonly byTarget = new Map<string, { deleter: string; anyAuthor: boolean }>();
+  private readonly byTarget = new Map<string, { deleters: Set<string>; anyAuthor: boolean }>();
 
   add(deletion: MarmotDeletion, groupId: string): void {
     for (const id of deletion.targets) {
       const target = `${groupId}:${id}`;
+      const entry = this.byTarget.get(target) ?? { deleters: new Set<string>(), anyAuthor: false };
+      entry.deleters.add(deletion.deleter);
+      entry.anyAuthor ||= deletion.anyAuthor;
       this.byTarget.delete(target); // re-insert → newest in eviction order
-      this.byTarget.set(target, { deleter: deletion.deleter, anyAuthor: deletion.anyAuthor });
+      this.byTarget.set(target, entry);
     }
     while (this.byTarget.size > LEDGER_CAP) {
       this.byTarget.delete(this.byTarget.keys().next().value as string);
@@ -99,6 +102,6 @@ export class DeletionLedger {
   /** True when `messageId`, authored by `sender`, has been validly deleted. */
   blocks(messageId: string, sender: string, groupId: string): boolean {
     const entry = this.byTarget.get(`${groupId}:${messageId.toLowerCase()}`);
-    return !!entry && (entry.anyAuthor || entry.deleter === sender.toLowerCase());
+    return !!entry && (entry.anyAuthor || entry.deleters.has(sender.toLowerCase()));
   }
 }

@@ -117,3 +117,14 @@ describe('DeletionLedger', () => {
     expect(ledger.blocks(id(2099), PEER, 'g1')).toBe(true);
   });
 });
+
+it('accumulates different authors and never revokes admin authority', () => {
+  const ledger = new DeletionLedger();
+  ledger.add({ targets: [MSG], deleter: PEER, anyAuthor: false }, 'g');
+  ledger.add({ targets: [MSG], deleter: ME, anyAuthor: false }, 'g');
+  expect(ledger.blocks(MSG, PEER, 'g')).toBe(true);
+  expect(ledger.blocks(MSG, ADMIN, 'g')).toBe(false);
+  ledger.add({ targets: [MSG], deleter: ADMIN, anyAuthor: true }, 'g');
+  ledger.add({ targets: [MSG], deleter: ME, anyAuthor: false }, 'g');
+  expect(ledger.blocks(MSG, 'another-author', 'g')).toBe(true);
+});

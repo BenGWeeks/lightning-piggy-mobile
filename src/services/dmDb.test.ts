@@ -375,12 +375,14 @@ describe('dmDb', () => {
 
   describe('deleteMarmotMessages', () => {
     it('deletes Marmot rows by id in the conversation, only those the sender wrote', async () => {
-      await deleteMarmotMessages(OWNER, 'convA', ['m1', 'm2'], 'peer');
+      mockExecute.mockResolvedValueOnce(rowsResult([{ event_id: 'm1' }]));
+      expect(await deleteMarmotMessages(OWNER, 'convA', ['m1', 'm2'], 'peer')).toEqual(['m1']);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain("protocol = 'marmot'");
       expect(sql).toContain('conversation = ?');
       expect(sql).toContain('sender = ?');
       expect(sql).toContain('event_id IN (?,?)');
+      expect(sql).toContain('RETURNING event_id');
       expect(params).toEqual([OWNER, 'convA', 'peer', 'm1', 'm2']);
     });
     it('an admin removal (null sender) takes any member’s message', async () => {

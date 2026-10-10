@@ -756,3 +756,77 @@ describe('notification watcher pushes', () => {
     expect(await dismissNotificationsFor({ groupId: 'g1' })).toBe(0);
   });
 });
+
+it('suppresses creation paused before scheduling when an authorized scoped deletion arrives', async () => {
+  let release!: (value: boolean) => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  const firing = fireMessageNotification({
+    kind: 'group',
+    threadId: 'g',
+    title: 'Group',
+    body: 'deleted text',
+    owner: 'alice',
+    data: { messageId: 'm', marmotGroupId: 'g', senderPubkey: 'bob' },
+    shouldSuppress: () => {
+      entered();
+      return gate;
+    },
+  });
+  await started;
+  await dismissNotificationsFor({
+    messageId: 'm',
+    owner: 'alice',
+    marmotGroupId: 'g',
+    senderPubkey: 'bob',
+  });
+  release(false);
+  expect(await firing).toBeNull();
+  expect(mockScheduleNotificationAsync).not.toHaveBeenCalled();
+});
+
+it.each(['bob', 'mallory', 'other-account', 'other-group'])(
+  'handles an in-flight schedule with cancellation scope %s',
+  async (scope) => {
+    await setLockScreenContentEnabled(true);
+    let release!: (id: string) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    mockScheduleNotificationAsync.mockImplementationOnce(() => {
+      entered();
+      return new Promise<string>((resolve) => {
+        release = resolve;
+      });
+    });
+    const firing = fireMessageNotification({
+      kind: 'group',
+      threadId: 'g',
+      title: 'Group',
+      body: 'deleted text',
+      owner: 'alice',
+      data: { messageId: 'm', marmotGroupId: 'g', senderPubkey: 'bob' },
+    });
+    await started;
+    mockCancel.mockClear();
+    mockDismiss.mockClear();
+    await dismissNotificationsFor({
+      messageId: 'm',
+      owner: scope === 'other-account' ? scope : 'alice',
+      marmotGroupId: scope === 'other-group' ? scope : 'g',
+      senderPubkey: scope === 'mallory' ? scope : 'bob',
+    });
+    release('late-notification');
+    expect(await firing).toBe(scope === 'bob' ? null : 'late-notification');
+    if (scope === 'bob') {
+      expect(mockCancel).toHaveBeenCalledWith('late-notification');
+      expect(mockDismiss).toHaveBeenCalledWith('late-notification');
+    } else expect(mockCancel).not.toHaveBeenCalledWith('late-notification');
+  },
+);

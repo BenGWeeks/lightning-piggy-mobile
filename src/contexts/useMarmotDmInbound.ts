@@ -8,8 +8,14 @@ import {
   upsertDmMessages,
   type DmMessageRow,
 } from '../services/dmDb';
+import { rememberMarmotDeletions, isMarmotDeleted } from '../services/marmotDeletionStore';
 import { rowsToInboxEntries } from '../services/dmInbox';
-import { DeletionLedger, mayDelete, parseMarmotDeletion } from '../services/marmotDeletions';
+import {
+  DeletionLedger,
+  mayDelete,
+  parseMarmotDeletion,
+  type MarmotDeletion,
+} from '../services/marmotDeletions';
 import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { dismissNotificationsFor, fireMessageNotification } from '../services/notificationService';
@@ -37,42 +43,59 @@ export function useMarmotDmInbound(
     // Builds before the filter stored push-token / reaction events as rows.
     void deleteMarmotRowsOfKinds(pubkey, MARMOT_NON_MESSAGE_KINDS).catch(() => undefined);
     const openedAtSec = Math.floor(Date.now() / 1000);
+    let disposed = false;
     let rows: DmMessageRow[] = [];
+    const groupsByMessage = new WeakMap<DmMessageRow, string>();
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribeMessages: (() => void) | null = null;
     // "Delete for everyone" (kind 5): what has been deleted, and the removals
     // still to apply to the store. Flushes run one after another so a removal
     // always lands after the upsert of a row it targets.
     const ledger = new DeletionLedger();
+    const unpersisted = new Set<{ groupId: string; deletion: MarmotDeletion }>();
     // Keyed `peer|deleter`: one store pass per pair, however many ids a replay carries.
-    let removals = new Map<string, { peer: string; sender: string | null; ids: Set<string> }>();
+    let removals = new Map<
+      string,
+      { peer: string; groupId: string; sender: string | null; ids: Set<string> }
+    >();
     let chain: Promise<void> = Promise.resolve();
 
     const applyRemovals = async (batch: typeof removals) => {
       for (const { peer, sender, ids: idSet } of batch.values()) {
         const ids = [...idSet];
         try {
-          await deleteMarmotMessages(pubkey, peer, ids, sender);
-          // The Messages list: drop the entry, then fall back to the thread's
-          // newest remaining message so the preview never shows deleted text.
-          const gone = new Set(ids);
-          setDmInbox((prev) => prev.filter((e) => !(e.protocol === 'marmot' && gone.has(e.id))));
+          const deleted = await deleteMarmotMessages(pubkey, peer, ids, sender);
           const [latest] = await getConversationMessages(pubkey, peer, {
             limit: 1,
             protocol: 'marmot',
           });
-          if (latest) {
-            const [entry] = rowsToInboxEntries([latest]);
-            setDmInbox((prev) =>
-              prev.some((e) => e.partnerPubkey === peer && e.protocol === 'marmot')
-                ? prev
-                : [entry, ...prev],
+          if (disposed) continue;
+          const gone = new Set(deleted);
+          const entry = latest ? rowsToInboxEntries([latest])[0] : undefined;
+          setDmInbox((prev) => {
+            if (disposed) return prev;
+            const remaining = prev.filter(
+              (e) =>
+                !(
+                  e.protocol === 'marmot' &&
+                  e.partnerPubkey === peer &&
+                  (gone.has(e.id) || (entry && e.createdAt <= entry.createdAt))
+                ),
             );
-          }
+            return entry
+              ? [
+                  entry,
+                  ...remaining.filter(
+                    (e) =>
+                      !(e.protocol === 'marmot' && e.partnerPubkey === peer && e.id === entry.id),
+                  ),
+                ]
+              : remaining;
+          });
         } catch (e) {
           if (__DEV__) console.warn('[Marmot] DM delete failed:', e);
         }
-        notifyDmMessage(peer);
+        if (!disposed) notifyDmMessage(peer);
       }
     };
 
@@ -80,36 +103,49 @@ export function useMarmotDmInbound(
       timer = null;
       const batch = rows;
       rows = [];
+      const deletionBatch = [...unpersisted];
       const removalBatch = removals;
       removals = new Map();
       if (batch.length === 0 && removalBatch.size === 0) return;
       // An open thread re-reads the store on notify, so notify only once the
       // batch has committed (else it can re-read stale rows and miss it).
       const peers = new Set(batch.map((r) => r.conversation));
-      chain = chain.then(async () => {
-        if (batch.length > 0) {
-          await upsertDmMessages(batch)
-            .catch((e) => {
-              if (__DEV__) console.warn('[Marmot] DM store write failed:', e);
-            })
-            .then(() => peers.forEach((peer) => notifyDmMessage(peer)));
-        }
-        await applyRemovals(removalBatch);
-      });
-      if (batch.length === 0) return;
-      const entries: DmInboxEntry[] = batch.map((r) => ({
-        id: r.eventId,
-        partnerPubkey: r.conversation,
-        fromMe: r.fromMe,
-        createdAt: r.createdAt,
-        text: dmRowPreview(r.content, r.wireKind),
-        renderText: r.content,
-        wireKind: r.wireKind,
-        rumorId: r.rumorId,
-        protocol: 'marmot',
-      }));
-      const ids = new Set(entries.map((e) => e.id));
-      setDmInbox((prev) => [...entries, ...prev.filter((e) => !ids.has(e.id))]);
+      chain = chain
+        .then(async () => {
+          // Persist each batch's instructions before testing incoming rows. Cache
+          // eviction must never erase a queued deletion or permit a later replay.
+          for (const { groupId, sender, ids } of removalBatch.values()) {
+            await rememberMarmotDeletions(`${pubkey}:${groupId}`, [
+              {
+                targets: [...ids],
+                deleter: sender ?? '',
+                anyAuthor: sender === null,
+              },
+            ]);
+          }
+          for (const deletion of deletionBatch) unpersisted.delete(deletion);
+          const accepted: DmMessageRow[] = [];
+          for (const row of batch) {
+            const groupId = groupsByMessage.get(row)!;
+            if (!(await isMarmotDeleted(`${pubkey}:${groupId}`, row.eventId, row.sender)))
+              accepted.push(row);
+          }
+          if (accepted.length) await upsertDmMessages(accepted);
+          if (!disposed) {
+            const entries = rowsToInboxEntries(accepted);
+            const ids = new Set(entries.map((e) => e.id));
+            if (entries.length)
+              setDmInbox((prev) =>
+                disposed ? prev : [...entries, ...prev.filter((e) => !ids.has(e.id))],
+              );
+            peers.forEach((peer) => notifyDmMessage(peer));
+            for (const row of accepted) notifyMessage(row, groupsByMessage.get(row)!);
+          }
+          await applyRemovals(removalBatch);
+        })
+        .catch((e) => {
+          if (__DEV__) console.warn('[Marmot] DM batch failed:', e);
+        });
     };
 
     const onMessage = (event: MarmotMessageEvent) => {
@@ -117,21 +153,34 @@ export function useMarmotDmInbound(
       const peer = event.group.memberPubkeys[0];
       if (deletion && event.group.isDm && peer) {
         ledger.add(deletion, event.group.id);
+        unpersisted.add({ groupId: event.group.id, deletion });
         // Not yet written: drop it from the pending batch.
         rows = rows.filter(
-          (r) => !(deletion.targets.includes(r.eventId) && mayDelete(deletion, r.sender)),
+          (r) =>
+            !(
+              r.conversation === peer &&
+              deletion.targets.includes(r.eventId) &&
+              mayDelete(deletion, r.sender)
+            ),
         );
         // An admin removal may take either member's message; else only the deleter's own.
         const sender = deletion.anyAuthor ? null : deletion.deleter;
-        const key = `${peer}|${sender}`;
-        const pending = removals.get(key) ?? { peer, sender, ids: new Set() };
+        const key = `${event.group.id}|${peer}|${sender}`;
+        const pending = removals.get(key) ?? {
+          peer,
+          groupId: event.group.id,
+          sender,
+          ids: new Set(),
+        };
         deletion.targets.forEach((id) => pending.ids.add(id));
         removals.set(key, pending);
-        // A notification already showing the deleted text goes too (only a
-        // live deletion can have one — a replayed old one has long gone).
-        if (event.rumor.created_at >= openedAtSec - NOTIFY_SKEW_SEC) {
-          for (const messageId of deletion.targets) void dismissNotificationsFor({ messageId });
-        }
+        for (const messageId of deletion.targets)
+          void dismissNotificationsFor({
+            messageId,
+            owner: pubkey,
+            marmotGroupId: event.group.id,
+            ...(deletion.anyAuthor ? {} : { senderPubkey: deletion.deleter }),
+          });
         if (!timer) timer = setTimeout(flush, FLUSH_MS);
         return;
       }
@@ -139,8 +188,12 @@ export function useMarmotDmInbound(
       if (!row) return;
       // Deleted already (the delete arrived first, or the history replays).
       if (ledger.blocks(row.eventId, row.sender, event.group.id)) return;
+      groupsByMessage.set(row, event.group.id);
       rows.push(row);
       if (!timer) timer = setTimeout(flush, FLUSH_MS);
+    };
+
+    const notifyMessage = (row: DmMessageRow, groupId: string) => {
       if (!row.fromMe && row.createdAt >= openedAtSec - NOTIFY_SKEW_SEC) {
         void fireMessageNotification({
           kind: 'dm',
@@ -151,8 +204,20 @@ export function useMarmotDmInbound(
             conversationPubkey: row.conversation,
             conversationProtocol: 'marmot',
             messageId: row.eventId,
+            marmotGroupId: groupId,
+            senderPubkey: row.sender,
           },
           owner: pubkey,
+          shouldSuppress: async () =>
+            disposed ||
+            ledger.blocks(row.eventId, row.sender, groupId) ||
+            [...unpersisted].some(
+              (pending) =>
+                pending.groupId === groupId &&
+                pending.deletion.targets.includes(row.eventId) &&
+                mayDelete(pending.deletion, row.sender),
+            ) ||
+            (await isMarmotDeleted(`${pubkey}:${groupId}`, row.eventId, row.sender)),
         });
       }
     };
@@ -163,6 +228,7 @@ export function useMarmotDmInbound(
         session && session.pubkey === pubkey ? session.subscribe({ onMessage }) : null;
     });
     return () => {
+      disposed = true;
       unsubscribeSession();
       unsubscribeMessages?.();
       if (timer) clearTimeout(timer);

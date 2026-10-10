@@ -126,6 +126,8 @@ export interface NotificationData {
   /** Marmot app-event id of the message shown — lets a "delete for everyone"
    * clear the tray notification that still carries its text. */
   messageId?: string;
+  marmotGroupId?: string;
+  senderPubkey?: string;
 }
 
 /** Typed payload every caller passes to `fireNotification`. Centralising
@@ -145,6 +147,8 @@ export interface NotificationPayload {
   /** Stable source id (e.g. a payment hash) so a retried notification
    * doesn't add a second history row. */
   historyKey?: string;
+  /** Rechecked immediately before scheduling, including durable deletion state. */
+  shouldSuppress?: () => Promise<boolean>;
 }
 
 let initialisingPromise: Promise<void> | null = null;
@@ -397,7 +401,14 @@ function genericFor(kind: NotificationKind): { title: string; body: string } {
  * after init), INCLUDING the background sync task — it only ever
  * *checks* permission (`hasNotificationPermission`), never prompts.
  */
+const inFlightNotifications = new Set<{ data: NotificationData; cancelled: boolean }>();
+
 export async function fireNotification(payload: NotificationPayload): Promise<string | null> {
+  const flight = {
+    data: { ...payload.data, owner: payload.owner ?? getActivePubkey() ?? undefined },
+    cancelled: false,
+  };
+  inFlightNotifications.add(flight);
   try {
     // In-app history (#1143) — recorded even without OS permission, so the
     // Notifications screen still lists what happened.
@@ -426,6 +437,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     const presented = lockScreenContent ? payload : { ...payload, ...genericFor(payload.kind) };
     const quiet = payload.data?.quiet === true;
 
+    if ((await payload.shouldSuppress?.()) || flight.cancelled) return null;
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: presented.title,
@@ -454,11 +466,20 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
             }
           : null,
     });
+    if (flight.cancelled) {
+      await Promise.all([
+        Notifications.cancelScheduledNotificationAsync(id),
+        Notifications.dismissNotificationAsync(id),
+      ]);
+      return null;
+    }
     if (owner) await markNotificationDelivered(owner, historyId);
     return id;
   } catch (err) {
     if (__DEV__) console.warn('[notificationService] fireNotification failed:', err);
     return null;
+  } finally {
+    inFlightNotifications.delete(flight);
   }
 }
 
@@ -527,7 +548,7 @@ export type NotificationTarget =
    * shows the real Marmot message. */
   | { marmotPushAlerts: true }
   /** The notification showing one message's text (Marmot, by app-event id). */
-  | { messageId: string };
+  | { messageId: string; owner?: string; marmotGroupId?: string; senderPubkey?: string };
 
 /** Pure: does a delivered notification's `data` belong to `target`? */
 export function notificationMatchesTarget(
@@ -535,6 +556,14 @@ export function notificationMatchesTarget(
   target: NotificationTarget,
 ): boolean {
   if (!data) return false;
+  if ('messageId' in target)
+    return (
+      data.messageId === target.messageId &&
+      (!target.owner || data.owner === target.owner) &&
+      (!target.marmotGroupId || data.marmotGroupId === target.marmotGroupId) &&
+      (!target.senderPubkey ||
+        data.senderPubkey?.toLowerCase() === target.senderPubkey.toLowerCase())
+    );
   if ('conversationPubkey' in target)
     return (
       data.conversationPubkey?.toLowerCase() === target.conversationPubkey.toLowerCase() &&
@@ -546,7 +575,6 @@ export function notificationMatchesTarget(
   if ('owner' in target) return data.owner?.toLowerCase() === target.owner.toLowerCase();
   if ('historyId' in target) return data.historyId === target.historyId;
   if ('marmotPushAlerts' in target) return data.marmotPush === true;
-  if ('messageId' in target) return data.messageId === target.messageId;
   return (data.kind === 'dm' || data.kind === 'group') && !data.conversationPubkey && !data.groupId;
 }
 
@@ -600,6 +628,9 @@ export function markHistoryReadFor(target: NotificationTarget): Promise<void> {
  * foreground-service notification. Best-effort: returns how many it cleared.
  */
 export async function dismissNotificationsFor(target: NotificationTarget): Promise<number> {
+  for (const flight of inFlightNotifications) {
+    if (notificationMatchesTarget(flight.data, target)) flight.cancelled = true;
+  }
   try {
     const matching = (request: Notifications.NotificationRequest) => {
       if (request.identifier === FOREGROUND_SERVICE_NOTIFICATION_ID) return false;
@@ -683,6 +714,7 @@ export async function fireMessageNotification(opts: {
   body: string;
   data: NotificationData;
   owner?: string;
+  shouldSuppress?: () => Promise<boolean>;
 }): Promise<string | null> {
   const marmot = isMarmotMessage(opts.data);
   if (isThreadActivelyViewed(opts.threadId)) {
@@ -696,6 +728,7 @@ export async function fireMessageNotification(opts: {
     body: opts.body,
     data: opts.data,
     owner: opts.owner,
+    shouldSuppress: opts.shouldSuppress,
   });
   if (id && marmot) {
     lastMarmotNotifiedAt = Date.now();

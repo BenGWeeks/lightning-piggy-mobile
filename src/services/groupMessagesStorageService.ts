@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mutateGroupStorage } from './groupStorageQueue';
+import { isMarmotDeleted } from './marmotDeletionStore';
 
 /**
  * In-thread message stored locally, per-group. We persist what the user
@@ -50,49 +52,55 @@ export async function appendGroupMessage(
   groupId: string,
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
-  const existing = await loadGroupMessages(groupId);
-  const map = new Map<string, GroupMessage>();
-  for (const m of existing) map.set(m.id, m);
+  return mutateGroupStorage(groupId, async () => {
+    const deleted = await isMarmotDeleted(groupId, message.id, message.senderPubkey);
+    const existing = await loadGroupMessages(groupId);
+    if (deleted) return existing;
+    const map = new Map<string, GroupMessage>();
+    for (const m of existing) map.set(m.id, m);
 
-  // When a real (non-local_) event arrives, look for a pending optimistic
-  // local_* row from the same sender with identical text and a close-enough
-  // createdAt — and replace it with the real one rather than appending
-  // alongside. Pick the closest createdAt match so back-to-back identical
-  // sends are matched in order even when relay echoes arrive out-of-order.
-  // senderPubkey is lowercased on both sides because inbound rumors are
-  // lowercased upstream while optimistic locals may use the viewer pubkey
-  // as-is.
-  if (!message.id.startsWith('local_')) {
-    const targetSender = message.senderPubkey.toLowerCase();
-    let bestKey: string | null = null;
-    let bestDelta = Infinity;
-    for (const [k, m] of map) {
-      if (!k.startsWith('local_')) continue;
-      if (m.senderPubkey.toLowerCase() !== targetSender) continue;
-      if (m.text !== message.text) continue;
-      const delta = Math.abs(m.createdAt - message.createdAt);
-      if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        bestKey = k;
+    // When a real (non-local_) event arrives, look for a pending optimistic
+    // local_* row from the same sender with identical text and a close-enough
+    // createdAt — and replace it with the real one rather than appending
+    // alongside. Pick the closest createdAt match so back-to-back identical
+    // sends are matched in order even when relay echoes arrive out-of-order.
+    // senderPubkey is lowercased on both sides because inbound rumors are
+    // lowercased upstream while optimistic locals may use the viewer pubkey
+    // as-is.
+    if (!message.id.startsWith('local_')) {
+      const targetSender = message.senderPubkey.toLowerCase();
+      let bestKey: string | null = null;
+      let bestDelta = Infinity;
+      for (const [k, m] of map) {
+        if (!k.startsWith('local_')) continue;
+        if (m.senderPubkey.toLowerCase() !== targetSender) continue;
+        if (m.text !== message.text) continue;
+        const delta = Math.abs(m.createdAt - message.createdAt);
+        if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestKey = k;
+        }
       }
+      if (bestKey !== null) map.delete(bestKey);
     }
-    if (bestKey !== null) map.delete(bestKey);
-  }
 
-  // Dedup on id; keep the newer copy when ids collide (createdAt wins).
-  const prior = map.get(message.id);
-  if (!prior || prior.createdAt < message.createdAt) {
-    map.set(message.id, message);
-  }
-  const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-  const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
-  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(capped));
-  return capped;
+    // Dedup on id; keep the newer copy when ids collide (createdAt wins).
+    const prior = map.get(message.id);
+    if (!prior || prior.createdAt < message.createdAt) {
+      map.set(message.id, message);
+    }
+    const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+    const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
+    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(capped));
+    return capped;
+  });
 }
 
 export async function clearGroupMessages(groupId: string): Promise<void> {
-  await AsyncStorage.removeItem(KEY(groupId));
+  return mutateGroupStorage(groupId, async () => {
+    await AsyncStorage.removeItem(KEY(groupId));
+  });
 }
 
 /**
@@ -121,11 +129,13 @@ export async function removeGroupMessage(
   groupId: string,
   messageId: string,
 ): Promise<GroupMessage[]> {
-  const existing = await loadGroupMessages(groupId);
-  const filtered = existing.filter((m) => m.id !== messageId);
-  if (filtered.length === existing.length) return existing;
-  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
-  return filtered;
+  return mutateGroupStorage(groupId, async () => {
+    const existing = await loadGroupMessages(groupId);
+    const filtered = existing.filter((m) => m.id !== messageId);
+    if (filtered.length === existing.length) return existing;
+    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+    return filtered;
+  });
 }
 
 /**
@@ -137,11 +147,13 @@ export async function removeGroupMessagesWhere(
   groupId: string,
   shouldRemove: (message: GroupMessage) => boolean,
 ): Promise<GroupMessage[]> {
-  const existing = await loadGroupMessages(groupId);
-  const filtered = existing.filter((m) => !shouldRemove(m));
-  if (filtered.length === existing.length) return existing;
-  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
-  return filtered;
+  return mutateGroupStorage(groupId, async () => {
+    const existing = await loadGroupMessages(groupId);
+    const filtered = existing.filter((m) => !shouldRemove(m));
+    if (filtered.length === existing.length) return existing;
+    await AsyncStorage.setItem(KEY(groupId), JSON.stringify(filtered));
+    return filtered;
+  });
 }
 
 // Scan AsyncStorage for every blob under GROUP_MESSAGES_KEY_PREFIX and return

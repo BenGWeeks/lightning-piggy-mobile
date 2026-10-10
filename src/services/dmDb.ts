@@ -478,18 +478,21 @@ export async function deleteMarmotMessages(
   conversation: string,
   messageIds: readonly string[],
   sender: string | null,
-): Promise<void> {
-  if (messageIds.length === 0) return;
+): Promise<string[]> {
+  if (messageIds.length === 0) return [];
   const db = await getLocalDb();
+  const deleted: string[] = [];
   for (let i = 0; i < messageIds.length; i += VAR_CHUNK) {
     const slice = messageIds.slice(i, i + VAR_CHUNK);
-    await db.execute(
+    const result = await db.execute(
       `DELETE FROM dm_messages WHERE owner = ? AND protocol = 'marmot' AND conversation = ?
          ${sender === null ? '' : 'AND sender = ?'}
-         AND event_id IN (${slice.map(() => '?').join(',')});`,
+         AND event_id IN (${slice.map(() => '?').join(',')}) RETURNING event_id;`,
       [owner, conversation, ...(sender === null ? [] : [sender]), ...slice],
     );
+    deleted.push(...(result.rows ?? []).map((row) => String(row.event_id)));
   }
+  return deleted;
 }
 
 /**

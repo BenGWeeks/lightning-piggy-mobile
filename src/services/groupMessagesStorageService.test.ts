@@ -230,3 +230,30 @@ describe('removeGroupMessagesWhere', () => {
     );
   });
 });
+
+it.each([false, true])('serializes append and deletion (append first: %s)', async (appendFirst) => {
+  await appendGroupMessage(GROUP, wrap('target', 'deleted plaintext', 1));
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const pause = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const original = AsyncStorage.setItem;
+  (AsyncStorage.setItem as jest.Mock).mockImplementationOnce(async (key, value) => {
+    entered();
+    await pause;
+    // The one-shot implementation has been consumed; use the underlying mock.
+    return original(key, value);
+  });
+  const append = () => appendGroupMessage(GROUP, local('local_new', 'new send', 2));
+  const remove = () => removeGroupMessagesWhere(GROUP, (m) => m.id === 'target');
+  const first = appendFirst ? append() : remove();
+  await started;
+  const second = appendFirst ? remove() : append();
+  release();
+  await Promise.all([first, second]);
+  expect((await loadGroupMessages(GROUP)).map((m) => m.text)).toEqual(['new send']);
+});
