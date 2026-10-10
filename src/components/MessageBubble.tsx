@@ -665,6 +665,7 @@ const MessageBubble: React.FC<Props> = ({
         encrypted={voice.encrypted}
         keyHex={voice.keyHex}
         nonceHex={voice.nonceHex}
+        marmot={voice.marmot}
         mime={voice.mime}
         fromMe={fromMe}
         createdAt={createdAt}

@@ -28,3 +28,18 @@ describe('dmRowPreview — Marmot (#1140)', () => {
     expect(dmRowPreview('Hello!', 14)).toBe('Hello!');
   });
 });
+
+describe('dmRowPreview — encrypted attachments', () => {
+  const frag = (mime: string) =>
+    `https://b.example/x.bin#lpe=1&alg=encrypted-media-v2&k=${'aa'.repeat(32)}&n=bb&m=${encodeURIComponent(mime)}`;
+
+  it('calls a voice note a voice message and never leaks its key', () => {
+    const preview = dmRowPreview(frag('audio/mp4'), 15);
+    expect(preview).toBe('🎤 Voice message');
+    expect(preview).not.toContain('aa'.repeat(8));
+  });
+
+  it('keeps the generic label for other encrypted files', () => {
+    expect(dmRowPreview(frag('image/jpeg'), 15)).toBe('📎 Attachment');
+  });
+});

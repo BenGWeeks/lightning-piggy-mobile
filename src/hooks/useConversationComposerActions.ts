@@ -330,7 +330,7 @@ export function useConversationComposerActions(params: {
           offerNip17(reason, async () =>
             sendFile(
               await uploadEncryptedBlob(image.uri, signEvent, image.mime, image.base64),
-              'image',
+              image.mime.startsWith('audio/') ? 'voice' : 'image',
               'nip17',
             ),
           ),

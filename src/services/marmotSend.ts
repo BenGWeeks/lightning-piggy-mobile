@@ -140,7 +140,7 @@ export async function sendMarmotGroupRumor(
   }
 }
 
-/** App kind the photo row is stored under (NIP-17's file kind — see marmotInbox). */
+/** App kind the photo / voice row is stored under (NIP-17's file kind — see marmotInbox). */
 const MARMOT_IMAGE_ROW_KIND = 15;
 /** Re-encrypt + re-upload at most this many times if the epoch keeps moving. */
 const MAX_EPOCH_RETRIES = 3;
@@ -150,10 +150,19 @@ export interface MarmotImage {
   uri: string;
   base64: string;
   mime: string;
+  /** Attachment filename; defaults to `photo.<ext>`. White Noise names its
+   * voice notes `voice-<ms>ms.m4a`, and so do we. */
+  filename?: string;
 }
 
+/** Voice notes are AAC in an MP4 container — White Noise's own recording
+ * format (`audio/mp4`, `.m4a`), so each client can play the other's. */
+export const MARMOT_VOICE_MIME = 'audio/mp4';
+export const marmotVoiceFilename = (durationMs: number) =>
+  `voice-${Math.max(0, Math.round(durationMs))}ms.m4a`;
+
 /**
- * Send a photo the Marmot way (MIP-04): encrypt it under the group's epoch,
+ * Send a photo or voice note the Marmot way (MIP-04): encrypt it under the group's epoch,
  * upload the ciphertext to Blossom, and send a kind-9 chat event carrying its
  * `imeta` tag — the shape White Noise and other Marmot clients render.
  * `target` is a 1:1 peer (DM created on first use) or an app group id.
@@ -182,7 +191,10 @@ export async function sendMarmotImage(
         : session.getGroup(target.groupId);
     if (!group) throw new Error('This group is not available yet.');
     const plaintext = new Uint8Array(Buffer.from(image.base64, 'base64'));
-    const filename = `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
+    const filename =
+      image.filename ?? `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;
+    const isVoice = image.mime.startsWith('audio/');
+    const what = isVoice ? 'voice note' : 'photo';
     // The file key is bound to the epoch we encrypt under. If a commit moves
     // the group on during a slow upload, a member added by it never held that
     // epoch and couldn't decrypt — so re-encrypt under the new one.
@@ -202,8 +214,9 @@ export async function sendMarmotImage(
         break;
       }
     }
-    // Never send a photo some members provably can't decrypt.
-    if (!sealed) throw new Error('This chat is changing right now — try sending the photo again.');
+    // Never send media some members provably can't decrypt.
+    if (!sealed)
+      throw new Error(`This chat is changing right now — try sending the ${what} again.`);
     const { attachment, keyHex } = sealed;
     const rumor = buildMarmotRumor(pubkey, {
       kind: MARMOT_CHAT_KIND,
@@ -228,7 +241,7 @@ export async function sendMarmotImage(
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
       ? { success: true, delivery }
-      : { success: false, delivery, error: 'No relay accepted the photo' };
+      : { success: false, delivery, error: `No relay accepted the ${what}` };
   } catch (e) {
     return marmotFailure(e);
   }

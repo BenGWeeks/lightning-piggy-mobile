@@ -8,6 +8,8 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { formatTime } from '../utils/messageContent';
 import { decryptFile } from '../services/encryptedFile';
+import { decryptMarmotMedia } from '../services/marmotMedia';
+import type { MarmotImageParams } from '../utils/messageContent';
 
 // url → decrypted-clip file:// uri. Module-scoped so a voice note decrypted
 // once is reused across re-renders, remounts and the session — no re-fetch /
@@ -87,6 +89,8 @@ interface Props {
   encrypted?: boolean;
   keyHex?: string;
   nonceHex?: string;
+  /** A Marmot (MIP-04) voice note: decrypted with these instead of `keyHex`. */
+  marmot?: MarmotImageParams;
   mime?: string;
   testID?: string;
   /** Optional time + delivery-tick footer (#856). When supplied it replaces
@@ -102,6 +106,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   encrypted = false,
   keyHex,
   nonceHex,
+  marmot,
   mime,
   testID,
   footer,
@@ -119,6 +124,10 @@ const VoiceNotePlayer: React.FC<Props> = ({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const wantPlayRef = useRef(false);
+  // The parsed `marmot` object is rebuilt every render; read it via a ref so
+  // it doesn't churn ensureLocal's identity.
+  const marmotRef = useRef(marmot);
+  marmotRef.current = marmot;
 
   const source = encrypted ? localUri : url;
   const player = useAudioPlayer(source ?? undefined);
@@ -145,7 +154,8 @@ const VoiceNotePlayer: React.FC<Props> = ({
       }
       decryptedVoiceCache.delete(url); // evicted from disk → fall through to re-decrypt
     }
-    if (!keyHex || !nonceHex) {
+    const marmotParams = marmotRef.current;
+    if ((!keyHex && !marmotParams) || !nonceHex) {
       setFailed(true);
       return null;
     }
@@ -164,7 +174,13 @@ const VoiceNotePlayer: React.FC<Props> = ({
         const res = await fetch(url);
         if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
         const cipher = new Uint8Array(await res.arrayBuffer());
-        const plain = decryptFile(cipher, keyHex, nonceHex);
+        const plain = marmotParams
+          ? decryptMarmotMedia(cipher, {
+              mime: mime ?? 'audio/mp4',
+              nonceHex,
+              marmot: marmotParams,
+            })
+          : decryptFile(cipher, keyHex as string, nonceHex);
         await writeAsStringAsync(uri, Buffer.from(plain).toString('base64'), {
           encoding: 'base64',
         });

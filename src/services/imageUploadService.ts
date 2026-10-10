@@ -156,7 +156,7 @@ export async function uploadToNostrBuild(fileUri: string): Promise<string> {
  * expo-file-system's native read sidesteps it (matches the base64 read
  * in HuntCreateScreen).
  */
-async function readFileAsBase64(fileUri: string): Promise<string> {
+export async function readFileAsBase64(fileUri: string): Promise<string> {
   const base64 = await readAsStringAsync(fileUri, { encoding: 'base64' });
   if (!base64) throw new Error(`Empty file: ${fileUri}`);
   return base64;
