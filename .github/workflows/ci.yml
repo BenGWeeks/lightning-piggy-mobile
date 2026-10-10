@@ -59,10 +59,19 @@ jobs:
                 # The files API caps at 3000 entries; can't prove it is JS-only.
                 echo "3000+ changed files: run native jobs to be safe."
                 native=true
-              elif bash scripts/ci-native-paths.sh <<<"$files"; then
+              elif [ ! -f scripts/ci-native-paths.sh ] || ! bash -n scripts/ci-native-paths.sh; then
+                # A PR that deletes or breaks the filter must not skip native validation.
+                echo "::warning::Native path filter missing or invalid; running native jobs to be safe."
                 native=true
               else
-                echo "No native-relevant files changed: skipping native jobs."
+                rc=0
+                bash scripts/ci-native-paths.sh <<<"$files" || rc=$?
+                case "$rc" in
+                  0) native=true ;;
+                  1) echo "No native-relevant files changed: skipping native jobs." ;;
+                  *) echo "::warning::Native path filter failed (exit $rc); running native jobs to be safe."
+                     native=true ;;
+                esac
               fi
             else
               echo "::warning::Could not list PR files/labels; running native jobs to be safe."
