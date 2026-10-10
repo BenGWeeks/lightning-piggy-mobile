@@ -33,12 +33,12 @@ name: Nostr Logout Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Confirm the Sign Out alert. Tap the branded-alert destructive button by
-# id, NOT `text: 'Sign Out'` — the text matcher is ambiguous against the
-# alert's own title (also "Sign Out") and can match the title, leaving the
-# dialog open. Button order is [Cancel (0), Sign Out (1)], so index 1.
+# Confirm the Sign Out alert by its stable testID. The button set and order
+# vary by signer / backup state (#1223): an unbacked local-key account gets
+# [Back Up Key First, Sign Out Anyway, Cancel], others [Cancel, Sign Out] —
+# `sign-out-confirm` is the destructive confirm in every variant.
 - tapOn:
-    id: 'branded-alert-button-1'
+    id: 'sign-out-confirm'
 - waitForAnimationToEnd:
     timeout: 3000
 

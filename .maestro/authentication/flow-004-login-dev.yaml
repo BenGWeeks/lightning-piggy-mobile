@@ -29,7 +29,7 @@ name: Nostr Login Test (dev variant)
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

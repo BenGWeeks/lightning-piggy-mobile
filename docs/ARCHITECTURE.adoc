@@ -97,16 +97,23 @@ build-properties plugins, and declares the deep-link schemes (`lightningpiggy://
 
 === Local native modules (`modules/`)
 
-`modules/amber-signer` is the *only* Expo native module that ships. It is
-Android-only and loaded via `requireOptionalNativeModule` so it degrades
-gracefully on binaries that predate it.
+Local Expo modules are loaded via `requireOptionalNativeModule` so they
+degrade gracefully on binaries that predate them.
 
-*`amber-signer`* — an IPC bridge to the https://github.com/greenart7c3/Amber[Amber]
+*`amber-signer`* (Android only) — an IPC bridge to the https://github.com/greenart7c3/Amber[Amber]
 Nostr signer app, so the private key never enters Lightning Piggy's process.
 Exposes `getPublicKey`, `signEvent`, `nip04Encrypt/Decrypt`,
 `nip44Encrypt/Decrypt`, `nip44DecryptSilent` (blanket-permission batch path that
 avoids per-event approval dialogs), and `isInstalled`. Wrapped by
 `src/services/amberService.ts`.
+
+*`secure-clipboard`* (Android + iOS) — copies a secret (the nsec on the Back up
+your key screen, #1223) with the platform's protections, which `expo-clipboard`
+can't set: Android marks the clip `android.content.extra.IS_SENSITIVE` (masked
+copy preview on Android 13+, kept out of Gboard's history); iOS writes it
+`localOnly` (no Universal Clipboard) with an OS-enforced `expirationDate`.
+Wrapped by `src/services/sensitiveClipboard.ts`, which adds a best-effort
+JS clear on Android and hides Copy entirely on a binary without the module.
 
 NOTE: There is no `background-dm-service` native module. Background DM delivery
 ships as a periodic `expo-background-task` detect-and-ping (Android WorkManager /

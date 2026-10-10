@@ -36,7 +36,7 @@ name: Create Nostr Account Test
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -143,7 +143,7 @@ name: Create Nostr Account Test
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

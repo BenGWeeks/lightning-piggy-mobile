@@ -93,6 +93,7 @@ const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceS
 const LanguageScreen = lazyScreen(() => import('../screens/account/LanguageScreen'));
 const NearbyScreen = lazyScreen(() => import('../screens/account/NearbyScreen'));
 const SecurityScreen = lazyScreen(() => import('../screens/account/SecurityScreen'));
+const KeyBackupScreen = lazyScreen(() => import('../screens/account/KeyBackupScreen'));
 const AboutScreen = lazyScreen(() => import('../screens/account/AboutScreen'));
 
 let __appNavigatorFirstRenderLogged = false;
@@ -573,6 +574,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountLanguage" component={LanguageScreen} />
       <AccountDrawer.Screen name="AccountNearby" component={NearbyScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
+      <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
     </AccountDrawer.Navigator>
   );

@@ -32,9 +32,9 @@ name: Internal — sign a Piggy out of LP's account registry (if it's there)
           commands:
             - tapOn:
                 id: 'account-switcher-signout-${PIGGY_PREFIX}'
-            # [Cancel, Sign out]
+            # Confirm by testID (button set varies by signer, #1223)
             - tapOn:
-                id: 'branded-alert-button-1'
+                id: 'sign-out-confirm'
             - extendedWaitUntil:
                 notVisible:
                   id: 'account-switcher-row-${PIGGY_PREFIX}'

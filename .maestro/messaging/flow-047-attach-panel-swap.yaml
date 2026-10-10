@@ -59,7 +59,7 @@ name: WhatsApp-style Attach Panel Swap Test
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -194,7 +194,7 @@ name: WhatsApp-style Attach Panel Swap Test
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
 - waitForAnimationToEnd:
     timeout: 3000
 

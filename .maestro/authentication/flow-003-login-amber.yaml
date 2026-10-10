@@ -27,7 +27,7 @@ name: Nostr Login via Amber
 - waitForAnimationToEnd:
     timeout: 1000
 - tapOn:
-    text: 'Sign Out'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000

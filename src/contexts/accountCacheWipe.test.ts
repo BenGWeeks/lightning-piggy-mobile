@@ -7,6 +7,7 @@ import {
   RELAY_LIST_CREATED_AT_KEY_BASE,
 } from './nostrCacheKeys';
 import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
+import { isKeyBackedUp, markKeyBackedUp } from '../services/keyBackupStatus';
 
 const PK = 'a'.repeat(64);
 
@@ -21,4 +22,13 @@ it("removes the signed-out account's relay-list caches and baselines", async () 
   await wipeAccountCaches(PK);
   const left = await AsyncStorage.multiGet(keys);
   expect(left.map(([, v]) => v)).toEqual([null, null, null, null]);
+});
+
+it("drops the signed-out account's key-backup flag but keeps other accounts' (#1223)", async () => {
+  const other = 'b'.repeat(64);
+  await markKeyBackedUp(PK);
+  await markKeyBackedUp(other);
+  await wipeAccountCaches(PK);
+  expect(await isKeyBackedUp(PK)).toBe(false);
+  expect(await isKeyBackedUp(other)).toBe(true);
 });

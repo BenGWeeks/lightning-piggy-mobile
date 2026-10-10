@@ -1,0 +1,126 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Safe sign-out — warning dialog + Back up your key screen (#1223)
+tags:
+  - authentication
+---
+# Non-destructive: NEVER confirms the sign-out and NEVER reveals the key.
+#
+# Precondition: the active account is a local-key (nsec) account, e.g. Big
+# Piggy after `common/login-nsec-big`. Re-runnable: if the key is already
+# marked backed up the dialog is the lighter two-button variant, and the
+# backup screen is reached via Settings only.
+#
+# Covers:
+#   1. Drawer → Sign Out shows the named dialog with Sign Out (Anyway) /
+#      Cancel; Cancel keeps the account signed in.
+#   2. Not backed up: Back Up Key First opens the backup screen with the key
+#      masked, the eye toggle, Copy, and "I've saved it" disabled until
+#      unlocked.
+#   3. Settings → Security → Back up your key reaches the same screen.
+#
+# Run: maestro test .maestro/authentication/flow-136-safe-signout-key-backup.yaml
+
+# --- 1. Sign-out dialog, cancelled ---------------------------------------
+- runFlow: ../common/open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: 'drawer-sign-out'
+    direction: DOWN
+    timeout: 5000
+- tapOn:
+    id: 'drawer-sign-out'
+- extendedWaitUntil:
+    visible:
+      id: 'branded-alert'
+    timeout: 5000
+- assertVisible:
+    text: 'Sign out of .*\?'
+- assertVisible:
+    id: 'sign-out-confirm'
+- tapOn:
+    id: 'sign-out-cancel'
+- extendedWaitUntil:
+    notVisible:
+      id: 'branded-alert'
+    timeout: 5000
+# Still signed in: the drawer header still has the npub QR button.
+- assertVisible:
+    id: 'drawer-npub-qr'
+
+# --- 2. Not backed up: Back Up Key First → backup screen ----------------
+- tapOn:
+    id: 'drawer-sign-out'
+- extendedWaitUntil:
+    visible:
+      id: 'branded-alert'
+    timeout: 5000
+- runFlow:
+    when:
+      notVisible:
+        id: 'sign-out-backup-first'
+    commands:
+      # Already backed up → lighter variant; nothing more to do here.
+      - tapOn:
+          id: 'sign-out-cancel'
+- runFlow:
+    when:
+      visible:
+        id: 'sign-out-backup-first'
+    commands:
+      - assertVisible:
+          text: 'Sign Out Anyway'
+      - tapOn:
+          id: 'sign-out-backup-first'
+      # A lazy screen: a cold dev bundle can take >10 s to serve its chunk.
+      - extendedWaitUntil:
+          visible:
+            id: 'key-backup-reveal-toggle'
+          timeout: 30000
+      - assertVisible:
+          text: 'Not backed up yet'
+      # Masked by default — the key text is the dot mask, not an nsec.
+      - assertVisible:
+          id: 'key-backup-key-text'
+          text: '•+'
+      - assertNotVisible:
+          text: 'nsec1.*'
+      # Copy only renders on a dev client built with modules/secure-clipboard
+      # (it's hidden rather than falling back to a plain clipboard write).
+      - assertVisible:
+          id: 'key-backup-copy'
+      - assertVisible:
+          id: 'key-backup-confirm-saved'
+          enabled: false
+      - tapOn:
+          id: 'account-back-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+# --- 3. Settings → Security entry point -----------------------------------
+- runFlow: ../common/open-drawer.yaml
+- scrollUntilVisible:
+    element:
+      id: 'drawer-row-security'
+    direction: DOWN
+    timeout: 5000
+- tapOn:
+    id: 'drawer-row-security'
+- extendedWaitUntil:
+    visible:
+      id: 'security-key-backup'
+    timeout: 30000
+- tapOn:
+    id: 'security-key-backup'
+- extendedWaitUntil:
+    visible:
+      id: 'key-backup-reveal-toggle'
+    timeout: 30000
+- assertVisible:
+    id: 'key-backup-key-text'
+    text: '•+'
+- assertNotVisible:
+    text: 'nsec1.*'
+- assertVisible:
+    id: 'key-backup-status'
+- tapOn:
+    id: 'account-back-button'

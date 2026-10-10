@@ -29,6 +29,7 @@ import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
 import { forgetLinkPreviewMirror } from '../services/linkPreviewPreference';
 import { WATCHER_PUSH_KEY_BASE } from '../services/watcherPushStore';
+import { KEY_BACKED_UP_KEY_BASE } from '../services/keyBackupStatus';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
   NSEC_NIP17_CACHE_KEY_BASE,
@@ -105,6 +106,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // so no signed unregister: the registration dies with the push token,
     // which wipeDmStoresForAccount (Marmot push teardown) deletes below.
     perAccountKey(WATCHER_PUSH_KEY_BASE, loggedOutPubkey),
+    // The key it vouched for is gone with the account (#1223).
+    perAccountKey(KEY_BACKED_UP_KEY_BASE, loggedOutPubkey),
     // DM-store migration flags (#848 wrap cache, #850 blobs) — a future
     // re-login re-runs the (then no-op) migration checks instead of
     // trusting a stale flag.

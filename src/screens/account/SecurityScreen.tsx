@@ -9,6 +9,7 @@ import { useAccountState } from '../../contexts/useAccountState';
 import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
+import KeyBackupEntry from '../../components/KeyBackupEntry';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
 import { Toast } from '../../components/BrandedToast';
 import {
@@ -155,6 +156,7 @@ const SecurityScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
+      <KeyBackupEntry />
       <View style={styles.headerRow}>
         <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>

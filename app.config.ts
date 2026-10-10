@@ -153,6 +153,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // breakdown.
     './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-local-authentication (#1223): biometrics / device PIN gate before
+    // the Back up your key screen reveals an nsec. Adds USE_BIOMETRIC on
+    // Android and the Face ID usage string on iOS. (expo-screen-capture,
+    // used on the same screen, needs no config plugin.)
+    [
+      'expo-local-authentication',
+      {
+        faceIDPermission:
+          'Lightning Piggy uses Face ID to confirm it is you before showing your secret account key.',
+      },
+    ],
     // expo-localization — reads the device's locale list at startup so
     // LocaleContext can default the in-app language to it (#137). No
     // permissions/options needed; just links the native module.
