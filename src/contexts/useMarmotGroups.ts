@@ -48,6 +48,12 @@ export interface MarmotGroupsApi {
  */
 export function useMarmotGroups(pubkey: string | null): MarmotGroupsApi {
   const [summaries, setSummaries] = useState<MarmotGroupSummary[]>([]);
+  // Same-render reset on account switch (see GroupsContext).
+  const [summariesOwner, setSummariesOwner] = useState(pubkey);
+  if (summariesOwner !== pubkey) {
+    setSummariesOwner(pubkey);
+    setSummaries([]);
+  }
 
   useEffect(() => {
     if (!pubkey) {

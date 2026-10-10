@@ -186,6 +186,15 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // listener below + a local hook from GroupConversationScreen sends.
   const [activityByGroup, setActivityByGroup] = useState<Record<string, GroupActivity>>({});
   const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  // Drop the previous account's groups + activity in the same render the
+  // active pubkey changes, so its group rows never paint under the next
+  // account (and its activity isn't merged into the new account's cache).
+  const [groupsOwner, setGroupsOwner] = useState(pubkey);
+  if (groupsOwner !== pubkey) {
+    setGroupsOwner(pubkey);
+    setGroups([]);
+    setActivityByGroup({});
+  }
   const marmot = useMarmotGroups(pubkey);
   const groups = useMemo(() => [...storedGroups, ...marmot.groups], [storedGroups, marmot.groups]);
   // Track the latest reconciler in a ref so the subscription effect can
@@ -214,9 +223,17 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
     setLoading(true);
+    let cancelled = false;
     loadGroups(pubkey)
-      .then((loaded) => setGroups(loaded))
-      .finally(() => setLoading(false));
+      .then((loaded) => {
+        if (!cancelled) setGroups(loaded);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [pubkey]);
 
   // Load persisted secret-mode flag with a one-shot migration from the
