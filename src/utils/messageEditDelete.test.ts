@@ -37,4 +37,11 @@ describe('messageEditDelete', () => {
       });
     }
   });
+
+  it('nothing while our send is still pending (or failed)', () => {
+    expect(messageEditDelete({ ...own, pending: true })).toEqual({
+      canEdit: false,
+      canDelete: false,
+    });
+  });
 });

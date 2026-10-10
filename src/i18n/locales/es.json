@@ -1153,11 +1153,15 @@
   },
   "messageEdit": {
     "deleteTitle": "¿Eliminar para todos?",
-    "deleteBody": "Se eliminará para todos en este chat. Puede que sigan las copias que otras apps ya mostraron en notificaciones.",
+    "deleteBody": "Se eliminará para todos en este chat. Quien ya haya visto una notificación puede conservar una copia.",
     "deleteConfirm": "Eliminar",
     "cancel": "Cancelar",
     "editFailed": "No se pudo editar el mensaje",
-    "deleteFailed": "No se pudo eliminar el mensaje"
+    "deleteFailed": "No se pudo eliminar el mensaje",
+    "noChat": "Todavía no hay un chat Marmot con esta persona.",
+    "notYours": "Solo puedes cambiar tus propios mensajes.",
+    "emptyEdit": "Una edición necesita algo de texto.",
+    "noRelay": "Ningún relé aceptó el cambio. Comprueba tu conexión e inténtalo de nuevo."
   },
   "messageBubble": {
     "quoteYou": "Tú",

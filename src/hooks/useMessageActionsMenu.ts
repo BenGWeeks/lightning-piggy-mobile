@@ -1,9 +1,10 @@
 import type React from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useAccountState } from '../contexts/useAccountState';
 import { messageEditDelete } from '../utils/messageEditDelete';
 import {
   sendMarmotMessageAction,
@@ -19,8 +20,14 @@ interface EditableRow {
 
 interface Params<T extends EditableRow> {
   myPubkey: string | null;
-  /** Null when the thread isn't a Marmot chat — every action is then a no-op. */
-  target: MarmotActionTarget | null;
+  /** Account + thread this menu belongs to (e.g. `${me}:${groupId}`). A screen
+   * instance can be reused for another thread or account: an edit started
+   * under one scope is invisible, and inert, under any other. */
+  scope: string | null;
+  /** The Marmot 1:1 peer, or the Marmot group id. Neither (NIP-04 / NIP-17
+   * thread): no Edit / Delete, and every action is a no-op. */
+  marmotPeer?: string | null;
+  marmotGroupId?: string | null;
   messages: T[];
   setMessages: React.Dispatch<React.SetStateAction<T[]>>;
   /** A row's Marmot event id (1:1: its rumor id). */
@@ -40,6 +47,8 @@ export interface ActionedMessage {
   fromMe: boolean;
   /** Plain chat text — set only for copyable (and so editable) messages. */
   copyText?: string;
+  /** Still sending (or failed): nothing to point an edit / delete at yet. */
+  pending?: boolean;
 }
 
 interface EditingState {
@@ -49,6 +58,8 @@ interface EditingState {
   previousEditedAt?: number;
   originalText: string;
 }
+
+const NOT_EDITING: EditingState | null = null;
 
 /**
  * The long-press message menu's text actions — Copy text, plus "Edit" and
@@ -62,7 +73,9 @@ interface EditingState {
  */
 export function useMessageActionsMenu<T extends EditableRow>({
   myPubkey,
-  target,
+  scope,
+  marmotPeer,
+  marmotGroupId,
   messages,
   setMessages,
   idOf,
@@ -73,7 +86,11 @@ export function useMessageActionsMenu<T extends EditableRow>({
   onSend,
 }: Params<T>) {
   const t = useTranslation();
-  const [editing, setEditing] = useState<EditingState | null>(null);
+  const target = useMemo<MarmotActionTarget | null>(
+    () => (marmotGroupId ? { groupId: marmotGroupId } : marmotPeer ? { peer: marmotPeer } : null),
+    [marmotPeer, marmotGroupId],
+  );
+  const [editing, setEditing] = useAccountState<EditingState | null>(scope, NOT_EDITING);
 
   // Optimistically apply `change` to the thread; returns the undo.
   const applyOptimistic = useCallback(
@@ -153,27 +170,32 @@ export function useMessageActionsMenu<T extends EditableRow>({
       });
       setDraft(message.text);
     },
-    [target, messages, idOf, editing, draft, setDraft],
+    [target, messages, idOf, editing, draft, setDraft, setEditing],
   );
 
   const cancelEdit = useCallback(() => {
     if (!editing) return;
     setEditing(null);
     setDraft(editing.priorDraft);
-  }, [editing, setDraft]);
+  }, [editing, setDraft, setEditing]);
 
   /** Send the composer's text as the edit (unchanged or empty = just stop editing). */
   const submitEdit = useCallback(() => {
     if (!editing) return;
     const text = draft.trim();
+    const { targetId, previousEditedAt } = editing;
+    // The message is gone (deleted meanwhile): stop editing but keep the typed text.
+    if (!messages.some((m) => idOf(m) === targetId)) {
+      setEditing(null);
+      return;
+    }
     cancelEdit();
     if (text === '' || text === editing.originalText.trim()) return;
-    const { targetId, previousEditedAt } = editing;
     // Display-only stamp: the edit's real `created_at` replaces it on success.
     const editedAt = Math.max(Math.floor(Date.now() / 1000), (previousEditedAt ?? 0) + 1);
     const undo = applyOptimistic(targetId, { text, editedAt });
     void send(targetId, { type: 'edit', text, previousEditedAt }, undo);
-  }, [editing, draft, cancelEdit, applyOptimistic, send]);
+  }, [editing, draft, messages, idOf, setEditing, cancelEdit, applyOptimistic, send]);
 
   const copyText = actioned?.copyText;
   const onCopyText = useCallback(async () => {
@@ -188,6 +210,7 @@ export function useMessageActionsMenu<T extends EditableRow>({
     fromMe: !!actioned?.fromMe,
     targetId: actioned?.targetId,
     isPlainText: !!copyText,
+    pending: !!actioned?.pending,
   });
   const targetId = actioned?.targetId;
   const onEdit = useCallback(() => {

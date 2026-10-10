@@ -540,6 +540,15 @@ export async function applyMarmotEdits(
   return changed;
 }
 
+/** Row ids "delete for everyone" removed this session — so an open thread's
+ * in-memory copy of an optimistic `local-` send (kept across reloads until its
+ * echo lands, see keepPendingLocalRows) is dropped, not resurrected (#1237). */
+const deletedRowIds = new Set<string>();
+const DELETED_ROW_CAP = 500;
+
+/** Whether `rowId` was removed by a Marmot "delete for everyone" this session. */
+export const wasDmRowDeleted = (rowId: string): boolean => deletedRowIds.has(rowId);
+
 /**
  * Delete `owner`'s Marmot rows with these message ids in one conversation — a
  * "delete for everyone". `sender` restricts it to messages that account wrote
@@ -568,6 +577,13 @@ export async function deleteMarmotMessages(
       [owner, conversation, ...(sender === null ? [] : [sender]), ...slice, ...slice],
     );
     deleted.push(...(result.rows ?? []).map((row) => String(row.event_id)));
+  }
+  for (const id of deleted) {
+    deletedRowIds.delete(id); // re-insert → newest in eviction order
+    deletedRowIds.add(id);
+  }
+  while (deletedRowIds.size > DELETED_ROW_CAP) {
+    deletedRowIds.delete(deletedRowIds.values().next().value as string);
   }
   return deleted;
 }

@@ -14,8 +14,10 @@ import {
   deleteMarmotMessages,
   getConversationMessages,
   upsertDmMessages,
+  wasDmRowDeleted,
   type DmMessageRow,
 } from './dmDb';
+import { keepPendingLocalRows } from '../contexts/nostrDmCache';
 import { getLocalDb } from './localDb';
 
 const ID = 'd'.repeat(64);
@@ -117,6 +119,23 @@ describe('our own sends (#1237): a `local-` row carrying the Marmot id as rumor 
   it('a delete of the Marmot id removes the local row, returning its row id', async () => {
     expect(await deleteMarmotMessages('me', 'peer', [MINE], 'me')).toEqual([`local-${MINE}`]);
     expect(await mineStored()).toEqual([]);
+  });
+
+  it('an open thread drops the deleted local row on reload instead of keeping it as pending', async () => {
+    const OWN = 'c'.repeat(64); // its own id: the deleted-row registry lives for the session
+    await upsertDmMessages([mine({ eventId: `local-${OWN}`, rumorId: OWN, content: 'oops' })]);
+    const onScreen = { id: `local-${OWN}`, fromMe: true, text: 'oops', createdAt: 10 };
+    const other = { id: 'x1', fromMe: false, text: 'hi', createdAt: 5 };
+    // Before any delete: a local row a stale fetch lacks is kept (still sending).
+    expect(keepPendingLocalRows([onScreen], [other]).map((m) => m.id)).toEqual([
+      'x1',
+      `local-${OWN}`,
+    ]);
+    await deleteMarmotMessages('me', 'peer', [OWN], 'peer'); // not the author: nothing removed
+    expect(wasDmRowDeleted(`local-${OWN}`)).toBe(false);
+    await deleteMarmotMessages('me', 'peer', [OWN], null); // an admin removal from the peer
+    expect(wasDmRowDeleted(`local-${OWN}`)).toBe(true);
+    expect(keepPendingLocalRows([onScreen], [other]).map((m) => m.id)).toEqual(['x1']);
   });
 
   it('the replayed original still retires the edited local row (no duplicate), then the edit replays', async () => {

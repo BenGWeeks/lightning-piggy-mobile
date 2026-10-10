@@ -54,7 +54,11 @@ import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import { indexMessagesById, resolveQuote, type MessageQuote } from '../utils/messageQuote';
-import { loadGroupMessages, type GroupMessage } from '../services/groupMessagesStorageService';
+import {
+  isEditableGroupText,
+  loadGroupMessages,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
 import {
   classifyMessageContent,
   deriveGroupWireKind,
@@ -89,6 +93,7 @@ interface MemberRow {
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
 const noReaction = () => {};
+const NO_ACTION: ActionedMessage | null = null;
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -316,15 +321,13 @@ const GroupConversationScreen: React.FC = () => {
 
   // Long-press your own message in a Marmot group: Copy text, Edit, Delete
   // for everyone (#1237). Groups have no reactions, so nothing else to offer.
-  const [actioned, setActioned] = useState<ActionedMessage | null>(null);
-  const closeActions = useCallback(() => setActioned(null), []);
-  const marmotTarget = useMemo(
-    () => (group && isMarmotGroupId(group.id) ? { groupId: group.id } : null),
-    [group],
-  );
+  const [actioned, setActioned] = useAccountState<ActionedMessage | null>(messageOwner, NO_ACTION);
+  const closeActions = useCallback(() => setActioned(null), [setActioned]);
+  const marmotGroupId = group && isMarmotGroupId(group.id) ? group.id : null;
   const menu = useMessageActionsMenu({
     myPubkey,
-    target: marmotTarget,
+    scope: messageOwner,
+    marmotGroupId,
     messages,
     setMessages,
     idOf: groupMessageId,
@@ -538,14 +541,14 @@ const GroupConversationScreen: React.FC = () => {
           quote={item.quote}
           edited={item.editedAt !== undefined}
           onLongPress={
-            fromMe && marmotTarget
+            fromMe && marmotGroupId
               ? () =>
                   setActioned({
                     targetId: item.id,
                     fromMe,
-                    ...(item.wireKind === 14 &&
-                    item.content.kind === 'text' &&
-                    !item.text.includes('#lpe=1') &&
+                    // Same rule the store applies to edits.
+                    ...(item.content.kind === 'text' &&
+                    isEditableGroupText(item.text) &&
                     item.text.trim() !== ''
                       ? { copyText: item.text }
                       : {}),
@@ -557,7 +560,8 @@ const GroupConversationScreen: React.FC = () => {
       );
     },
     [
-      marmotTarget,
+      marmotGroupId,
+      setActioned,
       myPubkey,
       memberNameByPubkey,
       sharedProfiles,

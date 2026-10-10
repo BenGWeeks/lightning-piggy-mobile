@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Pressable } from 'react-native';
 import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -62,6 +62,8 @@ interface Props {
   footer?: React.ReactNode;
   /** Shown under the sender label — a Marmot reply's quoted parent. */
   header?: React.ReactNode;
+  /** Long-press on the bubble opens the message menu (e.g. Delete for everyone). */
+  onLongPress?: () => void;
 }
 
 const VoiceNotePlayer: React.FC<Props> = ({
@@ -77,6 +79,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   testID,
   footer,
   header,
+  onLongPress,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createVoiceNotePlayerStyles(colors), [colors]);
@@ -177,7 +180,11 @@ const VoiceNotePlayer: React.FC<Props> = ({
 
   return (
     <View style={[styles.row, fromMe ? styles.rowRight : styles.rowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+      <Pressable
+        style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}
+        onLongPress={onLongPress}
+        disabled={!onLongPress}
+      >
         {senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null}
         {header}
         <Text
@@ -231,7 +238,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
             {formatTime(createdAt)}
           </Text>
         )}
-      </View>
+      </Pressable>
     </View>
   );
 };

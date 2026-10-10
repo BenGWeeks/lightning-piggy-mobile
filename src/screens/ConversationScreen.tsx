@@ -475,13 +475,10 @@ const ConversationScreen: React.FC = () => {
 
   // Copy text, plus Edit / Delete for everyone on your own messages in a
   // Marmot chat (#1237) — sheet + composer props.
-  const marmotTarget = useMemo(
-    () => (protocol === 'marmot' ? { peer: pubkey } : null),
-    [protocol, pubkey],
-  );
   const menu = useMessageActionsMenu({
     myPubkey,
-    target: marmotTarget,
+    scope: myPubkey ? `${myPubkey}:${pubkey}:${protocol}` : null,
+    marmotPeer: protocol === 'marmot' ? pubkey : null,
     messages,
     setMessages,
     idOf: marmotIdOf,

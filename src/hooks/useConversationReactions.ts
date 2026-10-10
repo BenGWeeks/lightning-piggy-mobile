@@ -77,6 +77,8 @@ interface ActionedMessage {
   // offered as "Copy text". Never set for encrypted files (their stored text
   // embeds the decryption key) or structured payloads (polls, wallet shares).
   copyText?: string;
+  // Our send hasn't been accepted by any relay yet (or failed).
+  pending?: boolean;
 }
 
 export interface UseConversationReactionsResult {
@@ -391,6 +393,9 @@ export function useConversationReactions({
         fromMe: item.fromMe,
         targetKind,
         ...(copyText ? { copyText } : {}),
+        ...('deliveryStatus' in item && item.deliveryStatus?.delivered === false
+          ? { pending: true }
+          : {}),
       };
     },
     [myPubkey, peerPubkey],
