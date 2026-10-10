@@ -5,11 +5,72 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual runs always include the native jobs (see the `changes` job).
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Gate for the slow native jobs (iOS pod build ~27 min, Android APK
+  # alignment ~25 min, ...). They run when native-relevant files change, on
+  # every push to main, on manual dispatch, or when a PR carries the
+  # `ci:native` label. A *skipped* job reports as skipped, which satisfies
+  # required status checks — unlike a workflow-level `on.paths` filter, which
+  # leaves a required check "pending" forever. Only TypeScript, ESLint and
+  # Prettier are required today, and they are never gated.
+  # The path list lives in scripts/ci-native-paths.sh.
+  changes:
+    name: Detect native changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci-native-paths.sh
+          sparse-checkout-cone-mode: false
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          native=false
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "Event '$EVENT' (push to main / manual run): always run native jobs."
+            native=true
+          else
+            # Read labels live (not from the event payload) so that adding
+            # `ci:native` and using "Re-run all jobs" picks the label up.
+            if labels=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name') \
+              && files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+                --jq '.[] | .filename, (.previous_filename // empty)'); then
+              if grep -Fxq 'ci:native' <<<"$labels"; then
+                echo "PR has the ci:native label: run native jobs."
+                native=true
+              elif [ "$(wc -l <<<"$files")" -ge 3000 ]; then
+                # The files API caps at 3000 entries; can't prove it is JS-only.
+                echo "3000+ changed files: run native jobs to be safe."
+                native=true
+              elif bash scripts/ci-native-paths.sh <<<"$files"; then
+                native=true
+              else
+                echo "No native-relevant files changed: skipping native jobs."
+              fi
+            else
+              echo "::warning::Could not list PR files/labels; running native jobs to be safe."
+              native=true
+            fi
+          fi
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+          echo "### Native jobs: $native" >> "$GITHUB_STEP_SUMMARY"
   typecheck:
     name: TypeScript
     runs-on: ubuntu-latest
@@ -72,6 +133,8 @@ jobs:
 
   native-sdk-tests:
     name: Native SDK artifact tests
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +149,8 @@ jobs:
 
   android-native-alignment:
     name: Android APK 16 KB alignment
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -128,6 +193,8 @@ jobs:
 
   ios-engine-lifecycle:
     name: iOS engine lifecycle
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: macos-latest
     timeout-minutes: 5
     steps:
@@ -147,10 +214,13 @@ jobs:
   # The lifecycle job above compiles against hand-written SDK doubles; this
   # one compiles modules/nostr-native against the real checksum-pinned
   # rust-nostr 0.44.2 artifacts and the installed ExpoModulesCore, and links
-  # the full app for the iOS Simulator. No path filter on purpose: a required
-  # status check must report on every PR or it blocks merge as "pending".
+  # the full app for the iOS Simulator. Gated by the `changes` job (job-level
+  # `if`, never a workflow `on.paths` filter) so that, if it is ever made a
+  # required check, a skipped run still reports and doesn't block merge.
   ios-native-build:
     name: iOS native pod build
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: macos-26
     timeout-minutes: 90
     env:
