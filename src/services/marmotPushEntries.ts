@@ -81,6 +81,10 @@ export function buildOwnRecord(
 export class OwnerProofMismatch extends Error {}
 
 export function ownerSigFromSigned(expected: ProofTemplate, signed: SignedProof): string {
+  // Whatever came back (Amber can return "null") must be an event object.
+  if (!signed || typeof signed !== 'object' || !Array.isArray(signed.tags)) {
+    throw new OwnerProofMismatch('push: signer returned no event');
+  }
   const id = getEventHash(expected);
   const same =
     signed.id === id &&

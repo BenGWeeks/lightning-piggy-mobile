@@ -12,6 +12,7 @@ import {
 } from './marmotPush';
 import {
   buildOwnRecord,
+  OwnerProofMismatch,
   ownerSigFromSigned,
   removalFor,
   signEntry,
@@ -160,6 +161,11 @@ describe('ownerSigFromSigned — the external-signer trust boundary', () => {
       finalizeEvent({ ...template, content: '' }, sk),
     ];
     for (const t of tampered) expect(() => ownerSigFromSigned(template, t)).toThrow();
+  });
+
+  it('rejects a missing / malformed result (Amber can return "null")', () => {
+    expect(() => ownerSigFromSigned(template, null as never)).toThrow(OwnerProofMismatch);
+    expect(() => ownerSigFromSigned(template, {} as never)).toThrow(OwnerProofMismatch);
   });
 
   it('rejects a bad signature or another key', () => {

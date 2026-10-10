@@ -177,7 +177,10 @@ async function initialiseInternal(): Promise<void> {
     // session shows the real message itself, so the generic one stays quiet.
     handleNotification: async (notification) => {
       if (isRemotePush(notification)) {
-        const show = !(await remotePushCoveredInForeground());
+        // Android's push is a data-only wake with nothing to show — the wake
+        // task (marmotPushWake) owns its generic alert. iOS's carries the
+        // server's alert: shown unless the app has the message already.
+        const show = Platform.OS === 'ios' && !(await remotePushCoveredInForeground());
         return {
           shouldShowBanner: show,
           shouldShowList: show,

@@ -212,7 +212,7 @@ describe('MarmotPushRegistrar', () => {
       expect(retry).toMatchObject({ published: 2, declined: false });
     });
 
-    it('stops asking after a signer returns a bad signature', async () => {
+    it('stops asking after a signer returns nothing / a bad signature', async () => {
       let prompts = 0;
       const sent: number[] = [];
       const registrar = new MarmotPushRegistrar({
@@ -224,7 +224,9 @@ describe('MarmotPushRegistrar', () => {
         sign: async (tpl) => {
           prompts++;
           const ev = finalizeEvent({ ...tpl }, sk);
-          return { ...ev, sig: '00'.repeat(64) } as unknown as Awaited<ReturnType<Sign>>;
+          return (prompts === 1
+            ? null // Amber's "null"
+            : { ...ev, sig: '00'.repeat(64) }) as unknown as Awaited<ReturnType<Sign>>;
         },
         send: async (_id, ev) => (sent.push(ev.kind), true),
       });
