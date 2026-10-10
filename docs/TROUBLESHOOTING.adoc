@@ -52,7 +52,7 @@ Measured impact: qemu writes dropped **~755 MB/s -> ~10 MB/s**, I/O pressure **6
 | Emulator throws repeated "System UI isn't responding" / "Process system isn't responding" / per-Google-app "isn't responding" ANR dialogs on the `google_apis` AVD (contact avatars never load in Messages, relays stall, Maestro flows die with `Terminated`)
 | The android-34 **google_apis** system image bundles Google apps (Digital Wellbeing, Quicksearch / the Google app, Maps) and a full GMS that churn in the background under the software GPU (`-gpu swiftshader_indirect`), throwing ANR dialogs that steal window focus, starve the Nostr relay websockets + avatar image downloads (so Messages-list profile pictures stay on the default pig placeholder), and abort Maestro runs mid-flow. An in-guest System UI restart (`adb shell am force-stop com.android.systemui`) does **not** hold — it re-ANRs within seconds. First rule out the RAM-snapshot writeback issue above by doing a true cold boot (`adb emu kill`, then relaunch with `-no-snapshot`, not `-no-snapshot-load`); that often clears the ANRs, though the GMS churn can still return under load. +
 *The biggest offender is core GMS, not the bundled apps.* The **"Process system isn't responding"** dialog specifically is `system_server` being pegged (~175% CPU) by `com.google.android.gms.persistent`, which loops ANR-ing and crashing on `.chimera.PersistentIntentOperationService` (`adb logcat \| grep "ANR in"` shows it). Disabling Wellbeing/Quicksearch/Maps quiets the focus-stealing app dialogs but NOT this one — you have to disable GMS itself to stop it. Confirmed harmless here: after disabling GMS, CPU dropped to ~370/400 idle, the ANRs stopped, and the app (which uses no GMS) ran fine. +
-*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-only (`expo-notifications`, "No FCM" per `app.config.ts`), and `expo-location` runs on the platform provider — set the emulator's GPS with `adb emu geo fix 0.0589 52.2964` or Extended Controls → Location (the dev-pin env-var approach was removed in PR #597). There are no `com.google.android.gms` references in the native Android config. +
+*The app needs none of Google Play Services*, so the image flavour is avoidable entirely: maps use MapLibre (`@maplibre/maplibre-react-native` — self-rendered OSM vector tiles, not Google Maps), notifications are local-first (`expo-notifications`; FCM is used only by the opt-in Marmot push — `googleServicesFile` in `app.config.ts`, with FCM auto-init off until the user turns push on), and `expo-location` runs on the platform provider — set the emulator's GPS with `adb emu geo fix 0.0589 52.2964` or Extended Controls → Location (the dev-pin env-var approach was removed in PR #597). Disabling GMS is fine for everything except that opt-in push: with GMS off the AVD can't get an FCM token, so Marmot push can't be tested on it (re-enable GMS, or use a phone). +
 *Quick fix (reversible, keeps app data — re-apply after each cold boot, like the keyboard gates above):* +
 [source,bash]
 ----
@@ -953,9 +953,10 @@ three package names is `google-services.json` in the repo root.
 The switch (Account → Security → Push notifications → "Marmot messages")
 needs a native token from Apple/Google. On Android that means Google Play
 services: de-Googled phones (GrapheneOS without sandboxed Play, microG builds
-without FCM) and the LP emulator AVD (a Google APIs-less image) can't get one,
-so the switch turns itself back off. Use a phone with Play services, or an
-emulator image that includes Google Play.
+without FCM), emulator images without Google APIs, and a `google_apis` AVD with
+GMS disabled (the ANR workaround above — as on the LP emulator) can't get one,
+so the switch turns itself back off. Use a phone with Play services, or a
+`google_apis` / `google_play` emulator image with GMS enabled.
 
 On iOS the APNs environment follows the build's *signing*, not the bundle id.
 The Simulator and `expo run:ios` dev clients get sandbox tokens, served by the

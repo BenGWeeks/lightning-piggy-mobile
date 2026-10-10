@@ -1744,7 +1744,7 @@
     "marmotPush": "Push notifications (Marmot)",
     "marmotPushHintAndroid": "Get Marmot message alerts while the app is closed, via Google's push service.",
     "marmotPushHintIos": "Get Marmot message alerts while the app is closed, via Apple's push service.",
-    "marmotPushPrivacy": "Apple/Google learn that your phone got a notification and when, but not what it says: every push just says 'New message' and the app fills in the details once it opens. Our notification server only ever sees sealed device tokens — it can see how many phones a message went to and how often this phone is woken, but not who sent it, which chat it was, or who you are. People in your Marmot chats can see that this phone has push on; the same phone shows the same fingerprint in every chat.",
+    "marmotPushPrivacy": "Apple/Google learn that your phone got a notification and when, but not what it says: every push just says 'New message' and the app fills in the details once it opens. Our notification server receives device tokens sealed so only it can open them, and opens them only to deliver each push — it can see how many phones a message went to and how often this phone is woken, but not who sent it, which chat it was, or who you are. People in your Marmot chats can see that this phone has push on; the same phone shows the same fingerprint in every chat.",
     "marmotPushOtherAccounts": "Other accounts on this phone also use push; people who chat with both could tell they're on the same phone.",
     "marmotPushGoogleFree": "Rather not use Google? The background checks above alert you without it.",
     "marmotPushToggle": "Marmot messages",

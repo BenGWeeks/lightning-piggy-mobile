@@ -298,9 +298,10 @@ the server's. Exact matching would need a message correlation the protocol
 doesn't carry (and an iOS notification service extension).
 
 *Privacy* (behind "Privacy details" next to the switch): Apple/Google learn
-that the phone got a notification and when, not what it says. Our server only
-ever sees sealed device tokens: it receives gift-wrapped triggers from fresh
-ephemeral keys and decrypts the device tokens in each, so it can see how many
+that the phone got a notification and when, not what it says. Our server gets
+device tokens sealed so only it can open them, and opens them only to deliver
+each push: it receives gift-wrapped triggers from fresh ephemeral keys and
+decrypts the device tokens in each, so it can see how many
 phones one message fans out to and how often this phone is woken, but not who
 sent it, which chat it was, or who you are. People in your Marmot chats can
 see that this phone has push on, and the same phone shows the same token

@@ -168,9 +168,11 @@ async function ingestPush(group, r) {
     const prev = records[recordKey(e)];
     if (!prev || e.owner_ts > prev.owner_ts) records[recordKey(e)] = e;
   }
+  // A removal leaves a tombstone (as the app does), so an older update that
+  // arrives later can't bring the token back.
   for (const e of body.removals ?? []) {
     const prev = records[recordKey(e)];
-    if (prev && e.owner_ts > prev.owner_ts) delete records[recordKey(e)];
+    if (!prev || e.owner_ts > prev.owner_ts) records[recordKey(e)] = { ...e, removed: true };
   }
   await pushStore.setItem(group.idStr, records);
   log(`PUSH records in ${group.idStr.slice(0, 8)}: ${Object.keys(records).length}`);
@@ -179,7 +181,7 @@ async function ingestPush(group, r) {
 async function triggerPush(group) {
   if (!process.env.BOT_PUSH) return;
   const records = Object.values((await pushStore.getItem(group.idStr)) ?? {}).filter(
-    (e) => e.member_id_hex !== pk,
+    (e) => !e.removed && e.member_id_hex !== pk,
   );
   const byServer = new Map();
   for (const e of records) {
