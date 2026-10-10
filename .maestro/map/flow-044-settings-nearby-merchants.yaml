@@ -22,20 +22,13 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 - waitForAnimationToEnd:
     timeout: 1500
 
-# The avatar in the TabHeader opens the drawer (#100). The ProfileIcon
-# component uses testID `profile-icon` (Copilot review #488 caught the
-# wrong id we had earlier). Falling back to a swipe is still here as a
-# defensive measure for builds where the icon hasn't rendered yet.
+# Open the drawer by its stable accessibility ID.
+- extendedWaitUntil:
+    visible:
+      id: 'profile-icon'
+    timeout: 30000
 - tapOn:
     id: 'profile-icon'
-    optional: true
-- swipe:
-    start: 95%, 30%
-    end: 30%, 30%
-    duration: 400
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 1000
 
 - tapOn:
     id: 'drawer-row-notifications'
@@ -72,6 +65,11 @@ name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
     id: 'settings-quiet-hours-toggle'
 
 # Back out of the drawer screen.
+- scrollUntilVisible:
+    element:
+      id: 'account-back-button'
+    direction: UP
+    timeout: 15000
 - tapOn:
     id: 'account-back-button'
 - waitForAnimationToEnd:
