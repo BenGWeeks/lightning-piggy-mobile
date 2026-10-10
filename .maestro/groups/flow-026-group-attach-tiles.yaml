@@ -1,5 +1,5 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Group attach panel — Zap (disabled), Invoice, Contact tiles render
+name: Group attach panel — Zap + Wallet (disabled), Invoice, Contact tiles render
 ---
 # Verifies that opening the inline AttachPanel inside a group chat
 # surfaces all 7 tiles, including the three that were missing before
@@ -75,6 +75,11 @@ name: Group attach panel — Zap (disabled), Invoice, Contact tiles render
       # disables the group voice path would ship unnoticed.
       - assertVisible:
           id: 'attach-tile-voice'
+      # Wallet renders but is disabled in groups: a wallet connection is only
+      # ever shared 1:1, never with a group.
+      - assertVisible:
+          id: 'attach-share-wallet'
+          enabled: false
 
       # Tap Voice → VoiceRecordingSheet opens. Don't tap the mic
       # (would trigger the OS permission prompt). Just confirm the

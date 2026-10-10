@@ -45,6 +45,11 @@ interface Props {
    * (#431). Omitted in builds/contexts without wallet sharing.
    */
   onShareWallet?: () => void;
+  // Greys the Wallet tile out (like `zapDisabled`). Groups set it: a wallet
+  // connection is a bearer secret, so it's only shared 1:1, never with a group.
+  walletDisabled?: boolean;
+  // Explains why the Wallet tile is disabled. Only consulted with `walletDisabled`.
+  walletAccessibilityLabel?: string;
   /**
    * Opens the voice-note recording sheet (#235). Same surface as
    * Image / Camera / GIF / Location — the sheet records a clip and
@@ -86,6 +91,8 @@ const AttachPanel: React.FC<Props> = ({
   onSharePoll,
   onSendVoiceNote,
   onShareWallet,
+  walletDisabled,
+  walletAccessibilityLabel,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -171,7 +178,10 @@ const AttachPanel: React.FC<Props> = ({
         icon: <Wallet size={26} color={colors.white} />,
         onPress: onShareWallet,
         testID: 'attach-share-wallet',
-        accessibilityLabel: 'Share a connected NWC wallet',
+        accessibilityLabel: walletDisabled
+          ? (walletAccessibilityLabel ?? 'Share a wallet (unavailable)')
+          : 'Share a connected NWC wallet',
+        disabled: walletDisabled,
       },
       onSharePoll && {
         key: 'poll',

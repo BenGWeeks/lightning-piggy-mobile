@@ -780,6 +780,10 @@ const GroupConversationScreen: React.FC = () => {
                 setPollComposerOpen(true);
               }}
               onSendVoiceNote={() => setVoiceSheetOpen(true)}
+              // Shown but disabled: wallet connections are only shared 1:1.
+              onShareWallet={() => {}}
+              walletDisabled
+              walletAccessibilityLabel={t('groupConversationScreen.walletUnavailable')}
             />
           }
         />
