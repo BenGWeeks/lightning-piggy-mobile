@@ -158,11 +158,23 @@ function serial<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Hydrate once; throws (and retries next time) when storage is unreadable. */
-async function ensureSettings(): Promise<void> {
-  if (settingsLoaded) return;
-  settings = await loadMarmotPushSettings();
-  settingsLoaded = true;
+let hydrating: Promise<void> | null = null;
+
+/** Hydrate once — one shared read, applied only if no change has set the
+ * settings meanwhile (a late read must never resurrect "on"). Throws (and
+ * retries next time) when storage is unreadable. */
+function ensureSettings(): Promise<void> {
+  if (settingsLoaded) return Promise.resolve();
+  hydrating ??= loadMarmotPushSettings()
+    .then((stored) => {
+      if (settingsLoaded) return;
+      settings = stored;
+      settingsLoaded = true;
+    })
+    .finally(() => {
+      hydrating = null;
+    });
+  return hydrating;
 }
 
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
@@ -350,6 +362,7 @@ async function enableNow(): Promise<EnableOutcome> {
     return { status: 'unavailable' };
   }
   settings.enabled = true;
+  settingsLoaded = true;
   registration = next;
   await registerWakeTask();
   return { status: 'enabled', sync: await syncActiveSession() };
@@ -370,6 +383,7 @@ export function disableMarmotPush(): Promise<DisableOutcome> {
     // Explicitly off — an unreadable store doesn't change that.
     await ensureSettings().catch(() => undefined);
     settings.enabled = false;
+    settingsLoaded = true; // explicit now — no late read may override it
     registration = null;
     // Retract + revoke regardless of whether the setting could be saved.
     const saved = await AsyncStorage.setItem(ENABLED_KEY, '0').then(
@@ -520,6 +534,7 @@ async function lookupRelayHint(server: string): Promise<{ relayHint?: string }> 
 export function __resetMarmotPushForTests(): void {
   settings = { enabled: false, customServer: null };
   settingsLoaded = false;
+  hydrating = null;
   registration = undefined;
   awaitingSession = null;
   retiring = false;

@@ -350,4 +350,23 @@ describe('native token reads', () => {
     );
     stop();
   });
+
+  it('a slow status read cannot resurrect "on" after a disable', async () => {
+    await AsyncStorage.setItem('marmot_push_enabled_v1', '1');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const realGet = (AsyncStorage.getItem as jest.Mock).getMockImplementation();
+    (AsyncStorage.getItem as jest.Mock).mockImplementationOnce(async (k: string) => {
+      await gate;
+      return realGet?.(k) ?? '1';
+    });
+    const status = pendingMarmotPushGroups(); // starts the (slow) hydration
+    const off = disableMarmotPush();
+    release();
+    await Promise.all([status, off]);
+    expect((await loadMarmotPushSettings()).enabled).toBe(false);
+    expect(await pendingMarmotPushGroups()).toBe(0);
+    expect(await syncMarmotPushNow()).toMatchObject({ published: 2 });
+    expect(lastRegistration()).toBeNull();
+  });
 });
