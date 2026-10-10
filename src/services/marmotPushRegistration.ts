@@ -17,6 +17,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import * as Application from 'expo-application';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as Notifications from 'expo-notifications';
@@ -252,6 +253,49 @@ export function subscribeMarmotPushStatus(listener: () => void): () => void {
   statusListeners.add(listener);
   return () => statusListeners.delete(listener);
 }
+
+// --- the device token, shared with the notification watcher ----------------------
+
+/** This phone's raw native push token, as the notification watcher takes it. */
+export interface PushDevice {
+  platform: PushPlatform;
+  /** APNs: lowercase hex. FCM: the opaque token string. */
+  token: string;
+}
+const deviceListeners = new Set<() => void>();
+const deviceKey = (r: DeviceRegistration | null | undefined) =>
+  r === undefined ? 'unknown' : r === null ? 'off' : r.fingerprint;
+const notifyDevice = () => deviceListeners.forEach((l) => l());
+
+/** Every token change goes through here, so the watcher hears about it.
+ * True when it announced one. */
+function setDeviceRegistration(next: DeviceRegistration | null | undefined): boolean {
+  const changed = deviceKey(next) !== deviceKey(registration);
+  registration = next;
+  if (changed) notifyDevice();
+  return changed;
+}
+
+/** The device token for `pubkey` — only if THAT account turned push on (the
+ * watcher registers per account, and must never carry the token for an
+ * account that didn't opt in). undefined until known, null when off. */
+export function currentPushDevice(pubkey: string | null): PushDevice | null | undefined {
+  if (!pubkey) return null;
+  const reg = registrationFor(pubkey);
+  if (!reg) return reg;
+  const { platform, token } = reg;
+  return {
+    platform,
+    // FCM tokens are ASCII ([A-Za-z0-9_:.-]); APNs tokens travel as hex.
+    token: platform === 'apns' ? bytesToHex(token) : String.fromCharCode(...token),
+  };
+}
+
+/** Fires when the token appears or changes, or an account turns push on/off. */
+export function subscribePushDevice(listener: () => void): () => void {
+  deviceListeners.add(listener);
+  return () => deviceListeners.delete(listener);
+}
 // In-memory mirror of RETIRE_PENDING_KEY: no token is handed out meanwhile.
 let retiring = false;
 
@@ -370,7 +414,7 @@ async function syncAccountSession(pubkey: string): Promise<SyncResult | null> {
   // On but no token yet (the startup read failed): retry it now.
   if (registration === undefined && isEnabled(pubkey) && !retiring && !awaitingSession) {
     try {
-      registration = await readRegistration(currentServer());
+      setDeviceRegistration(await readRegistration(currentServer()));
       await registerWakeTask();
     } catch {
       return null;
@@ -400,7 +444,7 @@ export function startMarmotPushRegistration(): () => void {
       if (!anyEnabled() || retiring || awaitingSession) return;
       try {
         const platform = native.type === 'ios' ? 'apns' : 'fcm';
-        registration = toRegistration(platform, String(native.data), currentServer());
+        setDeviceRegistration(toRegistration(platform, String(native.data), currentServer()));
         await registerWakeTask();
         applyTo(getMarmotSession());
       } catch {
@@ -422,7 +466,7 @@ export function startMarmotPushRegistration(): () => void {
     }
     if (anyEnabled()) {
       try {
-        registration = await readRegistration(currentServer());
+        setDeviceRegistration(await readRegistration(currentServer()));
         await registerWakeTask();
       } catch (e) {
         // Offline / no token right now: keep whatever the groups have.
@@ -433,7 +477,7 @@ export function startMarmotPushRegistration(): () => void {
     } else {
       // Off everywhere: retract anything still published (e.g. turned off
       // while the account's session wasn't running).
-      registration = null;
+      setDeviceRegistration(null);
     }
     applyTo(getMarmotSession());
   });
@@ -494,7 +538,8 @@ async function enableNow(pubkey: string): Promise<EnableOutcome> {
     return { status: 'unavailable' };
   }
   explicit.set(pubkey.toLowerCase(), true);
-  registration = next;
+  // This account's token appeared, even if the phone's didn't change.
+  if (!setDeviceRegistration(next)) notifyDevice();
   await registerWakeTask();
   return { status: 'enabled', sync: await syncAccountSession(pubkey) };
 }
@@ -511,7 +556,12 @@ export interface DisableOutcome {
 /** Turn push off for `pubkey` (user action): retract from its groups, then
  * — once no account on the phone uses push — delete the token at
  * Apple/Google so copies the members already hold stop working. */
-export function disableMarmotPush(pubkey: string): Promise<DisableOutcome> {
+export function disableMarmotPush(
+  pubkey: string,
+  /** Something else (the notification watcher) may still hold the token for
+   * this account: never keep it for the other accounts. */
+  opts: { stillRegistered?: boolean } = {},
+): Promise<DisableOutcome> {
   return serial(async () => {
     // Explicitly off — an unreadable store doesn't change that.
     const known = await ensureSettings().then(
@@ -521,7 +571,10 @@ export function disableMarmotPush(pubkey: string): Promise<DisableOutcome> {
     explicit.set(pubkey.toLowerCase(), false); // no late read may override it
     // Unknown whether others use it: treat as none (revoking is the safe side).
     const othersUsePush = known && anyEnabled();
-    if (!othersUsePush) registration = null;
+    // Gone for this account either way — an in-flight watcher registration
+    // for it must not land.
+    if (othersUsePush) notifyDevice();
+    else setDeviceRegistration(null);
     // Retract + revoke regardless of whether the setting could be saved.
     const saved = await AsyncStorage.setItem(accountKey(pubkey), '0').then(
       () => true,
@@ -534,6 +587,7 @@ export function disableMarmotPush(pubkey: string): Promise<DisableOutcome> {
     // Otherwise (declined, failed, or not this account's session) its groups
     // may still hold it, linking it to the other account: replace the token.
     const retracted =
+      !opts.stillRegistered &&
       !!session &&
       !!sync &&
       !sync.declined &&
@@ -633,7 +687,7 @@ export function retireMarmotPushForAccount(pubkey: string): Promise<boolean> {
       () => true,
       () => tombstone(me),
     );
-    registration = undefined;
+    setDeviceRegistration(undefined);
     if (!(await retireDeviceToken())) return false;
     const current = getMarmotSession();
     if (current && current.pubkey !== pubkey) await refreshAfterRetirement(current);
@@ -662,10 +716,10 @@ async function tombstone(account: string): Promise<boolean> {
  * their sessions re-publish it as they run (a remote signer waits for the
  * user). False when the deletion has to be retried (next start). */
 async function rotateDeviceToken(): Promise<boolean> {
-  registration = undefined;
+  setDeviceRegistration(undefined);
   if (!(await retireDeviceToken())) return false;
   try {
-    registration = await readRegistration(currentServer());
+    setDeviceRegistration(await readRegistration(currentServer()));
     await registerWakeTask();
   } catch {
     // unknown, not "off" — the next start (or Finish setup) retries
@@ -676,18 +730,20 @@ async function rotateDeviceToken(): Promise<boolean> {
 async function refreshAfterRetirement(session: MarmotSession): Promise<void> {
   if (await retirementPending()) return;
   if (!anyEnabled()) {
-    registration = null; // nobody left on push: no new token at all
+    setDeviceRegistration(null); // nobody left on push: no new token at all
     return;
   }
+  let next: DeviceRegistration;
   try {
-    registration = await readRegistration(currentServer());
-    await registerWakeTask();
+    next = await readRegistration(currentServer());
   } catch {
     return; // unknown, not "off" — the next start retries
   }
+  setDeviceRegistration(next);
+  await registerWakeTask();
   // Other opted-in accounts get the new token when their sessions run.
   if (!isEnabled(session.pubkey)) return;
-  session.pushRegistration.setRegistration(registration);
+  session.pushRegistration.setRegistration(next);
   void session.pushRegistration.sync({ interactive: true }).catch(() => undefined);
 }
 

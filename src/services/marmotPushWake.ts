@@ -24,6 +24,7 @@ import {
   fireMessageNotification,
   lastMarmotNotificationAt,
 } from './notificationService';
+import { isWatcherTaskPayload } from './watcherPushReceive';
 
 export const MARMOT_PUSH_WAKE_TASK = 'lp-marmot-push-wake';
 /** How long a running session gets to post the detailed notification. */
@@ -109,8 +110,14 @@ async function handleOne(deps: WakeDeps, arrived: number): Promise<WakeOutcome> 
 }
 
 if (!TaskManager.isTaskDefined(MARMOT_PUSH_WAKE_TASK)) {
-  TaskManager.defineTask(MARMOT_PUSH_WAKE_TASK, async ({ error }) => {
+  TaskManager.defineTask(MARMOT_PUSH_WAKE_TASK, async ({ data, error }) => {
     if (error) return;
+    // A tap on any notification (Android runs the task for those too) is a
+    // response, not a wake — it must never post a "New message".
+    if (data && typeof data === 'object' && 'actionIdentifier' in data) return;
+    // The task sees every push (and, on Android, taps on them): the
+    // notification watcher's pushes post their own alert and wake nothing.
+    if (isWatcherTaskPayload(data)) return;
     try {
       await handleMarmotPushWake();
     } catch (e) {

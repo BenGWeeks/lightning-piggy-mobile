@@ -14,6 +14,8 @@ import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { MarmotBridge } from './src/contexts/MarmotBridge';
+import { WatcherPushBridge } from './src/contexts/WatcherPushBridge';
+import { watcherCategoryOf, watcherTapData } from './src/services/watcherPushReceive';
 import { LiveLocationProvider } from './src/contexts/LiveLocationContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import { LocaleProvider } from './src/contexts/LocaleContext';
@@ -177,10 +179,15 @@ export default function App() {
       const raw = response?.notification?.request?.content?.data as
         | { kind?: string; conversationPubkey?: string; groupId?: string; walletId?: string }
         | undefined;
-      // A Marmot push alert (iOS, shown by the OS) carries no data: it means
-      // "a message arrived" → the Messages list.
-      const data =
-        response && isRemotePush(response.notification) && !raw?.kind ? { kind: 'dm' } : raw;
+      // The notification watcher's alert routes by its category; a Marmot
+      // push alert (iOS, shown by the OS) carries no data: it means "a
+      // message arrived" → the Messages list.
+      const watcher = watcherCategoryOf(response?.notification?.request);
+      const data = watcher
+        ? watcherTapData(watcher)
+        : response && isRemotePush(response.notification) && !raw?.kind
+          ? { kind: 'dm' }
+          : raw;
       if (!data) return;
       // The tapped notification's in-app history row is now read (#1143).
       const { historyId, owner } = data as { historyId?: string; owner?: string };
@@ -549,6 +556,10 @@ export default function App() {
                         {/* Marmot (MLS) session lifecycle — needs the signer +
                       relays from Nostr; Groups/DM inbox consume its events. */}
                         <MarmotBridge />
+                        {/* Notification-watcher push registration (DMs, zaps,
+                      mentions, NWC payments) — needs the signer, relays and
+                      the NWC wallets. */}
+                        <WatcherPushBridge />
                         {/* LiveLocationProvider sits inside Nostr (uses the
                       signer + sendDirectMessage) but outside the
                       navigator so an active share survives screen

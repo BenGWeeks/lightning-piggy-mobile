@@ -18,6 +18,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { unregisterWatcherBeforeSignOut } from '../services/watcherPush';
 import type { Palette } from '../styles/palettes';
 import type { NostrProfile } from '../types/nostr';
 
@@ -145,9 +146,13 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
             text: t('accountSwitcherSheet.signOut'),
             style: 'destructive',
             onPress: () => {
-              signOutIdentity(targetPubkey).catch((e) => {
-                if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
-              });
+              // The active account can still sign: drop it from the
+              // notification watcher first (no-op for another account).
+              unregisterWatcherBeforeSignOut(targetPubkey)
+                .then(() => signOutIdentity(targetPubkey))
+                .catch((e) => {
+                  if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
+                });
             },
           },
         ],

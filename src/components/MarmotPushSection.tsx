@@ -30,6 +30,8 @@ import {
   type PushServer,
 } from '../services/marmotPushRegistration';
 import type { SyncResult } from '../services/marmotPushRegistrar';
+import { unregisterWatcherPush } from '../services/watcherPush';
+import WatcherPushSection from './WatcherPushSection';
 import { createMarmotPushSectionStyles } from '../styles/MarmotPushSection.styles';
 import { createSecurityScreenStyles } from '../styles/SecurityScreen.styles';
 
@@ -125,7 +127,12 @@ const MarmotPushSection: React.FC = () => {
         if (on) Toast.show({ type: 'success', text1: t('securityScreen.marmotPushOn') });
       } else {
         setEnabled(false);
-        const off = await disableMarmotPush(pubkey);
+        // While the token still exists: tell the notification watcher to drop
+        // this phone (a remote signer may prompt). If it can't, deleting (or,
+        // when another account still uses push, replacing) the token below
+        // still ends its pushes (Android) / best-effort (iOS).
+        const watcherDropped = await unregisterWatcherPush().catch(() => false);
+        const off = await disableMarmotPush(pubkey, { stillRegistered: !watcherDropped });
         // (disable never throws — it reports what it couldn't do)
         reportSync(off.sync);
         Toast.show(
@@ -245,6 +252,8 @@ const MarmotPushSection: React.FC = () => {
           )}
         </View>
       )}
+
+      <WatcherPushSection pushEnabled={enabled} />
 
       <TouchableOpacity
         style={styles.advancedToggle}
