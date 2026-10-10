@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteAsync } from 'expo-file-system/legacy';
+import { deleteAsync, moveAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { encryptFile } from './encryptedFile';
 import {
   DecryptedMediaCancelledError,
@@ -185,14 +185,65 @@ describe('decryptedMediaCache', () => {
     }
   });
 
-  it('signing out the active account retires it: a later request writes nothing for it', async () => {
+  it("a request made after A's sign-out is cancelled and never lands in B's folder", async () => {
     setDecryptedMediaOwner(A);
     await resolveDecryptedMedia(ref);
+    fetchMock.mockClear();
     await wipeDecryptedMediaForOwner(A);
-    jest.useFakeTimers();
     const late = resolveDecryptedMedia(ref); // e.g. a bubble mounting mid-logout
-    jest.advanceTimersByTime(15_000);
-    await expect(late).rejects.toThrow(/No active account/);
+    setDecryptedMediaOwner(B); // the successor account becomes active
+    await expect(late).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+    await new Promise((r) => setImmediate(r));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(filesUnder(A)).toEqual([]);
+    expect(filesUnder(B)).toEqual([]);
+  });
+
+  it('a cold-start waiter is cancelled if the owner changes again before it runs', async () => {
+    const pending = resolveDecryptedMedia(ref);
+    setDecryptedMediaOwner(A);
+    setDecryptedMediaOwner(B);
+    await expect(pending).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
+    expect(filesUnder(A)).toEqual([]);
+    expect(filesUnder(B)).toEqual([]);
+  });
+
+  it('never leaves a plaintext temp file behind when a write or move fails', async () => {
+    setDecryptedMediaOwner(A);
+    (writeAsStringAsync as jest.Mock).mockImplementationOnce(async (uri: string) => {
+      mockFiles.set(uri, 'partial'); // e.g. disk full mid-write
+      throw new Error('ENOSPC');
+    });
+    await expect(resolveDecryptedMedia(ref)).rejects.toThrow('ENOSPC');
+    expect(filesUnder(A)).toEqual([]);
+    (moveAsync as jest.Mock).mockRejectedValueOnce(new Error('move failed'));
+    await expect(resolveDecryptedMedia(ref)).rejects.toThrow('move failed');
+    expect(filesUnder(A)).toEqual([]);
+  });
+
+  it('a wipe waits for a publish already past its last check, then deletes it', async () => {
+    setDecryptedMediaOwner(A);
+    let releaseMove!: () => void;
+    let moveStarted!: () => void;
+    const started = new Promise<void>((r) => (moveStarted = r));
+    // A move that reads the temp, then completes later (lands after a naive
+    // folder delete would have run).
+    (moveAsync as jest.Mock).mockImplementationOnce(
+      async ({ from, to }: { from: string; to: string }) => {
+        const data = mockFiles.get(from) as string;
+        moveStarted();
+        await new Promise<void>((r) => (releaseMove = r));
+        mockFiles.delete(from);
+        mockFiles.set(to, data);
+      },
+    );
+    const pending = resolveDecryptedMedia(ref);
+    await started;
+    const wipe = wipeDecryptedMediaForOwner(A);
+    await new Promise((r) => setImmediate(r));
+    releaseMove();
+    await wipe;
+    await expect(pending).rejects.toBeInstanceOf(DecryptedMediaCancelledError);
     expect(filesUnder(A)).toEqual([]);
   });
 

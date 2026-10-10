@@ -16,8 +16,13 @@
  *    served someone else's plaintext without decrypting.
  *  - **Generation token.** Each owner has a generation, bumped when its media
  *    is wiped or its session ends (account switch / sign-out). A decrypt that
- *    was in flight when that happened neither writes a file nor fills the
- *    memory cache.
+ *    was in flight when that happened never fills the memory cache, and only
+ *    publishes a file if it was already past its last check — on a wipe the
+ *    wipe waits for that publish and then deletes the folder; on a switch the
+ *    file lands in the outgoing account's own folder.
+ *  - **Sessions.** Only a cold start (no account yet in this process) waits
+ *    for an owner; a request made between sessions is cancelled, so one
+ *    account's media can never be decrypted into the next account's folder.
  *  - **Legacy cleanup.** Before #1241 the components wrote device-wide
  *    `lp-voice-*` / `lp-img-*` files straight into `cacheDirectory`; they are
  *    deleted once after upgrade (and on any sign-out until that has run).
@@ -80,8 +85,15 @@ const inflight = new Map<string, Promise<string>>();
 // ownerDir → generation; see the header.
 const generations = new Map<string, number>();
 let activeOwner: string | null = null;
-// Resolves waiting in `waitForOwner` until an account becomes active.
-let ownerWaiters: (() => void)[] = [];
+// "Not hydrated yet" vs "between sessions": only a cold start (no owner ever
+// set in this process) may wait for one. Every owner change bumps the epoch.
+let everHadOwner = false;
+let sessionEpoch = 0;
+type OwnerWaiter = (owner: string | null, epoch: number) => void;
+// Requests waiting in `waitForOwner` for the first account to become active.
+let ownerWaiters: OwnerWaiter[] = [];
+// ownerDir → file publishes in flight, so a wipe can wait for them.
+const publishing = new Map<string, Set<Promise<void>>>();
 const OWNER_WAIT_MS = 15_000;
 let legacyCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -92,7 +104,11 @@ function cacheBase(): string | null {
   return cacheDirectory.endsWith('/') ? cacheDirectory : `${cacheDirectory}/`;
 }
 
-/** The directory name for an owner — a hash, so the pubkey isn't on disk. */
+/**
+ * The directory name for an owner. A hash keeps the raw pubkey out of the
+ * path, but an unsalted sha256 of a public key is still linkable to it —
+ * this is tidiness, not anonymity.
+ */
 export function ownerDirName(owner: string): string {
   return hex(owner.toLowerCase());
 }
@@ -159,10 +175,12 @@ export function setDecryptedMediaOwner(pubkey: string | null): void {
   memory.clear();
   inflight.clear();
   activeOwner = next;
+  sessionEpoch++;
   if (next) {
+    everHadOwner = true;
     const waiters = ownerWaiters;
     ownerWaiters = [];
-    waiters.forEach((wake) => wake());
+    waiters.forEach((wake) => wake(next, sessionEpoch));
   }
   if (next && !legacyCleanupTimer) {
     // Off the startup path; a one-off directory listing.
@@ -185,20 +203,33 @@ export function peekDecryptedMedia(ref: EncryptedMediaRef): string | null {
   return memory.get(`${ownerDirName(activeOwner)}/${mediaCacheKey(ref)}`) ?? null;
 }
 
-/** The active owner, waiting up to OWNER_WAIT_MS for one to be set. */
-function waitForOwner(): Promise<string> {
+/** Cold start only: wait up to OWNER_WAIT_MS for the first owner. */
+function waitForOwner(): Promise<{ owner: string; epoch: number }> {
   return new Promise((resolve, reject) => {
-    const wake = () => {
+    const wake: OwnerWaiter = (owner, epoch) => {
       clearTimeout(timer);
-      if (activeOwner) resolve(activeOwner);
+      if (owner) resolve({ owner, epoch });
       else reject(new Error('No active account for decrypted media'));
     };
     const timer = setTimeout(() => {
       ownerWaiters = ownerWaiters.filter((w) => w !== wake);
-      wake();
+      wake(null, sessionEpoch);
     }, OWNER_WAIT_MS);
     ownerWaiters.push(wake);
   });
+}
+
+/** The account a new request belongs to (see `everHadOwner`). */
+async function requestOwner(): Promise<string> {
+  if (activeOwner) return activeOwner;
+  // Between sessions (after a sign-out / switch to nobody): the request
+  // belongs to an account that's gone, so it must never land in the next one.
+  if (everHadOwner) throw new DecryptedMediaCancelledError();
+  // A cold start can mount a bubble (e.g. a restored group chat, whose
+  // messages aren't per-account yet) before the session's pubkey lands.
+  const { owner, epoch } = await waitForOwner();
+  if (epoch !== sessionEpoch) throw new DecryptedMediaCancelledError();
+  return owner;
 }
 
 /**
@@ -208,9 +239,7 @@ function waitForOwner(): Promise<string> {
  * `DecryptedMediaCancelledError` if the account's session ended meanwhile.
  */
 export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
-  // A cold start can mount a bubble (e.g. a restored group chat, whose
-  // messages aren't per-account yet) before the session's pubkey lands.
-  const owner = activeOwner ?? (await waitForOwner());
+  const owner = await requestOwner();
   const ownerDir = ownerDirName(owner);
   const memoKey = `${ownerDir}/${mediaCacheKey(ref)}`;
   const pending = inflight.get(memoKey);
@@ -259,26 +288,51 @@ async function resolveUncached(
         })
       : decryptFile(cipher, keyHex as string, nonceHex);
     assertCurrent();
-    // Write to this writer's own temp file, then move it into place: a reader
-    // never sees a half-written file, and a cancelled writer only ever
-    // deletes its own temp — never a file a newer request already published.
-    const tmp = `${uri}.${gen}-${Math.random().toString(36).slice(2)}.tmp`;
-    await makeDirectoryAsync(dir, { intermediates: true });
-    await writeAsStringAsync(tmp, Buffer.from(plain).toString('base64'), { encoding: 'base64' });
-    if (generationOf(ownerDir) !== gen) {
-      // Wiped / switched while writing: don't leave the plaintext behind.
-      await deleteAsync(tmp, { idempotent: true }).catch(() => {});
-      throw new DecryptedMediaCancelledError();
-    }
-    if ((await getInfoAsync(uri)).exists) {
-      await deleteAsync(tmp, { idempotent: true }).catch(() => {}); // published meanwhile
-    } else {
-      await moveAsync({ from: tmp, to: uri });
-    }
+    // Registered in the same tick as the check above, so a wipe that bumps
+    // the generation after it will wait for this publish to settle.
+    await trackPublish(ownerDir, publishFile(dir, uri, plain, ownerDir, gen));
   }
   assertCurrent();
   remember(memoKey, uri);
   return uri;
+}
+
+/**
+ * Write to this writer's own temp file, then move it into place: a reader
+ * never sees a half-written file, and a cancelled writer only ever deletes its
+ * own temp — never a file a newer request already published.
+ */
+async function publishFile(
+  dir: string,
+  uri: string,
+  plain: Uint8Array,
+  ownerDir: string,
+  gen: number,
+): Promise<void> {
+  const tmp = `${uri}.${gen}-${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    await makeDirectoryAsync(dir, { intermediates: true });
+    await writeAsStringAsync(tmp, Buffer.from(plain).toString('base64'), { encoding: 'base64' });
+    // Wiped / switched while writing: don't publish.
+    if (generationOf(ownerDir) !== gen) throw new DecryptedMediaCancelledError();
+    if (!(await getInfoAsync(uri)).exists) await moveAsync({ from: tmp, to: uri });
+  } finally {
+    // Already gone after a successful move; on any failure (partial write,
+    // cancelled, move error) never leave the plaintext temp behind.
+    await deleteAsync(tmp, { idempotent: true }).catch(() => {});
+  }
+}
+
+function trackPublish(ownerDir: string, publish: Promise<void>): Promise<void> {
+  let set = publishing.get(ownerDir);
+  if (!set) publishing.set(ownerDir, (set = new Set()));
+  set.add(publish);
+  const done = () => {
+    set.delete(publish);
+    if (set.size === 0 && publishing.get(ownerDir) === set) publishing.delete(ownerDir);
+  };
+  publish.then(done, done);
+  return publish;
 }
 
 /**
@@ -288,12 +342,18 @@ async function resolveUncached(
 export async function wipeDecryptedMediaForOwner(pubkey: string): Promise<void> {
   const ownerDir = ownerDirName(pubkey);
   bump(ownerDir);
-  // Signing out the active account retires its session right away, so a
-  // bubble mounting during the rest of the logout can't decrypt (and write)
-  // again for it; requests wait for the next account instead.
-  if (activeOwner === pubkey.toLowerCase()) activeOwner = null;
+  // Signing out the active account retires its session right away: a bubble
+  // mounting during the rest of the logout is cancelled, never decrypted for
+  // it again — nor parked until the next account (whose folder it'd land in).
+  if (activeOwner === pubkey.toLowerCase()) {
+    activeOwner = null;
+    sessionEpoch++;
+  }
   for (const k of [...memory.keys()]) if (k.startsWith(`${ownerDir}/`)) memory.delete(k);
   for (const k of [...inflight.keys()]) if (k.startsWith(`${ownerDir}/`)) inflight.delete(k);
+  // A publish already past its generation check may still move a file into
+  // place; let it settle so the folder delete below catches it.
+  await Promise.allSettled([...(publishing.get(ownerDir) ?? [])]);
   const dir = ownerDirUri(pubkey);
   if (dir) await deleteAsync(dir, { idempotent: true }).catch(() => {});
   // Legacy files aren't attributable to an owner — any sign-out removes them.
@@ -323,7 +383,10 @@ export function __resetDecryptedMediaCacheForTests(): void {
   inflight.clear();
   generations.clear();
   activeOwner = null;
+  everHadOwner = false;
+  sessionEpoch = 0;
   ownerWaiters = [];
+  publishing.clear();
   if (legacyCleanupTimer) clearTimeout(legacyCleanupTimer);
   legacyCleanupTimer = null;
 }
