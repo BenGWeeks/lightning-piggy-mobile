@@ -79,6 +79,9 @@ const inflight = new Map<string, Promise<string>>();
 // ownerDir → generation; see the header.
 const generations = new Map<string, number>();
 let activeOwner: string | null = null;
+// Resolves waiting in `waitForOwner` until an account becomes active.
+let ownerWaiters: (() => void)[] = [];
+const OWNER_WAIT_MS = 15_000;
 let legacyCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
 const hex = (s: string) => bytesToHex(sha256(utf8ToBytes(s)));
@@ -155,6 +158,11 @@ export function setDecryptedMediaOwner(pubkey: string | null): void {
   memory.clear();
   inflight.clear();
   activeOwner = next;
+  if (next) {
+    const waiters = ownerWaiters;
+    ownerWaiters = [];
+    waiters.forEach((wake) => wake());
+  }
   if (next && !legacyCleanupTimer) {
     // Off the startup path; a one-off directory listing.
     legacyCleanupTimer = setTimeout(() => {
@@ -176,15 +184,32 @@ export function peekDecryptedMedia(ref: EncryptedMediaRef): string | null {
   return memory.get(`${ownerDirName(activeOwner)}/${mediaCacheKey(ref)}`) ?? null;
 }
 
+/** The active owner, waiting up to OWNER_WAIT_MS for one to be set. */
+function waitForOwner(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const wake = () => {
+      clearTimeout(timer);
+      if (activeOwner) resolve(activeOwner);
+      else reject(new Error('No active account for decrypted media'));
+    };
+    const timer = setTimeout(() => {
+      ownerWaiters = ownerWaiters.filter((w) => w !== wake);
+      wake();
+    }, OWNER_WAIT_MS);
+    ownerWaiters.push(wake);
+  });
+}
+
 /**
  * Resolve an encrypted attachment to a decrypted `file://` URI for the active
  * account: memory → this account's disk cache → fetch + decrypt + write.
  * Rejects on fetch / decrypt failure (wrong keys, bad hashes) and with
  * `DecryptedMediaCancelledError` if the account's session ended meanwhile.
  */
-export function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
-  const owner = activeOwner;
-  if (!owner) return Promise.reject(new Error('No active account for decrypted media'));
+export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
+  // A cold start can mount a bubble (e.g. a restored group chat, whose
+  // messages aren't per-account yet) before the session's pubkey lands.
+  const owner = activeOwner ?? (await waitForOwner());
   const ownerDir = ownerDirName(owner);
   const memoKey = `${ownerDir}/${mediaCacheKey(ref)}`;
   const pending = inflight.get(memoKey);
@@ -281,6 +306,7 @@ export function __resetDecryptedMediaCacheForTests(): void {
   inflight.clear();
   generations.clear();
   activeOwner = null;
+  ownerWaiters = [];
   if (legacyCleanupTimer) clearTimeout(legacyCleanupTimer);
   legacyCleanupTimer = null;
 }

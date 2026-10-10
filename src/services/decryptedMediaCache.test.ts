@@ -177,8 +177,20 @@ describe('decryptedMediaCache', () => {
     }
   });
 
-  it('refuses to decrypt with no active account', async () => {
-    await expect(resolveDecryptedMedia(ref)).rejects.toThrow(/No active account/);
+  it('waits for an account to become active (cold start) before decrypting', async () => {
+    const pending = resolveDecryptedMedia(ref);
+    await new Promise((r) => setImmediate(r));
+    expect(fetchMock).not.toHaveBeenCalled();
+    setDecryptedMediaOwner(A);
+    const uri = await pending;
+    expect(filesUnder(A)).toEqual([uri]);
+  });
+
+  it('gives up if no account becomes active', async () => {
+    jest.useFakeTimers();
+    const pending = resolveDecryptedMedia(ref);
+    jest.advanceTimersByTime(15_000);
+    await expect(pending).rejects.toThrow(/No active account/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
