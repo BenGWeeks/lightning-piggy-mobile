@@ -3,6 +3,7 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   startTransition,
@@ -356,13 +357,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return set;
   }, [contacts]);
 
-  // Publish the logged-in pubkey through the nostrService module so
-  // non-React consumers (e.g. WalletContext's zap sender resolver) can
-  // read it without introducing a circular provider dependency. Same
-  // mirror is needed for `walletStorageService` — its module-level
-  // `walletListKey()` reads from this published value to pick the
-  // correct per-account `wallet_list_${pk}` AsyncStorage key (#288).
-  useEffect(() => {
+  // Publish identity before paint so providers above NostrProvider (currency,
+  // language) cannot display the previous account's preference during a switch.
+  // Non-React wallet storage and zap consumers use the same identity mirror.
+  useLayoutEffect(() => {
     nostrService.setCurrentUserPubkey(pubkey);
     setActivePubkeyForWalletStorage(pubkey);
   }, [pubkey]);

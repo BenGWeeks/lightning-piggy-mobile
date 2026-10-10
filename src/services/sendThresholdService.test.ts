@@ -15,8 +15,16 @@ import {
   getSendThreshold,
   setSendThreshold,
   shouldConfirmSend,
-  initialiseSendThresholdForNewInstall,
 } from './sendThresholdService';
+import { perAccountKey } from './perAccountStorage';
+import { __resetSafetyMigrationForTests } from './safetySettingsMigration';
+
+jest.mock('./identitiesStore', () => ({
+  loadIdentities: jest.fn(async () => ({ identities: [], activePubkey: null })),
+}));
+
+const PK = 'a'.repeat(64);
+const OTHER = 'b'.repeat(64);
 
 describe('shouldConfirmSend', () => {
   it('prompts when amount equals the threshold', () => {
@@ -50,84 +58,63 @@ describe('shouldConfirmSend', () => {
 describe('getSendThreshold / setSendThreshold', () => {
   beforeEach(async () => {
     await AsyncStorage.clear();
+    __resetSafetyMigrationForTests();
+  });
+
+  it("is per account: one account's choice never changes another's", async () => {
+    await setSendThreshold(50_000, PK);
+    await expect(getSendThreshold(PK)).resolves.toBe(50_000);
+    await expect(getSendThreshold(OTHER)).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
+    await setSendThreshold(null, OTHER);
+    await expect(getSendThreshold(OTHER)).resolves.toBeNull();
+    await expect(getSendThreshold(PK)).resolves.toBe(50_000);
+  });
+
+  it('confirms at the default when there is no active account', async () => {
+    await expect(getSendThreshold(null)).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
   });
 
   it('returns the default for a new install (unwritten key)', async () => {
-    await expect(getSendThreshold()).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
+    await expect(getSendThreshold(PK)).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
   });
 
   it('round-trips a custom integer threshold', async () => {
-    await setSendThreshold(50_000);
-    await expect(getSendThreshold()).resolves.toBe(50_000);
+    await setSendThreshold(50_000, PK);
+    await expect(getSendThreshold(PK)).resolves.toBe(50_000);
   });
 
   it('returns null when the user has chosen Off', async () => {
-    await setSendThreshold(null);
-    await expect(getSendThreshold()).resolves.toBeNull();
+    await setSendThreshold(null, PK);
+    await expect(getSendThreshold(PK)).resolves.toBeNull();
   });
 
   it('preserves an explicit user choice across a re-read (no surprise default)', async () => {
-    await setSendThreshold(100_000);
+    await setSendThreshold(100_000, PK);
     // Mimic a relaunch by reading twice — value must stick, not revert to default.
-    await expect(getSendThreshold()).resolves.toBe(100_000);
-    await expect(getSendThreshold()).resolves.toBe(100_000);
+    await expect(getSendThreshold(PK)).resolves.toBe(100_000);
+    await expect(getSendThreshold(PK)).resolves.toBe(100_000);
   });
 
   it('falls back to default if the stored value is corrupt', async () => {
-    await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, 'not-a-number');
-    await expect(getSendThreshold()).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
+    await AsyncStorage.setItem(
+      perAccountKey(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, PK),
+      'not-a-number',
+    );
+    await expect(getSendThreshold(PK)).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
   });
 
   it('rejects setting a non-positive threshold', async () => {
-    await expect(setSendThreshold(0)).rejects.toThrow();
-    await expect(setSendThreshold(-100)).rejects.toThrow();
+    await expect(setSendThreshold(0, PK)).rejects.toThrow();
+    await expect(setSendThreshold(-100, PK)).rejects.toThrow();
   });
 
   it('rejects fractional thresholds that floor to 0', async () => {
     // Pre-fix bug: floored to 0, then validated against pre-floor value (0.5 > 0) and silently stored 0.
-    await expect(setSendThreshold(0.5)).rejects.toThrow();
+    await expect(setSendThreshold(0.5, PK)).rejects.toThrow();
   });
 
   it('floors fractional thresholds that floor to a positive integer', async () => {
-    await setSendThreshold(10500.7);
-    await expect(getSendThreshold()).resolves.toBe(10500);
-  });
-});
-
-describe('initialiseSendThresholdForNewInstall', () => {
-  beforeEach(async () => {
-    await AsyncStorage.clear();
-  });
-
-  it('leaves the key unset for a fresh install (no wallet_list, no onboarding_complete)', async () => {
-    await initialiseSendThresholdForNewInstall();
-    await expect(AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY)).resolves.toBeNull();
-    // Subsequent getSendThreshold returns the 10k default.
-    await expect(getSendThreshold()).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
-  });
-
-  it('writes the Off sentinel for an upgraded install with wallet_list populated', async () => {
-    await AsyncStorage.setItem('wallet_list', JSON.stringify([{ id: 'a' }]));
-    await initialiseSendThresholdForNewInstall();
-    await expect(getSendThreshold()).resolves.toBeNull();
-  });
-
-  it('writes the Off sentinel when only onboarding_complete is set', async () => {
-    await AsyncStorage.setItem('onboarding_complete', 'true');
-    await initialiseSendThresholdForNewInstall();
-    await expect(getSendThreshold()).resolves.toBeNull();
-  });
-
-  it('treats an empty wallet_list ("[]") as fresh install', async () => {
-    await AsyncStorage.setItem('wallet_list', '[]');
-    await initialiseSendThresholdForNewInstall();
-    await expect(AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY)).resolves.toBeNull();
-  });
-
-  it('is idempotent — does not overwrite an existing user choice', async () => {
-    await AsyncStorage.setItem('onboarding_complete', 'true');
-    await setSendThreshold(50_000); // explicit user choice
-    await initialiseSendThresholdForNewInstall();
-    await expect(getSendThreshold()).resolves.toBe(50_000);
+    await setSendThreshold(10500.7, PK);
+    await expect(getSendThreshold(PK)).resolves.toBe(10500);
   });
 });

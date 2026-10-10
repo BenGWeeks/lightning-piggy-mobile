@@ -16,9 +16,9 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
+import { useGroups } from '../contexts/GroupsContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createAddWalletWizardStyles } from '../styles/AddWalletWizard.styles';
@@ -49,7 +49,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [xpub, setXpub] = useState('');
   const [mnemonicInput, setMnemonicInput] = useState('');
   const [alias, setAlias] = useState('');
-  const [secretMode, setSecretMode] = useState(false);
+  // Per-account Secret Mode (GroupsContext owns the active account's value).
+  const { secretMode } = useGroups();
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>(defaultCardThemeFor('nwc'));
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,10 +61,6 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
-
-  useEffect(() => {
-    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
-  }, [visible]);
 
   const reset = useCallback(() => {
     setStep('type');

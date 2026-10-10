@@ -51,8 +51,14 @@ The app uses two storage mechanisms with different security levels:
 | `user_display_name`
 | The user's chosen display name.
 
-| `user_fiat_currency`
-| Selected fiat currency code for balance display.
+| `user_fiat_currency_<pubkey>`, `app_locale_preference_<pubkey>`
+| Account currency and language. New accounts snapshot the current phone template; switching restores the account's own choice.
+
+| `send_threshold_sats_v1_<pubkey>`, `@lp:wot-settings:v1_<pubkey>`, `secret_mode_<pubkey>`, `link_preview_enabled_v1_<pubkey>`
+| Account payment-confirmation threshold, trust tier, Secret Mode and link-preview choice. Sign-out removes only the signed-out account's settings.
+
+| `phone_template:user_fiat_currency`, `phone_template:app_locale_preference`
+| Last applied display preferences used to initialise a new account. Theme and animation remain device preferences.
 
 | `lightning_address`
 | The user's lightning address for receiving payments.
@@ -61,6 +67,8 @@ The app uses two storage mechanisms with different security levels:
 | Cached Nostr contact list with 24-hour TTL. Contains only public data (pubkeys, profile metadata).
 
 |===
+
+Existing device settings are copied once into every registered account without overwriting account values. Legacy device keys are removed only after every copy succeeds; interrupted migration retries safely. The older `dev_mode` flag is migrated too. Account-owned React state masks values from the previous account during switching; fiat exchange rates are also scoped to the current currency.
 
 NOTE: The app still stores **decrypted group-message plaintext** in AsyncStorage to power `GroupConversationScreen` and the group previews on the Messages tab (`group_messages_<groupId>`, `nostr_group_activity_<pubkey>`). This is the known at-rest residual — 1:1 DM plaintext moved to the encrypted DB in #848/#850. See <<Message Content at Rest (Threat Model)>> below.
 

@@ -512,8 +512,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     // explicit "are you sure?" before we fire the swap / payment chain.
     // Run after fee/min/max validation so the prompt never appears for
     // an amount that would have been rejected anyway.
-    const threshold = await getSendThreshold();
-    if (shouldConfirmSend(currentSats, threshold)) {
+    if (shouldConfirmSend(currentSats, await getSendThreshold(activePubkey))) {
       const fiat =
         btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
       const confirmed = await new Promise<boolean>((resolve) => {

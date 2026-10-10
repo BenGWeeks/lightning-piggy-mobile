@@ -158,6 +158,9 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 3. Use a signer that exposes a11y selectors (per the 2026-05 review, Nowser surfaces tappable elements with `accessibilityLabel` / resource-id, so Maestro can drive its connection-add flow without coordinate fallbacks). +
 *Validated this session:* PR #284 (NIP-46 / Clave) reaches the QR pairing screen + verifies the spec-compliant `nostrconnect://` URI fully via Maestro; the bunker-side approval cannot be Maestro-driven on Aegis until Aegis ships a `testTag` / `accessibilityLabel` on the FAB. Manual handoff is the supported path today.
 
+| iOS dev client shows `Cannot read property reload of undefined` with `hmr.ts` / `window.location.reload` in the stack
+| The Expo development HMR connection can fail while loading a split bundle. Cold-launch first; if the error returns on opening a lazy screen, run an isolated test Metro with `EXPO_NO_METRO_LAZY=1 npm start -- --port <port>` and reopen its development-client URL. This disables development bundle splitting only and does not change application code or clear app data. This stack is distinct from the BDK / `NativeDevSettings.reload` symptom below. Restore the shared simulator's original Metro URL after testing.
+
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 

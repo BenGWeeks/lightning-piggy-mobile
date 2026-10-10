@@ -5,9 +5,12 @@ import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
+import { useAccountState } from '../../contexts/useAccountState';
+import { useNostr } from '../../contexts/NostrContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
+import { Toast } from '../../components/BrandedToast';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   getSendThreshold,
@@ -49,33 +52,48 @@ const PRESETS: { value: number | null; labelKey: string; sublabelKey: string }[]
 const SecurityScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
+  const { pubkey } = useNostr();
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSecurityScreenStyles(colors), [colors]);
-  const [threshold, setThresholdState] = useState<number | null>(
+  const [threshold, setThresholdState] = useAccountState<number | null>(
+    pubkey,
     DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   );
-  const [customDraft, setCustomDraft] = useState<string>('');
-  const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
+  const [customDraft, setCustomDraft] = useAccountState<string>(pubkey, '');
+  const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
   const [lockScreenContentOn, setLockScreenContentOn] = useState<boolean>(false);
   // Background DM watch is Android-only (iOS can't hold a background socket).
   const [backgroundDmOn, setBackgroundDmOn] = useState<boolean>(false);
   const isAndroid = Platform.OS === 'android';
 
   useEffect(() => {
-    getSendThreshold().then((t) => {
+    getLockScreenContentEnabled().then(setLockScreenContentOn);
+    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
+  }, [isAndroid]);
+
+  // Per-account settings: (re)load for the ACTIVE account, and ignore a late
+  // answer for an account we've since switched away from.
+  useEffect(() => {
+    let cancelled = false;
+    setCustomDraft('');
+    getSendThreshold(pubkey).then((t) => {
+      if (cancelled) return;
       setThresholdState(t);
       // If the saved threshold doesn't match a preset, surface it in the custom row.
       const isPreset = PRESETS.some((p) => p.value === t);
       if (!isPreset && t !== null) setCustomDraft(String(t));
     });
-    getLinkPreviewEnabled().then(setLinkPreviewOn);
-    getLockScreenContentEnabled().then(setLockScreenContentOn);
-    if (isAndroid) loadBackgroundDmEnabled().then(setBackgroundDmOn);
-  }, [isAndroid]);
+    getLinkPreviewEnabled(pubkey).then((v) => {
+      if (!cancelled) setLinkPreviewOn(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, setCustomDraft, setThresholdState, setLinkPreviewOn]);
 
   const handleToggleLinkPreview = async (next: boolean) => {
     setLinkPreviewOn(next);
-    await setLinkPreviewEnabled(next);
+    await setLinkPreviewEnabled(next, pubkey);
   };
 
   const handleToggleLockScreenContent = async (next: boolean) => {
@@ -103,17 +121,34 @@ const SecurityScreen: React.FC = () => {
     }
   };
 
+  // `setSendThreshold` rejects (no active account, or the per-account
+  // migration couldn't read the identity registry). Don't leave the screen
+  // showing a value that wasn't saved: re-read the stored one and say so.
+  const saveThreshold = async (value: number | null) => {
+    try {
+      await setSendThreshold(value, pubkey);
+    } catch {
+      Toast.show({
+        type: 'error',
+        text1: t('securityScreen.thresholdSaveFailed'),
+        position: 'top',
+      });
+      const stored = await getSendThreshold(pubkey).catch(() => null);
+      setThresholdState(stored ?? DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
+    }
+  };
+
   const handlePickPreset = async (value: number | null) => {
     setThresholdState(value);
     setCustomDraft('');
-    await setSendThreshold(value);
+    await saveThreshold(value);
   };
 
   const handleCustomSave = async () => {
     const parsed = parseInt(customDraft.replace(/[^0-9]/g, ''), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     setThresholdState(parsed);
-    await setSendThreshold(parsed);
+    await saveThreshold(parsed);
   };
 
   const customActive = threshold !== null && !PRESETS.some((p) => p.value === threshold);
@@ -127,6 +162,7 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.confirmLargeSendsHint')}</Text>
+      <Text style={sharedAccountStyles.fieldHint}>{t('securityScreen.perAccountHint')}</Text>
 
       <View style={styles.optionList}>
         {PRESETS.map((opt) => {
