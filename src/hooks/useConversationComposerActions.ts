@@ -244,17 +244,22 @@ export function useConversationComposerActions(params: {
       if (!(await send())) return false;
       const claim = `${myPubkey}:${pubkey}`;
       if (myPubkey && !noteClaimedRef.current.has(claim)) {
-        // Claimed (in memory, then on disk) before sending so it never goes
-        // twice; a note that fails keeps its red-tick bubble for Re-publish.
+        // Claimed in memory so overlapping sends don't both send it; only
+        // recorded on disk once it actually went, so a failed note (which
+        // keeps its red-tick bubble) is tried again on the next fallback.
         noteClaimedRef.current.add(claim);
-        if (!(await hasSentMarmotFallbackNote(myPubkey, pubkey))) {
-          await markMarmotFallbackNoteSent(myPubkey, pubkey);
-          const note = marmotFallbackNoteText();
-          // Not awaited: the user's own send is done, so the composer clears now.
-          void sendWithBubble(note, 'nip17', (hooks) =>
-            sendDirectMessage(pubkey, note, { protocol: 'nip17', ...hooks }),
-          );
-        }
+        if (await hasSentMarmotFallbackNote(myPubkey, pubkey)) return true;
+        const note = marmotFallbackNoteText();
+        const release = () => {
+          noteClaimedRef.current.delete(claim);
+        };
+        // Not awaited: the user's own send is done, so the composer clears now.
+        void sendWithBubble(note, 'nip17', (hooks) =>
+          sendDirectMessage(pubkey, note, { protocol: 'nip17', ...hooks }),
+        ).then(
+          (sent) => (sent ? markMarmotFallbackNoteSent(myPubkey, pubkey) : release()),
+          release,
+        );
       }
       return true;
     },

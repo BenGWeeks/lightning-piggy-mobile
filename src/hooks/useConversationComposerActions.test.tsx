@@ -220,6 +220,32 @@ describe('useConversationComposerActions.sendText — optimistic + failed-keep-b
     expect(sentTexts()).toEqual(expect.arrayContaining(['first', 'second']));
   });
 
+  it('tries the note again next time if it failed to send', async () => {
+    let noteFails = true;
+    mockSendDirectMessage.mockImplementation(
+      async (_pk: string, text: string, hooks?: SendHooks): Promise<SendResult> => {
+        if (hooks?.protocol === 'marmot') {
+          return { success: false, error: 'no key package', marmotUnreachable: 'noKeyPackage' };
+        }
+        if (text.startsWith('I tried') && noteFails) return { success: false, error: 'offline' };
+        return { success: true };
+      },
+    );
+    answerAlertWith('Send with NIP-17');
+    const first = setup('marmot', jest.fn());
+    await act(async () => {
+      await first.result.current.handleSend();
+    });
+    expect(await AsyncStorage.getAllKeys()).toEqual([]);
+    noteFails = false;
+    mockSendDirectMessage.mockClear();
+    await act(async () => {
+      await first.result.current.handleSend();
+    });
+    expect(sentTexts().filter((x) => x.startsWith('I tried'))).toHaveLength(1);
+    expect(await AsyncStorage.getAllKeys()).toHaveLength(1);
+  });
+
   it('sends nothing and keeps the draft when the user cancels', async () => {
     marmotUnreachableThenNip17();
     answerAlertWith('Cancel');
