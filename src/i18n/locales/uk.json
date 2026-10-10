@@ -1435,7 +1435,7 @@
     "savedMyKey": "Я зберіг свій ключ"
   },
   "nostrScreen": {
-    "title": "Nostr",
+    "title": "Мережа Nostr",
     "connected": "Підключено",
     "disconnected": "Відключено",
     "removeRelayLabel": "Видалити релей {{url}}",
@@ -1448,12 +1448,12 @@
     "amberPermissionTitle": "Дозвіл Amber",
     "couldNotGrantPermission": "Не вдалося надати дозвіл NIP-44.",
     "grantAmberPermissionLabel": "Надати Amber дозвіл NIP-44",
-    "grantPermissionInAmber": "Надати дозвіл в Amber",
+    "grantPermissionInAmber": "Дозволити Amber розблокувати повідомлення",
     "noProfilePubkey": "Немає pubkey профілю — спершу увійдіть.",
     "amberRoundTripMismatch": "Невідповідність round-trip Amber — можливо, дозвіл не встановлено.",
     "experimental": "Експериментальне",
     "nativeCryptoHint": "Виконує шифрування NIP-44 та перевірку підписів через нативний модуль rust-nostr замість JavaScript. Функція для тестувальників — стежте за журналами [PerfBlock] nostrCrypto і вимкніть, якщо щось працює не так.",
-    "nativeCryptoLabel": "Нативна криптографія (rust-nostr)",
+    "nativeCryptoLabel": "Швидше шифрування (бета)",
     "nativeCryptoRestartCaption": "Перезапустіть застосунок, щоб застосувати.",
     "nativeCryptoUnavailable": "Недоступно на цьому пристрої",
     "nativeCryptoA11y": "Увімкнути нативну криптографію",
@@ -1471,12 +1471,12 @@
     "bannerText": "Ви офлайн — деякі дані можуть бути застарілими"
   },
   "onChainScreen": {
-    "title": "On-chain",
+    "title": "Мережа Bitcoin",
     "electrumServer": "Сервер Electrum",
     "electrumServerA11y": "Сервер Electrum",
     "useSsl": "Використовувати SSL",
     "hint": "On-chain гаманці використовують цей сервер Electrum, щоб зчитувати баланси й транслювати транзакції. Вкажіть тут власний сервер, якщо не хочете розкривати адреси публічному.",
-    "defaultWalletTitle": "Типовий on-chain гаманець",
+    "defaultWalletTitle": "Типовий для повернень",
     "defaultWalletEmpty": "Поки що немає on-chain гаманців. Додайте один через «Гаманці», щоб задати типове призначення для повернень Boltz і майбутніх процесів отримання on-chain.",
     "defaultWalletRowA11y": "Зробити {{wallet}} типовим on-chain гаманцем",
     "walletFallback": "гаманець",
@@ -2518,5 +2518,40 @@
     "title": "Екран і мова",
     "change": "Змінити",
     "currencyRowA11y": "Валюта: {{code}} {{name}}. Змінити валюту"
+  },
+  "advancedScreen": {
+    "title": "Додатково",
+    "notificationServer": "Сервер сповіщень",
+    "developerOptions": "Параметри розробника",
+    "secretMode": "Секретний режим",
+    "secretHint": "Показувати експериментальні інструменти та додаткові дії гаманця.",
+    "secretConfirmTitle": "Увімкнути секретний режим?",
+    "secretConfirmBody": "Секретний режим відкриває експериментальні інструменти та додаткові дії гаманця. Увімкніть його, лише якщо розумієте ці параметри.",
+    "enableSecret": "Увімкнути"
+  },
+  "messageSettingsScreen": {
+    "title": "Повідомлення",
+    "whoCanMessage": "Хто може мені писати",
+    "friends": "Друзі",
+    "fof": "Друзі друзів",
+    "all": "Усі"
+  },
+  "hermesProfiler": {
+    "title": "Профілювання продуктивності (розробка)",
+    "hint": "Записує профіль JS-потоку Hermes. Почніть запис, відтворіть уповільнення, потім зупиніть і поділіться файлом .cpuprofile для Chrome DevTools.",
+    "startA11y": "Почати профілювання Hermes",
+    "stopA11y": "Зупинити Hermes і поділитися .cpuprofile",
+    "recording": "Запис…",
+    "start": "Почати",
+    "stop": "Зупинити й поділитися",
+    "unavailableTitle": "Профілювання Hermes недоступне",
+    "unavailableBody": "Ця збірка не містить профілювальника Hermes. Перезберіть із увімкненим Hermes.",
+    "startError": "Не вдалося почати профілювання",
+    "emptyTitle": "Профіль порожній",
+    "emptyBody": "Зразків не записано. Перевірте, що Hermes активний, і відтворіть уповільнення під час запису.",
+    "shareTitle": "Зберегти Hermes .cpuprofile",
+    "saved": "Профіль збережено",
+    "savedBody": "Записано {{size}} Б у {{path}}",
+    "stopError": "Не вдалося зупинити профілювання"
   }
 }

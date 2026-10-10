@@ -1,7 +1,7 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-export const createOnChainScreenStyles = (colors: Palette) =>
+export const createDefaultOnchainWalletSectionStyles = (colors: Palette) =>
   StyleSheet.create({
     sectionGap: {
       marginTop: 28,

@@ -519,3 +519,11 @@ specifics it needs:
   Play-Services-dependent collection, no commercial telemetry (Sentry /
   Firebase Performance / Datadog). Everything measured runs on-device or
   on our own infrastructure.
+
+=== Settings profiler entry point
+
+In development or performance-log builds, open Settings → Advanced → Developer
+options → Performance profiler. Start recording, reproduce the slow action,
+then return and choose Stop & share. The profiler is no longer on Help & about.
+Secret Mode is a separate visible switch in Developer options; turning it on
+requires confirmation. About's version label no longer toggles it (#1222).

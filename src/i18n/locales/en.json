@@ -1463,7 +1463,7 @@
     "savedMyKey": "I've Saved My Key"
   },
   "nostrScreen": {
-    "title": "Nostr",
+    "title": "Nostr network",
     "connected": "Connected",
     "disconnected": "Disconnected",
     "removeRelayLabel": "Remove relay {{url}}",
@@ -1476,12 +1476,12 @@
     "amberPermissionTitle": "Amber permission",
     "couldNotGrantPermission": "Could not grant NIP-44 permission.",
     "grantAmberPermissionLabel": "Grant Amber NIP-44 permission",
-    "grantPermissionInAmber": "Grant permission in Amber",
+    "grantPermissionInAmber": "Let Amber unlock your messages",
     "noProfilePubkey": "No profile pubkey — log in first.",
     "amberRoundTripMismatch": "Amber round-trip mismatch — permission may not be set.",
     "experimental": "Experimental",
     "nativeCryptoHint": "Runs NIP-44 encryption and signature checks through the native rust-nostr module instead of JavaScript. Tester feature — watch the [PerfBlock] nostrCrypto logs and turn it off if anything misbehaves.",
-    "nativeCryptoLabel": "Native crypto (rust-nostr)",
+    "nativeCryptoLabel": "Faster encryption (beta)",
     "nativeCryptoRestartCaption": "Restart the app to apply.",
     "nativeCryptoUnavailable": "Unavailable on this device",
     "nativeCryptoA11y": "Enable native crypto",
@@ -1499,12 +1499,12 @@
     "bannerText": "You're offline — some data may be stale"
   },
   "onChainScreen": {
-    "title": "On-chain",
+    "title": "Bitcoin network",
     "electrumServer": "Electrum Server",
     "electrumServerA11y": "Electrum server",
     "useSsl": "Use SSL",
     "hint": "On-chain wallets use this Electrum server to read balances and broadcast transactions. Point this at your own server if you don't want to leak addresses to a public one.",
-    "defaultWalletTitle": "Default on-chain wallet",
+    "defaultWalletTitle": "Default for refunds",
     "defaultWalletEmpty": "No on-chain wallets yet. Add one via Wallets to set a default destination for Boltz refunds and future on-chain receive flows.",
     "defaultWalletRowA11y": "Set {{wallet}} as default on-chain wallet",
     "walletFallback": "wallet",
@@ -2518,5 +2518,40 @@
     "title": "Display & language",
     "change": "Change",
     "currencyRowA11y": "Currency: {{code}} {{name}}. Change currency"
+  },
+  "advancedScreen": {
+    "title": "Advanced",
+    "notificationServer": "Notification server",
+    "developerOptions": "Developer options",
+    "secretMode": "Secret Mode",
+    "secretHint": "Show experimental tools and additional wallet actions.",
+    "secretConfirmTitle": "Turn on Secret Mode?",
+    "secretConfirmBody": "Secret Mode reveals experimental tools and additional wallet actions. Only enable it if you understand these options.",
+    "enableSecret": "Turn on"
+  },
+  "messageSettingsScreen": {
+    "title": "Messages",
+    "whoCanMessage": "Who can message me",
+    "friends": "Friends",
+    "fof": "Friends of friends",
+    "all": "Everyone"
+  },
+  "hermesProfiler": {
+    "title": "Performance profiler (dev)",
+    "hint": "Captures a Hermes JS-thread sampling profile. Start, reproduce the slow scenario, then stop and share the .cpuprofile for Chrome DevTools.",
+    "startA11y": "Start Hermes sampling profiler",
+    "stopA11y": "Stop Hermes profiler and share .cpuprofile",
+    "recording": "Recording…",
+    "start": "Start",
+    "stop": "Stop & share",
+    "unavailableTitle": "Hermes profiler unavailable",
+    "unavailableBody": "This build does not expose the Hermes sampling profiler. Rebuild with Hermes enabled.",
+    "startError": "Could not start profiler",
+    "emptyTitle": "Profile is empty",
+    "emptyBody": "No samples were captured. Check that Hermes is active and reproduce the slow scenario while recording.",
+    "shareTitle": "Save Hermes .cpuprofile",
+    "saved": "Profile saved",
+    "savedBody": "Wrote {{size}} B to {{path}}",
+    "stopError": "Could not stop profiler"
   }
 }

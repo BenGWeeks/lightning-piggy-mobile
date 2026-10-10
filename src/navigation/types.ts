@@ -28,6 +28,8 @@ export type AccountDrawerParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   AccountProfile: undefined;
   AccountWallets: undefined;
+  AccountAdvanced: undefined;
+  AccountMessages: undefined;
   AccountNostr: undefined;
   AccountOnChain: undefined;
   AccountDisplayLanguage: undefined;

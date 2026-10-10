@@ -5,6 +5,7 @@ import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Plus } from 'lucide-react-
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import AddWalletWizard from '../../components/AddWalletWizard';
+import DefaultOnchainWalletSection from '../../components/DefaultOnchainWalletSection';
 import { useWallet } from '../../contexts/WalletContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
@@ -129,6 +130,7 @@ const WalletsScreen: React.FC = () => {
           <Text style={styles.addWalletText}>{t('walletsScreen.addWallet')}</Text>
         </TouchableOpacity>
       </View>
+      <DefaultOnchainWalletSection />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
     </AccountScreenLayout>
   );

@@ -1463,7 +1463,7 @@
     "savedMyKey": "He guardado mi clave"
   },
   "nostrScreen": {
-    "title": "Nostr",
+    "title": "Red Nostr",
     "connected": "Conectado",
     "disconnected": "Desconectado",
     "removeRelayLabel": "Eliminar relay {{url}}",
@@ -1476,12 +1476,12 @@
     "amberPermissionTitle": "Permiso de Amber",
     "couldNotGrantPermission": "No se pudo conceder el permiso NIP-44.",
     "grantAmberPermissionLabel": "Conceder permiso NIP-44 de Amber",
-    "grantPermissionInAmber": "Conceder permiso en Amber",
+    "grantPermissionInAmber": "Permitir que Amber desbloquee tus mensajes",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
     "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
     "experimental": "Experimental",
     "nativeCryptoHint": "Ejecuta el cifrado NIP-44 y la verificación de firmas a través del módulo nativo rust-nostr en lugar de JavaScript. Función para testers: observa los registros [PerfBlock] nostrCrypto y desactívala si algo falla.",
-    "nativeCryptoLabel": "Cripto nativa (rust-nostr)",
+    "nativeCryptoLabel": "Cifrado más rápido (beta)",
     "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
     "nativeCryptoUnavailable": "No disponible en este dispositivo",
     "nativeCryptoA11y": "Activar cripto nativa",
@@ -1499,12 +1499,12 @@
     "bannerText": "Estás sin conexión — algunos datos pueden estar desactualizados"
   },
   "onChainScreen": {
-    "title": "On-chain",
+    "title": "Red Bitcoin",
     "electrumServer": "Servidor Electrum",
     "electrumServerA11y": "Servidor Electrum",
     "useSsl": "Usar SSL",
     "hint": "Las carteras on-chain usan este servidor Electrum para leer saldos y difundir transacciones. Apúntalo a tu propio servidor si no quieres filtrar direcciones a uno público.",
-    "defaultWalletTitle": "Cartera on-chain predeterminada",
+    "defaultWalletTitle": "Predeterminada para reembolsos",
     "defaultWalletEmpty": "Aún no hay carteras on-chain. Añade una en Carteras para establecer un destino predeterminado para reembolsos de Boltz y futuros flujos de recepción on-chain.",
     "defaultWalletRowA11y": "Establecer {{wallet}} como cartera on-chain predeterminada",
     "walletFallback": "cartera",
@@ -2518,5 +2518,40 @@
     "title": "Pantalla e idioma",
     "change": "Cambiar",
     "currencyRowA11y": "Moneda: {{code}} {{name}}. Cambiar moneda"
+  },
+  "advancedScreen": {
+    "title": "Avanzado",
+    "notificationServer": "Servidor de notificaciones",
+    "developerOptions": "Opciones de desarrollo",
+    "secretMode": "Modo secreto",
+    "secretHint": "Muestra herramientas experimentales y más acciones de cartera.",
+    "secretConfirmTitle": "¿Activar el modo secreto?",
+    "secretConfirmBody": "El modo secreto muestra herramientas experimentales y más acciones de cartera. Actívalo solo si entiendes estas opciones.",
+    "enableSecret": "Activar"
+  },
+  "messageSettingsScreen": {
+    "title": "Mensajes",
+    "whoCanMessage": "Quién puede enviarme mensajes",
+    "friends": "Amigos",
+    "fof": "Amigos de amigos",
+    "all": "Todos"
+  },
+  "hermesProfiler": {
+    "title": "Perfilador de rendimiento (desarrollo)",
+    "hint": "Captura un perfil del hilo JS de Hermes. Inicia, reproduce la lentitud, detén y comparte el archivo .cpuprofile para Chrome DevTools.",
+    "startA11y": "Iniciar el perfilador de Hermes",
+    "stopA11y": "Detener Hermes y compartir .cpuprofile",
+    "recording": "Grabando…",
+    "start": "Iniciar",
+    "stop": "Detener y compartir",
+    "unavailableTitle": "Perfilador de Hermes no disponible",
+    "unavailableBody": "Esta compilación no incluye el perfilador de Hermes. Compila de nuevo con Hermes activado.",
+    "startError": "No se pudo iniciar el perfilador",
+    "emptyTitle": "El perfil está vacío",
+    "emptyBody": "No se capturaron muestras. Comprueba que Hermes esté activo y reproduce la lentitud durante la grabación.",
+    "shareTitle": "Guardar Hermes .cpuprofile",
+    "saved": "Perfil guardado",
+    "savedBody": "Se escribieron {{size}} B en {{path}}",
+    "stopError": "No se pudo detener el perfilador"
   }
 }
