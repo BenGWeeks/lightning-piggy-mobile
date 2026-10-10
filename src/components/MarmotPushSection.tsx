@@ -41,7 +41,7 @@ const shortNpub = (hex: string) => {
 };
 
 /**
- * Settings → Security: opt-in Marmot push (MIP-05) for the signed-in
+ * Settings → Notifications → For this account: opt-in Marmot push (MIP-05) for the signed-in
  * account. Off by default, and per account: another account on this phone
  * never inherits it. The privacy trade-off (and, for remote-signer users,
  * what approving costs them) sits behind "Privacy details" right above the

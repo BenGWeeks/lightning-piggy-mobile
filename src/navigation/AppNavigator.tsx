@@ -91,7 +91,9 @@ const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
 const AppearanceScreen = lazyScreen(() => import('../screens/account/AppearanceScreen'));
 const LanguageScreen = lazyScreen(() => import('../screens/account/LanguageScreen'));
-const NearbyScreen = lazyScreen(() => import('../screens/account/NearbyScreen'));
+const NotificationSettingsScreen = lazyScreen(
+  () => import('../screens/account/NotificationSettingsScreen'),
+);
 const SecurityScreen = lazyScreen(() => import('../screens/account/SecurityScreen'));
 const KeyBackupScreen = lazyScreen(() => import('../screens/account/KeyBackupScreen'));
 const AboutScreen = lazyScreen(() => import('../screens/account/AboutScreen'));
@@ -572,7 +574,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
       <AccountDrawer.Screen name="AccountLanguage" component={LanguageScreen} />
-      <AccountDrawer.Screen name="AccountNearby" component={NearbyScreen} />
+      <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
       <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />

@@ -1,8 +1,9 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Nearby merchants — toggle, radius preset, quiet hours
+name: Alerts near Bitcoin shops — toggle, radius preset, quiet hours
 ---
-# Walks through the new "Nearby merchants" drawer settings introduced for
-# the geofence half of #467. Verifies that the screen renders, the radius
+# Walks through the "Alerts near Bitcoin shops" settings (the geofence half
+# of #467), which live under Settings → Notifications → On this phone
+# (#1222). Verifies that the screen renders, the radius
 # preset chips switch (visual selection), and the quiet-hours toggle
 # flips. The actual permission grant + geofence-task registration are
 # not stable enough to assert under Maestro (they depend on whether the
@@ -15,7 +16,7 @@ name: Nearby merchants — toggle, radius preset, quiet hours
     timeout: 10000
 
 # Open the account drawer via the Home tab's avatar header. The drawer
-# has a `drawer-row-nearby` row that takes us into the new screen.
+# has a `drawer-row-notifications` row that takes us into the screen.
 - tapOn:
     id: 'tab-home'
 - waitForAnimationToEnd:
@@ -37,11 +38,17 @@ name: Nearby merchants — toggle, radius preset, quiet hours
     timeout: 1000
 
 - tapOn:
-    id: 'drawer-row-nearby'
+    id: 'drawer-row-notifications'
 - waitForAnimationToEnd:
     timeout: 1500
 
-- assertVisible: 'Nearby merchants'
+# The shop alerts sit at the bottom of the "On this phone" half.
+- scrollUntilVisible:
+    element:
+      id: 'settings-quiet-hours-toggle'
+    direction: DOWN
+    timeout: 15000
+- assertVisible: 'Alerts near Bitcoin shops'
 - assertVisible: 'Alert me near Bitcoin shops'
 - assertVisible:
     id: 'settings-nearby-merchants-toggle'
