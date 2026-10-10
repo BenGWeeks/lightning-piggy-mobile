@@ -1,0 +1,116 @@
+name: Bug report
+description: Report a bug or unexpected behavior in the Lightning Piggy app
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search [existing issues](https://github.com/BenGWeeks/lightning-piggy-mobile/issues) first.
+
+        **Security problem?** Do not file it here. Use [private vulnerability reporting](https://github.com/BenGWeeks/lightning-piggy-mobile/security/advisories/new) instead.
+  - type: markdown
+    attributes:
+      value: |
+        ## :warning: NEVER paste secrets in this issue
+
+        Issues are **public**. Do **not** paste or screenshot any of the following:
+
+        - Nostr private keys (`nsec1...`)
+        - NWC connection strings (`nostr+walletconnect://...`)
+        - Seed phrases / mnemonics
+        - LNURL-withdraw links
+        - Invoices, addresses or logs that contain private information
+
+        If you have already shared a secret by accident, rotate it now (new key, revoke the NWC connection) and edit it out of this issue.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version and build
+      description: Shown in the app under Account, then About.
+      placeholder: 'e.g. 1.4.1 (build 123), release / TestFlight / dev'
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and OS version
+      placeholder: 'e.g. Pixel 8, Android 16 / iPhone 15, iOS 19'
+  - type: dropdown
+    id: signer
+    attributes:
+      label: Signer type
+      description: How you are signed in to Nostr.
+      options:
+        - nsec (local key)
+        - Amber (NIP-55, Android)
+        - Nostr Connect (NIP-46)
+        - Not signed in / not applicable
+    validations:
+      required: true
+  - type: dropdown
+    id: wallet
+    attributes:
+      label: Wallet type
+      multiple: true
+      options:
+        - Lightning via NWC
+        - On-chain watch-only (xpub)
+        - On-chain hot wallet (mnemonic)
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Tap on '...'
+        3. Observe '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recording
+      description: Drag and drop images or a screen recording here. Redact anything private (keys, balances, invoices, contacts) first.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: If relevant, paste a short log excerpt. Remove any secrets first.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Frequency, recent app updates, related Nostr relay or wallet state, anything else worth knowing.
