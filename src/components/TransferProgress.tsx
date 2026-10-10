@@ -1,9 +1,12 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Check, Circle, X as XIcon } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferProgressStyles } from '../styles/TransferProgress.styles';
-import type { TransferProgress as TransferProgressState } from '../utils/transferPhase';
+import {
+  transferChecklistSteps,
+  type TransferProgress as TransferProgressState,
+} from '../utils/transferPhase';
+import StepChecklist from './StepChecklist';
 
 interface Props {
   /** Amount being transferred, in sats. */
@@ -74,53 +77,11 @@ const TransferProgress: React.FC<Props> = ({
           The legacy `progressMsg` renders as a separate block below
           the entire step list (see below) so the rich Boltz "swap
           underway / safe to close" copy still surfaces. */}
-      <View style={styles.stepList} testID="transfer-step-list">
-        {progress.steps.map((s, idx) => {
-          const isComplete = progress.phase === 'done' || idx < progress.activeIndex;
-          const isFailed = progress.phase === 'failed' && idx === progress.activeIndex;
-          const isActive =
-            progress.phase === 'in-progress' &&
-            idx === progress.activeIndex &&
-            backgroundError === null;
-          const status: 'complete' | 'failed' | 'active' | 'pending' = isComplete
-            ? 'complete'
-            : isFailed
-              ? 'failed'
-              : isActive
-                ? 'active'
-                : 'pending';
-          return (
-            <View
-              key={s.id}
-              style={styles.stepRow}
-              testID={`transfer-step-${s.id}`}
-              accessible={true}
-              accessibilityLabel={`${s.label} ${status}`}
-            >
-              <View style={styles.stepIcon}>
-                {status === 'complete' ? (
-                  <Check size={20} color={colors.brandPink} />
-                ) : status === 'failed' ? (
-                  <XIcon size={20} color={colors.red} />
-                ) : status === 'active' ? (
-                  <ActivityIndicator size="small" color={colors.brandPink} />
-                ) : (
-                  <Circle size={20} color={colors.textSupplementary} />
-                )}
-              </View>
-              <Text
-                style={[
-                  styles.stepLabel,
-                  status === 'pending' && styles.stepLabelPending,
-                  status === 'failed' && styles.stepLabelFailed,
-                ]}
-              >
-                {s.label}
-              </Text>
-            </View>
-          );
-        })}
-      </View>
+      <StepChecklist
+        steps={transferChecklistSteps(progress, backgroundError !== null)}
+        testID="transfer-step-list"
+        stepTestIDPrefix="transfer-step-"
+      />
       {progressMsg && (
         <Text style={styles.progressText} testID="transfer-progress-msg">
           {progressMsg}

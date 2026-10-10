@@ -246,6 +246,37 @@ describe('mapNwcTransactions — proof of payment (pending after a successful se
     expect(tx.settled_at).toBe(1_700_000_000);
   });
 
+  it("keeps the wallet's own pending state beside the proof (#1179)", () => {
+    recordPaymentProof('w1', preimage);
+    const [tx] = mapNwcTransactions([pending()], [], 'w1');
+    // Settled for display, but the wallet may still hold a fee reserve.
+    expect(tx.settled).toBe(true);
+    expect(tx.walletPending).toBe(true);
+    const [after] = mapNwcTransactions(
+      [pending({ state: 'settled', settled_at: 1_700_000_100 })],
+      [],
+      'w1',
+    );
+    expect(after.walletPending).toBeUndefined();
+  });
+
+  it('LNbits omits `state`: no settled_at means the wallet still holds it (#1179)', () => {
+    // The shape LNbits returned for a just-claimed reverse swap: no state, no
+    // settle time, a negative fee (the routing-fee reserve) — while pay_invoice
+    // had already handed us the preimage.
+    recordPaymentProof('w1', preimage);
+    const raw = pending({ state: undefined, settled_at: null, fees_paid: -107 });
+    const [tx] = mapNwcTransactions([raw], [], 'w1');
+    expect(tx.settled).toBe(true);
+    expect(tx.walletPending).toBe(true);
+    const [after] = mapNwcTransactions(
+      [pending({ state: undefined, settled_at: 1_700_000_100 })],
+      [],
+      'w1',
+    );
+    expect(after.walletPending).toBeUndefined();
+  });
+
   it('falls back to created_at when a proof-settled row reports settled_at 0', () => {
     recordPaymentProof('w1', preimage);
     expect(mapNwcTransactions([pending({ settled_at: 0 })], [], 'w1')[0].settled_at).toBe(

@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PaymentProgressState } from '../components/PaymentProgressOverlay';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { ReverseSwapSendStage } from '../utils/reverseSwapSend';
+import { swapSendSteps } from '../utils/swapSendStage';
 
 interface Options {
   onClose: () => void;
@@ -45,6 +46,11 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
   const [swapStage, setSwapStage] = useState<ReverseSwapSendStage | null>(null);
   const [swapDispatched, setSwapDispatched] = useState(false);
   const currentSendRef = useRef<SendInvocation | null>(null);
+  // The overlay's swap checklist (#1179): stage + dispatch → ✓ / spinner / ○ rows.
+  const swapSteps = useMemo(
+    () => (inFlightIsSwap ? swapSendSteps(swapStage, swapDispatched) : null),
+    [inFlightIsSwap, swapStage, swapDispatched],
+  );
 
   /** True while `send` may still paint the overlay. */
   const ownsOverlay = useCallback(
@@ -165,7 +171,7 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
     progressError,
     inFlightIsSwap,
     setInFlightIsSwap,
-    swapStage,
+    swapSteps,
     canContinueInBackground: inFlightIsSwap && swapDispatched,
     beginSend,
     endSend,

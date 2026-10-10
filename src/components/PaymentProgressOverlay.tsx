@@ -35,8 +35,7 @@ import {
   paymentProgressOverlaySharedStyles as sharedStyles,
 } from '../styles/PaymentProgressOverlay.styles';
 import type { IncomingPaymentSource } from '../contexts/incomingPaymentSource';
-import type { ReverseSwapSendStage } from '../utils/reverseSwapSend';
-import { swapSendStageKey } from '../utils/swapSendStage';
+import StepChecklist, { type ChecklistStep } from './StepChecklist';
 
 export type PaymentProgressState =
   | 'sending'
@@ -78,9 +77,9 @@ interface Props {
   /** A completed swap send's two sides (#1175): the success subtitle states
    *  what the recipient got and what the wallet paid, fees included. */
   swapReceipt?: { recipientSats: number; paidSats: number } | null;
-  /** Current stage of a Boltz reverse swap send, shown as a status line while
-   *  the swap is in flight (#1167). */
-  swapStage?: ReverseSwapSendStage | null;
+  /** A Boltz reverse swap send's stage checklist (labels are i18n keys),
+   *  shown while the swap is in flight (#1167, #1179). */
+  swapSteps?: readonly ChecklistStep[] | null;
   /** The swap's hold-invoice payment has been dispatched: it can no longer be
    *  cancelled, so `sending` offers "Continue in background" (→ `onDismiss`)
    *  instead of Cancel (#1167, #891). */
@@ -331,7 +330,7 @@ export default function PaymentProgressOverlay({
   onCancel,
   inFlightIsSwap = false,
   swapReceipt = null,
-  swapStage = null,
+  swapSteps = null,
   canContinueInBackground = false,
 }: Props) {
   const colors = useThemeColors();
@@ -522,8 +521,13 @@ export default function PaymentProgressOverlay({
   };
 
   const showSpinner = state === 'sending' || state === 'in-flight-extended';
-  const swapStageText =
-    showSpinner && inFlightIsSwap && swapStage ? t(swapSendStageKey(swapStage)) : undefined;
+  const swapChecklist = useMemo(
+    () =>
+      showSpinner && inFlightIsSwap && swapSteps
+        ? swapSteps.map((s) => ({ ...s, label: t(s.label) }))
+        : null,
+    [showSpinner, inFlightIsSwap, swapSteps, t],
+  );
 
   return (
     <Modal
@@ -591,10 +595,12 @@ export default function PaymentProgressOverlay({
 
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-          {swapStageText ? (
-            <Text style={styles.swapStage} testID="payment-overlay-swap-stage">
-              {swapStageText}
-            </Text>
+          {swapChecklist ? (
+            <StepChecklist
+              steps={swapChecklist}
+              testID="payment-overlay-swap-steps"
+              stepTestIDPrefix="payment-overlay-swap-step-"
+            />
           ) : null}
           {onchainHint ? (
             <Text style={styles.hint} testID="payment-overlay-onchain-hint">

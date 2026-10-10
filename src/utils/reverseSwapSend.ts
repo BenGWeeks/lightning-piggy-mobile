@@ -1,4 +1,5 @@
 import * as boltzService from '../services/boltzService';
+import { paymentHashFromBolt11 } from './bolt11';
 import {
   payAndClaimReverseSwap,
   persistReverseSwap,
@@ -34,6 +35,9 @@ export interface ReverseSwapReceipt {
   recipientSats: number;
   /** The Lightning invoice the wallet paid (excluding any routing fee). */
   paidSats: number;
+  /** The hold invoice's payment hash: identifies the wallet's Lightning leg,
+   *  which can stay pending at the wallet after the claim (#1179). */
+  paymentHash: string | null;
 }
 
 /**
@@ -68,5 +72,6 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<Rev
     claimTxId: claim.txId,
     recipientSats: claim.outputSats,
     paidSats: swap.invoiceAmount ?? 0,
+    paymentHash: paymentHashFromBolt11(swap.invoice),
   };
 }

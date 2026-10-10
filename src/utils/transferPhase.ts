@@ -20,6 +20,8 @@
  * "Handoff to background" rather than the eventual on-chain settle.
  */
 
+import type { ChecklistStep } from '../components/StepChecklist';
+
 export type TransferType = 'ln-to-ln' | 'ln-to-onchain' | 'onchain-to-ln' | 'onchain-to-onchain';
 
 export type TransferPhase = 'idle' | 'in-progress' | 'done' | 'failed';
@@ -142,3 +144,26 @@ export const failTransfer = (
     errorMessage,
   };
 };
+
+/**
+ * The checklist rows for `progress`: rows before `activeIndex` (or every row
+ * once `done`) are complete, the failing row is failed, the in-flight row is
+ * active — unless `suppressActive` (the background swap task errored, so
+ * nothing is actually spinning) — and the rest are pending.
+ */
+export const transferChecklistSteps = (
+  progress: TransferProgress,
+  suppressActive: boolean,
+): ChecklistStep[] =>
+  progress.steps.map((s, idx) => ({
+    id: s.id,
+    label: s.label,
+    status:
+      progress.phase === 'done' || idx < progress.activeIndex
+        ? 'complete'
+        : progress.phase === 'failed' && idx === progress.activeIndex
+          ? 'failed'
+          : progress.phase === 'in-progress' && idx === progress.activeIndex && !suppressActive
+            ? 'active'
+            : 'pending',
+  }));
