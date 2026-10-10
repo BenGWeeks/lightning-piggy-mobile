@@ -882,6 +882,25 @@ codex exec -c sandbox_mode="danger-full-access" "<prompt>" < /dev/null
 (The sandbox override is the separate workaround for Codex's bubblewrap
 sandbox failing on this machine.)
 
+=== Opening a direct message requests location permission (#1195)
+
+`ConversationScreen` used to retain `useUserLocation()` for the location-card
+mini-map's blue viewer dot. Retaining the shared subscription requests foreground
+permission and starts GPS, even when the conversation has no location messages.
+The conversation now uses `useUserLocation({ enabled: false })`: it can display
+an existing shared fix, but cannot start or keep the watch alive. Receiving a
+live-location message requires only the sender's coordinates, not the viewer's GPS.
+
+Permission remains intentional: Attach → Location → current/live location starts
+sharing; tapping a location card's mini-map explicitly opens the full map, whose
+own location consumer can request permission. Merely rendering either kind of
+location card in a conversation stays passive, including with permission granted.
+
+Regression check: reset the dev app's location permission, open a DM and verify
+there is no prompt; choose a location-sharing action and verify permission is
+requested there. `UserLocationContext.test.tsx` also verifies passive consumers
+make no location API calls and cannot keep another consumer's GPS watch alive.
+
 === Jest in a git worktree: "Could not locate module uint8array-tools mapped as …"
 
 `jest.config.js` maps `uint8array-tools` to

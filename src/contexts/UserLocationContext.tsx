@@ -78,9 +78,12 @@ export const UserLocationProvider: React.FC<
  * Calling this hook retains a reference on the underlying GPS
  * subscription for the lifetime of the consuming component, and
  * releases it on unmount. So the watch only runs while at least one
- * map screen is mounted.
+ * map screen is mounted. Pass `enabled: false` for passive displays that may
+ * read an existing fix but must never request permission or retain GPS.
  */
-export const useUserLocation = (): UserLocationValue => {
+export const useUserLocation = ({
+  enabled = true,
+}: { enabled?: boolean } = {}): UserLocationValue => {
   const ctx = useContext(UserLocationContext);
   if (ctx === null) {
     throw new Error('useUserLocation must be used inside <UserLocationProvider>');
@@ -103,8 +106,9 @@ export const useUserLocation = (): UserLocationValue => {
   // UserLocationProvider are unchanged: refCount drops to 0 when the last
   // mounted consumer unmounts, and the watch tears down then.
   useEffect(() => {
+    if (!enabled) return;
     retain();
     return () => release();
-  }, [retain, release]);
+  }, [enabled, retain, release]);
   return value;
 };
