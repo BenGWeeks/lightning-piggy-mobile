@@ -132,6 +132,13 @@ name: Marmot between Big Piggy (nsec) and Middle Piggy (Amber) — message and r
     visible:
       text: '.atrix marmot from Middle ${output.tag}'
     timeout: 60000
+# Settled, not just optimistic: the MLS message reached relays.
+- extendedWaitUntil:
+    visible:
+      text: 'Sent to .*'
+      below:
+        text: '.atrix marmot from Middle ${output.tag}'
+    timeout: 60000
 - assertNotVisible:
     text: 'Send failed'
 - takeScreenshot: signer-matrix-133-middle-amber-sent-marmot
