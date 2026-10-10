@@ -88,7 +88,10 @@ export function useMessageActionsMenu<T extends EditableRow>({
       );
       return () =>
         setMessages((prev) => {
-          if (change) return prev.map((m) => (idOf(m) === targetId ? original : m));
+          // Only undo our own change: a later edit (or a store reload) wins.
+          if (change) {
+            return prev.map((m) => (idOf(m) === targetId && m.text === change.text ? original : m));
+          }
           if (prev.some((m) => idOf(m) === targetId)) return prev;
           const next = [...prev];
           next.splice(Math.min(index, next.length), 0, original);
