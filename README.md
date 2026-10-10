@@ -32,8 +32,8 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
 - Receive payments with QR code generation (optional amount for BIP-21)
 - Real-time balance display with fiat conversion
 - Transaction history
-- Nostr identity login (nsec or Amber signer on Android)
-- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS, Alpha)** end-to-end encrypted chats that work with [White Noise](https://www.whitenoise.chat)
+- Nostr identity login: local `nsec`, Amber (NIP-55, Android), or a remote signer over NIP-46 / Nostr Connect (Clave on iOS, Aegis, nsec.app)
+- Private messaging: NIP-17 1:1 and group chats (photos, voice notes, polls, invoices, zaps, live location), plus **Marmot (MLS over Nostr, Alpha)** end-to-end encrypted 1:1 and group chats that interoperate with [White Noise](https://www.whitenoise.chat)
 - Friends tab with Nostr contacts and phone contacts
 - Follow/unfollow Nostr contacts (kind 3 event publishing)
 - Add friends by pasting npub or scanning QR code
@@ -48,7 +48,7 @@ A mobile Bitcoin Lightning wallet for smart savers and their families, built wit
   Hunt Piggies adopt [treasures.to](https://treasures.to)'s **NIP-GC**
   (`kind 37516` listings, `kind 7516` found-logs, `kind 1111` NIP-22 comments)
   and tag the listing with a NIP-32 `com.lightningpiggy.app / payout-lnurl-w`
-  label so LP renders the 🐷 claim UX on top while generic geocaching clients
+  label so Lightning Piggy renders the 🐷 claim UX on top while generic geocaching clients
   render the cache normally.
   **The LNURL bearer token never goes on the public relay event** — it
   lives only on the physical NFC tag / QR (the access control) and in
@@ -92,6 +92,7 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 | [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md)                                                                                          | Labels (`L` namespace + `l` value tags — used to mark Hunt caches as Lightning-payout via the `com.lightningpiggy.app / payout-lnurl-w` label)                    |
 | [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md)                                                                                          | Expiration Timestamp (auto-retire Hunt cache listings)                                                                                                            |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md)                                                                                          | Encrypted Payloads v2 (used by NIP-17 sealing)                                                                                                                    |
+| [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md)                                                                                          | Nostr Connect — remote signer over relays (Clave, Aegis, nsec.app); see docs/nip46-clave.adoc                                                                     |
 | [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md)                                                                                          | Nostr Wallet Connect (NWC)                                                                                                                                        |
 | [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md)                                                                                          | Calendar Events (kind 31923 time-based — read-only consumer for the Events sub-screen)                                                                            |
 | [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md)                                                                                          | Android Signer (Amber)                                                                                                                                            |
@@ -106,7 +107,7 @@ Group state for client-side group chat is propagated via a parameterised-replace
 `kind:30200` event (custom to this client; receivers reconcile by `groupId` + `created_at`).
 Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the schema.
 
-**Marmot** (MLS over Nostr, Alpha) — 1:1 and group chats via [`marmot-ts`](https://github.com/marmot-protocol/marmot-ts), wire-compatible with White Noise, including MIP-04 encrypted media and the send side of MIP-05 push notifications. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
+**Marmot** (MLS over Nostr, Alpha) — 1:1 and group chats via the vendored [`@internet-privacy/marmot-ts`](https://github.com/marmot-protocol/marmot-ts) (`vendor/`), interoperating with White Noise. Includes MIP-04 encrypted media and the send side of MIP-05 push notifications (opt-in receive side too). Media uploads go to [Blossom](https://github.com/hzrd149/blossom) servers (BUD-01 / BUD-02, configurable under Account → Nostr). Known interop gaps are tracked in GitHub issues. See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Marmot".
 
 ### LUDs (LNURL specifications)
 
@@ -151,8 +152,8 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
 │  AsyncStorage caches (per-account namespaced)                │
 ├─────────────────────────────────────────────────────────────┤
 │  Native  (modules/, plugins/)                                │
-│  amber-signer (NIP-55 IPC) — the only native module ·        │
-│  Expo config plugins (NFC, Amber queries, fg-service perms)  │
+│  amber-signer · background-dm-service · nostr-native ·       │
+│  bdk-rn (BDK, UniFFI) · Expo config plugins                  │
 └─────────────────────────────────────────────────────────────┘
         │                    │                     │
    Nostr relays        NWC wallet svc        Electrum / Boltz
@@ -160,23 +161,30 @@ Lightning Piggy is an [Expo](https://expo.dev) / React Native app (SDK 55, RN 0.
     contacts, caches)   get_balance)          LN↔on-chain swaps)
 ```
 
-**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. One Android-only **native module** (`amber-signer`, the NIP-55 Amber IPC bridge — the only Expo native module that ships) and a set of **Expo config plugins** round out the stack. Background DM delivery rides `expo-background-task` (Android WorkManager / iOS BGTaskScheduler), not a persistent native service.
+**Layers.** Presentation (screens/components) sits over React Navigation; long-lived state lives in **contexts** (`WalletContext` for wallets/balances/transactions, `NostrContext` for identity/signer/relays/DMs), which compose per-responsibility hooks and a large, mostly-stateless **service** layer grouped by domain. Persistence is split three ways by sensitivity: an encrypted **SQLCipher** DM store, **expo-secure-store** for keys/secrets, and per-account-namespaced **AsyncStorage** caches. Native code is limited to three local Expo modules in `modules/`, plus BDK and a set of config plugins:
+
+- `amber-signer` — Android-only NIP-55 (Amber) intent bridge for signing.
+- `background-dm-service` — Android-only persistent foreground service that hosts the opt-in background message watch (and NWC incoming-payment checks).
+- `nostr-native` — Kotlin / Swift wrapper over rust-nostr (NIP-44 and Schnorr) for off-JS-thread crypto; falls back to pure JS where it is not linked.
+- `bdk-rn` — Bitcoin Dev Kit (Rust, via UniFFI) for on-chain wallets, a fork pinned in `package.json`.
+- `plugins/` — Expo config plugins: `withAdjustResize`, `withAmberQueries`, `withFcmAutoInitDisabled`, `withForegroundService`, `withLargeHeap`, `withNfc`, `withTransparentSplashIcon`.
+
+Background delivery is opt-in: `expo-background-task` (WorkManager / BGTaskScheduler) does periodic detect-and-ping, and on Android the foreground service adds near-realtime message and NWC payment checks.
 
 **Key data flows.**
 
-- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping — it notices new inbound traffic and fires a generic notification without decrypting; a persistent realtime relay foreground service is only scaffolded (manifest permissions via `withForegroundService.js`) and not yet implemented. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc). In a **Marmot** thread the same message is sent inside an MLS group (kind 445) instead — see [docs/SOLUTION_DESIGN.adoc](docs/SOLUTION_DESIGN.adoc) → "Marmot (MLS) messaging".
+- **Sending a DM** — build a NIP-17 chat rumor (kind 14) → seal (kind 13) → gift-wrap (kind 1059) with NIP-44 → publish to the peer's and own relays. Inbound wraps are unwrapped once and stored plaintext in the encrypted SQLite DB. When the app is closed on Android, a periodic `expo-background-task` (WorkManager, ~15-min floor) does detect-and-ping, and the opt-in `background-dm-service` foreground service keeps a relay watch alive (also checking NWC incoming payments, see [docs/BACKGROUND_PAYMENTS.adoc](docs/BACKGROUND_PAYMENTS.adoc)). No FCM is required by default. See [docs/architecture/notifications.adoc](docs/architecture/notifications.adoc). In a **Marmot** thread the same message is sent inside an MLS group (kind 445) instead — see [docs/SOLUTION_DESIGN.adoc](docs/SOLUTION_DESIGN.adoc) → "Marmot (MLS) messaging".
 - **Paying over NWC** — a scanned invoice (or an LNURL-pay / Lightning address resolved to a BOLT-11) is sent to the wallet service as an encrypted NIP-47 `pay_invoice` request over the NWC relay; the encrypted response updates balance and history. Zaps (kind 9734 request → 9735 receipt) ride the same rail.
 - **Publishing a geo-cache ("Piglet")** — a NIP-GC listing (kind 37516) is published with a NIP-32 payout label and a stable `d` tag; the LNURL-withdraw bearer stays on the physical NFC tag / QR and in the hider's secure store, never on the public event. Claims record a found-log (kind 7516).
 
-See [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc) for the module map, the full Nostr event-kind reference, signer options (nsec / Amber; NIP-46 planned), and persistence detail.
+See [docs/ARCHITECTURE.adoc](docs/ARCHITECTURE.adoc) for the module map, the full Nostr event-kind reference, signer options (nsec / Amber / NIP-46), and persistence detail.
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18+)
-- [Expo CLI](https://docs.expo.dev/get-started/installation/)
-- An Android device or emulator
+- [Node.js](https://nodejs.org/) 22.13 or newer (see `.nvmrc` and `engines` in `package.json`)
+- An Android device or emulator for local development. iOS builds go through EAS cloud / TestFlight (`npx expo run:ios` also works on macOS, see [docs/INSTALLATION.adoc](docs/INSTALLATION.adoc))
 - A Lightning wallet that supports NWC (e.g. Alby, LNbits)
 
 ### Installation
@@ -189,7 +197,7 @@ npm install
 
 ### Development
 
-This project uses custom native modules (Amber signer), so it requires a dev client build rather than Expo Go.
+This project uses custom native modules, so it requires a dev client build rather than Expo Go.
 
 ```bash
 # First time: build and install the dev client
@@ -213,42 +221,36 @@ Optional keys are read from `.env` at the repo root (gitignored) and inlined int
 
 After changing `.env`, restart Metro (`npm start`) so the new value gets inlined. No native rebuild is required for `EXPO_PUBLIC_*` changes.
 
-### Building an APK
+### Releases
 
-```bash
-# Generate the native Android project
-npx expo prebuild --platform android
-
-# Build the APK
-cd android && ./gradlew assembleRelease
-
-# Install on connected device
-adb install app/build/outputs/apk/release/app-release.apk
-```
-
-### EAS Build (cloud)
-
-```bash
-npm install -g eas-cli
-eas login
-eas build --platform android --profile preview
-```
+Releases go through the GitHub Release workflow, not manual builds: bump with `npm version <patch|minor|major>`, run `git push origin main --follow-tags`, then publish a GitHub Release for the tag. `.github/workflows/release.yml` runs EAS cloud builds for both platforms, submits iOS to TestFlight and attaches the Android APK to the Release. `eas build --local` is only an offline fallback. See [docs/DEPLOYMENT.adoc](docs/DEPLOYMENT.adoc) → "Cutting a release". For a tester APK, `eas build --platform android --profile preview`.
 
 ## Project Structure
 
 ```
 src/
   components/       # Reusable UI components (SendSheet, ContactProfileSheet, etc.)
-  contexts/         # React contexts (WalletContext, NostrContext)
-  navigation/       # React Navigation setup
-  screens/          # App screens (Home, Earn, Learn, Friends, Account)
-  services/         # Business logic (NWC, LNURL, Nostr, contacts)
-  styles/           # Theme and shared styles
+  contexts/         # React contexts (WalletContext, NostrContext, ...)
+  hooks/            # Per-feature hooks
+  navigation/       # React Navigation: Home · Messages · Explore · Friends tabs + account drawer
+  screens/          # Tab and feature screens (Home, Messages, Explore/Hunt/Map, Friends, account/)
+  services/         # Business logic (NWC, LNURL, Nostr, Marmot, Boltz, BDK)
+  styles/           # Theme and per-component style files
   types/            # TypeScript type definitions
+  utils/            # Pure helpers
 assets/             # Images and icons
-modules/            # Custom native Expo modules (Amber signer)
+modules/            # Local native Expo modules (amber-signer, background-dm-service, nostr-native)
 plugins/            # Expo config plugins
+vendor/             # Vendored packages (marmot-ts tarball)
+.maestro/           # Maestro E2E flows, by feature area
+scripts/            # CI gates and dev tooling
+docs/               # Architecture, protocols, deployment, troubleshooting
 ```
+
+## Testing
+
+- **Unit tests** — Jest (`jest-expo`), co-located as `src/**/*.test.ts`; coverage covers `src/services`, `src/utils` and `src/contexts`. Run `npm test`. A CI workflow fails PRs that drop line coverage by more than 0.5pp.
+- **E2E** — [Maestro](https://maestro.mobile.dev) flows in `.maestro/`, grouped by feature area: `maestro test .maestro/<area>/flow-NNN-<name>.yaml`. See [.maestro/README.adoc](.maestro/README.adoc).
 
 ## Notable Native Dependencies
 
@@ -280,8 +282,8 @@ https://www.figma.com/proto/ROutnkBQtGGGzqi8yz0Maf/Lightning-Piggy?node-id=1-26&
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change. See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md).
 
 ## License
 
-[WTFPL](http://www.wtfpl.net/)
+[MIT](LICENSE)
