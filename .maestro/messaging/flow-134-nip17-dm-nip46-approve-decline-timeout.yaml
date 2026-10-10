@@ -148,6 +148,11 @@ name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never 
 # reopen once the bug is fixed so the flow checks the live thread.
 - tapOn:
     id: 'conversation-back'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 30000
 - retry:
     maxRetries: 3
     commands:
@@ -200,6 +205,11 @@ name: NIP-17 DM as Little Piggy via NIP-46 — bunker approves, declines, never 
 # reopen once the bug is fixed so the flow checks the live thread.
 - tapOn:
     id: 'conversation-back'
+- scrollUntilVisible:
+    element:
+      id: 'conversation-row-ccedbff9.*:nip17'
+    direction: UP
+    timeout: 30000
 - retry:
     maxRetries: 3
     commands:

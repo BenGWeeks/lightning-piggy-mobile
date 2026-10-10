@@ -317,6 +317,8 @@ allow-listed relays.
   the NIP-46 stack locally, point `NIP46_DEFAULT_RELAY` in
   `NostrLoginSheet.tsx` at an allow-listed relay (e.g. `wss://nos.lol`) in a
   scratch checkout — the bunker follows whatever relay the pairing URI names.
+* *#1213* — with a reachable relay, NIP-46 pairing never times out, so
+  flow 135 fails until it's fixed.
 * *#1207* — after a NIP-46 decline / timeout the failed bubble only renders
   once the thread is reopened; flow 134 reopens it before asserting.
 * *#1164* — the DM protocol picker can stay open after a pick; the flows swipe

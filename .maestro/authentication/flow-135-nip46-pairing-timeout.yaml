@@ -3,6 +3,8 @@ name: NIP-46 pairing the bunker never answers → "took too long" error, Big sti
 ---
 # NOTE: on a stock build NIP-46 pairing can't complete until #1198 is fixed
 # (LP's only pairing relay, relay.nsec.app, is down) — see docs/TESTING.adoc.
+# EXPECTED TO FAIL until #1213 is fixed: with a reachable relay LP's 120 s
+# pairing timeout never fires (nostr-tools treats maxWait as an EOSE timeout).
 # Signer matrix: the NIP-46 login sheet's pairing timeout. The bunker is put in
 # `silent-all` mode, so it ignores LP's nostrconnect:// pairing; after LP's
 # 120 s wait the sheet must fall back to the login view with
