@@ -884,6 +884,8 @@ export function isExplicitSwapFailure(error: unknown): boolean {
 export async function waitForSubmarineSwapComplete(
   swapId: string,
   timeoutMs: number = 120000,
+  /** Every status Boltz reports on the way, e.g. to narrate the 1-conf wait. */
+  onStatus?: (status: string) => void,
 ): Promise<void> {
   console.log(
     `[Boltz] Waiting for submarine swap completion: ${swapId} (timeout ${timeoutMs / 1000}s)`,
@@ -899,6 +901,11 @@ export async function waitForSubmarineSwapComplete(
   await waitForSwapStatus(
     swapId,
     (status) => {
+      try {
+        onStatus?.(status);
+      } catch {
+        // A caller's progress callback must never fail the swap watch.
+      }
       if (
         status === 'invoice.settled' ||
         status === 'transaction.claimed' ||

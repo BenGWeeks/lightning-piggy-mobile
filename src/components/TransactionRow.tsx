@@ -6,7 +6,7 @@ import { satsToFiatString } from '../services/fiatService';
 import TransactionTypeIcon, { type TransactionIconState } from './TransactionTypeIcon';
 import type { TransactionDetailData } from './TransactionDetailSheet';
 import { getTxCategory } from '../utils/txCategory';
-import { isTransactionSettled } from '../utils/transactionSettlement';
+import { isRowPending, pendingRowHintKey } from '../utils/transactionRowState';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { AVATAR_SIZE, type TransactionListStyles } from '../styles/TransactionList.styles';
@@ -130,7 +130,8 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   // `??` (not `||`) so a `0` (epoch) timestamp counts as present; only
   // null/undefined means the tx has no settle/create time yet (pending).
   const ts = item.settled_at ?? item.created_at;
-  const isPending = !isTransactionSettled(item);
+  // A swap the badge marks done isn't "Pending" (#1179) — see isRowPending.
+  const isPending = isRowPending(item, iconState);
   const zapCpRaw = item.zapCounterparty ?? undefined;
   // Prefer the live profile from contacts (which refreshes when the
   // profile cache updates) over the snapshot embedded in the tx.
@@ -153,6 +154,8 @@ const TransactionRow: React.FC<TransactionRowProps> = ({
   let subtitle: string | null = null;
   if (isPending) {
     primary = t('transactionList.pending');
+    const hintKey = pendingRowHintKey(item);
+    subtitle = hintKey ? t(hintKey) : null;
   } else if (zapCp) {
     primary = zapCounterpartyLabel(zapCp, t);
     subtitle = zapCp.comment?.trim() || null;

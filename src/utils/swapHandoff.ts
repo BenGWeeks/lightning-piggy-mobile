@@ -39,3 +39,16 @@ export function reverseSwapCompleteMessage(onchainAmount: number, claimTxId: str
 export function submarineSwapCompleteMessage(invoiceSats: number): string {
   return `Swap complete — ${invoiceSats.toLocaleString()} sats delivered via Lightning.`;
 }
+
+// Forward swap (on-chain → Lightning) status lines (#1179). Boltz pays the
+// invoice only once the lockup has a confirmation, so the long wait is normal
+// block time — say so, rather than leave it looking stuck.
+const SAFE_TO_CLOSE = "Safe to close — you'll get a notification when the swap completes.";
+
+export const SUBMARINE_AWAITING_CONFIRMATION_MESSAGE =
+  'Waiting for 1 confirmation (~10 min typical). Boltz pays the Lightning invoice once your ' +
+  "on-chain transaction is in a block — blocks sometimes take longer, and that's normal.\n\n" +
+  SAFE_TO_CLOSE;
+
+export const SUBMARINE_PAYING_MESSAGE =
+  'Confirmed on-chain — Boltz is paying the Lightning invoice now.\n\n' + SAFE_TO_CLOSE;

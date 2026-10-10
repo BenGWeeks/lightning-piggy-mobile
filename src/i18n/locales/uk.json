@@ -1509,9 +1509,10 @@
     "ok": "OK",
     "cancelPaymentA11y": "Скасувати платіж",
     "cancel": "Скасувати",
-    "swapStageCreating": "Створення обміну Boltz…",
-    "swapStagePaying": "Оплата рахунку Lightning — чекаємо, доки Boltz заблокує кошти on-chain…",
-    "swapStageClaiming": "Boltz заблокував кошти on-chain — отримуємо їх на вашу адресу…",
+    "swapStepCreate": "Створення обміну Boltz",
+    "swapStepPay": "Оплата рахунку Lightning",
+    "swapStepLockup": "Boltz блокує кошти on-chain",
+    "swapStepClaim": "Отримання на вашу адресу",
     "swapNotPaid": "Нічого не надіслано: платіж Lightning до Boltz не пройшов, тож жоден sat не покинув ваш гаманець. Можна спробувати ще раз."
   },
   "placeDetailScreen": {
@@ -1871,6 +1872,7 @@
     "today": "Сьогодні",
     "yesterday": "Вчора",
     "pending": "В очікуванні",
+    "awaitingConfirmation": "Очікування 1 підтвердження · зазвичай ~10 хв",
     "received": "Отримано",
     "sent": "Надіслано",
     "openDetailsFor": "Відкрити деталі для {{name}}",

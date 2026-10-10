@@ -1537,9 +1537,10 @@
     "ok": "OK",
     "cancelPaymentA11y": "Cancel payment",
     "cancel": "Cancel",
-    "swapStageCreating": "Creating Boltz swap…",
-    "swapStagePaying": "Paying the Lightning invoice — waiting for Boltz to lock up on-chain…",
-    "swapStageClaiming": "Boltz locked the funds on-chain — claiming them to your address…",
+    "swapStepCreate": "Creating Boltz swap",
+    "swapStepPay": "Paying the Lightning invoice",
+    "swapStepLockup": "Boltz locking funds on-chain",
+    "swapStepClaim": "Claiming to your address",
     "swapNotPaid": "Nothing was sent — the Lightning payment to Boltz didn't go through, so no sats left your wallet. You can try again."
   },
   "placeDetailScreen": {
@@ -1899,6 +1900,7 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "pending": "Pending",
+    "awaitingConfirmation": "Waiting for 1 confirmation · ~10 min typical",
     "received": "Received",
     "sent": "Sent",
     "openDetailsFor": "Open details for {{name}}",

@@ -80,15 +80,6 @@ export const createPaymentProgressOverlayStyles = (colors: Palette) =>
       textAlign: 'center',
       letterSpacing: 0.3,
     },
-    swapStage: {
-      // Current Boltz swap stage (#1167) — reads as live status under the
-      // subtitle while the swap is in flight.
-      marginTop: -6,
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
     okButton: {
       marginTop: 12,
       alignSelf: 'stretch',

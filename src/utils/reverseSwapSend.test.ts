@@ -26,6 +26,11 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(async () => undefined),
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
 }));
+// The receipt names the hold invoice's payment hash (#1179); the fixture
+// invoice below is a placeholder string, so decode it by lookup.
+jest.mock('./bolt11', () => ({
+  paymentHashFromBolt11: (invoice: string) => (invoice === 'lnbc30u1p...' ? 'hash-sw1' : null),
+}));
 import { executeReverseSwap, isSwapSettlingError, SwapSettlingError } from './reverseSwapSend';
 import * as boltzService from '../services/boltzService';
 import * as SecureStore from 'expo-secure-store';
@@ -83,6 +88,7 @@ describe('executeReverseSwap — #891 error contract', () => {
       claimTxId: 'claim-tx-id',
       recipientSats: 30000,
       paidSats: 30612,
+      paymentHash: 'hash-sw1',
     });
     // Secrets persisted with hardened keychain accessibility...
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith('boltz_swap_sw1', expect.any(String), {

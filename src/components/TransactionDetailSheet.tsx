@@ -23,6 +23,7 @@ import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import { isTransactionSettled } from '../utils/transactionSettlement';
+import { isRowPending } from '../utils/transactionRowState';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
@@ -306,7 +307,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   const statusBadge = useMemo(() => {
     if (!tx) return null;
-    const pending = !isTransactionSettled(tx);
+    const pending = isRowPending(tx, iconState);
     if (swap?.terminalFailure)
       return {
         style: styles.badgeFailed,
@@ -323,7 +324,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
       };
     if (pending) return { style: styles.badgePending, text: t('transactionDetailSheet.pending') };
     return { style: styles.badgeConfirmed, text: t('transactionDetailSheet.confirmed') };
-  }, [tx, swap, styles, t]);
+  }, [tx, swap, styles, t, iconState]);
 
   /** Plain-English explanation of where this Boltz swap is right now.
    *  Only set when the row is a Boltz swap — vanilla LN/on-chain rows

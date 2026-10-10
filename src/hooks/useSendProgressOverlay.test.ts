@@ -74,7 +74,7 @@ describe('useSendProgressOverlay — per-send scoping', () => {
       aCallbacks.onPaymentDispatched();
     });
     expect(result.current.progressState).toBe('sending');
-    expect(result.current.swapStage).toBeNull();
+    expect(result.current.swapSteps).toBeNull();
     expect(result.current.inFlightIsSwap).toBe(false);
     expect(result.current.canContinueInBackground).toBe(false);
     expect(result.current.ownsOverlay(a)).toBe(false);
@@ -147,5 +147,37 @@ describe('useSendProgressOverlay — per-send scoping', () => {
     expect(send.dismissed).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(swapRecoveryService.recoverPendingSwaps).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useSendProgressOverlay — swap checklist (#1179)', () => {
+  const active = (steps: { id: string; status: string }[] | null) =>
+    steps?.find((s) => s.status === 'active')?.id;
+
+  it('the reverse-swap callbacks walk the overlay checklist row by row', () => {
+    const { result } = setup();
+    let send!: SendInvocation;
+    act(() => {
+      send = result.current.beginSend();
+    });
+    // A plain Lightning send has no checklist.
+    expect(result.current.swapSteps).toBeNull();
+    act(() => result.current.setInFlightIsSwap(true));
+    const cb = result.current.callbacksFor(send);
+
+    act(() => cb.onStage('createSwap'));
+    expect(active(result.current.swapSteps)).toBe('create');
+    act(() => cb.onStage('payAndLockup'));
+    expect(active(result.current.swapSteps)).toBe('pay');
+    act(() => cb.onPaymentDispatched());
+    expect(active(result.current.swapSteps)).toBe('lockup');
+    act(() => cb.onStage('claimSwap'));
+    expect(active(result.current.swapSteps)).toBe('claim');
+    expect(result.current.swapSteps?.map((s) => s.status)).toEqual([
+      'complete',
+      'complete',
+      'complete',
+      'active',
+    ]);
   });
 });

@@ -45,40 +45,7 @@ export const createTransferProgressStyles = (colors: Palette) =>
       fontWeight: '500',
       textAlign: 'center',
     },
-    // --- Step list (issue #62) ---
-    stepList: {
-      alignSelf: 'stretch',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 20,
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      marginTop: 8,
-    },
-    stepRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    stepIcon: {
-      width: 24,
-      height: 24,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    stepLabel: {
-      fontSize: 15,
-      color: colors.textBody,
-      fontWeight: '600',
-      flex: 1,
-    },
-    stepLabelPending: {
-      color: colors.textSupplementary,
-      fontWeight: '500',
-    },
-    stepLabelFailed: {
-      color: colors.red,
-    },
+    // The step list itself is StepChecklist (StepChecklist.styles.ts).
     closeButton: {
       backgroundColor: colors.brandPink,
       height: 48,

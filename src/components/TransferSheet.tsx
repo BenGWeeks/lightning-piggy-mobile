@@ -19,11 +19,13 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { promptSubmarineRefund } from '../utils/submarineRefund';
+import { watchForwardSwap } from '../utils/forwardSwapWatch';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
+import { useSwapSettleFollowUp } from '../hooks/useSwapSettleFollowUp';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -47,7 +49,6 @@ import {
   isReverseSwapNotPaid,
   reverseSwapClaimingMessage,
   reverseSwapCompleteMessage,
-  submarineSwapCompleteMessage,
 } from '../utils/swapHandoff';
 import * as lnurlService from '../services/lnurlService';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
@@ -84,6 +85,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     fetchTransactionsForWallet,
     addPendingTransaction,
   } = useWallet();
+  const followSwapSettle = useSwapSettleFollowUp();
+  // Balance + history for each wallet a move touched. Cross-profile
+  // destinations belong to another profile's wallet list (the refreshers
+  // would no-op or error), so callers pass only the source for those.
+  const refreshWallets = (ids: string[]) =>
+    Promise.all(ids.flatMap((id) => [refreshBalanceForWallet(id), fetchTransactionsForWallet(id)]));
   const { btcPrice } = useWalletLive();
   const { identities, pubkey: activePubkey } = useNostr();
 
@@ -681,17 +688,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // real leg is not yet synced or tagged.
             markSwapPlaceholdersResolved(swap.id);
             stage = 'refresh';
-            try {
-              const refreshTasks: Promise<unknown>[] = [
-                refreshBalanceForWallet(sourceId),
-                fetchTransactionsForWallet(sourceId),
-              ];
-              if (!destIsCrossProfile) {
-                refreshTasks.push(refreshBalanceForWallet(destId));
-                refreshTasks.push(fetchTransactionsForWallet(destId));
-              }
-              await Promise.all(refreshTasks);
-            } catch {}
+            await refreshWallets(destIsCrossProfile ? [sourceId] : [sourceId, destId]).catch(
+              () => {},
+            );
+            // The source wallet can hold the hold-invoice payment (and a fee
+            // reserve) pending for minutes after the claim (#1179).
+            followSwapSettle(sourceId, paymentHashFromBolt11(swap.invoice));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn(
@@ -775,61 +777,20 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // On-chain leg is what was broadcast; Lightning leg is the invoice.
         addSwapPlaceholders(swap.id, 'submarine', swap.expectedAmount, currentSats);
         setProgress((p) => advanceTransfer(p)); // broadcast → handoff
-        // Boltz pays our invoice, so the Lightning amount is the invoice
-        // amount — not `expectedAmount`, which includes Boltz's fees.
-        const invoiceSats = currentSats;
-        // Same closure-capture pattern as the reverse-swap branch.
-        const destIsCrossProfileSubmarine = isCrossProfile;
+        // Background: narrate the 1-conf wait, then refresh once Boltz pays
+        // our invoice — the Lightning amount is the invoice amount, not
+        // `expectedAmount`, which includes Boltz's fees (#1179).
         const submarineSession = sessionRef.current;
-        (async () => {
-          try {
-            await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
-            if (sessionRef.current === submarineSession) {
-              setProgressMsg(submarineSwapCompleteMessage(invoiceSats));
-            }
-            Toast.show({
-              type: 'success',
-              text1: 'Swap complete',
-              text2: `${invoiceSats.toLocaleString()} sats delivered via Lightning.`,
-              position: 'top',
-              visibilityTime: 10000,
-            });
-            markSwapPlaceholdersResolved(swap.id);
-            await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
-            try {
-              const refreshTasks: Promise<unknown>[] = [
-                refreshBalanceForWallet(sourceId),
-                fetchTransactionsForWallet(sourceId),
-              ];
-              if (!destIsCrossProfileSubmarine) {
-                refreshTasks.push(refreshBalanceForWallet(destId));
-                refreshTasks.push(fetchTransactionsForWallet(destId));
-              }
-              await Promise.all(refreshTasks);
-            } catch {}
-          } catch (swapError) {
-            const msg = swapError instanceof Error ? swapError.message : '';
-            console.warn('[Transfer] Background submarine swap failed:', msg);
-            // #894: ONLY an explicit Boltz FAIL_STATUS is terminal → refund path.
-            // Timeouts AND transient/network errors (e.g. "Boltz status check
-            // failed: 500", fetch failures) are ambiguous — the swap may still
-            // settle — so show "still settling", never a false "Swap Failed".
-            if (boltzService.isExplicitSwapFailure(swapError)) {
-              // Terminal: the Lightning leg will never arrive, so its
-              // placeholder goes on the next refresh (the lockup is a real leg).
-              markSwapPlaceholdersResolved(swap.id);
-              await promptSubmarineRefund(swap, sourceId, msg);
-            } else {
-              Toast.show({
-                type: 'info',
-                text1: 'Swap still settling',
-                text2: 'Funds are safe — it finishes automatically once the lockup confirms.',
-                position: 'top',
-                visibilityTime: 12000,
-              });
-            }
-          }
-        })();
+        const submarineWallets = isCrossProfile ? [sourceId] : [sourceId, destId];
+        void watchForwardSwap({
+          swapId: swap.id,
+          invoiceSats: currentSats,
+          onMessage: (msg) => {
+            if (sessionRef.current === submarineSession) setProgressMsg(msg);
+          },
+          refreshWallets: () => refreshWallets(submarineWallets),
+          onFailed: (msg) => promptSubmarineRefund(swap, sourceId, msg),
+        });
 
         // Terminal "underway" state — user closes when ready. Background
         // task will toast on completion/failure.
@@ -850,21 +811,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
       setProgressMsg('Refreshing wallets...');
 
-      // Refresh balances and transactions (non-critical). Cross-profile
-      // destinations belong to a different profile's wallet list, so we
-      // skip the dest refresh — `refreshBalanceForWallet`/`fetchTransactionsForWallet`
-      // assume the walletId is in the active profile's wallets array
-      // and would no-op or error otherwise.
+      // Refresh balances and transactions (non-critical; see refreshWallets).
       try {
-        const tasks: Promise<unknown>[] = [
-          refreshBalanceForWallet(sourceId),
-          fetchTransactionsForWallet(sourceId),
-        ];
-        if (!isCrossProfile) {
-          tasks.push(refreshBalanceForWallet(destId));
-          tasks.push(fetchTransactionsForWallet(destId));
-        }
-        await Promise.all(tasks);
+        await refreshWallets(isCrossProfile ? [sourceId] : [sourceId, destId]);
       } catch {
         console.warn('Post-transfer refresh failed — pull to refresh');
       }

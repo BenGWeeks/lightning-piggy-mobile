@@ -21,6 +21,7 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { useLargeSendConfirm } from '../hooks/useLargeSendConfirm';
+import { usePostSendRefresh } from '../hooks/usePostSendRefresh';
 import SendWalletSelector from './SendWalletSelector';
 import SendPastePane from './SendPastePane';
 import SendActionButtons from './SendActionButtons';
@@ -54,7 +55,6 @@ import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
 import PaymentProgressOverlay from './PaymentProgressOverlay';
 import { useSendProgressOverlay } from '../hooks/useSendProgressOverlay';
 import { isReverseSwapNotPaid } from '../utils/swapHandoff';
-import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
 import SendModeTabs from './SendModeTabs';
@@ -96,18 +96,12 @@ const SendSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
-  const {
-    payInvoiceForWallet,
-    refreshBalanceForWallet,
-    fetchTransactionsForWallet,
-    addPendingTransaction,
-    activeWalletId,
-    wallets,
-    currency,
-  } = useWallet();
+  const { payInvoiceForWallet, addPendingTransaction, activeWalletId, wallets, currency } =
+    useWallet();
   const { btcPrice } = useWalletLive();
   const { signZapRequest } = useNostr();
   const confirmLargeSend = useLargeSendConfirm();
+  const refreshAfterSend = usePostSendRefresh();
   const { contacts } = useNostrContacts();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -160,7 +154,7 @@ const SendSheet: React.FC<Props> = ({
     progressError,
     inFlightIsSwap,
     setInFlightIsSwap,
-    swapStage,
+    swapSteps,
     canContinueInBackground,
     beginSend,
     endSend,
@@ -418,6 +412,7 @@ const SendSheet: React.FC<Props> = ({
     const { onReplyTimeout } = callbacksFor(send);
     setSwapReceipt(null);
     setSending(true);
+    let swapPaymentHash: string | null = null;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -446,6 +441,7 @@ const SendSheet: React.FC<Props> = ({
             payInvoice: payInvoiceForWallet,
             ...callbacksFor(send),
           });
+          swapPaymentHash = receipt.paymentHash;
           // A send continued in the background must not repaint a newer one.
           if (ownsOverlay(send)) setSwapReceipt(receipt);
         }
@@ -601,34 +597,9 @@ const SendSheet: React.FC<Props> = ({
           amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
-      if (walletId) {
-        // Refresh both balance and tx list so the user sees the send
-        // appear without having to pull-to-refresh manually. The tx
-        // list refresh also re-runs the zap-sender resolver, which
-        // picks up the counterparty entry we just wrote.
-        //
-        // Small delay before the tx-list refresh: LNbits records the
-        // outgoing payment asynchronously after pay_invoice returns, so
-        // an immediate list_transactions call can miss the new tx and
-        // the resolver then runs on a stale list (pending=0, silent).
-        // We also refetch a second time in case the first call raced.
-        await refreshBalanceForWallet(walletId);
-        const capturedWalletId = walletId;
-        // Defer the heavy tx-list refresh (JSON.stringify + zap resolver)
-        // off the interaction path so the success overlay's OK tap is
-        // serviced immediately rather than blocked behind it (#859, #828).
-        deferPostPaymentRefresh(async () => {
-          try {
-            await new Promise((r) => setTimeout(r, 600));
-            await fetchTransactionsForWallet(capturedWalletId);
-            await new Promise((r) => setTimeout(r, 1500));
-            await fetchTransactionsForWallet(capturedWalletId);
-          } catch {
-            // Refresh failures are non-fatal — a manual pull-to-refresh
-            // or the next natural refresh will pick the tx up.
-          }
-        });
-      }
+      // Balance now, history after the overlay's tap frame (#859), and a
+      // reverse swap's late-settling Lightning leg until it settles (#1179).
+      if (walletId) await refreshAfterSend(walletId, swapPaymentHash);
       if (signal.aborted) return;
       showOutcome(send, 'success');
     } catch (error) {
@@ -975,7 +946,7 @@ const SendSheet: React.FC<Props> = ({
         onCancel={handleCancelPayment}
         inFlightIsSwap={inFlightIsSwap}
         swapReceipt={swapReceipt}
-        swapStage={swapStage}
+        swapSteps={swapSteps}
         canContinueInBackground={canContinueInBackground}
       />
     </>

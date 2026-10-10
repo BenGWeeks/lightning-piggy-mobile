@@ -14,6 +14,7 @@ import {
   failTransfer,
   idleProgress,
   startTransfer,
+  transferChecklistSteps,
 } from './transferPhase';
 
 describe('transferPhase state machine', () => {
@@ -139,5 +140,25 @@ describe('transferPhase state machine', () => {
       expect(again).toEqual(failed);
       expect(again.errorMessage).toBe('first error');
     });
+  });
+});
+
+describe('transferChecklistSteps', () => {
+  const statuses = (p: ReturnType<typeof startTransfer>, suppress = false) =>
+    transferChecklistSteps(p, suppress).map((s) => s.status);
+
+  it('marks rows complete / active / pending as the move advances', () => {
+    const p = advanceTransfer(startTransfer('onchain-to-ln'));
+    expect(statuses(p)).toEqual(['complete', 'active', 'pending']);
+    expect(statuses(completeTransfer(p))).toEqual(['complete', 'complete', 'complete']);
+  });
+
+  it('marks the failing row failed', () => {
+    const p = failTransfer(advanceTransfer(startTransfer('onchain-to-ln')), 'boom');
+    expect(statuses(p)).toEqual(['complete', 'failed', 'pending']);
+  });
+
+  it('suppresses the spinner once the background task errored', () => {
+    expect(statuses(startTransfer('ln-to-onchain'), true)).toEqual(['pending', 'pending']);
   });
 });
