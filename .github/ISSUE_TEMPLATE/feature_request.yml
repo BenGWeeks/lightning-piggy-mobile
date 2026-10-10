@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing one
+title: 'feat: '
+labels: ['feature']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Please search [existing issues](https://github.com/BenGWeeks/lightning-piggy-mobile/issues) first, in case it has already been suggested.
+
+        Please do not include secrets (nsecs, NWC connection strings, seed phrases) in this issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or need
+      description: Who is the user, and what are they trying to accomplish? Lightning Piggy is built for smart savers and their families.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: A clear and concise description of what you would like to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches or existing workarounds you have thought about.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Wallet / Lightning payments
+        - On-chain
+        - Nostr / messaging
+        - Zaps
+        - Explore / Piglets / NFC
+        - Onboarding
+        - UI / accessibility
+        - Other
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, screenshots, related Nostr NIPs, Lightning specs, links to related issues or PRs.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help build this (see CONTRIBUTING.md).

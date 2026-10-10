@@ -9,6 +9,8 @@ Title format: Conventional Commits + optional scope, optional trailing issue suf
 Body sections below are required.
 - feat / fix / perf / refactor PRs MUST include a `Closes #nnn` line (one per resolved issue).
 - All PRs MUST include a `## Test plan` section with steps or `N/A — <reason>`.
+
+See CONTRIBUTING.md for the full contribution guide.
 -->
 
 ## Summary
