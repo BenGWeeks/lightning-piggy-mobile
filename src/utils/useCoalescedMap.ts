@@ -167,3 +167,4 @@ export function useCoalescedMap<V>(options?: {
 
   return { map, setMap, enqueue, flush, reset };
 }
+// scratch: JS-only change to demo native-job skipping
