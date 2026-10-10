@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import {
   User,
@@ -36,6 +35,7 @@ import { createAccountDrawerContentStyles } from '../styles/AccountDrawerContent
 import { appVersionLabel } from '../utils/appVersion';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { unregisterWatcherBeforeSignOut } from '../services/watcherPush';
+import { useSignOutConfirm } from '../hooks/useSignOutConfirm';
 import type { AccountDrawerParamList } from '../navigation/types';
 
 interface SectionRow {
@@ -119,7 +119,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const styles = useMemo(() => createAccountDrawerContentStyles(colors), [colors]);
   const sectionRows = useMemo(() => buildSectionRows(colors, t), [colors, t]);
   const insets = useSafeAreaInsets();
-  const { isLoggedIn, profile, logout, identities, pubkey, switchIdentity, relays } = useNostr();
+  const { isLoggedIn, profile, logout, identities, pubkey, signerType, switchIdentity, relays } =
+    useNostr();
+  const confirmSignOut = useSignOutConfirm();
   const [signingOut, setSigningOut] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -216,25 +218,32 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
     });
   };
 
+  // Open the Back up your key screen for `targetPubkey` (#1223).
+  const openKeyBackup = (targetPubkey: string) => {
+    setSwitcherOpen(false);
+    props.navigation.closeDrawer();
+    props.navigation.navigate('AccountKeyBackup', { pubkey: targetPubkey });
+  };
+
   const handleSignOut = () => {
-    if (!isLoggedIn) return;
-    Alert.alert(t('accountDrawerContent.signOut'), t('accountDrawerContent.signOutConfirm'), [
-      { text: t('accountDrawerContent.cancel'), style: 'cancel' },
-      {
-        text: t('accountDrawerContent.signOut'),
-        style: 'destructive',
-        onPress: async () => {
-          setSigningOut(true);
-          try {
-            // While the signer exists: drop this phone from the notification watcher.
-            if (pubkey) await unregisterWatcherBeforeSignOut(pubkey);
-            await logout();
-          } finally {
-            setSigningOut(false);
-          }
-        },
+    if (!isLoggedIn || !pubkey) return;
+    void confirmSignOut({
+      pubkey,
+      signerType,
+      displayName: displayName || truncatedNpub || t('accountDrawerContent.accountFallback'),
+      otherAccountCount: identities.filter((i) => i.pubkey !== pubkey).length,
+      onBackup: () => openKeyBackup(pubkey),
+      onConfirm: async () => {
+        setSigningOut(true);
+        try {
+          // While the signer exists: drop this phone from the notification watcher.
+          await unregisterWatcherBeforeSignOut(pubkey);
+          await logout();
+        } finally {
+          setSigningOut(false);
+        }
       },
-    ]);
+    });
   };
 
   return (
@@ -426,7 +435,11 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
 
-      <AccountSwitcherSheet visible={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+      <AccountSwitcherSheet
+        visible={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+        onBackupKey={openKeyBackup}
+      />
     </View>
   );
 };

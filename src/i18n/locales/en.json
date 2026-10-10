@@ -42,15 +42,9 @@
     "showNpubQr": "Show npub QR",
     "signInOrCreate": "Sign in or create account",
     "signInButton": "Sign In / Create Account",
-    "signOut": "Sign Out",
-    "signOutConfirm": "Disconnect your Nostr identity?",
-    "cancel": "Cancel"
+    "signOut": "Sign Out"
   },
   "accountSwitcherSheet": {
-    "signOutTitle": "Sign Out",
-    "signOutMessage": "Sign out of {{displayName}}? Other accounts stay signed in.",
-    "cancel": "Cancel",
-    "signOut": "Sign Out",
     "accounts": "Accounts",
     "subtitle": "Tap an account to switch. All signed-in accounts stay warm so switching is instant.",
     "switchTo": "Switch to {{display}}",
@@ -2421,5 +2415,51 @@
   "marmotSend": {
     "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
     "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now."
+  },
+  "signOutPrompt": {
+    "title": "Sign out of {{name}}?",
+    "nsecUnbacked": "This removes {{name}}'s secret key from this phone. If you haven't saved a copy, the account can't be recovered — not by you, and not by us.",
+    "nsecBacked": "This removes {{name}}'s secret key from this phone. You've marked it as backed up — you'll need that copy to sign back in.",
+    "amber": "Your key stays safe in Amber, so nothing is lost. You can sign back in any time.",
+    "nip46": "Your key stays safe in your signer app, so nothing is lost. You can sign back in any time.",
+    "otherAccountOne": "Your other account on this phone stays signed in.",
+    "otherAccountsMany": "Your {{count}} other accounts on this phone stay signed in.",
+    "backUpFirst": "Back Up Key First",
+    "signOutAnyway": "Sign Out Anyway",
+    "signOut": "Sign Out",
+    "cancel": "Cancel"
+  },
+  "keyBackupScreen": {
+    "title": "Back up your key",
+    "entryHeader": "Account key",
+    "entryAmber": "Kept in Amber",
+    "entrySigner": "Kept in your signer app",
+    "account": "Account: {{name}}",
+    "notSignedIn": "Sign in to back up your key.",
+    "whatIsIt": "What is this key?",
+    "explainControl": "Your secret key (it starts with “nsec”) is the master password for {{name}}. Whoever has it controls the account — its messages, friends and profile.",
+    "explainOnlyHere": "It's only stored on this phone. If the phone is lost or reset, or you sign out, the key goes too — and so does the account, unless you've saved a copy.",
+    "explainKeepSafe": "Write it down or keep it in a password manager. Never share it — Lightning Piggy will never ask you for it.",
+    "statusBackedUp": "Backed up",
+    "statusNotBackedUp": "Not backed up yet",
+    "keyHidden": "Key hidden",
+    "showKey": "Show key",
+    "hideKey": "Hide key",
+    "revealHint": "Tap the eye to show your key. You'll be asked to unlock your phone first.",
+    "authPrompt": "Unlock to show your key",
+    "authFailed": "Couldn't confirm it's you, so the key stays hidden.",
+    "keyMissing": "This phone doesn't have a key for this account.",
+    "copyKey": "Copy Key",
+    "copiedNote": "Copied. We'll clear it from your clipboard in {{seconds}} seconds.",
+    "savedIt": "I've Saved It Somewhere Safe",
+    "markedBackedUp": "Marked as backed up",
+    "noLockTitle": "This phone has no screen lock",
+    "noLockMessage": "We can't check it's you before showing the key. Anyone holding this key controls the account, so make sure nobody else can see your screen.",
+    "noLockConfirm": "I Understand",
+    "cancel": "Cancel",
+    "keptInAmber": "Your key is kept in Amber",
+    "keptInAmberBody": "Lightning Piggy never sees this account's secret key, so there's nothing to back up here — back it up from Amber. Signing out is safe: you can sign back in with Amber any time.",
+    "keptInSigner": "Your key is kept in your signer app",
+    "keptInSignerBody": "Lightning Piggy never sees this account's secret key, so there's nothing to back up here — back it up from your signer app. Signing out is safe: you can sign back in any time."
   }
 }

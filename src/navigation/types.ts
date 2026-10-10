@@ -35,6 +35,9 @@ export type AccountDrawerParamList = {
   AccountLanguage: undefined;
   AccountNearby: undefined;
   AccountSecurity: undefined;
+  // Back up your key (#1223). `pubkey` (public, hex) picks the account —
+  // defaults to the active one. Never put key material in params.
+  AccountKeyBackup: { pubkey?: string } | undefined;
   AccountAbout: undefined;
 };
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import {
   BottomSheetBackdrop,
   type BottomSheetBackdropProps,
@@ -10,7 +10,6 @@ import { Image } from 'expo-image';
 import { Plus, UserPlus, UserRound, X, Check } from 'lucide-react-native';
 import * as nip19 from 'nostr-tools/nip19';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from './BrandedAlert';
 import NostrLoginSheet from './NostrLoginSheet';
 import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -19,12 +18,15 @@ import { useTranslation } from '../contexts/LocaleContext';
 import * as nostrService from '../services/nostrService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { unregisterWatcherBeforeSignOut } from '../services/watcherPush';
-import type { Palette } from '../styles/palettes';
+import { createAccountSwitcherSheetStyles } from '../styles/AccountSwitcherSheet.styles';
+import { useSignOutConfirm } from '../hooks/useSignOutConfirm';
 import type { NostrProfile } from '../types/nostr';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Open the Back up your key screen for an account (#1223). */
+  onBackupKey: (pubkey: string) => void;
 }
 
 // Bottom sheet listing every signed-in identity. Triggered by the
@@ -41,12 +43,13 @@ interface Props {
 // Per-identity profile metadata is fetched lazily here so the cold
 // sheet open doesn't wait for the relay round-trip — rows render
 // immediately with the npub-prefix as a fallback.
-const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
+const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose, onBackupKey }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createAccountSwitcherSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const { identities, pubkey, switchIdentity, signOutIdentity, relays } = useNostr();
+  const { identities, pubkey, signerType, switchIdentity, signOutIdentity, relays } = useNostr();
+  const confirmSignOut = useSignOutConfirm();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [profileById, setProfileById] = useState<Record<string, NostrProfile>>({});
 
@@ -137,28 +140,30 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleSignOut = useCallback(
     (targetPubkey: string, displayName: string) => {
-      Alert.alert(
-        t('accountSwitcherSheet.signOutTitle'),
-        t('accountSwitcherSheet.signOutMessage', { displayName }),
-        [
-          { text: t('accountSwitcherSheet.cancel'), style: 'cancel' },
-          {
-            text: t('accountSwitcherSheet.signOut'),
-            style: 'destructive',
-            onPress: () => {
-              // The active account can still sign: drop it from the
-              // notification watcher first (no-op for another account).
-              unregisterWatcherBeforeSignOut(targetPubkey)
-                .then(() => signOutIdentity(targetPubkey))
-                .catch((e) => {
-                  if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
-                });
-            },
-          },
-        ],
-      );
+      // The registry only knows nsec / amber; the active account's live
+      // signer type also covers NIP-46.
+      const targetSignerType =
+        targetPubkey === pubkey
+          ? signerType
+          : identities.find((i) => i.pubkey === targetPubkey)?.signerType;
+      void confirmSignOut({
+        pubkey: targetPubkey,
+        signerType: targetSignerType,
+        displayName,
+        otherAccountCount: identities.filter((i) => i.pubkey !== targetPubkey).length,
+        onBackup: () => onBackupKey(targetPubkey),
+        onConfirm: () => {
+          // The active account can still sign: drop it from the
+          // notification watcher first (no-op for another account).
+          unregisterWatcherBeforeSignOut(targetPubkey)
+            .then(() => signOutIdentity(targetPubkey))
+            .catch((e) => {
+              if (__DEV__) console.warn('[Account] signOutIdentity failed:', e);
+            });
+        },
+      });
     },
-    [signOutIdentity, t],
+    [confirmSignOut, identities, onBackupKey, pubkey, signerType, signOutIdentity],
   );
 
   const handleAddAccount = useCallback(() => {
@@ -287,119 +292,5 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
     </>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 32,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 4,
-    },
-    subtitle: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginBottom: 16,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 8,
-    },
-    rowMain: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    avatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      overflow: 'hidden',
-      backgroundColor: colors.background,
-    },
-    avatarImage: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-    },
-    avatarPlaceholder: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    rowText: {
-      flex: 1,
-    },
-    nameRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    rowName: {
-      color: colors.textHeader,
-      fontSize: 16,
-      fontWeight: '700',
-      flexShrink: 1,
-    },
-    activeBadge: {
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    rowNpub: {
-      color: colors.textSupplementary,
-      fontSize: 12,
-      marginTop: 2,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    signOutButton: {
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-    },
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.divider,
-      marginVertical: 12,
-    },
-    actionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-    },
-    actionIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      borderWidth: 1.5,
-      borderStyle: 'dashed',
-      borderColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    actionLabel: {
-      color: colors.textHeader,
-      fontSize: 15,
-      fontWeight: '600',
-    },
-  });
 
 export default AccountSwitcherSheet;

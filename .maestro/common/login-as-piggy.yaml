@@ -32,7 +32,7 @@ name: Internal — login as the nsec passed via PIGGY_NSEC env var
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    id: 'branded-alert-button-1'
+    id: 'sign-out-confirm'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

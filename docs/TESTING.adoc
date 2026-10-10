@@ -147,6 +147,9 @@ folder deep by feature area — lives in `.maestro/README.adoc`):
 | `authentication/flow-007-logout.yaml`
 | Logout and state cleanup verification
 
+| `authentication/flow-136-safe-signout-key-backup.yaml`
+| Sign-out warning for a local-key account (named dialog, Back Up Key First / Sign Out Anyway / Cancel — cancelled, never confirmed) and the Back up your key screen (masked key, eye toggle, Copy) via the dialog and Settings → Security. Never reveals the key (#1223)
+
 | `authentication/flow-002-create-account.yaml`
 | Generate new Nostr keypair, set display name, backup nsec
 

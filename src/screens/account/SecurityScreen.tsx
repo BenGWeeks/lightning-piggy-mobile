@@ -7,6 +7,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import { createSecurityScreenStyles } from '../../styles/SecurityScreen.styles';
 import MarmotPushSection from '../../components/MarmotPushSection';
+import KeyBackupEntry from '../../components/KeyBackupEntry';
 import DetailsDisclosure from '../../components/DetailsDisclosure';
 import {
   DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
@@ -120,6 +121,7 @@ const SecurityScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title={t('securityScreen.title')}>
+      <KeyBackupEntry />
       <View style={styles.headerRow}>
         <ShieldCheck size={22} color={colors.white} />
         <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>

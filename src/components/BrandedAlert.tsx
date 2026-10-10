@@ -10,6 +10,8 @@ export interface BrandedAlertButton {
   text: string;
   style?: BrandedAlertButtonStyle;
   onPress?: () => void;
+  /** Stable Maestro selector; defaults to `branded-alert-button-<index>`. */
+  testID?: string;
 }
 
 export type BrandedAlertKind = 'info' | 'error' | 'success' | 'confirm';
@@ -198,7 +200,7 @@ export function BrandedAlertHost(): React.ReactElement | null {
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel={btn.text}
-                  testID={`branded-alert-button-${idx}`}
+                  testID={btn.testID ?? `branded-alert-button-${idx}`}
                 >
                   <Text
                     style={[

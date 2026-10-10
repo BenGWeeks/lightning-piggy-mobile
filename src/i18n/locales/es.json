@@ -42,15 +42,9 @@
     "showNpubQr": "Mostrar QR de npub",
     "signInOrCreate": "Iniciar sesión o crear cuenta",
     "signInButton": "Iniciar sesión / Crear cuenta",
-    "signOut": "Cerrar sesión",
-    "signOutConfirm": "¿Desconectar tu identidad Nostr?",
-    "cancel": "Cancelar"
+    "signOut": "Cerrar sesión"
   },
   "accountSwitcherSheet": {
-    "signOutTitle": "Cerrar sesión",
-    "signOutMessage": "¿Cerrar sesión de {{displayName}}? Las demás cuentas seguirán conectadas.",
-    "cancel": "Cancelar",
-    "signOut": "Cerrar sesión",
     "accounts": "Cuentas",
     "subtitle": "Toca una cuenta para cambiar. Todas las cuentas conectadas se mantienen activas para que el cambio sea instantáneo.",
     "switchTo": "Cambiar a {{display}}",
@@ -2421,5 +2415,51 @@
   "marmotSend": {
     "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
     "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17."
+  },
+  "signOutPrompt": {
+    "title": "¿Cerrar sesión de {{name}}?",
+    "nsecUnbacked": "Esto elimina la clave secreta de {{name}} de este teléfono. Si no has guardado una copia, la cuenta no se podrá recuperar: ni por ti ni por nosotros.",
+    "nsecBacked": "Esto elimina la clave secreta de {{name}} de este teléfono. La marcaste como respaldada: necesitarás esa copia para volver a iniciar sesión.",
+    "amber": "Tu clave sigue a salvo en Amber, así que no se pierde nada. Puedes volver a iniciar sesión cuando quieras.",
+    "nip46": "Tu clave sigue a salvo en tu app firmante, así que no se pierde nada. Puedes volver a iniciar sesión cuando quieras.",
+    "otherAccountOne": "Tu otra cuenta en este teléfono sigue con la sesión iniciada.",
+    "otherAccountsMany": "Tus otras {{count}} cuentas en este teléfono siguen con la sesión iniciada.",
+    "backUpFirst": "Respaldar la clave primero",
+    "signOutAnyway": "Cerrar sesión igualmente",
+    "signOut": "Cerrar sesión",
+    "cancel": "Cancelar"
+  },
+  "keyBackupScreen": {
+    "title": "Respalda tu clave",
+    "entryHeader": "Clave de la cuenta",
+    "entryAmber": "Guardada en Amber",
+    "entrySigner": "Guardada en tu app firmante",
+    "account": "Cuenta: {{name}}",
+    "notSignedIn": "Inicia sesión para respaldar tu clave.",
+    "whatIsIt": "¿Qué es esta clave?",
+    "explainControl": "Tu clave secreta (empieza por «nsec») es la contraseña maestra de {{name}}. Quien la tenga controla la cuenta: sus mensajes, amigos y perfil.",
+    "explainOnlyHere": "Solo está guardada en este teléfono. Si pierdes o restableces el teléfono, o cierras sesión, la clave desaparece, y con ella la cuenta, salvo que hayas guardado una copia.",
+    "explainKeepSafe": "Escríbela o guárdala en un gestor de contraseñas. No la compartas nunca: Lightning Piggy nunca te la pedirá.",
+    "statusBackedUp": "Respaldada",
+    "statusNotBackedUp": "Aún sin respaldar",
+    "keyHidden": "Clave oculta",
+    "showKey": "Mostrar clave",
+    "hideKey": "Ocultar clave",
+    "revealHint": "Toca el ojo para mostrar tu clave. Primero te pediremos desbloquear el teléfono.",
+    "authPrompt": "Desbloquea para mostrar tu clave",
+    "authFailed": "No pudimos confirmar que eres tú, así que la clave sigue oculta.",
+    "keyMissing": "Este teléfono no tiene una clave para esta cuenta.",
+    "copyKey": "Copiar clave",
+    "copiedNote": "Copiada. La borraremos del portapapeles en {{seconds}} segundos.",
+    "savedIt": "La he guardado en un lugar seguro",
+    "markedBackedUp": "Marcada como respaldada",
+    "noLockTitle": "Este teléfono no tiene bloqueo de pantalla",
+    "noLockMessage": "No podemos comprobar que eres tú antes de mostrar la clave. Quien tenga esta clave controla la cuenta, así que asegúrate de que nadie más vea tu pantalla.",
+    "noLockConfirm": "Lo entiendo",
+    "cancel": "Cancelar",
+    "keptInAmber": "Tu clave está guardada en Amber",
+    "keptInAmberBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta, así que aquí no hay nada que respaldar: respáldala desde Amber. Cerrar sesión es seguro: puedes volver a entrar con Amber cuando quieras.",
+    "keptInSigner": "Tu clave está guardada en tu app firmante",
+    "keptInSignerBody": "Lightning Piggy nunca ve la clave secreta de esta cuenta, así que aquí no hay nada que respaldar: respáldala desde tu app firmante. Cerrar sesión es seguro: puedes volver a entrar cuando quieras."
   }
 }
