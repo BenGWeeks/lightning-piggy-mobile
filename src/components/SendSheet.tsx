@@ -4,13 +4,13 @@ import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetTextInput,
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useCameraPermissions } from 'expo-camera';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';

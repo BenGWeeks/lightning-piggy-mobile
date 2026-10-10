@@ -14,12 +14,12 @@ import Svg, { Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { useThemeColors } from '../contexts/ThemeContext';

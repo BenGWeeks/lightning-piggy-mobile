@@ -3,9 +3,9 @@ import { BackHandler, StyleSheet, Text, View } from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetModal,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 

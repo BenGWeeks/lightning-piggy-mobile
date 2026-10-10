@@ -12,12 +12,12 @@ import {
 import { Image } from 'expo-image';
 import { UserRound, UsersRound } from 'lucide-react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetTextInput,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';

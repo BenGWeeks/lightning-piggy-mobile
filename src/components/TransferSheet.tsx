@@ -13,12 +13,12 @@ import {
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';

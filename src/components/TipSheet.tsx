@@ -10,11 +10,11 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import QRCode from 'react-native-qrcode-svg';
 import { Check } from 'lucide-react-native';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';

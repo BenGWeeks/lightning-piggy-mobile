@@ -9,11 +9,11 @@ import {
   type AppStateStatus,
 } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { readHuntTagPayload, cancelNfcOperation } from '../services/nfcService';
 import { paymentHashFromBolt11 } from '../utils/bolt11';

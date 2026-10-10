@@ -10,11 +10,11 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';

@@ -8,7 +8,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';

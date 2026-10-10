@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   type BottomSheetBackdropProps,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Image } from 'expo-image';
 import { Plus, UserPlus, UserRound, X, Check } from 'lucide-react-native';
 import * as nip19 from 'nostr-tools/nip19';

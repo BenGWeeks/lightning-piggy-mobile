@@ -12,12 +12,12 @@ import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';

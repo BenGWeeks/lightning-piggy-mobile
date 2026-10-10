@@ -1,12 +1,12 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetFlatList,
   BottomSheetTextInput,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';

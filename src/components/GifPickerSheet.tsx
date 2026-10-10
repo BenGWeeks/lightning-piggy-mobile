@@ -14,12 +14,12 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { Search } from 'lucide-react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetTextInput,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';

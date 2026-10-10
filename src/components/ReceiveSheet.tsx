@@ -9,11 +9,11 @@ import {
   BackHandler,
 } from 'react-native';
 import {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { ChevronUp, ChevronDown, Copy, Share2, Send } from 'lucide-react-native';
 import ReceivePaymentQr from './ReceivePaymentQr';
 import * as Clipboard from 'expo-clipboard';
