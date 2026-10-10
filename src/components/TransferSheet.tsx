@@ -1323,7 +1323,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                         />
                       </TouchableOpacity>
                     )}
-                    <View>
+                    <View style={styles.feeLines}>
                       <Text style={styles.feeText}>
                         Estimated fee: {feeEstimate.split('\u00B7')[0].trim()}
                       </Text>

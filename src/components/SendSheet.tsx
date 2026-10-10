@@ -446,7 +446,8 @@ const SendSheet: React.FC<Props> = ({
             payInvoice: payInvoiceForWallet,
             ...callbacksFor(send),
           });
-          setSwapReceipt(receipt);
+          // A send continued in the background must not repaint a newer one.
+          if (ownsOverlay(send)) setSwapReceipt(receipt);
         }
       } else if (isLightningAddress(invoiceData) || isLnurl) {
         if (!lnurlParams) {

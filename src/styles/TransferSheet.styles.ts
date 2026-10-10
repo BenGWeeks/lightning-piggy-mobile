@@ -163,6 +163,10 @@ export const createTransferSheetStyles = (colors: Palette) =>
       alignSelf: 'center',
       gap: 8,
     },
+    // Lets a long quote (e.g. "Boltz ~N + network ~M") wrap beside the logo.
+    feeLines: {
+      flexShrink: 1,
+    },
     boltzLogo: {
       width: 75,
       height: 75,
