@@ -20,7 +20,6 @@ import {
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType, Nip46Connection } from '../types/nostr'; // prettier-ignore
-import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
@@ -48,8 +47,7 @@ import { useContactActions } from './useContactActions';
 import { useNip46Login, restoreNip46Session } from './useNip46Login';
 import { nip46Sign } from './nip46DmDecrypt';
 import type { EncryptedUpload } from '../services/imageUploadService';
-import { nip04PlaintextCache, clearMemoisedSecretKey } from './nostrSecretKeyCache';
-import { stopNativeDmEngineGlobal } from './nativeDmEngine';
+import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
 import { wipeLocalDmStore } from '../services/localDb';
@@ -72,7 +70,9 @@ import {
   readCachedWithTtl,
   persistMergedProfileCache,
 } from './nostrCacheKeys';
-import type { RefreshDmInboxOptions, SignedEvent, ConversationMessage } from './nostrContextTypes';
+import type { SignedEvent, ConversationMessage } from './nostrContextTypes';
+import { useOwnProfile } from './useOwnProfile';
+import { useAccountState } from './useAccountState';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 
 export { OWN_PROFILE_CACHE_KEY_BASE } from './nostrCacheKeys';
@@ -300,22 +300,7 @@ const NostrContactsContext = createContext<NostrContactsContextType | undefined>
 // [Perf] line in this file.
 perfLog('NostrContext module-eval');
 
-/**
- * Shallow field-equality for own-profile updates. Every `loadProfile` /
- * `loadProfileFromCache` call builds a *fresh* object (JSON.parse / relay
- * fetch), and Home/Friends call `refreshProfile()` on every tab focus — so
- * without this guard each focus minted a new `profile` identity, rebuilt the
- * main context value, and re-rendered every `useNostr()` consumer even when
- * nothing changed. Profile fields are all primitives, so shallow compare is
- * exact.
- */
-const sameProfile = (a: NostrProfile | null, b: NostrProfile): boolean => {
-  if (!a) return false;
-  const ka = Object.keys(a) as (keyof NostrProfile)[];
-  const kb = Object.keys(b) as (keyof NostrProfile)[];
-  if (ka.length !== kb.length) return false;
-  return ka.every((k) => Object.is(a[k], b[k]));
-};
+const EMPTY_CONTACTS: NostrContact[] = [];
 
 let __nostrProviderFirstRenderLogged = false;
 let __nostrProviderLoggedInLogged = false;
@@ -326,8 +311,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [profile, setProfile] = useState<NostrProfile | null>(null);
-  const [contacts, setContacts] = useState<NostrContact[]>([]);
   // `nip65Relays` mirrors the user's published kind-10002 list (or the
   // last cached snapshot of it). `userRelays` are explicit in-app
   // overrides persisted to AsyncStorage by the Nostr settings screen
@@ -350,6 +333,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
+  const [profile, setProfile, profileSetterFor] = useAccountState<NostrProfile | null>(
+    pubkey,
+    null,
+  );
+  const [contacts, setContacts, contactsSetterFor] = useAccountState(pubkey, EMPTY_CONTACTS);
   // Multi-account registry (#288). Mirrors the SecureStore `identities_v1`
   // blob so the drawer header and AccountSwitcherSheet can render without
   // each rendering its own SecureStore round-trip. The `pubkey` state above
@@ -459,6 +447,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAmberNip44Permission,
     knownWrapIdsRef,
   } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays });
+  // Identity-transition teardown (switch + add-account logins); see helper.
+  const { resetIdentityMemory, activateLoginPubkey } = useIdentityMemoryReset(pubkey, setPubkey, {
+    setProfile,
+    setContacts,
+    setDmInbox,
+    setAmberNip44Permission,
+    resetRelayLists,
+  });
 
   // Group-messaging cluster (#707). The NIP-17 group send + kind-30200
   // group-state publish callbacks live in `useGroupMessaging`. The provider
@@ -477,38 +473,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // the in-app event bus (`notifyFoundLog`). See useCacheNotifications.
   useCacheNotifications({ pubkey, getReadRelays });
 
-  const loadProfile = useCallback(
-    async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
-      const t0 = Date.now();
-      // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
-      // `force` bypasses it for user-initiated refreshes.
-      const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
-        perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
-        perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
-      );
-      if (!opts?.force && cached && ageMs < CACHE_MAX_AGE_MS) {
-        setProfile((prev) => (sameProfile(prev, cached) ? prev : cached));
-        if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
-        return;
-      }
-      const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
-      if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
-      if (fetchedProfile) {
-        setProfile((prev) => (sameProfile(prev, fetchedProfile) ? prev : fetchedProfile));
-        InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(
-            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
-            JSON.stringify(fetchedProfile),
-          ).catch(() => {});
-          AsyncStorage.setItem(
-            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
-            Date.now().toString(),
-          ).catch(() => {});
-        });
-      }
-    },
-    [],
-  );
+  const { loadProfile, loadProfileFromCache } = useOwnProfile(profileSetterFor);
 
   // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
   // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
@@ -522,95 +487,79 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [getReadRelays],
   );
 
-  /** Eagerly hydrate own `profile` state from the per-account cache so
-   * the drawer header + tab profile avatar paint on cold start without
-   * waiting for the deferred `loadProfile` relay round-trip. Matches the
-   * pattern of `loadContactsFromCache`. The cache-fresh setProfile-from-
-   * cache was previously only happening inside the deferred `loadProfile`
-   * fast path, which meant a fresh cold-start with grace-window deferral
-   * left `profile` null for ~1.5 s. */
-  const loadProfileFromCache = useCallback(async (pk: string) => {
-    try {
-      const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
-      if (!raw) return false;
-      const cached = JSON.parse(raw) as NostrProfile;
-      setProfile((prev) => (sameProfile(prev, cached) ? prev : cached));
-      return true;
-    } catch (error) {
-      console.warn('Failed to load profile cache:', error);
-      return false;
-    }
-  }, []);
-
-  const loadContactsFromCache = useCallback(async (pk: string) => {
-    try {
-      const t0 = Date.now();
-      perfLog('loadContactsFromCache: start');
-      const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
-      const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
-      const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
-      const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
-      perfLog('loadContactsFromCache: multiGet returned');
-      let contactsJson: string | null = null;
-      let profilesJson: string | null = null;
-      let contactsTsStr: string | null = null;
-      for (const [k, v] of pairs) {
-        if (k === contactsKey) contactsJson = v;
-        else if (k === profilesKey) profilesJson = v;
-        else if (k === contactsTsKey) contactsTsStr = v;
-      }
-      perfLog(
-        `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
-      );
-      // Previously: any contacts cache older than 24h short-circuited the
-      // whole bootstrap, discarding the still-useful profile map and
-      // painting an empty Friends tab while `loadContacts` ran the relay
-      // fetch (#642). Even a stale follow list is a better first paint
-      // than nothing — the relay refresh will overwrite it in seconds via
-      // the stale-while-revalidate path in `loadContacts`. Profiles in
-      // particular are identity data that change rarely; preserving them
-      // means the per-row zap gate hydrates from cache instead of reading
-      // `lightningAddress: null` for every contact during the kind-0
-      // batch refetch.
-      if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
+  const loadContactsFromCache = useCallback(
+    async (pk: string) => {
+      const setContacts = contactsSetterFor(pk);
+      try {
+        const t0 = Date.now();
+        perfLog('loadContactsFromCache: start');
+        const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
+        const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
+        const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
+        const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
+        perfLog('loadContactsFromCache: multiGet returned');
+        let contactsJson: string | null = null;
+        let profilesJson: string | null = null;
+        let contactsTsStr: string | null = null;
+        for (const [k, v] of pairs) {
+          if (k === contactsKey) contactsJson = v;
+          else if (k === profilesKey) profilesJson = v;
+          else if (k === contactsTsKey) contactsTsStr = v;
+        }
         perfLog(
-          'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
+          `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
         );
-      }
-      if (contactsJson) {
-        const tParse = Date.now();
-        // sanitizeContacts drops any junk pubkeys persisted before the
-        // ingest-time HEX64 gate landed, so a poisoned cache self-heals on
-        // the next read instead of rendering zero-prefixed rows (#855).
-        const cached: NostrContact[] = sanitizeContacts(JSON.parse(contactsJson));
-        perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
-        if (profilesJson) {
-          const tProfilesParse = Date.now();
-          const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
-          perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
-          const tMerge = Date.now();
-          const withProfiles = cached.map((c) => ({
-            ...c,
-            profile: profileMap[c.pubkey] ?? c.profile,
-          }));
+        // Previously: any contacts cache older than 24h short-circuited the
+        // whole bootstrap, discarding the still-useful profile map and
+        // painting an empty Friends tab while `loadContacts` ran the relay
+        // fetch (#642). Even a stale follow list is a better first paint
+        // than nothing — the relay refresh will overwrite it in seconds via
+        // the stale-while-revalidate path in `loadContacts`. Profiles in
+        // particular are identity data that change rarely; preserving them
+        // means the per-row zap gate hydrates from cache instead of reading
+        // `lightningAddress: null` for every contact during the kind-0
+        // batch refetch.
+        if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
           perfLog(
-            `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
-          );
-          startTransition(() => setContacts(withProfiles));
-          perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
-        } else {
-          startTransition(() => setContacts(cached));
-          perfLog(
-            `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+            'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
           );
         }
-        return true;
+        if (contactsJson) {
+          const tParse = Date.now();
+          // sanitizeContacts drops any junk pubkeys persisted before the
+          // ingest-time HEX64 gate landed, so a poisoned cache self-heals on
+          // the next read instead of rendering zero-prefixed rows (#855).
+          const cached: NostrContact[] = sanitizeContacts(JSON.parse(contactsJson));
+          perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
+          if (profilesJson) {
+            const tProfilesParse = Date.now();
+            const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+            perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
+            const tMerge = Date.now();
+            const withProfiles = cached.map((c) => ({
+              ...c,
+              profile: profileMap[c.pubkey] ?? c.profile,
+            }));
+            perfLog(
+              `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
+            );
+            startTransition(() => setContacts(withProfiles));
+            perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
+          } else {
+            startTransition(() => setContacts(cached));
+            perfLog(
+              `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+            );
+          }
+          return true;
+        }
+      } catch (error) {
+        console.warn('Failed to load contacts cache:', error);
       }
-    } catch (error) {
-      console.warn('Failed to load contacts cache:', error);
-    }
-    return false;
-  }, []);
+      return false;
+    },
+    [contactsSetterFor],
+  );
 
   const loadContacts = useCallback(
     async (
@@ -618,6 +567,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       relayUrls: string[],
       opts?: { force?: boolean; awaitProfiles?: boolean },
     ) => {
+      const setContacts = contactsSetterFor(pk);
       const t0 = Date.now();
 
       // Read the contact-list cache AND profile cache concurrently — both
@@ -811,7 +761,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await runProfileFetch();
       }
     },
-    [],
+    [contactsSetterFor],
   );
 
   // Single-fire perf log when isLoggedIn becomes true — the
@@ -1016,7 +966,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
-        setPubkey(pk);
+        activateLoginPubkey(pk);
 
         // Store credentials in the legacy single-active-identity slots via the
         // canonical writer (hardened, device-only keychain) AND register the
@@ -1078,7 +1028,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggingIn(false);
       }
     },
-    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
+    [
+      activateLoginPubkey,
+      loadRelays,
+      loadProfile,
+      loadContacts,
+      loadContactsFromCache,
+      hydrateDmInboxFromCache,
+    ],
   );
 
   const loginWithAmber = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -1090,7 +1047,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Native module uses startActivityForResult — returns pubkey directly
       const pk = await amberService.requestPublicKey();
 
-      setPubkey(pk);
+      activateLoginPubkey(pk);
       await persistActiveIdentityKeys({ pubkey: pk, signerType: 'amber' });
       const next = await upsertIdentity({
         pubkey: pk,
@@ -1139,12 +1096,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoggingIn(false);
     }
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
+  }, [
+    activateLoginPubkey,
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  ]);
 
   // NIP-46 login lives in its own hook (#283); see useNip46Login.
   const loginWithNip46 = useNip46Login({
     setIsLoggingIn,
-    setPubkey,
+    setPubkey: activateLoginPubkey,
     setSignerType,
     setIsLoggedIn,
     loadRelays,
@@ -1158,14 +1122,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Extracted so the multi-account sign-out path can call it without
   // coupling to the active-identity teardown logic (#288).
   const logout = useCallback(async () => {
-    clearMemoisedSecretKey();
-    // Belt-and-braces (Stage 2 M2 key lifecycle): the live sub's teardown
-    // stops its own engine handle, but a logout must never race a native
-    // rust-nostr pool still holding this account's parsed key — force the
-    // native stop + single-entry key-cache clear.
-    void stopNativeDmEngineGlobal();
+    dropIdentityKeyMaterial();
     setAmberNip44Permission('unknown');
-    nip04PlaintextCache.clear();
     // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
     // sign-out then sign-back-in to the SAME pubkey would keep wrap
     // ids from the prior session alive in memory, and any wrap whose
@@ -1269,6 +1227,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadProfileFromCache,
     loadRelays,
     loadProfile,
+    setContacts,
+    setProfile,
     hydrateDmInboxFromCache,
     setDmInbox,
     setAmberNip44Permission,
@@ -1300,22 +1260,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (__DEV__) console.warn(`[Nostr] switchIdentity: ${nextPubkey} not in registry`);
         return;
       }
-      // Tear down the previous identity's in-memory state. Persistent
-      // caches (per-account namespaced) are kept on disk so a switch
-      // back is instant.
-      clearMemoisedSecretKey();
-      // Same Stage 2 M2 belt-and-braces as logout: the switched-away
-      // identity's key must not survive in the native engine / key cache.
-      void stopNativeDmEngineGlobal();
-      nip04PlaintextCache.clear();
-      setAmberNip44Permission('unknown');
-      setProfile(null);
-      setContacts([]);
-      // Reset the NIP-65 slice only — user-added overrides are an
-      // in-app preference and shared across identities (matches the
-      // logout behaviour).
-      resetRelayLists();
-      setDmInbox([]);
+      // Tear down the previous identity's in-memory state (on-disk caches
+      // are per-account namespaced and kept, so a switch back is instant).
+      resetIdentityMemory();
 
       // Promote the target identity to "active" everywhere — write the legacy
       // single-identity SecureStore slots and clear the other signer's stale
@@ -1353,14 +1300,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [
       pubkey,
-      resetRelayLists,
+      resetIdentityMemory,
       loadContactsFromCache,
       hydrateDmInboxFromCache,
       loadRelays,
       loadProfile,
       loadContacts,
-      setAmberNip44Permission,
-      setDmInbox,
     ],
   );
 
@@ -1543,7 +1488,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return false;
       }
     },
-    [pubkey, isLoggedIn, signerType, relays],
+    [setProfile, pubkey, isLoggedIn, signerType, relays],
   );
 
   /**

@@ -18,9 +18,12 @@ import type { Group } from '../types/groups';
  */
 
 let known: Group[] = [];
+let knownOwner: string | null = null;
+let reconcilerOwner: string | null = null;
 
-export function setKnownGroups(groups: Group[]): void {
+export function setKnownGroups(groups: Group[], owner: string | null = null): void {
   known = groups;
+  knownOwner = owner;
 }
 
 export function getKnownGroups(): readonly Group[] {
@@ -56,12 +59,19 @@ export interface SyntheticRoomInput {
 type SyntheticReconciler = (input: SyntheticRoomInput) => Promise<Group | null>;
 let syntheticReconciler: SyntheticReconciler | null = null;
 
-export function setSyntheticGroupReconciler(fn: SyntheticReconciler | null): void {
+export function setSyntheticGroupReconciler(
+  fn: SyntheticReconciler | null,
+  owner: string | null = null,
+): void {
   syntheticReconciler = fn;
+  reconcilerOwner = owner;
 }
 
-export async function reconcileSyntheticGroup(input: SyntheticRoomInput): Promise<Group | null> {
-  if (!syntheticReconciler) return null;
+export async function reconcileSyntheticGroup(
+  input: SyntheticRoomInput,
+  owner: string | null = null,
+): Promise<Group | null> {
+  if (owner !== reconcilerOwner || !syntheticReconciler) return null;
   return syntheticReconciler(input);
 }
 
@@ -78,7 +88,11 @@ export async function reconcileSyntheticGroup(input: SyntheticRoomInput): Promis
  * kind-30200 reconciliation in GroupsContext, which has the friend-graph
  * trust check.
  */
-export function findGroupForParticipants(otherParticipants: Set<string>): Group | null {
+export function findGroupForParticipants(
+  otherParticipants: Set<string>,
+  owner: string | null = null,
+): Group | null {
+  if (owner !== knownOwner) return null;
   for (const group of known) {
     if (group.memberPubkeys.length !== otherParticipants.size) continue;
     let mismatch = false;

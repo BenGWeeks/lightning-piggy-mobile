@@ -36,10 +36,12 @@ export async function tryRouteGroupRumor(
   rumor: DecodedRumor,
   viewerPubkey: string,
   wrapId: string,
+  shouldAbort: () => boolean = () => false,
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type !== 'group') return { kind: 'not-group' };
-  let group = findGroupForParticipants(cls.otherParticipants);
+  if (shouldAbort()) return { kind: 'group-no-match' };
+  let group = findGroupForParticipants(cls.otherParticipants, viewerPubkey);
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later
   // `subject`-tag renames from foreign clients propagate to the local
@@ -73,12 +75,15 @@ export async function tryRouteGroupRumor(
       const synthId = syntheticGroupIdForParticipants(fullRoom);
       // memberPubkeys excludes the viewer by LP convention (see Group
       // type docstring + reconcileFromGroupStateEvent).
-      const synthetic = await reconcileSyntheticGroup({
-        groupId: synthId,
-        name: subject,
-        memberPubkeys: Array.from(cls.otherParticipants),
-        createdAtSec: rumor.created_at,
-      });
+      const synthetic = await reconcileSyntheticGroup(
+        {
+          groupId: synthId,
+          name: subject,
+          memberPubkeys: Array.from(cls.otherParticipants),
+          createdAtSec: rumor.created_at,
+        },
+        viewerPubkey,
+      );
       if (synthetic) {
         group = synthetic;
       }
@@ -106,6 +111,7 @@ export async function tryRouteGroupRumor(
     }
     return { kind: 'group-no-match' };
   }
+  if (shouldAbort()) return { kind: 'group-no-match' };
   const message: GroupMessage = {
     id: wrapId,
     senderPubkey: rumor.pubkey.toLowerCase(),
@@ -114,6 +120,7 @@ export async function tryRouteGroupRumor(
   };
   try {
     await appendGroupMessage(group.id, message);
+    if (shouldAbort()) return { kind: 'group-no-match' };
     notifyGroupMessage(group.id, message);
   } catch (e) {
     if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);

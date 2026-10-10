@@ -1,6 +1,6 @@
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
-import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
 import { DEFAULT_DM_PROTOCOL, dmMessageThreadId, type DmProtocol } from '../utils/dmProtocol';
 import {
@@ -29,7 +29,6 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
-import type { ContactInfo } from '../components/GroupAvatar';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
@@ -47,18 +46,24 @@ import {
   type ConversationSummary,
 } from '../utils/conversationSummaries';
 import { useStableRowIdentity } from '../utils/stableRowIdentity';
+import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
+import { useAccountDeferredValue } from '../contexts/useAccountState';
+import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
+import type { NostrContact } from '../types/nostr';
 // __DEV__-only marketplace-order fixture seeding. The helper is a no-op outside
 // __DEV__ and is only invoked behind a __DEV__-gated button, so it never runs at
 // runtime in a release build (the module may still be present in the bundle).
 import { seedDevOrderConversation } from '../utils/devSeedOrders';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
-import type { NostrProfile } from '../types/nostr';
 
 type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
+
+const NO_CONTACTS: NostrContact[] = [];
+const EMPTY_LIST_INPUTS = { dmInbox: EMPTY_DM_INBOX, contacts: NO_CONTACTS };
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -184,7 +189,12 @@ const MessagesScreen: React.FC = () => {
   // animation lands (#286 / #300). 30 s mirrors the avatar-prefetch TTL
   // below; the live `subscribeGroupMessages` channel covers delivery
   // for any wraps that arrive while the user was inside a group.
-  const dmInboxLastRefreshAt = useRef<number>(0);
+  // Tagged with the account it ran for: a switch must not inherit the
+  // previous account's TTL (its inbox would never refresh until pull-down).
+  const dmInboxLastRefreshAt = useRef<{ pubkey: string | null; at: number }>({
+    pubkey: null,
+    at: 0,
+  });
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
   // Short TTL written on abort (#731 Fix 1 — "chaining trap").
   // The full 30 s TTL is only written when the refresh RESOLVES. If the
@@ -255,7 +265,8 @@ const MessagesScreen: React.FC = () => {
       // cleanup so a blur before the delay fires is a complete no-op —
       // no decrypt work starts at all (optimal outcome for a fast tab-hop).
       const interactionHandle = InteractionManager.runAfterInteractions(() => {
-        if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
+        const last = dmInboxLastRefreshAt.current;
+        if (last.pubkey === pubkey && Date.now() - last.at < DM_INBOX_REFRESH_TTL_MS) return;
         refreshDelayRef.current = setTimeout(() => {
           refreshDelayRef.current = null;
           const startedAt = Date.now();
@@ -284,15 +295,20 @@ const MessagesScreen: React.FC = () => {
               // doesn't immediately re-chain a full refresh, while still
               // refreshing sooner than a clean 30 s TTL would. A clean
               // completion gets the full 30 s TTL.
-              dmInboxLastRefreshAt.current = signal.aborted
-                ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
-                : startedAt;
+              dmInboxLastRefreshAt.current = {
+                pubkey,
+                at: signal.aborted
+                  ? Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS)
+                  : startedAt,
+              };
             })
             .catch(() => {
               // refreshDmInbox rarely rejects, but if it does, treat it like an
               // abort: short marker so we retry soon rather than waiting 30 s.
-              dmInboxLastRefreshAt.current =
-                Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS);
+              dmInboxLastRefreshAt.current = {
+                pubkey,
+                at: Date.now() - (DM_INBOX_REFRESH_TTL_MS - DM_INBOX_ABORT_TTL_MS),
+              };
             });
         }, 120);
       });
@@ -308,7 +324,7 @@ const MessagesScreen: React.FC = () => {
         refreshAbortRef.current?.abort();
         refreshAbortRef.current = null;
       };
-    }, [isLoggedIn, refreshDmInbox, newRefreshSignal, armLiveDmSub]),
+    }, [isLoggedIn, pubkey, refreshDmInbox, newRefreshSignal, armLiveDmSub]),
   );
 
   // Avatar prefetch is split into its own focus effect so it can depend on `contacts` (the content it iterates) without invalidating the DM-refresh callback above. (#413 review)
@@ -374,109 +390,24 @@ const MessagesScreen: React.FC = () => {
   const followPubkeys = trustSetForTier(effectiveWotTier);
 
   // Single pubkey → ContactInfo lookup for the screen, shared by every
-  // row + handler. Three previously-separate `contacts.find()` paths
-  // (GroupAvatar's avatar cluster, GroupRow's sender-name preview, and
-  // handleConversationPress's picture/lightning-address fallback) now
-  // all consult this map, so a 50-contact x N-row screen does O(contacts)
-  // once per render instead of O(rows × contacts) per render. See #245.
-  // Non-followed DM senders aren't in `contacts`, so the contacts pipeline
-  // never fetches their kind-0 — they'd show a raw npub + blank avatar. We
-  // fetch their profiles on demand (see the effect below), cache to disk, and
-  // layer them into the resolution here + buildDmSummaries (#664).
-  const [nonFollowProfiles, setNonFollowProfiles] = useState<Map<string, NostrProfile>>(new Map());
-  const nonFollowAttempted = useRef<Set<string>>(new Set());
-
-  // Hydrate the per-account non-follow profile cache on mount / identity change.
-  useEffect(() => {
-    // Reset per-account state first so a previous account's profiles + the
-    // attempted set don't leak across a multi-account switch (#668 review).
-    nonFollowAttempted.current = new Set();
-    setNonFollowProfiles(new Map());
-    if (!pubkey) return;
-    let cancelled = false;
-    AsyncStorage.getItem(`nonfollow_profiles_${pubkey}`)
-      .then((raw) => {
-        if (cancelled || !raw) return;
-        try {
-          const obj = JSON.parse(raw) as Record<string, NostrProfile>;
-          setNonFollowProfiles(new Map(Object.entries(obj)));
-        } catch {
-          // Corrupt cache — ignore; the fetch effect repopulates.
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [pubkey]);
-
-  const contactInfoMap = useMemo(() => {
-    const map = new Map<string, ContactInfo>();
-    for (const c of contacts) {
-      map.set(c.pubkey.toLowerCase(), {
-        picture: c.profile?.picture ?? null,
-        name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim() || null,
-        lightningAddress: c.profile?.lud16 ?? null,
-      });
-    }
-    // Layer in non-followed senders' fetched profiles (never override a contact).
-    for (const [pk, prof] of nonFollowProfiles) {
-      if (map.has(pk)) continue;
-      map.set(pk, {
-        picture: prof.picture ?? null,
-        name: (prof.displayName || prof.name || '').trim() || null,
-        lightningAddress: prof.lud16 ?? null,
-      });
-    }
-    return map;
-  }, [contacts, nonFollowProfiles]);
-
-  // Fetch kind-0 for DM partners not in contacts and not yet cached, so their
-  // name + avatar resolve in the list (esp. with WoT: All). Each pubkey is
-  // attempted once per session so a profile-less sender isn't re-queried (#664).
-  useEffect(() => {
-    if (!pubkey) return;
-    // De-dupe — dmInbox can hold multiple entries for the same partner.
-    const missingSet = new Set<string>();
-    for (const entry of dmInbox) {
-      const pk = entry.partnerPubkey?.toLowerCase();
-      if (!pk || contactInfoMap.has(pk) || nonFollowAttempted.current.has(pk)) continue;
-      missingSet.add(pk);
-    }
-    if (missingSet.size === 0) return;
-    const missing = [...missingSet];
-    missing.forEach((pk) => nonFollowAttempted.current.add(pk));
-    let cancelled = false;
-    fetchProfilesForPubkeys(missing)
-      .then((fetched) => {
-        if (cancelled || fetched.size === 0) return;
-        // No side effects in the updater (Strict Mode may run it twice);
-        // persistence is handled by the dedicated effect below.
-        setNonFollowProfiles((prev) => {
-          const next = new Map(prev);
-          for (const [pk, prof] of fetched) next.set(pk.toLowerCase(), prof);
-          return next;
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [dmInbox, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
-
-  // Persist the non-follow profile cache when it changes — kept out of the
-  // state updater so Strict Mode's double-invocation can't duplicate the write.
-  useEffect(() => {
-    if (!pubkey || nonFollowProfiles.size === 0) return;
-    AsyncStorage.setItem(
-      `nonfollow_profiles_${pubkey}`,
-      JSON.stringify(Object.fromEntries(nonFollowProfiles)),
-    ).catch(() => {});
-  }, [nonFollowProfiles, pubkey]);
+  // row + handler (#245), with non-followed DM senders' kind-0s fetched on
+  // demand and layered in (#664). Scoped to the active account — see hook.
+  const { nonFollowProfiles, contactInfoMap } = useNonFollowProfiles({
+    pubkey,
+    dmInbox,
+    contacts,
+    fetchProfilesForPubkeys,
+  });
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
-  const deferredDmInbox = useDeferredValue(dmInbox);
-  const deferredContacts = useDeferredValue(contacts);
+  // The deferred snapshot is tagged with its account: the render right after a
+  // switch would otherwise still show the previous account's (deferred) rows.
+  const listInputs = useMemo(() => ({ dmInbox, contacts }), [dmInbox, contacts]);
+  const { dmInbox: deferredDmInbox, contacts: deferredContacts } = useAccountDeferredValue(
+    pubkey,
+    listInputs,
+    EMPTY_LIST_INPUTS,
+  );
   // Build the DM summaries first — this is always part of the inbox
   // regardless of the zap-counterparties toggle. Pass the tier-aware
   // trust set (#547) as a defence-in-depth filter. NostrContext's

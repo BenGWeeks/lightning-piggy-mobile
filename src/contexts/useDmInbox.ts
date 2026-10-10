@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -45,6 +45,15 @@ import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
+import {
+  applyScopedDmInboxUpdate,
+  INITIAL_SCOPED_DM_INBOX,
+  linkAbortSignals,
+  selectScopedDmInbox,
+  type ScopedDmInbox,
+} from './dmInboxScope';
+
+type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
 
 /**
  * Options the provider threads into the DM-inbox + conversation hook.
@@ -102,9 +111,57 @@ export interface UseDmInboxResult {
 export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const { pubkey, isLoggedIn, signerType, followPubkeys, getReadRelays } = options;
 
-  const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
+  // The inbox is tagged with the account that owns it (see dmInboxScope):
+  // only the active account's entries are ever exposed, and writes computed
+  // for a previous account (an in-flight refresh, a live-sub / Marmot
+  // teardown flush) are dropped instead of painting under the new one.
+  const [scopedInbox, setScopedInbox] = useState<ScopedDmInbox>(INITIAL_SCOPED_DM_INBOX);
+  const dmInbox = selectScopedDmInbox(scopedInbox, pubkey);
+  // The account inbox writes are accepted for. Mirrors the `pubkey` prop,
+  // assigned in render so it is current before any effect cleanup flushes.
+  const activeOwnerRef = useRef<string | null>(pubkey);
+  activeOwnerRef.current = pubkey;
+  // Aborts the previous account's in-flight refresh on a switch, so it stops
+  // decrypting / group-routing (whose side effects aren't owner-scoped) for
+  // an account that is no longer active.
+  const accountAbortRef = useRef<{ owner: string; ctrl: AbortController } | null>(null);
+  const accountSignalFor = useCallback((owner: string): AbortSignal => {
+    const cur = accountAbortRef.current;
+    if (cur && cur.owner === owner) return cur.ctrl.signal;
+    cur?.ctrl.abort();
+    const next = { owner, ctrl: new AbortController() };
+    accountAbortRef.current = next;
+    return next.ctrl.signal;
+  }, []);
+  useEffect(
+    () => () => {
+      const cur = accountAbortRef.current;
+      if (cur && cur.owner === pubkey) {
+        cur.ctrl.abort();
+        accountAbortRef.current = null;
+      }
+    },
+    [pubkey],
+  );
+  /** A setState-compatible writer bound to `owner`'s inbox. */
+  const inboxSetterFor = useCallback(
+    (owner: string | null): DmInboxSetter =>
+      (action) => {
+        setScopedInbox((prev) =>
+          applyScopedDmInboxUpdate(prev, owner, activeOwnerRef.current, action),
+        );
+      },
+    [],
+  );
+  // Writer for whichever account is active at call time — used by the
+  // provider's login / logout / switch teardown (`setDmInbox([])`).
+  const setDmInbox = useCallback<DmInboxSetter>(
+    (action) => inboxSetterFor(activeOwnerRef.current)(action),
+    [inboxSetterFor],
+  );
+  const setDmInboxForPubkey = useMemo(() => inboxSetterFor(pubkey), [inboxSetterFor, pubkey]);
   // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
-  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInbox);
+  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Gates the live NIP-17 DM sub useEffect below. False on cold boot
   // so we don't burn JS-thread cycles unwrapping wraps the user can't
@@ -146,13 +203,19 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
   // they don't race on the skip-set file + encrypted-store writes.
-  const dmInboxInFlight = useRef<{
-    promise: Promise<void>;
-    includeNonFollows: boolean;
-  } | null>(null);
+  // Keyed by account: a refresh still running for the previous account must
+  // not be piggy-backed on (or awaited) by the new account's refresh.
+  const dmInboxInFlight = useRef(
+    new Map<string, { promise: Promise<void>; includeNonFollows: boolean; signal: AbortSignal }>(),
+  );
   /** `performance.now()` of the last COMPLETED `refreshDmInbox` (`0` before
-   * any). Drives the cold-start + freshness-TTL gates — see dmRefreshGate. */
-  const dmInboxLastRefreshAt = useRef<number>(0);
+   * any) and the account it ran for. Drives the cold-start + freshness-TTL
+   * gates — see dmRefreshGate. A different account reads as `0`, so its first
+   * refresh after a switch is a cold start and isn't TTL-skipped. */
+  const dmInboxLastRefresh = useRef<{ pubkey: string | null; at: number }>({
+    pubkey: null,
+    at: 0,
+  });
 
   /** Eagerly hydrate `dmInbox` so the Messages tab paints conversations on
    * cold start instead of staying blank for the relay-fetch + decrypt loop
@@ -161,11 +224,26 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
    * retired. The one-time migration runs first (memoised; a Map lookup once
    * done) so a just-updated install hydrates the pre-#848 kind-4-only
    * threads its blobs held. Called from session-restore + post-login flows. */
-  const hydrateDmInboxFromCache = useCallback(async (pk: string) => {
-    await ensureDmStoreMigrated(pk);
-    const dbLatest = await loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]);
-    if (dbLatest.length > 0) setDmInbox(dbLatest);
-  }, []);
+  const pendingHydrateRef = useRef<{ owner: string; entries: DmInboxEntry[] } | null>(null);
+  const hydrateDmInboxFromCache = useCallback(
+    async (pk: string) => {
+      await ensureDmStoreMigrated(pk);
+      const dbLatest = await loadInboxEntries(pk).catch(() => [] as DmInboxEntry[]);
+      if (dbLatest.length === 0) return;
+      // Callers hydrate right after setPubkey(pk). If this hook hasn't
+      // rendered pk yet, park the entries until it does (effect below) rather
+      // than claiming ownership early — a late hydrate for an account the user
+      // has already switched away from then simply never applies.
+      if (activeOwnerRef.current === pk) inboxSetterFor(pk)(dbLatest);
+      else pendingHydrateRef.current = { owner: pk, entries: dbLatest };
+    },
+    [inboxSetterFor],
+  );
+  useEffect(() => {
+    const pending = pendingHydrateRef.current;
+    pendingHydrateRef.current = null;
+    if (pubkey && pending?.owner === pubkey) inboxSetterFor(pubkey)(pending.entries);
+  }, [pubkey, inboxSetterFor]);
 
   /**
    * Decrypt one NIP-04 payload with whichever signer is active. Returns
@@ -227,7 +305,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       if (!/^[0-9a-f]{64}$/.test(normalized)) return;
       // Outgoing NIP-04 sends have no self-echo to surface them in the list.
       const entry = localSendInboxEntry(normalized, msg);
-      if (entry) setDmInbox((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
+      if (entry) {
+        setDmInboxForPubkey((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
+      }
       try {
         await upsertDmMessages([
           {
@@ -251,7 +331,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         if (__DEV__) console.warn('[DmStore] optimistic append failed:', e);
       }
     },
-    [pubkey, setDmInbox],
+    [pubkey, setDmInboxForPubkey],
   );
 
   // Durably attach delivery status (#856) to stored rows, keyed by row id —
@@ -341,28 +421,29 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // Cold start = first refresh this session (incl. force: the real cold
       // load is MessagesScreen's on-mount focus refresh; the cold-start wrap
       // cap + #788 macro-task yield must apply to it). See dmRefreshGate.
-      const isColdStart = isColdStartRefresh(dmInboxLastRefreshAt.current);
+      const lastRefreshAt =
+        dmInboxLastRefresh.current.pubkey === pubkey ? dmInboxLastRefresh.current.at : 0;
+      const isColdStart = isColdStartRefresh(lastRefreshAt);
       // Skip-set / TTL / kind-4 `since` policies are pure functions in
       // dmRefreshGate — the cold-start backfill (#751) bypasses only the
       // TTL; backfill itself must NOT inherit the #743 force-refresh cache
       // bypasses (includeNonFollows still bypasses, see shouldBypassSkipSet)
       // (that was the every-cold-start decrypt sweep, #846).
       const bypassSkipSet = shouldBypassSkipSet(opts);
-      if (
-        shouldSkipForFreshness(
-          dmInboxLastRefreshAt.current,
-          bypassesFreshnessTtl(opts),
-          performance.now(),
-        )
-      ) {
+      if (shouldSkipForFreshness(lastRefreshAt, bypassesFreshnessTtl(opts), performance.now())) {
         return;
       }
       // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
-      if (dmInboxInFlight.current) {
-        if (dmInboxInFlight.current.includeNonFollows === includeNonFollows) {
-          return dmInboxInFlight.current.promise;
+      // A refresh in flight for a previous account is ignored here — its
+      // writes are dropped by the owner scope, so there's nothing to wait for.
+      const inFlight = dmInboxInFlight.current.get(pubkey);
+      if (inFlight) {
+        if (inFlight.includeNonFollows === includeNonFollows && !inFlight.signal.aborted) {
+          return inFlight.promise;
         }
-        await dmInboxInFlight.current.promise;
+        await inFlight.promise;
+        if (activeOwnerRef.current !== pubkey) return;
+        return refreshDmInboxRef.current?.(opts);
       }
 
       // Capture local references once so the closure isn't affected by
@@ -370,6 +451,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // has changed by the time we're about to commit, we bail without
       // mutating state to avoid leaking entries into the wrong session.
       const refreshForPubkey = pubkey;
+      const setInboxForRefresh = inboxSetterFor(refreshForPubkey);
+      const isStillActive = (): boolean => activeOwnerRef.current === refreshForPubkey;
       // Local helper: encapsulates the follow gate so all seven sites in
       // the cache hydrate + NIP-04 + NIP-17 decrypt loops + final merge
       // reuse the same predicate. When includeNonFollows is true the
@@ -379,7 +462,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshFollows = followPubkeys;
       const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
+      if (!isStillActive()) return;
+      const accountSignal = accountSignalFor(refreshForPubkey);
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+      let disposeSignal: () => void = () => {};
 
       const task = (async () => {
         setDmInboxLoading(true);
@@ -400,7 +486,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // refresh (store already populated) keeps the real signal, so #412's
           // fast tab-hopper abort is fully intact.
           const mustCompleteRebuild = isColdStart && !(await hasStoredWraps(refreshForPubkey));
-          const effectiveSignal = mustCompleteRebuild ? undefined : signal;
+          // A cold rebuild ignores the caller's (tab-hop) abort, but every
+          // refresh stops when its account is switched away from.
+          const linked = linkAbortSignals(mustCompleteRebuild ? undefined : signal, accountSignal);
+          disposeSignal = linked.dispose;
+          const effectiveSignal = linked.signal;
           if (__DEV__ && mustCompleteRebuild) {
             console.log('[Perf] refreshDmInbox: cold rebuild — running to completion (F1)');
           }
@@ -443,7 +533,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // the filter here so unfollowed senders don't resurrect.
           if (storedInbox.length > 0) {
             const filteredCache = storedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
-            setDmInbox(filteredCache);
+            setInboxForRefresh(filteredCache);
           }
 
           // For pull-to-refresh / force refresh, skip the `since` filter
@@ -525,7 +615,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             // Stop decrypting on abort (releases the JS thread, #412) but BREAK
             // rather than return: the k4Rows decrypted so far are idempotent
             // and persist below, then the productive-abort commit paints them
-            // (F1, #849). A cold rebuild's effectiveSignal never aborts here.
+            // (F1, #849). A cold rebuild only aborts on an account switch.
             if (effectiveSignal?.aborted) break;
             const batch = k4ToDecrypt.slice(i, i + DECRYPT_YIELD_EVERY);
             const batchResults = await Promise.all(
@@ -533,7 +623,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 nip04FreshDecrypts++;
                 const plaintext = await decryptNip04ViaSigner(t.partnerPubkey, t.ev.content);
                 if (plaintext === null) return null;
-                nip04PlaintextCache.set(t.ev.id, plaintext);
+                if (!effectiveSignal?.aborted) nip04PlaintextCache.set(t.ev.id, plaintext);
                 return { t, plaintext };
               }),
             );
@@ -617,17 +707,20 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             nip17Misses = nip17.misses;
             nip17Stored = nip17.stored;
             nip17YieldCount = nip17.yields;
-            if (nip17.amberPermission) setAmberNip44Permission(nip17.amberPermission);
+            if (nip17.amberPermission && isStillActive()) {
+              setAmberNip44Permission(nip17.amberPermission);
+            }
           }
 
           // Identity-change guard: if the user logged out or switched signer
           // while we were mid-flight, don't leak these entries into a
           // different session's state. This is a HARD return — never paint
-          // one session's plaintext into another.
-          if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
+          // one session's plaintext into another. Reads the live owner ref:
+          // the closure's own `pubkey` always equals `refreshForPubkey`.
+          if (!isStillActive() || refreshForSigner !== signerType) return;
 
-          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal is
-          // undefined (never aborts), so this guard is false and we always
+          // Abort handling (F1, #849). For a cold REBUILD, effectiveSignal only
+          // aborts on an account switch (returned above), so we always
           // commit — the rebuild paints the freshly-decrypted inbox.
           // For a WARM refresh, effectiveSignal IS the real signal: a tab-hop
           // that aborted before decrypting anything fresh skips the commit,
@@ -675,7 +768,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               `yields=${nip17YieldCount}`,
           );
 
-          setDmInbox(filteredFinal);
+          setInboxForRefresh(filteredFinal);
 
           // Advance the kind-4 last-seen cursor (a bare unix timestamp — no
           // plaintext; the decrypted content itself persists ONLY in the
@@ -696,7 +789,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               String(newLastSeen),
             ).catch(() => {});
           }
-          // A cold rebuild (effectiveSignal undefined) that reached here
+          // A cold rebuild (caller abort ignored) that reached here
           // finished its backlog → claim the full cursor stamp. A WARM
           // productive-but-aborted sweep painted from the DB but did NOT finish
           // the backlog → leave refreshCompleted false so it gets the short
@@ -705,20 +798,27 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
-          setDmInboxLoading(false);
+          disposeSignal();
+          if (isStillActive()) setDmInboxLoading(false);
         }
       })();
 
-      dmInboxInFlight.current = { promise: task, includeNonFollows };
+      dmInboxInFlight.current.set(refreshForPubkey, {
+        promise: task,
+        includeNonFollows,
+        signal: accountSignal,
+      });
       try {
         await task;
         // Stamp only for a refresh that COMPLETED its work — gate on
         // `refreshCompleted`, not `signal.aborted` (see the helper). #788.
         if (shouldStampCursor(!refreshCompleted)) {
-          dmInboxLastRefreshAt.current = performance.now();
+          dmInboxLastRefresh.current = { pubkey: refreshForPubkey, at: performance.now() };
         }
       } finally {
-        dmInboxInFlight.current = null;
+        // Only clear our own marker — a newer account's refresh may own it.
+        if (dmInboxInFlight.current.get(refreshForPubkey)?.promise === task)
+          dmInboxInFlight.current.delete(refreshForPubkey);
         const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
         // Only surface costly refreshes — sub-200 ms ones aren't
         // contributors to the multi-second freezes we're hunting.
@@ -744,6 +844,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       followPubkeys,
       decryptNip04ViaSigner,
       amberNip44DecryptSilent,
+      inboxSetterFor,
+      setDmInbox,
+      accountSignalFor,
     ],
   );
   // Keep the self-ref pointed at the latest refreshDmInbox closure.
@@ -751,7 +854,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
 
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);
-  }, [isLoggedIn]);
+  }, [isLoggedIn, setDmInbox]);
 
   // Live mirror of `followPubkeys` for the long-lived kind-1059
   // subscription below. The sub captures `followPubkeys` at the time
@@ -854,12 +957,15 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     return startLiveDmSubscription({
       viewerPubkey: pubkey,
       activeSigner: signerType,
+      isCurrentOwner: () => activeOwnerRef.current === pubkey,
       pubkey,
       signerType,
       readRelays: getReadRelays(),
       knownWrapIdsRef,
       followPubkeysRef,
-      setDmInbox,
+      // Bound to this sub's viewer so its teardown flush can't land in the
+      // next account's inbox.
+      setDmInbox: inboxSetterFor(pubkey),
       setAmberNip44Permission,
       followGateBuffer: followGateBufferRef.current,
       setDeferredReplay: (fn) => {
@@ -874,7 +980,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // (which would re-open the sub on every inbox refresh).
       onReconnect: (opts) => refreshDmInboxRef.current?.(opts) ?? Promise.resolve(),
     });
-  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed, inboxSetterFor]);
 
   return {
     dmInbox,

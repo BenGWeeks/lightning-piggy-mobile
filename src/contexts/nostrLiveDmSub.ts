@@ -61,6 +61,7 @@ import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
 
 export interface LiveDmSubscriptionParams {
   viewerPubkey: string;
+  isCurrentOwner?: () => boolean;
   activeSigner: SignerType;
   pubkey: string | null;
   signerType: SignerType | null;
@@ -95,6 +96,7 @@ export interface LiveDmSubscriptionParams {
 export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () => void {
   const {
     viewerPubkey,
+    isCurrentOwner = () => true,
     activeSigner,
     pubkey,
     signerType,
@@ -190,13 +192,14 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   // the next refreshDmInbox (the drop was never skip-set-persisted), so this
   // only recovers the live inbox update + the one-shot OS notification.
   const replayDeferredFollowGate = (item: DeferredFollowGateEntry): void => {
-    if (cancelled) return;
+    if (cancelled || !isCurrentOwner()) return;
     queueInboxEntry(item.entry);
     notifyDmMessage(item.partnerPubkey);
     // claimWrapNotification: the background watch (same JS context, no follow
     // gate) may have already notified for this wrap — never post twice (#279).
     if (item.notify && claimWrapNotification(item.entry.id)) {
       void fireMessageNotification({
+        owner: viewerPubkey,
         kind: 'dm',
         threadId: dmThreadId(item.partnerPubkey, protocolForWireKind(item.entry.wireKind)),
         title: item.notify.title,
@@ -223,8 +226,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
   };
   const surfaceRumor = createLiveRumorSurfacer({
     viewerPubkey,
-    isCancelled: () => cancelled,
-    shouldAbort: () => cancelled || viewerPubkey !== pubkey || activeSigner !== signerType,
+    isCancelled: () => cancelled || !isCurrentOwner(),
+    shouldAbort: () =>
+      cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType,
     followPubkeysRef,
     followGateBuffer,
     isFreshArrival,
@@ -245,7 +249,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     readRelays,
     wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
     knownWrapIds,
-    isCancelled: () => cancelled,
+    isCancelled: () => cancelled || !isCurrentOwner(),
     surfaceRumor,
     onReconnect,
     onEngineUnavailable: () => {
@@ -282,7 +286,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       capKnownWrapIds(knownWrapIds);
     }
     if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
-    if (cancelled) return;
+    if (cancelled || !isCurrentOwner()) return;
     if (seen.has(ev.id)) {
       if (__DEV__) console.log(`[Nostr] live evt ${ev.id.slice(0, 8)} dedup-seen`);
       return;
@@ -339,11 +343,15 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} empty-plaintext`);
           return;
         }
+        // A decrypt that outlived its account must not repopulate the cache
+        // the switch just cleared.
+        if (cancelled || !isCurrentOwner()) return;
         nip04PlaintextCache.set(ev.id, plaintext);
       } else if (__DEV__) {
         console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
       }
-      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+      if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
+        return;
 
       // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
       if (!fromMe && !followPubkeysRef.current.has(partnerPubkey)) {
@@ -397,7 +405,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       };
       writeChain = writeChain
         .then(async () => {
-          if (cancelled) return;
+          if (cancelled || !isCurrentOwner()) return;
           // N5 (#850): a store failure THROWS here (caught by the trailing
           // .catch), so the lastSeen bump below never runs for a row the DB
           // failed to keep — aligned with the kind-1059 path. The next
@@ -409,7 +417,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           if (ev.created_at > lastSeen) {
             // Re-check after the awaits: logout may have wiped these stores
             // while we were writing.
-            if (cancelled) return;
+            if (cancelled || !isCurrentOwner()) return;
             await AsyncStorage.setItem(inboxLastSeenKey(viewerPubkey), String(ev.created_at)).catch(
               () => {},
             );
@@ -425,7 +433,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // queue depth. Persistence stays fully serialized via writeChain; a
       // failed persist is recovered by the next refreshDmInbox — the same
       // recovery model as the follow-gate replay path.
-      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+      if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
+        return;
 
       queueInboxEntry(k4InboxEntry);
       notifyDmMessage(partnerPubkey);
@@ -435,6 +444,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // notificationService when the user is viewing this exact thread.
       if (!fromMe && isFreshArrival(ev.created_at)) {
         void fireMessageNotification({
+          owner: viewerPubkey,
           kind: 'dm',
           threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
           title: 'New message',
@@ -509,7 +519,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       let persisted = false;
       writeChain = writeChain
         .then(async () => {
-          if (cancelled) return;
+          if (cancelled || !isCurrentOwner()) return;
           if (!partnerKnown) {
             partnerKnown = await hasConversationWith(viewerPubkey, partnerPubkey).catch(
               () => false,
@@ -524,14 +534,22 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // Keep the inbox responsive, but the conversation reload reads SQLite:
       // notify only after this order is durable, otherwise a fast reload can
       // finish before the queued write and miss the invoice indefinitely.
-      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+      if (cancelled || !isCurrentOwner() || viewerPubkey !== pubkey || activeSigner !== signerType)
+        return;
       queueInboxEntry(orderInboxEntry);
       void writeChain.then(() => {
-        if (!persisted || cancelled || viewerPubkey !== pubkey || activeSigner !== signerType)
+        if (
+          !persisted ||
+          cancelled ||
+          !isCurrentOwner() ||
+          viewerPubkey !== pubkey ||
+          activeSigner !== signerType
+        )
           return;
         notifyDmMessage(partnerPubkey);
         if (!fromMe && isFreshArrival(ev.created_at) && partnerKnown) {
           void fireMessageNotification({
+            owner: viewerPubkey,
             kind: 'dm',
             threadId: dmThreadId(partnerPubkey, protocolForWireKind(ev.kind)),
             title: 'Marketplace update',
@@ -594,7 +612,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // in-flight wrap would be silently skipped by every future live-sub
     // instance for the rest of the session even though the store never got
     // it — undetectable because it never resurfaces even on the next arm.
-    if (cancelled) {
+    if (cancelled || !isCurrentOwner()) {
       knownWrapIds.delete(wrap.id);
       return;
     }
@@ -619,7 +637,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           // a one-tap grant button; without it, the live sub would
           // silently fail every wrap until the user re-enabled
           // Amber's blanket nip44_decrypt.
-          setAmberNip44Permission('denied');
+          if (!cancelled && isCurrentOwner()) setAmberNip44Permission('denied');
           return;
         }
         if (__DEV__) console.warn('[Nostr] live Amber NIP-17 unwrap failed:', error);
@@ -675,13 +693,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       });
     },
     onReconnect,
-    isCancelled: () => cancelled,
+    isCancelled: () => cancelled || !isCurrentOwner(),
   });
 
   (async () => {
     // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
     const sinceK4Cursor = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
-    if (cancelled) return;
+    if (cancelled || !isCurrentOwner()) return;
     // Pre-seed `knownWrapIds` from the encrypted store's wrap-id index
     // (#848 — one indexed id-only query, no plaintext leaves the DB). The
     // early-return in `handleInboxEvent` (top) checks this Set as the very
@@ -726,7 +744,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__)
         console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
     }
-    if (cancelled) return;
+    if (cancelled || !isCurrentOwner()) return;
     reconnectController.start(sinceK4Cursor);
     // Native engine (Stage 2 M2, #1036) — started AFTER the knownWrapIds
     // seed so the engine's native dedupe set is seeded with the same ids.
