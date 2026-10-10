@@ -50,6 +50,11 @@ jest.mock('../components/BrandedAlert', () => ({
   Alert: { alert: (...args: unknown[]) => mockAlert(...args) },
 }));
 
+// Identity translator: the hook reads `t` from LocaleContext. A stable
+// function so the hook's callbacks keep their identities across renders.
+const mockT = (key: string) => key;
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => mockT }));
+
 // useComposerActions has its own side-effects we don't need for these tests.
 jest.mock('./useComposerActions', () => ({
   useComposerActions: () => ({ handleSend: jest.fn() }),

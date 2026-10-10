@@ -9,6 +9,12 @@ import {
 import { NOTIFICATION_HISTORY_KEY_BASE } from '../services/notificationHistory';
 import { isKeyBackedUp, markKeyBackedUp } from '../services/keyBackupStatus';
 
+import { wipeDecryptedMediaForOwner } from '../services/decryptedMediaCache';
+
+jest.mock('../services/decryptedMediaCache', () => ({
+  wipeDecryptedMediaForOwner: jest.fn(async () => {}),
+}));
+
 const PK = 'a'.repeat(64);
 
 it("removes the signed-out account's relay-list caches and baselines", async () => {
@@ -31,4 +37,9 @@ it("drops the signed-out account's key-backup flag but keeps other accounts' (#1
   await wipeAccountCaches(PK);
   expect(await isKeyBackedUp(PK)).toBe(false);
   expect(await isKeyBackedUp(other)).toBe(true);
+});
+
+it("deletes the signed-out account's decrypted voice notes and photos (#1241)", async () => {
+  await wipeAccountCaches(PK);
+  expect(wipeDecryptedMediaForOwner).toHaveBeenCalledWith(PK);
 });

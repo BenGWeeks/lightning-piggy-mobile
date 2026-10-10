@@ -131,6 +131,41 @@ describe('appendGroupMessage — id-collision dedup (existing behaviour)', () =>
   });
 });
 
+describe('appendGroupMessage — same-timestamp replay repair (#1241)', () => {
+  const id = 'r'.repeat(64);
+  const T = 1700000000;
+  const VOICE = 'https://blossom.example/x#lpe=1&m=audio%2Fmp4';
+
+  it('repairs a row stored blank (a pre-#1225 Marmot voice note)', async () => {
+    await appendGroupMessage(GROUP, wrap(id, '', T));
+    const after = await appendGroupMessage(GROUP, wrap(id, VOICE, T));
+    expect(after).toHaveLength(1);
+    expect(after[0].text).toBe(VOICE);
+  });
+
+  it('repairs a row stored as the attachment fallback label, in any locale', async () => {
+    for (const label of [
+      "Couldn't open attachment: voice.m4a",
+      'Unsupported attachment: clip.mov (video/quicktime)',
+    ]) {
+      await AsyncStorage.clear();
+      await appendGroupMessage(GROUP, wrap(id, label, T));
+      const after = await appendGroupMessage(GROUP, wrap(id, VOICE, T));
+      expect(after[0].text).toBe(VOICE);
+    }
+  });
+
+  it('never replaces real text at the same timestamp, or with blank text', async () => {
+    await appendGroupMessage(GROUP, wrap(id, 'hello', T));
+    expect((await appendGroupMessage(GROUP, wrap(id, VOICE, T)))[0].text).toBe('hello');
+    await AsyncStorage.clear();
+    await appendGroupMessage(GROUP, wrap(id, "Couldn't open attachment: a.jpg", T));
+    expect((await appendGroupMessage(GROUP, wrap(id, '', T)))[0].text).toBe(
+      "Couldn't open attachment: a.jpg",
+    );
+  });
+});
+
 describe('appendGroupMessage — basic ordering & cap', () => {
   it('returns messages sorted by createdAt ascending', async () => {
     await appendGroupMessage(GROUP, wrap('a'.repeat(64), 'first', 1700000010));

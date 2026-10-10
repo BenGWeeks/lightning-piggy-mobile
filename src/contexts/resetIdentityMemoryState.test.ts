@@ -1,8 +1,13 @@
 import { renderHook } from '@testing-library/react-native';
+import { clearDecryptedMediaMemory, setDecryptedMediaOwner } from '../services/decryptedMediaCache';
 import { stopNativeDmEngineGlobal } from './nativeDmEngine';
 import { clearMemoisedSecretKey, nip04PlaintextCache } from './nostrSecretKeyCache';
 import { useIdentityMemoryReset, type IdentityMemoryState } from './resetIdentityMemoryState';
 
+jest.mock('../services/decryptedMediaCache', () => ({
+  clearDecryptedMediaMemory: jest.fn(),
+  setDecryptedMediaOwner: jest.fn(),
+}));
 jest.mock('./nativeDmEngine', () => ({ stopNativeDmEngineGlobal: jest.fn(async () => {}) }));
 jest.mock('./nostrSecretKeyCache', () => ({
   clearMemoisedSecretKey: jest.fn(),
@@ -46,6 +51,7 @@ describe('useIdentityMemoryReset', () => {
     expect(clearMemoisedSecretKey).toHaveBeenCalled();
     expect(stopNativeDmEngineGlobal).toHaveBeenCalled();
     expect(nip04PlaintextCache.clear).toHaveBeenCalled();
+    expect(clearDecryptedMediaMemory).toHaveBeenCalled();
     expect(setPubkey).toHaveBeenCalledWith(B);
     // Teardown happens before the new pubkey is set.
     expect(state.setProfile.mock.invocationCallOrder[0]).toBeLessThan(
@@ -69,5 +75,12 @@ describe('useIdentityMemoryReset', () => {
     result.current.resetIdentityMemory();
     expectReset(state, 1);
     expect(state.setAmberNip44Permission).toHaveBeenCalledWith('unknown');
+  });
+});
+
+describe('decrypted-media owner (#1241)', () => {
+  it('points the decrypted-media cache at the active account', () => {
+    setup(A);
+    expect(setDecryptedMediaOwner).toHaveBeenCalledWith(A);
   });
 });

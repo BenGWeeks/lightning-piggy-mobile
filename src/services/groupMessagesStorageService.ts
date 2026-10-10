@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isAttachmentPlaceholderText } from '../utils/attachmentPlaceholder';
 import { isNewerEdit } from '../utils/marmotEditOrder';
 import { isPollVoteMessage, parsePoll } from '../utils/pollMessage';
 import { mutateGroupStorage } from './groupStorageQueue';
@@ -91,9 +92,16 @@ export async function appendGroupMessage(
       if (bestKey !== null) map.delete(bestKey);
     }
 
-    // Dedup on id; keep the newer copy when ids collide (createdAt wins).
+    // Dedup on id; keep the newer copy when ids collide (createdAt wins). At the
+    // same timestamp a replay may only repair a row stored blank or as the
+    // attachment fallback label (e.g. pre-#1225 Marmot voice notes, #1241).
     const prior = map.get(message.id);
-    if (!prior || prior.createdAt < message.createdAt) {
+    const repairs =
+      prior?.createdAt === message.createdAt &&
+      message.text !== '' &&
+      message.text !== prior.text &&
+      isAttachmentPlaceholderText(prior.text);
+    if (!prior || prior.createdAt < message.createdAt || repairs) {
       map.set(message.id, message);
     }
     const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);

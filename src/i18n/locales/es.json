@@ -2426,7 +2426,14 @@
   },
   "marmotSend": {
     "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
-    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17."
+    "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17.",
+    "sendFailedTitle": "Error al enviar",
+    "couldNotSendVoice": "No se pudo enviar la nota de voz.",
+    "couldNotSendPhoto": "No se pudo enviar la imagen.",
+    "chatChangingVoice": "Este chat está cambiando ahora mismo; intenta enviar la nota de voz de nuevo.",
+    "chatChangingPhoto": "Este chat está cambiando ahora mismo; intenta enviar la foto de nuevo.",
+    "noRelayAcceptedVoice": "Ningún relay aceptó la nota de voz",
+    "noRelayAcceptedPhoto": "Ningún relay aceptó la foto"
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
