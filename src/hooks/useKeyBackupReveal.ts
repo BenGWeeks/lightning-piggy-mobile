@@ -7,7 +7,7 @@
 //    dropped from state on blur, on app background and on unmount.
 //  - It never leaves this hook except as the `nsec` value the screen
 //    renders — no logs, toasts, analytics or navigation params.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ScreenCapture from 'expo-screen-capture';
@@ -38,18 +38,28 @@ export interface KeyBackupReveal {
 
 export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
   const t = useTranslation();
-  const [nsec, setNsec] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<{ pubkey: string; nsec: string } | null>(null);
+  const nsec = loadedKey?.pubkey === pubkey ? loadedKey.nsec : null;
   const [revealed, setRevealed] = useState(false);
-  const [hasUnlocked, setHasUnlocked] = useState(false);
+  const hasUnlocked = nsec !== null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<KeyRevealError>(null);
   // Guards against a slow auth / SecureStore read landing after blur.
   const focusedRef = useRef(false);
+  const generationRef = useRef(0);
+  const unlockingRef = useRef(false);
 
   const lock = useCallback(() => {
-    setNsec(null);
+    generationRef.current += 1;
+    unlockingRef.current = false;
+    setLoadedKey(null);
+    setBusy(false);
+    setError(null);
     setRevealed(false);
   }, []);
+
+  // Invalidate before interaction with new route params, including account removal.
+  useLayoutEffect(lock, [pubkey, lock]);
 
   useFocusEffect(
     useCallback(() => {
@@ -63,8 +73,6 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
         focusedRef.current = false;
         sub.remove();
         lock();
-        setHasUnlocked(false);
-        setError(null);
       };
     }, [lock]),
   );
@@ -105,12 +113,16 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
 
   // Returns the key, running the gate first if it isn't loaded yet.
   const unlock = useCallback(async (): Promise<string | null> => {
+    if (!pubkey || !focusedRef.current || unlockingRef.current) return null;
     if (nsec) return nsec;
-    if (!pubkey) return null;
+    const generation = generationRef.current;
+    const isCurrent = () => focusedRef.current && generationRef.current === generation;
+    unlockingRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const gate = await keyRevealGate();
+      if (!isCurrent()) return null;
       const passed =
         gate === 'device-auth'
           ? await authenticateForKeyReveal({
@@ -118,24 +130,27 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
               cancelLabel: t('keyBackupScreen.cancel'),
             })
           : await confirmWithoutScreenLock();
+      if (!isCurrent()) return null;
       if (!passed) {
         if (gate === 'device-auth') setError('auth-failed');
         return null;
       }
       const loaded = await loadAccountNsec(pubkey);
-      if (!focusedRef.current) return null;
+      if (!isCurrent()) return null;
       if (!loaded) {
         setError('missing');
         return null;
       }
-      setNsec(loaded);
-      setHasUnlocked(true);
+      setLoadedKey({ pubkey, nsec: loaded });
       return loaded;
     } catch {
-      setError('missing');
+      if (isCurrent()) setError('missing');
       return null;
     } finally {
-      setBusy(false);
+      if (isCurrent()) {
+        unlockingRef.current = false;
+        setBusy(false);
+      }
     }
   }, [nsec, pubkey, t, confirmWithoutScreenLock]);
 
@@ -144,13 +159,15 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
       setRevealed(false);
       return;
     }
+    const generation = generationRef.current;
     const key = await unlock();
-    if (key) setRevealed(true);
+    if (key && focusedRef.current && generationRef.current === generation) setRevealed(true);
   }, [revealed, unlock]);
 
   const copy = useCallback(async () => {
+    const generation = generationRef.current;
     const key = await unlock();
-    if (!key) return false;
+    if (!key || !focusedRef.current || generationRef.current !== generation) return false;
     try {
       await copySensitiveText(key);
       return true;
@@ -159,5 +176,5 @@ export function useKeyBackupReveal(pubkey: string | null): KeyBackupReveal {
     }
   }, [unlock]);
 
-  return { nsec, revealed, hasUnlocked, busy, error, toggleReveal, copy };
+  return { nsec, revealed: !!nsec && revealed, hasUnlocked, busy, error, toggleReveal, copy };
 }

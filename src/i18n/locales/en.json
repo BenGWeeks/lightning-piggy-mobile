@@ -2417,11 +2417,12 @@
     "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now."
   },
   "signOutPrompt": {
+    "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
     "title": "Sign out of {{name}}?",
     "nsecUnbacked": "This removes {{name}}'s secret key from this phone. If you haven't saved a copy, the account can't be recovered — not by you, and not by us.",
     "nsecBacked": "This removes {{name}}'s secret key from this phone. You've marked it as backed up — you'll need that copy to sign back in.",
-    "amber": "Your key stays safe in Amber, so nothing is lost. You can sign back in any time.",
-    "nip46": "Your key stays safe in your signer app, so nothing is lost. You can sign back in any time.",
+    "amber": "Your account key stays in Amber. You can use Amber to sign back in.",
+    "nip46": "Your account key stays in your signer app. You can use that app to sign back in.",
     "otherAccountOne": "Your other account on this phone stays signed in.",
     "otherAccountsMany": "Your {{count}} other accounts on this phone stay signed in.",
     "backUpFirst": "Back Up Key First",
@@ -2458,8 +2459,8 @@
     "noLockConfirm": "I Understand",
     "cancel": "Cancel",
     "keptInAmber": "Your key is kept in Amber",
-    "keptInAmberBody": "Lightning Piggy never sees this account's secret key, so there's nothing to back up here — back it up from Amber. Signing out is safe: you can sign back in with Amber any time.",
+    "keptInAmberBody": "Lightning Piggy never sees this account's secret key. Back it up from Amber. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out.",
     "keptInSigner": "Your key is kept in your signer app",
-    "keptInSignerBody": "Lightning Piggy never sees this account's secret key, so there's nothing to back up here — back it up from your signer app. Signing out is safe: you can sign back in any time."
+    "keptInSignerBody": "Lightning Piggy never sees this account's secret key. Back it up from your signer app. Wallet recovery phrases stored in Lightning Piggy need a separate backup before signing out."
   }
 }

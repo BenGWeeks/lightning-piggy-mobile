@@ -28,7 +28,10 @@ describe('buildSignOutPrompt', () => {
     expect(p.variant).toBe('nsec-unbacked');
     expect(p.offerBackup).toBe(true);
     expect(p.confirm.key).toBe('signOutPrompt.signOutAnyway');
-    expect(p.paragraphs.map((x) => x.key)).toEqual(['signOutPrompt.nsecUnbacked']);
+    expect(p.paragraphs.map((x) => x.key)).toEqual([
+      'signOutPrompt.nsecUnbacked',
+      'signOutPrompt.walletsRemoved',
+    ]);
     expect(p.paragraphs[0].params).toEqual({ name: 'Big Piggy' });
   });
 
@@ -47,21 +50,22 @@ describe('buildSignOutPrompt', () => {
     const p = buildSignOutPrompt({ ...base, signerType: signer });
     expect(p.offerBackup).toBe(false);
     expect(p.confirm.key).toBe('signOutPrompt.signOut');
-    expect(p.paragraphs.map((x) => x.key)).toEqual([key]);
+    expect(p.paragraphs.map((x) => x.key)).toEqual([key, 'signOutPrompt.walletsRemoved']);
   });
 
   it('only mentions other accounts when there are some', () => {
-    expect(buildSignOutPrompt({ ...base, signerType: 'amber' }).paragraphs).toHaveLength(1);
+    expect(buildSignOutPrompt({ ...base, signerType: 'amber' }).paragraphs).toHaveLength(2);
     const one = buildSignOutPrompt({ ...base, signerType: 'amber', otherAccountCount: 1 });
-    expect(one.paragraphs[1]).toEqual({
+    expect(one.paragraphs[2]).toEqual({
       key: 'signOutPrompt.otherAccountOne',
       params: { count: 1 },
     });
     const many = buildSignOutPrompt({ ...base, signerType: 'nsec', otherAccountCount: 3 });
     expect(many.paragraphs.map((x) => x.key)).toEqual([
       'signOutPrompt.nsecUnbacked',
+      'signOutPrompt.walletsRemoved',
       'signOutPrompt.otherAccountsMany',
     ]);
-    expect(many.paragraphs[1].params).toEqual({ count: 3 });
+    expect(many.paragraphs[2].params).toEqual({ count: 3 });
   });
 });

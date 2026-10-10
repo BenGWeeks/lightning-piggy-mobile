@@ -53,15 +53,21 @@ const KeyBackupScreen: React.FC = () => {
     ? activeSignerType
     : identities.find((i) => i.pubkey === targetPubkey)?.signerType;
 
+  const knownAccount = identities.some((i) => i.pubkey === targetPubkey);
+
   const [backedUp, setBackedUp] = useState(false);
   const [cachedName, setCachedName] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const reveal = useKeyBackupReveal(signerType === 'nsec' ? (targetPubkey ?? null) : null);
+  const reveal = useKeyBackupReveal(
+    knownAccount && signerType === 'nsec' ? (targetPubkey ?? null) : null,
+  );
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       setCopied(false);
+      setBackedUp(false);
+      setCachedName(null);
       if (targetPubkey) {
         isKeyBackedUp(targetPubkey).then((v) => !cancelled && setBackedUp(v));
         if (!isActive) {
@@ -90,7 +96,7 @@ const KeyBackupScreen: React.FC = () => {
   };
 
   const handleSaved = async () => {
-    if (!targetPubkey) return;
+    if (!targetPubkey || !knownAccount || !reveal.hasUnlocked) return;
     await markKeyBackedUp(targetPubkey);
     setBackedUp(true);
     Toast.show({ type: 'success', text1: t('keyBackupScreen.markedBackedUp') });
@@ -98,7 +104,6 @@ const KeyBackupScreen: React.FC = () => {
 
   // No account, or one that has since been signed out (e.g. a stale
   // restored navigation state) — there is no key to talk about.
-  const knownAccount = isActive || identities.some((i) => i.pubkey === targetPubkey);
   if (!targetPubkey || !knownAccount) {
     return (
       <AccountScreenLayout title={t('keyBackupScreen.title')}>

@@ -69,6 +69,9 @@ export function buildSignOutPrompt(input: SignOutPromptInput): SignOutPrompt {
       break;
   }
 
+  // Wallet secrets are wiped for every signer, independently of the Nostr key.
+  paragraphs.push({ key: 'signOutPrompt.walletsRemoved' });
+
   if (input.otherAccountCount > 0) {
     paragraphs.push({
       key:
