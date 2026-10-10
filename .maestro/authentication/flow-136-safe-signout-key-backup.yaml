@@ -5,14 +5,17 @@ tags:
 ---
 # Non-destructive: NEVER confirms the sign-out and NEVER reveals the key.
 #
-# Precondition: the active account is a local-key (nsec) account that has
-# not been marked backed up — e.g. Big Piggy after `common/login-nsec-big`.
+# Precondition: the active account is a local-key (nsec) account, e.g. Big
+# Piggy after `common/login-nsec-big`. Re-runnable: if the key is already
+# marked backed up the dialog is the lighter two-button variant, and the
+# backup screen is reached via Settings only.
 #
 # Covers:
-#   1. Drawer → Sign Out shows the named, signer-aware dialog with
-#      Back Up Key First / Sign Out Anyway / Cancel; Cancel keeps the account.
-#   2. Back Up Key First opens the backup screen with the key masked, the
-#      eye toggle, Copy, and "I've saved it" disabled until unlocked.
+#   1. Drawer → Sign Out shows the named dialog with Sign Out (Anyway) /
+#      Cancel; Cancel keeps the account signed in.
+#   2. Not backed up: Back Up Key First opens the backup screen with the key
+#      masked, the eye toggle, Copy, and "I've saved it" disabled until
+#      unlocked.
 #   3. Settings → Security → Back up your key reaches the same screen.
 #
 # Run: maestro test .maestro/authentication/flow-136-safe-signout-key-backup.yaml
@@ -33,11 +36,7 @@ tags:
 - assertVisible:
     text: 'Sign out of .*\?'
 - assertVisible:
-    id: 'sign-out-backup-first'
-- assertVisible:
     id: 'sign-out-confirm'
-- assertVisible:
-    text: 'Sign Out Anyway'
 - tapOn:
     id: 'sign-out-cancel'
 - extendedWaitUntil:
@@ -48,38 +47,52 @@ tags:
 - assertVisible:
     id: 'drawer-npub-qr'
 
-# --- 2. Back Up Key First → backup screen ---------------------------------
+# --- 2. Not backed up: Back Up Key First → backup screen ----------------
 - tapOn:
     id: 'drawer-sign-out'
 - extendedWaitUntil:
     visible:
-      id: 'sign-out-backup-first'
+      id: 'branded-alert'
     timeout: 5000
-- tapOn:
-    id: 'sign-out-backup-first'
-- extendedWaitUntil:
-    visible:
-      id: 'key-backup-reveal-toggle'
-    timeout: 10000
-- assertVisible:
-    id: 'key-backup-status'
-- assertVisible:
-    text: 'Not backed up yet'
-# Masked by default — the key text is the dot mask, not an nsec.
-- assertVisible:
-    id: 'key-backup-key-text'
-    text: '•+'
-- assertNotVisible:
-    text: 'nsec1.*'
-- assertVisible:
-    id: 'key-backup-copy'
-- assertVisible:
-    id: 'key-backup-confirm-saved'
-    enabled: false
-- tapOn:
-    id: 'account-back-button'
-- waitForAnimationToEnd:
-    timeout: 2000
+- runFlow:
+    when:
+      notVisible:
+        id: 'sign-out-backup-first'
+    commands:
+      # Already backed up → lighter variant; nothing more to do here.
+      - tapOn:
+          id: 'sign-out-cancel'
+- runFlow:
+    when:
+      visible:
+        id: 'sign-out-backup-first'
+    commands:
+      - assertVisible:
+          text: 'Sign Out Anyway'
+      - tapOn:
+          id: 'sign-out-backup-first'
+      # A lazy screen: a cold dev bundle can take >10 s to serve its chunk.
+      - extendedWaitUntil:
+          visible:
+            id: 'key-backup-reveal-toggle'
+          timeout: 30000
+      - assertVisible:
+          text: 'Not backed up yet'
+      # Masked by default — the key text is the dot mask, not an nsec.
+      - assertVisible:
+          id: 'key-backup-key-text'
+          text: '•+'
+      - assertNotVisible:
+          text: 'nsec1.*'
+      - assertVisible:
+          id: 'key-backup-copy'
+      - assertVisible:
+          id: 'key-backup-confirm-saved'
+          enabled: false
+      - tapOn:
+          id: 'account-back-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
 
 # --- 3. Settings → Security entry point -----------------------------------
 - runFlow: ../common/open-drawer.yaml
@@ -93,14 +106,19 @@ tags:
 - extendedWaitUntil:
     visible:
       id: 'security-key-backup'
-    timeout: 10000
+    timeout: 30000
 - tapOn:
     id: 'security-key-backup'
 - extendedWaitUntil:
     visible:
       id: 'key-backup-reveal-toggle'
-    timeout: 10000
+    timeout: 30000
+- assertVisible:
+    id: 'key-backup-key-text'
+    text: '•+'
 - assertNotVisible:
     text: 'nsec1.*'
+- assertVisible:
+    id: 'key-backup-status'
 - tapOn:
     id: 'account-back-button'
