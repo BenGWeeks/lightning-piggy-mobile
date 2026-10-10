@@ -1,0 +1,13 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — make Little Piggy the active identity (nsec signer)
+---
+# Building block. Reads MAESTRO_NSEC_LITTLE from the environment — run with
+# `set -a; source .env; set +a` first (Maestro picks up MAESTRO_* vars itself,
+# so the nsec never goes on the command line).
+- runFlow:
+    file: login-nsec.yaml
+    env:
+      PIGGY_NSEC: ${MAESTRO_NSEC_LITTLE}
+      PIGGY_PREFIX: 'd9b33280'
+      PIGGY_NPUB: 'npub1mxen9q9…tqp265'
+      PIGGY_NAME: 'Little Piggy'

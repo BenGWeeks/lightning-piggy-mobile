@@ -1,0 +1,49 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — sign Middle Piggy in through Amber (NIP-55)
+---
+# Building block (never run alone). Prerequisite: Amber is installed and holds
+# ONLY Middle Piggy's key (authentication/flow-131-amber-import-middle.yaml).
+#
+# Starts from a clean slate: if Middle is already in LP's account registry
+# (possibly with a different signer) it is signed out first, then added again
+# via "Use Amber Signer". Other identities (Big Piggy) are left untouched.
+- runFlow:
+    file: forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: '4b2fcb4e'
+- runFlow: open-drawer.yaml
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-sign-in'
+    commands:
+      - tapOn:
+          id: 'drawer-sign-in'
+- runFlow:
+    when:
+      visible:
+        id: 'account-switcher-button'
+    commands:
+      - tapOn:
+          id: 'account-switcher-button'
+      - tapOn:
+          id: 'account-switcher-add-existing'
+- tapOn:
+    id: 'amber-button'
+# Amber's "connect app" screen (first time LP asks this Amber install), then
+# any follow-up prompts. Amber returns to LP when done.
+- runFlow:
+    file: approve-amber-prompt.yaml
+    env:
+      AMBER_WAIT_MS: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+- runFlow: open-drawer.yaml
+# Identity check by npub (derived from the pubkey), not the display name.
+- extendedWaitUntil:
+    visible:
+      text: 'npub1fvhukn3…8vtatq'
+    timeout: 20000
+- pressKey: back

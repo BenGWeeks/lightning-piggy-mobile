@@ -1,0 +1,64 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — sign Little Piggy in through the local NIP-46 test bunker
+---
+# Building block (never run alone). Prerequisite — the host bunker is running
+# and holds Little Piggy's key:
+#   bash scripts/nip46-test-bunker.sh start
+#
+# Flow: Accounts → Add existing → "Use NIP-46 Signer" → LP shows its
+# nostrconnect:// QR → `runScript` asks the bunker to screencap the device,
+# decode the QR and answer it (pairing secret never leaves the host) → LP
+# finishes the login.
+#
+# NIP-46 sessions are not part of LP's multi-account registry (see
+# useNip46Login.ts), so Little is added as the active session on top of
+# whoever is registered; sign-out-nip46-little.yaml hands back to them.
+- runFlow:
+    file: forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: 'd9b33280'
+- runScript:
+    file: nip46-bunker.js
+    env:
+      ACTION: mode
+      MODE: approve
+- runFlow: open-drawer.yaml
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-sign-in'
+    commands:
+      - tapOn:
+          id: 'drawer-sign-in'
+- runFlow:
+    when:
+      visible:
+        id: 'account-switcher-button'
+    commands:
+      - tapOn:
+          id: 'account-switcher-button'
+      - tapOn:
+          id: 'account-switcher-add-existing'
+- tapOn:
+    id: 'nip46-button'
+# QR + "Waiting for bunker…" are up once Cancel renders.
+- extendedWaitUntil:
+    visible:
+      id: 'cancel-nip46'
+    timeout: 10000
+- runScript:
+    file: nip46-bunker.js
+    env:
+      ACTION: pair-from-screen
+      WAIT: 10
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 45000
+- runFlow: open-drawer.yaml
+# Identity check by npub (derived from the pubkey), not the display name.
+- extendedWaitUntil:
+    visible:
+      text: 'npub1mxen9q9…tqp265'
+    timeout: 20000
+- pressKey: back

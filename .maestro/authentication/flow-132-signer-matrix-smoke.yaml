@@ -1,0 +1,37 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Signer matrix smoke — Big (nsec), Middle (Amber), Little (NIP-46) each reach Home
+---
+# Logs in as each Piggy with its signer and checks Home + the drawer identity:
+#   Big Piggy    → nsec (local key)
+#   Middle Piggy → Amber (NIP-55, Android Intent IPC)
+#   Little Piggy → NIP-46 via the local test bunker
+# then restores the default: Big Piggy active (nsec), Middle and Little signed
+# out of the account registry.
+#
+# Prerequisites: flow-131 has set Amber up with Middle's key; the bunker is
+# running (bash scripts/nip46-test-bunker.sh start). Easiest:
+#   bash scripts/signer-matrix-e2e.sh 132
+- runFlow: ../common/login-nsec-big.yaml
+- assertVisible:
+    id: 'tab-home'
+- takeScreenshot: signer-matrix-132-big-nsec-home
+
+- runFlow: ../common/login-amber-middle.yaml
+- assertVisible:
+    id: 'tab-home'
+- takeScreenshot: signer-matrix-132-middle-amber-home
+
+- runFlow: ../common/login-nsec-big.yaml
+- runFlow: ../common/login-nip46-little.yaml
+- assertVisible:
+    id: 'tab-home'
+- takeScreenshot: signer-matrix-132-little-nip46-home
+
+# Restore: Little out (hands back to Big), Middle out, Big active.
+- runFlow: ../common/sign-out-nip46-little.yaml
+- runFlow: ../common/login-nsec-big.yaml
+- runFlow:
+    file: ../common/forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: '4b2fcb4e'
+- runFlow: ../common/login-nsec-big.yaml

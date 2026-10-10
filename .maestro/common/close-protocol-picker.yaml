@@ -1,0 +1,24 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — dismiss the DM protocol picker if it stayed open
+---
+# Building block (never run alone). Picking a protocol is meant to dismiss the
+# picker, but the dismiss is sometimes dropped and the sheet stays over the
+# conversation (worse case of #1164 — Back then navigates *under* it and
+# leaves it orphaned on the Messages list). Swipe it down from its title — an
+# element-anchored swipe, not coordinates. No-op when it already closed.
+- extendedWaitUntil:
+    notVisible:
+      id: 'dm-protocol-picker-sheet'
+    timeout: 3000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: 'dm-protocol-picker-sheet'
+    commands:
+      - swipe:
+          from:
+            text: 'Messaging protocol'
+          direction: DOWN
+      - waitForAnimationToEnd:
+          timeout: 2000

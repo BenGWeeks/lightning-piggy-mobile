@@ -1,0 +1,61 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — get LP to the main tabs and open the account drawer
+---
+# Building block (never run alone). Brings LP to the front without clearing
+# state (the dev client's bundle URL and every identity's data survive),
+# backs out of a restored conversation / account sub-screen, and opens the
+# drawer. Back is only pressed while one of those sub-screens is showing, so
+# it can never back out of LP itself.
+- launchApp:
+    stopApp: false
+# Cold start can land on an overlay (payment celebration, dev LogBox, a sheet
+# left by an earlier run, an Amber prompt) that hides the screen behind it — clear overlays and
+# re-check until a known screen is up (~45 s ceiling).
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        id: 'tab-home|conversation-back|group-back|account-back-button|contact-profile-back'
+    commands:
+      - runFlow: close-sheets.yaml
+      # An Amber account that has used Marmot re-publishes its key package at
+      # app start, so an Amber prompt can be the first thing on screen.
+      - runFlow:
+          file: approve-amber-prompt.yaml
+          env:
+            AMBER_WAIT_MS: 500
+      - waitForAnimationToEnd:
+          timeout: 2000
+- runFlow: close-sheets.yaml
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home|conversation-back|group-back|account-back-button|contact-profile-back'
+    timeout: 10000
+- repeat:
+    times: 4
+    while:
+      visible:
+        id: 'conversation-back|group-back|account-back-button|contact-profile-back'
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1500
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home|drawer-version'
+    timeout: 10000
+# Already open (the drawer covers the tab bar) → leave it.
+- runFlow:
+    when:
+      notVisible:
+        id: 'drawer-version'
+    commands:
+      - runFlow: close-sheets.yaml
+      - tapOn:
+          id: 'tab-home'
+      - tapOn:
+          id: 'profile-icon'
+- extendedWaitUntil:
+    visible:
+      id: 'account-switcher-button|drawer-sign-in'
+    timeout: 8000

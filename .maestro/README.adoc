@@ -26,7 +26,8 @@ on their own).
   common/              shared building blocks (login-as, seed-test-wallet,
                        send-lud16, …) — composed via runFlow, un-numbered
   authentication/      flow-NNN  login (dev/amber/perf), logout, create-account,
-                       key import, cold-start isolation
+                       key import, cold-start isolation, signer matrix
+                       (131 Amber setup, 132 smoke, 135 NIP-46 pairing timeout)
   cards/               flow-NNN  Revolut/Xapo card flows
   friends/             flow-NNN  follow/unfollow, contacts, alphabet, search
   groups/              flow-NNN  create/leave/rename/manage, 3-way Triad, amber
@@ -35,6 +36,8 @@ on their own).
   market/              flow-NNN  grid, product detail, reviews/comments tabs
   messaging/           flow-NNN  1:1 DM, conversation, attach panel, secret mode,
                        protocol picker (124), Marmot/MLS (125–130, via scripts/marmot-e2e.sh)
+                       signer matrix: 133 Marmot Big (nsec) ⇄ Middle (Amber),
+                       134 NIP-17 via NIP-46 (approve / decline / timeout)
   payments/            flow-NNN  send/receive/pay/transfer/swap/amount entry
   profile/             flow-NNN  edit profile/picture, appearance, account drawer
   ui/                  flow-NNN  alerts, dialogs, events, NFC, explore tour, WoT
@@ -51,6 +54,13 @@ Run one flow:
 [source,bash]
 ----
 maestro test .maestro/payments/flow-080-send-invoice-to-friend.yaml
+----
+
+Run the signer matrix (nsec / Amber / NIP-46 — see below):
+
+[source,bash]
+----
+bash scripts/signer-matrix-e2e.sh
 ----
 
 Run the curated wallet/transfer suite:
@@ -129,10 +139,70 @@ clause that asserts a Piggy fixture is present, OR explicitly documented
 at the top of the file as "manual run only — do NOT add to run-all.sh".
 Don't ship an unguarded flow that taps a non-Piggy member.
 
+== Signer matrix (nsec / Amber / NIP-46)
+
+The same LP install is exercised with each of the app's three Nostr signers,
+one Piggy per signer:
+
+|===
+| Piggy        | Signer | Where the key lives
+
+| Big Piggy    | `nsec` (local key) | LP's SecureStore — the device default
+| Middle Piggy | Amber (NIP-55, Android Intent IPC) | Amber on the emulator (`flow-131` imports it)
+| Little Piggy | NIP-46 (Nostr Connect) | `scripts/nip46-test-bunker.sh` on the host
+|===
+
+`bash scripts/signer-matrix-e2e.sh` runs flows 132–134 (add `135` for the
+slow pairing-timeout case, `setup-amber` once per fresh Amber install). It
+starts/stops the bunker, tags every message with a per-run `RUN_TAG`, prints
+how many Amber prompts each flow had to answer (a prompt-storm signal) and the
+bunker's per-method request counts, and keeps screenshots + a redacted copy of
+Maestro's debug output under `$OUT`.
+
+* *Identities are switched, not wiped.* The building blocks never
+  `clearState` (that wipes the dev client's bundle URL and every account's
+  wallets and Marmot state). They use LP's account switcher: Middle / Little
+  are signed out of the registry first (`common/forget-piggy.yaml`) so they
+  always start clean with the signer under test, and every flow ends with Big
+  Piggy active and Middle / Little signed out again.
+* *NIP-46 isn't in the account registry* (`useNip46Login.ts`), so Little is
+  added on top as the active session and handed back with
+  `common/sign-out-nip46-little.yaml` — which refuses to sign out anyone but
+  Little.
+* *Amber is a third-party app*: `common/amber-import-key.yaml` and
+  `common/approve-amber-prompt.yaml` use Amber's own English copy as text
+  selectors ("Use your private key", "Connect", "Accept", "Reject" — Amber
+  v6.6.7). No coordinates anywhere.
+* *The bunker is driven from the flow*: `common/nip46-bunker.js` (via
+  `runScript`) flips its mode (`approve` / `decline` / `silent` / `-all`
+  variants), answers LP's pairing QR (the bunker screencaps the device and
+  decodes it — the pairing secret never leaves the host) and asserts its
+  request counters.
+* *Two LP sheets ignore Back or get stuck* (the Accounts sheet, and the DM
+  protocol picker — #1164). `common/close-sheets.yaml` /
+  `common/close-protocol-picker.yaml` swipe them down from their title text:
+  an element-anchored `swipe: { from: … }`, not a coordinate.
+
+=== Secrets in signer-matrix flows
+
+* nsecs reach Maestro only through the environment: `set -a; source .env`
+  and Maestro picks up `MAESTRO_*` itself (no `-e MAESTRO_NSEC_…=` on the
+  command line, where `ps` can see it).
+* Every `inputText` of an nsec carries a `label:`, so Maestro's console shows
+  "Enter the Piggy nsec (redacted)" instead of the key.
+* Maestro's debug output (`~/.maestro/tests/<run>/commands-*.json`,
+  `maestro.log`) still records the *evaluated* command, nsec included. The
+  runner sends it to a private temp dir and redacts `nsec1…` before keeping
+  it. If you run these flows by hand, pass `--debug-output` to a temp dir and
+  delete it afterwards.
+* The bunker reads Little's nsec from `.env` with `grep` and hands it to node
+  on stdin — never argv, the environment, its state dir or its log.
+
 == Other safety conventions
 
 * Never use coordinate taps (`point:`, `tapOn: { point: }`,
-  `adb shell input tap`). See `CLAUDE.md` § Testing.
+  `adb shell input tap`). See `CLAUDE.md` § Testing. A swipe anchored on an
+  element (`swipe: { from: { text: … }, direction: DOWN }`) is fine.
 * Never send a real Lightning payment from a flow. Use lightning
   addresses that don't resolve (`test@example.com`) or invoices the
   flow generates and then cancels.

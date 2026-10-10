@@ -1,0 +1,25 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — sign the active NIP-46 Little Piggy session out
+---
+# Building block (never run alone). Guarded: only signs out if the active
+# identity is Little Piggy — checked by the drawer's truncated npub (derived
+# from the pubkey), so it can never sign Big Piggy or a look-alike out. LP then
+# promotes the registry's active identity (Big Piggy) back.
+- runFlow: open-drawer.yaml
+- runFlow:
+    when:
+      visible:
+        text: 'npub1mxen9q9…tqp265'
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: 'drawer-sign-out'
+          direction: DOWN
+          timeout: 5000
+      - tapOn:
+          id: 'drawer-sign-out'
+      # [Cancel, Sign Out]
+      - tapOn:
+          id: 'branded-alert-button-1'
+      - waitForAnimationToEnd:
+          timeout: 3000

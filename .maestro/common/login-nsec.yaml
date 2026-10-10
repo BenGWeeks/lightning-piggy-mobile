@@ -1,0 +1,94 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — make a Piggy the active identity, signed in with its nsec
+---
+# Building block (never run alone) behind login-nsec-{big,middle,little}.yaml.
+# Non-destructive: never clearState (that would wipe the dev client's bundle
+# URL plus every identity's wallets and Marmot state).
+#
+#   - Piggy already registered (avatar in the drawer) → switch to it.
+#   - Nobody signed in → drawer "Sign in" → nsec.
+#   - Someone else active and the Piggy isn't registered → Accounts →
+#     "Add existing account" → nsec.
+#
+# Caller passes:
+#   PIGGY_NSEC    the nsec (from the environment — MAESTRO_NSEC_*)
+#   PIGGY_PREFIX  first 8 hex chars of the Piggy's pubkey (Piggy fixtures only,
+#                 see .maestro/README.adoc)
+#   PIGGY_NPUB    the drawer's truncated npub for the Piggy (npub[0:12]…npub[-6:]) —
+#                 the identity check. It's derived from the pubkey, unlike the
+#                 display name, which any account could copy.
+#   PIGGY_NAME    its kind-0 display name (documentation only)
+#
+# NOTE: switching to an already-registered Piggy keeps whatever signer it was
+# registered with. The signer-matrix flows sign Middle / Little out first (see
+# forget-piggy.yaml) so this never silently tests the wrong signer.
+- runFlow: open-drawer.yaml
+
+# 1. Registered but not active → switch.
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-account-switch-${PIGGY_PREFIX}'
+    commands:
+      - runFlow: switch-to-piggy.yaml
+      - runFlow: open-drawer.yaml
+
+# 2. Nobody signed in → sign in.
+- runFlow:
+    when:
+      visible:
+        id: 'drawer-sign-in'
+    commands:
+      - tapOn:
+          id: 'drawer-sign-in'
+      - tapOn:
+          id: 'nsec-input'
+      - inputText:
+          text: ${PIGGY_NSEC}
+          label: 'Enter the Piggy nsec (redacted)'
+      - tapOn:
+          id: 'login-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'tab-home'
+          timeout: 20000
+
+# 3. Someone else is active and the Piggy isn't registered → add it.
+- runFlow: open-drawer.yaml
+- extendedWaitUntil:
+    visible:
+      text: '${PIGGY_NPUB}'
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        text: '${PIGGY_NPUB}'
+    commands:
+      - tapOn:
+          id: 'account-switcher-button'
+      - tapOn:
+          id: 'account-switcher-add-existing'
+      - tapOn:
+          id: 'nsec-input'
+      - inputText:
+          text: ${PIGGY_NSEC}
+          label: 'Enter the Piggy nsec (redacted)'
+      - tapOn:
+          id: 'login-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'tab-home'
+          timeout: 20000
+      - runFlow: open-drawer.yaml
+
+# Active identity is now the Piggy (checked by npub, i.e. pubkey).
+- extendedWaitUntil:
+    visible:
+      text: '${PIGGY_NPUB}'
+    timeout: 15000
+- pressKey: back
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 5000

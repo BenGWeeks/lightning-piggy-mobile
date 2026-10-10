@@ -1,0 +1,17 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Internal — put the device back to the default after a signer-matrix flow
+---
+# Building block (never run alone; scripts/signer-matrix-e2e.sh runs it after a
+# failed flow, whose own restore steps were skipped). Little (NIP-46) signed
+# out if active, Big Piggy active, Middle / Little signed out of the registry.
+- runFlow: sign-out-nip46-little.yaml
+- runFlow: login-nsec-big.yaml
+- runFlow:
+    file: forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: '4b2fcb4e'
+- runFlow:
+    file: forget-piggy.yaml
+    env:
+      PIGGY_PREFIX: 'd9b33280'
+- runFlow: login-nsec-big.yaml
