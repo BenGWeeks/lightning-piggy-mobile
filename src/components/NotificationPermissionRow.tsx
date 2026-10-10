@@ -31,10 +31,15 @@ const NotificationPermissionRow: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       void refresh();
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const sub = AppState.addEventListener('change', (state) => {
-        if (state === 'active') void refresh();
+        if (timer) clearTimeout(timer);
+        if (state === 'active') timer = setTimeout(() => void refresh(), 3000);
       });
-      return () => sub.remove();
+      return () => {
+        if (timer) clearTimeout(timer);
+        sub.remove();
+      };
     }, [refresh]),
   );
 

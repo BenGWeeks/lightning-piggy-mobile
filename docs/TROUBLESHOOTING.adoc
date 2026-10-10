@@ -1014,3 +1014,12 @@ app start (except the weekly refresh). A change that didn't go through earlier
 The emulator has no Google Play services, so it never gets a push token and
 the switches stay unavailable there — test on a phone.
 
+
+=== Settings evidence on a shared Metro checkout
+
+For before/after UI evidence, run `npm start -- --port <assigned-port>` from
+an isolated worktree and confirm the listener's working directory. A shared
+checkout can change while a lazy settings screen is loading; an observed
+Expo HMR error (`window.location.reload` undefined) can obscure the screen.
+Cold-launch the simulator dev client against the isolated Metro, without
+clearing app data, and restore its original Metro URL after the session.
